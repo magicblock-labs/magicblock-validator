@@ -79,9 +79,9 @@ use crate::{
     },
     remote_account_provider::{
         program_account::get_loaderv3_get_program_data_address,
-        ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
-        MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
-        ResolvedAccountSharedData, SubscriptionReason, SubscriptionReleaseMode,
+        CapacityEvictionProtection, ChainPubsubClient, ChainRpcClient,
+        ForwardedSubscriptionUpdate, MatchSlotsConfig, RemoteAccount,
+        RemoteAccountProvider, ResolvedAccountSharedData, SubscriptionReason,
     },
 };
 
@@ -226,6 +226,22 @@ where
             )),
             risk_service,
         });
+
+        let accounts_bank_for_eviction = accounts_bank.clone();
+        me.remote_account_provider.set_capacity_eviction_protection(
+            move |pubkey| {
+                accounts_bank_for_eviction
+                    .get_account(pubkey)
+                    .map(|account| CapacityEvictionProtection {
+                        delegated: account.delegated(),
+                        undelegating: account.undelegating(),
+                    })
+                    .unwrap_or(CapacityEvictionProtection {
+                        delegated: false,
+                        undelegating: false,
+                    })
+            },
+        );
 
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
@@ -607,9 +623,11 @@ where
             return;
         }
 
+        let mut undelegation_completed_on_chain = false;
         if let Some(in_bank) = self.accounts_bank.get_account(&pubkey) {
             if in_bank.delegated() && !in_bank.undelegating() {
-                self.unsubscribe_from_delegated_account(pubkey).await;
+                self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                    .await;
                 return;
             }
 
@@ -658,6 +676,9 @@ where
                 ) {
                     return;
                 }
+                undelegation_completed_on_chain = true;
+            } else if !in_bank.delegated() && account.delegated() {
+                undelegation_completed_on_chain = true;
             } else if in_bank.owner().eq(&dlp_api::id()) {
                 debug!(
                     pubkey = %pubkey,
@@ -692,12 +713,20 @@ where
             return;
         }
 
-        // Once we clone an account that is delegated to us we no
-        // longer need to receive updates for it from chain.
-        // The subscription will be turned back on once the committor
-        // service schedules a commit for it that includes undelegation.
+        // Delegated subscription cleanup is limited to direct subscription/LRU
+        // ownership here; undelegation tracking owns protected subscriptions
+        // until undelegation is explicitly complete.
+        if undelegation_completed_on_chain {
+            if !account.delegated() {
+                self.ensure_direct_subscription_for_completed_account(pubkey)
+                    .await;
+            }
+            self.cleanup_undelegation_tracking_for_completed_account(pubkey)
+                .await;
+        }
         if account.delegated() {
-            self.unsubscribe_from_delegated_account(pubkey).await;
+            self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                .await;
         }
 
         if account.executable() {
@@ -1016,17 +1045,61 @@ where
             .await;
     }
 
-    async fn unsubscribe_from_delegated_account(&self, pubkey: Pubkey) {
-        self.release_subscription_reason_all(
-            &pubkey,
-            SubscriptionReason::UndelegationTracking,
-        )
-        .await;
-        self.release_subscription_reason_all(
-            &pubkey,
-            SubscriptionReason::DirectAccount,
-        )
-        .await;
+    async fn cleanup_direct_subscription_for_delegated_account(
+        &self,
+        pubkey: Pubkey,
+    ) {
+        if let Err(err) = self
+            .remote_account_provider
+            .release_subscription_reason_silently_for_delegated_account(
+                &pubkey,
+                SubscriptionReason::DirectAccount,
+            )
+            .await
+        {
+            warn!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to clean up direct subscription for delegated account"
+            );
+        }
+    }
+
+    async fn ensure_direct_subscription_for_completed_account(
+        &self,
+        pubkey: Pubkey,
+    ) {
+        if let Err(err) = self
+            .remote_account_provider
+            .ensure_subscription(&pubkey, SubscriptionReason::DirectAccount)
+            .await
+        {
+            warn!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to retain direct subscription for completed account"
+            );
+        }
+    }
+
+    async fn cleanup_undelegation_tracking_for_completed_account(
+        &self,
+        pubkey: Pubkey,
+    ) {
+        if let Err(err) = self
+            .remote_account_provider
+            .release_subscription_reason_silently_for_delegated_account(
+                &pubkey,
+                SubscriptionReason::UndelegationTracking,
+            )
+            .await
+        {
+            warn!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to clean up undelegation tracking for completed account"
+            );
+        }
     }
 
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
@@ -2364,30 +2437,20 @@ where
             })
     }
 
-    pub(crate) async fn release_subscription_reason_all(
-        &self,
-        pubkey: &Pubkey,
-        reason: SubscriptionReason,
-    ) {
-        if let Err(err) = self
-            .remote_account_provider
-            .release_subscription_with_mode(
-                pubkey,
-                reason,
-                SubscriptionReleaseMode::All,
-            )
-            .await
-        {
-            warn!(pubkey = %pubkey, ?reason, error = %err, "Failed to release all subscription reason ownership");
-        }
-    }
-
     #[instrument(skip(self))]
     pub async fn subscribe_to_account_to_track_undelegation(
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<()> {
-        trace!(pubkey = %pubkey, "Subscribing to account");
+        trace!(
+            pubkey = %pubkey,
+            reason = ?SubscriptionReason::UndelegationTracking,
+            "Subscribing to account"
+        );
+        // Acquire undelegation tracking ownership before/with local
+        // undelegating visibility; any LRU entry created for this reason is
+        // protected from capacity eviction by the provider's bank-state
+        // predicate and ownership filter.
         self.acquire_subscription_reason(
             pubkey,
             SubscriptionReason::UndelegationTracking,

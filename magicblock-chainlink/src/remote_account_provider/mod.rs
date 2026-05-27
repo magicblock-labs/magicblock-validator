@@ -3,7 +3,7 @@ use std::{
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, Weak,
+        Arc, Mutex, RwLock, Weak,
     },
     time::Duration,
 };
@@ -20,7 +20,7 @@ use futures_util::{
     future::{join_all, try_join_all},
     stream::{FuturesUnordered, StreamExt},
 };
-pub use lru_cache::AccountsLruCache;
+pub use lru_cache::{AccountsLruCache, AddAccountOutcome};
 use magicblock_config::config::GrpcConfig;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
@@ -277,18 +277,17 @@ impl Drop for ClaimedSubscriptionSetupGuard {
 
 /// Internal ownership/refcount key for shared pubsub subscriptions.
 ///
-/// A single pubkey can be watched for multiple independent purposes
-/// (direct account access, delegation records, program data, undelegation
-/// tracking, ATA projection, etc.). Tracking the reason prevents one
-/// subsystem from accidentally unsubscribing an account that another subsystem
-/// still needs. For explicit reason-based releases, the provider only tears
-/// down the actual pubsub subscription once all reasons/counts for that pubkey
-/// have been released.
+/// `DirectAccount` is normal remote-account monitoring and is the only
+/// subscription reason that should participate in normal capacity eviction.
+/// `UndelegationTracking` is protected ownership for delegated accounts that
+/// are being undelegated and must never be treated as normal capacity-evictable
+/// ownership.
 ///
-/// This ownership tracking does not protect the account from LRU capacity
-/// eviction. If the subscribed-accounts LRU evicts a pubkey, that eviction is
-/// treated as a forced full unsubscribe/removal regardless of the reasons still
-/// recorded for that pubkey.
+/// Delegated accounts that are not undelegating are locally authoritative and
+/// should have `DirectAccount` ownership released once delegation is discovered.
+/// LRU membership is bookkeeping for live account subscriptions, but capacity
+/// eviction may only remove entries that are not protected by account state or
+/// ownership.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscriptionReason {
     DirectAccount,
@@ -340,6 +339,23 @@ pub(crate) enum SubscriptionReleaseMode {
     All,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CapacityEvictionProtection {
+    pub delegated: bool,
+    pub undelegating: bool,
+}
+
+impl CapacityEvictionProtection {
+    pub fn is_protected(self) -> bool {
+        self.delegated || self.undelegating
+    }
+}
+
+type CapacityEvictionProtectionPredicate =
+    dyn Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync;
+type SharedCapacityEvictionProtectionPredicate =
+    Arc<RwLock<Option<Arc<CapacityEvictionProtectionPredicate>>>>;
+
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
     pub account: RemoteAccount,
@@ -350,6 +366,10 @@ unsafe impl Sync for ForwardedSubscriptionUpdate {}
 
 // Not sure why helius uses a different code for this error
 const HELIUS_CONTEXT_SLOT_NOT_REACHED: i64 = -32603;
+const RPC_FETCH_MAX_RETRIES: u64 = 3;
+const RPC_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
+const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
 pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// The RPC client to fetch accounts from chain the first time we receive
     /// a request for them
@@ -401,6 +421,8 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// Tracks which accounts are currently subscribed to
     lrucache_subscribed_accounts: Arc<AccountsLruCache>,
 
+    capacity_eviction_protection: SharedCapacityEvictionProtectionPredicate,
+
     /// Channel to notify when an account is removed from the cache and thus no
     /// longer being watched
     removed_account_tx: mpsc::Sender<Pubkey>,
@@ -431,6 +453,37 @@ impl Default for MatchSlotsConfig {
             min_context_slot: None,
         }
     }
+}
+
+fn next_match_slots_retry(
+    retries: &mut u64,
+    start: std::time::Instant,
+    config: &MatchSlotsConfig,
+) -> Result<Duration, String> {
+    *retries += 1;
+    if *retries == config.max_retries {
+        return Err(format!("max retries {}", config.max_retries));
+    }
+    if start.elapsed() > MATCH_SLOTS_MAX_TOTAL_TIME {
+        return Err(format!(
+            "max total time of {} seconds",
+            MATCH_SLOTS_MAX_TOTAL_TIME.as_secs()
+        ));
+    }
+    Ok(match_slots_retry_delay(config))
+}
+
+fn next_match_slots_rpc_error_retry(
+    retries: &mut u64,
+    start: std::time::Instant,
+    config: &MatchSlotsConfig,
+) -> Result<Duration, String> {
+    next_match_slots_retry(retries, start, config)
+        .map(|delay| delay.max(RPC_FETCH_RETRY_DELAY))
+}
+
+fn match_slots_retry_delay(config: &MatchSlotsConfig) -> Duration {
+    Duration::from_millis(config.retry_interval_ms)
 }
 
 impl
@@ -568,6 +621,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
             lrucache_subscribed_accounts,
+            capacity_eviction_protection: Arc::new(RwLock::new(None)),
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
@@ -780,6 +834,33 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         self.lrucache_subscribed_accounts.promote_multi(pubkeys);
     }
 
+    pub(crate) fn set_capacity_eviction_protection<F>(&self, predicate: F)
+    where
+        F: Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync + 'static,
+    {
+        let mut guard = self
+            .capacity_eviction_protection
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        *guard = Some(Arc::new(predicate));
+    }
+
+    fn capacity_eviction_protection_for(
+        &self,
+        pubkey: &Pubkey,
+    ) -> CapacityEvictionProtection {
+        let guard = self
+            .capacity_eviction_protection
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.as_ref().map(|predicate| predicate(pubkey)).unwrap_or(
+            CapacityEvictionProtection {
+                delegated: false,
+                undelegating: false,
+            },
+        )
+    }
+
     pub fn try_get_removed_account_rx(
         &self,
     ) -> RemoteAccountProviderResult<mpsc::Receiver<Pubkey>> {
@@ -935,7 +1016,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
-        let remote_accounts = self
+        let mut remote_accounts = self
             .try_get_multi(pubkeys, None, fetch_origin, None, None)
             .await?;
         if let Match = slots_match_and_meet_min_context(
@@ -954,32 +1035,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .chain_slot
             .load()
             .max(config.min_context_slot.unwrap_or_default());
-        // 2. Force a re-fetch unless all the accounts are already pending which
-        //    means someone else already requested a re-fetch for all of them
-        let refetch = {
-            let fetching = self.fetching_accounts.lock().unwrap();
-            pubkeys.iter().any(|pk| !fetching.contains_key(pk))
-        };
-        if refetch {
-            if tracing::enabled!(tracing::Level::TRACE) {
-                trace!(
-                    "Triggering re-fetch for accounts [{}] at slot {}",
-                    pubkeys_str(pubkeys),
-                    fetch_start_slot
-                );
-            }
-            self.fetch(
-                pubkeys.to_vec(),
-                HashMap::new(),
-                None,
-                fetch_start_slot,
-                fetch_origin,
-                None,
-            );
-        }
-
-        // 3. Wait for the slots to match
-        const MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
+        // 2. Wait for the slots to match. Once the fast path mixed slots,
+        // retry with an RPC-only batch so all accounts share one response slot.
         let start = std::time::Instant::now();
         let mut retries = 0;
         loop {
@@ -997,15 +1054,34 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     pubkey_slots
                 );
             }
-            let remote_accounts = self
-                .try_get_multi(
-                    pubkeys,
-                    None,
-                    fetch_origin,
-                    None,
-                    Some(fetch_start_slot),
-                )
-                .await?;
+            remote_accounts = match self
+                .fetch_multi_rpc_only(pubkeys, fetch_start_slot, fetch_origin)
+                .await
+            {
+                Ok(remote_accounts) => remote_accounts,
+                Err(err) => {
+                    let retry = next_match_slots_rpc_error_retry(
+                        &mut retries,
+                        start,
+                        &config,
+                    );
+                    warn!(
+                        pubkeys = %pubkeys_str(pubkeys),
+                        min_context_slot = ?config.min_context_slot,
+                        retries = retries,
+                        elapsed_ms = start.elapsed().as_millis() as u64,
+                        error = %err,
+                        "RPC-only account fetch failed while resolving accounts to compatible slots"
+                    );
+                    match retry {
+                        Ok(retry_delay) => {
+                            tokio::time::sleep(retry_delay).await;
+                            continue;
+                        }
+                        Err(_) => return Err(err),
+                    }
+                }
+            };
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
                 config.min_context_slot,
@@ -1014,49 +1090,51 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Ok(remote_accounts);
             }
 
-            retries += 1;
-            let hit_max_retry_limit = retries == config.max_retries;
-            if hit_max_retry_limit || start.elapsed() > MAX_TOTAL_TIME {
-                let remote_accounts =
-                    remote_accounts.into_iter().map(|a| a.slot()).collect();
-                let limit = if hit_max_retry_limit {
-                    format!("max retries {}", config.max_retries)
-                } else {
-                    format!(
-                        "max total time of {} seconds",
-                        MAX_TOTAL_TIME.as_secs()
-                    )
-                };
-                match slots_match_result {
-                    // SAFETY: Match case is already handled and returns
-                    Match => unreachable!("we would have returned above"),
-                    Mismatch => {
-                        return Err(
-                            RemoteAccountProviderError::SlotsDidNotMatch(
+            match next_match_slots_retry(&mut retries, start, &config) {
+                Ok(retry_delay) => {
+                    // If the slots don't match then wait for a bit and retry
+                    tokio::time::sleep(retry_delay).await;
+                    continue;
+                }
+                Err(limit) => {
+                    let remote_account_slots = account_slots(&remote_accounts);
+                    let remote_account_sources = remote_accounts
+                        .iter()
+                        .map(|account| account.source())
+                        .collect::<Vec<_>>();
+                    warn!(
+                        pubkeys = %pubkeys_str(pubkeys),
+                        slots = ?remote_account_slots,
+                        sources = ?remote_account_sources,
+                        min_context_slot = ?config.min_context_slot,
+                        retries = retries,
+                        elapsed_ms = start.elapsed().as_millis() as u64,
+                        limit = %limit,
+                        "Failed to resolve accounts to compatible slots"
+                    );
+                    match slots_match_result {
+                        // SAFETY: Match case is already handled and returns
+                        Match => unreachable!("we would have returned above"),
+                        Mismatch => {
+                            return Err(
+                                RemoteAccountProviderError::SlotsDidNotMatch(
+                                    pubkeys_str(pubkeys),
+                                    remote_account_slots,
+                                    limit,
+                                ),
+                            );
+                        }
+                        MatchButBelowMinContextSlot(slot) => {
+                            return Err(RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
                                 pubkeys_str(pubkeys),
-                                remote_accounts,
-                                limit,
-                            ),
-                        );
-                    }
-                    MatchButBelowMinContextSlot(slot) => {
-                        return Err(
-                            RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
-                                pubkeys_str(pubkeys),
-                                remote_accounts,
+                                remote_account_slots,
                                 slot,
-                                limit
-                            )
-                        );
+                                limit,
+                            ));
+                        }
                     }
                 }
             }
-
-            // If the slots don't match then wait for a bit and retry
-            tokio::time::sleep(tokio::time::Duration::from_millis(
-                config.retry_interval_ms,
-            ))
-            .await;
         }
     }
 
@@ -1213,6 +1291,78 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
+    async fn fetch_multi_rpc_only(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        fetch_origin: AccountFetchOrigin,
+    ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
+        let config = RpcAccountInfoConfig {
+            commitment: Some(self.rpc_client.commitment()),
+            min_context_slot: Some(min_context_slot),
+            encoding: Some(UiAccountEncoding::Base64Zstd),
+            data_slice: None,
+        };
+
+        metrics::inc_remote_account_provider_a_count();
+        let response = tokio::time::timeout(RPC_FETCH_TIMEOUT, async {
+            self.rpc_client
+                .get_multiple_accounts_with_config(pubkeys, config)
+                .await
+        })
+        .await
+        .map_err(|_| {
+            RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                "RPC call timeout fetching accounts {} after {}ms",
+                pubkeys_str(pubkeys),
+                RPC_FETCH_TIMEOUT.as_millis()
+            ))
+        })?
+        .map_err(|err| {
+            RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                "RpcError fetching accounts {}: {err:?}",
+                pubkeys_str(pubkeys)
+            ))
+        })?;
+
+        let response_slot = response.context.slot;
+        if response_slot < min_context_slot {
+            return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                format!(
+                    "Response slot {response_slot} < {min_context_slot} fetching accounts {}",
+                    pubkeys_str(pubkeys)
+                ),
+            ));
+        }
+
+        let mut found_count = 0u64;
+        let mut not_found_count = 0u64;
+        let remote_accounts = response
+            .value
+            .into_iter()
+            .map(|account| match account {
+                Some(account) => {
+                    found_count += 1;
+                    RemoteAccount::from_fresh_account(
+                        account,
+                        response_slot,
+                        RemoteAccountUpdateSource::Fetch,
+                    )
+                }
+                None => {
+                    not_found_count += 1;
+                    RemoteAccount::NotFound(response_slot)
+                }
+            })
+            .collect();
+
+        inc_account_fetches_success(pubkeys.len() as u64);
+        inc_account_fetches_found(fetch_origin, found_count);
+        inc_account_fetches_not_found(fetch_origin, not_found_count);
+
+        Ok(remote_accounts)
+    }
+
     async fn setup_subscriptions(
         &self,
         pubkeys: &[Pubkey],
@@ -1299,6 +1449,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     async fn register_subscription(
         &self,
         pubkey: &Pubkey,
+        reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
         // 1. First realize subscription
         self.pubsub_client.subscribe(*pubkey, None).await?;
@@ -1306,36 +1457,111 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // 2. Add to LRU cache
         // If an account is evicted then we need to unsubscribe from it
         // and then inform upstream that we are no longer tracking it
-        if let Some(evicted) = self.lrucache_subscribed_accounts.add(*pubkey) {
-            trace!(evicted = %evicted, "Evicting account");
+        let add_outcome = {
+            let ownership = self.subscription_ownership.lock().await;
+            self.lrucache_subscribed_accounts.add_with_evict_filter(
+                *pubkey,
+                |candidate| {
+                    if !self.lrucache_subscribed_accounts.can_evict(candidate) {
+                        trace!(
+                            candidate = %candidate,
+                            "Skipping capacity eviction candidate from never-evict set"
+                        );
+                        return false;
+                    }
 
-            // LRU eviction is a forced full removal. Drop all ownership reasons
-            // before awaiting on pubsub unsubscribe or removal notification so stale
-            // reasons cannot survive a later failure on this cold path.
-            self.subscription_ownership.lock().await.remove(&evicted);
+                    let protection =
+                        self.capacity_eviction_protection_for(candidate);
+                    if protection.is_protected() {
+                        trace!(
+                            candidate = %candidate,
+                            delegated = protection.delegated,
+                            undelegating = protection.undelegating,
+                            "Skipping capacity eviction candidate protected by bank state"
+                        );
+                        return false;
+                    }
 
-            // 1. Unsubscribe from the account directly (LRU has already removed it)
-            if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
-                if matches!(
-                    err,
-                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                        _
-                    )
-                ) {
-                    debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
-                } else {
-                    // Should we retry here?
-                    warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                    let protected_by_ownership =
+                        ownership.get(candidate).is_some_and(|ownership| {
+                            ownership.contains(
+                                SubscriptionReason::UndelegationTracking,
+                            )
+                        });
+                    if protected_by_ownership {
+                        trace!(
+                            candidate = %candidate,
+                            reason = ?SubscriptionReason::UndelegationTracking,
+                            "Skipping capacity eviction candidate protected by subscription ownership"
+                        );
+                    }
+                    !protected_by_ownership
+                },
+            )
+        };
+
+        match add_outcome {
+            AddAccountOutcome::AlreadyPresent | AddAccountOutcome::Added => {}
+            AddAccountOutcome::Evicted(evicted) => {
+                trace!(evicted = %evicted, "Evicting account");
+
+                // LRU eviction is a forced full removal, but keep local
+                // ownership intact until pubsub confirms the subscription is
+                // gone so a failed unsubscribe cannot leave ownership state
+                // inconsistent with the active subscription.
+                if let Err(err) = self.pubsub_client.unsubscribe(evicted).await
+                {
+                    if matches!(
+                        err,
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                            _
+                        )
+                    ) {
+                        debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                    } else {
+                        // Should we retry here?
+                        warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                    }
+                    self.subscription_ownership
+                        .lock()
+                        .await
+                        .entry(*pubkey)
+                        .or_default()
+                        .acquire(reason);
+                    return Err(err);
+                }
+
+                self.subscription_ownership.lock().await.remove(&evicted);
+
+                // Inform upstream so it can remove it from the store. Failure
+                // to notify is non-fatal here because the LRU, pubsub, and
+                // ownership state have already been updated consistently.
+                if let Err(err) = self.send_removal_update(evicted).await {
+                    warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
                 }
             }
-
-            // 2. Inform upstream so it can remove it from the store. Failure
-            // to notify is non-fatal here because the LRU and pubsub state have
-            // already been updated consistently.
-            if let Err(err) = self.send_removal_update(evicted).await {
-                warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
+            AddAccountOutcome::NoEvictableCandidate => {
+                if let Err(err) = self.pubsub_client.unsubscribe(*pubkey).await
+                {
+                    debug!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Failed to unsubscribe new subscription after all LRU candidates were protected"
+                    );
+                    return Err(err);
+                }
+                self.subscription_ownership.lock().await.remove(pubkey);
+                self.lrucache_subscribed_accounts.remove(pubkey);
+                debug!(
+                    pubkey = %pubkey,
+                    "No evictable subscription capacity available; all LRU candidates are protected"
+                );
+                return Err(
+                    RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                        pubkey: *pubkey,
+                    },
+                );
             }
-            return Ok(());
         }
 
         Ok(())
@@ -1398,6 +1624,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .await
     }
 
+    #[cfg(test)]
+    pub(crate) async fn has_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> bool {
+        self.subscription_ownership
+            .lock()
+            .await
+            .get(pubkey)
+            .is_some_and(|ownership| ownership.contains(reason))
+    }
+
     async fn acquire_subscription_with_mode(
         &self,
         pubkey: &Pubkey,
@@ -1418,7 +1657,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
         drop(ownership);
 
-        self.register_subscription(pubkey).await?;
+        self.register_subscription(pubkey, reason).await?;
 
         let mut ownership = self.subscription_ownership.lock().await;
         ownership.entry(*pubkey).or_default().acquire(reason);
@@ -1501,6 +1740,97 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(success)
     }
 
+    pub(crate) async fn release_subscription_reason_silently_for_delegated_account(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> RemoteAccountProviderResult<bool> {
+        let _transition_guard = self.subscription_transition_lock.lock().await;
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+
+        let released_count = {
+            let release_mode = SubscriptionReleaseMode::All;
+            let mut ownership = self.subscription_ownership.lock().await;
+            let (is_empty, released_count) = match ownership.get_mut(pubkey) {
+                Some(existing) => {
+                    let released_count = match release_mode {
+                        SubscriptionReleaseMode::Single => {
+                            existing.release(reason);
+                            1
+                        }
+                        SubscriptionReleaseMode::All => {
+                            existing.release_all(reason)
+                        }
+                    };
+                    (existing.is_empty(), released_count)
+                }
+                None => return Ok(false),
+            };
+
+            if released_count == 0 {
+                return Ok(false);
+            }
+
+            if !is_empty {
+                trace!(
+                    pubkey = %pubkey,
+                    ?reason,
+                    released_count,
+                    "Released delegated-account subscription ownership; \
+                     kept protected/live subscription and LRU entry"
+                );
+                return Ok(false);
+            }
+
+            ownership.remove(pubkey);
+            released_count
+        };
+
+        match self.pubsub_client.unsubscribe(*pubkey).await {
+            Ok(()) => {
+                self.lrucache_subscribed_accounts.remove(pubkey);
+                trace!(
+                    pubkey = %pubkey,
+                    ?reason,
+                    "Removed final delegated-account subscription ownership \
+                     and LRU entry silently; no removal notification emitted"
+                );
+                Ok(true)
+            }
+            Err(err) => {
+                if matches!(
+                    err,
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                        _
+                    )
+                ) {
+                    self.lrucache_subscribed_accounts.remove(pubkey);
+                    trace!(
+                        pubkey = %pubkey,
+                        ?reason,
+                        "Removed stale delegated-account LRU entry for missing subscription"
+                    );
+                    return Ok(false);
+                }
+
+                let mut ownership = self.subscription_ownership.lock().await;
+                if ownership
+                    .get(pubkey)
+                    .is_none_or(SubscriptionOwnership::is_empty)
+                {
+                    let ownership = ownership.entry(*pubkey).or_default();
+                    for _ in 0..released_count {
+                        ownership.acquire(reason);
+                    }
+                }
+                drop(ownership);
+
+                Err(err)
+            }
+        }
+    }
+
     /// Subscribe to program account updates
     #[instrument(skip(self))]
     pub async fn subscribe_program(
@@ -1567,9 +1897,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
     ) {
-        const MAX_RETRIES: u64 = 10;
-        const RPC_CALL_TIMEOUT: Duration = Duration::from_secs(2);
-
         let rpc_client = self.rpc_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
         let commitment = self.rpc_client.commitment();
@@ -1579,10 +1906,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         tokio::spawn(async move {
             use RemoteAccount::*;
 
+            let fetch_started_at = std::time::Instant::now();
             // Helper to notify all pending requests of fetch failure
             let notify_error = |error_msg: &str| {
                 let mut fetching = fetching_accounts.lock().unwrap();
-                warn!("{error_msg}");
+                warn!(
+                    pubkey_count = pubkeys.len(),
+                    pubkeys = %pubkeys_str(&pubkeys),
+                    min_context_slot = min_context_slot,
+                    commitment = ?commitment,
+                    fetch_origin = %fetch_origin,
+                    elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
+                    error = %error_msg,
+                    "{error_msg}"
+                );
                 inc_account_fetches_failed(pubkeys.len() as u64);
                 if let Some(program_ids) = &program_ids {
                     for program_id in program_ids {
@@ -1616,7 +1953,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 }
             };
 
-            let mut remaining_retries: u64 = MAX_RETRIES;
+            let mut remaining_retries: u64 = RPC_FETCH_MAX_RETRIES;
 
             if tracing::enabled!(tracing::Level::TRACE) {
                 trace!(pubkeys = pubkeys_str(&pubkeys), "Fetching accounts");
@@ -1627,11 +1964,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     trace!($msg);
                     remaining_retries -= 1;
                     if remaining_retries <= 0 {
-                        let err_msg = format!("Max retries {MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
+                        let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
                         notify_error(&err_msg);
                         return;
                     }
-                    tokio::time::sleep(Duration::from_millis(400)).await;
+                    tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
                     continue;
                 }};
             }
@@ -1640,7 +1977,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 // its account cache. Otherwise we could just keep fetching the accounts
                 // until the context slot is high enough.
                 metrics::inc_remote_account_provider_a_count();
-                match tokio::time::timeout(RPC_CALL_TIMEOUT, async {
+                match tokio::time::timeout(RPC_FETCH_TIMEOUT, async {
                     let config = RpcAccountInfoConfig {
                         commitment: Some(commitment),
                         min_context_slot: Some(min_context_slot),
@@ -1739,14 +2076,28 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         }
                     },
                     Err(_) => {
-                        warn!("RPC call timeout. Retrying...");
+                        let attempt =
+                            RPC_FETCH_MAX_RETRIES - remaining_retries + 1;
+                        warn!(
+                            pubkey_count = pubkeys.len(),
+                            pubkeys = %pubkeys_str(&pubkeys),
+                            attempt = attempt,
+                            max_retries = RPC_FETCH_MAX_RETRIES,
+                            remaining_retries = remaining_retries.saturating_sub(1),
+                            timeout_ms = RPC_FETCH_TIMEOUT.as_millis() as u64,
+                            elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
+                            min_context_slot = min_context_slot,
+                            commitment = ?commitment,
+                            fetch_origin = %fetch_origin,
+                            "RPC call timeout. Retrying..."
+                        );
                         remaining_retries -= 1;
                         if remaining_retries == 0 {
-                            let err_msg = format!("Max retries {MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
+                            let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
                             notify_error(&err_msg);
                             return;
                         }
-                        tokio::time::sleep(Duration::from_millis(400)).await;
+                        tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
                         continue;
                     }
                 };

@@ -15,7 +15,7 @@ use crate::{
     remote_account_provider::{
         chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_slot::ChainSlot, RemoteAccountProvider,
-        RemoteAccountUpdateSource,
+        RemoteAccountUpdateSource, SubscriptionReleaseMode,
     },
     testing::{
         accounts::{
@@ -126,6 +126,18 @@ async fn setup<I>(
 where
     I: IntoIterator<Item = (Pubkey, Account)>,
 {
+    setup_with_capacity(accounts, current_slot, validator_keypair, 1000).await
+}
+
+async fn setup_with_capacity<I>(
+    accounts: I,
+    current_slot: u64,
+    validator_keypair: Keypair,
+    lru_capacity: usize,
+) -> FetcherTestCtx
+where
+    I: IntoIterator<Item = (Pubkey, Account)>,
+{
     init_logger();
 
     // Setup mock RPC client with the accounts and clock sysvar
@@ -144,7 +156,7 @@ where
     let rpc_client_clone = rpc_client.clone();
 
     let (forward_tx, forward_rx) = mpsc::channel(1_000);
-    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let (subscribed_accounts, config) = create_test_lru_cache(lru_capacity);
     let chain_slot = Arc::<AtomicU64>::default();
 
     let remote_account_provider = Arc::new(
@@ -1324,7 +1336,306 @@ async fn test_undelegation_requested_subscription_behavior() {
 }
 
 #[tokio::test]
-async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
+async fn test_delegated_discovered_after_direct_subscribe_releases_direct_without_bank_removal(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        fetch_cloner,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+    let mut removed_rx = remote_account_provider
+        .try_get_removed_account_rx()
+        .expect("removed account receiver should be available");
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    // Clone delegated account into bank (authoritative local delegated state).
+    fetch_cloner
+        .fetch_and_clone_accounts(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await
+        .expect("delegated account fetch should succeed");
+    assert_cloned_delegated_account!(
+        accounts_bank,
+        account_pubkey,
+        delegated_account.clone(),
+        CURRENT_SLOT,
+        account_owner
+    );
+
+    remote_account_provider
+        .acquire_subscription(
+            &account_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .expect("failed to subscribe delegated account");
+    assert_subscribed!(remote_account_provider, &[&account_pubkey]);
+    while removed_rx.try_recv().is_ok() {}
+
+    // Send a newer plain update; delegated authoritative-skip path should
+    // silently release direct subscription ownership.
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+    let chain_update = Account {
+        lamports: 900_000,
+        data: vec![9, 9, 9, 9],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                chain_update,
+                CURRENT_SLOT + 1,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if !remote_account_provider.is_watching(&account_pubkey) {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for delegated account direct cleanup");
+
+    assert_not_subscribed!(remote_account_provider, &[&account_pubkey]);
+    let direct_release_after_cleanup = remote_account_provider
+        .release_subscription_with_mode(
+            &account_pubkey,
+            SubscriptionReason::DirectAccount,
+            SubscriptionReleaseMode::All,
+        )
+        .await
+        .expect("direct release after cleanup should not fail");
+    assert!(!direct_release_after_cleanup);
+    assert!(matches!(
+        removed_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+
+    // Ensure we did not overwrite the local delegated account state.
+    assert_cloned_delegated_account!(
+        accounts_bank,
+        account_pubkey,
+        delegated_account,
+        CURRENT_SLOT,
+        account_owner
+    );
+}
+
+#[tokio::test]
+async fn test_undelegation_tracking_window_is_protected_from_capacity_eviction()
+{
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let tracking_pubkey = random_pubkey();
+    let new_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+
+    let remote_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        ..
+    } = setup_with_capacity(
+        [
+            (tracking_pubkey, remote_account.clone()),
+            (new_pubkey, remote_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+        1,
+    )
+    .await;
+    let mut removed_rx = remote_account_provider
+        .try_get_removed_account_rx()
+        .expect("removed account receiver should be available");
+
+    let mut tracking_account =
+        AccountSharedData::new(1_000_000, 4, &account_owner);
+    tracking_account.set_delegated(true);
+    tracking_account.set_undelegating(true);
+    accounts_bank.insert(tracking_pubkey, tracking_account);
+
+    remote_account_provider
+        .acquire_subscription(
+            &tracking_pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .expect("failed to acquire undelegation tracking");
+
+    let err = remote_account_provider
+        .acquire_subscription(&new_pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .expect_err("all protected capacity should reject new subscription");
+    assert!(matches!(
+        err,
+        crate::remote_account_provider::RemoteAccountProviderError::NoEvictableSubscriptionCapacity { pubkey }
+            if pubkey == new_pubkey
+    ));
+
+    assert!(remote_account_provider.is_watching(&tracking_pubkey));
+    assert!(!remote_account_provider.is_watching(&new_pubkey));
+    assert!(remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&tracking_pubkey));
+    assert!(!remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&new_pubkey));
+    assert!(matches!(
+        removed_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+
+    let direct_release_after_rejected_capacity = remote_account_provider
+        .release_subscription_with_mode(
+            &tracking_pubkey,
+            SubscriptionReason::DirectAccount,
+            SubscriptionReleaseMode::All,
+        )
+        .await
+        .expect("direct release after rejected capacity should not fail");
+    assert!(!direct_release_after_rejected_capacity);
+    assert!(remote_account_provider.is_watching(&tracking_pubkey));
+}
+
+#[tokio::test]
+async fn test_delegated_cleanup_keeps_undelegation_tracking_subscription() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    remote_account_provider
+        .acquire_subscription(
+            &account_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .expect("failed to acquire direct subscription");
+    remote_account_provider
+        .acquire_subscription(
+            &account_pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .expect("failed to acquire undelegation tracking subscription");
+
+    fetch_cloner
+        .cleanup_direct_subscription_for_delegated_account(account_pubkey)
+        .await;
+
+    assert!(remote_account_provider.is_watching(&account_pubkey));
+    assert!(remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&account_pubkey));
+
+    let unsubscribed = remote_account_provider
+        .release_subscription_with_mode(
+            &account_pubkey,
+            SubscriptionReason::UndelegationTracking,
+            SubscriptionReleaseMode::All,
+        )
+        .await
+        .expect("failed to release undelegation tracking subscription");
+
+    assert!(unsubscribed);
+    assert_not_subscribed!(remote_account_provider, &[&account_pubkey]);
+}
+
+// End-to-end variant of the test above that drives the cleanup through
+// `process_subscription_update` (via the subscription channel) instead of
+// invoking `cleanup_direct_subscription_for_delegated_account` directly.
+//
+// Reproduces the acquire-before-bank-update race: an external owner
+// acquires an `UndelegationTracking` subscription while the bank still
+// has the account as `delegated && !undelegating`. A delegated chain
+// update is then forwarded into `process_subscription_update`, exercising
+// the delegated-account cleanup path that must release `DirectAccount`
+// without releasing `UndelegationTracking`. Only after the update is
+// processed does the bank flip the account to `undelegating`, mirroring
+// the real-world ordering. The externally held tracking subscription must
+// be preserved.
+#[tokio::test]
+async fn test_delegated_subscription_update_keeps_externally_acquired_undelegation_tracking(
+) {
     init_logger();
     let validator_keypair = Keypair::new();
     let validator_pubkey = validator_keypair.pubkey();
@@ -1361,7 +1672,8 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
         account_owner,
     );
 
-    // Clone delegated account into bank (authoritative local delegated state).
+    // Populate the bank with the delegated (not undelegating) account so
+    // `process_subscription_update` takes the delegated-cleanup branch.
     fetch_cloner
         .fetch_and_clone_accounts(
             &[account_pubkey],
@@ -1380,21 +1692,31 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
         account_owner
     );
 
-    // Simulate undelegation-tracking subscription being active.
-    fetch_cloner
-        .subscribe_to_account_to_track_undelegation(&account_pubkey)
+    remote_account_provider
+        .acquire_subscription(
+            &account_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
         .await
-        .expect("failed to subscribe delegated account");
-    assert_subscribed!(remote_account_provider, &[&account_pubkey]);
+        .expect("failed to acquire direct subscription");
+    // Acquire the tracking subscription BEFORE the bank update arrives -
+    // this is the race the test reproduces.
+    remote_account_provider
+        .acquire_subscription(
+            &account_pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .expect("failed to acquire undelegation tracking subscription");
 
-    // Send a newer plain update; delegated authoritative-skip path should still unsubscribe.
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
+    // Drive a delegated update through the subscription listener so the
+    // delegated direct-subscription cleanup path is exercised end-to-end.
+    use crate::remote_account_provider::RemoteAccount;
+    rpc_client.set_slot(CURRENT_SLOT + 1);
     let chain_update = Account {
         lamports: 900_000,
         data: vec![9, 9, 9, 9],
-        owner: account_owner,
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -1410,29 +1732,70 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
         .await
         .unwrap();
 
+    // Wait until the spawned subscription-update task has run the delegated
+    // cleanup path: DirectAccount ownership should be gone, while the
+    // externally acquired UndelegationTracking ownership must remain.
     const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
     const TIMEOUT: std::time::Duration = Duration::from_millis(500);
     tokio::time::timeout(TIMEOUT, async {
         loop {
-            if !remote_account_provider.is_watching(&account_pubkey) {
+            let direct_removed = !remote_account_provider
+                .has_subscription_reason(
+                    &account_pubkey,
+                    SubscriptionReason::DirectAccount,
+                )
+                .await;
+            let tracking_retained = remote_account_provider
+                .has_subscription_reason(
+                    &account_pubkey,
+                    SubscriptionReason::UndelegationTracking,
+                )
+                .await;
+            if direct_removed && tracking_retained {
                 break;
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     })
     .await
-    .expect("timed out waiting for delegated account unsubscribe");
+    .expect("timed out waiting for delegated subscription cleanup");
 
+    // Only after the update has been processed do we flip the bank to
+    // `undelegating`, matching the real-world ordering described in the
+    // race scenario.
+    accounts_bank.set_undelegating(&account_pubkey, true);
+
+    // Externally acquired UndelegationTracking ownership must survive the
+    // delegated-account cleanup that ran inside process_subscription_update.
+    assert!(remote_account_provider.is_watching(&account_pubkey));
+    assert!(remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&account_pubkey));
+
+    // Bank-side delegated/undelegating state intentionally protects the
+    // subscription from capacity eviction. Clear those local protection bits
+    // only for this explicit release check so
+    // `release_subscription_with_mode(..., All)` can verify that the retained
+    // UndelegationTracking owner is the final owner and fully unsubscribes.
+    let mut releasable_bank_account = accounts_bank
+        .get(&account_pubkey)
+        .expect("account should still be present in bank");
+    releasable_bank_account.set_delegated(false);
+    releasable_bank_account.set_undelegating(false);
+    accounts_bank.insert(account_pubkey, releasable_bank_account);
+
+    let unsubscribed = remote_account_provider
+        .release_subscription_with_mode(
+            &account_pubkey,
+            SubscriptionReason::UndelegationTracking,
+            SubscriptionReleaseMode::All,
+        )
+        .await
+        .expect("failed to release undelegation tracking subscription");
+
+    assert!(unsubscribed);
     assert_not_subscribed!(remote_account_provider, &[&account_pubkey]);
-
-    // Ensure we did not overwrite the local delegated account state.
-    assert_cloned_delegated_account!(
-        accounts_bank,
-        account_pubkey,
-        delegated_account,
-        CURRENT_SLOT,
-        account_owner
-    );
 }
 
 #[tokio::test]
