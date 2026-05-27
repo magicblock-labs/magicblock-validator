@@ -60,6 +60,12 @@ pub struct TableMania {
     compute_budgets: TableManiaComputeBudgets,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ExistingPubkeyAction {
+    Reserve,
+    LeaveUnreserved,
+}
+
 impl TableMania {
     pub fn new(
         rpc_client: MagicblockRpcClient,
@@ -157,7 +163,12 @@ impl TableMania {
         }
 
         // 2. Add new reservations for pubkeys that are not in any table
-        self.reserve_new_pubkeys(authority, &remaining).await
+        self.reserve_new_pubkeys(
+            authority,
+            &remaining,
+            ExistingPubkeyAction::Reserve,
+        )
+        .await
     }
 
     /// Ensures that pubkeys exist in any active table without increasing reference counts.
@@ -195,7 +206,12 @@ impl TableMania {
 
         // 2. If any pubkeys dont exist, create tables for them
         if !remaining.is_empty() {
-            self.reserve_new_pubkeys(authority, &remaining).await?;
+            self.reserve_new_pubkeys(
+                authority,
+                &remaining,
+                ExistingPubkeyAction::LeaveUnreserved,
+            )
+            .await?;
         }
 
         Ok(())
@@ -226,6 +242,7 @@ impl TableMania {
         &self,
         authority: &Keypair,
         pubkeys: &HashSet<Pubkey>,
+        existing_pubkey_action: ExistingPubkeyAction,
     ) -> TableManiaResult<()> {
         self.check_authority(authority)?;
 
@@ -253,6 +270,7 @@ impl TableMania {
                                 authority,
                                 &mut remaining,
                                 &mut tables_used,
+                                existing_pubkey_action,
                             )
                             .await
                         {
@@ -308,6 +326,17 @@ impl TableMania {
         Ok(())
     }
 
+    fn filter_pubkeys_present_in_table(
+        table: &LookupTableRc,
+        remaining: &mut Vec<Pubkey>,
+        existing_pubkey_action: ExistingPubkeyAction,
+    ) {
+        remaining.retain(|pk| match existing_pubkey_action {
+            ExistingPubkeyAction::Reserve => !table.reserve_pubkey(pk),
+            ExistingPubkeyAction::LeaveUnreserved => !table.contains_key(pk),
+        });
+    }
+
     /// Extends the table to store as many of the provided pubkeys as possile.
     /// The stored pubkeys are removed from the `remaining` vector.
     /// If successful the table addres is added to the `tables_used` set.
@@ -326,6 +355,7 @@ impl TableMania {
         authority: &Keypair,
         remaining: &mut Vec<Pubkey>,
         tables_used: &mut HashSet<Pubkey>,
+        existing_pubkey_action: ExistingPubkeyAction,
     ) -> TableManiaResult<()> {
         let remaining_len = remaining.len();
         let storing_len =
@@ -338,14 +368,31 @@ impl TableMania {
         };
 
         let storing = remaining[..storing_len].to_vec();
-        let stored = table
+        let stored = match table
             .extend_respecting_capacity(
                 &self.rpc_client,
                 authority,
                 &storing,
                 &self.compute_budgets.extend,
             )
-            .await?;
+            .await
+        {
+            Ok(stored) => stored,
+            Err(err) => {
+                // Extend failed; chain may be ahead of local (a prior extend
+                // landed but its outcome was lost). Reconcile so the next
+                // outer iteration sees accurate fullness, and reserve any of
+                // `storing` that turned out to already be on chain.
+                if table.reconcile_with_chain(&self.rpc_client).await.is_ok() {
+                    Self::filter_pubkeys_present_in_table(
+                        table,
+                        remaining,
+                        existing_pubkey_action,
+                    );
+                }
+                return Err(err);
+            }
+        };
         let stored_len = stored.len();
         tracing::Span::current().record("stored_count", stored_len);
         trace!("Pubkeys stored");
