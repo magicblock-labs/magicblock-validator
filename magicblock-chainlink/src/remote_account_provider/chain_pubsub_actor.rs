@@ -410,21 +410,15 @@ impl ChainPubsubActor {
                     send_ok(response, client_id);
                     return;
                 }
-                let sub = subscriptions
+                let cancellation_token = subscriptions
                     .lock()
                     .expect("subcriptions lock poisoned")
-                    .remove(&pubkey);
-                if let Some(sub) = sub {
-                    match Self::cancel_and_wait_for_stream_drop(
-                        client_id, "account", pubkey, sub,
-                    )
-                    .await
-                    {
-                        Ok(()) => send_ok(response, client_id),
-                        Err(err) => {
-                            let _ = response.send(Err(err));
-                        }
-                    }
+                    .get(&pubkey)
+                    .map(|sub| sub.cancellation_token.clone());
+
+                if let Some(cancellation_token) = cancellation_token {
+                    cancellation_token.cancel();
+                    send_ok(response, client_id);
                 } else {
                     let _ = response
                         .send(Err(RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
