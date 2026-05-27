@@ -180,33 +180,27 @@ impl ScheduledCommitsProcessorImpl {
         )
         .await;
 
-        let total_count = intent_bundles.len();
-        let mut scheduled_count = 0;
-        for intent_bundle in intent_bundles {
-            let intent_id = intent_bundle.id;
-            match committor
-                .schedule_recovered_intent_bundles(vec![intent_bundle])
-                .await
-            {
-                Ok(Ok(())) => {
-                    scheduled_count += 1;
-                }
-                Ok(Err(err)) => {
-                    Self::remove_intent_metas(&intents_meta_map, &[intent_id]);
-                    error!(intent_id, error = ?err, "Failed to schedule recovered pending commit intent");
-                }
-                Err(err) => {
-                    Self::remove_intent_metas(&intents_meta_map, &[intent_id]);
-                    error!(intent_id, error = ?err, "Failed to receive recovered pending commit intent schedule result");
-                }
+        let intent_ids: Vec<u64> =
+            intent_bundles.iter().map(|b| b.id).collect();
+        let total_count = intent_ids.len();
+        match committor
+            .schedule_recovered_intent_bundles(intent_bundles)
+            .await
+        {
+            Ok(Ok(())) => {
+                info!(
+                    intent_count = total_count,
+                    "Scheduled recovered pending commit intents"
+                );
             }
-        }
-
-        if scheduled_count > 0 {
-            info!(
-                intent_count = scheduled_count,
-                total_count, "Scheduled recovered pending commit intents"
-            );
+            Ok(Err(err)) => {
+                Self::remove_intent_metas(&intents_meta_map, &intent_ids);
+                error!(intent_count = total_count, error = ?err, "Failed to schedule recovered pending commit intents");
+            }
+            Err(err) => {
+                Self::remove_intent_metas(&intents_meta_map, &intent_ids);
+                error!(intent_count = total_count, error = ?err, "Failed to receive recovered pending commit intent schedule result");
+            }
         }
     }
 

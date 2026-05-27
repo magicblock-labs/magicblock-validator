@@ -213,7 +213,7 @@ impl CommittorActor {
             } => {
                 let result = self
                     .processor
-                    .schedule_recovered_intent_bundle(intent_bundles)
+                    .schedule_recovered_intent_bundles(intent_bundles)
                     .await;
                 if let Err(e) = respond_to.send(result) {
                     error!(message_type = "ScheduleRecoveredIntentBundle", error = ?e, "Failed to send response");

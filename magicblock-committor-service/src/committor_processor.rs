@@ -36,8 +36,8 @@ use crate::{
         },
     },
     persist::{
-        CommitStatus, CommitStatusRow, CommitType as PersistCommitType,
-        IntentPersister, IntentPersisterImpl, MessageSignatures,
+        CommitStatusRow, CommitType as PersistCommitType, IntentPersister,
+        IntentPersisterImpl, MessageSignatures,
     },
 };
 
@@ -206,7 +206,7 @@ impl CommittorProcessor {
     }
 
     #[instrument(skip(self, intent_bundles))]
-    pub async fn schedule_recovered_intent_bundle(
+    pub async fn schedule_recovered_intent_bundles(
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
@@ -245,11 +245,9 @@ fn pending_rows_to_scheduled_intent_bundles(
     recovery_base_slot: u64,
 ) -> Vec<ScheduledIntentBundle> {
     let mut grouped_rows = BTreeMap::<u64, Vec<CommitStatusRow>>::new();
-    rows.into_iter()
-        .filter(|row| row.commit_status == CommitStatus::Pending)
-        .for_each(|row| {
-            grouped_rows.entry(row.message_id).or_default().push(row);
-        });
+    for row in rows {
+        grouped_rows.entry(row.message_id).or_default().push(row);
+    }
 
     grouped_rows
         .into_iter()
