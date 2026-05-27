@@ -263,21 +263,14 @@ impl TableMania {
 
                 // Try to use the last table if it's not full
                 if let Some(table) = active_tables_write_lock.last() {
-                    table.reconcile_with_chain(&self.rpc_client).await?;
-                    Self::filter_pubkeys_present_in_table(
-                        table,
-                        &mut remaining,
-                        existing_pubkey_action,
-                    );
-                    if remaining.is_empty() {
-                        stored_in_existing = true;
-                    } else if !table.is_full() {
+                    if !table.is_full() {
                         if let Err(err) = self
                             .extend_table(
                                 table,
                                 authority,
                                 &mut remaining,
                                 &mut tables_used,
+                                existing_pubkey_action,
                             )
                             .await
                         {
@@ -307,15 +300,6 @@ impl TableMania {
 
                 // Double-check if a new table was created while we were waiting for the lock
                 if let Some(table) = active_tables_write_lock.last() {
-                    table.reconcile_with_chain(&self.rpc_client).await?;
-                    Self::filter_pubkeys_present_in_table(
-                        table,
-                        &mut remaining,
-                        existing_pubkey_action,
-                    );
-                    if remaining.is_empty() {
-                        continue;
-                    }
                     if !table.is_full() {
                         // Another task created a table we can use, so drop the write lock
                         // and try again with the read lock
@@ -371,6 +355,7 @@ impl TableMania {
         authority: &Keypair,
         remaining: &mut Vec<Pubkey>,
         tables_used: &mut HashSet<Pubkey>,
+        existing_pubkey_action: ExistingPubkeyAction,
     ) -> TableManiaResult<()> {
         let remaining_len = remaining.len();
         let storing_len =
@@ -383,14 +368,35 @@ impl TableMania {
         };
 
         let storing = remaining[..storing_len].to_vec();
-        let stored = table
+        let stored = match table
             .extend_respecting_capacity(
                 &self.rpc_client,
                 authority,
                 &storing,
                 &self.compute_budgets.extend,
             )
-            .await?;
+            .await
+        {
+            Ok(stored) => stored,
+            Err(err) => {
+                // Extend failed; chain may be ahead of local (a prior extend
+                // landed but its outcome was lost). Reconcile so the next
+                // outer iteration sees accurate fullness, and reserve any of
+                // `storing` that turned out to already be on chain.
+                if table
+                    .reconcile_with_chain(&self.rpc_client)
+                    .await
+                    .is_ok()
+                {
+                    Self::filter_pubkeys_present_in_table(
+                        table,
+                        remaining,
+                        existing_pubkey_action,
+                    );
+                }
+                return Err(err);
+            }
+        };
         let stored_len = stored.len();
         tracing::Span::current().record("stored_count", stored_len);
         trace!("Pubkeys stored");
