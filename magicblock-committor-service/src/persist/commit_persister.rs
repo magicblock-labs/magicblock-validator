@@ -9,7 +9,7 @@ use solana_pubkey::Pubkey;
 
 use super::{
     db::CommitStatusRow,
-    error::{CommitPersistError, CommitPersistResult},
+    error::CommitPersistResult,
     utils::now,
     CommitStatus, CommitStrategy, CommitType, CommittsDb, MessageSignatures,
 };
@@ -253,7 +253,7 @@ impl IntentPersister for IntentPersisterImpl {
     ) -> CommitPersistResult<Vec<CommitStatusRow>> {
         self.commits_db
             .lock()
-            .map_err(|err| CommitPersistError::MutexPoisoned(err.to_string()))?
+            .expect(POISONED_MUTEX_MSG)
             .get_pending_commit_statuses()
     }
 

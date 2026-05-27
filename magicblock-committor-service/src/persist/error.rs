@@ -38,7 +38,4 @@ pub enum CommitPersistError {
 
     #[error("Commit Status needs commit strategy: '{0}' ({0:?})")]
     CommitStatusNeedsStrategy(String),
-
-    #[error("Mutex poisoned: '{0}'")]
-    MutexPoisoned(String),
 }
