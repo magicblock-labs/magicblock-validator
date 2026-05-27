@@ -67,7 +67,8 @@ pub(crate) fn process_schedule_intent_bundle(
                 if !account.compressed() {
                     ic_msg!(
                     invoke_context,
-                    "ScheduleIntentBundle: compressed commits are not supported for uncompressed accounts"
+                    "ScheduleIntentBundle: compressed commits are only for compressed accounts ({})",
+                    get_instruction_pubkey_with_idx(invoke_context.transaction_context, idx as u16)?
                 );
                     return Err(InstructionError::InvalidInstructionData);
                 }
@@ -75,7 +76,8 @@ pub(crate) fn process_schedule_intent_bundle(
                 if account.lamports() != 0 {
                     ic_msg!(
                         invoke_context,
-                        "ScheduleIntentBundle: compressed commits are not supported for accounts with non-zero lamports"
+                        "ScheduleIntentBundle: compressed commits are only for accounts with zero lamports ({})",
+                        get_instruction_pubkey_with_idx(invoke_context.transaction_context, idx as u16)?
                     );
                     return Err(InstructionError::InvalidInstructionData);
                 }

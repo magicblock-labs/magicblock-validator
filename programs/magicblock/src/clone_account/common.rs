@@ -212,24 +212,26 @@ pub fn set_account_from_fields(
 ) -> Result<(), InstructionError> {
     ic_msg!(
         invoke_context,
-        "src account state: lamports={}, owner={}, executable={}, delegated={}, confined={}, remote_slot={}, data_len={}",
+        "src account state: lamports={}, owner={}, executable={}, delegated={}, confined={}, compressed={}, remote_slot={}, data_len={}",
         fields.lamports,
         fields.owner,
         fields.executable,
         fields.delegated,
         fields.confined,
+        fields.compressed,
         fields.remote_slot,
         data.len()
     );
     ic_msg!(
         invoke_context,
-        "dest account state: lamports={}, owner={}, executable={}, delegated={}, undelegating={} confined={}, remote_slot={}, data_len={}",
+        "dest account state: lamports={}, owner={}, executable={}, delegated={}, undelegating={}, confined={}, compressed={}, remote_slot={}, data_len={}",
         acc.lamports(),
         acc.owner(),
         acc.executable(),
         acc.delegated(),
         acc.undelegating(),
         acc.confined(),
+        acc.compressed(),
         acc.remote_slot(),
         acc.data().len()
     );
@@ -261,6 +263,7 @@ pub fn set_account_from_fields(
     acc.set_executable(fields.executable);
     acc.set_delegated(fields.delegated);
     acc.set_confined(fields.confined);
+    acc.set_compressed(fields.compressed);
     acc.set_remote_slot(fields.remote_slot);
     acc.set_undelegating(false);
 

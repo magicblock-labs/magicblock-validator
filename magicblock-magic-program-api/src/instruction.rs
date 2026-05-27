@@ -346,6 +346,7 @@ pub struct AccountCloneFields {
     pub executable: bool,
     pub delegated: bool,
     pub confined: bool,
+    pub compressed: bool,
     pub remote_slot: u64,
 }
 
