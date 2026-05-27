@@ -247,7 +247,13 @@ impl TableMania {
                 // Try to use the last table if it's not full
                 if let Some(table) = active_tables_write_lock.last() {
                     table.reconcile_with_chain(&self.rpc_client).await?;
-                    if !table.is_full() {
+                    Self::reserve_pubkeys_present_in_table(
+                        table,
+                        &mut remaining,
+                    );
+                    if remaining.is_empty() {
+                        stored_in_existing = true;
+                    } else if !table.is_full() {
                         if let Err(err) = self
                             .extend_table(
                                 table,
@@ -284,6 +290,13 @@ impl TableMania {
                 // Double-check if a new table was created while we were waiting for the lock
                 if let Some(table) = active_tables_write_lock.last() {
                     table.reconcile_with_chain(&self.rpc_client).await?;
+                    Self::reserve_pubkeys_present_in_table(
+                        table,
+                        &mut remaining,
+                    );
+                    if remaining.is_empty() {
+                        continue;
+                    }
                     if !table.is_full() {
                         // Another task created a table we can use, so drop the write lock
                         // and try again with the read lock
@@ -308,6 +321,13 @@ impl TableMania {
         }
 
         Ok(())
+    }
+
+    fn reserve_pubkeys_present_in_table(
+        table: &LookupTableRc,
+        remaining: &mut Vec<Pubkey>,
+    ) {
+        remaining.retain(|pk| !table.reserve_pubkey(pk));
     }
 
     /// Extends the table to store as many of the provided pubkeys as possile.
