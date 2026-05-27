@@ -333,11 +333,12 @@ impl ChainPubsubActor {
                     send_ok(response, client_id);
                     return;
                 }
-                if let Some(AccountSubscription { cancellation_token }) =
-                    subscriptions
-                        .lock()
-                        .expect("subcriptions lock poisoned")
-                        .get(&pubkey)
+                if let Some(AccountSubscription {
+                    cancellation_token, ..
+                }) = subscriptions
+                    .lock()
+                    .expect("subcriptions lock poisoned")
+                    .get(&pubkey)
                 {
                     cancellation_token.cancel();
                     send_ok(response, client_id);
@@ -449,6 +450,7 @@ impl ChainPubsubActor {
         trace!("Adding subscription");
 
         let cancellation_token = CancellationToken::new();
+        let completion_token = CancellationToken::new();
 
         // Insert into subscriptions HashMap immediately to prevent race condition
         // with unsubscribe operations
@@ -462,6 +464,7 @@ impl ChainPubsubActor {
                 pubkey,
                 AccountSubscription {
                     cancellation_token: cancellation_token.clone(),
+                    completion_token: completion_token.clone(),
                 },
             );
         }
@@ -507,6 +510,10 @@ impl ChainPubsubActor {
                         is_connected.clone(),
                         &format!("Failed to subscribe to account {pubkey} after {initial_tries} retries")
                     );
+                    subs.lock()
+                        .expect("subscriptions lock poisoned")
+                        .remove(&pubkey);
+                    completion_token.cancel();
                     // RPC failed - inform the requester
                     let _ = sub_response.send(Err(err.into()));
                     return;
@@ -579,6 +586,8 @@ impl ChainPubsubActor {
                 }
             }
 
+            drop(update_stream);
+
             // Clean up subscription with timeout to prevent hanging on dead sockets
             if tokio::time::timeout(Duration::from_secs(2), unsubscribe())
                 .await
@@ -590,6 +599,7 @@ impl ChainPubsubActor {
             subs.lock()
                 .expect("subscriptions lock poisoned")
                 .remove(&pubkey);
+            completion_token.cancel();
         });
     }
     #[allow(clippy::too_many_arguments)]
@@ -621,6 +631,7 @@ impl ChainPubsubActor {
         trace!("Adding program subscription");
 
         let cancellation_token = CancellationToken::new();
+        let completion_token = CancellationToken::new();
 
         {
             let mut program_subs_lock = program_subs
@@ -630,6 +641,7 @@ impl ChainPubsubActor {
                 program_pubkey,
                 AccountSubscription {
                     cancellation_token: cancellation_token.clone(),
+                    completion_token: completion_token.clone(),
                 },
             );
         }
@@ -667,6 +679,11 @@ impl ChainPubsubActor {
                     is_connected.clone(),
                     &format!("Failed to subscribe to program {program_pubkey}"),
                 );
+                program_subs
+                    .lock()
+                    .expect("program_subs lock poisoned")
+                    .remove(&program_pubkey);
+                completion_token.cancel();
                 // RPC failed - inform the requester
                 let _ = sub_response.send(Err(err.into()));
                 return;
@@ -774,6 +791,8 @@ impl ChainPubsubActor {
                 }
             }
 
+            drop(update_stream);
+
             // Clean up subscription with timeout to prevent hanging on dead sockets
             if tokio::time::timeout(Duration::from_secs(2), unsubscribe())
                 .await
@@ -786,6 +805,7 @@ impl ChainPubsubActor {
                 .lock()
                 .expect("program_subs lock poisoned")
                 .remove(&program_pubkey);
+            completion_token.cancel();
         });
     }
 
@@ -868,7 +888,12 @@ impl ChainPubsubActor {
                 std::mem::take(&mut *subs_lock)
             };
             let drained_len = drained_subs.len();
-            for (_, AccountSubscription { cancellation_token }) in drained_subs
+            for (
+                _,
+                AccountSubscription {
+                    cancellation_token, ..
+                },
+            ) in drained_subs
             {
                 cancellation_token.cancel();
             }
