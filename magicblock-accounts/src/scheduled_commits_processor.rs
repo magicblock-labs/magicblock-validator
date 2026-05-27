@@ -18,10 +18,11 @@ use magicblock_committor_service::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput, BaseIntentCommittor, CommittorService,
 };
-use magicblock_core::link::transactions::{
-    with_encoded, TransactionSchedulerHandle,
+use magicblock_core::{
+    link::transactions::{with_encoded, TransactionSchedulerHandle},
+    traits::LatestBlockProvider,
 };
-use magicblock_metrics::metrics;
+use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use magicblock_program::{
     instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle,
@@ -35,7 +36,7 @@ use tokio::{
     task,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     errors::ScheduledCommitsProcessorResult, ScheduledCommitsProcessor,
@@ -64,6 +65,7 @@ impl ScheduledCommitsProcessorImpl {
         committor: Arc<CommittorService>,
         chainlink: Arc<ChainlinkImpl>,
         internal_transaction_scheduler: TransactionSchedulerHandle,
+        latest_block: impl LatestBlockProvider,
     ) -> Self {
         let result_subscriber = committor.subscribe_for_results();
         let intents_meta_map = Arc::new(Mutex::default());
@@ -73,6 +75,7 @@ impl ScheduledCommitsProcessorImpl {
             cancellation_token.clone(),
             intents_meta_map.clone(),
             internal_transaction_scheduler.clone(),
+            latest_block,
         ));
         tokio::spawn(Self::recover_pending_intents(
             committor.clone(),
@@ -148,6 +151,14 @@ impl ScheduledCommitsProcessorImpl {
         if intent_bundles.is_empty() {
             return;
         }
+        let intent_bundles = Self::recoverable_intent_bundles(
+            chainlink.as_ref(),
+            intent_bundles,
+        )
+        .await;
+        if intent_bundles.is_empty() {
+            return;
+        }
 
         let pubkeys_being_undelegated = {
             let mut intent_metas = match intents_meta_map.lock() {
@@ -204,6 +215,42 @@ impl ScheduledCommitsProcessorImpl {
         }
     }
 
+    async fn recoverable_intent_bundles(
+        chainlink: &ChainlinkImpl,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+    ) -> Vec<ScheduledIntentBundle> {
+        let mut recoverable_intent_bundles = Vec::new();
+        for intent_bundle in intent_bundles {
+            let pubkeys = intent_bundle.get_all_committed_pubkeys();
+            let accounts_delegated = match chainlink
+                .accounts_delegated_on_base_and_er(
+                    &pubkeys,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
+            {
+                Ok(accounts_delegated) => accounts_delegated,
+                Err(err) => {
+                    error!(
+                        intent_id = intent_bundle.id,
+                        error = ?err,
+                        "Failed to verify recovered commit intent accounts"
+                    );
+                    continue;
+                }
+            };
+            if accounts_delegated.into_iter().all(|delegated| delegated) {
+                recoverable_intent_bundles.push(intent_bundle);
+            } else {
+                warn!(
+                    intent_id = intent_bundle.id,
+                    "Skipping recovered commit intent because not all accounts are delegated on base and ER"
+                );
+            }
+        }
+        recoverable_intent_bundles
+    }
+
     fn remove_intent_metas(
         intents_meta_map: &Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
         intent_ids: &[u64],
@@ -227,7 +274,8 @@ impl ScheduledCommitsProcessorImpl {
         result_subscriber,
         cancellation_token,
         intents_meta_map,
-        internal_transaction_scheduler
+        internal_transaction_scheduler,
+        latest_block
     ))]
     async fn result_processor(
         result_subscriber: oneshot::Receiver<
@@ -236,6 +284,7 @@ impl ScheduledCommitsProcessorImpl {
         cancellation_token: CancellationToken,
         intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
         internal_transaction_scheduler: TransactionSchedulerHandle,
+        latest_block: impl LatestBlockProvider,
     ) {
         const SUBSCRIPTION_ERR_MSG: &str =
             "Failed to get subscription of results of BaseIntents execution";
@@ -287,6 +336,7 @@ impl ScheduledCommitsProcessorImpl {
                 &internal_transaction_scheduler,
                 execution_result,
                 intent_meta,
+                latest_block.blockhash(),
             )
             .await;
         }
@@ -301,16 +351,13 @@ impl ScheduledCommitsProcessorImpl {
         internal_transaction_scheduler: &TransactionSchedulerHandle,
         result: BroadcastedIntentExecutionResult,
         mut intent_meta: ScheduledBaseIntentMeta,
+        current_blockhash: Hash,
     ) {
-        let intent_sent_transaction = intent_meta
-            .intent_sent_transaction
-            .take()
-            .unwrap_or_else(|| {
-                InstructionUtils::scheduled_commit_sent(
-                    intent_id,
-                    intent_meta.blockhash,
-                )
-            });
+        let intent_sent_transaction = Self::intent_sent_transaction(
+            intent_id,
+            &mut intent_meta,
+            current_blockhash,
+        );
         let sent_commit =
             Self::build_sent_commit(intent_id, intent_meta, result);
         register_scheduled_commit_sent(sent_commit);
@@ -327,6 +374,22 @@ impl ScheduledCommitsProcessorImpl {
                 error!(error = ?err, "Failed to signal sent commit");
             }
         }
+    }
+
+    fn intent_sent_transaction(
+        intent_id: u64,
+        intent_meta: &mut ScheduledBaseIntentMeta,
+        current_blockhash: Hash,
+    ) -> Transaction {
+        intent_meta
+            .intent_sent_transaction
+            .take()
+            .unwrap_or_else(|| {
+                InstructionUtils::scheduled_commit_sent(
+                    intent_id,
+                    current_blockhash,
+                )
+            })
     }
 
     fn build_sent_commit(

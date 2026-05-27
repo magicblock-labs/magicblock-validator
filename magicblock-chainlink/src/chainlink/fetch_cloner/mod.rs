@@ -254,6 +254,18 @@ where
         self.fetch_count.load(Ordering::Relaxed)
     }
 
+    #[instrument(skip(self, pubkeys))]
+    pub async fn fetch_remote_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<RemoteAccount>> {
+        Ok(self
+            .remote_account_provider
+            .try_get_multi(pubkeys, None, fetch_origin, None, None)
+            .await?)
+    }
+
     pub fn cloner(&self) -> &Arc<C> {
         &self.cloner
     }

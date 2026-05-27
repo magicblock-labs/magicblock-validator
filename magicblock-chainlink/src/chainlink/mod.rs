@@ -411,6 +411,37 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(accounts)
     }
 
+    #[instrument(skip(self, pubkeys))]
+    pub async fn accounts_delegated_on_base_and_er(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<bool>> {
+        let Some(fetch_cloner) = self.fetch_cloner() else {
+            return Ok(vec![false; pubkeys.len()]);
+        };
+        let remote_accounts = fetch_cloner
+            .fetch_remote_accounts(pubkeys, fetch_origin)
+            .await?;
+
+        Ok(pubkeys
+            .iter()
+            .zip(remote_accounts)
+            .map(|(pubkey, remote_account)| {
+                let delegated_on_base =
+                    remote_account.is_owned_by_delegation_program();
+                let delegated_on_er = self
+                    .accounts_bank
+                    .get_account(pubkey)
+                    .is_some_and(|account| {
+                        account.delegated()
+                            || account.owner().eq(&dlp_api::id())
+                    });
+                delegated_on_base && delegated_on_er
+            })
+            .collect())
+    }
+
     #[instrument(skip(
         self,
         fetch_cloner,

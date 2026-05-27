@@ -24,7 +24,8 @@ use solana_rpc_client::{
 use solana_rpc_client_api::{
     client_error::ErrorKind as RpcClientErrorKind,
     config::{
-        RpcAccountInfoConfig, RpcSendTransactionConfig, RpcTransactionConfig,
+        RpcAccountInfoConfig, RpcSendTransactionConfig,
+        RpcSimulateTransactionConfig, RpcTransactionConfig,
     },
     request::RpcError,
 };
@@ -70,6 +71,12 @@ pub enum MagicBlockRpcClientError {
     #[error("Error sending transaction: {0} ({0:?})")]
     SendTransaction(Box<solana_rpc_client_api::client_error::Error>),
 
+    #[error("Error simulating transaction: {0} ({0:?})")]
+    SimulateTransaction(Box<solana_rpc_client_api::client_error::Error>),
+
+    #[error("Simulated transaction failed: {0:?}")]
+    SimulatedTransactionError(TransactionError),
+
     #[error("Error getting signature status for: {0} {1}")]
     CannotGetTransactionSignatureStatus(Signature, String),
 
@@ -99,7 +106,13 @@ impl MagicBlockRpcClientError {
             CannotGetTransactionSignatureStatus(sig, _)
             | SentTransactionError(_, sig)
             | CannotConfirmTransactionSignatureStatus(sig, _) => Some(*sig),
-            _ => None,
+            SimulatedTransactionError(_)
+            | SimulateTransaction(_)
+            | RpcClientError(_)
+            | GetLatestBlockhash(_)
+            | GetSlot(_)
+            | LookupTableDeserialize(_)
+            | SendTransaction(_) => None,
         }
     }
 }
@@ -611,6 +624,36 @@ impl MagicblockRpcClient {
                 ));
             }
         }
+    }
+
+    pub async fn simulate_transaction(
+        &self,
+        tx: &impl SerializableTransaction,
+    ) -> MagicBlockRpcClientResult<()> {
+        let result = self
+            .client
+            .simulate_transaction_with_config(
+                tx,
+                RpcSimulateTransactionConfig {
+                    sig_verify: true,
+                    replace_recent_blockhash: false,
+                    commitment: Some(self.commitment()),
+                    encoding: Some(SEND_TRANSACTION_ENCODING),
+                    accounts: None,
+                    min_context_slot: None,
+                    inner_instructions: false,
+                },
+            )
+            .await
+            .map_err(|e| {
+                MagicBlockRpcClientError::SimulateTransaction(Box::new(e))
+            })?;
+        if let Some(err) = result.value.err {
+            return Err(MagicBlockRpcClientError::SimulatedTransactionError(
+                err.into(),
+            ));
+        }
+        Ok(())
     }
 
     pub async fn get_transaction(

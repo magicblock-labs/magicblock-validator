@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::Path,
     sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use magicblock_core::{
@@ -40,6 +41,8 @@ use crate::{
         IntentPersisterImpl, MessageSignatures,
     },
 };
+
+const RECOVERY_MIN_AGE_SECS: u64 = 30 * 60;
 
 pub(crate) struct CommittorProcessor {
     pub(crate) magicblock_rpc_client: MagicblockRpcClient,
@@ -167,6 +170,7 @@ impl CommittorProcessor {
             rows,
             self.auth_pubkey(),
             recovery_base_slot,
+            unix_timestamp(),
         );
         if !bundles.is_empty() {
             let accounts_count: usize = bundles
@@ -243,6 +247,7 @@ fn pending_rows_to_scheduled_intent_bundles(
     rows: Vec<CommitStatusRow>,
     payer: Pubkey,
     recovery_base_slot: u64,
+    recovery_time: u64,
 ) -> Vec<ScheduledIntentBundle> {
     let mut grouped_rows = BTreeMap::<u64, Vec<CommitStatusRow>>::new();
     for row in rows {
@@ -252,6 +257,17 @@ fn pending_rows_to_scheduled_intent_bundles(
     grouped_rows
         .into_iter()
         .filter_map(|(message_id, rows)| {
+            if rows
+                .iter()
+                .any(|row| !pending_row_is_old_enough(row, recovery_time))
+            {
+                warn!(
+                    intent_id = message_id,
+                    "Skipping pending commit intent because it is not old enough to recover"
+                );
+                return None;
+            }
+
             let first = rows.first()?;
             let slot = first.slot;
             let blockhash = first.ephemeral_blockhash;
@@ -299,6 +315,20 @@ fn pending_rows_to_scheduled_intent_bundles(
             })
         })
         .collect()
+}
+
+fn pending_row_is_old_enough(
+    row: &CommitStatusRow,
+    recovery_time: u64,
+) -> bool {
+    recovery_time.saturating_sub(row.last_retried_at) > RECOVERY_MIN_AGE_SECS
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn committed_account_from_pending_row(
@@ -393,6 +423,7 @@ mod tests {
             ],
             payer,
             7,
+            RECOVERY_MIN_AGE_SECS + 2,
         );
 
         assert_eq!(bundles.len(), 1);

@@ -111,6 +111,19 @@ where
                 ).into()
             }
         }
+        MagicBlockRpcClientError::SimulatedTransactionError(
+            transaction_err,
+        ) => {
+            match transaction_error_mapper.try_map(transaction_err, None) {
+                Ok(mapped_err) => mapped_err,
+                Err(original) => {
+                    MagicBlockRpcClientError::SimulatedTransactionError(
+                        original,
+                    )
+                    .into()
+                }
+            }
+        }
         MagicBlockRpcClientError::RpcClientError(err) => {
             match try_map_client_error(transaction_error_mapper, *err) {
                 Ok(mapped_err) => mapped_err,
@@ -121,6 +134,15 @@ where
             match try_map_client_error(transaction_error_mapper, *err) {
                 Ok(mapped_err) => mapped_err,
                 Err(original) => MagicBlockRpcClientError::SendTransaction(original).into()
+            }
+        }
+        MagicBlockRpcClientError::SimulateTransaction(err) => {
+            match try_map_client_error(transaction_error_mapper, *err) {
+                Ok(mapped_err) => mapped_err,
+                Err(original) => {
+                    MagicBlockRpcClientError::SimulateTransaction(original)
+                        .into()
+                }
             }
         }
         err @
@@ -180,12 +202,14 @@ pub fn decide_rpc_error_flow(
 ) -> ControlFlow<(), Duration> {
     match error {
         MagicBlockRpcClientError::RpcClientError(err)
-        | MagicBlockRpcClientError::SendTransaction(err) => {
+        | MagicBlockRpcClientError::SendTransaction(err)
+        | MagicBlockRpcClientError::SimulateTransaction(err) => {
             decide_rpc_native_flow(err)
         }
         MagicBlockRpcClientError::GetSlot(_)
         | MagicBlockRpcClientError::LookupTableDeserialize(_)
-        | MagicBlockRpcClientError::SentTransactionError(_, _) => {
+        | MagicBlockRpcClientError::SentTransactionError(_, _)
+        | MagicBlockRpcClientError::SimulatedTransactionError(_) => {
             // This wasn't mapped to any user defined error - break
             // Unexpected error - break
             ControlFlow::Break(())

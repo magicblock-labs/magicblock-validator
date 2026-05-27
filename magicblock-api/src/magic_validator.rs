@@ -304,6 +304,7 @@ impl MagicValidator {
                     committor_service.clone(),
                     chainlink.clone(),
                     dispatch.transaction_scheduler.clone(),
+                    ledger.latest_block().clone(),
                 ))
             });
 
