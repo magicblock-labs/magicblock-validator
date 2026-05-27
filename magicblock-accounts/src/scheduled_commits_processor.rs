@@ -353,11 +353,16 @@ impl ScheduledCommitsProcessorImpl {
         mut intent_meta: ScheduledBaseIntentMeta,
         current_blockhash: Hash,
     ) {
-        let intent_sent_transaction = Self::intent_sent_transaction(
-            intent_id,
-            &mut intent_meta,
-            current_blockhash,
-        );
+        let intent_sent_transaction = intent_meta
+            .intent_sent_transaction
+            .take()
+            .unwrap_or_else(|| {
+                intent_meta.blockhash = current_blockhash;
+                InstructionUtils::scheduled_commit_sent(
+                    intent_id,
+                    current_blockhash,
+                )
+            });
         let sent_commit =
             Self::build_sent_commit(intent_id, intent_meta, result);
         register_scheduled_commit_sent(sent_commit);
@@ -374,22 +379,6 @@ impl ScheduledCommitsProcessorImpl {
                 error!(error = ?err, "Failed to signal sent commit");
             }
         }
-    }
-
-    fn intent_sent_transaction(
-        intent_id: u64,
-        intent_meta: &mut ScheduledBaseIntentMeta,
-        current_blockhash: Hash,
-    ) -> Transaction {
-        intent_meta
-            .intent_sent_transaction
-            .take()
-            .unwrap_or_else(|| {
-                InstructionUtils::scheduled_commit_sent(
-                    intent_id,
-                    current_blockhash,
-                )
-            })
     }
 
     fn build_sent_commit(
