@@ -46,7 +46,19 @@ use crate::remote_account_provider::{
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
+#[cfg(not(test))]
 const SUBSCRIPTION_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn subscription_completion_timeout() -> Duration {
+    #[cfg(test)]
+    {
+        Duration::from_millis(100)
+    }
+    #[cfg(not(test))]
+    {
+        SUBSCRIPTION_COMPLETION_TIMEOUT
+    }
+}
 
 // -----------------
 // ChainPubsubActor
@@ -161,25 +173,26 @@ impl ChainPubsubActor {
         shutdown_token.cancel();
     }
 
+    // Reconnect must not drop pooled PubsubClient instances until all listener
+    // tasks have stopped polling, explicitly dropped their subscription streams,
+    // and run or timed out unsubscribe cleanup.
     async fn cancel_and_wait_subscription(
         client_id: &str,
         kind: &'static str,
         pubkey: Pubkey,
         sub: AccountSubscription,
     ) -> RemoteAccountProviderResult<()> {
+        let timeout = subscription_completion_timeout();
         sub.cancellation_token.cancel();
-        match tokio::time::timeout(
-            SUBSCRIPTION_COMPLETION_TIMEOUT,
-            sub.completion_token.cancelled(),
-        )
-        .await
+        match tokio::time::timeout(timeout, sub.completion_token.cancelled())
+            .await
         {
             Ok(()) => Ok(()),
             Err(_) => {
                 warn!(
                     %pubkey,
                     kind,
-                    timeout_ms = SUBSCRIPTION_COMPLETION_TIMEOUT.as_millis() as u64,
+                    timeout_ms = timeout.as_millis() as u64,
                     client_id,
                     "Timed out waiting for subscription listener to finish"
                 );
@@ -977,5 +990,126 @@ impl ChainPubsubActor {
                 )
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
+
+    use tokio::time::{sleep, Duration, Instant};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn unsubscribe_all_waits_for_account_and_program_completion() {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let program_subs = Arc::new(Mutex::new(HashMap::new()));
+        let account_pubkey = Pubkey::new_unique();
+        let program_pubkey = Pubkey::new_unique();
+
+        let account_cancellation_token = CancellationToken::new();
+        let account_completion_token = CancellationToken::new();
+        subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .insert(
+                account_pubkey,
+                AccountSubscription {
+                    cancellation_token: account_cancellation_token.clone(),
+                    completion_token: account_completion_token.clone(),
+                },
+            );
+
+        let program_cancellation_token = CancellationToken::new();
+        let program_completion_token = CancellationToken::new();
+        program_subs
+            .lock()
+            .expect("program subs lock poisoned")
+            .insert(
+                program_pubkey,
+                AccountSubscription {
+                    cancellation_token: program_cancellation_token.clone(),
+                    completion_token: program_completion_token.clone(),
+                },
+            );
+
+        let account_task_cancellation_token =
+            account_cancellation_token.clone();
+        let account_task_completion_token = account_completion_token.clone();
+        tokio::spawn(async move {
+            account_task_cancellation_token.cancelled().await;
+            sleep(Duration::from_millis(50)).await;
+            account_task_completion_token.cancel();
+        });
+
+        let program_task_cancellation_token =
+            program_cancellation_token.clone();
+        let program_task_completion_token = program_completion_token.clone();
+        tokio::spawn(async move {
+            program_task_cancellation_token.cancelled().await;
+            sleep(Duration::from_millis(50)).await;
+            program_task_completion_token.cancel();
+        });
+
+        let started = Instant::now();
+        ChainPubsubActor::unsubscribe_all(
+            "test_client",
+            subscriptions.clone(),
+            program_subs.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert!(subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .is_empty());
+        assert!(program_subs
+            .lock()
+            .expect("program subs lock poisoned")
+            .is_empty());
+        assert!(account_cancellation_token.is_cancelled());
+        assert!(program_cancellation_token.is_cancelled());
+        assert!(account_completion_token.is_cancelled());
+        assert!(program_completion_token.is_cancelled());
+        assert!(started.elapsed() >= Duration::from_millis(50));
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_all_returns_error_when_completion_times_out() {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let program_subs = Arc::new(Mutex::new(HashMap::new()));
+        let account_pubkey = Pubkey::new_unique();
+        let cancellation_token = CancellationToken::new();
+        let completion_token = CancellationToken::new();
+
+        subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .insert(
+                account_pubkey,
+                AccountSubscription {
+                    cancellation_token: cancellation_token.clone(),
+                    completion_token,
+                },
+            );
+
+        let result = ChainPubsubActor::unsubscribe_all(
+            "test_client",
+            subscriptions.clone(),
+            program_subs,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .is_empty());
+        assert!(cancellation_token.is_cancelled());
     }
 }
