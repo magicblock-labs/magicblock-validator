@@ -286,7 +286,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
 pub mod mock {
     use std::{
         collections::HashSet,
-        sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
+        sync::atomic::{AtomicU16, AtomicU64, Ordering as AtomicOrdering},
         time::Duration,
     };
 
@@ -327,7 +327,7 @@ pub mod mock {
             updates_sndr: mpsc::Sender<SubscriptionUpdate>,
             updates_rcvr: mpsc::Receiver<SubscriptionUpdate>,
         ) -> Self {
-            static CLIENT_ID: AtomicU64 = AtomicU64::new(0);
+            static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
 
             Self {
                 updates_sndr,
