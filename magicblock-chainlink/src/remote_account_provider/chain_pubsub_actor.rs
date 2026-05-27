@@ -46,6 +46,7 @@ use crate::remote_account_provider::{
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
+const SUBSCRIPTION_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5);
 
 // -----------------
 // ChainPubsubActor
@@ -152,27 +153,84 @@ impl ChainPubsubActor {
         shutdown_token: CancellationToken,
     ) {
         info!(client_id = client_id, "Shutting down pubsub actor");
-        Self::unsubscribe_all(subscriptions, program_subs);
+        let result =
+            Self::unsubscribe_all(client_id, subscriptions, program_subs).await;
+        if let Err(err) = result {
+            warn!(error = ?err, client_id, "Timed out while shutting down pubsub subscriptions");
+        }
         shutdown_token.cancel();
     }
 
-    fn unsubscribe_all(
+    async fn cancel_and_wait_subscription(
+        client_id: &str,
+        kind: &'static str,
+        pubkey: Pubkey,
+        sub: AccountSubscription,
+    ) -> RemoteAccountProviderResult<()> {
+        sub.cancellation_token.cancel();
+        match tokio::time::timeout(
+            SUBSCRIPTION_COMPLETION_TIMEOUT,
+            sub.completion_token.cancelled(),
+        )
+        .await
+        {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                warn!(
+                    %pubkey,
+                    kind,
+                    timeout_ms = SUBSCRIPTION_COMPLETION_TIMEOUT.as_millis() as u64,
+                    client_id,
+                    "Timed out waiting for subscription listener to finish"
+                );
+                Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    format!(
+                        "Timed out waiting for {kind} subscription listener {pubkey} to finish"
+                    ),
+                ))
+            }
+        }
+    }
+
+    async fn unsubscribe_all(
+        client_id: &str,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-    ) {
-        let subs = subscriptions
+    ) -> RemoteAccountProviderResult<()> {
+        let account_subs = subscriptions
             .lock()
             .expect("subscriptions lock poisoned")
             .drain()
-            .chain(
-                program_subs
-                    .lock()
-                    .expect("program subs lock poisoned")
-                    .drain(),
-            )
             .collect::<Vec<_>>();
-        for (_, sub) in subs {
-            sub.cancellation_token.cancel();
+        let program_subs = program_subs
+            .lock()
+            .expect("program subs lock poisoned")
+            .drain()
+            .collect::<Vec<_>>();
+
+        let mut first_error = None;
+        for (pubkey, sub) in account_subs {
+            if let Err(err) = Self::cancel_and_wait_subscription(
+                client_id, "account", pubkey, sub,
+            )
+            .await
+            {
+                first_error.get_or_insert(err);
+            }
+        }
+        for (pubkey, sub) in program_subs {
+            if let Err(err) = Self::cancel_and_wait_subscription(
+                client_id, "program", pubkey, sub,
+            )
+            .await
+            {
+                first_error.get_or_insert(err);
+            }
+        }
+
+        match first_error {
+            Some(err) => Err(err),
+            None => Ok(()),
         }
     }
 
@@ -333,15 +391,21 @@ impl ChainPubsubActor {
                     send_ok(response, client_id);
                     return;
                 }
-                if let Some(AccountSubscription {
-                    cancellation_token, ..
-                }) = subscriptions
+                let sub = subscriptions
                     .lock()
                     .expect("subcriptions lock poisoned")
-                    .get(&pubkey)
-                {
-                    cancellation_token.cancel();
-                    send_ok(response, client_id);
+                    .remove(&pubkey);
+                if let Some(sub) = sub {
+                    match Self::cancel_and_wait_subscription(
+                        client_id, "account", pubkey, sub,
+                    )
+                    .await
+                    {
+                        Ok(()) => send_ok(response, client_id),
+                        Err(err) => {
+                            let _ = response.send(Err(err));
+                        }
+                    }
                 } else {
                     let _ = response
                         .send(Err(RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
@@ -819,7 +883,7 @@ impl ChainPubsubActor {
         is_connected: Arc<AtomicBool>,
     ) -> RemoteAccountProviderResult<()> {
         // 1. Ensure we cleaned all existing subscriptions
-        Self::unsubscribe_all(subs, program_subs);
+        Self::unsubscribe_all(client_id, subs, program_subs).await?;
 
         // 2. Try to reconnect the pubsub connection
         pubsub_connection.reconnect().await?;
