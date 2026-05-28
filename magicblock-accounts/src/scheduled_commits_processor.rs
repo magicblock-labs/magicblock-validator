@@ -122,6 +122,31 @@ impl ScheduledCommitsProcessorImpl {
         }
     }
 
+    async fn prepare_intent_bundles_for_scheduling(
+        &self,
+        intent_bundles: &[ScheduledIntentBundle],
+    ) {
+        let pubkeys_being_undelegated = {
+            let mut intent_metas =
+                self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
+            let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
+
+            intent_bundles.iter().for_each(|intent| {
+                intent_metas
+                    .insert(intent.id, ScheduledBaseIntentMeta::new(intent));
+                if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
+                {
+                    pubkeys_being_undelegated.extend(undelegate);
+                }
+            });
+
+            pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
+        };
+
+        self.process_undelegation_requests(pubkeys_being_undelegated)
+            .await;
+    }
+
     /// Spawn the one-shot recovery pass for persisted pending commit intents.
     /// Must be invoked only after ledger replay completes, so the local accounts
     /// bank reflects the delegated state checked by `recover_pending_intents`.
@@ -156,35 +181,11 @@ impl ScheduledCommitsProcessorImpl {
             return;
         }
 
-        let pubkeys_being_undelegated = {
-            let mut intent_metas = match self.intents_meta_map.lock() {
-                Ok(intent_metas) => intent_metas,
-                Err(err) => {
-                    error!(
-                        error = %err,
-                        "Failed to register recovered commit intent metadata"
-                    );
-                    return;
-                }
-            };
-            let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
-            for intent in &intent_bundles {
-                intent_metas
-                    .insert(intent.id, ScheduledBaseIntentMeta::new(intent));
-                if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
-                {
-                    pubkeys_being_undelegated.extend(undelegate);
-                }
-            }
-            pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
-        };
-
-        self.process_undelegation_requests(pubkeys_being_undelegated)
-            .await;
-
         let intent_ids: Vec<u64> =
             intent_bundles.iter().map(|b| b.id).collect();
         let intent_count = intent_ids.len();
+        self.prepare_intent_bundles_for_scheduling(&intent_bundles)
+            .await;
         match self
             .committor
             .schedule_recovered_intent_bundles(intent_bundles)
@@ -454,25 +455,7 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
         }
         metrics::inc_committor_intents_count_by(intent_bundles.len() as u64);
 
-        // Add metas for intent we schedule
-        let pubkeys_being_undelegated = {
-            let mut intent_metas =
-                self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
-            let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
-
-            intent_bundles.iter().for_each(|intent| {
-                intent_metas
-                    .insert(intent.id, ScheduledBaseIntentMeta::new(intent));
-                if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
-                {
-                    pubkeys_being_undelegated.extend(undelegate);
-                }
-            });
-
-            pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
-        };
-
-        self.process_undelegation_requests(pubkeys_being_undelegated)
+        self.prepare_intent_bundles_for_scheduling(&intent_bundles)
             .await;
         self.committor
             .schedule_intent_bundles(intent_bundles)
