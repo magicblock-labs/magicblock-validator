@@ -39,7 +39,9 @@ pub(super) fn validate_supported_transaction_shape(
 mod tests {
     use magicblock_core::link::blocks::BlockHash;
     use solana_message::{
-        compiled_instruction::CompiledInstruction, legacy::Message,
+        compiled_instruction::CompiledInstruction,
+        legacy::Message,
+        v0::{Message as V0Message, MessageAddressTableLookup},
         MessageHeader, VersionedMessage,
     };
     use solana_pubkey::Pubkey;
@@ -112,6 +114,37 @@ mod tests {
             error
                 .to_string()
                 .contains("unsupported program id index 38"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn rejects_v0_transactions_with_address_lookup_tables() {
+        let transaction = VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::V0(V0Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 1,
+                },
+                account_keys: vec![SYSTEM_PROGRAM_ID],
+                recent_blockhash: BlockHash::new_unique(),
+                instructions: vec![],
+                address_table_lookups: vec![MessageAddressTableLookup {
+                    account_key: Pubkey::new_unique(),
+                    writable_indexes: vec![0],
+                    readonly_indexes: vec![1],
+                }],
+            }),
+        };
+
+        let error =
+            validate_supported_transaction_shape(&transaction).unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "v0 transactions with address lookup tables are not supported"
+            ),
             "unexpected error: {error}"
         );
     }
