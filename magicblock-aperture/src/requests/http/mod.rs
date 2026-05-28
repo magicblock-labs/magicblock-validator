@@ -8,19 +8,20 @@ use hyper::{
     Request, Response,
 };
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::link::transactions::{
-    SanitizeableTransaction, WithEncoded,
+use magicblock_core::{
+    coordination_mode::CoordinationMode,
+    link::transactions::{SanitizeableTransaction, WithEncoded},
 };
 use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
 use solana_account::{AccountSharedData, ReadableAccount};
-use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
 };
 use solana_transaction_status::UiTransactionEncoding;
 use tracing::*;
+use transaction_validation::validate_supported_transaction_shape;
 
 use super::RpcRequest;
 use crate::{
@@ -29,10 +30,6 @@ use crate::{
 
 pub(crate) type HandlerResult = RpcResult<Response<JsonBody>>;
 
-// Solana's builtin-program filters in compute-budget processing assume program
-// indices fit within a packet-bounded pubkey table (1232 / 32 = 38).
-const MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE: usize =
-    1232 / size_of::<Pubkey>();
 const SYSTEM_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("11111111111111111111111111111111");
 
@@ -123,6 +120,23 @@ impl HttpDispatcher {
             && account.owner() == &SYSTEM_PROGRAM_ID
     }
 
+    fn needs_onchain_interactions(&self) -> bool {
+        CoordinationMode::current().needs_onchain_interactions()
+    }
+
+    fn require_primary_rpc_method(
+        &self,
+        method: &'static str,
+    ) -> RpcResult<()> {
+        if self.needs_onchain_interactions() {
+            Ok(())
+        } else {
+            Err(RpcError::transaction_verification(format!(
+                "{method} is only available while validator is primary"
+            )))
+        }
+    }
+
     /// Fetches an account's data from the `AccountsDb` filling it in from chain
     /// as needed.
     #[instrument(skip_all)]
@@ -130,6 +144,10 @@ impl HttpDispatcher {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
+        if !self.needs_onchain_interactions() {
+            return self.accountsdb.get_account(pubkey);
+        }
+
         let mark_empty_if_not_found = [*pubkey];
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["account"])
@@ -158,6 +176,13 @@ impl HttpDispatcher {
         &self,
         pubkeys: &[Pubkey],
     ) -> Vec<Option<AccountSharedData>> {
+        if !self.needs_onchain_interactions() {
+            return pubkeys
+                .iter()
+                .map(|pubkey| self.accountsdb.get_account(pubkey))
+                .collect();
+        }
+
         trace!("Ensuring accounts");
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["multi-account"])
@@ -246,6 +271,8 @@ impl HttpDispatcher {
         &self,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
+        self.require_primary_rpc_method("transaction")?;
+
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["transaction"])
             .start_timer();
@@ -269,30 +296,6 @@ impl HttpDispatcher {
             }
         }
     }
-}
-
-fn validate_supported_transaction_shape(
-    transaction: &VersionedTransaction,
-) -> RpcResult<()> {
-    if let VersionedMessage::V0(message) = &transaction.message {
-        if !message.address_table_lookups.is_empty() {
-            return Err(RpcError::transaction_verification(
-                "v0 transactions with address lookup tables are not supported",
-            ));
-        }
-    }
-
-    for instruction in transaction.message.instructions() {
-        let program_id_index = usize::from(instruction.program_id_index);
-        if program_id_index >= MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE {
-            return Err(RpcError::transaction_verification(format!(
-                "unsupported program id index {program_id_index}; max supported is {}",
-                MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE - 1
-            )));
-        }
-    }
-
-    Ok(())
 }
 
 /// A prelude module to provide common imports for all RPC handler modules.
@@ -358,6 +361,7 @@ pub(crate) mod mocked;
 pub(crate) mod request_airdrop;
 pub(crate) mod send_transaction;
 pub(crate) mod simulate_transaction;
+mod transaction_validation;
 
 // Magic Router compatibility methods.
 pub(crate) mod get_delegation_status;
