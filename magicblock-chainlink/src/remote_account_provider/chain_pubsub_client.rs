@@ -286,7 +286,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
 pub mod mock {
     use std::{
         collections::HashSet,
-        sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
+        sync::atomic::{AtomicU16, AtomicU64, Ordering as AtomicOrdering},
         time::Duration,
     };
 
@@ -319,6 +319,7 @@ pub mod mock {
         subscribe_blocked: Arc<Mutex<bool>>,
         subscribe_attempts: Arc<AtomicU64>,
         subscribe_notify: Arc<Notify>,
+        client_id: String,
     }
 
     impl ChainPubsubClientMock {
@@ -326,6 +327,8 @@ pub mod mock {
             updates_sndr: mpsc::Sender<SubscriptionUpdate>,
             updates_rcvr: mpsc::Receiver<SubscriptionUpdate>,
         ) -> Self {
+            static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
+
             Self {
                 updates_sndr,
                 updates_rcvr: Arc::new(Mutex::new(Some(updates_rcvr))),
@@ -339,6 +342,10 @@ pub mod mock {
                 subscribe_blocked: Arc::new(Mutex::new(false)),
                 subscribe_attempts: Arc::new(AtomicU64::new(0)),
                 subscribe_notify: Arc::new(Notify::new()),
+                client_id: format!(
+                    "mock:{}",
+                    CLIENT_ID.fetch_add(1, AtomicOrdering::SeqCst)
+                ),
             }
         }
 
@@ -428,6 +435,10 @@ pub mod mock {
                 }
                 notified.await;
             }
+        }
+
+        pub fn subscribe_attempts(&self) -> u64 {
+            self.subscribe_attempts.load(AtomicOrdering::SeqCst)
         }
 
         pub fn is_connected_and_resubscribed(&self) -> bool {
@@ -544,7 +555,7 @@ pub mod mock {
         }
 
         fn id(&self) -> &str {
-            "ChainPubsubClientMock"
+            &self.client_id
         }
     }
 

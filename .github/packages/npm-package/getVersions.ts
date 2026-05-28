@@ -17,8 +17,14 @@ export function getVersions() {
 
   return {
     EPHEMERAL_VALIDATOR: pkg.version,
-    VRF_ORACLE: pkg.optionalDependencies["@magicblock-labs/vrf-oracle-linux-x64"],
-    RPC_ROUTER: pkg.optionalDependencies["@magicblock-labs/rpc-router-linux-x64"],
+    QUERY_FILTERING_SERVICE:
+      pkg.optionalDependencies[
+        "@magicblock-labs/query-filtering-service-linux-x64"
+      ],
+    VRF_ORACLE:
+      pkg.optionalDependencies["@magicblock-labs/vrf-oracle-linux-x64"],
+    RPC_ROUTER:
+      pkg.optionalDependencies["@magicblock-labs/rpc-router-linux-x64"],
   } as const;
 }
 
