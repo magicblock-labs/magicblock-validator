@@ -37,6 +37,10 @@ impl IntentExecutionClient {
         IntentExecutionClient { rpc_client }
     }
 
+    pub(in crate::intent_executor) async fn clear_cached_blockhash(&self) {
+        self.rpc_client.clear_cached_blockhash().await;
+    }
+
     pub(in crate::intent_executor) async fn execute_message_with_retries(
         &self,
         authority: &Keypair,
