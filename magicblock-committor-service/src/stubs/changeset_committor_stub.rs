@@ -256,9 +256,12 @@ fn count_bundle_callbacks(bundle: &ScheduledIntentBundle) -> usize {
         .as_ref()
         .map(|ct| match ct {
             CommitType::Standalone(_) => 0,
-            CommitType::WithBaseActions { base_actions, .. } => {
-                base_actions.iter().filter(|a| a.callback.is_some()).count()
-            }
+            CommitType::BasePostActions {
+                base_post_actions, ..
+            } => base_post_actions
+                .iter()
+                .filter(|a| a.callback.is_some())
+                .count(),
         })
         .unwrap_or(0);
 
@@ -268,13 +271,16 @@ fn count_bundle_callbacks(bundle: &ScheduledIntentBundle) -> usize {
         .map(|cau| {
             let from_commit_action = match &cau.commit_action {
                 CommitType::Standalone(_) => 0,
-                CommitType::WithBaseActions { base_actions, .. } => {
-                    base_actions.iter().filter(|a| a.callback.is_some()).count()
-                }
+                CommitType::BasePostActions {
+                    base_post_actions, ..
+                } => base_post_actions
+                    .iter()
+                    .filter(|a| a.callback.is_some())
+                    .count(),
             };
             let from_undelegate = match &cau.undelegate_action {
                 UndelegateType::Standalone => 0,
-                UndelegateType::WithBaseActions(actions) => {
+                UndelegateType::BasePostActions(actions) => {
                     actions.iter().filter(|a| a.callback.is_some()).count()
                 }
             };
@@ -282,13 +288,13 @@ fn count_bundle_callbacks(bundle: &ScheduledIntentBundle) -> usize {
         })
         .unwrap_or(0);
 
-    let from_standalone = ib
-        .standalone_actions
+    let from_base_pre_actions = ib
+        .base_pre_actions
         .iter()
         .filter(|a| a.callback.is_some())
         .count();
 
-    from_commit + from_cau + from_standalone
+    from_commit + from_cau + from_base_pre_actions
 }
 
 fn now() -> u64 {

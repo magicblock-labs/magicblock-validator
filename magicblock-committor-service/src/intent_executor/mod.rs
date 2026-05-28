@@ -212,8 +212,8 @@ where
 
         if all_committed_pubkeys.is_empty() {
             // Build tasks for commit stage
-            // TODO (snawaz): it's actually MagicBaseIntent::BaseActions scenario, not Commit
-            // scenario, so the related code needs little bit of refactoring and proper renaming.
+            // TODO (snawaz): this is a MagicBaseIntent::BasePreActions scenario,
+            // not a Commit scenario, so this path still needs a small refactor.
             let commit_tasks = TaskBuilderImpl::commit_tasks(
                 &self.task_info_fetcher,
                 &intent_bundle,
@@ -221,7 +221,7 @@ where
             )
             .await?;
 
-            // Standalone actions executed in single stage
+            // Base pre-actions execute in single stage when there are no commits.
             let strategy = TaskStrategist::build_strategy(
                 commit_tasks,
                 &self.authority.pubkey(),

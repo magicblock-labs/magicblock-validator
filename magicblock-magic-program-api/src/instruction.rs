@@ -83,7 +83,7 @@ pub enum MagicBlockInstruction {
     ///
     /// A "base intent" is an atomic unit of work executed by the validator on the Base layer,
     /// such as:
-    /// - executing standalone base actions (`BaseActions`)
+    /// - executing Base pre-actions (`BasePreActions`)
     /// - committing a set of accounts (`Commit`)
     /// - committing and undelegating accounts, optionally with post-actions (`CommitAndUndelegate`)
     ///
@@ -136,7 +136,7 @@ pub enum MagicBlockInstruction {
     ///
     /// A "intent bundle" is an atomic unit of work executed by the validator on the Base layer,
     /// such as:
-    /// - standalone base actions
+    /// - Base pre-actions
     /// - an optional `Commit`
     /// - an optional `CommitAndUndelegate`
     ///

@@ -171,7 +171,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
 }
 
 #[tokio::test]
-async fn test_prepare_commit_tx_with_base_actions() {
+async fn test_prepare_commit_tx_with_base_post_actions() {
     let fixture = TestFixture::new().await;
     let preparator = fixture.create_transaction_preparator();
 
