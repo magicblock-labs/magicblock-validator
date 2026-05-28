@@ -16,6 +16,7 @@ pub mod transaction_preparator;
 pub mod transactions;
 pub(crate) mod utils;
 
+pub mod service_final;
 #[cfg(test)]
 pub mod test_utils;
 
@@ -24,4 +25,4 @@ pub use config::DEFAULT_ACTIONS_TIMEOUT;
 pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,
 };
-pub use service::{BaseIntentCommittor, CommittorService};
+// pub use service::{BaseIntentCommittor, CommittorService};

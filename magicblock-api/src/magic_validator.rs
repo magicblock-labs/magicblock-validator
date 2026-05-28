@@ -28,8 +28,10 @@ use magicblock_chainlink::{
     Chainlink,
 };
 use magicblock_committor_service::{
-    config::ChainConfig, BaseIntentCommittor, CommittorService,
-    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
+    config::ChainConfig,
+    service_final::{IntentExecutionService, InternalIntentRpcClient},
+    BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
+    DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{
     config::{
@@ -82,6 +84,7 @@ use tokio::{
     runtime::Builder,
     sync::mpsc::{channel, Sender},
 };
+use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
@@ -97,7 +100,7 @@ use crate::{
         write_validator_keypair_to_ledger,
     },
     magic_sys_adapter::MagicSysAdapter,
-    tickers::{init_slot_ticker, init_system_metrics_ticker},
+    tickers::init_system_metrics_ticker,
 };
 
 type ChainlinkImpl = Chainlink<
@@ -106,6 +109,11 @@ type ChainlinkImpl = Chainlink<
     AccountsDb,
     ChainlinkCloner,
 >;
+
+type IntentExecutionServiceImpl =
+    IntentExecutionService<InternalIntentRpcClient<LatestBlock>>;
+
+type IntentExecutionState = Either<IntentExecutionServiceImpl, tokio::task::JoinHandle<()>>;
 
 // -----------------
 // MagicValidator
@@ -117,10 +125,8 @@ pub struct MagicValidator {
     accountsdb: Arc<AccountsDb>,
     ledger: Arc<Ledger>,
     ledger_truncator: LedgerTruncator,
-    slot_ticker: Option<tokio::task::JoinHandle<()>>,
-    committor_service: Option<Arc<CommittorService>>,
+    intent_execution_service: IntentExecutionState,
     replication_service: Option<ReplicationService>,
-    scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
     chainlink: Arc<ChainlinkImpl>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
@@ -299,7 +305,7 @@ impl MagicValidator {
 
         let scheduled_commits_processor =
             committor_service.as_ref().map(|committor_service| {
-                Arc::new(ScheduledCommitsProcessorImpl::new(
+                Arc::new(Intent::new(
                     committor_service.clone(),
                     chainlink.clone(),
                     dispatch.transaction_scheduler.clone(),
@@ -426,7 +432,6 @@ impl MagicValidator {
             exit,
             _metrics: (metrics_service, system_metrics_ticker),
             // NOTE: set during [Self::start]
-            slot_ticker: None,
             committor_service,
             replication_service,
             scheduled_commits_processor,
@@ -446,11 +451,22 @@ impl MagicValidator {
         })
     }
 
-    #[instrument(skip(config, latest_block))]
+    #[instrument(skip(
+        config, latest_block, accounts_db, transaction_scheduler, chainlink
+    ))]
     async fn init_committor_service(
         config: &ValidatorParams,
+        accounts_db: &Arc<AccountsDb>,
+        chainlink: Arc<ChainlinkImpl>,
+        transaction_scheduler: &TransactionSchedulerHandle,
         latest_block: &LatestBlock,
-    ) -> ApiResult<Option<Arc<CommittorService>>> {
+    ) -> ApiResult<IntentExecutionServiceImpl> {
+        let intent_client = InternalIntentRpcClient::new(
+            accounts_db.clone(),
+            transaction_scheduler.clone(),
+            latest_block.clone()
+        );
+
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
         debug!(path = %committor_persist_path.display(), "Initializing committor service");
@@ -460,8 +476,10 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             latest_block.clone(),
         );
-        let committor_service = Some(Arc::new(CommittorService::try_start(
+        let committor_service = IntentExecutionServiceImpl::try_new(
             config.validator.keypair.insecure_clone(),
+            chainlink,
+            intent_client,
             committor_persist_path,
             ChainConfig {
                 rpc_uri: config.rpc_url().to_owned(),
@@ -472,7 +490,7 @@ impl MagicValidator {
                 actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
             },
             actions_callback_executor,
-        )?));
+        )?;
 
         Ok(committor_service)
     }
@@ -1014,11 +1032,6 @@ impl MagicValidator {
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
-        if let Some(handle) = self.slot_ticker {
-            let step_start = Instant::now();
-            let _ = handle.await;
-            log_timing("shutdown", "slot_ticker_join", step_start);
-        }
         let step_start = Instant::now();
         if let Err(err) = self.ledger_truncator.join() {
             error!(error = ?err, "Ledger truncator did not gracefully exit");

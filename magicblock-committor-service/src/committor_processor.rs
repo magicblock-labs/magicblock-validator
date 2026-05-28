@@ -1,9 +1,10 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     path::Path,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
+use futures_util::future::join_all;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
@@ -12,12 +13,12 @@ use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
-use tokio::sync::broadcast;
-use tracing::{error, instrument};
+use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
+use tracing::{error, info, instrument};
 
 use crate::{
     config::ChainConfig,
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
@@ -33,14 +34,19 @@ use crate::{
         MessageSignatures,
     },
 };
+// use crate::service_ext::CommittorServiceExtError;
+
+const POISONED_MUTEX_MSG: &str =
+    "CommittorProcessor pending messages mutex poisoned!";
+type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
 pub(crate) struct CommittorProcessor {
-    pub(crate) magicblock_rpc_client: MagicblockRpcClient,
     pub(crate) table_mania: TableMania,
     pub(crate) authority: Keypair,
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
+    pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
 }
 
 impl CommittorProcessor {
@@ -91,40 +97,21 @@ impl CommittorProcessor {
             actions_callback_executor,
         );
 
+        let result_subscription = commits_scheduler.subscribe_for_results();
+        let pending_result_listeners = Arc::new(Mutex::new(HashMap::new()));
+        tokio::spawn(Self::dispatcher(
+            result_subscription,
+            pending_result_listeners.clone(),
+        ));
+
         Ok(Self {
             authority,
-            magicblock_rpc_client: magic_block_rpc_client,
             table_mania,
             commits_scheduler,
             persister,
             task_info_fetcher,
+            pending_result_listeners,
         })
-    }
-
-    pub async fn active_lookup_tables(&self) -> Vec<Pubkey> {
-        self.table_mania.active_table_addresses().await
-    }
-
-    pub async fn released_lookup_tables(&self) -> Vec<Pubkey> {
-        self.table_mania.released_table_addresses().await
-    }
-
-    pub fn auth_pubkey(&self) -> Pubkey {
-        self.authority.pubkey()
-    }
-
-    pub(crate) async fn reserve_pubkeys(
-        &self,
-        pubkeys: HashSet<Pubkey>,
-    ) -> CommittorServiceResult<()> {
-        Ok(self
-            .table_mania
-            .reserve_pubkeys(&self.authority, &pubkeys)
-            .await?)
-    }
-
-    pub(crate) async fn release_pubkeys(&self, pubkeys: HashSet<Pubkey>) {
-        self.table_mania.release_pubkeys(&pubkeys).await
     }
 
     pub fn get_commit_statuses(
@@ -148,7 +135,7 @@ impl CommittorProcessor {
     }
 
     #[instrument(skip(self, intent_bundles))]
-    pub async fn schedule_intent_bundle(
+    pub async fn schedule_intent_bundles(
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
@@ -169,6 +156,45 @@ impl CommittorProcessor {
         Ok(())
     }
 
+    pub async fn execute_intent_bundles(
+        &self,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+    ) -> CommittorServiceResult<Vec<BroadcastedIntentExecutionResult>> {
+        // Critical section
+        let receivers = {
+            let mut result_listeners = self
+                .pending_result_listeners
+                .lock()
+                .expect(POISONED_MUTEX_MSG);
+
+            intent_bundles
+                .iter()
+                .map(|intent| {
+                    let (sender, receiver) = oneshot::channel();
+                    match result_listeners.entry(intent.id) {
+                        Entry::Vacant(vacant) => {
+                            vacant.insert(sender);
+                            Ok(receiver)
+                        }
+                        Entry::Occupied(_) => {
+                            Err(CommittorServiceError::RepeatingMessageError(
+                                intent.id,
+                            ))
+                        }
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+
+        self.schedule_intent_bundles(intent_bundles).await?;
+        let results = join_all(receivers.into_iter())
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, RecvError>>()?;
+
+        Ok(results)
+    }
+
     /// Creates a subscription for results of BaseIntent execution
     pub fn subscribe_for_results(
         &self,
@@ -185,5 +211,49 @@ impl CommittorProcessor {
         self.task_info_fetcher
             .fetch_current_commit_nonces(pubkeys, min_context_slot)
             .await
+    }
+
+    /// Dispatch worker
+    #[instrument(skip(pending_result_listeners, results_subscription))]
+    async fn dispatcher(
+        mut results_subscription: broadcast::Receiver<
+            BroadcastedIntentExecutionResult,
+        >,
+        pending_result_listeners: Arc<
+            Mutex<HashMap<u64, BundleResultListener>>,
+        >,
+    ) {
+        loop {
+            let execution_result = match results_subscription.recv().await {
+                Ok(result) => result,
+                Err(broadcast::error::RecvError::Closed) => {
+                    info!("Intent execution shutdown");
+                    break;
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    // SAFETY: not really feasible to happen as this function is way faster than Intent execution
+                    // requires investigation if ever happens!
+                    error!(skipped, "Dispatcher lag detected");
+                    continue;
+                }
+            };
+
+            let sender = if let Some(sender) = pending_result_listeners
+                .lock()
+                .expect(POISONED_MUTEX_MSG)
+                .remove(&execution_result.id)
+            {
+                sender
+            } else {
+                continue;
+            };
+
+            if let Err(execution_result) = sender.send(execution_result) {
+                error!(
+                    intent_id = execution_result.id,
+                    "Failed to send execution result"
+                );
+            }
+        }
     }
 }

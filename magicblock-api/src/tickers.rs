@@ -19,69 +19,6 @@ use solana_account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
-pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
-    accountsdb: Arc<AccountsDb>,
-    committor_processor: &Option<Arc<C>>,
-    latest_block: LatestBlock,
-    tick_duration: Duration,
-    transaction_scheduler: TransactionSchedulerHandle,
-    exit: Arc<AtomicBool>,
-) -> tokio::task::JoinHandle<()> {
-    let committor_processor = committor_processor.clone();
-
-    tokio::task::spawn(async move {
-        while !exit.load(Ordering::Relaxed) {
-            tokio::time::sleep(tick_duration).await;
-
-            // Handle intents if such feature enabled
-            let Some(committor_processor) = &committor_processor else {
-                continue;
-            };
-
-            // If accounts were scheduled to be committed, we accept them here
-            // and processs the commits
-            let magic_context_acc = accountsdb.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
-                .expect("Validator found to be running without MagicContext account!");
-            if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
-                handle_scheduled_commits(
-                    committor_processor,
-                    &transaction_scheduler,
-                    &latest_block,
-                )
-                .await;
-            }
-        }
-    })
-}
-
-#[instrument(skip(committor_processor, transaction_scheduler, latest_block))]
-async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
-    committor_processor: &Arc<C>,
-    transaction_scheduler: &TransactionSchedulerHandle,
-    latest_block: &LatestBlock,
-) {
-    // 1. Send the transaction to move the scheduled commits from the MagicContext
-    //    to the global ScheduledCommit store
-    let tx = InstructionUtils::accept_scheduled_commits(
-        latest_block.load().blockhash,
-    );
-    let Ok(tx) = with_encoded(tx) else {
-        // Unreachable case, all schedule commit txns are smaller than 64KB by construction
-        error!("Failed to bincode intent transaction");
-        return;
-    };
-    if let Err(err) = transaction_scheduler.execute(tx).await {
-        error!(error = ?err, "Failed to accept scheduled commits");
-        return;
-    }
-
-    // 2. Process those scheduled commits
-    // TODO: fix the possible delay here
-    // https://github.com/magicblock-labs/magicblock-validator/issues/104
-    if let Err(err) = committor_processor.process().await {
-        error!(error = ?err, "Failed to process scheduled commits");
-    }
-}
 #[allow(unused_variables)]
 pub fn init_system_metrics_ticker(
     tick_duration: Duration,

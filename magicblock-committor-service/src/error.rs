@@ -2,6 +2,7 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use thiserror::Error;
+use tokio::sync::oneshot::error::RecvError;
 
 use crate::{
     intent_execution_manager::IntentExecutionManagerError,
@@ -12,74 +13,39 @@ pub type CommittorServiceResult<T, E = CommittorServiceError> = Result<T, E>;
 
 #[derive(Error, Debug)]
 pub enum CommittorServiceError {
-    #[error("CommittorError: {0} ({0:?})")]
-    CommittorError(#[from] magicblock_committor_program::error::CommittorError),
-
     #[error("CommitPersistError: {0} ({0:?})")]
     CommitPersistError(#[from] crate::persist::error::CommitPersistError),
 
-    #[error("MagicBlockRpcClientError: {0} ({0:?})")]
-    MagicBlockRpcClientError(
-        #[from] magicblock_rpc_client::MagicBlockRpcClientError,
-    ),
+    // #[error("MagicBlockRpcClientError: {0} ({0:?})")]
+    // MagicBlockRpcClientError(
+    //     #[from] magicblock_rpc_client::MagicBlockRpcClientError,
+    // ),
 
-    #[error("TableManiaError: {0} ({0:?})")]
-    TableManiaError(#[from] magicblock_table_mania::error::TableManiaError),
-
+    // #[error("TableManiaError: {0} ({0:?})")]
+    // TableManiaError(#[from] magicblock_table_mania::error::TableManiaError),
     #[error("IntentExecutionManagerError: {0} ({0:?})")]
     IntentExecutionManagerError(#[from] IntentExecutionManagerError),
 
-    #[error("TaskInfoFetcherError: {0} ({0:?})")]
-    TaskInfoFetcherError(#[from] TaskInfoFetcherError),
+    #[error("RecvError: {0}")]
+    IntentResultRecvError(#[from] RecvError),
 
-    #[error(
-        "Failed send and confirm transaction to {0} on chain: {1} ({1:?})"
-    )]
-    FailedToSendAndConfirmTransaction(
-        String,
-        magicblock_rpc_client::MagicBlockRpcClientError,
-    ),
+    // #[error("TaskInfoFetcherError: {0} ({0:?})")]
+    // TaskInfoFetcherError(#[from] TaskInfoFetcherError),
 
-    #[error("The transaction to {0} was sent and confirmed, but encountered an error: {1} ({1:?})")]
-    EncounteredTransactionError(String, TransactionError),
+    // #[error("Task {0} failed to compile transaction message: {1} ({1:?})")]
+    // FailedToCompileTransactionMessage(String, solana_message::CompileError),
 
-    #[error("Failed to send init changeset account: {0} ({0:?})")]
-    FailedToSendInitChangesetAccount(
-        Box<solana_rpc_client_api::client_error::Error>,
-    ),
-
-    #[error("Failed to confirm init changeset account: {0} ({0:?})")]
-    FailedToConfirmInitChangesetAccount(
-        Box<solana_rpc_client_api::client_error::Error>,
-    ),
-    #[error("Init transaction '{0}' was not confirmed")]
-    InitChangesetAccountNotConfirmed(String),
-
-    #[error("Task {0} failed to compile transaction message: {1} ({1:?})")]
-    FailedToCompileTransactionMessage(String, solana_message::CompileError),
-
-    #[error("Task {0} failed to create transaction: {1} ({1:?})")]
-    FailedToCreateTransaction(String, solana_signer::SignerError),
-
-    #[error("Could not find commit strategy for bundle {0}")]
-    CouldNotFindCommitStrategyForBundle(u64),
-
-    #[error("Failed to fetch metadata account for {0}")]
-    FailedToFetchDelegationMetadata(Pubkey),
-
-    #[error("Failed to deserialize metadata account for {0}, {1:?}")]
-    FailedToDeserializeDelegationMetadata(
-        Pubkey,
-        solana_program::program_error::ProgramError,
-    ),
+    // #[error("Task {0} failed to create transaction: {1} ({1:?})")]
+    // FailedToCreateTransaction(String, solana_signer::SignerError),
+    #[error("Attempt to schedule already scheduled message id: {0}")]
+    RepeatingMessageError(u64),
 }
 
 impl CommittorServiceError {
     pub fn signature(&self) -> Option<Signature> {
         use CommittorServiceError::*;
         match self {
-            MagicBlockRpcClientError(e) => e.signature(),
-            FailedToSendAndConfirmTransaction(_, e) => e.signature(),
+            // MagicBlockRpcClientError(e) => e.signature(),
             _ => None,
         }
     }

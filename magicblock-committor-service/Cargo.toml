@@ -18,6 +18,12 @@ borsh = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 lru = { workspace = true }
+# TDOO: should be removed
+magicblock-account-cloner = { workspace = true }
+# TODO: should be removed
+magicblock-accounts-db = { workspace = true }
+# TODO: should be removed, hidden behinf the trait
+magicblock-chainlink = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
