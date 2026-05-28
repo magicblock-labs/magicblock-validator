@@ -45,6 +45,9 @@ pub struct ValidatorParams {
     /// Root directory for application storage.
     pub storage: StorageDirectory,
 
+    /// Disable the terminal UI (TUI). When set, validator runs headless.
+    pub no_tui: bool,
+
     /// Listen address for the metrics endpoint.
     pub metrics: MetricsConfig,
 
