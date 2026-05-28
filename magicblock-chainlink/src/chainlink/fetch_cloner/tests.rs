@@ -4081,6 +4081,107 @@ async fn test_delegated_eata_update_projects_existing_token_2022_ata_in_bank() {
 }
 
 #[tokio::test]
+async fn test_greedy_delegated_eata_update_projects_remote_token_2022_ata() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const EATA_SLOT: u64 = 100;
+    const EATA_AMOUNT: u64 = 777;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let legacy_ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let token_2022_ata_pubkey = derive_ata_with_token_program(
+        &wallet_owner,
+        &mint,
+        &TOKEN_2022_PROGRAM_ID,
+    );
+    let eata_account =
+        create_eata_account(&wallet_owner, &mint, EATA_AMOUNT, true);
+    let token_2022_ata_account =
+        create_token_2022_ata_account(&wallet_owner, &mint);
+    let expected_len = token_2022_ata_account.data.len();
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (eata_pubkey, eata_account.clone()),
+            (token_2022_ata_pubkey, token_2022_ata_account),
+        ],
+        EATA_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                EATA_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if accounts_bank
+                .get_account(&token_2022_ata_pubkey)
+                .is_some_and(|account| account.delegated())
+            {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for greedy Token-2022 ATA projection");
+
+    let projected_ata = accounts_bank
+        .get_account(&token_2022_ata_pubkey)
+        .expect("Token-2022 ATA should be projected");
+    assert!(projected_ata.delegated());
+    assert_eq!(*projected_ata.owner(), TOKEN_2022_PROGRAM_ID);
+    assert_eq!(projected_ata.data().len(), expected_len);
+
+    let ata_data = projected_ata.data();
+    let projected_mint =
+        Pubkey::new_from_array(ata_data[0..32].try_into().unwrap());
+    let projected_owner =
+        Pubkey::new_from_array(ata_data[32..64].try_into().unwrap());
+    let projected_amount =
+        u64::from_le_bytes(ata_data[64..72].try_into().unwrap());
+    assert_eq!(projected_mint, mint);
+    assert_eq!(projected_owner, wallet_owner);
+    assert_eq!(projected_amount, EATA_AMOUNT);
+
+    assert!(
+        accounts_bank.get_account(&legacy_ata_pubkey).is_none(),
+        "Token-2022 eATA projection must not synthesize a legacy ATA"
+    );
+}
+
+#[tokio::test]
 async fn test_fetch_subscription_race_duplicate_clone() {
     // This test validates that pending clone ownership prevents duplicate
     // clone submissions when the fetch and subscription paths race on the

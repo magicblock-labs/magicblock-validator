@@ -16,8 +16,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
-    is_ata, try_derive_ata_address_and_bump,
-    try_derive_ata_address_and_bump_with_token_program,
+    is_ata, try_derive_ata_address_and_bump_with_token_program,
     try_derive_eata_address_and_bump, EphemeralAta, MaybeIntoAta,
     EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
 };
@@ -914,19 +913,29 @@ where
         }
         let delegation_actions = delegation_actions.unwrap_or_default();
 
-        let greedy_ata_pubkey = delegation::parse_raw_eata_pda(
+        let greedy_ata_pubkeys = delegation::parse_raw_eata_pda(
             &pubkey,
             account.data(),
             deleg_record.owner,
         )
         .and_then(|(wallet_owner, mint)| {
-            try_derive_ata_address_and_bump(&wallet_owner, &mint)
-                .map(|(ata_pubkey, _)| ata_pubkey)
-        });
-        let mut pubkeys_to_clone = vec![pubkey];
-        if let Some(ata_pubkey) = greedy_ata_pubkey {
-            pubkeys_to_clone.push(ata_pubkey);
-        }
+            [TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID]
+                .into_iter()
+                .map(|token_program| {
+                    try_derive_ata_address_and_bump_with_token_program(
+                        &wallet_owner,
+                        &mint,
+                        &token_program,
+                    )
+                    .map(|(ata_pubkey, _)| ata_pubkey)
+                })
+                .collect::<Option<Vec<_>>>()
+        })
+        .unwrap_or_default();
+        let mut pubkeys_to_clone =
+            Vec::with_capacity(1 + greedy_ata_pubkeys.len());
+        pubkeys_to_clone.push(pubkey);
+        pubkeys_to_clone.extend(greedy_ata_pubkeys.iter().copied());
 
         match self
             .fetch_and_clone_accounts_with_dedup(
@@ -992,8 +1001,10 @@ where
                         true
                     }
                 } else {
-                    let cloned_ata_pubkey =
-                        greedy_ata_pubkey.filter(|ata_pubkey| {
+                    let cloned_ata_pubkey = greedy_ata_pubkeys
+                        .iter()
+                        .copied()
+                        .find(|ata_pubkey| {
                             self.accounts_bank
                                 .get_account(ata_pubkey)
                                 .is_some_and(|account_in_bank| {
