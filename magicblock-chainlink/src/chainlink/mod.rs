@@ -55,12 +55,6 @@ pub type ProdChainlink<C> = ReplicationModeAwareChainlink<
     C,
 >;
 
-/// Narrow reset-only bridge for services that need account-bank cleanup
-/// without depending on a Chainlink-shaped test stub.
-pub trait AccountsBankResetter: Send + Sync {
-    fn reset_accounts_bank(&self) -> AccountsDbResult<()>;
-}
-
 // -----------------
 // Chainlink
 // -----------------
@@ -216,14 +210,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             Self::Enabled(chainlink) => chainlink.is_watching(pubkey),
             Self::Disabled { .. } => false,
         }
-    }
-}
-
-impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    AccountsBankResetter for ReplicationModeAwareChainlink<T, U, V, C>
-{
-    fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
-        ReplicationModeAwareChainlink::reset_accounts_bank(self)
     }
 }
 
