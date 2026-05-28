@@ -353,6 +353,7 @@ impl MagicblockRpcClient {
     }
 
     pub async fn clear_cached_blockhash(&self) {
+        let _guard = self.cache.blockhash_refresh.lock().await;
         let mut cached = self.cache.blockhash.write().await;
         *cached = None;
     }
