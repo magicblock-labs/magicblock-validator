@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use futures_util::stream::FuturesUnordered;
+use futures_util::{future::join_all, stream::FuturesUnordered};
 use magicblock_core::logger::{log_trace_debug, log_trace_warn};
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
@@ -232,22 +232,23 @@ impl ChainPubsubActor {
             .drain()
             .collect::<Vec<_>>();
 
+        let cancellation_waits = account_subs
+            .into_iter()
+            .map(|(pubkey, sub)| {
+                Self::cancel_and_wait_for_stream_drop(
+                    client_id, "account", pubkey, sub,
+                )
+            })
+            .chain(program_subs.into_iter().map(|(pubkey, sub)| {
+                Self::cancel_and_wait_for_stream_drop(
+                    client_id, "program", pubkey, sub,
+                )
+            }))
+            .collect::<Vec<_>>();
+
         let mut first_error = None;
-        for (pubkey, sub) in account_subs {
-            if let Err(err) = Self::cancel_and_wait_for_stream_drop(
-                client_id, "account", pubkey, sub,
-            )
-            .await
-            {
-                first_error.get_or_insert(err);
-            }
-        }
-        for (pubkey, sub) in program_subs {
-            if let Err(err) = Self::cancel_and_wait_for_stream_drop(
-                client_id, "program", pubkey, sub,
-            )
-            .await
-            {
+        for result in join_all(cancellation_waits).await {
+            if let Err(err) = result {
                 first_error.get_or_insert(err);
             }
         }
