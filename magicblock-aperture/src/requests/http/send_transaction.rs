@@ -19,6 +19,7 @@ impl HttpDispatcher {
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
+        self.require_primary_rpc_method("sendTransaction")?;
         let _timer = TRANSACTION_PROCESSING_TIME.start_timer();
         let (transaction_str, config) =
             parse_params!(request.params()?, String, RpcSendTransactionConfig);
