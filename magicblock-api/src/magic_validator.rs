@@ -60,7 +60,7 @@ use magicblock_program::{
 use magicblock_replicator::{nats::Broker, ReplicationService};
 use magicblock_services::actions_callback_service::ActionsCallbackService;
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
-use magicblock_validator_admin::claim_fees::ClaimFeesTask;
+use magicblock_validator_admin::claim_fees::{claim_fees, ClaimFeesTask};
 use mdp::state::{
     features::FeaturesSet,
     record::{CountryCode, ErRecord},
@@ -847,6 +847,22 @@ impl MagicValidator {
                 std::process::exit(1);
             }
             if let Some(ref config) = chain_operation_config {
+                if !config.claim_fees_frequency.is_zero() {
+                    let step_start = Instant::now();
+                    if let Err(err) = claim_fees(rpc_url.clone()).await {
+                        error!(
+                            error = ?err,
+                            "Failed to claim validator fees on startup"
+                        );
+                    }
+                    log_timing(
+                        "startup_background",
+                        "claim_fees_on_startup",
+                        step_start,
+                    );
+                }
+            }
+            if let Some(ref config) = chain_operation_config {
                 let step_start = Instant::now();
                 if let Err(error) = MagicValidator::register_validator_on_chain(
                     &rpc_url,
@@ -906,9 +922,7 @@ impl MagicValidator {
             .config
             .chain_operation
             .as_ref()
-            .filter(|_| {
-                CoordinationMode::current().needs_onchain_interactions()
-            })
+            .filter(|_| self.is_standalone)
             .filter(|co| !co.claim_fees_frequency.is_zero())
             .map(|co| co.claim_fees_frequency)
         {
