@@ -13,7 +13,6 @@ bincode = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 magicblock-accounts-db = { workspace = true }
-magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }

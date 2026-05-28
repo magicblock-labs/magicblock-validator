@@ -27,7 +27,6 @@ use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
 pub use context::ReplicationContext;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::AccountsBankResetter;
 use magicblock_config::config::validator::ReplicationMode;
 use magicblock_core::link::{
     replication::Message,
@@ -58,18 +57,12 @@ const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 // =============================================================================
 
 /// Replication service for the selected replication role.
-pub enum Service<R>
-where
-    R: AccountsBankResetter,
-{
-    Primary(Primary<R>),
-    Replica(Replica<R>),
+pub enum Service {
+    Primary(Primary),
+    Replica(Replica),
 }
 
-impl<R> Service<R>
-where
-    R: AccountsBankResetter + 'static,
-{
+impl Service {
     /// Creates service, attempting primary role first if allowed.
     ///
     /// When `can_promote` is false (ReplicaOnly mode), skips lock acquisition
@@ -80,7 +73,6 @@ where
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        account_bank_resetter: Arc<R>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
         cancel: CancellationToken,
@@ -93,7 +85,6 @@ where
             mode_tx,
             accountsdb,
             ledger,
-            account_bank_resetter,
             scheduler,
             cancel,
             validator_identity,

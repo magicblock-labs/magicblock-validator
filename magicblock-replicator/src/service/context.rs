@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::AccountsBankResetter;
 use magicblock_core::{
     link::{
         replication::{Block, Message, SuperBlock},
@@ -28,10 +27,7 @@ use crate::{
 };
 
 /// Shared state for both primary and replica roles.
-pub struct ReplicationContext<R>
-where
-    R: AccountsBankResetter,
-{
+pub struct ReplicationContext {
     /// Producer lock owner identifier.
     pub producer_id: String,
     /// Durable consumer identifier.
@@ -44,9 +40,6 @@ where
     pub mode_tx: Sender<SchedulerMode>,
     /// Accounts database.
     pub accountsdb: Arc<AccountsDb>,
-    /// Reset-only bridge for account-bank cleanup.
-    /// TODO(bmuddha): remove this once accounts management is moved to AccountsDb.
-    pub account_bank_resetter: Arc<R>,
     /// Transaction ledger.
     pub ledger: Arc<Ledger>,
     /// Transaction scheduler.
@@ -57,10 +50,7 @@ where
     pub index: TransactionIndex,
 }
 
-impl<R> ReplicationContext<R>
-where
-    R: AccountsBankResetter,
-{
+impl ReplicationContext {
     /// Creates context from ledger state.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
@@ -68,7 +58,6 @@ where
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        account_bank_resetter: Arc<R>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
         validator_identity: Pubkey,
@@ -90,7 +79,6 @@ where
             cancel,
             mode_tx,
             accountsdb,
-            account_bank_resetter,
             ledger,
             scheduler,
             slot,
@@ -185,10 +173,8 @@ where
         self,
         producer: Producer,
         messages: Receiver<Message>,
-    ) -> Result<Primary<R>> {
+    ) -> Result<Primary> {
         let snapshots = self.create_snapshot_watcher()?;
-        let _guard = self.scheduler.wait_for_idle().await;
-        self.account_bank_resetter.reset_accounts_bank()?;
         self.enter_primary_mode().await;
         Ok(Primary::new(self, producer, messages, snapshots))
     }
@@ -198,7 +184,7 @@ where
     /// reset parameter controls where in the stream the consumption starts:
     /// true - the last known position that we know
     /// false - the last known position that message broker tracks for us
-    pub async fn into_replica(self, reset: bool) -> Result<Option<Replica<R>>> {
+    pub async fn into_replica(self, reset: bool) -> Result<Option<Replica>> {
         let Some(consumer) = self.create_consumer(reset).await else {
             return Ok(None);
         };

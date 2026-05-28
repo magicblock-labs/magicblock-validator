@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use magicblock_chainlink::AccountsBankResetter;
 use magicblock_core::link::replication::Message;
 use tokio::{sync::mpsc::Receiver, time::Instant};
 use tracing::{error, info, instrument, warn};
@@ -20,11 +19,8 @@ const PUBLISH_RETRY_MAX_DELAY: Duration = Duration::from_secs(1);
 const PUBLISH_RETRY_LIMIT: usize = 5;
 
 /// Primary node: publishes events and holds leader lock.
-pub struct Primary<R>
-where
-    R: AccountsBankResetter,
-{
-    pub(crate) ctx: ReplicationContext<R>,
+pub struct Primary {
+    pub(crate) ctx: ReplicationContext,
     producer: Producer,
     messages: Receiver<Message>,
     snapshots: SnapshotWatcher,
@@ -68,13 +64,10 @@ impl LockState {
     }
 }
 
-impl<R> Primary<R>
-where
-    R: AccountsBankResetter,
-{
+impl Primary {
     /// Creates a new primary instance.
     pub fn new(
-        ctx: ReplicationContext<R>,
+        ctx: ReplicationContext,
         producer: Producer,
         messages: Receiver<Message>,
         snapshots: SnapshotWatcher,

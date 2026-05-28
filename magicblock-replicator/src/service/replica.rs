@@ -4,7 +4,6 @@ use std::time::{Duration, Instant};
 
 use async_nats::jetstream::Message as NatsMessage;
 use futures::StreamExt;
-use magicblock_chainlink::AccountsBankResetter;
 use magicblock_core::link::{
     replication::{Message, Transaction},
     transactions::{ReplayPosition, WithEncoded},
@@ -16,21 +15,15 @@ use super::{ReplicationContext, LEADER_TIMEOUT};
 use crate::{nats::Consumer, Result};
 
 /// Replica node: consumes and applies replicated events.
-pub struct Replica<R>
-where
-    R: AccountsBankResetter,
-{
-    pub(crate) ctx: ReplicationContext<R>,
+pub struct Replica {
+    pub(crate) ctx: ReplicationContext,
     consumer: Box<Consumer>,
     last_activity: Instant,
 }
 
-impl<R> Replica<R>
-where
-    R: AccountsBankResetter,
-{
+impl Replica {
     /// Creates a new replica instance.
-    pub fn new(ctx: ReplicationContext<R>, consumer: Box<Consumer>) -> Self {
+    pub fn new(ctx: ReplicationContext, consumer: Box<Consumer>) -> Self {
         Self {
             ctx,
             consumer,
