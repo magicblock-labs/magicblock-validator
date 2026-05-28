@@ -569,12 +569,11 @@ impl TableMania {
 
         // 2. Ensure that all matching keys are also present remotely and have been finalized
         let remote_tables = {
-            let mut last_slot = self.rpc_client.get_slot().await?;
-
             let matching_table_keys =
                 matching_tables.keys().cloned().collect::<Vec<_>>();
 
             let start = Instant::now();
+            let mut last_wait_log = Instant::now();
             let table_keys_str = matching_table_keys
                 .iter()
                 .map(|x| x.to_string())
@@ -648,12 +647,10 @@ impl TableMania {
                     );
                 }
 
-                if let Ok(slot) = self.rpc_client.wait_for_next_slot().await {
-                    if slot - last_slot > 20 {
-                        tracing::Span::current().record("current_slot", slot);
-                        debug!("Still waiting for remote tables");
-                    }
-                    last_slot = slot;
+                sleep(Duration::from_millis(400)).await;
+                if last_wait_log.elapsed() > Duration::from_secs(8) {
+                    debug!("Still waiting for remote tables");
+                    last_wait_log = Instant::now();
                 }
             }
         };

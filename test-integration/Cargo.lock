@@ -4777,6 +4777,7 @@ name = "magicblock-rpc-client"
 version = "0.11.2"
 dependencies = [
  "futures-util",
+ "serde_json",
  "solana-account",
  "solana-account-decoder-client-types",
  "solana-address-lookup-table-interface",
