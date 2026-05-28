@@ -1,9 +1,11 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
-use errors::ChainlinkResult;
+use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
+use magicblock_accounts_db::{
+    traits::AccountsBank, AccountsDb, AccountsDbResult,
+};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_metrics::metrics::AccountFetchOrigin;
@@ -23,12 +25,10 @@ use crate::{
     fetch_cloner::FetchAndCloneResult,
     filters::is_noop_system_transfer,
     remote_account_provider::{
-        chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
         ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
     },
     submux::SubMuxClient,
-    testing::{cloner_stub::ClonerStub, rpc_client_mock::ChainRpcClientMock},
 };
 
 mod account_still_undelegating_on_chain;
@@ -39,14 +39,26 @@ pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
 
-/// A type alias for chainlink with only accountsdb being real impl
-pub type StubbedChainlink<V> =
-    Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>;
+/// Production Chainlink stack with configurable cloner implementation.
+pub type ProdInnerChainlink<C> = InnerChainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainUpdatesClient>,
+    AccountsDb,
+    C,
+>;
+
+/// Production `ProdChainlink` stack with configurable cloner implementation.
+pub type ProdChainlink<C> = ReplicationModeAwareChainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainUpdatesClient>,
+    AccountsDb,
+    C,
+>;
 
 // -----------------
 // Chainlink
 // -----------------
-pub struct Chainlink<
+pub struct InnerChainlink<
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
@@ -67,8 +79,202 @@ pub struct Chainlink<
     remove_confined_accounts: bool,
 }
 
+pub enum ReplicationModeAwareChainlink<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    V: AccountsBank,
+    C: Cloner,
+> {
+    Enabled(InnerChainlink<T, U, V, C>),
+    Disabled {
+        accounts_bank: Arc<V>,
+        validator_id: Pubkey,
+        remove_confined_accounts: bool,
+    },
+}
+
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    Chainlink<T, U, V, C>
+    ReplicationModeAwareChainlink<T, U, V, C>
+{
+    pub fn enabled(chainlink: InnerChainlink<T, U, V, C>) -> Self {
+        Self::Enabled(chainlink)
+    }
+
+    pub fn disabled(
+        accounts_bank: &Arc<V>,
+        validator_pubkey: Pubkey,
+        config: &ChainLinkConfig,
+    ) -> ChainlinkResult<Self> {
+        Ok(Self::Disabled {
+            accounts_bank: accounts_bank.clone(),
+            validator_id: validator_pubkey,
+            remove_confined_accounts: config.remove_confined_accounts,
+        })
+    }
+
+    pub fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
+        match self {
+            Self::Enabled(chainlink) => chainlink.reset_accounts_bank(),
+            Self::Disabled {
+                accounts_bank,
+                validator_id,
+                remove_confined_accounts,
+            } => reset_accounts_bank_with(
+                accounts_bank,
+                validator_id,
+                *remove_confined_accounts,
+            ),
+        }
+    }
+
+    pub async fn ensure_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
+        fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink
+                    .ensure_accounts(
+                        pubkeys,
+                        mark_empty_if_not_found,
+                        fetch_origin,
+                        program_ids,
+                    )
+                    .await
+            }
+            Self::Disabled { .. } => Ok(Default::default()),
+        }
+    }
+
+    pub async fn ensure_transaction_accounts(
+        &self,
+        tx: &SanitizedTransaction,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink.ensure_transaction_accounts(tx).await
+            }
+            Self::Disabled { .. } => {
+                Err(ChainlinkError::DisabledForNonPrimaryMode)
+            }
+        }
+    }
+
+    pub async fn fetch_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
+    ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink
+                    .fetch_accounts(pubkeys, fetch_origin, program_ids)
+                    .await
+            }
+            Self::Disabled { .. } => Ok(vec![None; pubkeys.len()]),
+        }
+    }
+
+    pub async fn undelegation_requested(
+        &self,
+        pubkey: Pubkey,
+    ) -> ChainlinkResult<()> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink.undelegation_requested(pubkey).await
+            }
+            Self::Disabled { .. } => Ok(()),
+        }
+    }
+
+    pub fn fetch_count(&self) -> Option<u64> {
+        match self {
+            Self::Enabled(chainlink) => chainlink.fetch_count(),
+            Self::Disabled { .. } => None,
+        }
+    }
+
+    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
+        match self {
+            Self::Enabled(chainlink) => chainlink.fetch_cloner(),
+            Self::Disabled { .. } => None,
+        }
+    }
+
+    pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
+        match self {
+            Self::Enabled(chainlink) => chainlink.is_watching(pubkey),
+            Self::Disabled { .. } => false,
+        }
+    }
+}
+
+fn reset_accounts_bank_with<V: AccountsBank>(
+    accounts_bank: &Arc<V>,
+    validator_id: &Pubkey,
+    remove_confined_accounts: bool,
+) -> AccountsDbResult<()> {
+    let blacklisted_accounts = blacklisted_accounts(validator_id);
+
+    let mut delegated_only = 0;
+    let mut kept_ephemeral = 0;
+    let mut undelegating = 0;
+    let mut blacklisted = 0;
+    let mut remaining = 0u32;
+
+    let removed = accounts_bank.remove_where(|pubkey, account| {
+        if blacklisted_accounts.contains(pubkey) {
+            blacklisted += 1;
+            return false;
+        }
+        if remove_confined_accounts && account.confined() {
+            return true;
+        }
+        // Undelegating accounts are normally also delegated, but if that ever changes
+        // we want to make sure we never remove an account of which we aren't sure
+        // if the undelegation completed on chain or not.
+        let should_remove = if account.undelegating() {
+            undelegating += 1;
+            false
+        } else if account.ephemeral() {
+            kept_ephemeral += 1;
+            false
+        } else if account.delegated() {
+            delegated_only += 1;
+            false
+        } else {
+            *account.owner() != feature::ID
+        };
+        if should_remove {
+            trace!(
+                pubkey = %pubkey,
+                account=%format!("{account:#?}"),
+                "Removing non-delegated account during accountsdb reset"
+            );
+        } else {
+            remaining += 1;
+        }
+        should_remove
+    })?;
+
+    info!(
+        total_removed = removed,
+        delegated_not_undelegating = delegated_only,
+        delegated_and_undelegating = undelegating,
+        kept_delegated = delegated_only,
+        kept_blacklisted = blacklisted,
+        kept_ephemeral,
+        "Removed accounts from bank"
+    );
+    Ok(())
+}
+
+impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
+    InnerChainlink<T, U, V, C>
 {
     pub fn try_new(
         accounts_bank: &Arc<V>,
@@ -115,7 +321,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         chainlink_config: &ChainLinkConfig,
         ledger_path: &Path,
     ) -> ChainlinkResult<
-        Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
+        InnerChainlink<
+            ChainRpcClientImpl,
+            SubMuxClient<ChainUpdatesClient>,
+            V,
+            C,
+        >,
     > {
         let validator_pubkey = validator_keypair.pubkey();
         // Extract accounts provider and create fetch cloner while connecting
@@ -149,7 +360,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             None
         };
 
-        Chainlink::try_new(
+        InnerChainlink::try_new(
             accounts_bank,
             fetch_cloner,
             validator_pubkey,
@@ -162,59 +373,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// when resuming an existing ledger to guarantee that we don't hold
     /// accounts that might be stale.
     pub fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
-        let blacklisted_accounts = blacklisted_accounts(&self.validator_id);
-
-        let mut delegated_only = 0;
-        let mut kept_ephemeral = 0;
-        let mut undelegating = 0;
-        let mut blacklisted = 0;
-        let mut remaining = 0u32;
-
-        let removed = self.accounts_bank.remove_where(|pubkey, account| {
-            if blacklisted_accounts.contains(pubkey) {
-                blacklisted += 1;
-                return false;
-            }
-            if self.remove_confined_accounts && account.confined() {
-                return true;
-            }
-            // Undelegating accounts are normally also delegated, but if that ever changes
-            // we want to make sure we never remove an account of which we aren't sure
-            // if the undelegation completed on chain or not.
-            let should_remove = if account.undelegating() {
-                undelegating += 1;
-                false
-            } else if account.ephemeral() {
-                kept_ephemeral += 1;
-                false
-            } else if account.delegated() {
-                delegated_only += 1;
-                false
-            } else {
-                *account.owner() != feature::ID
-            };
-            if should_remove {
-                trace!(
-                    pubkey = %pubkey,
-                    account=%format!("{account:#?}"),
-                    "Removing non-delegated account during accountsdb reset"
-                );
-            } else {
-                remaining += 1;
-            }
-            should_remove
-        })?;
-
-        info!(
-            total_removed = removed,
-            delegated_not_undelegating = delegated_only,
-            delegated_and_undelegating = undelegating,
-            kept_delegated = delegated_only,
-            kept_blacklisted = blacklisted,
-            kept_ephemeral,
-            "Removed accounts from bank"
-        );
-        Ok(())
+        reset_accounts_bank_with(
+            &self.accounts_bank,
+            &self.validator_id,
+            self.remove_confined_accounts,
+        )
     }
 
     fn subscribe_account_removals(
@@ -514,14 +677,131 @@ mod tests {
     use std::{sync::Arc, time::Duration};
 
     use magicblock_accounts_db::traits::AccountsBank;
+    use magicblock_config::config::ChainLinkConfig;
+    use magicblock_metrics::metrics::AccountFetchOrigin;
     use solana_account::AccountSharedData;
+    use solana_message::legacy::Message;
+    use solana_pubkey::Pubkey;
+    use solana_sdk_ids::feature;
+    use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
     use tokio::sync::mpsc;
 
-    use super::*;
+    use super::{
+        errors::ChainlinkError, InnerChainlink, ReplicationModeAwareChainlink,
+    };
     use crate::{
         accounts_bank::mock::AccountsBankStub,
-        testing::{cloner_stub::ClonerStub, init_logger},
+        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        testing::{
+            cloner_stub::ClonerStub, init_logger,
+            rpc_client_mock::ChainRpcClientMock,
+        },
     };
+
+    type TestReplicationModeAwareChainlink = ReplicationModeAwareChainlink<
+        ChainRpcClientMock,
+        ChainPubsubClientMock,
+        AccountsBankStub,
+        ClonerStub,
+    >;
+
+    fn disabled_chainlink(
+    ) -> (Arc<AccountsBankStub>, TestReplicationModeAwareChainlink) {
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let chainlink = TestReplicationModeAwareChainlink::disabled(
+            &accounts_bank,
+            Pubkey::new_unique(),
+            &ChainLinkConfig::default(),
+        )
+        .expect("disabled Chainlink should be constructed");
+        (accounts_bank, chainlink)
+    }
+
+    #[tokio::test]
+    async fn disabled_mode_ensure_accounts_is_noop() {
+        let (accounts_bank, chainlink) = disabled_chainlink();
+        let pubkey = Pubkey::new_unique();
+
+        let result = chainlink
+            .ensure_accounts(
+                &[pubkey],
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await;
+
+        assert!(result
+            .expect("disabled ensure_accounts should succeed")
+            .is_ok());
+        assert!(accounts_bank.get_account(&pubkey).is_none());
+        assert_eq!(chainlink.fetch_count(), None);
+        assert!(!chainlink.is_watching(&pubkey));
+    }
+
+    #[tokio::test]
+    async fn disabled_mode_fetch_accounts_returns_none_values() {
+        let (_accounts_bank, chainlink) = disabled_chainlink();
+        let pubkeys = vec![Pubkey::new_unique(), Pubkey::new_unique()];
+
+        let result = chainlink
+            .fetch_accounts(
+                &pubkeys,
+                AccountFetchOrigin::GetMultipleAccounts,
+                None,
+            )
+            .await;
+
+        let accounts = result.expect("disabled fetch_accounts should succeed");
+        assert_eq!(accounts.len(), 2);
+        assert!(accounts.iter().all(Option::is_none));
+    }
+
+    #[tokio::test]
+    async fn disabled_mode_reset_accounts_bank_cleans_bank() {
+        let (accounts_bank, _chainlink) = disabled_chainlink();
+        let removable_pubkey = Pubkey::new_unique();
+        let kept_feature_pubkey = Pubkey::new_unique();
+        let validator_id = Pubkey::new_unique();
+        let blacklisted_validator_account = AccountSharedData::default();
+        let removable_account = AccountSharedData::default();
+        let kept_feature_account = AccountSharedData::new(1, 0, &feature::ID);
+
+        accounts_bank.insert(removable_pubkey, removable_account);
+        accounts_bank.insert(kept_feature_pubkey, kept_feature_account);
+        accounts_bank.insert(validator_id, blacklisted_validator_account);
+
+        let chainlink = TestReplicationModeAwareChainlink::disabled(
+            &accounts_bank,
+            validator_id,
+            &ChainLinkConfig::default(),
+        )
+        .expect("disabled Chainlink should be constructed");
+
+        chainlink
+            .reset_accounts_bank()
+            .expect("disabled reset should clean accounts bank");
+
+        assert!(accounts_bank.get_account(&removable_pubkey).is_none());
+        assert!(accounts_bank.get_account(&kept_feature_pubkey).is_some());
+        assert!(accounts_bank.get_account(&validator_id).is_some());
+    }
+
+    #[tokio::test]
+    async fn disabled_mode_rejects_transaction_ensure() {
+        let (_accounts_bank, chainlink) = disabled_chainlink();
+        let payer = Pubkey::new_unique();
+        let message = Message::new(&[], Some(&payer));
+        let tx = Transaction::new_unsigned(message);
+        let sanitized_tx = SanitizedTransaction::from_transaction_for_tests(tx);
+
+        let error = chainlink
+            .ensure_transaction_accounts(&sanitized_tx)
+            .await
+            .expect_err("disabled transaction ensure should be rejected");
+
+        assert!(matches!(error, ChainlinkError::DisabledForNonPrimaryMode));
+    }
 
     #[tokio::test]
     async fn test_subscribe_account_removals_skips_delegated_or_undelegating_and_evicts_normal(
@@ -550,7 +830,7 @@ mod tests {
         let normal_account = AccountSharedData::new(1_000_000, 0, &owner);
         accounts_bank.insert(normal_pubkey, normal_account);
 
-        let handle = Chainlink::<
+        let handle = InnerChainlink::<
             ChainRpcClientMock,
             ChainPubsubClientMock,
             AccountsBankStub,
