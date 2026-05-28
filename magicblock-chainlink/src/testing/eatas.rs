@@ -7,6 +7,9 @@ use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
 use spl_token::state::{Account as SplAccount, AccountState};
+use spl_token_2022::{
+    extension::ExtensionType, state::Account as Token2022Account,
+};
 
 /// Creates a test ATA (Associated Token Account) with initialized state and zero balance.
 ///
@@ -23,11 +26,30 @@ pub fn create_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {
 }
 
 pub fn create_token_2022_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {
+    // Default Token-2022 ATAs carry ImmutableOwner; mint-specific extensions can require more.
+    create_token_2022_ata_account_with_extensions(
+        owner,
+        mint,
+        &[ExtensionType::ImmutableOwner],
+    )
+}
+
+pub fn create_token_2022_ata_account_with_extensions(
+    owner: &Pubkey,
+    mint: &Pubkey,
+    account_extensions: &[ExtensionType],
+) -> Account {
+    // Token-2022 account length depends on account extensions required by the mint.
+    let data_len =
+        ExtensionType::try_calculate_account_len::<Token2022Account>(
+            account_extensions,
+        )
+        .expect("calculate Token-2022 account length");
     create_ata_account_with_token_program(
         owner,
         mint,
         TOKEN_2022_PROGRAM_ID,
-        187,
+        data_len,
     )
 }
 

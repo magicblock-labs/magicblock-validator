@@ -1372,25 +1372,24 @@ where
             )?
             .0;
 
-        let mut ata_pubkey = legacy_ata_pubkey;
+        let mut ata_pubkey = None;
         let mut in_bank_ata = None;
         for candidate_pubkey in [token_2022_ata_pubkey, legacy_ata_pubkey] {
             if let Some(candidate_account) =
                 self.accounts_bank.get_account(&candidate_pubkey)
             {
-                ata_pubkey = candidate_pubkey;
+                ata_pubkey = Some(candidate_pubkey);
                 in_bank_ata = Some(candidate_account);
                 break;
             }
         }
-        if let Some(in_bank_ata) = &in_bank_ata {
-            if in_bank_ata.delegated() || in_bank_ata.undelegating() {
-                return None;
-            }
+        let in_bank_ata = in_bank_ata.as_ref()?;
+        let ata_pubkey = ata_pubkey?;
+        if in_bank_ata.delegated() || in_bank_ata.undelegating() {
+            return None;
         }
-        let ata_account = in_bank_ata.as_ref().unwrap_or(eata_account);
         let projected_ata = self.maybe_project_delegated_ata_from_eata(
-            ata_account,
+            in_bank_ata,
             eata_account,
             deleg_record,
         )?;
