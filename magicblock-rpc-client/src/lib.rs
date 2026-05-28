@@ -343,6 +343,11 @@ impl MagicblockRpcClient {
         Ok(slot)
     }
 
+    pub async fn clear_cached_blockhash(&self) {
+        let mut cached = self.cache.blockhash.write().await;
+        *cached = None;
+    }
+
     async fn cached_blockhash(&self) -> Option<Hash> {
         let cached = self.cache.blockhash.read().await;
         cached
