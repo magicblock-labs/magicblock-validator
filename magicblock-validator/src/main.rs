@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
+#[cfg(feature = "tui")]
 use magicblock_tui_client::{
     enrich_config_from_rpc, init_embedded_logger, run_tui, TuiConfig,
 };
