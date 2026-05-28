@@ -235,7 +235,8 @@ impl MagicBlockSendTransactionOutcome {
 
 // Derived from error from helius RPC: Failed to download accounts: Error { request: Some(GetMultipleAccounts), kind: RpcError(RpcResponseError { code: -32602, message: "Too many inputs provided; max 100", data: Empty }) }
 const MAX_MULTIPLE_ACCOUNTS: usize = 100;
-const BLOCKHASH_CACHE_TTL: Duration = Duration::from_secs(15);
+// Keep this below the default 50ms * 150 slot blockhash lifetime.
+const BLOCKHASH_CACHE_TTL: Duration = Duration::from_secs(5);
 const SLOT_CACHE_TTL: Duration = Duration::from_millis(400);
 
 #[derive(Default)]
