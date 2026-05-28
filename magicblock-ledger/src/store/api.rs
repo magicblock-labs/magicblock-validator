@@ -1110,6 +1110,8 @@ impl Ledger {
         readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
     ) -> LedgerResult<()> {
+        let status = status.into();
+
         for address in writable_keys {
             self.address_signatures_cf.put(
                 (*address, slot, index, signature),
@@ -1128,7 +1130,6 @@ impl Ledger {
         self.slot_signatures_cf.put((slot, index), &signature)?;
         self.slot_signatures_cf.try_increase_entry_counter(1);
 
-        let status = status.into();
         self.transaction_status_cf
             .put_protobuf((signature, slot), &status)?;
         self.transaction_status_cf.try_increase_entry_counter(1);

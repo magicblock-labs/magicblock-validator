@@ -19,13 +19,8 @@ use magicblock_aperture::{
     state::{NodeContext, SharedState},
 };
 use magicblock_chainlink::{
-    config::ChainlinkConfig,
-    remote_account_provider::{
-        chain_rpc_client::ChainRpcClientImpl,
-        chain_updates_client::ChainUpdatesClient, Endpoints,
-    },
-    submux::SubMuxClient,
-    Chainlink,
+    config::ChainlinkConfig, remote_account_provider::Endpoints, ProdChainlink,
+    ProdInnerChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -65,7 +60,7 @@ use magicblock_program::{
 use magicblock_replicator::{nats::Broker, ReplicationService};
 use magicblock_services::actions_callback_service::ActionsCallbackService;
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
-use magicblock_validator_admin::claim_fees::ClaimFeesTask;
+use magicblock_validator_admin::claim_fees::{claim_fees, ClaimFeesTask};
 use mdp::state::{
     features::FeaturesSet,
     record::{CountryCode, ErRecord},
@@ -100,12 +95,9 @@ use crate::{
     tickers::{init_slot_ticker, init_system_metrics_ticker},
 };
 
-type ChainlinkImpl = Chainlink<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainUpdatesClient>,
-    AccountsDb,
-    ChainlinkCloner,
->;
+type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
+
+type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
 // -----------------
 // MagicValidator
@@ -251,12 +243,12 @@ impl MagicValidator {
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
-                    chainlink.stub(),
                     dispatch.transaction_scheduler.clone(),
                     messages_rx,
                     token.clone(),
                     is_fresh_start,
                     &config.validator.replication_mode,
+                    validator_pubkey,
                 )
                 .await?
             } else {
@@ -455,7 +447,7 @@ impl MagicValidator {
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
         debug!(path = %committor_persist_path.display(), "Initializing committor service");
-        // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
+        // TODO(thlorenz): if startup roles change, revisit whether this service is needed for that role.
         let actions_callback_executor = ActionsCallbackService::new(
             Arc::new(RpcClient::new(config.aperture.listen.http())),
             config.validator.keypair.insecure_clone(),
@@ -486,6 +478,17 @@ impl MagicValidator {
         latest_block: &LatestBlock,
         accountsdb: &Arc<AccountsDb>,
     ) -> ApiResult<ChainlinkImpl> {
+        if Self::replication_mode_uses_disabled_chainlink(
+            &config.validator.replication_mode,
+        ) {
+            return ChainlinkImpl::disabled(
+                accountsdb,
+                config.validator.keypair.pubkey(),
+                &config.chainlink,
+            )
+            .map_err(ApiError::from);
+        }
+
         let endpoints = Endpoints::try_from(config.remotes.as_slice())
             .map_err(|e| {
                 ApiError::from(
@@ -524,7 +527,7 @@ impl MagicValidator {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
         };
-        let chainlink = ChainlinkImpl::try_new_from_endpoints(
+        let chainlink = InnerChainlinkImpl::try_new_from_endpoints(
             &endpoints,
             commitment_config,
             &accounts_bank,
@@ -536,7 +539,13 @@ impl MagicValidator {
         )
         .await?;
 
-        Ok(chainlink)
+        Ok(ChainlinkImpl::enabled(chainlink))
+    }
+
+    fn replication_mode_uses_disabled_chainlink(
+        replication_mode: &ReplicationMode,
+    ) -> bool {
+        matches!(replication_mode, ReplicationMode::Replica { .. })
     }
 
     fn init_ledger(
@@ -837,6 +846,22 @@ impl MagicValidator {
                 std::process::exit(1);
             }
             if let Some(ref config) = chain_operation_config {
+                if !config.claim_fees_frequency.is_zero() {
+                    let step_start = Instant::now();
+                    if let Err(err) = claim_fees(rpc_url.clone()).await {
+                        error!(
+                            error = ?err,
+                            "Failed to claim validator fees on startup"
+                        );
+                    }
+                    log_timing(
+                        "startup_background",
+                        "claim_fees_on_startup",
+                        step_start,
+                    );
+                }
+            }
+            if let Some(ref config) = chain_operation_config {
                 let step_start = Instant::now();
                 if let Err(error) = MagicValidator::register_validator_on_chain(
                     &rpc_url,
@@ -896,9 +921,7 @@ impl MagicValidator {
             .config
             .chain_operation
             .as_ref()
-            .filter(|_| {
-                CoordinationMode::current().needs_onchain_interactions()
-            })
+            .filter(|_| self.is_standalone)
             .filter(|co| !co.claim_fees_frequency.is_zero())
             .map(|co| co.claim_fees_frequency)
         {
@@ -1001,17 +1024,6 @@ impl MagicValidator {
             }
             log_timing("shutdown", "unregister_validator_on_chain", step_start);
         }
-        // we have two memory mapped databases,
-        // flush them to disk before exitting
-        let step_start = Instant::now();
-        self.accountsdb.flush();
-        log_timing("shutdown", "accountsdb_flush", step_start);
-
-        let step_start = Instant::now();
-        if let Err(err) = self.ledger.shutdown(true) {
-            error!(error = ?err, "Failed to shutdown ledger");
-        }
-        log_timing("shutdown", "ledger_shutdown", step_start);
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
@@ -1026,9 +1038,6 @@ impl MagicValidator {
         }
         log_timing("shutdown", "ledger_truncator_join", step_start);
         let step_start = Instant::now();
-        let _ = self.transaction_execution.join();
-        log_timing("shutdown", "transaction_execution_join", step_start);
-        let step_start = Instant::now();
         if let Some(handle) = self.replication_handle {
             match handle.join() {
                 Ok(Ok(())) => {}
@@ -1041,6 +1050,27 @@ impl MagicValidator {
             }
         }
         log_timing("shutdown", "replication_service_join", step_start);
+        let step_start = Instant::now();
+        let _ = self.transaction_execution.join();
+        log_timing("shutdown", "transaction_execution_join", step_start);
+
+        // Flush durable state only after every worker that can still admit,
+        // commit, or truncate state has stopped.
+        let step_start = Instant::now();
+        self.accountsdb.flush();
+        log_timing("shutdown", "accountsdb_flush", step_start);
+
+        let step_start = Instant::now();
+        if let Err(err) = self.ledger.flush() {
+            error!(error = ?err, "Failed to flush ledger");
+        }
+        log_timing("shutdown", "ledger_flush", step_start);
+
+        let step_start = Instant::now();
+        if let Err(err) = self.ledger.shutdown(true) {
+            error!(error = ?err, "Failed to shutdown ledger");
+        }
+        log_timing("shutdown", "ledger_shutdown", step_start);
 
         log_timing("shutdown", "stop_total", stop_start);
         info!("MagicValidator shutdown");
@@ -1075,4 +1105,44 @@ fn programs_to_load(programs: &[LoadableProgram]) -> Vec<(Pubkey, PathBuf)> {
         .iter()
         .map(|program| (program.id.0, program.path.clone()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use magicblock_config::{
+        config::validator::ReplicationConfig, types::SerdePubkey,
+    };
+
+    use super::*;
+
+    fn replication_config() -> ReplicationConfig {
+        ReplicationConfig {
+            url: "nats://127.0.0.1:4222".parse().unwrap(),
+            secret: "secret".to_string(),
+        }
+    }
+
+    #[test]
+    fn standalone_replication_mode_uses_enabled_chainlink() {
+        assert!(!MagicValidator::replication_mode_uses_disabled_chainlink(
+            &ReplicationMode::Standalone,
+        ));
+    }
+
+    #[test]
+    fn primary_replication_mode_uses_enabled_chainlink() {
+        assert!(!MagicValidator::replication_mode_uses_disabled_chainlink(
+            &ReplicationMode::Primary(replication_config()),
+        ));
+    }
+
+    #[test]
+    fn replica_replication_mode_uses_disabled_chainlink() {
+        assert!(MagicValidator::replication_mode_uses_disabled_chainlink(
+            &ReplicationMode::Replica {
+                config: replication_config(),
+                authority_override: SerdePubkey(Pubkey::new_unique()),
+            },
+        ));
+    }
 }

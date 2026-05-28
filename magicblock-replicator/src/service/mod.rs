@@ -27,7 +27,6 @@ use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
 pub use context::ReplicationContext;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::StubbedChainlink;
 use magicblock_config::config::validator::ReplicationMode;
 use magicblock_core::link::{
     replication::Message,
@@ -36,6 +35,7 @@ use magicblock_core::link::{
 use magicblock_ledger::Ledger;
 pub use primary::Primary;
 pub use replica::Replica;
+use solana_pubkey::Pubkey;
 use tokio::{
     runtime::Builder,
     sync::mpsc::{Receiver, Sender},
@@ -73,15 +73,21 @@ impl Service {
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        chainlink: StubbedChainlink<AccountsDb>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
         cancel: CancellationToken,
         reset: bool,
         mode: &ReplicationMode,
+        validator_identity: Pubkey,
     ) -> crate::Result<Option<Self>> {
         let ctx = ReplicationContext::new(
-            broker, mode_tx, accountsdb, ledger, chainlink, scheduler, cancel,
+            broker,
+            mode_tx,
+            accountsdb,
+            ledger,
+            scheduler,
+            cancel,
+            validator_identity,
         )
         .await?;
 
