@@ -179,6 +179,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    pub async fn accounts_delegated_on_base_and_er(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<bool>> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink
+                    .accounts_delegated_on_base_and_er(pubkeys, fetch_origin)
+                    .await
+            }
+            Self::Disabled { .. } => Ok(vec![false; pubkeys.len()]),
+        }
+    }
+
     pub async fn undelegation_requested(
         &self,
         pubkey: Pubkey,
