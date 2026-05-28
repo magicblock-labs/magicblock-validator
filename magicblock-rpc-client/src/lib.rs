@@ -325,6 +325,12 @@ impl MagicblockRpcClient {
     }
 
     pub async fn get_slot(&self) -> MagicBlockRpcClientResult<Slot> {
+        let slot = self.fetch_slot().await?;
+        self.cache_slot(slot).await;
+        Ok(slot)
+    }
+
+    async fn get_cached_slot(&self) -> MagicBlockRpcClientResult<Slot> {
         if let Some(slot) = self.cached_slot().await {
             return Ok(slot);
         }
@@ -334,13 +340,16 @@ impl MagicblockRpcClient {
             return Ok(slot);
         }
 
-        let slot = self
-            .client
-            .get_slot()
-            .await
-            .map_err(|e| MagicBlockRpcClientError::GetSlot(Box::new(e)))?;
+        let slot = self.fetch_slot().await?;
         self.cache_slot(slot).await;
         Ok(slot)
+    }
+
+    async fn fetch_slot(&self) -> MagicBlockRpcClientResult<Slot> {
+        self.client
+            .get_slot()
+            .await
+            .map_err(|e| MagicBlockRpcClientError::GetSlot(Box::new(e)))
     }
 
     pub async fn clear_cached_blockhash(&self) {
@@ -494,7 +503,7 @@ impl MagicblockRpcClient {
     }
 
     pub async fn wait_for_next_slot(&self) -> MagicBlockRpcClientResult<Slot> {
-        let slot = self.get_slot().await?;
+        let slot = self.get_cached_slot().await?;
         self.wait_for_higher_slot(slot).await
     }
 
@@ -503,7 +512,7 @@ impl MagicblockRpcClient {
         slot: Slot,
     ) -> MagicBlockRpcClientResult<Slot> {
         let higher_slot = loop {
-            let next_slot = self.get_slot().await?;
+            let next_slot = self.get_cached_slot().await?;
             if next_slot > slot {
                 break next_slot;
             }
