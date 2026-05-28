@@ -26,6 +26,8 @@ impl HttpDispatcher {
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
+        self.require_primary_rpc_method("simulateTransaction")?;
+
         let (transaction_str, config) = parse_params!(
             request.params()?,
             String,
