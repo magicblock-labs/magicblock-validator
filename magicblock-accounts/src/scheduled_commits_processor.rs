@@ -15,6 +15,7 @@ use magicblock_chainlink::{
     Chainlink,
 };
 use magicblock_committor_service::{
+    error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput, BaseIntentCommittor, CommittorService,
 };
@@ -152,60 +153,69 @@ impl ScheduledCommitsProcessorImpl {
     /// bank reflects the delegated state checked by `recover_pending_intents`.
     pub fn spawn_pending_intents_recovery(self: &Arc<Self>) {
         let this = self.clone();
-        tokio::spawn(async move { this.recover_pending_intents().await });
+        tokio::spawn(async move {
+            if let Err(err) = this.recover_pending_intents().await {
+                error!(error = ?err, "Failed to recover pending commit intents");
+            }
+        });
     }
 
     #[instrument(skip(self))]
-    async fn recover_pending_intents(&self) {
-        let intent_bundles = match self
-            .committor
-            .get_pending_intent_bundles()
-            .await
-        {
-            Ok(Ok(intent_bundles)) => intent_bundles,
-            Ok(Err(err)) => {
-                error!(error = ?err, "Failed to load pending commit intents");
-                return;
-            }
-            Err(err) => {
-                error!(error = ?err, "Failed to receive pending commit intents");
-                return;
-            }
-        };
+    async fn recover_pending_intents(
+        &self,
+    ) -> ScheduledCommitsProcessorResult<()> {
+        let intent_bundles =
+            self.committor.get_pending_intent_bundles().await??;
         if intent_bundles.is_empty() {
-            return;
+            return Ok(());
         }
         let intent_bundles =
             self.recoverable_intent_bundles(intent_bundles).await;
-        if intent_bundles.is_empty() {
-            return;
-        }
+        self.process_recovered_intent_bundles(intent_bundles).await
+    }
 
+    async fn process_recovered_intent_bundles(
+        &self,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+    ) -> ScheduledCommitsProcessorResult<()> {
+        if intent_bundles.is_empty() {
+            return Ok(());
+        }
         let intent_ids: Vec<u64> =
             intent_bundles.iter().map(|b| b.id).collect();
         let intent_count = intent_ids.len();
+
+        let result = self
+            .process_intent_bundles(intent_bundles, |intent_bundles| {
+                self.committor
+                    .schedule_recovered_intent_bundles(intent_bundles)
+            })
+            .await;
+        if result.is_err() {
+            self.remove_intent_metas(&intent_ids);
+        }
+        result?;
+        info!(intent_count, "Scheduled recovered pending commit intents");
+        Ok(())
+    }
+
+    async fn process_intent_bundles<F>(
+        &self,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+        schedule: F,
+    ) -> ScheduledCommitsProcessorResult<()>
+    where
+        F: FnOnce(
+            Vec<ScheduledIntentBundle>,
+        ) -> oneshot::Receiver<CommittorServiceResult<()>>,
+    {
+        if intent_bundles.is_empty() {
+            return Ok(());
+        }
         self.prepare_intent_bundles_for_scheduling(&intent_bundles)
             .await;
-        match self
-            .committor
-            .schedule_recovered_intent_bundles(intent_bundles)
-            .await
-        {
-            Ok(Ok(())) => {
-                info!(
-                    intent_count,
-                    "Scheduled recovered pending commit intents"
-                );
-            }
-            Ok(Err(err)) => {
-                self.remove_intent_metas(&intent_ids);
-                error!(intent_count, error = ?err, "Failed to schedule recovered pending commit intents");
-            }
-            Err(err) => {
-                self.remove_intent_metas(&intent_ids);
-                error!(intent_count, error = ?err, "Failed to receive recovered pending commit intent schedule result");
-            }
-        }
+        schedule(intent_bundles).await??;
+        Ok(())
     }
 
     async fn recoverable_intent_bundles(
@@ -455,12 +465,10 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
         }
         metrics::inc_committor_intents_count_by(intent_bundles.len() as u64);
 
-        self.prepare_intent_bundles_for_scheduling(&intent_bundles)
-            .await;
-        self.committor
-            .schedule_intent_bundles(intent_bundles)
-            .await??;
-        Ok(())
+        self.process_intent_bundles(intent_bundles, |intent_bundles| {
+            self.committor.schedule_intent_bundles(intent_bundles)
+        })
+        .await
     }
 
     fn scheduled_commits_len(&self) -> usize {
