@@ -997,7 +997,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: Pubkey,
         fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], None, fetch_origin, None, None)
+        self.try_get_multi(&[pubkey], None, fetch_origin, None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -1016,7 +1016,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
         let mut remote_accounts = self
-            .try_get_multi(pubkeys, None, fetch_origin, None, None)
+            .try_get_multi(pubkeys, None, fetch_origin, None)
             .await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
@@ -1140,13 +1140,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Gets the accounts for the given pubkeys by fetching from RPC.
     /// Always fetches fresh data. FetchCloner handles request deduplication.
     /// Subscribes first to catch any updates that arrive during fetch.
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids))]
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found))]
     pub async fn try_get_multi(
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
         fetch_start_slot: Option<u64>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
@@ -1232,7 +1231,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 mark_empty_if_not_found,
                 min_context_slot,
                 fetch_origin,
-                program_ids,
             );
         }
 
@@ -1894,14 +1892,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         mark_empty_if_not_found: Option<&[Pubkey]>,
         min_context_slot: u64,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) {
         let rpc_client = self.rpc_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
         let commitment = self.rpc_client.commitment();
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
-        let _ = program_ids;
         tokio::spawn(async move {
             use RemoteAccount::*;
 

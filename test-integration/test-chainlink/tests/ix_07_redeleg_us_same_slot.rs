@@ -37,9 +37,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot() {
             .ensure_accounts(
                 &pubkeys,
                 None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
+                AccountFetchOrigin::GetAccount)
             .await
             .unwrap();
         sleep_ms(1_500).await;

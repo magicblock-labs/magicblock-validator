@@ -381,7 +381,6 @@ where
         mark_empty_if_not_found: bool,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<Vec<Pubkey>>,
     ) {
         let this = self.clone();
         let pending = self.pending_requests.clone();
@@ -390,13 +389,11 @@ where
             let pubkeys = vec![pubkey];
             let mark_empty = mark_empty_if_not_found.then_some(vec![pubkey]);
             let mark_empty_ref = mark_empty.as_deref();
-            let program_ids_ref = program_ids.as_deref();
             let work = this.fetch_and_clone_accounts(
                 &pubkeys,
                 mark_empty_ref,
                 slot,
                 fetch_origin,
-                program_ids_ref,
             );
             let terminal = tokio::select! {
                 biased;
@@ -803,7 +800,6 @@ where
                 None,
                 Some(remote_slot),
                 AccountFetchOrigin::GetAccount,
-                None,
             )
             .await?;
         if result.missing_delegation_record.is_empty() {
@@ -932,7 +928,6 @@ where
                 None,
                 Some(account.remote_slot()),
                 AccountFetchOrigin::GetAccount,
-                None,
             )
             .await
         {
@@ -1581,14 +1576,13 @@ where
     /// - **slot**: optional slot to use as minimum context slot for the accounts being cloned
     ///
     /// NOTE: accounts fetched here have not been found in the bank
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids), fields(tx_sig = tracing::field::Empty))]
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found), fields(tx_sig = tracing::field::Empty))]
     async fn fetch_and_clone_accounts(
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if let Some(sig) = fetch_origin.signature() {
             tracing::Span::current().record("tx_sig", sig.to_string());
@@ -1613,7 +1607,6 @@ where
                 pubkeys,
                 mark_empty_if_not_found,
                 fetch_origin,
-                program_ids,
                 min_context_slot,
             )
             .await?;
@@ -1812,7 +1805,6 @@ where
                     &action_dependencies_to_fetch,
                     None,
                     fetch_origin,
-                    None,
                     min_context_slot,
                 )
                 .await?;
@@ -2056,14 +2048,13 @@ where
     ///
     /// Note: since we fetch each account only once in parallel, we also avoid fetching
     /// the same delegation record in parallel.
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids))]
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found))]
     pub async fn fetch_and_clone_accounts_with_dedup(
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
         // in the bank (e.g. native programs) or they don't exist and the transaction
@@ -2212,7 +2203,6 @@ where
                         mark_empty_set.contains(&waiter_pubkey),
                         slot,
                         fetch_origin,
-                        program_ids.map(|p| p.to_vec()),
                     );
                     waiters.push(waiter);
                 }

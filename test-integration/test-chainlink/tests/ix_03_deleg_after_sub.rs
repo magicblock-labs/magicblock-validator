@@ -26,9 +26,7 @@ async fn ixtest_deleg_after_subscribe_case2() {
             .ensure_accounts(
                 &pubkeys,
                 None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
+                AccountFetchOrigin::GetAccount)
             .await
             .unwrap();
 
@@ -46,9 +44,7 @@ async fn ixtest_deleg_after_subscribe_case2() {
             .ensure_accounts(
                 &pubkeys,
                 None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
+                AccountFetchOrigin::GetAccount)
             .await
             .unwrap();
 
@@ -75,9 +71,7 @@ async fn ixtest_deleg_after_subscribe_case2() {
             .ensure_accounts(
                 &pubkeys,
                 None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
+                AccountFetchOrigin::GetAccount)
             .await
             .unwrap();
 

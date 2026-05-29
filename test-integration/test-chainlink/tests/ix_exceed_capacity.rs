@@ -44,7 +44,7 @@ async fn ixtest_read_multiple_accounts_not_exceeding_capacity() {
         setup(subscribed_accounts_lru_capacity, pubkeys_len).await;
 
     ctx.chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
         .await
         .unwrap();
 
@@ -79,18 +79,14 @@ async fn ixtest_read_multiple_accounts_exceeding_capacity() {
         .ensure_accounts(
             &pubkeys[0..4],
             None,
-            AccountFetchOrigin::GetAccount,
-            None,
-        )
+            AccountFetchOrigin::GetAccount)
         .await
         .unwrap();
     ctx.chainlink
         .ensure_accounts(
             &pubkeys[4..8],
             None,
-            AccountFetchOrigin::GetAccount,
-            None,
-        )
+            AccountFetchOrigin::GetAccount)
         .await
         .unwrap();
 

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::{ChainlinkError, ChainlinkResult};
@@ -132,7 +132,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         match self {
             Self::Enabled(chainlink) => {
@@ -141,7 +140,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                         pubkeys,
                         mark_empty_if_not_found,
                         fetch_origin,
-                        program_ids,
                     )
                     .await
             }
@@ -167,13 +165,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
         match self {
             Self::Enabled(chainlink) => {
-                chainlink
-                    .fetch_accounts(pubkeys, fetch_origin, program_ids)
-                    .await
+                chainlink.fetch_accounts(pubkeys, fetch_origin).await
             }
             Self::Disabled { .. } => Ok(vec![None; pubkeys.len()]),
         }
@@ -495,16 +490,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         // Mark *all* pubkeys as empty-if-not-found
         let mark_empty_if_not_found = Some(pubkeys.as_slice());
 
-        // Extract programs from transaction instructions for metrics
-        let program_ids = extract_program_ids_from_transaction(tx);
-
         // Ensure accounts
         let res = self
             .ensure_accounts(
                 &pubkeys,
                 mark_empty_if_not_found,
                 AccountFetchOrigin::SendTransaction(*tx.signature()),
-                Some(&program_ids),
             )
             .await?;
 
@@ -514,13 +505,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// Same as fetch accounts, but does not return the accounts, just
     /// ensures were cloned into our validator if they exist on chain.
     /// If we're offline and not syncing accounts then this is a no-op.
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids))]
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found))]
     pub async fn ensure_accounts(
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(FetchAndCloneResult::default());
@@ -530,7 +520,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             pubkeys,
             mark_empty_if_not_found,
             fetch_origin,
-            program_ids,
         )
         .await
     }
@@ -539,12 +528,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// Otherwise ensures that the accounts exist on chain and were cloned into our validator
     /// and returns their state from the bank (which may be None if the account does not
     /// exist locally or on chain).
-    #[instrument(skip(self, pubkeys, program_ids))]
+    #[instrument(skip(self, pubkeys))]
     pub async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
         if tracing::enabled!(tracing::Level::TRACE) {
             let count = pubkeys.len();
@@ -558,13 +546,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 .collect());
         };
         let _ = self
-            .fetch_accounts_common(
-                fetch_cloner,
-                pubkeys,
-                None,
-                fetch_origin,
-                program_ids,
-            )
+            .fetch_accounts_common(fetch_cloner, pubkeys, None, fetch_origin)
             .await?;
 
         let accounts = pubkeys
@@ -574,20 +556,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(accounts)
     }
 
-    #[instrument(skip(
-        self,
-        fetch_cloner,
-        pubkeys,
-        mark_empty_if_not_found,
-        program_ids
-    ))]
+    #[instrument(skip(self, fetch_cloner, pubkeys, mark_empty_if_not_found,))]
     async fn fetch_accounts_common(
         &self,
         fetch_cloner: &FetchCloner<T, U, V, C>,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if tracing::enabled!(tracing::Level::TRACE) {
             let count = pubkeys.len();
@@ -607,7 +582,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 mark_empty_if_not_found,
                 None,
                 fetch_origin,
-                program_ids,
             )
             .await?;
         trace!("Fetched and cloned accounts");
@@ -660,18 +634,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 // Helper Functions
 // -----------------
 
-/// Extracts all unique program IDs from a transaction's instructions.
-fn extract_program_ids_from_transaction(
-    tx: &SanitizedTransaction,
-) -> Vec<Pubkey> {
-    let program_ids = tx
-        .message()
-        .program_instructions_iter()
-        .map(|(program_id, _)| *program_id)
-        .collect::<HashSet<_>>();
-    program_ids.into_iter().collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::{sync::Arc, time::Duration};
@@ -723,12 +685,7 @@ mod tests {
         let pubkey = Pubkey::new_unique();
 
         let result = chainlink
-            .ensure_accounts(
-                &[pubkey],
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
+            .ensure_accounts(&[pubkey], None, AccountFetchOrigin::GetAccount)
             .await;
 
         assert!(result
@@ -745,11 +702,7 @@ mod tests {
         let pubkeys = vec![Pubkey::new_unique(), Pubkey::new_unique()];
 
         let result = chainlink
-            .fetch_accounts(
-                &pubkeys,
-                AccountFetchOrigin::GetMultipleAccounts,
-                None,
-            )
+            .fetch_accounts(&pubkeys, AccountFetchOrigin::GetMultipleAccounts)
             .await;
 
         let accounts = result.expect("disabled fetch_accounts should succeed");
