@@ -8,7 +8,11 @@ use solana_pubkey::Pubkey;
 use solana_rent::Rent;
 use spl_token::state::{Account as SplAccount, AccountState};
 use spl_token_2022::{
-    extension::ExtensionType, state::Account as Token2022Account,
+    extension::{
+        set_account_type, BaseStateWithExtensionsMut, ExtensionType,
+        StateWithExtensionsMut,
+    },
+    state::Account as Token2022Account,
 };
 
 /// Creates a test ATA (Associated Token Account) with initialized state and zero balance.
@@ -45,12 +49,35 @@ pub fn create_token_2022_ata_account_with_extensions(
             account_extensions,
         )
         .expect("calculate Token-2022 account length");
-    create_ata_account_with_token_program(
+    let mut account = create_ata_account_with_token_program(
         owner,
         mint,
         TOKEN_2022_PROGRAM_ID,
         data_len,
-    )
+    );
+    initialize_token_2022_account_extensions(
+        &mut account.data,
+        account_extensions,
+    );
+    account
+}
+
+fn initialize_token_2022_account_extensions(
+    data: &mut [u8],
+    account_extensions: &[ExtensionType],
+) {
+    if account_extensions.is_empty() {
+        return;
+    }
+    set_account_type::<Token2022Account>(data)
+        .expect("set Token-2022 account type");
+    let mut state = StateWithExtensionsMut::<Token2022Account>::unpack(data)
+        .expect("unpack Token-2022 account");
+    for extension_type in account_extensions {
+        state
+            .init_account_extension_from_type(*extension_type)
+            .expect("initialize Token-2022 account extension");
+    }
 }
 
 fn create_ata_account_with_token_program(

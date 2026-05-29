@@ -5,6 +5,13 @@ use solana_account::{Account, AccountSharedData, WritableAccount};
 use solana_keypair::Keypair;
 use solana_sdk_ids::system_program;
 use solana_signer::Signer;
+use spl_token_2022::{
+    extension::{
+        immutable_owner::ImmutableOwner, BaseStateWithExtensions,
+        StateWithExtensions,
+    },
+    state::Account as Token2022Account,
+};
 use tokio::sync::mpsc;
 
 use super::*;
@@ -4187,9 +4194,15 @@ async fn test_delegated_eata_update_projects_existing_token_2022_ata_in_bank() {
         Pubkey::new_from_array(ata_data[32..64].try_into().unwrap());
     let projected_amount =
         u64::from_le_bytes(ata_data[64..72].try_into().unwrap());
+    let projected_token_account =
+        StateWithExtensions::<Token2022Account>::unpack(ata_data)
+            .expect("unpack projected Token-2022 ATA");
     assert_eq!(projected_mint, mint);
     assert_eq!(projected_owner, wallet_owner);
     assert_eq!(projected_amount, EATA_AMOUNT);
+    projected_token_account
+        .get_extension::<ImmutableOwner>()
+        .expect("projected Token-2022 ATA preserves ImmutableOwner");
     let legacy_ata = accounts_bank
         .get_account(&legacy_ata_pubkey)
         .expect("legacy ATA should remain in bank");
