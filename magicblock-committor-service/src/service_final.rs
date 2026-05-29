@@ -45,9 +45,7 @@ use crate::{
     intent_executor::ExecutionOutput,
 };
 
-// TODO(edwin): adapt
-const POISONED_MUTEX_MSG: &str =
-    "Mutex of RemoteScheduledCommitsProcessor.intents_meta_map is poisoned";
+const POISONED_MUTEX_MSG: &str = "ServiceInner intents_meta_map mutex poisoned";
 
 pub type ChainlinkImpl = Chainlink<
     ChainRpcClientImpl,
@@ -161,8 +159,7 @@ impl<L: LatestBlockProvider> IntentRpcClient for InternalIntentRpcClient<L> {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalRpcClientError {
-    // TODO(edwin)
-    #[error("asd")]
+    #[error("TransactionError: {0}")]
     TransactionError(#[from] TransactionError),
 }
 
@@ -173,7 +170,11 @@ pub enum IntentExecutionService<R> {
     Error,
 }
 
-impl<R: IntentRpcClient> IntentExecutionService<R> {
+impl<R> IntentExecutionService<R>
+where
+    R: IntentRpcClient,
+    R::Error: Into<IntentExecutionServiceError>,
+{
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
         intent_rpc_client: R,
@@ -194,20 +195,23 @@ impl<R: IntentRpcClient> IntentExecutionService<R> {
         mem::replace(self, Self::Error)
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> Result<(), IntentExecutionServiceError> {
         let Self::Created(service) = self.take() else {
-            // TODO(edwin): err InvalidState(String)
-            return;
+            return Err(IntentExecutionServiceError::InvalidState(
+                "service must be in Created state to start".into(),
+            ));
         };
 
         let handle = service.start();
         *self = Self::Started(handle);
+        Ok(())
     }
 
-    pub async fn stop(&mut self) -> Result<(), JoinError> {
+    pub async fn stop(&mut self) -> Result<(), IntentExecutionServiceError> {
         let Self::Started(handle) = self.take() else {
-            // TODO(edwin): err InvalidState(String)
-            return Ok(());
+            return Err(IntentExecutionServiceError::InvalidState(
+                "service must be in Started state to stop".into(),
+            ));
         };
 
         handle.await?;
@@ -231,7 +235,11 @@ pub struct ServiceInner<R> {
     intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
 }
 
-impl<R: IntentRpcClient> ServiceInner<R> {
+impl<R> ServiceInner<R>
+where
+    R: IntentRpcClient,
+    R::Error: Into<IntentExecutionServiceError>,
+{
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
         intent_rpc_client: R,
@@ -250,20 +258,19 @@ impl<R: IntentRpcClient> ServiceInner<R> {
     }
 
     pub fn start(self) -> JoinHandle<()> {
-        tokio::task::spawn(self.run())
-    }
-
-    async fn run(self) {
-        // TODO(edwin): move to start and make ExecutionHandle{main, result_worker}
         let result_subscriber = self.processor.subscribe_for_results();
         let cancellation_token = self.cancellation_token.clone();
-        let handle = tokio::spawn(Self::result_processor(
+        tokio::spawn(Self::result_processor(
             result_subscriber,
             cancellation_token,
             self.intents_meta_map.clone(),
             self.intent_rpc_client.clone(),
         ));
 
+        tokio::task::spawn(self.accept_worker())
+    }
+
+    async fn accept_worker(self) {
         let mut interval = tokio::time::interval(self.slot_interval);
         loop {
             tokio::select! {
@@ -380,9 +387,6 @@ impl<R: IntentRpcClient> ServiceInner<R> {
         intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
         intent_client: Arc<R>,
     ) {
-        const SUBSCRIPTION_ERR_MSG: &str =
-            "Failed to get subscription of results of BaseIntents execution";
-
         loop {
             let execution_result = tokio::select! {
                 biased;
@@ -408,12 +412,15 @@ impl<R: IntentRpcClient> ServiceInner<R> {
                 }
             };
 
-            ServiceInner::<R>::process_execution_result(
+            if let Err(err) = ServiceInner::<R>::process_execution_result(
                 &intent_client,
                 execution_result,
                 &intents_meta_map,
             )
-            .await;
+            .await
+            {
+                error!(error = ?err, "Failed process intent execution results");
+            }
         }
     }
 
@@ -444,42 +451,12 @@ impl<R: IntentRpcClient> ServiceInner<R> {
             intent_meta,
             execution_result,
         );
-        // TODO(edwin): convert
         intent_client
             .finalize_intent(sent_transaction, sent_commit)
-            .await;
+            .await
+            .map_err(Into::into)?;
 
         Ok(())
-    }
-
-    #[instrument(
-        skip(internal_transaction_scheduler, result, intent_meta),
-        fields(intent_id)
-    )]
-    async fn process_intent_result(
-        intent_id: u64,
-        internal_transaction_scheduler: &TransactionSchedulerHandle,
-        result: BroadcastedIntentExecutionResult,
-        mut intent_meta: ScheduledBaseIntentMeta,
-    ) {
-        let intent_sent_transaction =
-            std::mem::take(&mut intent_meta.intent_sent_transaction);
-        let sent_commit =
-            Self::build_sent_commit(intent_id, intent_meta, result);
-        register_scheduled_commit_sent(sent_commit);
-        let Ok(txn) = with_encoded(intent_sent_transaction) else {
-            // Unreachable case, all intent transactions are smaller than 64KB by construction
-            error!("Failed to bincode intent transaction");
-            return;
-        };
-        match internal_transaction_scheduler.execute(txn).await {
-            Ok(()) => {
-                debug!("Sent commit signaled")
-            }
-            Err(err) => {
-                error!(error = ?err, "Failed to signal sent commit");
-            }
-        }
     }
 
     fn build_sent_commit(
@@ -576,4 +553,11 @@ impl ScheduledBaseIntentMeta {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum IntentExecutionServiceError {}
+pub enum IntentExecutionServiceError {
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
+    #[error("JoinError: {0}")]
+    JoinError(#[from] JoinError),
+    #[error("IntentRpcClientError: {0}")]
+    IntentRpcClientError(#[from] InternalRpcClientError),
+}

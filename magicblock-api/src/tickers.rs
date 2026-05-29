@@ -1,16 +1,7 @@
-use std::{
-    sync::{
-        atomic::{ Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
-use magicblock_accounts_db::{AccountsDb};
-use magicblock_core::link::transactions::{
-     TransactionSchedulerHandle,
-};
-use magicblock_ledger::{Ledger};
+use magicblock_accounts_db::AccountsDb;
+use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;
 use tokio_util::sync::CancellationToken;
 use tracing::*;

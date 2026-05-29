@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use magicblock_committor_service::committor_processor::CommittorProcessor;
+use magicblock_committor_service::{
+    committor_processor::CommittorProcessor,
+    intent_executor::task_info_fetcher::TaskInfoFetcherResult,
+};
 use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use magicblock_metrics::metrics;
 use solana_instruction::error::InstructionError;
@@ -9,6 +12,7 @@ use tracing::error;
 
 #[derive(Clone)]
 pub struct MagicSysAdapter {
+    handle: tokio::runtime::Handle,
     committor_processor: Arc<CommittorProcessor>,
 }
 
@@ -22,10 +26,40 @@ impl MagicSysAdapter {
 
     const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-    pub fn new(committor_processor: Arc<CommittorProcessor>) -> Self {
+    pub fn new(
+        handle: tokio::runtime::Handle,
+        committor_processor: Arc<CommittorProcessor>,
+    ) -> Self {
         Self {
+            handle,
             committor_processor,
         }
+    }
+
+    fn fetch_current_commit_nonces_sync(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> std::sync::mpsc::Receiver<TaskInfoFetcherResult<HashMap<Pubkey, u64>>>
+    {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let committor_processor = self.committor_processor.clone();
+        let pubkeys = pubkeys.to_owned();
+
+        // This is required to switch from TransactionExecutor runtime
+        // blocking on it would cause a panic
+        let _guard = self.handle.enter();
+        tokio::spawn(async move {
+            let result = committor_processor
+                .fetch_current_commit_nonces(&pubkeys, min_context_slot)
+                .await;
+            if let Err(err) = sender.send(result) {
+                error!(error = ?err, "Failed to send result back");
+            }
+        });
+        drop(_guard);
+
+        receiver
     }
 }
 
@@ -47,9 +81,8 @@ impl MagicSys for MagicSysAdapter {
             commits.iter().map(|account| account.pubkey).collect();
 
         let _timer = metrics::start_fetch_commit_nonces_wait_timer();
-        let receiver = self
-            .committor_processor
-            .fetch_current_commit_nonces_sync(&pubkeys, min_context_slot);
+        let receiver =
+            self.fetch_current_commit_nonces_sync(&pubkeys, min_context_slot);
         receiver
             .recv_timeout(Self::FETCH_TIMEOUT)
             .map_err(|err| match err {

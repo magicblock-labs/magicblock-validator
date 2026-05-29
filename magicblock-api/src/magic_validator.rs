@@ -9,7 +9,6 @@ use std::{
 };
 
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_accounts::ScheduledCommitsProcessor;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
     initialize_aperture,
@@ -27,10 +26,7 @@ use magicblock_chainlink::{
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
-    service_final::{
-        IntentExecutionService,
-        InternalIntentRpcClient,
-    },
+    service_final::{IntentExecutionService, InternalIntentRpcClient},
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{
@@ -254,6 +250,7 @@ impl MagicValidator {
         );
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
+            tokio::runtime::Handle::current(),
             committor_processor.clone(),
         )));
 
@@ -935,7 +932,7 @@ impl MagicValidator {
         }
 
         let step_start = Instant::now();
-        self.intent_execution_service.start();
+        self.intent_execution_service.start()?;
         log_timing("startup", "intent_execution_service_start", step_start);
 
         let step_start = Instant::now();

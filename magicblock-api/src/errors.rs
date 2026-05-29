@@ -1,4 +1,5 @@
 use magicblock_accounts_db::error::AccountsDbError;
+use magicblock_committor_service::service_final::IntentExecutionServiceError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
@@ -37,6 +38,9 @@ pub enum ApiError {
     CommittorServiceError(
         Box<magicblock_committor_service::error::CommittorServiceError>,
     ),
+
+    #[error("IntentExecutionServiceError: {0}")]
+    IntentExecutionServiceError(#[from] IntentExecutionServiceError),
 
     #[error("Failed to load programs into bank: {0}")]
     FailedToLoadProgramsIntoBank(String),
