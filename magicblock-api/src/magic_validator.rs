@@ -26,7 +26,7 @@ use magicblock_chainlink::{
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
-    service_final::{IntentExecutionService, InternalIntentRpcClient},
+    service::{intent_client::InternalIntentRpcClient, IntentExecutionService},
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{

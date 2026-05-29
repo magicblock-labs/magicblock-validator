@@ -1,5 +1,5 @@
 use magicblock_accounts_db::error::AccountsDbError;
-use magicblock_committor_service::service_final::IntentExecutionServiceError;
+use magicblock_committor_service::service::IntentExecutionServiceError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 

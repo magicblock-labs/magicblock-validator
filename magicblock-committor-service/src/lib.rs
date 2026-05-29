@@ -14,7 +14,7 @@ pub mod transaction_preparator;
 pub mod transactions;
 pub(crate) mod utils;
 
-pub mod service_final;
+pub mod service;
 #[cfg(test)]
 pub mod test_utils;
 
