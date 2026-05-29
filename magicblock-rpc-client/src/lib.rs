@@ -3,7 +3,10 @@
 pub mod utils;
 
 use std::{
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -35,10 +38,7 @@ use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
-use tokio::{
-    sync::{Mutex as TMutex, RwLock},
-    time::sleep,
-};
+use tokio::{sync::Mutex as TMutex, time::sleep};
 use tracing::*;
 
 /// The encoding to use when sending transactions
@@ -241,15 +241,15 @@ const SLOT_CACHE_TTL: Duration = Duration::from_millis(400);
 
 #[derive(Default)]
 struct RpcClientCache {
-    blockhash: RwLock<Option<CachedBlockhash>>,
-    blockhash_refresh: TMutex<()>,
-    slot: RwLock<Option<CachedSlot>>,
-    slot_refresh: TMutex<()>,
+    blockhash: TMutex<Option<CachedBlockhash>>,
+    slot: TMutex<Option<CachedSlot>>,
 }
 
 #[derive(Clone, Copy)]
 struct CachedBlockhash {
     blockhash: Hash,
+    context_slot: Slot,
+    last_valid_block_height: u64,
     fetched_at: Instant,
 }
 
@@ -265,6 +265,7 @@ struct CachedSlot {
 pub struct MagicblockRpcClient {
     client: Arc<RpcClient>,
     cache: Arc<RpcClientCache>,
+    chain_slot: Option<Arc<AtomicU64>>,
 }
 
 impl From<RpcClient> for MagicblockRpcClient {
@@ -279,21 +280,47 @@ impl MagicblockRpcClient {
         Self {
             client,
             cache: Arc::new(RpcClientCache::default()),
+            chain_slot: None,
+        }
+    }
+
+    pub fn new_with_chain_slot(
+        client: Arc<RpcClient>,
+        chain_slot: Arc<AtomicU64>,
+    ) -> Self {
+        Self {
+            client,
+            cache: Arc::new(RpcClientCache::default()),
+            chain_slot: Some(chain_slot),
         }
     }
 
     pub async fn get_latest_blockhash(
         &self,
     ) -> MagicBlockRpcClientResult<Hash> {
-        if let Some(blockhash) = self.cached_blockhash().await {
+        let mut cached = self.cache.blockhash.lock().await;
+        if let Some(blockhash) = Self::fresh_cached_blockhash(&cached) {
             return Ok(blockhash);
         }
 
-        let _guard = self.cache.blockhash_refresh.lock().await;
-        if let Some(blockhash) = self.cached_blockhash().await {
-            return Ok(blockhash);
-        }
+        let (blockhash, context_slot, last_valid_block_height) =
+            self.fetch_latest_blockhash_with_context().await?;
+        *cached = Some(CachedBlockhash {
+            blockhash,
+            context_slot,
+            last_valid_block_height,
+            fetched_at: Instant::now(),
+        });
+        drop(cached);
 
+        self.record_observed_slot(context_slot).await;
+
+        Ok(blockhash)
+    }
+
+    async fn fetch_latest_blockhash_with_context(
+        &self,
+    ) -> MagicBlockRpcClientResult<(Hash, Slot, u64)> {
         let resp: Response<RpcBlockhash> = self
             .client
             .send(RpcRequest::GetLatestBlockhash, json!([self.commitment()]))
@@ -312,36 +339,31 @@ impl MagicblockRpcClient {
             ))
         })?;
 
-        self.cache_slot(resp.context.slot).await;
-        {
-            let mut cached = self.cache.blockhash.write().await;
-            *cached = Some(CachedBlockhash {
-                blockhash,
-                fetched_at: Instant::now(),
-            });
-        }
-
-        Ok(blockhash)
+        Ok((
+            blockhash,
+            resp.context.slot,
+            resp.value.last_valid_block_height,
+        ))
     }
 
     pub async fn get_slot(&self) -> MagicBlockRpcClientResult<Slot> {
         let slot = self.fetch_slot().await?;
-        self.cache_slot(slot).await;
+        self.record_observed_slot(slot).await;
         Ok(slot)
     }
 
     async fn get_cached_slot(&self) -> MagicBlockRpcClientResult<Slot> {
-        if let Some(slot) = self.cached_slot().await {
-            return Ok(slot);
-        }
-
-        let _guard = self.cache.slot_refresh.lock().await;
-        if let Some(slot) = self.cached_slot().await {
+        let mut cached = self.cache.slot.lock().await;
+        if let Some(slot) = Self::fresh_cached_slot(&cached) {
             return Ok(slot);
         }
 
         let slot = self.fetch_slot().await?;
-        self.cache_slot(slot).await;
+        Self::cache_slot(&mut cached, slot);
+        drop(cached);
+
+        self.update_chain_slot(slot);
+
         Ok(slot)
     }
 
@@ -352,35 +374,59 @@ impl MagicblockRpcClient {
             .map_err(|e| MagicBlockRpcClientError::GetSlot(Box::new(e)))
     }
 
-    pub async fn clear_cached_blockhash(&self) {
-        let _guard = self.cache.blockhash_refresh.lock().await;
-        let mut cached = self.cache.blockhash.write().await;
+    pub async fn invalidate_cached_blockhash(&self) {
+        let mut cached = self.cache.blockhash.lock().await;
         *cached = None;
     }
 
-    async fn cached_blockhash(&self) -> Option<Hash> {
-        let cached = self.cache.blockhash.read().await;
+    fn fresh_cached_blockhash(
+        cached: &Option<CachedBlockhash>,
+    ) -> Option<Hash> {
         cached
             .as_ref()
             .filter(|value| value.fetched_at.elapsed() < BLOCKHASH_CACHE_TTL)
-            .map(|value| value.blockhash)
+            .map(|value| {
+                trace!(
+                    context_slot = value.context_slot,
+                    last_valid_block_height = value.last_valid_block_height,
+                    "Using cached latest blockhash"
+                );
+                value.blockhash
+            })
     }
 
-    async fn cached_slot(&self) -> Option<Slot> {
-        let cached = self.cache.slot.read().await;
+    fn fresh_cached_slot(cached: &Option<CachedSlot>) -> Option<Slot> {
         cached
             .as_ref()
             .filter(|value| value.fetched_at.elapsed() < SLOT_CACHE_TTL)
             .map(|value| value.slot)
     }
 
-    async fn cache_slot(&self, slot: Slot) {
-        let mut cached = self.cache.slot.write().await;
+    async fn record_observed_slot(&self, slot: Slot) {
+        self.update_chain_slot(slot);
+        let mut cached = self.cache.slot.lock().await;
+        Self::cache_slot(&mut cached, slot);
+    }
+
+    fn cache_slot(cached: &mut Option<CachedSlot>, slot: Slot) {
         if cached.as_ref().is_none_or(|value| slot >= value.slot) {
             *cached = Some(CachedSlot {
                 slot,
                 fetched_at: Instant::now(),
             });
+        }
+    }
+
+    fn observed_chain_slot(&self) -> Option<Slot> {
+        self.chain_slot
+            .as_ref()
+            .map(|slot| slot.load(Ordering::Relaxed))
+            .filter(|slot| *slot > 0)
+    }
+
+    fn update_chain_slot(&self, slot: Slot) {
+        if let Some(chain_slot) = &self.chain_slot {
+            chain_slot.fetch_max(slot, Ordering::Relaxed);
         }
     }
 
@@ -504,7 +550,11 @@ impl MagicblockRpcClient {
     }
 
     pub async fn wait_for_next_slot(&self) -> MagicBlockRpcClientResult<Slot> {
-        let slot = self.get_cached_slot().await?;
+        let slot = if let Some(slot) = self.observed_chain_slot() {
+            slot
+        } else {
+            self.get_cached_slot().await?
+        };
         self.wait_for_higher_slot(slot).await
     }
 
@@ -513,7 +563,12 @@ impl MagicblockRpcClient {
         slot: Slot,
     ) -> MagicBlockRpcClientResult<Slot> {
         let higher_slot = loop {
-            let next_slot = self.get_cached_slot().await?;
+            let next_slot = if let Some(next_slot) = self.observed_chain_slot()
+            {
+                next_slot
+            } else {
+                self.get_cached_slot().await?
+            };
             if next_slot > slot {
                 break next_slot;
             }

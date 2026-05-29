@@ -1,7 +1,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     thread,
@@ -211,11 +211,19 @@ impl MagicValidator {
         };
         let accountsdb = Arc::new(accountsdb);
         let (mut dispatch, validator_channels) = link();
+        let shared_chain_slot =
+            (!Self::replication_mode_uses_disabled_chainlink(
+                &config.validator.replication_mode,
+            ))
+            .then(Arc::<AtomicU64>::default);
 
         let step_start = Instant::now();
-        let committor_service =
-            Self::init_committor_service(&config, ledger.latest_block())
-                .await?;
+        let committor_service = Self::init_committor_service(
+            &config,
+            ledger.latest_block(),
+            shared_chain_slot.clone(),
+        )
+        .await?;
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             committor_service.clone(),
@@ -228,6 +236,7 @@ impl MagicValidator {
                 &dispatch.transaction_scheduler,
                 &ledger.latest_block().clone(),
                 &accountsdb,
+                shared_chain_slot.clone(),
             )
             .await?,
         );
@@ -443,6 +452,7 @@ impl MagicValidator {
     async fn init_committor_service(
         config: &ValidatorParams,
         latest_block: &LatestBlock,
+        chain_slot: Option<Arc<AtomicU64>>,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
@@ -464,6 +474,7 @@ impl MagicValidator {
                 ),
                 actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
             },
+            chain_slot,
             actions_callback_executor,
         )?));
 
@@ -477,6 +488,7 @@ impl MagicValidator {
         transaction_scheduler: &TransactionSchedulerHandle,
         latest_block: &LatestBlock,
         accountsdb: &Arc<AccountsDb>,
+        chain_slot: Option<Arc<AtomicU64>>,
     ) -> ApiResult<ChainlinkImpl> {
         if Self::replication_mode_uses_disabled_chainlink(
             &config.validator.replication_mode,
@@ -536,6 +548,7 @@ impl MagicValidator {
             chainlink_config,
             &config.chainlink,
             config.storage.as_path(),
+            chain_slot.unwrap_or_default(),
         )
         .await?;
 

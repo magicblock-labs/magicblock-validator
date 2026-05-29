@@ -114,7 +114,7 @@ where
                     break Err(execution_err);
                 }
             };
-            self.intent_client.clear_cached_blockhash().await;
+            self.intent_client.invalidate_cached_blockhash().await;
             self.execution_report.dispose(cleanup);
 
             if self.current_attempt >= RECURSION_CEILING {

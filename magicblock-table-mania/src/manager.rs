@@ -647,7 +647,13 @@ impl TableMania {
                     );
                 }
 
-                sleep(Duration::from_millis(400)).await;
+                if let Err(err) = self.rpc_client.wait_for_next_slot().await {
+                    trace!(
+                        error = ?err,
+                        "Failed to wait for next slot; falling back to timed retry"
+                    );
+                    sleep(Duration::from_millis(450)).await;
+                }
                 if last_wait_log.elapsed() > Duration::from_secs(8) {
                     debug!("Still waiting for remote tables");
                     last_wait_log = Instant::now();
