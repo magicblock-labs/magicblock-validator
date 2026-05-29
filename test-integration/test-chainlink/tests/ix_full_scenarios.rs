@@ -165,9 +165,7 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
         let (fetched_pubkeys, fetched_strs) = {
             let fetched_accounts = ctx
                 .chainlink
-                .fetch_accounts(
-                    &all_pubkeys,
-                    AccountFetchOrigin::GetAccount)
+                .fetch_accounts(&all_pubkeys, AccountFetchOrigin::GetAccount)
                 .await
                 .unwrap();
             let mut fetched_pubkeys = all_pubkeys
@@ -215,9 +213,7 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
         let (fetched_pubkeys, fetched_strs) = {
             let fetched_accounts = ctx
                 .chainlink
-                .fetch_accounts(
-                    &all_pubkeys,
-                    AccountFetchOrigin::GetAccount)
+                .fetch_accounts(&all_pubkeys, AccountFetchOrigin::GetAccount)
                 .await
                 .unwrap();
             let mut fetched_pubkeys = all_pubkeys

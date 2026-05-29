@@ -165,7 +165,8 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
                 &all_pubkeys,
                 None,
                 AccountFetchOrigin::GetAccount,
-                None)
+                None,
+            )
             .await
             .unwrap();
 
@@ -196,7 +197,8 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
                 &all_pubkeys,
                 None,
                 AccountFetchOrigin::GetAccount,
-                None)
+                None,
+            )
             .await
             .unwrap();
         let remote_lamports =
@@ -229,7 +231,8 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
                 &all_pubkeys,
                 None,
                 AccountFetchOrigin::GetAccount,
-                None)
+                None,
+            )
             .await
             .unwrap();
         let remote_lamports =
