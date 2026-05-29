@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use magicblock_committor_service::CommittorService;
+use magicblock_committor_service::committor_processor::CommittorProcessor;
 use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use magicblock_metrics::metrics;
 use solana_instruction::error::InstructionError;
@@ -9,7 +9,7 @@ use tracing::error;
 
 #[derive(Clone)]
 pub struct MagicSysAdapter {
-    committor_service: Option<Arc<CommittorService>>,
+    committor_processor: Arc<CommittorProcessor>,
 }
 
 impl MagicSysAdapter {
@@ -19,13 +19,13 @@ impl MagicSysAdapter {
     const TIMEOUT_ERR: u32 = 0xE000_0001;
     /// Returned when the fetch of current commit nonces fails.
     const FETCH_ERR: u32 = 0xE000_0002;
-    /// Returned when no committor service is configured.
-    const NO_COMMITTOR_ERR: u32 = 0xE000_0003;
 
     const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-    pub fn new(committor_service: Option<Arc<CommittorService>>) -> Self {
-        Self { committor_service }
+    pub fn new(committor_processor: Arc<CommittorProcessor>) -> Self {
+        Self {
+            committor_processor,
+        }
     }
 }
 
@@ -37,12 +37,6 @@ impl MagicSys for MagicSysAdapter {
         if commits.is_empty() {
             return Ok(HashMap::new());
         }
-        let committor_service =
-            if let Some(committor_service) = &self.committor_service {
-                Ok(committor_service)
-            } else {
-                Err(InstructionError::Custom(Self::NO_COMMITTOR_ERR))
-            }?;
 
         let min_context_slot = commits
             .iter()
@@ -53,7 +47,8 @@ impl MagicSys for MagicSysAdapter {
             commits.iter().map(|account| account.pubkey).collect();
 
         let _timer = metrics::start_fetch_commit_nonces_wait_timer();
-        let receiver = committor_service
+        let receiver = self
+            .committor_processor
             .fetch_current_commit_nonces_sync(&pubkeys, min_context_slot);
         receiver
             .recv_timeout(Self::FETCH_TIMEOUT)

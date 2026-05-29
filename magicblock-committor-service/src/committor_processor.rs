@@ -40,9 +40,9 @@ const POISONED_MUTEX_MSG: &str =
     "CommittorProcessor pending messages mutex poisoned!";
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
-pub(crate) struct CommittorProcessor {
-    pub(crate) table_mania: TableMania,
-    pub(crate) authority: Keypair,
+pub struct CommittorProcessor {
+    table_mania: TableMania,
+    authority: Keypair,
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,

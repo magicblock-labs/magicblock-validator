@@ -15,9 +15,6 @@ pub enum ApiError {
     #[error("Accounts error: {0}")]
     AccountsError(Box<magicblock_accounts::errors::AccountsError>),
 
-    #[error("AccountCloner error: {0}")]
-    AccountClonerError(Box<magicblock_account_cloner::AccountClonerError>),
-
     #[error("Ledger error: {0}")]
     LedgerError(Box<magicblock_ledger::errors::LedgerError>),
 
@@ -115,12 +112,6 @@ pub enum ApiError {
 impl From<magicblock_accounts::errors::AccountsError> for ApiError {
     fn from(e: magicblock_accounts::errors::AccountsError) -> Self {
         Self::AccountsError(Box::new(e))
-    }
-}
-
-impl From<magicblock_account_cloner::AccountClonerError> for ApiError {
-    fn from(e: magicblock_account_cloner::AccountClonerError) -> Self {
-        Self::AccountClonerError(Box::new(e))
     }
 }
 

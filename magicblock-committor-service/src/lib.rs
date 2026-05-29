@@ -1,4 +1,4 @@
-mod committor_processor;
+pub mod committor_processor;
 mod compute_budget;
 pub mod config;
 mod consts;

@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     iter::chain,
+    mem,
     path::Path,
     sync::{Arc, Mutex},
     time::Duration,
@@ -34,7 +35,11 @@ use solana_hash::Hash;
 use solana_keypair::Keypair;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
-use tokio::{sync::broadcast, task, task::JoinHandle};
+use tokio::{
+    sync::broadcast,
+    task,
+    task::{JoinError, JoinHandle},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument};
 
@@ -161,20 +166,62 @@ impl<L: LatestBlockProvider> IntentRpcClient for InternalIntentRpcClient<L> {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalRpcClientError {
+    // TODO(edwin)
     #[error("asd")]
     TransactionError(#[from] TransactionError),
 }
 
-pub struct IntentExecutionServiceConfig<P: AsRef<Path>> {
-    pub authority: Keypair,
-    pub slot_interval: Duration,
-    pub persist_file: P,
-    pub base_chain_config: ChainConfig,
+pub enum IntentExecutionService<R> {
+    Created(ServiceInner<R>),
+    Started(JoinHandle<()>),
+    Stopped,
+    Error,
 }
 
-pub struct IntentExecutionService<R: IntentRpcClient> {
-    /// Validator/ER authority keypair
-    authority: Keypair,
+impl<R: IntentRpcClient> IntentExecutionService<R> {
+    pub fn new(
+        chainlink: Arc<ChainlinkImpl>,
+        intent_rpc_client: R,
+        processor: Arc<CommittorProcessor>,
+        slot_interval: Duration,
+        cancellation_token: CancellationToken,
+    ) -> Self {
+        Self::Created(ServiceInner::new(
+            chainlink,
+            intent_rpc_client,
+            processor,
+            slot_interval,
+            cancellation_token,
+        ))
+    }
+
+    fn take(&mut self) -> Self {
+        mem::replace(self, Self::Error)
+    }
+
+    pub fn start(&mut self) {
+        let Self::Created(service) = self.take() else {
+            // TODO(edwin): err InvalidState(String)
+            return;
+        };
+
+        let handle = service.start();
+        *self = Self::Started(handle);
+    }
+
+    pub async fn stop(&mut self) -> Result<(), JoinError> {
+        let Self::Started(handle) = self.take() else {
+            // TODO(edwin): err InvalidState(String)
+            return Ok(());
+        };
+
+        handle.await?;
+        *self = Self::Stopped;
+        Ok(())
+    }
+}
+
+pub struct ServiceInner<R> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
     /// ER client specific for Intent needs
@@ -189,42 +236,25 @@ pub struct IntentExecutionService<R: IntentRpcClient> {
     intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
 }
 
-impl<R: IntentRpcClient> IntentExecutionService<R> {
-    pub fn try_new<P, A>(
-        authority: Keypair,
+impl<R: IntentRpcClient> ServiceInner<R> {
+    pub fn new(
         chainlink: Arc<ChainlinkImpl>,
         intent_rpc_client: R,
-        persist_file: P,
-        base_chain_config: ChainConfig,
-        actions_callback_executor: A,
+        processor: Arc<CommittorProcessor>,
         slot_interval: Duration,
         cancellation_token: CancellationToken,
-    ) -> Self
-    where
-        P: AsRef<Path>,
-        A: ActionsCallbackScheduler,
-    {
-        let intents_meta_map = Arc::new(Mutex::default());
-        let processor = CommittorProcessor::try_new(
-            authority.insecure_clone(),
-            persist_file,
-            base_chain_config,
-            actions_callback_executor,
-        )
-        .unwrap(); // TODO(edwin): remove
-
+    ) -> Self {
         Self {
-            authority,
             chainlink,
             intent_rpc_client: Arc::new(intent_rpc_client),
-            processor: Arc::new(processor),
+            processor,
             slot_interval,
             cancellation_token,
-            intents_meta_map,
+            intents_meta_map: Arc::new(Mutex::default()),
         }
     }
 
-    pub async fn start(self) -> JoinHandle<()> {
+    pub fn start(self) -> JoinHandle<()> {
         tokio::task::spawn(self.run())
     }
 
@@ -383,7 +413,7 @@ impl<R: IntentRpcClient> IntentExecutionService<R> {
                 }
             };
 
-            IntentExecutionService::<R>::process_execution_result(
+            ServiceInner::<R>::process_execution_result(
                 &intent_client,
                 execution_result,
                 &intents_meta_map,
@@ -414,7 +444,7 @@ impl<R: IntentRpcClient> IntentExecutionService<R> {
 
         let sent_transaction =
             std::mem::take(&mut intent_meta.intent_sent_transaction);
-        let sent_commit = IntentExecutionService::<R>::build_sent_commit(
+        let sent_commit = ServiceInner::<R>::build_sent_commit(
             intent_id,
             intent_meta,
             execution_result,
