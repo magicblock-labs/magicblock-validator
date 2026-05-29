@@ -712,7 +712,10 @@ mod tests {
     };
     use crate::{
         accounts_bank::mock::AccountsBankStub,
-        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        remote_account_provider::{
+            chain_pubsub_client::mock::ChainPubsubClientMock,
+            SubscriptionReason,
+        },
         testing::{
             cloner_stub::ClonerStub, init_logger,
             rpc_client_mock::ChainRpcClientMock,
@@ -732,6 +735,8 @@ mod tests {
             ChainPubsubClientMock,
         >,
     > {
+        use std::sync::atomic::AtomicU64;
+
         use crate::{
             remote_account_provider::{
                 chain_slot::ChainSlot, RemoteAccountProvider,
@@ -741,7 +746,6 @@ mod tests {
                 utils::create_test_lru_cache,
             },
         };
-        use std::sync::atomic::AtomicU64;
 
         let rpc_client = ChainRpcClientMockBuilder::new()
             .slot(1)
@@ -927,5 +931,128 @@ mod tests {
 
         drop(removed_tx);
         handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_account_removals_skips_evict_when_account_is_watched_again(
+    ) {
+        init_logger();
+
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+        let (removed_tx, removed_rx) = mpsc::channel(8);
+        let remote_account_provider = test_remote_account_provider().await;
+
+        let pubkey = Pubkey::new_unique();
+        let owner = Pubkey::new_unique();
+        let account = AccountSharedData::new(1_000_000, 0, &owner);
+        accounts_bank.insert(pubkey, account);
+
+        let handle = InnerChainlink::<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            AccountsBankStub,
+            ClonerStub,
+        >::subscribe_account_removals(
+            &accounts_bank,
+            &cloner,
+            &remote_account_provider,
+            removed_rx,
+        );
+
+        remote_account_provider
+            .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+            .await
+            .expect("subscription acquisition should succeed");
+        assert!(remote_account_provider.is_watching(&pubkey));
+
+        removed_tx.send(pubkey).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                assert!(accounts_bank.get_account(&pubkey).is_some());
+                if remote_account_provider.is_watching(&pubkey) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("watched account should not be evicted");
+
+        assert!(remote_account_provider.is_watching(&pubkey));
+        assert!(accounts_bank.get_account(&pubkey).is_some());
+
+        drop(removed_tx);
+        handle.await.unwrap();
+        assert!(accounts_bank.get_account(&pubkey).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_defensive_eviction_blocks_same_pubkey_subscription_until_eviction_finishes(
+    ) {
+        init_logger();
+
+        let remote_account_provider = test_remote_account_provider().await;
+        let pubkey = Pubkey::new_unique();
+        assert!(!remote_account_provider.is_watching(&pubkey));
+
+        let eviction_started = Arc::new(tokio::sync::Notify::new());
+        let release_eviction = Arc::new(tokio::sync::Notify::new());
+
+        let eviction_provider = remote_account_provider.clone();
+        let eviction_pubkey = pubkey;
+        let eviction_started_for_task = eviction_started.clone();
+        let release_eviction_for_task = release_eviction.clone();
+        let eviction_task = tokio::spawn(async move {
+            eviction_provider
+                .evict_unwatched_with_subscription_lock(
+                    &eviction_pubkey,
+                    || async move {
+                        eviction_started_for_task.notify_one();
+                        release_eviction_for_task.notified().await;
+                    },
+                )
+                .await
+        });
+
+        eviction_started.notified().await;
+
+        let (result_tx, mut result_rx) = tokio::sync::oneshot::channel();
+        let subscribe_provider = remote_account_provider.clone();
+        let subscribe_pubkey = pubkey;
+        let subscribe_task = tokio::spawn(async move {
+            let result = subscribe_provider
+                .acquire_subscription(
+                    &subscribe_pubkey,
+                    SubscriptionReason::DirectAccount,
+                )
+                .await;
+            let _ = result_tx.send(result);
+        });
+
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(50),
+                &mut result_rx,
+            )
+            .await
+            .is_err(),
+            "same-pubkey subscribe must wait while defensive eviction holds the per-pubkey subscription lock"
+        );
+
+        release_eviction.notify_one();
+        assert!(eviction_task.await.unwrap());
+        let subscribe_result = tokio::time::timeout(
+            Duration::from_secs(1),
+            &mut result_rx,
+        )
+        .await
+        .expect("subscription should complete after eviction releases the lock")
+        .expect("subscription task should send its result");
+        subscribe_task.await.unwrap();
+
+        assert!(subscribe_result.is_ok());
+        assert!(remote_account_provider.is_watching(&pubkey));
     }
 }
