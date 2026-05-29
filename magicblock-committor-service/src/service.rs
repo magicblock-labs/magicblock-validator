@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::Path, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{atomic::AtomicU64, Arc},
+    time::Instant,
+};
 
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
@@ -113,6 +118,7 @@ impl CommittorActor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        chain_slot: Option<Arc<AtomicU64>>,
         actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
@@ -123,6 +129,7 @@ impl CommittorActor {
             authority,
             persist_file,
             chain_config,
+            chain_slot,
             actions_callback_executor,
         )?);
 
@@ -316,6 +323,7 @@ impl CommittorService {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        chain_slot: Option<Arc<AtomicU64>>,
         actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
@@ -332,6 +340,7 @@ impl CommittorService {
                 authority,
                 persist_file,
                 chain_config,
+                chain_slot,
                 actions_callback_executor,
             )?;
             tokio::spawn(async move {
