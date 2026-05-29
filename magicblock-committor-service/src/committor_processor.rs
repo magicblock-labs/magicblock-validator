@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::Path,
-    sync::Arc,
+    sync::Arc,  
+    sync::{atomic::AtomicU64, Arc},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -58,6 +59,7 @@ impl CommittorProcessor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        chain_slot: Option<Arc<AtomicU64>>,
         actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
@@ -69,7 +71,11 @@ impl CommittorProcessor {
             chain_config.commitment,
         );
         let rpc_client = Arc::new(rpc_client);
-        let magic_block_rpc_client = MagicblockRpcClient::new(rpc_client);
+        let magic_block_rpc_client = if let Some(chain_slot) = chain_slot {
+            MagicblockRpcClient::new_with_chain_slot(rpc_client, chain_slot)
+        } else {
+            MagicblockRpcClient::new(rpc_client)
+        };
 
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();

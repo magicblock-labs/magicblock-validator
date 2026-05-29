@@ -193,6 +193,7 @@ impl DeliveryPreparator {
         let cleanup_task = preparation_task.cleanup_task();
 
         self.cleanup(authority, &[cleanup_task], &[]).await?;
+        self.rpc_client.invalidate_cached_blockhash().await;
 
         // Restore preparation stage for retry
         *stage = CommitBufferStage::Preparation(preparation_task);
