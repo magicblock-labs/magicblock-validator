@@ -18,8 +18,24 @@ on:
         default: 'v0.1.0'
 
 jobs:
+  validate-release-branch:
+    name: Validate release branch
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v4
+        with:
+          path: magicblock-validator
+
+      - name: Check versions are aligned
+        shell: bash
+        run: |
+          cd magicblock-validator/.github && ./version-align.sh --check
+
   publish-binaries:
     name: Publish Binaries
+    if: github.event_name != 'push'
     runs-on: ${{ matrix.build.OS }}
     strategy:
       fail-fast: false
@@ -195,7 +211,8 @@ jobs:
 
   publish-wrapper-npm-package:
     name: Publish wrapper NPM packages
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
     needs: publish-binaries
     steps:
       - name: Checkout
