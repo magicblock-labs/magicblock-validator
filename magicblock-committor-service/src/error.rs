@@ -1,4 +1,3 @@
-use solana_signature::Signature;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 
@@ -19,13 +18,4 @@ pub enum CommittorServiceError {
 
     #[error("Attempt to schedule already scheduled message id: {0}")]
     RepeatingMessageError(u64),
-}
-
-// TODO(edwin): use or remove
-impl CommittorServiceError {
-    pub fn signature(&self) -> Option<Signature> {
-        match self {
-            _ => None,
-        }
-    }
 }
