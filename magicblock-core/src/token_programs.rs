@@ -83,6 +83,43 @@ pub fn try_derive_ata_address_and_bump_with_token_program(
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SupportedAtaPubkeys {
+    pub legacy: Option<Pubkey>,
+    pub token_2022: Option<Pubkey>,
+}
+
+impl SupportedAtaPubkeys {
+    pub fn token_2022_first(&self) -> [Option<Pubkey>; 2] {
+        [self.token_2022, self.legacy]
+    }
+
+    pub fn contains(&self, pubkey: &Pubkey) -> bool {
+        self.legacy.as_ref() == Some(pubkey)
+            || self.token_2022.as_ref() == Some(pubkey)
+    }
+}
+
+pub fn try_derive_supported_ata_pubkeys(
+    owner: &Pubkey,
+    mint: &Pubkey,
+) -> SupportedAtaPubkeys {
+    SupportedAtaPubkeys {
+        legacy: try_derive_ata_address_and_bump_with_token_program(
+            owner,
+            mint,
+            &TOKEN_PROGRAM_ID,
+        )
+        .map(|(pubkey, _)| pubkey),
+        token_2022: try_derive_ata_address_and_bump_with_token_program(
+            owner,
+            mint,
+            &TOKEN_2022_PROGRAM_ID,
+        )
+        .map(|(pubkey, _)| pubkey),
+    }
+}
+
 /// Derives the Enhanced Associated Token Account (eATA) Program Derived Address (PDA) for the given wallet owner and token mint.
 ///
 /// # Arguments

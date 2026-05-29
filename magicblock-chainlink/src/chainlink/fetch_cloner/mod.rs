@@ -16,9 +16,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
-    is_ata, try_derive_ata_address_and_bump_with_token_program,
-    try_derive_eata_address_and_bump, EphemeralAta, MaybeIntoAta,
-    EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+    try_derive_supported_ata_pubkeys, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use parking_lot::Mutex as PlMutex;
@@ -918,18 +916,12 @@ where
             account.data(),
             deleg_record.owner,
         )
-        .and_then(|(wallet_owner, mint)| {
-            [TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID]
+        .map(|(wallet_owner, mint)| {
+            try_derive_supported_ata_pubkeys(&wallet_owner, &mint)
+                .token_2022_first()
                 .into_iter()
-                .map(|token_program| {
-                    try_derive_ata_address_and_bump_with_token_program(
-                        &wallet_owner,
-                        &mint,
-                        &token_program,
-                    )
-                    .map(|(ata_pubkey, _)| ata_pubkey)
-                })
-                .collect::<Option<Vec<_>>>()
+                .flatten()
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
         let mut pubkeys_to_clone =
@@ -1347,67 +1339,18 @@ where
         deleg_record: Option<&DelegationRecord>,
         delegation_actions: &DelegationActions,
     ) -> Option<AccountCloneRequest> {
-        let deleg_record = deleg_record?;
-
-        if deleg_record.authority != self.validator_pubkey {
-            return None;
-        }
-        let (wallet_owner, mint) = delegation::parse_raw_eata_pda(
-            &eata_pubkey,
-            eata_account.data(),
-            deleg_record.owner,
-        )?;
-        let legacy_ata_pubkey =
-            try_derive_ata_address_and_bump_with_token_program(
-                &wallet_owner,
-                &mint,
-                &TOKEN_PROGRAM_ID,
-            )?
-            .0;
-        let token_2022_ata_pubkey =
-            try_derive_ata_address_and_bump_with_token_program(
-                &wallet_owner,
-                &mint,
-                &TOKEN_2022_PROGRAM_ID,
-            )?
-            .0;
-
-        let mut ata_pubkey = None;
-        let mut in_bank_ata = None;
-        for candidate_pubkey in [token_2022_ata_pubkey, legacy_ata_pubkey] {
-            if let Some(candidate_account) =
-                self.accounts_bank.get_account(&candidate_pubkey)
-            {
-                ata_pubkey = Some(candidate_pubkey);
-                in_bank_ata = Some(candidate_account);
-                break;
-            }
-        }
-        let in_bank_ata = in_bank_ata.as_ref()?;
-        let ata_pubkey = ata_pubkey?;
-        if in_bank_ata.delegated() || in_bank_ata.undelegating() {
-            return None;
-        }
-        let projected_ata = self.maybe_project_delegated_ata_from_eata(
-            in_bank_ata,
+        ata_projection::maybe_build_projected_ata_clone_request_from_eata_sub_update(
+            self,
+            eata_pubkey,
             eata_account,
             deleg_record,
-        )?;
-        Some(AccountCloneRequest {
-            pubkey: ata_pubkey,
-            account: projected_ata,
-            commit_frequency_ms: None,
-            delegation_actions: delegation_actions.clone(),
-            delegated_to_other: None,
-        })
+            delegation_actions,
+        )
     }
 
+    #[cfg(test)]
     fn is_known_empty_eata(&self, eata_pubkey: &Pubkey) -> bool {
-        self.known_empty_eatas.lock().get(eata_pubkey).is_some()
-    }
-
-    fn mark_eata_empty(&self, eata_pubkey: Pubkey) {
-        self.known_empty_eatas.lock().put(eata_pubkey, ());
+        ata_projection::is_known_empty_eata(self, eata_pubkey)
     }
 
     async fn maybe_project_ata_from_subscription_update(
@@ -1418,135 +1361,12 @@ where
         AccountSharedData,
         Option<(DelegationRecord, Option<DelegationActions>)>,
     ) {
-        let Some(ata_info) = is_ata(&ata_pubkey, &ata_account) else {
-            return (ata_account, None);
-        };
-
-        let Some((eata_pubkey, _)) =
-            try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
-        else {
-            return (ata_account, None);
-        };
-
-        let was_watching =
-            self.remote_account_provider.is_watching(&eata_pubkey);
-
-        // Ensure before cache checks; this keeps the subscription LRU warm
-        // without refcounting the projection reason on every ATA update.
-        let subscribed = match self
-            .ensure_subscription(
-                &eata_pubkey,
-                SubscriptionReason::AtaProjection,
-            )
-            .await
-        {
-            Ok(()) => true,
-            Err(err) => {
-                warn!(
-                    pubkey = %eata_pubkey,
-                    error = ?err,
-                    "Failed to subscribe to derived eATA"
-                );
-                false
-            }
-        };
-
-        // Known-empty eATAs skip the fetch only if the subscription was already live.
-        if was_watching && subscribed && self.is_known_empty_eata(&eata_pubkey)
-        {
-            return (ata_account, None);
-        }
-
-        let (eata_account, definitively_not_found) = match self
-            .remote_account_provider
-            .try_get_multi_until_slots_match(
-                &[eata_pubkey],
-                Some(MatchSlotsConfig {
-                    min_context_slot: Some(ata_account.remote_slot()),
-                    ..Default::default()
-                }),
-                AccountFetchOrigin::ProjectAta,
-            )
-            .await
-        {
-            Ok(mut accounts) => {
-                let popped = accounts.pop();
-                // Only `NotFound` proves absence; stale, missing, or failed fetches retry later.
-                let nf = matches!(popped, Some(RemoteAccount::NotFound(_)));
-                let fresh = popped.and_then(|a| a.fresh_account());
-                (fresh, nf)
-            }
-            Err(err) => {
-                debug!(
-                    pubkey = %eata_pubkey,
-                    error = ?err,
-                    "Failed to fetch eATA for projection"
-                );
-                (None, false)
-            }
-        };
-
-        let Some(eata_account) = eata_account else {
-            // Cache absence only after a confirmed NotFound and live subscription.
-            if definitively_not_found && subscribed {
-                self.mark_eata_empty(eata_pubkey);
-            }
-            return (ata_account, None);
-        };
-
-        let deleg_record = delegation::fetch_and_parse_delegation_record(
+        ata_projection::maybe_project_ata_from_subscription_update(
             self,
-            eata_pubkey,
-            ata_account.remote_slot().max(eata_account.remote_slot()),
-            AccountFetchOrigin::ProjectAta,
+            ata_pubkey,
+            ata_account,
         )
-        .await;
-
-        let Some(deleg_record) = deleg_record else {
-            return (ata_account, None);
-        };
-        let (deleg_record, delegation_actions) = deleg_record;
-
-        if let Some(projected_ata) = self.maybe_project_delegated_ata_from_eata(
-            &ata_account,
-            &eata_account,
-            &deleg_record,
-        ) {
-            return (projected_ata, Some((deleg_record, delegation_actions)));
-        }
-        (ata_account, Some((deleg_record, delegation_actions)))
-    }
-
-    fn maybe_project_delegated_ata_from_eata(
-        &self,
-        ata_account: &AccountSharedData,
-        eata_account: &AccountSharedData,
-        deleg_record: &DelegationRecord,
-    ) -> Option<AccountSharedData> {
-        if deleg_record.authority != self.validator_pubkey {
-            return None;
-        }
-
-        let projected_from_base_ata = if deleg_record.owner == EATA_PROGRAM_ID {
-            EphemeralAta::try_from_account_data(eata_account.data())
-                .and_then(|eata| eata.project_into_ata_account(ata_account))
-        } else {
-            None
-        };
-
-        let mut projected_ata = match projected_from_base_ata
-            .or_else(|| eata_account.maybe_into_ata(deleg_record.owner))
-        {
-            Some(projected_ata) => projected_ata,
-            None => {
-                return None;
-            }
-        };
-        let projected_slot =
-            ata_account.remote_slot().max(eata_account.remote_slot());
-        projected_ata.set_remote_slot(projected_slot);
-        projected_ata.set_delegated(true);
-        Some(projected_ata)
+        .await
     }
 
     /// Parses a delegation record from account data bytes.
