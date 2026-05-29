@@ -14,7 +14,7 @@ on:
       - 'clippy.toml'
       - 'Makefile'
       - 'test-integration/Makefile'
-      - '.github/workflows/ci-lint.yml'
+      - '.github/workflows/**'
       - '.github/actions/setup-build-env/**'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -25,7 +25,7 @@ on:
       - 'clippy.toml'
       - 'Makefile'
       - 'test-integration/Makefile'
-      - '.github/workflows/ci-lint.yml'
+      - '.github/workflows/**'
       - '.github/actions/setup-build-env/**'
 
 jobs:
