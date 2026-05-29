@@ -28,7 +28,7 @@ use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
     service_final::{
-        IntentExecutionService, IntentExecutionServiceConfig,
+        IntentExecutionService,
         InternalIntentRpcClient,
     },
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,

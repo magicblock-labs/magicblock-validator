@@ -1,21 +1,17 @@
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{ Ordering},
         Arc,
     },
     time::Duration,
 };
 
-use magicblock_accounts::ScheduledCommitsProcessor;
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use magicblock_accounts_db::{AccountsDb};
 use magicblock_core::link::transactions::{
-    with_encoded, TransactionSchedulerHandle,
+     TransactionSchedulerHandle,
 };
-use magicblock_ledger::{LatestBlock, Ledger};
-use magicblock_magic_program_api as magic_program;
+use magicblock_ledger::{Ledger};
 use magicblock_metrics::metrics;
-use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
-use solana_account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 

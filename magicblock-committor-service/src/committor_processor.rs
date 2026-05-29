@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -12,7 +12,6 @@ use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_signer::Signer;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 use tracing::{error, info, instrument};
 
@@ -42,7 +41,6 @@ type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
 pub struct CommittorProcessor {
     table_mania: TableMania,
-    authority: Keypair,
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
@@ -105,7 +103,6 @@ impl CommittorProcessor {
         ));
 
         Ok(Self {
-            authority,
             table_mania,
             commits_scheduler,
             persister,

@@ -1,14 +1,11 @@
 use std::{
     collections::{HashMap, HashSet},
-    iter::chain,
     mem,
-    path::Path,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use async_trait::async_trait;
-use base64::encode;
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_chainlink::{
@@ -21,7 +18,7 @@ use magicblock_chainlink::{
 };
 use magicblock_core::{
     link::transactions::{with_encoded, TransactionSchedulerHandle},
-    traits::{ActionsCallbackScheduler, LatestBlockProvider},
+    traits::LatestBlockProvider,
 };
 use magicblock_metrics::metrics;
 use magicblock_program::{
@@ -32,7 +29,6 @@ use magicblock_program::{
 };
 use solana_account::ReadableAccount;
 use solana_hash::Hash;
-use solana_keypair::Keypair;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tokio::{
@@ -44,8 +40,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument};
 
 use crate::{
-    committor_processor::CommittorProcessor, config::ChainConfig,
-    error::CommittorServiceError,
+    committor_processor::CommittorProcessor, error::CommittorServiceError,
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
 };
@@ -107,7 +102,7 @@ impl<L: LatestBlockProvider> InternalIntentRpcClient<L> {
             self.latest_block_provider.blockhash(),
         );
         let encoded_tx = with_encoded(tx).inspect_err(|err| {
-            error!("Failed to bincode intent transaction");
+            error!(error = ?err, "Failed to bincode intent transaction");
         })?;
         self.transaction_scheduler
             .execute(encoded_tx)
@@ -150,7 +145,7 @@ impl<L: LatestBlockProvider> IntentRpcClient for InternalIntentRpcClient<L> {
         register_scheduled_commit_sent(sent_commit);
         let txn = with_encoded(sent_tx).inspect_err(|err| {
             // Unreachable case, all intent transactions are smaller than 64KB by construction
-            error!("Failed to bincode intent transaction");
+            error!(error = ?err, "Failed to bincode intent transaction");
         })?;
         self.transaction_scheduler
             .execute(txn)
@@ -443,7 +438,7 @@ impl<R: IntentRpcClient> ServiceInner<R> {
         };
 
         let sent_transaction =
-            std::mem::take(&mut intent_meta.intent_sent_transaction);
+            mem::take(&mut intent_meta.intent_sent_transaction);
         let sent_commit = ServiceInner::<R>::build_sent_commit(
             intent_id,
             intent_meta,
