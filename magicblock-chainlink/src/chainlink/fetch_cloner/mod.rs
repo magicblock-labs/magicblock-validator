@@ -568,6 +568,21 @@ where
             return;
         }
 
+        // A late forwarded update can arrive after an account was removed from
+        // the provider watch set. If a new subscription already won the race,
+        // is_watching is true and this update can be processed normally. If this
+        // update wins before acquire_subscription completes, the update is dropped;
+        // the new subscription path performs its own fetch and clones fresh state.
+        let update_slot = update.account.slot();
+        if !self.remote_account_provider.is_watching(&pubkey) {
+            trace!(
+                pubkey = %pubkey,
+                update_slot,
+                "Dropping subscription update for account that is no longer watched"
+            );
+            return;
+        }
+
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
