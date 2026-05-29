@@ -44,6 +44,7 @@ use magicblock_chainlink::{
 };
 use magicblock_core::link::transactions::{
     with_encoded, SanitizeableTransaction, TransactionSchedulerHandle,
+    WithEncoded,
 };
 use magicblock_ledger::LatestBlock;
 use magicblock_magic_program_api::{
@@ -122,7 +123,7 @@ impl ChainlinkCloner {
 
     async fn send_sanitized_tx(
         &self,
-        tx: SanitizedTransaction,
+        tx: WithEncoded<SanitizedTransaction>,
     ) -> ClonerResult<()> {
         self.tx_scheduler.execute(tx).await?;
         Ok(())
@@ -560,12 +561,12 @@ impl ChainlinkCloner {
 
     async fn send_actions_tx(
         &self,
-        actions_tx: Option<SanitizedTransaction>,
+        actions_tx: Option<WithEncoded<SanitizedTransaction>>,
     ) -> ClonerResult<Option<()>> {
         let Some(sanitized_tx) = actions_tx else {
             return Ok(None);
         };
-        let action_tx_sig = *sanitized_tx.signature();
+        let action_tx_sig = *sanitized_tx.txn.signature();
         {
             let mut sent = self.lock_sent_action_txs();
             if sent.contains(&action_tx_sig) {
@@ -595,7 +596,7 @@ impl ChainlinkCloner {
         &self,
         actions: &DelegationActions,
         recent_blockhash: Hash,
-    ) -> ClonerResult<Option<SanitizedTransaction>> {
+    ) -> ClonerResult<Option<WithEncoded<SanitizedTransaction>>> {
         if actions.is_empty() {
             return Ok(None);
         }
@@ -605,7 +606,12 @@ impl ChainlinkCloner {
             Some(&validator_authority_id()),
         );
         tx.partial_sign(&[&validator_authority()], recent_blockhash);
-        Ok(Some(tx.sanitize(false)?))
+        let tx = with_encoded(tx)?;
+        let tx = WithEncoded {
+            encoded: tx.encoded,
+            txn: tx.txn.sanitize(false)?,
+        };
+        Ok(Some(tx))
     }
 }
 
@@ -630,7 +636,7 @@ impl Cloner for ChainlinkCloner {
         let data_len = request.account.data().len();
         let actions_tx =
             self.create_actions_tx(&request.delegation_actions, blockhash)?;
-        let actions_tx_sig = actions_tx.as_ref().map(|tx| *tx.signature());
+        let actions_tx_sig = actions_tx.as_ref().map(|tx| *tx.txn.signature());
 
         // Small account: single tx
         if data_len <= MAX_INLINE_DATA_SIZE {

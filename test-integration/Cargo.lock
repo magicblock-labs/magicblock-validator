@@ -1066,7 +1066,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "proc-macro2",
@@ -1086,7 +1086,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "regex",
@@ -2375,7 +2375,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2469,7 +2469,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2913,10 +2913,10 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "bincode",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "serde",
  "solana-program",
 ]
@@ -4165,26 +4165,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "machineid-rs"
-version = "1.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35ceb4d434d69d7199abc3036541ba6ef86767a4356e3077d5a3419f85b70b14"
-dependencies = [
- "hex",
- "hmac 0.12.1",
- "md-5",
- "serde",
- "serde_json",
- "sha-1",
- "sha2 0.10.9",
- "sysinfo",
- "uuid",
- "whoami",
- "winreg 0.11.0",
- "wmi",
-]
-
-[[package]]
 name = "magic-domain-program"
 version = "0.3.0"
 source = "git+https://github.com/magicblock-labs/magic-domain-program.git?rev=335a22#335a22ba5aa7b8c4bc84d5053444c74c3b05cdac"
@@ -4197,7 +4177,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "async-trait",
  "bincode",
@@ -4205,7 +4185,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "magicblock-program",
  "rand 0.9.2",
  "solana-account",
@@ -4225,7 +4205,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "async-trait",
  "magicblock-committor-service",
@@ -4238,7 +4218,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "flate2",
  "lmdb-rkv",
@@ -4256,7 +4236,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -4272,7 +4252,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "agave-feature-set",
  "agave-geyser-plugin-interface",
@@ -4318,7 +4298,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "agave-feature-set",
  "anyhow",
@@ -4335,7 +4315,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -4380,7 +4360,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -4395,7 +4375,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "magicblock-metrics",
  "parking_lot",
  "scc",
@@ -4436,7 +4416,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "borsh",
  "paste",
@@ -4451,7 +4431,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -4498,7 +4478,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "clap",
  "derive_more",
@@ -4516,12 +4496,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "bincode",
  "bytes",
  "flume",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "serde",
  "solana-account",
  "solana-account-decoder",
@@ -4603,7 +4583,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -4652,7 +4632,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "bincode",
  "const-crypto",
@@ -4663,7 +4643,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "http-body-util",
  "hyper 1.8.1",
@@ -4678,7 +4658,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -4723,12 +4703,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -4757,13 +4737,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "async-nats",
  "bincode",
  "bytes",
  "futures",
- "machineid-rs",
  "magicblock-accounts-db",
  "magicblock-config",
  "magicblock-core",
@@ -4771,6 +4750,7 @@ dependencies = [
  "notify",
  "serde",
  "solana-hash 3.1.0",
+ "solana-pubkey 3.0.0",
  "solana-transaction",
  "solana-transaction-error",
  "thiserror 2.0.18",
@@ -4782,7 +4762,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "futures-util",
  "solana-account",
@@ -4805,12 +4785,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "bincode",
  "futures-util",
  "magicblock-core",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "solana-instruction",
  "solana-keypair",
  "solana-message",
@@ -4826,7 +4806,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -4852,7 +4832,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "bincode",
  "chrono",
@@ -4878,7 +4858,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
  "magicblock-program",
@@ -4895,7 +4875,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "agave-feature-set",
  "git-version",
@@ -4927,16 +4907,6 @@ name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
-
-[[package]]
-name = "md-5"
-version = "0.10.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
-dependencies = [
- "cfg-if",
- "digest 0.10.7",
-]
 
 [[package]]
 name = "memchr"
@@ -5207,21 +5177,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "ntapi"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5896,7 +5857,7 @@ dependencies = [
  "bincode",
  "borsh",
  "ephemeral-rollups-sdk",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "serde",
  "solana-program",
  "solana-system-interface 3.2.0",
@@ -5921,7 +5882,7 @@ dependencies = [
  "borsh",
  "ephemeral-rollups-sdk",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "rkyv 0.7.45",
  "solana-program",
  "solana-system-interface 3.2.0",
@@ -5989,8 +5950,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes",
- "heck 0.5.0",
- "itertools 0.12.1",
+ "heck 0.4.1",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "once_cell",
@@ -6009,8 +5970,8 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.13.0",
+ "heck 0.4.1",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "petgraph 0.8.3",
@@ -6031,7 +5992,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -6044,7 +6005,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -6457,7 +6418,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "rustix",
- "windows 0.62.2",
+ "windows",
 ]
 
 [[package]]
@@ -6547,7 +6508,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "webpki-roots 0.25.4",
- "winreg 0.50.0",
+ "winreg",
 ]
 
 [[package]]
@@ -6768,7 +6729,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6869,7 +6830,7 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7006,7 +6967,7 @@ dependencies = [
  "integration-test-tools",
  "magicblock-core",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "magicblock-program",
  "program-schedulecommit",
  "rand 0.8.5",
@@ -7027,7 +6988,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
@@ -7311,17 +7272,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "sha-1"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5058ada175748e33390e40e872bd0fe59a19f265d0158daa551c5a88a76009c"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "digest 0.10.7",
 ]
 
 [[package]]
@@ -9869,7 +9819,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "bincode",
  "bs58",
@@ -11048,21 +10998,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sysinfo"
-version = "0.29.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd727fc423c2060f6c92d9534cef765c65a6ed3f428a03d7def74a8c4348e666"
-dependencies = [
- "cfg-if",
- "core-foundation-sys",
- "libc",
- "ntapi",
- "once_cell",
- "rayon",
- "winapi",
-]
-
-[[package]]
 name = "system-configuration"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11158,7 +11093,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11246,7 +11181,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "guinea",
  "magicblock-accounts-db",
@@ -11349,7 +11284,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
- "magicblock-magic-program-api 0.11.1",
+ "magicblock-magic-program-api 0.11.2",
  "program-flexi-counter",
  "solana-rpc-client-api",
  "solana-sdk",
@@ -12303,12 +12238,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasite"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8dad83b4f25e74f184f64c43b150b91efe7647395b42289f38e50566d82855b"
-
-[[package]]
 name = "wasm-bindgen"
 version = "0.2.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12420,17 +12349,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "whoami"
-version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d4a4db5077702ca3015d3d02d74974948aba2ad9e12ab7df718ee64ccd7e97d"
-dependencies = [
- "libredox",
- "wasite",
- "web-sys",
-]
-
-[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12501,17 +12419,6 @@ dependencies = [
 
 [[package]]
 name = "windows"
-version = "0.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e686886bc078bc1b0b600cac0147aadb815089b6e4da64016cbd754b6342700f"
-dependencies = [
- "windows-implement 0.48.0",
- "windows-interface 0.48.0",
- "windows-targets 0.48.5",
-]
-
-[[package]]
-name = "windows"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
@@ -12537,8 +12444,8 @@ version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
 dependencies = [
- "windows-implement 0.60.2",
- "windows-interface 0.59.3",
+ "windows-implement",
+ "windows-interface",
  "windows-link",
  "windows-result",
  "windows-strings",
@@ -12557,17 +12464,6 @@ dependencies = [
 
 [[package]]
 name = "windows-implement"
-version = "0.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e2ee588991b9e7e6c8338edf3333fbe4da35dc72092643958ebb43f0ab2c49c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "windows-implement"
 version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
@@ -12575,17 +12471,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6fb8df20c9bcaa8ad6ab513f7b40104840c8867d5751126e4df3b08388d0cc7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -12667,15 +12552,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]
@@ -12961,16 +12837,6 @@ dependencies = [
 
 [[package]]
 name = "winreg"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76a1a57ff50e9b408431e8f97d5456f2807f8eb2a2cd79b06068fc87f8ecf189"
-dependencies = [
- "cfg-if",
- "winapi",
-]
-
-[[package]]
-name = "winreg"
 version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
@@ -12984,20 +12850,6 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
-
-[[package]]
-name = "wmi"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daffb44abb7d2e87a1233aa17fdbde0d55b890b32a23a1f908895b87fa6f1a00"
-dependencies = [
- "chrono",
- "futures",
- "log",
- "serde",
- "thiserror 1.0.69",
- "windows 0.48.0",
-]
 
 [[package]]
 name = "writeable"
