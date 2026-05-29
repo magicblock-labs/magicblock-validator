@@ -289,6 +289,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             Some(Self::subscribe_account_removals(
                 accounts_bank,
                 cloner,
+                fetch_cloner.remote_account_provider(),
                 removed_accounts_rx,
             ))
         } else {
@@ -383,10 +384,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     fn subscribe_account_removals(
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         mut removed_accounts_rx: mpsc::Receiver<Pubkey>,
     ) -> task::JoinHandle<()> {
         let accounts_bank = accounts_bank.clone();
         let cloner = cloner.clone();
+        let remote_account_provider = remote_account_provider.clone();
 
         task::spawn(async move {
             while let Some(pubkey) = removed_accounts_rx.recv().await {
@@ -420,15 +423,33 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                     continue;
                 }
 
-                trace!(
-                    pubkey = %pubkey,
-                    "Submitting eviction transaction"
-                );
-                if let Err(err) = cloner.evict_account(pubkey).await {
-                    warn!(
+                // Removal notifications can race with a new acquire_subscription for the same
+                // pubkey. The provider helper holds the same per-pubkey subscription lock used
+                // by acquire/release while it re-checks is_watching and submits eviction. This
+                // prevents an EvictAccount transaction from being submitted after a fresh
+                // subscription has made the account watched again, without blocking unrelated
+                // pubkeys on the defensive-eviction slow path.
+                let cloner = cloner.clone();
+                let evicted = remote_account_provider
+                    .evict_unwatched_with_subscription_lock(&pubkey, || async move {
+                        trace!(
+                            pubkey = %pubkey,
+                            "Submitting eviction transaction for unwatched account"
+                        );
+                        if let Err(err) = cloner.evict_account(pubkey).await {
+                            warn!(
+                                pubkey = %pubkey,
+                                error = ?err,
+                                "Failed to submit eviction transaction"
+                            );
+                        }
+                    })
+                    .await;
+
+                if !evicted {
+                    trace!(
                         pubkey = %pubkey,
-                        error = ?err,
-                        "Failed to submit eviction transaction"
+                        "Skipping removal notification because account is watched again"
                     );
                 }
             }
@@ -705,6 +726,48 @@ mod tests {
         ClonerStub,
     >;
 
+    async fn test_remote_account_provider() -> Arc<
+        crate::remote_account_provider::RemoteAccountProvider<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+        >,
+    > {
+        use crate::{
+            remote_account_provider::{
+                chain_slot::ChainSlot, RemoteAccountProvider,
+            },
+            testing::{
+                rpc_client_mock::ChainRpcClientMockBuilder,
+                utils::create_test_lru_cache,
+            },
+        };
+        use std::sync::atomic::AtomicU64;
+
+        let rpc_client = ChainRpcClientMockBuilder::new()
+            .slot(1)
+            .clock_sysvar_for_slot(1)
+            .build();
+        let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+        let pubsub_client =
+            ChainPubsubClientMock::new(updates_sender, updates_receiver);
+        let (forward_tx, _forward_rx) = mpsc::channel(1_000);
+        let (subscribed_accounts, config) = create_test_lru_cache(1000);
+        let chain_slot = Arc::<AtomicU64>::default();
+
+        Arc::new(
+            RemoteAccountProvider::new(
+                rpc_client,
+                pubsub_client,
+                forward_tx,
+                &config,
+                subscribed_accounts,
+                ChainSlot::new(chain_slot),
+            )
+            .await
+            .expect("test remote account provider should be constructed"),
+        )
+    }
+
     fn disabled_chainlink(
     ) -> (Arc<AccountsBankStub>, TestReplicationModeAwareChainlink) {
         let accounts_bank = Arc::new(AccountsBankStub::default());
@@ -811,6 +874,7 @@ mod tests {
         let accounts_bank = Arc::new(AccountsBankStub::default());
         let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
         let (removed_tx, removed_rx) = mpsc::channel(8);
+        let remote_account_provider = test_remote_account_provider().await;
 
         let delegated_pubkey = Pubkey::new_unique();
         let undelegating_pubkey = Pubkey::new_unique();
@@ -836,7 +900,10 @@ mod tests {
             AccountsBankStub,
             ClonerStub,
         >::subscribe_account_removals(
-            &accounts_bank, &cloner, removed_rx
+            &accounts_bank,
+            &cloner,
+            &remote_account_provider,
+            removed_rx,
         );
 
         removed_tx.send(delegated_pubkey).await.unwrap();

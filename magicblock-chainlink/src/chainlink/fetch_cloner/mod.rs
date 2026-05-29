@@ -258,6 +258,12 @@ where
         &self.cloner
     }
 
+    pub(crate) fn remote_account_provider(
+        &self,
+    ) -> &Arc<RemoteAccountProvider<T, U>> {
+        &self.remote_account_provider
+    }
+
     #[cfg(test)]
     fn has_pending_request(&self, pubkey: &Pubkey) -> bool {
         self.pending_requests.contains(pubkey)
@@ -573,6 +579,9 @@ where
         // is_watching is true and this update can be processed normally. If this
         // update wins before acquire_subscription completes, the update is dropped;
         // the new subscription path performs its own fetch and clones fresh state.
+        // If stale state is still present locally, cleanup is routed through the
+        // existing removal listener, which serializes the final is_watching check and
+        // eviction submission against same-pubkey subscription transitions.
         let update_slot = update.account.slot();
         if !self.remote_account_provider.is_watching(&pubkey) {
             trace!(
@@ -580,6 +589,19 @@ where
                 update_slot,
                 "Dropping subscription update for account that is no longer watched"
             );
+            if self.accounts_bank.get_account(&pubkey).is_some() {
+                if let Err(err) = self
+                    .remote_account_provider
+                    .send_removal_update(pubkey)
+                    .await
+                {
+                    warn!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Failed to enqueue stale subscription update removal"
+                    );
+                }
+            }
             return;
         }
 
