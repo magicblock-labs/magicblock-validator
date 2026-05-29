@@ -235,7 +235,7 @@ impl MagicValidator {
         let committor_processor = {
             let processor = Self::init_committor_processor(
                 &config,
-                &ledger.latest_block(),
+                ledger.latest_block(),
             )?;
             Arc::new(processor)
         };
