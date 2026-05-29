@@ -70,8 +70,7 @@ use magicblock_metrics::{
     metrics::{
         inc_account_fetches_failed, inc_account_fetches_found,
         inc_account_fetches_not_found, inc_account_fetches_success,
-        inc_per_program_account_fetch_stats, set_monitored_accounts_count,
-        AccountFetchOrigin, ProgramFetchResult,
+        set_monitored_accounts_count, AccountFetchOrigin,
     },
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
@@ -1902,7 +1901,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let commitment = self.rpc_client.commitment();
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
-        let program_ids = program_ids.map(|ids| ids.to_vec());
+        let _ = program_ids;
         tokio::spawn(async move {
             use RemoteAccount::*;
 
@@ -1921,15 +1920,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     "{error_msg}"
                 );
                 inc_account_fetches_failed(pubkeys.len() as u64);
-                if let Some(program_ids) = &program_ids {
-                    for program_id in program_ids {
-                        inc_per_program_account_fetch_stats(
-                            &program_id.to_string(),
-                            ProgramFetchResult::Failed,
-                            pubkeys.len() as u64,
-                        );
-                    }
-                }
 
                 for pubkey in &pubkeys {
                     // Update metrics
@@ -2147,26 +2137,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             inc_account_fetches_success(pubkeys.len() as u64);
             inc_account_fetches_found(fetch_origin, found_count);
             inc_account_fetches_not_found(fetch_origin, not_found_count);
-
-            // Record per-program metrics if programs were provided
-            if let Some(program_ids) = &program_ids {
-                for program_id in program_ids {
-                    if found_count > 0 {
-                        inc_per_program_account_fetch_stats(
-                            &program_id.to_string(),
-                            ProgramFetchResult::Found,
-                            found_count,
-                        );
-                    }
-                    if not_found_count > 0 {
-                        inc_per_program_account_fetch_stats(
-                            &program_id.to_string(),
-                            ProgramFetchResult::NotFound,
-                            not_found_count,
-                        );
-                    }
-                }
-            }
 
             if tracing::enabled!(tracing::Level::TRACE) {
                 let pubkeys = pubkeys

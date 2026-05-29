@@ -7,7 +7,6 @@ use prometheus::{
 };
 pub use types::{
     AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
-    ProgramFetchResult,
 };
 
 mod types;
@@ -286,14 +285,6 @@ lazy_static::lazy_static! {
     )
     .unwrap();
 
-    pub static ref PER_PROGRAM_ACCOUNT_FETCH_STATS: IntCounterVec = IntCounterVec::new(
-        Opts::new(
-            "per_program_account_fetch_stats",
-            "Per-program account fetch statistics (failed/found/not_found)",
-        ),
-        &["program", "result"],
-    )
-    .unwrap();
 
     pub static ref PER_PROGRAM_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
@@ -607,7 +598,6 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
-        register!(PER_PROGRAM_ACCOUNT_FETCH_STATS);
         register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
@@ -846,16 +836,6 @@ pub fn inc_account_subscription_activations_count(client_id: &impl LabelValue) {
     ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT
         .with_label_values(&[client_id.value()])
         .inc();
-}
-
-pub fn inc_per_program_account_fetch_stats(
-    program_id: &str,
-    result: ProgramFetchResult,
-    count: u64,
-) {
-    PER_PROGRAM_ACCOUNT_FETCH_STATS
-        .with_label_values(&[program_id, result.value()])
-        .inc_by(count);
 }
 
 pub fn inc_per_program_account_updates_count(
