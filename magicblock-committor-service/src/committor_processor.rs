@@ -40,7 +40,7 @@ const POISONED_MUTEX_MSG: &str =
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
 pub struct CommittorProcessor {
-    table_mania: TableMania,
+    _table_mania: TableMania,
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
@@ -103,7 +103,7 @@ impl CommittorProcessor {
         ));
 
         Ok(Self {
-            table_mania,
+            _table_mania: table_mania,
             commits_scheduler,
             persister,
             task_info_fetcher,

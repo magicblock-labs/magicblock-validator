@@ -1059,9 +1059,7 @@ async fn ix_commit_local(
         })
         .collect();
 
-        let statuses = processor
-            .get_commit_statuses(base_intent.id)
-            .unwrap();
+        let statuses = processor.get_commit_statuses(base_intent.id).unwrap();
         debug!(
             "{}",
             statuses
@@ -1117,7 +1115,6 @@ async fn ix_commit_local(
         strategies, expected_strategies,
         "Strategies used do not match expected ones"
     );
-
 }
 
 fn validate_account(
