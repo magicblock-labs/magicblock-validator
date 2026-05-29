@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use intent_client::{IntentRpcClient, InternalRpcClientError};
+use intent_client::{ERIntentClient, InternalIntentClientError};
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
@@ -56,7 +56,7 @@ pub enum IntentExecutionService<R> {
 
 impl<R> IntentExecutionService<R>
 where
-    R: IntentRpcClient,
+    R: ERIntentClient,
     R::Error: Into<IntentExecutionServiceError>,
 {
     pub fn new(
@@ -121,7 +121,7 @@ pub struct ServiceInner<R> {
 
 impl<R> ServiceInner<R>
 where
-    R: IntentRpcClient,
+    R: ERIntentClient,
     R::Error: Into<IntentExecutionServiceError>,
 {
     pub fn new(
@@ -332,7 +332,7 @@ where
             execution_result,
         );
         intent_client
-            .finalize_intent(sent_transaction, sent_commit)
+            .notify_commit_sent(sent_transaction, sent_commit)
             .await
             .map_err(Into::into)?;
 
@@ -439,5 +439,5 @@ pub enum IntentExecutionServiceError {
     #[error("JoinError: {0}")]
     JoinError(#[from] JoinError),
     #[error("IntentRpcClientError: {0}")]
-    IntentRpcClientError(#[from] InternalRpcClientError),
+    IntentRpcClientError(#[from] InternalIntentClientError),
 }

@@ -18,7 +18,7 @@ use solana_transaction_error::TransactionError;
 use tracing::{debug, error};
 
 #[async_trait]
-pub trait IntentRpcClient: Send + Sync + 'static {
+pub trait ERIntentClient: Send + Sync + 'static {
     type Error: std::error::Error + Send;
 
     /// Executes `Accept` tx and returns accepted intents
@@ -27,7 +27,7 @@ pub trait IntentRpcClient: Send + Sync + 'static {
     ) -> Result<Vec<ScheduledIntentBundle>, Self::Error>;
 
     /// Processes intent results, submitting them on chain(ER)
-    async fn finalize_intent(
+    async fn notify_commit_sent(
         &self,
         sent_tx: Transaction,
         sent_commit: SentCommit,
@@ -58,7 +58,7 @@ impl<L: LatestBlockProvider> InternalIntentRpcClient<L> {
 
     /// Sends transaction to move the scheduled commits from the `MagicContext`
     /// to the global ScheduledCommit store
-    async fn execute_accept_tx(&self) -> Result<(), InternalRpcClientError> {
+    async fn send_accept_tx(&self) -> Result<(), InternalIntentClientError> {
         let tx = InstructionUtils::accept_scheduled_commits(
             self.latest_block_provider.blockhash(),
         );
@@ -77,8 +77,8 @@ impl<L: LatestBlockProvider> InternalIntentRpcClient<L> {
 }
 
 #[async_trait]
-impl<L: LatestBlockProvider> IntentRpcClient for InternalIntentRpcClient<L> {
-    type Error = InternalRpcClientError;
+impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
+    type Error = InternalIntentClientError;
 
     async fn accept_scheduled_intents(
         &self,
@@ -92,13 +92,13 @@ impl<L: LatestBlockProvider> IntentRpcClient for InternalIntentRpcClient<L> {
         if !MagicContext::has_scheduled_commits(magic_context_acc.data()) {
             return Ok(vec![]);
         }
-        self.execute_accept_tx().await?;
+        self.send_accept_tx().await?;
 
         // Return intents from global store
         Ok(TransactionScheduler::default().take_scheduled_intent_bundles())
     }
 
-    async fn finalize_intent(
+    async fn notify_commit_sent(
         &self,
         sent_tx: Transaction,
         sent_commit: SentCommit,
@@ -121,7 +121,7 @@ impl<L: LatestBlockProvider> IntentRpcClient for InternalIntentRpcClient<L> {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum InternalRpcClientError {
+pub enum InternalIntentClientError {
     #[error("TransactionError: {0}")]
     TransactionError(#[from] TransactionError),
 }
