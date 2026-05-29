@@ -1,23 +1,18 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use borsh::to_vec;
 use magicblock_committor_service::{
+    committor_processor::CommittorProcessor,
     config::ChainConfig,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
     persist::CommitStrategy,
-    service_ext::{BaseIntentCommittorExt, CommittorServiceExt},
-    BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
+    ComputeBudgetConfig,
 };
 use magicblock_core::intent::CommittedAccount;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
     ScheduledIntentBundle, UndelegateType,
 };
-use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::{Account, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
@@ -245,14 +240,15 @@ async fn commit_single_account(
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     // Run each test with and without finalizing
-    let service = CommittorService::try_start(
-        validator_auth.insecure_clone(),
-        ":memory:",
-        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-        common::MockActionsCallbackExecutor::default(),
-    )
-    .unwrap();
-    let service = CommittorServiceExt::new(Arc::new(service));
+    let processor = Arc::new(
+        CommittorProcessor::try_new(
+            validator_auth.insecure_clone(),
+            ":memory:",
+            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+            common::MockActionsCallbackExecutor::default(),
+        )
+        .unwrap(),
+    );
 
     let counter_auth = Keypair::new();
     let (pubkey, mut account) =
@@ -308,7 +304,7 @@ async fn commit_single_account(
 
     // We should always be able to Commit & Finalize 1 account either with Args or Buffers
     ix_commit_local(
-        service,
+        processor,
         vec![intent],
         expect_strategies(&[(expected_strategy, 1)]),
         program_flexi_counter::ID,
@@ -327,14 +323,15 @@ async fn commit_book_order_account(
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     // Run each test with and without finalizing
-    let service = CommittorService::try_start(
-        validator_auth.insecure_clone(),
-        ":memory:",
-        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-        common::MockActionsCallbackExecutor::default(),
-    )
-    .unwrap();
-    let service = CommittorServiceExt::new(Arc::new(service));
+    let processor = Arc::new(
+        CommittorProcessor::try_new(
+            validator_auth.insecure_clone(),
+            ":memory:",
+            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+            common::MockActionsCallbackExecutor::default(),
+        )
+        .unwrap(),
+    );
 
     let payer = Keypair::new();
     let (order_book_pk, mut order_book_ac) =
@@ -387,7 +384,7 @@ async fn commit_book_order_account(
     };
 
     ix_commit_local(
-        service,
+        processor,
         vec![intent],
         expect_strategies(&[(expected_strategy, 1)]),
         program_schedulecommit::ID,
@@ -800,14 +797,15 @@ async fn commit_multiple_accounts(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
-    let service = CommittorService::try_start(
-        validator_auth.insecure_clone(),
-        ":memory:",
-        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-        common::MockActionsCallbackExecutor::default(),
-    )
-    .unwrap();
-    let service = CommittorServiceExt::new(Arc::new(service));
+    let processor = Arc::new(
+        CommittorProcessor::try_new(
+            validator_auth.insecure_clone(),
+            ":memory:",
+            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+            common::MockActionsCallbackExecutor::default(),
+        )
+        .unwrap(),
+    );
 
     // Create bundles of committed accounts
     let bundles_of_committees = create_bundles(bundle_size, bytess).await;
@@ -850,7 +848,7 @@ async fn commit_multiple_accounts(
         .collect::<Vec<_>>();
 
     ix_commit_local(
-        service,
+        processor,
         intents,
         expected_strategies,
         program_flexi_counter::ID,
@@ -869,14 +867,15 @@ async fn execute_intent_bundle(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
-    let service = CommittorService::try_start(
-        validator_auth.insecure_clone(),
-        ":memory:",
-        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-        common::MockActionsCallbackExecutor::default(),
-    )
-    .unwrap();
-    let service = CommittorServiceExt::new(Arc::new(service));
+    let processor = Arc::new(
+        CommittorProcessor::try_new(
+            validator_auth.insecure_clone(),
+            ":memory:",
+            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+            common::MockActionsCallbackExecutor::default(),
+        )
+        .unwrap(),
+    );
 
     // Create bundles of committed accounts
     let to_commit = create_and_delegate_accounts(bytess_to_commit);
@@ -911,7 +910,7 @@ async fn execute_intent_bundle(
         intent_bundle,
     };
     ix_commit_local(
-        service,
+        processor,
         vec![intent_bundle],
         expected_strategies,
         program_flexi_counter::id(),
@@ -947,13 +946,13 @@ async fn execute_intent_bundle(
 // Test Executor
 // -----------------
 async fn ix_commit_local(
-    service: CommittorServiceExt<CommittorService>,
+    processor: Arc<CommittorProcessor>,
     intent_bundles: Vec<ScheduledIntentBundle>,
     expected_strategies: ExpectedStrategies,
     program_id: Pubkey,
 ) {
-    let execution_outputs = service
-        .schedule_intent_bundles_waiting(intent_bundles.clone())
+    let execution_outputs = processor
+        .execute_intent_bundles(intent_bundles.clone())
         .await
         .unwrap()
         .into_iter()
@@ -961,7 +960,6 @@ async fn ix_commit_local(
 
     // Assert that all completed
     assert_eq!(execution_outputs.len(), intent_bundles.len());
-    service.release_common_pubkeys().await.unwrap();
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
     let mut strategies = ExpectedStrategies::new();
@@ -1061,10 +1059,8 @@ async fn ix_commit_local(
         })
         .collect();
 
-        let statuses = service
+        let statuses = processor
             .get_commit_statuses(base_intent.id)
-            .await
-            .unwrap()
             .unwrap();
         debug!(
             "{}",
@@ -1122,75 +1118,6 @@ async fn ix_commit_local(
         "Strategies used do not match expected ones"
     );
 
-    let expect_empty_lookup_tables = false;
-    // changeset.accounts.len() == changeset.accounts_to_undelegate.len();
-    if expect_empty_lookup_tables {
-        let lookup_tables = service.get_lookup_tables().await.unwrap();
-        assert!(lookup_tables.active.is_empty());
-
-        if utils::TEST_TABLE_CLOSE {
-            let mut closing_tables = lookup_tables.released;
-
-            // Tables deactivate after ~2.5 mins (150secs), but most times
-            // it takes a lot longer so we allow double the time
-            const MAX_TIME_TO_CLOSE: Duration = Duration::from_secs(300);
-            info!(
-                "Waiting for lookup tables close for up to {} secs",
-                MAX_TIME_TO_CLOSE.as_secs()
-            );
-
-            let start = Instant::now();
-            let rpc_client = MagicblockRpcClient::from(rpc_client);
-            loop {
-                let accs = rpc_client
-                    .get_multiple_accounts_with_commitment(
-                        &closing_tables,
-                        CommitmentConfig::confirmed(),
-                        None,
-                    )
-                    .await
-                    .unwrap();
-                let closed_pubkeys = accs
-                    .into_iter()
-                    .zip(closing_tables.iter())
-                    .filter_map(|(acc, pubkey)| {
-                        if acc.is_none() {
-                            Some(*pubkey)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<HashSet<_>>();
-                closing_tables.retain(|pubkey| {
-                    if closed_pubkeys.contains(pubkey) {
-                        debug!("Table {} closed", pubkey);
-                        false
-                    } else {
-                        true
-                    }
-                });
-                if closing_tables.is_empty() {
-                    break;
-                }
-                debug!(
-                    "Still waiting for {} released table(s) to close",
-                    closing_tables.len()
-                );
-                if Instant::now() - start > MAX_TIME_TO_CLOSE {
-                    panic!(
-                        "Timed out waiting for tables close after {} seconds. Still open: {}",
-                        MAX_TIME_TO_CLOSE.as_secs(),
-                        closing_tables
-                            .iter()
-                            .map(|x| x.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
-                }
-                utils::sleep_millis(10_000).await;
-            }
-        }
-    }
 }
 
 fn validate_account(
