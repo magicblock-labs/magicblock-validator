@@ -267,6 +267,18 @@ fn init_fetch_cloner(
     (fetch_cloner, subscription_tx)
 }
 
+async fn acquire_direct_subscription_for_update(
+    remote_account_provider: &Arc<
+        RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    >,
+    pubkey: &Pubkey,
+) {
+    remote_account_provider
+        .acquire_subscription(pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .expect("failed to acquire direct subscription for update test");
+}
+
 async fn wait_for_pending_request(
     fetch_cloner: &Arc<
         FetchCloner<
@@ -1620,6 +1632,96 @@ async fn test_delegated_cleanup_keeps_undelegation_tracking_subscription() {
     assert_not_subscribed!(remote_account_provider, &[&account_pubkey]);
 }
 
+#[tokio::test]
+async fn test_subscription_update_for_unwatched_absent_account_is_dropped() {
+    init_logger();
+    let pubkey = Pubkey::new_unique();
+    let validator_keypair = Keypair::new();
+    let chain_account = Account {
+        lamports: 1_000_000,
+        data: Vec::new(),
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ctx =
+        setup([(pubkey, chain_account.clone())], 42, validator_keypair).await;
+
+    assert!(!ctx.remote_account_provider.is_watching(&pubkey));
+    assert!(ctx.accounts_bank.get_account(&pubkey).is_none());
+
+    ctx.subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey,
+            account: RemoteAccount::from_fresh_account(
+                chain_account,
+                42,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            if ctx.fetch_cloner.cloner().clone_request_count() == 0 {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for stale update to be dropped");
+
+    assert!(ctx.accounts_bank.get_account(&pubkey).is_none());
+    assert_eq!(ctx.fetch_cloner.cloner().clone_request_count(), 0);
+}
+
+#[tokio::test]
+async fn test_subscription_update_for_unwatched_present_account_enqueues_removal(
+) {
+    init_logger();
+    let pubkey = Pubkey::new_unique();
+    let validator_keypair = Keypair::new();
+    let owner = Pubkey::new_unique();
+    let bank_account = AccountSharedData::new(1_000_000, 0, &owner);
+
+    let ctx = setup(
+        [(pubkey, Account::from(bank_account.clone()))],
+        43,
+        validator_keypair,
+    )
+    .await;
+    ctx.accounts_bank.insert(pubkey, bank_account.clone());
+    let mut removed_rx = ctx
+        .remote_account_provider
+        .try_get_removed_account_rx()
+        .expect("removed account receiver should be available");
+
+    assert!(!ctx.remote_account_provider.is_watching(&pubkey));
+
+    ctx.subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey,
+            account: RemoteAccount::from_fresh_account(
+                Account::from(bank_account),
+                43,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    let removed =
+        tokio::time::timeout(Duration::from_secs(1), removed_rx.recv())
+            .await
+            .expect("timed out waiting for removal notification");
+    assert_eq!(removed, Some(pubkey));
+    assert!(removed_rx.try_recv().is_err());
+    assert_eq!(ctx.fetch_cloner.cloner().clone_request_count(), 0);
+}
+
 // End-to-end variant of the test above that drives the cleanup through
 // `process_subscription_update` (via the subscription channel) instead of
 // invoking `cleanup_direct_subscription_for_delegated_account` directly.
@@ -2668,6 +2770,11 @@ async fn send_subscription_update_and_get_subscribed_programs(
     };
 
     accounts_bank.insert(account_pubkey, AccountSharedData::from(bank_account));
+    acquire_direct_subscription_for_update(
+        remote_account_provider,
+        &account_pubkey,
+    )
+    .await;
 
     let pubsub_client = remote_account_provider.pubsub_client();
     let initial_programs = pubsub_client.subscribed_program_ids();
@@ -2906,6 +3013,7 @@ async fn test_non_raw_eata_owned_account_subscription_update_stays_delegated() {
     let ata_pubkey = derive_ata(&wallet_owner, &mint);
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         rpc_client,
         subscription_tx,
@@ -2928,6 +3036,11 @@ async fn test_non_raw_eata_owned_account_subscription_update_stays_delegated() {
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &account_pubkey,
+    )
+    .await;
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
@@ -2981,6 +3094,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
     };
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         subscription_tx,
         ..
@@ -2995,6 +3109,11 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &account_pubkey,
+    )
+    .await;
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
@@ -3114,6 +3233,7 @@ async fn test_out_of_order_delegated_eata_subscription_update_still_projects_ata
     let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         rpc_client,
         subscription_tx,
@@ -3141,6 +3261,11 @@ async fn test_out_of_order_delegated_eata_subscription_update_still_projects_ata
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &eata_pubkey,
+    )
+    .await;
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: eata_pubkey,
@@ -3193,6 +3318,7 @@ async fn test_out_of_order_delegated_eata_update_clones_action_dependencies() {
     };
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         rpc_client,
         subscription_tx,
@@ -3224,6 +3350,11 @@ async fn test_out_of_order_delegated_eata_update_clones_action_dependencies() {
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &eata_pubkey,
+    )
+    .await;
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: eata_pubkey,
@@ -3286,6 +3417,7 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
     };
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         rpc_client,
         subscription_tx,
@@ -3316,6 +3448,11 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &account_pubkey,
+    )
+    .await;
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
@@ -3375,6 +3512,7 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
     let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         rpc_client,
         subscription_tx,
@@ -3397,6 +3535,11 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &eata_pubkey,
+    )
+    .await;
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: eata_pubkey,
@@ -3473,6 +3616,7 @@ async fn test_ata_subscription_update_projects_eata_when_chain_slot_lags() {
     ata_account.data[64..72].copy_from_slice(&BASE_ATA_AMOUNT.to_le_bytes());
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         rpc_client,
         subscription_tx,
@@ -3502,6 +3646,11 @@ async fn test_ata_subscription_update_projects_eata_when_chain_slot_lags() {
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &ata_pubkey,
+    )
+    .await;
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: ata_pubkey,
@@ -3582,6 +3731,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
     };
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         rpc_client,
         subscription_tx,
@@ -3608,6 +3758,11 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &eata_pubkey,
+    )
+    .await;
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: eata_pubkey,
@@ -4419,6 +4574,11 @@ async fn test_undelegating_projected_ata_subscription_update_stays_locked() {
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &ata_pubkey,
+    )
+    .await;
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: ata_pubkey,
@@ -5384,6 +5544,12 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
     use crate::remote_account_provider::{
         RemoteAccount, RemoteAccountUpdateSource,
     };
+
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &ata_pubkey,
+    )
+    .await;
 
     let send_update = |slot| {
         let ata_account = ata_account.clone();
