@@ -7,8 +7,34 @@ concurrency:
 on:
   push:
     branches: [master, dev]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'Makefile'
+      - 'test-integration/Makefile'
+      - 'rust-toolchain.toml'
+      - 'test-integration/rust-toolchain.toml'
+      - '.github/workflows/ci-test-unit.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'Makefile'
+      - 'test-integration/Makefile'
+      - 'rust-toolchain.toml'
+      - 'test-integration/rust-toolchain.toml'
+      - '.github/workflows/ci-test-unit.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
 
 jobs:
   run_make_ci_test:
