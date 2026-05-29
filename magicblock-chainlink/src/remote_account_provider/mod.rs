@@ -957,7 +957,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     None
                                 } else {
                                     // Subscription is stale, put the fetch tracking back
-                                    warn!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Received stale subscription update");
+                                    debug!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Received stale subscription update");
                                     fetching.insert(update.pubkey, state);
                                     None
                                 }
@@ -1064,7 +1064,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         start,
                         &config,
                     );
-                    warn!(
+                    debug!(
                         pubkeys = %pubkeys_str(pubkeys),
                         min_context_slot = ?config.min_context_slot,
                         retries = retries,
