@@ -297,9 +297,6 @@ where
                 }
             }
         }
-
-        // TODO(edwin): handle cancellation
-        todo!()
     }
 
     async fn schedule_intent_execution(
@@ -391,7 +388,6 @@ where
             let execution_result = tokio::select! {
                 biased;
                 _ = cancellation_token.cancelled() => {
-                    // TODO(edwin): validate shutdown correctness
                     info!("Shutting down");
                     return;
                 }

@@ -4228,21 +4228,11 @@ name = "magicblock-accounts"
 version = "0.11.1"
 dependencies = [
  "async-trait",
- "magicblock-account-cloner",
- "magicblock-accounts-db",
- "magicblock-chainlink",
  "magicblock-committor-service",
- "magicblock-core",
- "magicblock-metrics",
- "magicblock-program",
- "solana-hash 3.1.0",
  "solana-pubkey 3.0.0",
- "solana-transaction",
  "solana-transaction-error",
  "thiserror 2.0.18",
  "tokio",
- "tokio-util 0.7.17",
- "tracing",
  "url",
 ]
 
