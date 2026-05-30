@@ -38,6 +38,12 @@ pub fn main() {
         return;
     };
 
+    let Ok(query_filtering_output) =
+        run_query_filtering_tests(&manifest_dir, &config)
+    else {
+        return;
+    };
+
     let Ok(restore_ledger_output) =
         run_restore_ledger_tests(&manifest_dir, &config)
     else {
@@ -83,6 +89,7 @@ pub fn main() {
     assert_cargo_tests_passed(scenarios_output, "scenarios");
     assert_cargo_tests_passed(chainlink_output, "chainlink");
     assert_cargo_tests_passed(cloning_output, "cloning");
+    assert_cargo_tests_passed(query_filtering_output, "query_filtering");
     assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
     assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
     assert_cargo_tests_passed(table_mania_output, "table_mania");
@@ -770,6 +777,73 @@ fn run_cloning_tests(
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run cloning tests: {:?}", err);
+                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        Ok(output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let ephem_validator =
+            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+    }
+}
+
+fn run_query_filtering_tests(
+    manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
+) -> Result<Output, Box<dyn Error>> {
+    const TEST_NAME: &str = "query_filtering";
+    if config.skip_entirely(TEST_NAME) {
+        return Ok(success_output());
+    }
+
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+    let start_devnet_validator = || match start_validator(
+        "query-filtering-conf.devnet.toml",
+        ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+
+    let start_ephem_validator = || match start_validator(
+        "query-filtering-conf.ephem.toml",
+        ValidatorCluster::Ephem,
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== RUNNING QUERY FILTERING TESTS ========");
+
+        let mut devnet_validator = start_devnet_validator();
+        let mut ephem_validator = start_ephem_validator();
+
+        let test_query_filtering_dir =
+            format!("{}/../{}", manifest_dir, "test-query-filtering");
+        eprintln!(
+            "Running query filtering tests in {}",
+            test_query_filtering_dir
+        );
+        let output = match run_test(
+            test_query_filtering_dir,
+            RunTestConfig::default(),
+        ) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run query filtering tests: {:?}", err);
                 cleanup_validators(&mut ephem_validator, &mut devnet_validator);
                 return Err(err.into());
             }

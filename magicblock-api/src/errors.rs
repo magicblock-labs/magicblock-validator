@@ -110,6 +110,9 @@ pub enum ApiError {
 
     #[error("Replication service failed: {0}")]
     Replication(#[from] magicblock_replicator::Error),
+
+    #[error("Risk service failed: {0}")]
+    Risk(#[from] magicblock_aml::RiskError),
 }
 
 impl From<magicblock_accounts::errors::AccountsError> for ApiError {

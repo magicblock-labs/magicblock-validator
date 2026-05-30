@@ -29,15 +29,33 @@ impl HttpDispatcher {
 
         debug!("Getting account info");
 
-        // `read_account_with_ensure` guarantees the account is clone from chain if not in database.
-        let account = self
-            .read_account_with_ensure(&pubkey)
+        // Bundles the permission PDA into the same chainlink ensure when the
+        // request is authenticated so we don't pay a second round-trip just to
+        // run query filtering.
+        let mut account = self
+            .read_account_with_ensure_for_user(
+                &pubkey,
+                request.authenticated_user.as_ref(),
+            )
             .await
             .filter(|acc| !Self::account_should_render_as_null(acc))
             // `LockedAccount` provides a race-free read of the account data before encoding.
             .map(|acc| {
                 LockedAccount::new(pubkey, acc).ui_encode(encoding, slice)
             });
+        if let Some(user) = &request.authenticated_user {
+            let permission =
+                magicblock_query_filtering::permission_for_account(
+                    &*self.accountsdb,
+                    &pubkey,
+                )
+                .map_err(RpcError::internal)?;
+            account = magicblock_query_filtering::filter_account(
+                account,
+                &permission,
+                user,
+            );
+        }
 
         let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, account, slot))

@@ -14,12 +14,13 @@ members = [
     "test-config",
     "test-ledger-restore",
     "test-magicblock-api",
+    "test-query-filtering",
     "test-pubsub",
     "test-runner",
     "test-schedule-intent",
     "test-table-mania",
     "test-task-scheduler",
-    "test-tools"
+    "test-tools",
 ]
 resolver = "2"
 
@@ -36,20 +37,24 @@ chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "ccfc9f924dc40", default-features = false, features = [
-    "disable-realloc",
-    "modular-sdk"
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", tag = "v0.14.3", default-features = false, features = [
+    "access-control",
+    "modular-sdk",
 ] }
 futures = "0.3.31"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "335a22", default-features = false }
-magicblock-accounts-db = { path = "../magicblock-accounts-db", features = ["dev-tools"] }
+magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [
+    "dev-tools",
+] }
 magicblock-api = { path = "../magicblock-api" }
-magicblock-chainlink = { path = "../magicblock-chainlink", features = ["dev-context"] }
+magicblock-chainlink = { path = "../magicblock-chainlink", features = [
+    "dev-context",
+] }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
-    "no-entrypoint"
+    "no-entrypoint",
 ] }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-config = { path = "../magicblock-config" }
@@ -57,6 +62,7 @@ magicblock-core = { path = "../magicblock-core" }
 magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "25386a7c1d406d06b8d07a4d5b0fd37d5e74213b", default-features = false }
 magicblock-magic-program-api = { path = "../magicblock-magic-program-api" }
 magicblock-program = { path = "../programs/magicblock" }
+magicblock-query-filtering = { path = "../magicblock-query-filtering" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
 paste = "1.0"
@@ -85,7 +91,7 @@ solana-rpc-client = "3.1.12"
 solana-rpc-client-api = "3.1.12"
 solana-sdk = "3.0"
 solana-sdk-ids = { version = "3.0" }
-solana-system-interface = "3.1"
+solana-system-interface = { version = "3.1", features = ["bincode"] }
 solana-transaction-status = "3.1.12"
 spl-associated-token-account-interface = "2.0"
 spl-memo-interface = "2.0"

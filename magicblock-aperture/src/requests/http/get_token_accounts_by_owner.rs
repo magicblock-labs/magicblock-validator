@@ -1,3 +1,4 @@
+use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_rpc_client_api::config::{
     RpcAccountInfoConfig, RpcTokenAccountsFilter,
 };
@@ -13,7 +14,7 @@ impl HttpDispatcher {
     ///
     /// Fetches all token accounts owned by a specific public key. The query must
     /// be further filtered by either a `mint` address or a `programId`.
-    pub(crate) fn get_token_accounts_by_owner(
+    pub(crate) async fn get_token_accounts_by_owner(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
@@ -59,6 +60,30 @@ impl HttpDispatcher {
             self.accountsdb.get_program_accounts(&program, move |a| {
                 filters.matches(a.data())
             })?;
+        let mut accounts = accounts.collect::<Vec<_>>();
+
+        if let Some(user) = &request.authenticated_user {
+            let account_pubkeys = accounts
+                .iter()
+                .map(|(pubkey, _)| *pubkey)
+                .collect::<Vec<_>>();
+            self.ensure_permission_accounts(
+                &account_pubkeys,
+                AccountFetchOrigin::GetMultipleAccounts,
+            )
+            .await;
+            let permissions =
+                magicblock_query_filtering::permissions_for_accounts(
+                    &*self.accountsdb,
+                    &account_pubkeys,
+                )
+                .map_err(RpcError::internal)?;
+            accounts = magicblock_query_filtering::filter_keyed_accounts(
+                accounts,
+                &permissions,
+                user,
+            );
+        }
 
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let slice = config.data_slice;

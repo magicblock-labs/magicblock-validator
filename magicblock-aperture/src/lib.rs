@@ -1,8 +1,9 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use error::{ApertureError, RpcError};
 use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_core::link::DispatchEndpoints;
+use magicblock_query_filtering::QueryFilteringService;
 use processor::EventProcessor;
 use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
@@ -15,13 +16,19 @@ type ApertureResult<T> = Result<T, ApertureError>;
 
 pub async fn initialize_aperture(
     config: &ApertureConfig,
+    query_filtering: Option<Arc<QueryFilteringService>>,
     state: SharedState,
     dispatch: &DispatchEndpoints,
     cancel: CancellationToken,
 ) -> ApertureResult<JsonRpcServer> {
-    let server =
-        JsonRpcServer::new(config, state.clone(), dispatch, cancel.clone())
-            .await?;
+    let server = JsonRpcServer::new(
+        config,
+        query_filtering,
+        state.clone(),
+        dispatch,
+        cancel.clone(),
+    )
+    .await?;
     // Start event processors only after the server has bound its sockets so a
     // bind failure cannot leak background tasks during retries in tests/startup.
     EventProcessor::start(config, &state, dispatch, cancel)?;
@@ -40,6 +47,7 @@ impl JsonRpcServer {
     /// Create a new instance of JSON-RPC server, hooked into validator via dispatch channels
     async fn new(
         config: &ApertureConfig,
+        query_filtering: Option<Arc<QueryFilteringService>>,
         state: SharedState,
         dispatch: &DispatchEndpoints,
         cancel: CancellationToken,
@@ -66,7 +74,9 @@ impl JsonRpcServer {
             let cancel = cancel.clone();
             WebsocketServer::new(ws, &state, cancel).await?
         };
-        let http = HttpServer::new(http, state, cancel, dispatch).await?;
+        let http =
+            HttpServer::new(http, query_filtering, state, cancel, dispatch)
+                .await?;
         Ok(Self {
             http,
             websocket,

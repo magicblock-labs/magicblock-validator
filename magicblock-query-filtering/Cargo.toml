@@ -1,0 +1,38 @@
+[package]
+name = "magicblock-query-filtering"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+chrono = { workspace = true }
+ed25519-dalek = { workspace = true }
+jsonwebtoken = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-aml = { workspace = true }
+rand = { workspace = true }
+scc = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+solana-account = { workspace = true }
+solana-account-decoder-client-types = { workspace = true }
+solana-message = { workspace = true }
+solana-program-pack = { workspace = true }
+solana-pubkey = { workspace = true, features = ["curve25519"] }
+solana-signature = { workspace = true }
+solana-transaction = { workspace = true }
+solana-transaction-status = { workspace = true, features = ["agave-unstable-api"] }
+spl-token = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+
+[dev-dependencies]
+solana-hash = { workspace = true }
+solana-keypair = { workspace = true }
+solana-signer = { workspace = true }

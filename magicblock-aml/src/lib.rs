@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures_util::future::{try_join_all, BoxFuture, FutureExt, Shared};
-use magicblock_config::config::RiskConfig;
+use magicblock_config::config::AmlRiskConfig;
 use reqwest::Client;
 use rusqlite::{params, Connection};
 use serde_json::Value;
@@ -72,7 +72,7 @@ pub struct RiskService {
 
 impl RiskService {
     pub fn try_from_config(
-        config: &RiskConfig,
+        config: &AmlRiskConfig,
         ledger_path: &Path,
     ) -> RiskResult<Option<Self>> {
         if !config.enabled {
@@ -441,8 +441,8 @@ mod tests {
         }
     }
 
-    fn make_risk_config(base_url: String) -> RiskConfig {
-        RiskConfig {
+    fn make_risk_config(base_url: String) -> AmlRiskConfig {
+        AmlRiskConfig {
             enabled: true,
             base_url,
             api_key: Some("test-api-key".to_string()),

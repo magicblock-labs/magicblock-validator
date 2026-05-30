@@ -14,6 +14,7 @@ use magicblock_accounts::{
     ScheduledCommitsProcessor,
 };
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use magicblock_aml::RiskService;
 use magicblock_aperture::{
     initialize_aperture,
     state::{NodeContext, SharedState},
@@ -57,6 +58,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
+use magicblock_query_filtering::auth::{AuthConfig, QueryFilteringService};
 use magicblock_replicator::{nats::Broker, ReplicationService};
 use magicblock_services::actions_callback_service::ActionsCallbackService;
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
@@ -120,6 +122,7 @@ pub struct MagicValidator {
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
+    query_filtering: Option<Arc<QueryFilteringService>>,
     transaction_execution: thread::JoinHandle<()>,
     replication_handle:
         Option<thread::JoinHandle<magicblock_replicator::Result<()>>>,
@@ -155,6 +158,27 @@ impl MagicValidator {
         tracing::Span::current().record("last_slot", last_slot);
         info!("Ledger initialized");
         let ledger_path = ledger.ledger_path();
+
+        let step_start = Instant::now();
+        let risk_service =
+            RiskService::try_from_config(&config.aml_risk, ledger_path)?
+                .map(Arc::new);
+        log_timing("startup", "risk_service_init", step_start);
+
+        let step_start = Instant::now();
+        let query_filtering = config.query_filtering.enabled.then(|| {
+            Arc::new(QueryFilteringService::new(
+                AuthConfig {
+                    jwt_secret: config.query_filtering.jwt_secret.clone(),
+                    token_expiry_days: config.query_filtering.token_expiry_days,
+                    challenge_ttl_seconds: config
+                        .query_filtering
+                        .challenge_ttl_seconds,
+                },
+                risk_service.clone(),
+            ))
+        });
+        log_timing("startup", "query_filtering_init", step_start);
 
         let step_start = Instant::now();
         Self::sync_validator_keypair_with_ledger(
@@ -237,6 +261,7 @@ impl MagicValidator {
                 &ledger.latest_block().clone(),
                 &accountsdb,
                 shared_chain_slot.clone(),
+                risk_service.clone(),
             )
             .await?,
         );
@@ -381,6 +406,7 @@ impl MagicValidator {
         let step_start = Instant::now();
         let rpc = initialize_aperture(
             &config.aperture,
+            query_filtering.clone(),
             shared_state,
             &dispatch,
             token.clone(),
@@ -442,6 +468,7 @@ impl MagicValidator {
             identity: validator_pubkey,
             transaction_scheduler: dispatch.transaction_scheduler,
             task_scheduler: Some(task_scheduler),
+            query_filtering,
             transaction_execution,
             replication_handle: None,
             mode_tx,
@@ -490,6 +517,7 @@ impl MagicValidator {
         latest_block: &LatestBlock,
         accountsdb: &Arc<AccountsDb>,
         chain_slot: Option<Arc<AtomicU64>>,
+        risk_service: Option<Arc<RiskService>>,
     ) -> ApiResult<ChainlinkImpl> {
         if Self::replication_mode_uses_disabled_chainlink(
             &config.validator.replication_mode,
@@ -550,6 +578,7 @@ impl MagicValidator {
             &config.chainlink,
             config.storage.as_path(),
             chain_slot.unwrap_or_default(),
+            risk_service,
         )
         .await?;
 
@@ -1047,6 +1076,7 @@ impl MagicValidator {
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
+        if let Some(service) = self.query_filtering.take() { service.stop() }
         if let Some(handle) = self.slot_ticker {
             let step_start = Instant::now();
             let _ = handle.await;

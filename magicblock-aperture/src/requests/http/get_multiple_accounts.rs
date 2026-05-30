@@ -28,9 +28,32 @@ impl HttpDispatcher {
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let slice = config.data_slice;
 
+        // Bundles each pubkey's permission PDA into the same chainlink ensure
+        // when the request is authenticated, so query-filtering doesn't pay
+        // an extra round-trip.
+        let mut raw_accounts = self
+            .read_accounts_with_ensure_for_user(
+                &pubkeys,
+                request.authenticated_user.as_ref(),
+            )
+            .await;
+        if let Some(user) = &request.authenticated_user {
+            let permissions =
+                magicblock_query_filtering::permissions_for_accounts(
+                    &*self.accountsdb,
+                    &pubkeys,
+                )
+                .map_err(RpcError::internal)?;
+            raw_accounts = magicblock_query_filtering::filter_accounts(
+                raw_accounts,
+                &permissions,
+                user,
+            );
+        }
+
         let accounts = pubkeys
             .iter()
-            .zip(self.read_accounts_with_ensure(&pubkeys).await.into_iter())
+            .zip(raw_accounts)
             .map(|(pubkey, acc)| {
                 acc.filter(|account| {
                     !Self::account_should_render_as_null(account)

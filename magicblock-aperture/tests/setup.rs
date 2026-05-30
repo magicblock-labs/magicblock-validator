@@ -127,10 +127,15 @@ impl RpcTestEnv {
             listen: "127.0.0.1:0".parse().unwrap(),
             ..Default::default()
         };
-        let server =
-            initialize_aperture(&config, state, &execution.dispatch, cancel)
-                .await
-                .expect("failed to initialize aperture test server");
+        let server = initialize_aperture(
+            &config,
+            None,
+            state,
+            &execution.dispatch,
+            cancel,
+        )
+        .await
+        .expect("failed to initialize aperture test server");
 
         let rpc_url = format!("http://{}", server.http_addr());
         let pubsub_url = format!("ws://{}", server.ws_addr());

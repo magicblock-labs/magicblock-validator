@@ -78,6 +78,7 @@ pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
 /// Default capacity for the LRU cache of subscribed accounts
 pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;
 
+// AML Risk Defaults
 /// Default base URL for Range risk service
 pub const DEFAULT_RISK_BASE_URL: &str = "https://api.range.org/v1";
 
@@ -89,3 +90,13 @@ pub const DEFAULT_RISK_REQUEST_TIMEOUT_SEC: u64 = 5;
 
 /// Default risk score threshold for Range risk service
 pub const DEFAULT_RISK_SCORE_THRESHOLD: u64 = 5;
+
+// Query Filtering Defaults
+/// Default JWT secret for query filtering
+pub const DEFAULT_JWT_SECRET: &str = "your_jwt_secret_key";
+
+/// Default token expiry days for query filtering
+pub const DEFAULT_TOKEN_EXPIRY_DAYS: i64 = 30;
+
+/// Default challenge TTL seconds for query filtering
+pub const DEFAULT_CHALLENGE_TTL_SECONDS: i64 = 5 * 60;

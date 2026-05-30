@@ -18,6 +18,7 @@ magic-domain-program = { workspace = true }
 magicblock-account-cloner = { workspace = true }
 magicblock-accounts = { workspace = true }
 magicblock-accounts-db = { workspace = true }
+magicblock-aml = { workspace = true }
 magicblock-aperture = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
@@ -28,6 +29,7 @@ magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
+magicblock-query-filtering = { workspace = true }
 magicblock-services = { workspace = true }
 magicblock-replicator = { workspace = true }
 magicblock-task-scheduler = { workspace = true }

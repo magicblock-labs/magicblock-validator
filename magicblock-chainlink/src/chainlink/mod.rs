@@ -328,7 +328,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         accounts_bank,
         cloner,
         config,
-        chainlink_config
+        chainlink_config,
+        risk_service
     ))]
     pub async fn try_new_from_endpoints(
         endpoints: &Endpoints,
@@ -340,6 +341,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         chainlink_config: &ChainLinkConfig,
         ledger_path: &Path,
         chain_slot: Arc<AtomicU64>,
+        risk_service: Option<Arc<RiskService>>,
     ) -> ChainlinkResult<
         InnerChainlink<
             ChainRpcClientImpl,
@@ -362,11 +364,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         .await?;
         let fetch_cloner = if let Some(provider) = account_provider {
             let provider = Arc::new(provider);
-            let risk_service = RiskService::try_from_config(
-                &chainlink_config.risk,
-                ledger_path,
-            )?
-            .map(Arc::new);
             let fetch_cloner = FetchCloner::new(
                 &provider,
                 accounts_bank,

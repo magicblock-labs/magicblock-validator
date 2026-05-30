@@ -1,6 +1,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk::{
-    consts::{MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID},
+    access_control::structs::{
+        Member as PermissionMember, Permission as PermissionAccount,
+    },
+    consts::{EPHEMERAL_VAULT_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID},
     delegate_args::{DelegateAccountMetas, DelegateAccounts},
     dlp_api,
 };
@@ -30,6 +33,12 @@ pub struct ScheduleArgs {
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct CancelArgs {
     pub task_id: i64,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct PermissionMemberArgs {
+    pub pubkey: Pubkey,
+    pub flags: u8,
 }
 
 pub const MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
@@ -106,6 +115,32 @@ pub enum FlexiCounterInstruction {
     /// 6. `[]` The delegation program
     /// 7. `[]` The system program
     Delegate(DelegateArgs),
+
+    /// Delegates the FlexiCounter permission account to the ephemeral validator.
+    ///
+    /// Accounts:
+    /// 0. `[signer, write]` The payer that owns the counter.
+    /// 1. `[]` The counter PDA that signs the permission CPI.
+    /// 2. `[write]` The permission PDA derived from the counter PDA.
+    /// 3. `[]` The permission program.
+    /// 4. `[]` The magic program.
+    /// 5. `[write]` The ephemeral vault.
+    CreatePermission {
+        members: Option<Vec<PermissionMemberArgs>>,
+    },
+
+    /// Creates or replaces a permission account for the FlexiCounter PDA.
+    ///
+    /// Accounts:
+    /// 0. `[signer, write]` The payer that owns the counter.
+    /// 1. `[]` The counter PDA that signs the permission CPI.
+    /// 2. `[write]` The permission PDA derived from the counter PDA.
+    /// 3. `[]` The permission program.
+    /// 4. `[]` The magic program.
+    /// 5. `[write]` The ephemeral vault.
+    UpdatePermission {
+        members: Option<Vec<PermissionMemberArgs>>,
+    },
 
     /// Updates the FlexiCounter by adding the count to it and then
     /// commits its current state, optionally undelegating the account.
@@ -388,6 +423,67 @@ pub fn create_delegate_ix_with_commit_frequency_ms(
         &FlexiCounterInstruction::Delegate(args),
         account_metas,
     )
+}
+
+pub fn create_create_permission_ix(
+    payer: Pubkey,
+    members: Option<Vec<PermissionMemberArgs>>,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (counter, _) = FlexiCounter::pda(&payer);
+    let (permission, _) = PermissionAccount::find_pda(&counter);
+
+    let accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(counter, false),
+        AccountMeta::new(permission, false),
+        AccountMeta::new_readonly(
+            ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID,
+            false,
+        ),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new(EPHEMERAL_VAULT_ID, false),
+    ];
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreatePermission { members },
+        accounts,
+    )
+}
+
+pub fn create_update_permission_ix(
+    payer: Pubkey,
+    members: Option<Vec<PermissionMemberArgs>>,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (counter, _) = FlexiCounter::pda(&payer);
+    let (permission, _) = PermissionAccount::find_pda(&counter);
+    let accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(counter, false),
+        AccountMeta::new(permission, false),
+        AccountMeta::new_readonly(
+            ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID,
+            false,
+        ),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::UpdatePermission { members },
+        accounts,
+    )
+}
+
+impl From<PermissionMemberArgs> for PermissionMember {
+    fn from(value: PermissionMemberArgs) -> Self {
+        Self {
+            pubkey: value.pubkey,
+            flags: value.flags,
+        }
+    }
 }
 
 pub fn create_add_and_schedule_commit_ix(

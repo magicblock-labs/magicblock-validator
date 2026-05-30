@@ -1,3 +1,4 @@
+use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature;
 use solana_transaction_status::TransactionConfirmationStatus;
 
@@ -11,7 +12,7 @@ impl HttpDispatcher {
     /// Fetches a list of confirmed transaction signatures for a given address,
     /// sorted in reverse chronological order. The query can be paginated using
     /// the optional `limit`, `before`, and `until` parameters.
-    pub(crate) fn get_signatures_for_address(
+    pub(crate) async fn get_signatures_for_address(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
@@ -43,7 +44,7 @@ impl HttpDispatcher {
                 limit,
             )?;
 
-        let signatures = signatures_result
+        let mut signatures = signatures_result
             .infos
             .into_iter()
             .map(|info| {
@@ -56,6 +57,24 @@ impl HttpDispatcher {
                 rpc_status
             })
             .collect::<Vec<_>>();
+        if let Some(user) = &request.authenticated_user {
+            self.ensure_permission_accounts(
+                &[address],
+                AccountFetchOrigin::GetAccount,
+            )
+            .await;
+            let permission =
+                magicblock_query_filtering::permission_for_account(
+                    &*self.accountsdb,
+                    &address,
+                )
+                .map_err(RpcError::internal)?;
+            signatures = magicblock_query_filtering::filter_signatures(
+                signatures,
+                &permission,
+                user,
+            );
+        }
 
         Ok(ResponsePayload::encode_no_context(&request.id, signatures))
     }

@@ -176,6 +176,7 @@ jobs:
               -p test-pubsub \
               -p test-schedule-intent \
               -p test-task-scheduler \
+              -p test-query-filtering \
               > _integration_test_bins/no-run.jsonl
           RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
           CARGO_PROFILE_DEV_DEBUG=0 \
@@ -235,6 +236,7 @@ jobs:
           copy_package_tests test-integration/test-pubsub pubsub
           copy_package_tests test-integration/test-schedule-intent schedule_intents
           copy_package_tests test-integration/test-task-scheduler task-scheduler
+          copy_package_tests test-integration/test-query-filtering query-filtering
 
           find _integration_test_bins/artifacts -mindepth 2 -type f | wc -l
           du -sh _integration_test_bins/artifacts/*
@@ -377,6 +379,15 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+      - name: Upload integration test binaries - query-filtering
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-query-filtering
+          path: magicblock-validator/_integration_test_bins/artifact-archives/query-filtering.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
   run_integration_tests:
     needs: [build_validator, build_sbf, build_integration_tests]
     runs-on: ${{ matrix.runner || 'blacksmith-8vcpu-ubuntu-2404' }}
@@ -447,6 +458,8 @@ jobs:
             test_bins_artifact: "committor-ix"
           - batch_tests: "committor_intent_executor"
             test_bins_artifact: "committor-intent-executor"
+          - batch_tests: "query_filtering"
+            test_bins_artifact: "query-filtering"
       # While we iterate on this branch we want a single shard failure to
       # cancel the rest of the matrix so we don't burn ~50 min of runner time
       # on every false start. Flip back to `false` once it's green & stable.

@@ -1,4 +1,5 @@
 use json::{Array, Deserialize, Value};
+use solana_pubkey::Pubkey;
 
 use crate::{error::RpcError, RpcResult};
 
@@ -14,6 +15,9 @@ pub(crate) struct JsonRequest<M> {
     pub(crate) method: M,
     /// An optional array of positional parameter values for the method.
     pub(crate) params: Option<Array>,
+    /// Authenticated query-filtering user, populated by the HTTP dispatcher.
+    #[serde(skip)]
+    pub(crate) authenticated_user: Option<Pubkey>,
 }
 /// Represents either a single JSON-RPC request or a batch of multiple requests.
 pub enum RpcRequest {

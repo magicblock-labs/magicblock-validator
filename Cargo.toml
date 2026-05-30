@@ -19,6 +19,7 @@ members = [
     "magicblock-ledger",
     "magicblock-magic-program-api",
     "magicblock-metrics",
+    "magicblock-query-filtering",
     "magicblock-processor",
     "magicblock-replicator",
     "magicblock-rpc-client",
@@ -34,7 +35,7 @@ members = [
     "tools/genx",
     "tools/keypair-base58",
     "tools/ledger-stats",
-    "tools/magicblock-tui-client"
+    "tools/magicblock-tui-client",
 ]
 
 # This prevents a Travis CI error when building for Windows.
@@ -69,7 +70,7 @@ chrono = "0.4"
 clap = "4.5.40"
 console-subscriber = "0.5.0"
 derive_more = "2.0"
-ed25519-dalek = "1.0.1"
+ed25519-dalek = "2.2.0"
 enum-iterator = "1.5.0"
 fastwebsockets = "0.10"
 fd-lock = "4.0.2"
@@ -88,6 +89,7 @@ hyper-util = "0.1.15"
 isocountry = "0.3.2"
 itertools = "0.14"
 json = { package = "sonic-rs", version = "0.5.3" }
+jsonwebtoken = "9.3.1"
 lazy_static = "1.4.0"
 libc = "0.2.153"
 libloading = "0.8"
@@ -101,9 +103,11 @@ magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-aml = { path = "./magicblock-aml" }
 magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-api = { path = "./magicblock-api" }
-magicblock-chainlink = { path = "./magicblock-chainlink", features = ["dev-context"] }
+magicblock-chainlink = { path = "./magicblock-chainlink", features = [
+    "dev-context",
+] }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
-    "no-entrypoint"
+    "no-entrypoint",
 ] }
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
@@ -112,6 +116,7 @@ magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-metrics = { path = "./magicblock-metrics" }
+magicblock-query-filtering = { path = "./magicblock-query-filtering" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
 magicblock-replicator = { path = "./magicblock-replicator" }
@@ -145,6 +150,7 @@ serde = "1.0.217"
 serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
+sha2 = "0.10.8"
 sha3 = "0.10.8"
 solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "5bd1d56" }
 solana-account-decoder = { version = "3.1" }
@@ -202,7 +208,7 @@ solana-sysvar = { version = "3.0" }
 solana-timings = { package = "solana-svm-timings", version = "3.1" }
 solana-transaction = { version = "3.0" }
 solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "5bd1d56", features = [
-    "dev-context-only-utils"
+    "dev-context-only-utils",
 ] }
 solana-transaction-error = { version = "3.0" }
 solana-transaction-status = { version = "=3.1.12" }
@@ -221,7 +227,10 @@ tonic-prost-build = "0.14"
 tracing = "0.1"
 tracing-log = { version = "0.2", features = ["log-tracer"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-twox-hash = { version = "2.1", default-features = false, features = ["alloc", "xxhash3_64"] }
+twox-hash = { version = "2.1", default-features = false, features = [
+    "alloc",
+    "xxhash3_64",
+] }
 url = "2.5.0"
 
 # SPL Token crates used across the workspace

@@ -3,7 +3,7 @@ use std::mem::size_of;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{
     parse_account_data::SplTokenAdditionalDataV2,
-    parse_token::token_amount_to_ui_amount_v3,
+    parse_token::{token_amount_to_ui_amount_v3, UiTokenAmount},
 };
 
 use super::{
@@ -24,9 +24,40 @@ impl HttpDispatcher {
         let pubkey = parse_params!(request.params()?, Serde32Bytes);
         let pubkey: Pubkey = some_or_err!(pubkey);
 
-        // Fetch the target token account.
+        // Fetch the token account up-front and bundle its permission PDA into
+        // the same chainlink round-trip so the auth check below doesn't need
+        // a second network hop.
+        let token_account_opt = self
+            .read_account_with_ensure_for_user(
+                &pubkey,
+                request.authenticated_user.as_ref(),
+            )
+            .await;
+
+        if let Some(user) = &request.authenticated_user {
+            let permission =
+                magicblock_query_filtering::permission_for_account(
+                    &*self.accountsdb,
+                    &pubkey,
+                )
+                .map_err(RpcError::internal)?;
+            if !permission.access_for(user).account {
+                let slot = self.blocks.block_height();
+                return Ok(ResponsePayload::encode(
+                    &request.id,
+                    UiTokenAmount {
+                        ui_amount: None,
+                        decimals: 0,
+                        amount: "0".to_owned(),
+                        ui_amount_string: "0.0".to_owned(),
+                    },
+                    slot,
+                ));
+            }
+        }
+
         let token_account: AccountSharedData = some_or_err!(
-            self.read_account_with_ensure(&pubkey).await,
+            token_account_opt,
             "token account not found or is not a token account"
         );
 

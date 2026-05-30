@@ -66,6 +66,7 @@ fn test_defaults_are_sane() {
     // Remotes default to [devnet HTTP] + [devnet WS] (added by ensure_websocket)
     assert_eq!(config.remotes.len(), 2);
     assert_eq!(config.aperture.listen.0.port(), 8899);
+
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
 
     // Verify internal config defaults (not exposed to CLI)
@@ -77,6 +78,38 @@ fn test_defaults_are_sane() {
     assert_eq!(config.grpc.max_old_unoptimized, 5);
     assert_eq!(config.grpc.max_subs_in_new, 400);
     assert_eq!(config.grpc.max_time_without_optimization_secs, 60);
+
+    // Query filtering defaults
+    assert!(!config.query_filtering.enabled);
+    assert_eq!(
+        config.query_filtering.jwt_secret,
+        consts::DEFAULT_JWT_SECRET
+    );
+    assert_eq!(
+        config.query_filtering.token_expiry_days,
+        consts::DEFAULT_TOKEN_EXPIRY_DAYS
+    );
+    assert_eq!(
+        config.query_filtering.challenge_ttl_seconds,
+        consts::DEFAULT_CHALLENGE_TTL_SECONDS
+    );
+
+    // AML risk defaults
+    assert!(!config.aml_risk.enabled);
+    assert_eq!(config.aml_risk.base_url, consts::DEFAULT_RISK_BASE_URL);
+    assert_eq!(config.aml_risk.api_key, None);
+    assert_eq!(
+        config.aml_risk.cache_ttl,
+        Duration::from_secs(consts::DEFAULT_RISK_CACHE_TTL_SEC)
+    );
+    assert_eq!(
+        config.aml_risk.request_timeout,
+        Duration::from_secs(consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC)
+    );
+    assert_eq!(
+        config.aml_risk.risk_score_threshold,
+        consts::DEFAULT_RISK_SCORE_THRESHOLD
+    );
 }
 
 #[test]
@@ -269,7 +302,7 @@ fn test_chainlink_config() {
         max-monitored-accounts = 5000
         resubscription-delay = "50ms"
 
-        [chainlink.risk]
+        [aml-risk]
         enabled = true
         api-key = "test-token"
         cache-ttl = "20m"
@@ -285,20 +318,11 @@ fn test_chainlink_config() {
         config.chainlink.resubscription_delay,
         std::time::Duration::from_millis(50)
     );
-    assert!(config.chainlink.risk.enabled);
-    assert_eq!(
-        config.chainlink.risk.api_key,
-        Some("test-token".to_string())
-    );
-    assert_eq!(
-        config.chainlink.risk.cache_ttl,
-        std::time::Duration::from_secs(20 * 60)
-    );
-    assert_eq!(
-        config.chainlink.risk.request_timeout,
-        std::time::Duration::from_secs(2)
-    );
-    assert_eq!(config.chainlink.risk.risk_score_threshold, 8);
+    assert!(config.aml_risk.enabled);
+    assert_eq!(config.aml_risk.api_key, Some("test-token".to_owned()));
+    assert_eq!(config.aml_risk.cache_ttl, Duration::from_secs(20 * 60));
+    assert_eq!(config.aml_risk.request_timeout, Duration::from_secs(2));
+    assert_eq!(config.aml_risk.risk_score_threshold, 8);
 }
 
 // ============================================================================
@@ -466,7 +490,6 @@ fn test_example_config_full_coverage() {
     // 9. Chainlink (Cloning)
     // ========================================================================
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
-    assert!(!config.chainlink.risk.enabled);
 
     // ========================================================================
     // 10. Aperture
@@ -481,15 +504,50 @@ fn test_example_config_full_coverage() {
     assert!(!config.task_scheduler.reset);
     assert_eq!(
         config.task_scheduler.min_interval,
-        Duration::from_millis(10)
+        Duration::from_millis(
+            consts::DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS
+        )
     );
     assert_eq!(
         config.task_scheduler.failed_task_retention,
-        Duration::from_secs(14 * 24 * 60 * 60)
+        Duration::from_secs(
+            consts::DEFAULT_TASK_SCHEDULER_FAILED_TASK_RETENTION_SECS
+        )
     );
     assert_eq!(
         config.task_scheduler.failed_task_cleanup_interval,
-        Duration::from_secs(60 * 60)
+        Duration::from_secs(
+            consts::DEFAULT_TASK_SCHEDULER_FAILED_TASK_CLEANUP_INTERVAL_SECS
+        )
+    );
+
+    assert!(!config.query_filtering.enabled);
+    assert_eq!(
+        config.query_filtering.jwt_secret,
+        consts::DEFAULT_JWT_SECRET
+    );
+    assert_eq!(
+        config.query_filtering.token_expiry_days,
+        consts::DEFAULT_TOKEN_EXPIRY_DAYS
+    );
+    assert_eq!(
+        config.query_filtering.challenge_ttl_seconds,
+        consts::DEFAULT_CHALLENGE_TTL_SECONDS
+    );
+
+    assert!(!config.aml_risk.enabled);
+    assert_eq!(config.aml_risk.api_key, None);
+    assert_eq!(
+        config.aml_risk.cache_ttl,
+        Duration::from_secs(consts::DEFAULT_RISK_CACHE_TTL_SEC)
+    );
+    assert_eq!(
+        config.aml_risk.request_timeout,
+        Duration::from_secs(consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC)
+    );
+    assert_eq!(
+        config.aml_risk.risk_score_threshold,
+        consts::DEFAULT_RISK_SCORE_THRESHOLD
     );
 
     // The example file has the programs section with 2 entries
@@ -555,11 +613,6 @@ fn test_env_vars_full_coverage() {
         // --- Chainlink ---
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
         EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
-        EnvVarGuard::new("MBV_CHAINLINK__RISK__ENABLED", "true"),
-        EnvVarGuard::new("MBV_CHAINLINK__RISK__API_KEY", "env-range-token"),
-        EnvVarGuard::new("MBV_CHAINLINK__RISK__CACHE_TTL", "45m"),
-        EnvVarGuard::new("MBV_CHAINLINK__RISK__REQUEST_TIMEOUT", "3s"),
-        EnvVarGuard::new("MBV_CHAINLINK__RISK__RISK_SCORE_THRESHOLD", "8"),
         // --- Task Scheduler ---
         EnvVarGuard::new("MBV_TASK_SCHEDULER__RESET", "true"),
         EnvVarGuard::new("MBV_TASK_SCHEDULER__MIN_INTERVAL", "99ms"),
@@ -568,6 +621,17 @@ fn test_env_vars_full_coverage() {
             "MBV_TASK_SCHEDULER__FAILED_TASK_CLEANUP_INTERVAL",
             "3m",
         ),
+        // --- Query Filtering ---
+        EnvVarGuard::new("MBV_QUERY_FILTERING__ENABLED", "true"),
+        EnvVarGuard::new("MBV_QUERY_FILTERING__JWT_SECRET", "env-jwt-secret"),
+        EnvVarGuard::new("MBV_QUERY_FILTERING__TOKEN_EXPIRY_DAYS", "7"),
+        EnvVarGuard::new("MBV_QUERY_FILTERING__CHALLENGE_TTL_SECONDS", "60"),
+        // --- AML Risk ---
+        EnvVarGuard::new("MBV_AML_RISK__ENABLED", "true"),
+        EnvVarGuard::new("MBV_AML_RISK__API_KEY", "env-range-token"),
+        EnvVarGuard::new("MBV_AML_RISK__CACHE_TTL", "45m"),
+        EnvVarGuard::new("MBV_AML_RISK__REQUEST_TIMEOUT", "3s"),
+        EnvVarGuard::new("MBV_AML_RISK__RISK_SCORE_THRESHOLD", "8"),
         // --- Chain Operation (Optional Section) ---
         // Figment can instantiate optional structs if their fields are present
         EnvVarGuard::new("MBV_CHAIN_OPERATION__COUNTRY_CODE", "DE"),
@@ -629,20 +693,6 @@ fn test_env_vars_full_coverage() {
         config.chainlink.resubscription_delay,
         Duration::from_millis(150)
     );
-    assert!(config.chainlink.risk.enabled);
-    assert_eq!(
-        config.chainlink.risk.api_key,
-        Some("env-range-token".to_string())
-    );
-    assert_eq!(
-        config.chainlink.risk.cache_ttl,
-        Duration::from_secs(45 * 60)
-    );
-    assert_eq!(
-        config.chainlink.risk.request_timeout,
-        Duration::from_secs(3)
-    );
-    assert_eq!(config.chainlink.risk.risk_score_threshold, 8);
 
     // Task Scheduler
     assert!(config.task_scheduler.reset);
@@ -658,6 +708,19 @@ fn test_env_vars_full_coverage() {
         config.task_scheduler.failed_task_cleanup_interval,
         Duration::from_secs(3 * 60)
     );
+
+    // Query Filtering
+    assert!(config.query_filtering.enabled);
+    assert_eq!(config.query_filtering.jwt_secret, "env-jwt-secret");
+    assert_eq!(config.query_filtering.token_expiry_days, 7);
+    assert_eq!(config.query_filtering.challenge_ttl_seconds, 60);
+
+    // AML Risk
+    assert!(config.aml_risk.enabled);
+    assert_eq!(config.aml_risk.api_key, Some("env-range-token".to_string()));
+    assert_eq!(config.aml_risk.cache_ttl, Duration::from_secs(45 * 60));
+    assert_eq!(config.aml_risk.request_timeout, Duration::from_secs(3));
+    assert_eq!(config.aml_risk.risk_score_threshold, 8);
 
     // Chain Operation
     // Verify the optional struct was created and populated

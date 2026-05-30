@@ -35,6 +35,7 @@ magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-metrics = { workspace = true }
+magicblock-query-filtering = { workspace = true }
 magicblock-version = { workspace = true }
 
 # solana
@@ -59,9 +60,11 @@ base64 = { workspace = true }
 bincode = { workspace = true }
 bs58 = { workspace = true }
 json = { workspace = true }
+serde_json = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }

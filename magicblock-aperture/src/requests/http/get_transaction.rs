@@ -1,6 +1,10 @@
 use json::{JsonContainerTrait, JsonValueMutTrait, JsonValueTrait};
+use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_rpc_client_api::config::RpcTransactionConfig;
-use solana_transaction_status::UiTransactionEncoding;
+use solana_transaction_status::{
+    ConfirmedTransactionWithStatusMeta, TransactionWithStatusMeta,
+    UiTransactionEncoding,
+};
 
 use super::prelude::*;
 
@@ -9,7 +13,7 @@ impl HttpDispatcher {
     ///
     /// Fetches the details of a confirmed transaction from the ledger by its
     /// signature. Returns `null` if the transaction is not found.
-    pub(crate) fn get_transaction(
+    pub(crate) async fn get_transaction(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
@@ -22,8 +26,25 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
 
         // Fetch the complete transaction details from the persistent ledger.
-        let transaction =
+        let mut transaction =
             self.ledger.get_complete_transaction(signature, u64::MAX)?;
+
+        if let (Some(user), Some(confirmed)) =
+            (&request.authenticated_user, transaction.as_mut())
+        {
+            let touched = collect_static_account_keys(confirmed);
+            self.ensure_permission_accounts(
+                &touched,
+                AccountFetchOrigin::GetMultipleAccounts,
+            )
+            .await;
+            magicblock_query_filtering::filter_confirmed_transaction(
+                &*self.accountsdb,
+                confirmed,
+                user,
+            )
+            .map_err(RpcError::internal)?;
+        }
 
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
         // This implementation supports all transaction versions, so we pass a max version number.
@@ -54,6 +75,37 @@ fn value_from_serializable<T: json::Serialize>(
     value: &T,
 ) -> Option<json::Value> {
     json::to_value(value).ok()
+}
+
+/// Collects every account key the confirmed transaction touches — static keys
+/// plus any address-table lookups already resolved into the meta. Used to
+/// determine which permission PDAs must be fetched before filtering.
+fn collect_static_account_keys(
+    confirmed: &ConfirmedTransactionWithStatusMeta,
+) -> Vec<Pubkey> {
+    let mut keys = Vec::new();
+    match &confirmed.tx_with_meta {
+        TransactionWithStatusMeta::Complete(complete) => {
+            keys.extend(
+                complete
+                    .transaction
+                    .message
+                    .static_account_keys()
+                    .iter()
+                    .copied(),
+            );
+            keys.extend(
+                complete.meta.loaded_addresses.writable.iter().copied(),
+            );
+            keys.extend(
+                complete.meta.loaded_addresses.readonly.iter().copied(),
+            );
+        }
+        TransactionWithStatusMeta::MissingMetadata(legacy) => {
+            keys.extend(legacy.message.account_keys.iter().copied());
+        }
+    }
+    keys
 }
 
 fn normalize_failed_transaction_balance_arrays(value: &mut json::Value) {

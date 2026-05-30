@@ -5,11 +5,18 @@ mod transfer_intent;
 
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::{
+    access_control::{
+        instructions::{
+            CreateEphemeralPermissionCpi, UpdateEphemeralPermissionCpi,
+        },
+        structs::{EphemeralMembersArgs, EphemeralPermission, Member},
+    },
     consts::{EXTERNAL_UNDELEGATE_DISCRIMINATOR, MAGIC_PROGRAM_ID},
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
     ephem::{commit_accounts, commit_and_undelegate_accounts},
+    ephemeral_accounts::rent,
 };
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
@@ -27,11 +34,14 @@ use solana_program::{
 };
 use solana_system_interface::instruction as system_instruction;
 
+// The max number of members in the query filtering permission in tests
+const QUERY_FILTERING_PERMISSION_MEMBERS: usize = 3;
+
 use crate::{
     instruction::{
         create_add_error_ix, create_add_ix, create_add_unsigned_ix, CancelArgs,
-        DelegateArgs, FlexiCounterInstruction, ScheduleArgs,
-        MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
+        DelegateArgs, FlexiCounterInstruction, PermissionMemberArgs,
+        ScheduleArgs, MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
     processor::{
         call_handler::{
@@ -83,6 +93,12 @@ pub fn process(
         AddError { count } => process_add_error(accounts, count),
         Mul { multiplier } => process_mul(accounts, multiplier),
         Delegate(args) => process_delegate(accounts, &args),
+        CreatePermission { members } => {
+            process_create_permission(accounts, members)
+        }
+        UpdatePermission { members } => {
+            process_update_permission(accounts, members)
+        }
         AddAndScheduleCommit {
             count,
             undelegate,
@@ -182,7 +198,10 @@ fn process_init(
     let ix = system_instruction::create_account(
         payer_info.key,
         counter_pda_info.key,
-        Rent::get()?.minimum_balance(size),
+        Rent::get()?.minimum_balance(size)
+            + rent(EphemeralPermission::size_of(
+                QUERY_FILTERING_PERMISSION_MEMBERS,
+            ) as u32),
         size as u64,
         program_id,
     );
@@ -360,6 +379,100 @@ fn process_delegate(
     )?;
 
     Ok(())
+}
+
+fn process_create_permission(
+    accounts: &[AccountInfo],
+    members: Option<Vec<PermissionMemberArgs>>,
+) -> ProgramResult {
+    msg!("CreatePermission");
+
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+    let permission_info = next_account_info(account_info_iter)?;
+    let permission_program_info = next_account_info(account_info_iter)?;
+    let magic_program_info = next_account_info(account_info_iter)?;
+    let ephemeral_vault_info = next_account_info(account_info_iter)?;
+
+    let (counter_pda, bump) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
+        format!(
+            "Invalid Counter PDA {}, should be {}",
+            counter_pda_info.key, counter_pda
+        )
+    })?;
+
+    let bump_slice = [bump];
+    let signer_seeds =
+        FlexiCounter::seeds_with_bump(payer_info.key, &bump_slice);
+
+    CreateEphemeralPermissionCpi {
+        permission_program: permission_program_info.clone(),
+        permissioned_account: counter_pda_info.clone(),
+        permission: permission_info.clone(),
+        payer: counter_pda_info.clone(),
+        magic_program: magic_program_info.clone(),
+        vault: ephemeral_vault_info.clone(),
+        args: members
+            .map(|members| EphemeralMembersArgs {
+                members: members.into_iter().map(Member::from).collect(),
+                is_private: true,
+            })
+            .unwrap_or(EphemeralMembersArgs {
+                members: vec![],
+                is_private: false,
+            }),
+    }
+    .invoke_signed(&[&signer_seeds])
+}
+
+fn process_update_permission(
+    accounts: &[AccountInfo],
+    members: Option<Vec<PermissionMemberArgs>>,
+) -> ProgramResult {
+    msg!("UpdatePermission");
+
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+    let permission_info = next_account_info(account_info_iter)?;
+    let permission_program_info = next_account_info(account_info_iter)?;
+    let magic_program_info = next_account_info(account_info_iter)?;
+    let ephemeral_vault_info = next_account_info(account_info_iter)?;
+
+    let (counter_pda, bump) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
+        format!(
+            "Invalid Counter PDA {}, should be {}",
+            counter_pda_info.key, counter_pda
+        )
+    })?;
+
+    let bump_slice = [bump];
+    let signer_seeds =
+        FlexiCounter::seeds_with_bump(payer_info.key, &bump_slice);
+
+    UpdateEphemeralPermissionCpi {
+        authority: counter_pda_info.clone(),
+        authority_is_signer: true,
+        permission_program: permission_program_info.clone(),
+        permissioned_account: counter_pda_info.clone(),
+        permission: permission_info.clone(),
+        payer: counter_pda_info.clone(),
+        magic_program: magic_program_info.clone(),
+        vault: ephemeral_vault_info.clone(),
+        args: members
+            .map(|members| EphemeralMembersArgs {
+                members: members.into_iter().map(Member::from).collect(),
+                is_private: true,
+            })
+            .unwrap_or(EphemeralMembersArgs {
+                members: vec![],
+                is_private: false,
+            }),
+    }
+    .invoke_signed(&[&signer_seeds])
 }
 
 fn process_add_and_schedule_commit(

@@ -144,26 +144,47 @@ impl HttpDispatcher {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
+        self.read_account_with_ensure_for_user(pubkey, None).await
+    }
+
+    /// Like [`read_account_with_ensure`], but additionally ensures the
+    /// permission PDA when the request is authenticated — both fetches share a
+    /// single chainlink round-trip so the query-filtering path doesn't pay a
+    /// second network hop. Pass `None` to skip the permission ensure.
+    ///
+    /// If the data account is already known to be a permission account
+    /// itself, its meta-permission PDA is skipped — permission accounts are
+    /// always public and never filtered, so fetching their meta-perm would be
+    /// wasted bandwidth.
+    #[instrument(skip_all)]
+    async fn read_account_with_ensure_for_user(
+        &self,
+        pubkey: &Pubkey,
+        authenticated_user: Option<&Pubkey>,
+    ) -> Option<AccountSharedData> {
         if !self.needs_onchain_interactions() {
             return self.accountsdb.get_account(pubkey);
         }
 
-        let mark_empty_if_not_found = [*pubkey];
+        let mut to_ensure = vec![*pubkey];
+        if authenticated_user.is_some() && !self.is_permission_account(pubkey) {
+            to_ensure.push(magicblock_query_filtering::types::Permission::pda(
+                pubkey,
+            ));
+        }
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["account"])
             .start_timer();
         let _ = self
             .chainlink
             .ensure_accounts(
-                &[*pubkey],
-                Some(&mark_empty_if_not_found),
+                &to_ensure,
+                Some(&to_ensure),
                 AccountFetchOrigin::GetAccount,
                 None,
             )
             .await
             .inspect_err(|e| {
-                // There is nothing we can do if fetching the account fails
-                // Log the error and return whatever is in the accounts db
                 debug!(error = ?e, "Failed to ensure account");
             });
         self.accountsdb.get_account(pubkey)
@@ -176,6 +197,20 @@ impl HttpDispatcher {
         &self,
         pubkeys: &[Pubkey],
     ) -> Vec<Option<AccountSharedData>> {
+        self.read_accounts_with_ensure_for_user(pubkeys, None).await
+    }
+
+    /// Like [`read_accounts_with_ensure`], but bundles each pubkey's
+    /// permission PDA into the same chainlink ensure when the request is
+    /// authenticated. Single network round-trip for both data and permission
+    /// fetches. Permission accounts known locally are skipped — they are
+    /// public and never filtered.
+    #[instrument(skip(self, pubkeys), fields(pubkey_count = pubkeys.len()))]
+    async fn read_accounts_with_ensure_for_user(
+        &self,
+        pubkeys: &[Pubkey],
+        authenticated_user: Option<&Pubkey>,
+    ) -> Vec<Option<AccountSharedData>> {
         if !self.needs_onchain_interactions() {
             return pubkeys
                 .iter()
@@ -183,6 +218,14 @@ impl HttpDispatcher {
                 .collect();
         }
 
+        let mut to_ensure: Vec<Pubkey> = pubkeys.to_vec();
+        if authenticated_user.is_some() {
+            to_ensure.extend(pubkeys.iter().filter_map(|pubkey| {
+                (!self.is_permission_account(pubkey)).then(|| {
+                    magicblock_query_filtering::types::Permission::pda(pubkey)
+                })
+            }));
+        }
         trace!("Ensuring accounts");
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["multi-account"])
@@ -190,21 +233,29 @@ impl HttpDispatcher {
         let _ = self
             .chainlink
             .ensure_accounts(
-                pubkeys,
-                Some(pubkeys),
+                &to_ensure,
+                Some(&to_ensure),
                 AccountFetchOrigin::GetMultipleAccounts,
                 None,
             )
             .await
             .inspect_err(|e| {
-                // There is nothing we can do if fetching the accounts fails
-                // Log the error and return whatever is in the accounts db
                 warn!(error = ?e, "Failed to ensure accounts");
             });
         pubkeys
             .iter()
             .map(|pubkey| self.accountsdb.get_account(pubkey))
             .collect()
+    }
+
+    /// Cheap local check: does the address already resolve to an account
+    /// owned by the permission program? Used to short-circuit meta-permission
+    /// ensures for accounts we know to be permission accounts themselves.
+    fn is_permission_account(&self, pubkey: &Pubkey) -> bool {
+        self.accountsdb.get_account(pubkey).is_some_and(|account| {
+            account.owner()
+                == &magicblock_query_filtering::PERMISSION_PROGRAM_ID
+        })
     }
 
     /// Decodes, validates, and sanitizes a transaction from its string representation.
@@ -263,6 +314,83 @@ impl HttpDispatcher {
             txn,
             encoded: encoded.into(),
         })
+    }
+
+    /// Enforces send/simulate transaction admission against query-filtering
+    /// permissions when the caller is authenticated. No-op when query
+    /// filtering is disabled or the request has no authenticated user.
+    pub(crate) async fn enforce_transaction_admission(
+        &self,
+        transaction: &SanitizedTransaction,
+        request: &super::JsonHttpRequest,
+    ) -> RpcResult<()> {
+        if request.authenticated_user.is_none() {
+            return Ok(());
+        }
+        let message = transaction.message();
+        let account_keys: Vec<Pubkey> =
+            message.account_keys().iter().copied().collect();
+        self.ensure_permission_accounts(
+            &account_keys,
+            AccountFetchOrigin::SendTransaction(*transaction.signature()),
+        )
+        .await;
+        magicblock_query_filtering::check_transaction_admission(
+            &*self.accountsdb,
+            &account_keys,
+            message.instructions(),
+        )
+        .map_err(|err| match err {
+            magicblock_query_filtering::service::QueryFilteringError::AccessDenied => {
+                RpcError::invalid_request(err)
+            }
+            other => RpcError::internal(other),
+        })
+    }
+
+    /// Ensures the permission PDAs for the given data accounts are present in
+    /// the local `AccountsDb`. Without this step the query-filtering layer
+    /// would treat a not-yet-cloned permission account as missing, silently
+    /// rendering a restricted account as unrestricted on first access.
+    ///
+    /// Accounts already known locally to be permission accounts themselves
+    /// are skipped — permission accounts are public and never filtered, so
+    /// fetching their meta-permission would be wasted bandwidth.
+    ///
+    /// `mark_empty_if_not_found` is set so PDAs that don't exist on chain are
+    /// cached as empty locally — subsequent reads short-circuit through the
+    /// `permission_for_account` owner gate without re-fetching.
+    pub(crate) async fn ensure_permission_accounts(
+        &self,
+        accounts: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) {
+        if !self.needs_onchain_interactions() || accounts.is_empty() {
+            return;
+        }
+        let permission_pdas: Vec<Pubkey> = accounts
+            .iter()
+            .filter(|pubkey| !self.is_permission_account(pubkey))
+            .map(magicblock_query_filtering::types::Permission::pda)
+            .collect();
+        if permission_pdas.is_empty() {
+            return;
+        }
+        let _timer = ENSURE_ACCOUNTS_TIME
+            .with_label_values(&["permission"])
+            .start_timer();
+        let _ = self
+            .chainlink
+            .ensure_accounts(
+                &permission_pdas,
+                Some(&permission_pdas),
+                fetch_origin,
+                None,
+            )
+            .await
+            .inspect_err(|err| {
+                warn!(error = ?err, "Failed to ensure permission accounts");
+            });
     }
 
     /// Ensures all accounts required for a transaction are present in the `AccountsDb`.

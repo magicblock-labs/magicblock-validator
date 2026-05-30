@@ -29,9 +29,9 @@ fn derive_insecure(message: &[u8]) -> Keypair {
     let hash = <sha3::Sha3_512 as sha3::Digest>::digest(message);
     let seed = &hash.as_slice()[0..32];
 
-    let secret = SecretKey::from_bytes(seed).unwrap();
+    let secret: SecretKey = seed.try_into().unwrap();
     let mut secret_bytes = [0u8; Keypair::SECRET_KEY_LENGTH];
-    secret_bytes.copy_from_slice(secret.as_bytes());
+    secret_bytes.copy_from_slice(&secret);
     Keypair::new_from_array(secret_bytes)
 }
 

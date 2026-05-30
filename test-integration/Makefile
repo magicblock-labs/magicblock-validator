@@ -100,6 +100,25 @@ setup-cloning-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
+test-query-filtering:
+	RUN_TESTS=query_filtering \
+	$(MAKE) test
+setup-query-filtering-devnet:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=query_filtering \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+setup-query-filtering-ephem:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=query_filtering \
+	SETUP_ONLY=ephem \
+	$(MAKE) test
+setup-query-filtering-both:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=query_filtering \
+	SETUP_ONLY=both \
+	$(MAKE) test
+
 test-restore-ledger:
 	RUN_TESTS=restore_ledger \
 	$(MAKE) test
@@ -286,6 +305,9 @@ ci-lint: lint
 	setup-pubsub-both \
 	setup-pubsub-devnet \
 	setup-pubsub-ephem \
+	setup-query-filtering-both \
+	setup-query-filtering-devnet \
+	setup-query-filtering-ephem \
 	setup-restore-ledger-devnet \
 	setup-schedule-intents-both \
 	setup-schedule-intents-devnet \
@@ -312,6 +334,7 @@ ci-lint: lint
 	test-force-mb \
 	test-magicblock-api \
 	test-pubsub \
+	test-query-filtering \
 	test-restore-ledger \
 	test-schedule-intents \
 	test-schedulecommit \

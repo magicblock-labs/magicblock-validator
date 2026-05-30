@@ -7,6 +7,7 @@ use hyper_util::{
     server::conn,
 };
 use magicblock_core::link::DispatchEndpoints;
+use magicblock_query_filtering::QueryFilteringService;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument};
@@ -30,13 +31,14 @@ impl HttpServer {
     /// Initializes the HTTP server by binding to an address and setting up shutdown signaling.
     pub(crate) async fn new(
         socket: TcpListener,
+        query_filtering: Option<Arc<QueryFilteringService>>,
         state: SharedState,
         cancel: CancellationToken,
         dispatch: &DispatchEndpoints,
     ) -> RpcResult<Self> {
         Ok(Self {
             socket,
-            dispatcher: HttpDispatcher::new(state, dispatch),
+            dispatcher: HttpDispatcher::new(query_filtering, state, dispatch),
             cancel,
         })
     }

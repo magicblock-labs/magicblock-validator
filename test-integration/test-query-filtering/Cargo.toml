@@ -1,0 +1,19 @@
+[package]
+edition.workspace = true
+name = "test-query-filtering"
+version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+borsh = { workspace = true }
+integration-test-tools = { workspace = true }
+program-flexi-counter = { workspace = true }
+magicblock-query-filtering = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1.0"
+solana-commitment-config = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = "3.1.12"
+solana-sdk = { workspace = true }
+solana-transaction-status = { workspace = true }
+ureq = { workspace = true, features = ["json"] }

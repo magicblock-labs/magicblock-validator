@@ -48,7 +48,13 @@ impl HttpDispatcher {
             .inspect_err(|err| {
                 debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
-        self.ensure_transaction_accounts(&transaction.txn).await?;
+        // Run the chainlink tx-account ensure in parallel with the admission
+        // ensure (and check) so query filtering doesn't add an extra
+        // network round-trip on the simulate hot path.
+        tokio::try_join!(
+            self.ensure_transaction_accounts(&transaction.txn),
+            self.enforce_transaction_admission(&transaction.txn, request),
+        )?;
         let number_of_accounts = transaction.txn.message().account_keys().len();
 
         let replacement_blockhash = config

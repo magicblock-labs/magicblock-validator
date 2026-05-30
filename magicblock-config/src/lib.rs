@@ -21,9 +21,9 @@ pub mod types;
 
 use crate::{
     config::{
-        AccountsDbConfig, ChainLinkConfig, ChainOperationConfig,
-        CommittorConfig, LedgerConfig, LoadableProgram, TaskSchedulerConfig,
-        ValidatorConfig,
+        AccountsDbConfig, AmlRiskConfig, ChainLinkConfig, ChainOperationConfig,
+        CommittorConfig, LedgerConfig, LoadableProgram, QueryFilteringConfig,
+        TaskSchedulerConfig, ValidatorConfig,
     },
     types::Remote,
 };
@@ -59,6 +59,12 @@ pub struct ValidatorParams {
 
     /// Aperture-specific configuration.
     pub aperture: ApertureConfig,
+
+    /// AML risk configuration.
+    pub aml_risk: AmlRiskConfig,
+
+    /// Query filtering configuration.
+    pub query_filtering: QueryFilteringConfig,
 
     // --- File-Only Configuration ---
     pub commit: CommittorConfig,
