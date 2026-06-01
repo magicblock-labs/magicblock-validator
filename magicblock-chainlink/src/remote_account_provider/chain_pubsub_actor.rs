@@ -966,30 +966,24 @@ impl ChainPubsubActor {
             "Aborting connection"
         );
 
-        fn drain_subscriptions(
+        fn cancel_subscriptions(
             _client_id: &str,
             subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         ) {
-            let drained_subs = {
-                let mut subs_lock =
-                    subscriptions.lock().expect("subscriptions lock poisoned");
-                std::mem::take(&mut *subs_lock)
-            };
-            let drained_len = drained_subs.len();
-            for (
-                _,
-                AccountSubscription {
-                    cancellation_token, ..
-                },
-            ) in drained_subs
+            let subs_lock =
+                subscriptions.lock().expect("subscriptions lock poisoned");
+            let canceled_len = subs_lock.len();
+            for AccountSubscription {
+                cancellation_token, ..
+            } in subs_lock.values()
             {
                 cancellation_token.cancel();
             }
-            debug!(count = drained_len, "Canceled subscriptions");
+            debug!(count = canceled_len, "Canceled subscriptions");
         }
 
-        drain_subscriptions(client_id, subscriptions);
-        drain_subscriptions(client_id, program_subs);
+        cancel_subscriptions(client_id, subscriptions);
+        cancel_subscriptions(client_id, program_subs);
 
         // Use try_send to avoid blocking and naturally coalesce signals
         let _ = abort_sender.try_send(()).inspect_err(|err| {
