@@ -1,10 +1,10 @@
 use std::{
     fs::{self, File},
-    hash::{DefaultHasher, Hash, Hasher},
     io::{self, ErrorKind, Read, Write},
     path::{Path, PathBuf},
 };
 
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const CONFIGFS_TSM_REPORT_PATH: &str = "/sys/kernel/config/tsm/report";
@@ -26,13 +26,10 @@ pub fn tdx_guest_device_present() -> bool {
 }
 
 fn quote_dir_name(input: &[u8]) -> String {
-    let mut h = DefaultHasher::new();
-    input.hash(&mut h);
-    h.finish()
-        .to_le_bytes()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    let mut hasher = Sha256::new();
+    hasher.update(input);
+    let hash = hasher.finalize();
+    hash.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 fn trim_newline(s: &mut String) {
