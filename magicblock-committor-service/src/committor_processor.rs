@@ -140,6 +140,7 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
+    /// Fetches pending bundles from DB
     pub async fn pending_intent_bundles(
         &self,
     ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {

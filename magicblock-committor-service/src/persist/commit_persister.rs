@@ -504,7 +504,7 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
 
 fn pending_rows_to_scheduled_intent_bundles<F>(
     rows: Vec<CommitStatusRow>,
-    filter: F,
+    predicate: F,
 ) -> Vec<ScheduledIntentBundle>
 where
     F: Fn(&CommitStatusRow) -> bool,
@@ -518,7 +518,7 @@ where
         .into_iter()
         // Filter row if any item doesn't satisfy predicate
         .filter(|(message_id, rows)| {
-            if rows.iter().any(|row| filter(row)) {
+            if rows.iter().any(&predicate) {
                 warn!(
                     intent_id = message_id,
                     "Skipping pending commit intent because it is not old enough to recover"

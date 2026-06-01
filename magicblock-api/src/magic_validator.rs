@@ -935,12 +935,6 @@ impl MagicValidator {
             log_timing("startup", "reset_accounts_bank", step_start);
         }
 
-        // Recovery of persisted pending commit intents reads the local accounts
-        // bank for delegation checks, so it must run only after replay + reset.
-        if let Some(processor) = self.scheduled_commits_processor.as_ref() {
-            processor.spawn_pending_intents_recovery();
-        }
-
         // Notify the scheduler that ledger replay and bank cleanup is complete.
         if self.is_standalone {
             self.mode_tx
@@ -1030,8 +1024,9 @@ impl MagicValidator {
         self.token.cancel();
 
         let step_start = Instant::now();
-        // TODO(edwin): handle returned errs, at least log
-        let _ = self.intent_execution_service.stop().await;
+        if let Err(err) = self.intent_execution_service.stop().await {
+            error!(error =? err, "Failure during stopping Intent Execution Service")
+        }
         log_timing("shutdown", "intent_execution_service_stop", step_start);
 
         let step_start = Instant::now();

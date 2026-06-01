@@ -2,15 +2,17 @@ pub mod intent_client;
 
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     mem,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
+use futures_util::future::join_all;
 use intent_client::{ERIntentClient, InternalIntentClientError};
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
-use magicblock_metrics::metrics;
+use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle, Pubkey, SentCommit,
 };
@@ -22,10 +24,10 @@ use tokio::{
     task::{JoinError, JoinHandle},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 use crate::{
-    committor_processor::CommittorProcessor, error::CommittorServiceError,
+    committor_processor::CommittorProcessor, error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
 };
@@ -144,6 +146,10 @@ where
     }
 
     async fn accept_worker(self) {
+        if let Err(err) = self.reschedule_pending_bundles().await {
+            error!(error = ?err, "Failed to reschedule pending bundles")
+        }
+
         let mut interval = tokio::time::interval(self.slot_interval);
         loop {
             tokio::select! {
@@ -172,22 +178,60 @@ where
         }
     }
 
+    async fn reschedule_pending_bundles(&self) -> CommittorServiceResult<()> {
+        // Fetch pending bundles from DB
+        let mut bundles =
+            self.processor.pending_intent_bundles().await.inspect_err(|err| {
+                error!(error = ?err, "Failed to load pending intent bundles for recovery");
+            })?;
+        if bundles.is_empty() {
+            return Ok(());
+        }
+
+        // Retain only recoverable bundles
+        self.retain_recoverable_intent_bundles(&mut bundles).await;
+
+        // Schedule  without initial persisitance as bundle already exists in db
+        self.process_intent_bundles(bundles, |bundles| {
+            self.processor.schedule_recovered_intent_bundles(bundles)
+        })
+        .await
+    }
+
     async fn schedule_intent_execution(
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
-    ) -> Result<(), CommittorServiceError> {
+    ) -> CommittorServiceResult<()> {
         if intent_bundles.is_empty() {
             return Ok(());
         }
 
         metrics::inc_committor_intents_count_by(intent_bundles.len() as u64);
 
+        self.process_intent_bundles(intent_bundles, |bundles| {
+            self.processor.schedule_intent_bundles(bundles)
+        })
+        .await
+    }
+
+    async fn process_intent_bundles<F, Fut>(
+        &self,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+        schedule: F,
+    ) -> CommittorServiceResult<()>
+    where
+        F: FnOnce(Vec<ScheduledIntentBundle>) -> Fut,
+        Fut: Future<Output = CommittorServiceResult<()>>,
+    {
+        if intent_bundles.is_empty() {
+            return Ok(());
+        }
+
         // Add metas for intent we schedule
         let pubkeys_being_undelegated = {
             let mut intent_metas =
                 self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
             let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
-
             intent_bundles.iter().for_each(|intent| {
                 intent_metas
                     .insert(intent.id, ScheduledBaseIntentMeta::new(intent));
@@ -196,16 +240,12 @@ where
                     pubkeys_being_undelegated.extend(undelegate);
                 }
             });
-
             pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
         };
 
         self.process_undelegation_requests(pubkeys_being_undelegated)
             .await;
-        self.processor
-            .schedule_intent_bundles(intent_bundles)
-            .await?;
-        Ok(())
+        schedule(intent_bundles).await
     }
 
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
@@ -395,6 +435,52 @@ where
             patched_errors,
             callbacks_scheduling_results: callbacks_report,
         }
+    }
+
+    /// Retains bundles whose accounts are still delegated
+    async fn retain_recoverable_intent_bundles(
+        &self,
+        bundles: &mut Vec<ScheduledIntentBundle>,
+    ) {
+        let results = join_all(
+            bundles.iter().map(|b| b.get_all_committed_pubkeys()).map(
+                |pubkeys| async move {
+                    self.chainlink
+                        .accounts_delegated_on_base_and_er(
+                            &pubkeys,
+                            AccountFetchOrigin::GetAccount,
+                        )
+                        .await
+                },
+            ),
+        )
+        .await;
+
+        let mut results_iter = results.into_iter();
+        bundles.retain(|bundle| {
+            let Some(result) = results_iter.next() else {
+                error!("Results and bundles must have equal length");
+                return false;
+            };
+            match result {
+                Ok(delegated) if delegated.iter().all(|d| *d) => true,
+                Ok(_) => {
+                    warn!(
+                        intent_id = bundle.id,
+                        "Skipping recovered commit intent because not all accounts are delegated on base and ER"
+                    );
+                    false
+                }
+                Err(err) => {
+                    error!(
+                        intent_id = bundle.id,
+                        error = ?err,
+                        "Failed to verify recovered commit intent accounts"
+                    );
+                    false
+                }
+            }
+        });
     }
 }
 

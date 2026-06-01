@@ -32,6 +32,9 @@ pub trait ERIntentClient: Send + Sync + 'static {
         sent_tx: Transaction,
         sent_commit: SentCommit,
     ) -> Result<(), Self::Error>;
+
+    // TODO(edwin): probably more proper place to load pending intent
+    // CommittorProcessor::pending_intent_bundles could be moved here in the future
 }
 
 pub struct InternalIntentRpcClient<L: LatestBlockProvider> {
