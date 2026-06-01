@@ -966,6 +966,10 @@ impl ChainPubsubActor {
             "Aborting connection"
         );
 
+        // Abort only cancels listeners in place. Do not drain these maps here:
+        // reconnect still needs the stored completion tokens so
+        // drain_and_wait_for_listener_completion can wait for old websocket
+        // streams to drop before pooled clients are reconnected or pruned.
         fn cancel_subscriptions(
             _client_id: &str,
             subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
