@@ -1071,7 +1071,10 @@ where
         .process(self.connected_clients_snapshot())
         .await?;
 
-        self.program_subs.lock().unwrap().insert(program_id);
+        self.program_subs
+            .lock()
+            .expect("program_subs lock poisoned")
+            .insert(program_id);
         Ok(())
     }
 
