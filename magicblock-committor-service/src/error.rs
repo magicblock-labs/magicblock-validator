@@ -16,6 +16,11 @@ pub enum CommittorServiceError {
     #[error("RecvError: {0}")]
     IntentResultRecvError(#[from] RecvError),
 
+    #[error("MagicBlockRpcClientError: {0} ({0:?})")]
+    MagicBlockRpcClientError(
+        #[from] magicblock_rpc_client::MagicBlockRpcClientError,
+    ),
+
     #[error("Attempt to schedule already scheduled message id: {0}")]
     RepeatingMessageError(u64),
 }
