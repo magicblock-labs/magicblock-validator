@@ -95,7 +95,7 @@ where
 pub struct ServiceInner<R> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
-    /// ER client specific for Intent needs
+    /// ER client specific for Intent needs. Could be switched to RpcClient
     intent_rpc_client: Arc<R>,
     /// Processor of accepted intents
     processor: Arc<CommittorProcessor>,
@@ -129,7 +129,8 @@ where
         }
     }
 
-    pub fn start(self) -> JoinHandle<()> {
+    /// Starts 2 workers: one accepting intents, another awaiting and handling results
+    fn start(self) -> JoinHandle<()> {
         let result_subscriber = self.processor.subscribe_for_results();
         let cancellation_token = self.cancellation_token.clone();
         tokio::spawn(Self::result_processor(
@@ -296,7 +297,7 @@ where
         intent_client: &Arc<R>,
         execution_result: BroadcastedIntentExecutionResult,
         intents_meta_map: &Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-    ) -> Result<(), IntentExecutionServiceError> {
+    ) -> Result<(), R::Error> {
         // Create IntentMeta
         let intent_id = execution_result.id;
         // Remove intent from metas
@@ -321,8 +322,7 @@ where
         );
         intent_client
             .notify_commit_sent(sent_transaction, sent_commit)
-            .await
-            .map_err(Into::into)?;
+            .await?;
 
         Ok(())
     }
