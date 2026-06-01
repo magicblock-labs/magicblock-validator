@@ -1663,12 +1663,10 @@ async fn test_subscription_update_for_unwatched_absent_account_is_dropped() {
         .await
         .unwrap();
 
+    drop(ctx.subscription_tx);
     tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
+        while Arc::strong_count(&ctx.fetch_cloner) > 1 {
             tokio::time::sleep(Duration::from_millis(10)).await;
-            if ctx.fetch_cloner.cloner().clone_request_count() == 0 {
-                break;
-            }
         }
     })
     .await
