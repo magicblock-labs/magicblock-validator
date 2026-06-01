@@ -647,20 +647,21 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         }
 
         let from_slot = self.compute_from_slot();
-        if let Some((subscribed_programs, handle)) = self.program_sub.take() {
-            let mut updated_programs = subscribed_programs.clone();
-            updated_programs.insert(program_id);
+        if let Some((mut subscribed_programs, handle)) = self.program_sub.take()
+        {
+            subscribed_programs.insert(program_id);
             let request = Self::build_program_request(
-                &updated_programs,
+                &subscribed_programs,
                 commitment,
                 from_slot,
             );
             match write_with_retry(&handle, "program_subscribe", request).await
             {
                 Ok(()) => {
-                    self.program_sub = Some((updated_programs, handle));
+                    self.program_sub = Some((subscribed_programs, handle));
                 }
                 Err(e) => {
+                    subscribed_programs.remove(&program_id);
                     self.program_sub = Some((subscribed_programs, handle));
                     return Err(e);
                 }
