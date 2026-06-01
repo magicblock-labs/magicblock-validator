@@ -1,4 +1,7 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    path::Path,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::{ChainlinkError, ChainlinkResult};
@@ -174,6 +177,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    pub async fn accounts_delegated_on_base_and_er(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<bool>> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink
+                    .accounts_delegated_on_base_and_er(pubkeys, fetch_origin)
+                    .await
+            }
+            Self::Disabled { .. } => Ok(vec![false; pubkeys.len()]),
+        }
+    }
+
     pub async fn undelegation_requested(
         &self,
         pubkey: Pubkey,
@@ -315,6 +333,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
         ledger_path: &Path,
+        chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<
         InnerChainlink<
             ChainRpcClientImpl,
@@ -332,6 +351,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             commitment,
             tx,
             &config.remote_account_provider,
+            Some(chain_slot),
         )
         .await?;
         let fetch_cloner = if let Some(provider) = account_provider {
@@ -556,7 +576,45 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(accounts)
     }
 
-    #[instrument(skip(self, fetch_cloner, pubkeys, mark_empty_if_not_found,))]
+    #[instrument(skip(self, pubkeys))]
+    pub async fn accounts_delegated_on_base_and_er(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<bool>> {
+        let Some(fetch_cloner) = self.fetch_cloner() else {
+            return Ok(vec![false; pubkeys.len()]);
+        };
+        let remote_accounts = fetch_cloner
+            .fetch_remote_accounts(pubkeys, fetch_origin)
+            .await?;
+        if remote_accounts.len() != pubkeys.len() {
+            return Err(ChainlinkError::UnexpectedAccountCount(format!(
+                "expected {} remote accounts, got {}",
+                pubkeys.len(),
+                remote_accounts.len()
+            )));
+        }
+
+        Ok(pubkeys
+            .iter()
+            .zip(remote_accounts)
+            .map(|(pubkey, remote_account)| {
+                let delegated_on_base =
+                    remote_account.is_owned_by_delegation_program();
+                let delegated_on_er = self
+                    .accounts_bank
+                    .get_account(pubkey)
+                    .is_some_and(|account| {
+                        account.delegated()
+                            || account.owner().eq(&dlp_api::id())
+                    });
+                delegated_on_base && delegated_on_er
+            })
+            .collect())
+    }
+
+    #[instrument(skip(self, fetch_cloner, pubkeys, mark_empty_if_not_found))]
     async fn fetch_accounts_common(
         &self,
         fetch_cloner: &FetchCloner<T, U, V, C>,

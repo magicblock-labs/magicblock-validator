@@ -3,7 +3,9 @@ use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::token_programs::{derive_eata, EATA_PROGRAM_ID};
+use magicblock_core::token_programs::{
+    try_derive_eata_address_and_bump, EphemeralAta, EATA_PROGRAM_ID,
+};
 use magicblock_metrics::metrics;
 use solana_account::ReadableAccount;
 use solana_keypair::Keypair;
@@ -136,14 +138,15 @@ pub(crate) fn parse_raw_eata_pda(
     data: &[u8],
     owner_program: Pubkey,
 ) -> Option<(Pubkey, Pubkey)> {
-    if owner_program != EATA_PROGRAM_ID || data.len() < 72 {
+    if owner_program != EATA_PROGRAM_ID {
         return None;
     }
 
-    let wallet_owner = Pubkey::new_from_array(data[0..32].try_into().ok()?);
-    let mint = Pubkey::new_from_array(data[32..64].try_into().ok()?);
-    (derive_eata(&wallet_owner, &mint) == *account_pubkey)
-        .then_some((wallet_owner, mint))
+    let eata = EphemeralAta::try_from_account_data(data)?;
+    let (derived_eata, bump) =
+        try_derive_eata_address_and_bump(&eata.owner, &eata.mint)?;
+    (derived_eata == *account_pubkey && bump == eata.bump)
+        .then_some((eata.owner, eata.mint))
 }
 
 pub(crate) fn get_delegated_to_other<T, U, V, C>(

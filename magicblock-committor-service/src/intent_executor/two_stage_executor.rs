@@ -141,6 +141,7 @@ where
                     break Err(execution_err);
                 }
             };
+            self.intent_client.invalidate_cached_blockhash().await;
             self.execution_report.dispose(cleanup);
 
             if self.state.current_attempt >= Self::RECURSION_CEILING {
@@ -401,6 +402,7 @@ where
                     break Err(execution_err);
                 }
             };
+            self.intent_client.invalidate_cached_blockhash().await;
             self.execution_report.dispose(cleanup);
 
             if self.state.current_attempt >= Self::RECURSION_CEILING {

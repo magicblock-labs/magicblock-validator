@@ -493,6 +493,7 @@ impl
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
+        chain_slot: Option<Arc<AtomicU64>>,
     ) -> ChainlinkResult<
         Option<
             RemoteAccountProvider<
@@ -512,6 +513,7 @@ impl
                 commitment,
                 subscription_forwarder,
                 config,
+                chain_slot.unwrap_or_default(),
             )
             .await?;
             Ok(Some(provider))
@@ -650,6 +652,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
+        chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<
         RemoteAccountProvider<
             ChainRpcClientImpl,
@@ -672,9 +675,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         })?;
         let rpc_client =
             ChainRpcClientImpl::new_from_url(rpc_url.as_str(), commitment);
-
-        // Create chain_slot to be shared with all pubsub clients
-        let chain_slot = Arc::<AtomicU64>::default();
 
         // Build startup pubsub clients and wrap them into a SubMuxClient.
         // gRPC clients are cheap to create and backfill subscriptions, so
