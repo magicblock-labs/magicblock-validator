@@ -237,7 +237,9 @@ pub fn set_account_from_fields(
     // In the same slot, we do not expect an account to be delegated,
     // undelegated and then delegated. So if we see the same account being
     // delegated twice (ore more) in the same slot, we consider such cases
-    // as "duplicates".
+    // as "duplicates". A delegated clone is still allowed to override a
+    // same-slot plain clone, which can happen when an eATA projection catches
+    // up after the underlying ATA was cloned without delegation metadata.
     //
     // Under current design, we clone with "CONFIRMED" commitment and thus:
     //
@@ -247,7 +249,10 @@ pub fn set_account_from_fields(
     //
     // Given this, same slot re-delegation is impossible therefore this this totally acceptable.
     //
-    if fields.delegated && acc.remote_slot() == fields.remote_slot {
+    if fields.delegated
+        && acc.delegated()
+        && acc.remote_slot() == fields.remote_slot
+    {
         return Err(
             MagicBlockProgramError::DuplicateDelegatedAccountClone.into()
         );
