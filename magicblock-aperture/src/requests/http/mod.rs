@@ -158,7 +158,6 @@ impl HttpDispatcher {
                 &[*pubkey],
                 Some(&mark_empty_if_not_found),
                 AccountFetchOrigin::GetAccount,
-                None,
             )
             .await
             .inspect_err(|e| {
@@ -193,7 +192,6 @@ impl HttpDispatcher {
                 pubkeys,
                 Some(pubkeys),
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
             .inspect_err(|e| {
