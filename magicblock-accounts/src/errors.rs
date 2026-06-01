@@ -53,7 +53,7 @@ pub enum AccountsError {
 pub enum ScheduledCommitsProcessorError {
     #[error("RecvError: {0}")]
     RecvError(#[from] RecvError),
-    #[error("CommittorSerivceError")]
+    #[error("CommittorSerivceError: {0}")]
     CommittorSerivceError(Box<CommittorServiceError>),
 }
 

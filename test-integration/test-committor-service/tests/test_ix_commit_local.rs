@@ -245,6 +245,7 @@ async fn commit_single_account(
             validator_auth.insecure_clone(),
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+            None,
             common::MockActionsCallbackExecutor::default(),
         )
         .unwrap(),
@@ -328,6 +329,7 @@ async fn commit_book_order_account(
             validator_auth.insecure_clone(),
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+            None,
             common::MockActionsCallbackExecutor::default(),
         )
         .unwrap(),
@@ -802,6 +804,7 @@ async fn commit_multiple_accounts(
             validator_auth.insecure_clone(),
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+            None,
             common::MockActionsCallbackExecutor::default(),
         )
         .unwrap(),
@@ -872,6 +875,7 @@ async fn execute_intent_bundle(
             validator_auth.insecure_clone(),
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+            None,
             common::MockActionsCallbackExecutor::default(),
         )
         .unwrap(),

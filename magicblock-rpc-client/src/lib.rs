@@ -3,11 +3,15 @@
 pub mod utils;
 
 use std::{
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
 use futures_util::future::try_join_all;
+use serde_json::json;
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_address_lookup_table_interface::state::{
@@ -22,18 +26,19 @@ use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
 use solana_rpc_client_api::{
-    client_error::ErrorKind as RpcClientErrorKind,
+    client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
     config::{
         RpcAccountInfoConfig, RpcSendTransactionConfig, RpcTransactionConfig,
     },
-    request::RpcError,
+    request::{RpcError, RpcRequest},
+    response::{Response, RpcBlockhash},
 };
 use solana_signature::Signature;
 use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
-use tokio::time::sleep;
+use tokio::{sync::Mutex as TMutex, time::sleep};
 use tracing::*;
 
 /// The encoding to use when sending transactions
@@ -230,12 +235,37 @@ impl MagicBlockSendTransactionOutcome {
 
 // Derived from error from helius RPC: Failed to download accounts: Error { request: Some(GetMultipleAccounts), kind: RpcError(RpcResponseError { code: -32602, message: "Too many inputs provided; max 100", data: Empty }) }
 const MAX_MULTIPLE_ACCOUNTS: usize = 100;
+// Keep this below the default 50ms * 150 slot blockhash lifetime.
+const BLOCKHASH_CACHE_TTL: Duration = Duration::from_secs(5);
+const SLOT_CACHE_TTL: Duration = Duration::from_millis(400);
+
+#[derive(Default)]
+struct RpcClientCache {
+    blockhash: TMutex<Option<CachedBlockhash>>,
+    slot: TMutex<Option<CachedSlot>>,
+}
+
+#[derive(Clone, Copy)]
+struct CachedBlockhash {
+    blockhash: Hash,
+    context_slot: Slot,
+    last_valid_block_height: u64,
+    fetched_at: Instant,
+}
+
+#[derive(Clone, Copy)]
+struct CachedSlot {
+    slot: Slot,
+    fetched_at: Instant,
+}
 
 /// Wraps a [RpcClient] to provide improved functionality, specifically
 /// for sending transactions.
 #[derive(Clone)]
 pub struct MagicblockRpcClient {
     client: Arc<RpcClient>,
+    cache: Arc<RpcClientCache>,
+    chain_slot: Option<Arc<AtomicU64>>,
 }
 
 impl From<RpcClient> for MagicblockRpcClient {
@@ -247,22 +277,157 @@ impl From<RpcClient> for MagicblockRpcClient {
 impl MagicblockRpcClient {
     /// Create a new [MagicBlockRpcClient] from an existing [RpcClient].
     pub fn new(client: Arc<RpcClient>) -> Self {
-        Self { client }
+        Self {
+            client,
+            cache: Arc::new(RpcClientCache::default()),
+            chain_slot: None,
+        }
+    }
+
+    pub fn new_with_chain_slot(
+        client: Arc<RpcClient>,
+        chain_slot: Arc<AtomicU64>,
+    ) -> Self {
+        Self {
+            client,
+            cache: Arc::new(RpcClientCache::default()),
+            chain_slot: Some(chain_slot),
+        }
     }
 
     pub async fn get_latest_blockhash(
         &self,
     ) -> MagicBlockRpcClientResult<Hash> {
-        self.client.get_latest_blockhash().await.map_err(|e| {
-            MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e))
-        })
+        let mut cached = self.cache.blockhash.lock().await;
+        if let Some(blockhash) = Self::fresh_cached_blockhash(&cached) {
+            return Ok(blockhash);
+        }
+
+        let (blockhash, context_slot, last_valid_block_height) =
+            self.fetch_latest_blockhash_with_context().await?;
+        *cached = Some(CachedBlockhash {
+            blockhash,
+            context_slot,
+            last_valid_block_height,
+            fetched_at: Instant::now(),
+        });
+        drop(cached);
+
+        self.record_observed_slot(context_slot).await;
+
+        Ok(blockhash)
+    }
+
+    async fn fetch_latest_blockhash_with_context(
+        &self,
+    ) -> MagicBlockRpcClientResult<(Hash, Slot, u64)> {
+        let resp: Response<RpcBlockhash> = self
+            .client
+            .send(RpcRequest::GetLatestBlockhash, json!([self.commitment()]))
+            .await
+            .map_err(|e| {
+                MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e))
+            })?;
+        let blockhash = resp.value.blockhash.parse().map_err(|_| {
+            MagicBlockRpcClientError::GetLatestBlockhash(Box::new(
+                RpcClientError::new_with_request(
+                    RpcClientErrorKind::RpcError(RpcError::ParseError(
+                        "Hash".to_string(),
+                    )),
+                    RpcRequest::GetLatestBlockhash,
+                ),
+            ))
+        })?;
+
+        Ok((
+            blockhash,
+            resp.context.slot,
+            resp.value.last_valid_block_height,
+        ))
     }
 
     pub async fn get_slot(&self) -> MagicBlockRpcClientResult<Slot> {
+        let slot = self.fetch_slot().await?;
+        self.record_observed_slot(slot).await;
+        Ok(slot)
+    }
+
+    async fn get_cached_slot(&self) -> MagicBlockRpcClientResult<Slot> {
+        let mut cached = self.cache.slot.lock().await;
+        if let Some(slot) = Self::fresh_cached_slot(&cached) {
+            return Ok(slot);
+        }
+
+        let slot = self.fetch_slot().await?;
+        Self::cache_slot(&mut cached, slot);
+        drop(cached);
+
+        self.update_chain_slot(slot);
+
+        Ok(slot)
+    }
+
+    async fn fetch_slot(&self) -> MagicBlockRpcClientResult<Slot> {
         self.client
             .get_slot()
             .await
             .map_err(|e| MagicBlockRpcClientError::GetSlot(Box::new(e)))
+    }
+
+    pub async fn invalidate_cached_blockhash(&self) {
+        let mut cached = self.cache.blockhash.lock().await;
+        *cached = None;
+    }
+
+    fn fresh_cached_blockhash(
+        cached: &Option<CachedBlockhash>,
+    ) -> Option<Hash> {
+        cached
+            .as_ref()
+            .filter(|value| value.fetched_at.elapsed() < BLOCKHASH_CACHE_TTL)
+            .map(|value| {
+                trace!(
+                    context_slot = value.context_slot,
+                    last_valid_block_height = value.last_valid_block_height,
+                    "Using cached latest blockhash"
+                );
+                value.blockhash
+            })
+    }
+
+    fn fresh_cached_slot(cached: &Option<CachedSlot>) -> Option<Slot> {
+        cached
+            .as_ref()
+            .filter(|value| value.fetched_at.elapsed() < SLOT_CACHE_TTL)
+            .map(|value| value.slot)
+    }
+
+    async fn record_observed_slot(&self, slot: Slot) {
+        self.update_chain_slot(slot);
+        let mut cached = self.cache.slot.lock().await;
+        Self::cache_slot(&mut cached, slot);
+    }
+
+    fn cache_slot(cached: &mut Option<CachedSlot>, slot: Slot) {
+        if cached.as_ref().is_none_or(|value| slot >= value.slot) {
+            *cached = Some(CachedSlot {
+                slot,
+                fetched_at: Instant::now(),
+            });
+        }
+    }
+
+    fn observed_chain_slot(&self) -> Option<Slot> {
+        self.chain_slot
+            .as_ref()
+            .map(|slot| slot.load(Ordering::Relaxed))
+            .filter(|slot| *slot > 0)
+    }
+
+    fn update_chain_slot(&self, slot: Slot) {
+        if let Some(chain_slot) = &self.chain_slot {
+            chain_slot.fetch_max(slot, Ordering::Relaxed);
+        }
     }
 
     pub async fn get_account(
@@ -385,7 +550,11 @@ impl MagicblockRpcClient {
     }
 
     pub async fn wait_for_next_slot(&self) -> MagicBlockRpcClientResult<Slot> {
-        let slot = self.get_slot().await?;
+        let slot = if let Some(slot) = self.observed_chain_slot() {
+            slot
+        } else {
+            self.get_cached_slot().await?
+        };
         self.wait_for_higher_slot(slot).await
     }
 
@@ -394,7 +563,12 @@ impl MagicblockRpcClient {
         slot: Slot,
     ) -> MagicBlockRpcClientResult<Slot> {
         let higher_slot = loop {
-            let next_slot = self.get_slot().await?;
+            let next_slot = if let Some(next_slot) = self.observed_chain_slot()
+            {
+                next_slot
+            } else {
+                self.get_cached_slot().await?
+            };
             if next_slot > slot {
                 break next_slot;
             }

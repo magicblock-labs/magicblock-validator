@@ -808,7 +808,7 @@ dependencies = [
  "bitflags 2.11.1",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "proc-macro2",
@@ -828,7 +828,7 @@ dependencies = [
  "bitflags 2.11.1",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -1949,7 +1949,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2419,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "magicblock-magic-program-api",
@@ -3620,7 +3620,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3648,7 +3648,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "async-trait",
  "magicblock-committor-service",
@@ -3661,7 +3661,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "flate2",
  "lmdb-rkv",
@@ -3681,7 +3681,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3699,7 +3699,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "agave-geyser-plugin-interface",
@@ -3750,7 +3750,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "anyhow",
@@ -3812,7 +3812,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -3870,7 +3870,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "borsh",
  "paste",
@@ -3885,7 +3885,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -3932,7 +3932,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "clap",
  "derive_more",
@@ -3952,7 +3952,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "bytes",
@@ -4012,7 +4012,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -4054,7 +4054,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "const-crypto",
@@ -4067,7 +4067,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "http-body-util",
  "hyper 1.9.0",
@@ -4082,7 +4082,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -4133,7 +4133,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -4172,7 +4172,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "async-nats",
  "bincode",
@@ -4198,9 +4198,10 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "futures-util",
+ "serde_json",
  "solana-account 3.4.0",
  "solana-account-decoder-client-types",
  "solana-address-lookup-table-interface 3.1.0",
@@ -4221,7 +4222,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "futures-util",
@@ -4242,7 +4243,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -4268,7 +4269,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "chrono",
@@ -4294,7 +4295,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-tui-client"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "chrono",
  "clap",
@@ -4316,7 +4317,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "console-subscriber",
  "magicblock-api",
@@ -4332,7 +4333,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "magicblock-delegation-program-api",
  "magicblock-program",
@@ -4349,7 +4350,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "git-version",
@@ -5182,7 +5183,7 @@ checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes",
  "heck",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "log",
  "multimap",
  "once_cell",
@@ -5202,7 +5203,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
  "heck",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "multimap",
  "petgraph 0.8.3",
@@ -5223,7 +5224,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -5236,7 +5237,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -5929,7 +5930,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8718,7 +8719,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "bs58",
@@ -9758,12 +9759,12 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
 name = "test-kit"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "guinea",
  "magicblock-accounts-db",
