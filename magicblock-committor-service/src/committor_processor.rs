@@ -140,12 +140,9 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
-    pub async fn pending_intent_bundles<F>(
+    pub async fn pending_intent_bundles(
         &self,
-    ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>>
-    where
-        F: Fn(&CommitStatusRow) -> bool,
-    {
+    ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
         const RECOVERY_MIN_AGE_SECS: u64 = 30 * 60;
 
         // Extract pending bundles satisfying predicate
