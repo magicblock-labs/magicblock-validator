@@ -61,7 +61,6 @@ async fn test_subs_receive_out_of_order_updates() {
             &[pubkey],
             None,
             AccountFetchOrigin::GetMultipleAccounts,
-            None,
         )
         .await
         .unwrap();
