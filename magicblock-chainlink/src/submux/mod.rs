@@ -1338,6 +1338,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_subscribe_program_retry_after_failure_reaches_client() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel(10_000);
+        let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
+        client.fail_next_program_subscriptions(1);
+
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client.clone()], Some(100));
+        let program_id = Pubkey::new_unique();
+
+        let err = mux
+            .subscribe_program(program_id)
+            .await
+            .expect_err("first program subscription should fail");
+        assert!(
+            err.to_string().contains("forced program subscribe failure"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            !mux.program_subs_lock().contains(&program_id),
+            "failed program subscription must not be recorded"
+        );
+        assert_eq!(client.program_subscribe_attempts(), 1);
+
+        mux.subscribe_program(program_id)
+            .await
+            .expect("retry should reach the client and succeed");
+
+        assert_eq!(client.program_subscribe_attempts(), 2);
+        assert!(mux.program_subs_lock().contains(&program_id));
+        assert!(client.subscribed_program_ids().contains(&program_id));
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn test_submux_unsubscribe_stops_forwarding() {
         init_logger();
 
