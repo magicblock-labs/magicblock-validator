@@ -32,7 +32,7 @@ use magicblock_config::{
         validator::ReplicationMode, ChainOperationConfig, LedgerConfig,
         LifecycleMode, LoadableProgram,
     },
-    ValidatorParams,
+    consts, ValidatorParams,
 };
 use magicblock_core::{
     coordination_mode::CoordinationMode,
@@ -167,6 +167,9 @@ impl MagicValidator {
 
         let step_start = Instant::now();
         let query_filtering = config.query_filtering.enabled.then(|| {
+            if config.query_filtering.jwt_secret == consts::DEFAULT_JWT_SECRET {
+                error!("query_filtering is enabled but default jwt_secret is used!");
+            }
             Arc::new(QueryFilteringService::new(
                 AuthConfig {
                     jwt_secret: config.query_filtering.jwt_secret.clone(),
