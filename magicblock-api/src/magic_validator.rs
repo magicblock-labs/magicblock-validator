@@ -1076,7 +1076,9 @@ impl MagicValidator {
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
-        if let Some(service) = self.query_filtering.take() { service.stop() }
+        if let Some(service) = self.query_filtering.take() {
+            service.stop()
+        }
         if let Some(handle) = self.slot_ticker {
             let step_start = Instant::now();
             let _ = handle.await;

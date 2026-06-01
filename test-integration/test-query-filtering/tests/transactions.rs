@@ -218,7 +218,7 @@ fn assert_expected_access(
             // but the others (payer, program) keep their balance because
             // they are unrestricted accounts.
             assert!(
-                meta.pre_balances.iter().any(|balance| *balance == 0),
+                meta.pre_balances.contains(&0),
                 "[{label}] expected the restricted account's balance to be zeroed; got {:?}",
                 meta.pre_balances
             );

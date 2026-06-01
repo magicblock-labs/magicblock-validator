@@ -211,11 +211,12 @@ impl HttpDispatcher {
 
         let mut to_ensure: Vec<Pubkey> = pubkeys.to_vec();
         if authenticated_user.is_some() {
-            to_ensure.extend(pubkeys.iter().filter_map(|pubkey| {
-                (!self.is_permission_account(pubkey)).then(|| {
-                    magicblock_query_filtering::types::Permission::pda(pubkey)
-                })
-            }));
+            to_ensure.extend(
+                pubkeys
+                    .iter()
+                    .filter(|pubkey| !self.is_permission_account(pubkey))
+                    .map(magicblock_query_filtering::types::Permission::pda),
+            );
         }
         trace!("Ensuring accounts");
         let _timer = ENSURE_ACCOUNTS_TIME

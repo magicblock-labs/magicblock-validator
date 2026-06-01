@@ -190,12 +190,11 @@ mod tests {
     use magicblock_accounts_db::AccountsDbResult;
     use solana_account::AccountSharedData;
 
+    use super::*;
     use crate::{
         types::{Member, RestrictedEntry},
         PERMISSION_PROGRAM_ID,
     };
-
-    use super::*;
 
     #[derive(Default)]
     struct MockAccountsBank {

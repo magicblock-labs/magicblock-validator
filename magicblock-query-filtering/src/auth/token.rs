@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
-use jsonwebtoken::errors::Error as JwtError;
 use jsonwebtoken::{
-    decode, encode, DecodingKey, EncodingKey, Header, Validation,
+    decode, encode, errors::Error as JwtError, DecodingKey, EncodingKey,
+    Header, Validation,
 };
 use serde::{Deserialize, Serialize};
 
