@@ -55,7 +55,17 @@ impl HttpDispatcher {
             self.ensure_transaction_accounts(&transaction.txn),
             self.enforce_transaction_admission(&transaction.txn, request),
         )?;
-        let number_of_accounts = transaction.txn.message().account_keys().len();
+        // Captured before the transaction is moved into the scheduler so the
+        // response redaction below can look up each touched account's
+        // permission.
+        let account_keys: Vec<Pubkey> = transaction
+            .txn
+            .message()
+            .account_keys()
+            .iter()
+            .copied()
+            .collect();
+        let number_of_accounts = account_keys.len();
 
         let replacement_blockhash = config
             .replace_recent_blockhash
@@ -108,28 +118,52 @@ impl HttpDispatcher {
                             .map_err(RpcError::invalid_params)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let current_accounts =
-                    self.read_accounts_with_ensure(&pubkeys).await;
+                let current_accounts = self
+                    .read_accounts_with_ensure_for_user(
+                        &pubkeys,
+                        request.authenticated_user.as_ref(),
+                    )
+                    .await;
                 let post_simulation_accounts = post_simulation_accounts
                     .into_iter()
                     .collect::<HashMap<_, _>>();
 
-                Some(
-                    pubkeys
-                        .into_iter()
-                        .zip(current_accounts)
-                        .map(|(pubkey, account)| {
-                            post_simulation_accounts
-                                .get(&pubkey)
-                                .cloned()
-                                .or(account)
-                                .map(|account| {
-                                    LockedAccount::new(pubkey, account)
-                                        .ui_encode(accounts_encoding, None)
-                                })
-                        })
-                        .collect(),
-                )
+                let encoded = pubkeys
+                    .iter()
+                    .zip(current_accounts)
+                    .map(|(pubkey, account)| {
+                        post_simulation_accounts
+                            .get(pubkey)
+                            .cloned()
+                            .or(account)
+                            .map(|account| {
+                                LockedAccount::new(*pubkey, account)
+                                    .ui_encode(accounts_encoding, None)
+                            })
+                    })
+                    .collect::<Vec<_>>();
+
+                // Filter post-simulation account data the authenticated user
+                // isn't permitted to read. Without this, `simulateTransaction`
+                // would expose restricted account state that `getAccountInfo`
+                // and `getMultipleAccounts` redact.
+                let encoded = if let Some(user) = &request.authenticated_user {
+                    let permissions =
+                        magicblock_query_filtering::permissions_for_accounts(
+                            &*self.accountsdb,
+                            &pubkeys,
+                        )
+                        .map_err(RpcError::internal)?;
+                    magicblock_query_filtering::filter_accounts(
+                        encoded,
+                        &permissions,
+                        user,
+                    )
+                } else {
+                    encoded
+                };
+
+                Some(encoded)
             }
         } else {
             None
@@ -159,7 +193,7 @@ impl HttpDispatcher {
                 .collect::<Vec<_>>()
         });
 
-        let result = RpcSimulateTransactionResult {
+        let mut result = RpcSimulateTransactionResult {
             logs,
             accounts,
             units_consumed: Some(units_consumed),
@@ -175,6 +209,36 @@ impl HttpDispatcher {
             post_token_balances: None,
             loaded_addresses: None,
         };
+
+        // Redact execution metadata the authenticated user lacks the flags to
+        // see, mirroring the per-flag redaction `getTransaction` applies to
+        // confirmed transactions. Logs and return data are gated on the `logs`
+        // flag (execution observability); inner instructions on the `message`
+        // flag. Permission PDAs for these accounts were already ensured by
+        // `enforce_transaction_admission` above.
+        if let Some(user) = &request.authenticated_user {
+            let permissions =
+                magicblock_query_filtering::permissions_for_accounts(
+                    &*self.accountsdb,
+                    &account_keys,
+                )
+                .map_err(RpcError::internal)?;
+            let (logs_visible, message_visible) = permissions
+                .iter()
+                .map(|permission| permission.access_for(user))
+                .fold((true, true), |(logs, message), access| {
+                    (logs && access.logs, message && access.message)
+                });
+            if !logs_visible {
+                if result.logs.is_some() {
+                    result.logs = Some(Vec::new());
+                }
+                result.return_data = None;
+            }
+            if !message_visible {
+                result.inner_instructions = None;
+            }
+        }
 
         let slot = self.blocks.block_height();
         Ok(ResponsePayload::encode(&request.id, result, slot))

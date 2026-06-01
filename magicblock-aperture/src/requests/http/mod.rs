@@ -190,21 +190,12 @@ impl HttpDispatcher {
         self.accountsdb.get_account(pubkey)
     }
 
-    /// Fetches multiple account's data from the `AccountsDb` filling them in from chain
-    /// as needed.
-    #[instrument(skip(self, pubkeys), fields(pubkey_count = pubkeys.len()))]
-    async fn read_accounts_with_ensure(
-        &self,
-        pubkeys: &[Pubkey],
-    ) -> Vec<Option<AccountSharedData>> {
-        self.read_accounts_with_ensure_for_user(pubkeys, None).await
-    }
-
-    /// Like [`read_accounts_with_ensure`], but bundles each pubkey's
-    /// permission PDA into the same chainlink ensure when the request is
-    /// authenticated. Single network round-trip for both data and permission
-    /// fetches. Permission accounts known locally are skipped — they are
-    /// public and never filtered.
+    /// Fetches multiple accounts' data from the `AccountsDb`, filling them in
+    /// from chain as needed, and bundles each pubkey's permission PDA into the
+    /// same chainlink ensure when the request is authenticated. Single network
+    /// round-trip for both data and permission fetches. Permission accounts
+    /// known locally are skipped — they are public and never filtered. Pass
+    /// `None` for `authenticated_user` to skip the permission ensure.
     #[instrument(skip(self, pubkeys), fields(pubkey_count = pubkeys.len()))]
     async fn read_accounts_with_ensure_for_user(
         &self,
