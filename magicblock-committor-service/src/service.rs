@@ -1,4 +1,9 @@
-use std::{collections::HashMap, path::Path, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{atomic::AtomicU64, Arc},
+    time::Instant,
+};
 
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
@@ -59,6 +64,15 @@ pub enum CommittorMessage {
         intent_bundles: Vec<ScheduledIntentBundle>,
         respond_to: oneshot::Sender<CommittorServiceResult<()>>,
     },
+    GetPendingIntentBundles {
+        respond_to:
+            oneshot::Sender<CommittorServiceResult<Vec<ScheduledIntentBundle>>>,
+    },
+    ScheduleRecoveredIntentBundle {
+        /// Recovered [`ScheduleIntentBundle`]s to commit without re-persisting rows.
+        intent_bundles: Vec<ScheduledIntentBundle>,
+        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
+    },
     GetCommitStatuses {
         respond_to:
             oneshot::Sender<CommittorServiceResult<Vec<CommitStatusRow>>>,
@@ -115,6 +129,7 @@ impl CommittorActor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        chain_slot: Option<Arc<AtomicU64>>,
         actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
@@ -125,6 +140,7 @@ impl CommittorActor {
             authority,
             persist_file,
             chain_config,
+            chain_slot,
             actions_callback_executor,
         )?);
 
@@ -191,6 +207,25 @@ impl CommittorActor {
                     self.processor.schedule_intent_bundle(intent_bundles).await;
                 if let Err(e) = respond_to.send(result) {
                     error!(message_type = "ScheduleBaseIntents", error = ?e, "Failed to send response");
+                }
+            }
+            GetPendingIntentBundles { respond_to } => {
+                let pending_intents =
+                    self.processor.pending_intent_bundles().await;
+                if let Err(e) = respond_to.send(pending_intents) {
+                    error!(message_type = "GetPendingIntentBundles", error = ?e, "Failed to send response");
+                }
+            }
+            ScheduleRecoveredIntentBundle {
+                intent_bundles,
+                respond_to,
+            } => {
+                let result = self
+                    .processor
+                    .schedule_recovered_intent_bundles(intent_bundles)
+                    .await;
+                if let Err(e) = respond_to.send(result) {
+                    error!(message_type = "ScheduleRecoveredIntentBundle", error = ?e, "Failed to send response");
                 }
             }
             GetCommitStatuses {
@@ -328,6 +363,7 @@ impl CommittorService {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        chain_slot: Option<Arc<AtomicU64>>,
         actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
@@ -344,6 +380,7 @@ impl CommittorService {
                 authority,
                 persist_file,
                 chain_config,
+                chain_slot,
                 actions_callback_executor,
             )?;
             tokio::spawn(async move {
@@ -369,6 +406,29 @@ impl CommittorService {
     pub fn release_common_pubkeys(&self) -> oneshot::Receiver<()> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::ReleaseCommonPubkeys {
+            respond_to: tx,
+        });
+        rx
+    }
+
+    pub fn get_pending_intent_bundles(
+        &self,
+    ) -> oneshot::Receiver<CommittorServiceResult<Vec<ScheduledIntentBundle>>>
+    {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::GetPendingIntentBundles {
+            respond_to: tx,
+        });
+        rx
+    }
+
+    pub fn schedule_recovered_intent_bundles(
+        &self,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::ScheduleRecoveredIntentBundle {
+            intent_bundles,
             respond_to: tx,
         });
         rx

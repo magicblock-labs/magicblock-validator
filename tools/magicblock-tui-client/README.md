@@ -32,7 +32,8 @@ cargo run --features tui --bin magicblock-validator
 
 In this mode, TUI RPC/WS endpoints are derived from the validator `aperture.listen` config.
 
-Without `--features tui`, validator startup remains headless.
+Without `--features tui`, validator startup remains headless. If built with `--features tui`,
+you can disable the TUI at runtime with `--no-tui`.
 
 ## Data Sources
 

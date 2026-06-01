@@ -23,7 +23,7 @@ use magicblock_chainlink::{
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
         utils::{create_test_lru_cache, create_test_lru_cache_with_config},
     },
-    AccountFetchOrigin, Chainlink,
+    AccountFetchOrigin, InnerChainlink,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use solana_account::{Account, AccountSharedData};
@@ -35,7 +35,7 @@ use tokio::sync::mpsc;
 use tracing::*;
 
 use super::accounts::account_shared_with_owner_and_slot;
-pub type TestChainlink = Chainlink<
+pub type TestChainlink = InnerChainlink<
     ChainRpcClientMock,
     ChainPubsubClientMock,
     AccountsBankStub,
@@ -125,7 +125,7 @@ impl TestContext {
                 _ => (None, None),
             }
         };
-        let chainlink = Chainlink::try_new(
+        let chainlink = InnerChainlink::try_new(
             &bank,
             fetch_cloner,
             validator_pubkey,

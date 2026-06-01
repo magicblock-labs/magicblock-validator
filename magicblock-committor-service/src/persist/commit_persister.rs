@@ -57,6 +57,9 @@ pub trait IntentPersister: Send + Sync + Clone + 'static {
         &self,
         message_id: u64,
     ) -> CommitPersistResult<Vec<CommitStatusRow>>;
+    fn get_pending_commit_statuses(
+        &self,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>>;
     fn get_commit_status_by_message(
         &self,
         message_id: u64,
@@ -252,6 +255,15 @@ impl IntentPersister for IntentPersisterImpl {
             .get_commit_statuses_by_id(message_id)
     }
 
+    fn get_pending_commit_statuses(
+        &self,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>> {
+        self.commits_db
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .get_pending_commit_statuses()
+    }
+
     fn get_commit_status_by_message(
         &self,
         message_id: u64,
@@ -394,6 +406,15 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
             Some(persister) => {
                 persister.get_commit_statuses_by_message(message_id)
             }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn get_pending_commit_statuses(
+        &self,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>> {
+        match self {
+            Some(persister) => persister.get_pending_commit_statuses(),
             None => Ok(Vec::new()),
         }
     }

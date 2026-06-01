@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use magicblock_core::{
     intent::{BaseActionCallback, CommittedAccount},
-    token_programs::{EATA_PROGRAM_ID, TOKEN_PROGRAM_ID},
+    token_programs::{
+        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+    },
     Slot,
 };
 use magicblock_magic_program_api::args::{
@@ -1433,9 +1435,10 @@ pub(crate) fn validate_commit_schedule_permissions(
     signers: &HashSet<Pubkey>,
 ) -> Result<(), InstructionError> {
     let validator_id = effective_validator_authority_id();
-    let is_eata_token_program_call = parent_program_id
-        == Some(&EATA_PROGRAM_ID)
-        && committee_owner == &TOKEN_PROGRAM_ID;
+    let is_token_account_owner = committee_owner == &TOKEN_PROGRAM_ID
+        || committee_owner == &TOKEN_2022_PROGRAM_ID;
+    let is_eata_token_program_call =
+        parent_program_id == Some(&EATA_PROGRAM_ID) && is_token_account_owner;
     if parent_program_id != Some(committee_owner)
         && !signers.contains(committee_pubkey)
         && !signers.contains(&validator_id)

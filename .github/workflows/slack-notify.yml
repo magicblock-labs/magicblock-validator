@@ -21,7 +21,7 @@ on:
 jobs:
   notify-review-requested:
     if: github.event_name == 'pull_request' && github.event.action == 'review_requested' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - name: Build Slack review message
         id: message
@@ -71,7 +71,7 @@ jobs:
 
   notify-review:
     if: github.event_name == 'pull_request_review' && github.event.action == 'submitted' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - name: Build Slack review message
         id: message
@@ -96,6 +96,7 @@ jobs:
             const ignoredReviewers = new Set([
               "codex",
               "codex[bot]",
+              "chatgpt-codex-connector[bot]",
               "coderabbit",
               "coderabbit[bot]",
               "coderabbitai",

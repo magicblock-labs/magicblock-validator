@@ -1059,7 +1059,7 @@ where
         {
             let mut subs = self.program_subs.lock().unwrap();
             if subs.contains(&program_id) {
-                warn!(program_id = %program_id, "Program subscription already exists");
+                debug!(program_id = %program_id, "Program subscription already exists");
                 return Ok(());
             }
             // Add to program_subs before subscribing to clients

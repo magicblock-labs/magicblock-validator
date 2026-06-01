@@ -1333,7 +1333,7 @@ dependencies = [
 
 [[package]]
 name = "compressed-delegation-api"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "borsh 1.6.1",
  "light-compressed-account",
@@ -1344,7 +1344,7 @@ dependencies = [
 
 [[package]]
 name = "compressed-delegation-client"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "borsh 1.6.1",
  "compressed-delegation-api",
@@ -2198,7 +2198,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2627,7 +2627,7 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "magicblock-magic-program-api",
@@ -4457,7 +4457,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "async-trait",
  "bincode",
@@ -4490,7 +4490,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "async-trait",
  "magicblock-account-cloner",
@@ -4513,7 +4513,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "flate2",
  "lmdb-rkv",
@@ -4533,7 +4533,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -4551,7 +4551,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set 3.1.12",
  "agave-geyser-plugin-interface",
@@ -4602,7 +4602,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set 3.1.12",
  "anyhow",
@@ -4665,7 +4665,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set 3.1.12",
  "arc-swap",
@@ -4726,7 +4726,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "borsh 1.6.1",
  "paste",
@@ -4741,7 +4741,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -4796,7 +4796,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "clap",
  "derive_more",
@@ -4816,7 +4816,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "bytes",
@@ -4879,7 +4879,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -4921,7 +4921,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "const-crypto",
@@ -4934,7 +4934,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "http-body-util",
  "hyper 1.9.0",
@@ -4949,7 +4949,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set 3.1.12",
  "agave-precompiles",
@@ -5000,7 +5000,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -5039,7 +5039,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "async-nats",
  "bincode",
@@ -5065,9 +5065,10 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "futures-util",
+ "serde_json",
  "solana-account 3.4.0",
  "solana-account-decoder-client-types 3.1.12",
  "solana-address-lookup-table-interface 3.1.0",
@@ -5088,7 +5089,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "futures-util",
@@ -5109,7 +5110,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -5135,7 +5136,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "chrono",
@@ -5161,7 +5162,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-tui-client"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "chrono",
  "clap",
@@ -5183,7 +5184,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "console-subscriber",
  "magicblock-api",
@@ -5199,7 +5200,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "magicblock-delegation-program-api",
  "magicblock-program",
@@ -5216,7 +5217,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set 3.1.12",
  "git-version",
@@ -6872,7 +6873,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9991,7 +9992,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "bs58",
@@ -11558,7 +11559,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "guinea",
  "magicblock-accounts-db",

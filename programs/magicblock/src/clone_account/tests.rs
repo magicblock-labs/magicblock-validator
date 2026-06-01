@@ -154,6 +154,66 @@ fn test_clone_account_rejects_stale_slot() {
 }
 
 #[test]
+fn test_clone_account_allows_same_slot_delegated_update_over_plain_account() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let accounts = setup_with_account(pubkey, 100, 42);
+
+    let mut fields = clone_fields(200, 42);
+    fields.delegated = true;
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        fields,
+        None,
+    );
+
+    let mut result = process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Ok(()),
+    );
+    result.drain(0..1);
+    let account = result.drain(0..1).next().unwrap();
+
+    assert_eq!(account.lamports(), 200);
+    assert!(account.delegated());
+    assert_eq!(account.remote_slot(), 42);
+}
+
+#[test]
+fn test_clone_account_rejects_same_slot_duplicate_delegated_update() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let mut account = AccountSharedData::new(100, 0, &pubkey);
+    account.set_delegated(true);
+    account.set_undelegating(true);
+    account.set_remote_slot(42);
+    let mut accounts = HashMap::new();
+    accounts.insert(pubkey, account);
+    ensure_started_validator(&mut accounts, None);
+
+    let mut fields = clone_fields(200, 42);
+    fields.delegated = true;
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        fields,
+        None,
+    );
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(MagicBlockProgramError::DuplicateDelegatedAccountClone.into()),
+    );
+}
+
+#[test]
 fn test_clone_account_rejects_delegated_account() {
     init_logger!();
     let pubkey = Pubkey::new_unique();

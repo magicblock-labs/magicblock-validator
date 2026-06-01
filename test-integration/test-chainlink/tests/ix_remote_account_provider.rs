@@ -54,6 +54,7 @@ async fn init_remote_account_provider() -> RemoteAccountProvider<
         &RemoteAccountProviderConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         ),
+        None,
     )
     .await
     .expect("Failed to create RemoteAccountProvider")

@@ -7,8 +7,34 @@ concurrency:
 on:
   push:
     branches: [master, dev]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'Makefile'
+      - 'test-integration/**'
+      - 'rust-toolchain.toml'
+      - 'test-integration/rust-toolchain.toml'
+      - '.github/workflows/ci-test-integration.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'Makefile'
+      - 'test-integration/**'
+      - 'rust-toolchain.toml'
+      - 'test-integration/rust-toolchain.toml'
+      - '.github/workflows/ci-test-integration.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
 
 jobs:
   # These producer jobs exist purely to produce reusable artifacts so matrix
@@ -376,12 +402,12 @@ jobs:
             test_bins_artifact: "committor-intent-executor"
           - batch_tests: "committor_intent_executor_callbacks"
             test_bins_artifact: "committor-intent-executor"
-            runner: "blacksmith-8vcpu-ubuntu-2404"
+            runner: "blacksmith-4vcpu-ubuntu-2404"
           - batch_tests: "committor_ix_multi"
             test_bins_artifact: "committor-ix"
           - batch_tests: "committor_bundles"
             test_bins_artifact: "committor-ix"
-            runner: "blacksmith-8vcpu-ubuntu-2404"
+            runner: "blacksmith-4vcpu-ubuntu-2404"
           - batch_tests: "table_mania"
             test_bins_artifact: "table_mania"
           - batch_tests: "committor_ix_order"
@@ -400,24 +426,24 @@ jobs:
             needs_build_env: true
           - batch_tests: "task-scheduler"
             test_bins_artifact: "task-scheduler"
-            runner: "blacksmith-8vcpu-ubuntu-2404"
+            runner: "blacksmith-4vcpu-ubuntu-2404"
           - batch_tests: "pubsub"
             test_bins_artifact: "pubsub"
-            runner: "blacksmith-8vcpu-ubuntu-2404"
+            runner: "blacksmith-4vcpu-ubuntu-2404"
           - batch_tests: "magicblock_api"
             test_bins_artifact: "magicblock_api"
-            runner: "blacksmith-8vcpu-ubuntu-2404"
+            runner: "blacksmith-4vcpu-ubuntu-2404"
           - batch_tests: "schedule_intents"
             test_bins_artifact: "schedule_intents"
-            runner: "blacksmith-8vcpu-ubuntu-2404"
+            runner: "blacksmith-4vcpu-ubuntu-2404"
           - batch_tests: "config"
             test_bins_artifact: "config"
-            runner: "blacksmith-8vcpu-ubuntu-2404"
+            runner: "blacksmith-4vcpu-ubuntu-2404"
           - batch_tests: "committor_preparators"
             test_bins_artifact: "committor-preparators"
           - batch_tests: "committor_bundles_8"
             test_bins_artifact: "committor-ix"
-            runner: "blacksmith-8vcpu-ubuntu-2404"
+            runner: "blacksmith-4vcpu-ubuntu-2404"
           - batch_tests: "committor_commitfinalize"
             test_bins_artifact: "committor-ix"
           - batch_tests: "committor_intent_executor"

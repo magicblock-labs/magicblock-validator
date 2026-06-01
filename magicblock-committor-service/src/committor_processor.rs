@@ -1,23 +1,31 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use light_client::indexer::photon_indexer::PhotonIndexer;
-use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_core::{
+    intent::CommittedAccount, traits::ActionsCallbackScheduler,
+};
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
+    magic_scheduled_base_intent::{
+        CommitAndUndelegate, CommitType, MagicIntentBundle,
+        ScheduledIntentBundle, UndelegateType,
+    },
     magic_sys::is_compression_enabled,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
+use solana_account::Account;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
+use solana_transaction::Transaction;
 use tokio::sync::broadcast;
-use tracing::{error, instrument};
+use tracing::{error, info, instrument, warn};
 
 use crate::{
     config::ChainConfig,
@@ -33,10 +41,12 @@ use crate::{
         },
     },
     persist::{
-        CommitStatusRow, IntentPersister, IntentPersisterImpl,
-        MessageSignatures,
+        CommitStatusRow, CommitType as PersistCommitType, IntentPersister,
+        IntentPersisterImpl, MessageSignatures,
     },
 };
+
+const RECOVERY_MIN_AGE_SECS: u64 = 30 * 60;
 
 pub(crate) struct CommittorProcessor {
     pub(crate) magicblock_rpc_client: MagicblockRpcClient,
@@ -52,6 +62,7 @@ impl CommittorProcessor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        chain_slot: Option<Arc<AtomicU64>>,
         actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
@@ -63,7 +74,11 @@ impl CommittorProcessor {
             chain_config.commitment,
         );
         let rpc_client = Arc::new(rpc_client);
-        let magic_block_rpc_client = MagicblockRpcClient::new(rpc_client);
+        let magic_block_rpc_client = if let Some(chain_slot) = chain_slot {
+            MagicblockRpcClient::new_with_chain_slot(rpc_client, chain_slot)
+        } else {
+            MagicblockRpcClient::new(rpc_client)
+        };
         let photon_client = chain_config
             .photon_uri
             .as_ref()
@@ -157,6 +172,36 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
+    pub async fn pending_intent_bundles(
+        &self,
+    ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
+        let rows = self.persister.get_pending_commit_statuses()?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let recovery_base_slot = self.magicblock_rpc_client.get_slot().await?;
+        let bundles = pending_rows_to_scheduled_intent_bundles(
+            rows,
+            self.auth_pubkey(),
+            recovery_base_slot,
+            unix_timestamp(),
+        );
+        if !bundles.is_empty() {
+            let accounts_count: usize = bundles
+                .iter()
+                .map(|bundle| bundle.get_all_committed_pubkeys().len())
+                .sum();
+            info!(
+                intent_count = bundles.len(),
+                accounts_count,
+                "Loaded pending commit intents from persistence for recovery"
+            );
+        }
+
+        Ok(bundles)
+    }
+
     #[instrument(skip(self, intent_bundles))]
     pub async fn schedule_intent_bundle(
         &self,
@@ -194,6 +239,21 @@ impl CommittorProcessor {
         Ok(())
     }
 
+    #[instrument(skip(self, intent_bundles))]
+    pub async fn schedule_recovered_intent_bundles(
+        &self,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+    ) -> CommittorServiceResult<()> {
+        self.commits_scheduler
+            .schedule(intent_bundles)
+            .await
+            .inspect_err(|err| {
+                error!(error = ?err, "Failed to schedule recovered intent");
+            })?;
+
+        Ok(())
+    }
+
     /// Creates a subscription for results of BaseIntent execution
     pub fn subscribe_for_results(
         &self,
@@ -214,26 +274,181 @@ impl CommittorProcessor {
     }
 }
 
+fn pending_rows_to_scheduled_intent_bundles(
+    rows: Vec<CommitStatusRow>,
+    payer: Pubkey,
+    recovery_base_slot: u64,
+    recovery_time: u64,
+) -> Vec<ScheduledIntentBundle> {
+    let mut grouped_rows = BTreeMap::<u64, Vec<CommitStatusRow>>::new();
+    for row in rows {
+        grouped_rows.entry(row.message_id).or_default().push(row);
+    }
+
+    grouped_rows
+        .into_iter()
+        .filter_map(|(message_id, rows)| {
+            if rows
+                .iter()
+                .any(|row| !pending_row_is_old_enough(row, recovery_time))
+            {
+                warn!(
+                    intent_id = message_id,
+                    "Skipping pending commit intent because it is not old enough to recover"
+                );
+                return None;
+            }
+
+            let first = rows.first()?;
+            let slot = first.slot;
+            let blockhash = first.ephemeral_blockhash;
+            if rows.iter().any(|r| {
+                r.slot != slot || r.ephemeral_blockhash != blockhash
+            }) {
+                warn!(
+                    intent_id = message_id,
+                    "Skipping pending commit intent: rows disagree on slot or ephemeral_blockhash"
+                );
+                return None;
+            }
+            let mut commit_finalize_accounts = Vec::new();
+            let mut commit_finalize_and_undelegate_accounts = Vec::new();
+
+            for row in rows {
+                let Some((account, undelegate)) =
+                    committed_account_from_pending_row(row, recovery_base_slot)
+                else {
+                    continue;
+                };
+                if undelegate {
+                    commit_finalize_and_undelegate_accounts.push(account);
+                } else {
+                    commit_finalize_accounts.push(account);
+                }
+            }
+
+            let mut intent_bundle = MagicIntentBundle::default();
+            if !commit_finalize_accounts.is_empty() {
+                intent_bundle.commit_finalize =
+                    Some(CommitType::Standalone(commit_finalize_accounts));
+            }
+            if !commit_finalize_and_undelegate_accounts.is_empty() {
+                intent_bundle.commit_finalize_and_undelegate =
+                    Some(CommitAndUndelegate {
+                        commit_action: CommitType::Standalone(
+                            commit_finalize_and_undelegate_accounts,
+                        ),
+                        undelegate_action: UndelegateType::Standalone,
+                    });
+            }
+            if intent_bundle.is_empty() {
+                return None;
+            }
+
+            Some(ScheduledIntentBundle {
+                id: message_id,
+                slot,
+                blockhash,
+                sent_transaction: Transaction::default(),
+                payer,
+                intent_bundle,
+            })
+        })
+        .collect()
+}
+
+fn pending_row_is_old_enough(
+    row: &CommitStatusRow,
+    recovery_time: u64,
+) -> bool {
+    recovery_time.saturating_sub(row.last_retried_at) > RECOVERY_MIN_AGE_SECS
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn committed_account_from_pending_row(
+    row: CommitStatusRow,
+    recovery_base_slot: u64,
+) -> Option<(CommittedAccount, bool)> {
+    if row.commit_type == PersistCommitType::DataAccount && row.data.is_none() {
+        warn!(
+            intent_id = row.message_id,
+            pubkey = %row.pubkey,
+            "Skipping pending data-account commit row without account data"
+        );
+        return None;
+    }
+
+    Some((
+        CommittedAccount {
+            pubkey: row.pubkey,
+            account: Account {
+                lamports: row.lamports,
+                data: row.data.unwrap_or_default(),
+                owner: row.delegated_account_owner,
+                executable: false,
+                rent_epoch: 0,
+            },
+            remote_slot: recovery_base_slot,
+        },
+        row.undelegate,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use magicblock_core::{
         intent::BaseActionCallback,
-        traits::{
-            ActionResult, ActionsCallbackScheduler, CallbackScheduleError,
-        },
+        traits::{ActionResult, CallbackScheduleError},
     };
     use solana_hash::Hash;
-    use solana_signature::Signature;
-    use solana_transaction::Transaction;
+    use solana_keypair::Signature;
     use tempfile::NamedTempFile;
 
     use super::*;
     use crate::{
-        compute_budget::ComputeBudgetConfig,
-        config::{ChainConfig, DEFAULT_ACTIONS_TIMEOUT},
-        error::CommittorServiceError,
         intent_execution_manager::intent_scheduler::create_test_compressed_intent,
+        persist::CommitStatus, ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
     };
+
+    fn pending_row(
+        message_id: u64,
+        pubkey: Pubkey,
+        owner: Pubkey,
+        blockhash: Hash,
+        undelegate: bool,
+        data: Option<Vec<u8>>,
+    ) -> CommitStatusRow {
+        let commit_type =
+            if data.as_ref().map(|data| data.is_empty()) == Some(false) {
+                PersistCommitType::DataAccount
+            } else {
+                PersistCommitType::EmptyAccount
+            };
+
+        CommitStatusRow {
+            message_id,
+            pubkey,
+            commit_id: 0,
+            delegated_account_owner: owner,
+            slot: 42,
+            ephemeral_blockhash: blockhash,
+            undelegate,
+            lamports: 1_000,
+            data,
+            commit_type,
+            created_at: 1,
+            commit_status: CommitStatus::Pending,
+            commit_strategy: Default::default(),
+            last_retried_at: 1,
+            retries_count: 0,
+        }
+    }
 
     #[derive(Clone, Default)]
     struct NoopActionsCallbackScheduler;
@@ -266,6 +481,7 @@ mod tests {
                 compute_budget_config: ComputeBudgetConfig::new(1_000_000),
                 actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
             },
+            None,
             NoopActionsCallbackScheduler,
         )
         .unwrap();
@@ -281,5 +497,53 @@ mod tests {
             result,
             Err(CommittorServiceError::CompressionNotConfigured)
         ));
+    }
+
+    #[test]
+    fn pending_rows_reconstruct_commit_finalize_bundle() {
+        let payer = Pubkey::new_unique();
+        let owner = Pubkey::new_unique();
+        let blockhash = Hash::new_unique();
+        let commit_pubkey = Pubkey::new_unique();
+        let undelegate_pubkey = Pubkey::new_unique();
+
+        let bundles = pending_rows_to_scheduled_intent_bundles(
+            vec![
+                pending_row(
+                    9,
+                    commit_pubkey,
+                    owner,
+                    blockhash,
+                    false,
+                    Some(vec![1, 2, 3]),
+                ),
+                pending_row(9, undelegate_pubkey, owner, blockhash, true, None),
+            ],
+            payer,
+            7,
+            RECOVERY_MIN_AGE_SECS + 2,
+        );
+
+        assert_eq!(bundles.len(), 1);
+        let bundle = &bundles[0];
+        assert_eq!(bundle.id, 9);
+        assert_eq!(bundle.slot, 42);
+        assert_eq!(bundle.blockhash, blockhash);
+        assert_eq!(bundle.payer, payer);
+
+        let commit_accounts =
+            bundle.get_commit_finalize_intent_accounts().unwrap();
+        assert_eq!(commit_accounts.len(), 1);
+        assert_eq!(commit_accounts[0].pubkey, commit_pubkey);
+        assert_eq!(commit_accounts[0].account.data, vec![1, 2, 3]);
+        assert_eq!(commit_accounts[0].remote_slot, 7);
+
+        let undelegate_accounts = bundle
+            .get_commit_finalize_and_undelegate_intent_accounts()
+            .unwrap();
+        assert_eq!(undelegate_accounts.len(), 1);
+        assert_eq!(undelegate_accounts[0].pubkey, undelegate_pubkey);
+        assert_eq!(undelegate_accounts[0].account.owner, owner);
+        assert!(bundle.has_undelegate_intent());
     }
 }

@@ -514,6 +514,7 @@ impl
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
+        chain_slot: Option<Arc<AtomicU64>>,
     ) -> ChainlinkResult<
         Option<
             RemoteAccountProvider<
@@ -535,6 +536,7 @@ impl
                 commitment,
                 subscription_forwarder,
                 config,
+                chain_slot.unwrap_or_default(),
             )
             .await?;
             Ok(Some(provider))
@@ -681,6 +683,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
+        chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<
         RemoteAccountProvider<
             ChainRpcClientImpl,
@@ -709,9 +712,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
 
         let photon_client =
             endpoints.photon_url().map(PhotonClientImpl::new_from_url);
-
-        // Create chain_slot to be shared with all pubsub clients
-        let chain_slot = Arc::<AtomicU64>::default();
 
         // Build startup pubsub clients and wrap them into a SubMuxClient.
         // gRPC clients are cheap to create and backfill subscriptions, so
@@ -1001,7 +1001,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                                     None
                                 } else {
                                     // Subscription is stale, put the fetch tracking back
-                                    warn!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Received stale subscription update");
+                                    debug!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Received stale subscription update");
                                     fetching.insert(update.pubkey, state);
                                     None
                                 }
@@ -1108,7 +1108,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                         start,
                         &config,
                     );
-                    warn!(
+                    debug!(
                         pubkeys = %pubkeys_str(pubkeys),
                         min_context_slot = ?config.min_context_slot,
                         retries = retries,

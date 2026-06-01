@@ -30,7 +30,7 @@ use magicblock_chainlink::{
     },
     submux::SubMuxClient,
     testing::cloner_stub::ClonerStub,
-    Chainlink,
+    InnerChainlink, ReplicationModeAwareChainlink,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use magicblock_core::compression::{
@@ -58,7 +58,7 @@ use tracing::*;
 
 use crate::sleep_ms;
 
-pub type IxtestChainlink = Chainlink<
+pub type IxtestChainlink = ReplicationModeAwareChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
     AccountsBankStub,
@@ -145,6 +145,7 @@ impl IxtestContext {
                     commitment,
                     tx,
                     &config.remote_account_provider,
+                    None,
                 )
                 .await;
 
@@ -171,12 +172,13 @@ impl IxtestContext {
                 _ => (None, None),
             }
         };
-        let chainlink = Chainlink::try_new(
+        let chainlink = InnerChainlink::try_new(
             &bank,
             fetch_cloner,
             validator_kp.pubkey(),
             &ChainLinkConfig::default(),
         )
+        .map(ReplicationModeAwareChainlink::enabled)
         .unwrap();
 
         let rpc_client = IxtestContext::get_rpc_client(commitment);
