@@ -137,7 +137,6 @@ impl AuthService {
     }
 
     pub fn verify_token(&self, token: &str) -> AuthResult<String> {
-        let now = Utc::now();
         let claims = self.token_generator.verify(token)?;
 
         Ok(claims.pubkey)
