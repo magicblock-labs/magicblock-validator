@@ -1057,13 +1057,11 @@ where
     ) -> RemoteAccountProviderResult<()> {
         // Check if we already have this program subscription
         {
-            let mut subs = self.program_subs.lock().unwrap();
+            let subs = self.program_subs.lock().unwrap();
             if subs.contains(&program_id) {
                 debug!(program_id = %program_id, "Program subscription already exists");
                 return Ok(());
             }
-            // Add to program_subs before subscribing to clients
-            subs.insert(program_id);
         }
 
         AccountSubscriptionTask::SubscribeProgram(
@@ -1071,7 +1069,10 @@ where
             self.required_program_subscription_confirmations(),
         )
         .process(self.connected_clients_snapshot())
-        .await
+        .await?;
+
+        self.program_subs.lock().unwrap().insert(program_id);
+        Ok(())
     }
 
     async fn unsubscribe(
