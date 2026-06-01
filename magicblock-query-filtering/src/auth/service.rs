@@ -140,10 +140,6 @@ impl AuthService {
         let now = Utc::now();
         let claims = self.token_generator.verify(token)?;
 
-        if claims.exp < now.timestamp() as usize {
-            return Err(AuthError::TokenExpired);
-        }
-
         Ok(claims.pubkey)
     }
 }
