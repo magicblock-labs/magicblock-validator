@@ -1605,6 +1605,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_program_subscription_retry_after_update_failure_writes_again()
+    {
+        let (mut mgr, factory) = create_manager();
+        let first_program = Pubkey::new_unique();
+        let second_program = Pubkey::new_unique();
+
+        mgr.add_program_subscription(first_program, &COMMITMENT)
+            .await
+            .unwrap();
+
+        let writes_after_first = factory.handle_requests().len();
+        factory.fail_next_handle_writes(6);
+
+        let err = mgr
+            .add_program_subscription(second_program, &COMMITMENT)
+            .await
+            .expect_err("program stream update should fail");
+        assert!(
+            err.to_string().contains("program_subscribe"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(factory.handle_requests().len(), writes_after_first);
+
+        mgr.add_program_subscription(second_program, &COMMITMENT)
+            .await
+            .expect("retry should write the expanded program request");
+
+        let handle_reqs = factory.handle_requests();
+        assert_eq!(handle_reqs.len(), writes_after_first + 1);
+        let owners = &handle_reqs
+            .last()
+            .expect("retry should record a handle request")
+            .accounts["program_sub"]
+            .owner;
+        assert!(owners.contains(&first_program.to_string()));
+        assert!(owners.contains(&second_program.to_string()));
+    }
+
+    #[tokio::test]
     async fn test_optimize_uses_from_slot_with_chain_slot() {
         use std::sync::{atomic::AtomicU64, Arc};
 
