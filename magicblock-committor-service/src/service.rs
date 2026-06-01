@@ -228,6 +228,7 @@ where
         }
 
         // Add metas for intent we schedule
+        let intent_ids: Vec<u64>;
         let pubkeys_being_undelegated = {
             let mut intent_metas =
                 self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
@@ -240,12 +241,23 @@ where
                     pubkeys_being_undelegated.extend(undelegate);
                 }
             });
+            intent_ids = intent_bundles.iter().map(|b| b.id).collect();
             pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
         };
 
         self.process_undelegation_requests(pubkeys_being_undelegated)
             .await;
-        schedule(intent_bundles).await
+
+        let result = schedule(intent_bundles).await;
+        // If scheduling failed remove from map
+        if result.is_err() {
+            let mut intent_metas =
+                self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
+            intent_ids.iter().for_each(|id| {
+                intent_metas.remove(id);
+            });
+        }
+        result
     }
 
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
