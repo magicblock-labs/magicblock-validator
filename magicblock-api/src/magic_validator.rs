@@ -429,7 +429,6 @@ impl MagicValidator {
             config,
             exit,
             _metrics: (metrics_service, system_metrics_ticker),
-            // NOTE: set during [Self::start]
             intent_execution_service,
             replication_service,
             chainlink,

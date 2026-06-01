@@ -236,32 +236,49 @@ impl CommittorProcessor {
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<Vec<BroadcastedIntentExecutionResult>> {
         // Critical section
-        let receivers = {
+        let (receivers, inserted_ids) = {
             let mut result_listeners = self
                 .pending_result_listeners
                 .lock()
                 .expect(POISONED_MUTEX_MSG);
 
-            intent_bundles
-                .iter()
-                .map(|intent| {
-                    let (sender, receiver) = oneshot::channel();
-                    match result_listeners.entry(intent.id) {
-                        Entry::Vacant(vacant) => {
-                            vacant.insert(sender);
-                            Ok(receiver)
-                        }
-                        Entry::Occupied(_) => {
-                            Err(CommittorServiceError::RepeatingMessageError(
-                                intent.id,
-                            ))
-                        }
+            let mut receivers = Vec::with_capacity(intent_bundles.len());
+            let mut inserted_ids = Vec::with_capacity(intent_bundles.len());
+
+            for intent in &intent_bundles {
+                let (sender, receiver) = oneshot::channel();
+                match result_listeners.entry(intent.id) {
+                    Entry::Vacant(vacant) => {
+                        vacant.insert(sender);
+                        inserted_ids.push(intent.id);
+                        receivers.push(receiver);
                     }
-                })
-                .collect::<Result<Vec<_>, _>>()?
+                    Entry::Occupied(_) => {
+                        for id in &inserted_ids {
+                            result_listeners.remove(id);
+                        }
+                        return Err(
+                            CommittorServiceError::RepeatingMessageError(
+                                intent.id,
+                            ),
+                        );
+                    }
+                }
+            }
+            (receivers, inserted_ids)
         };
 
-        self.schedule_intent_bundles(intent_bundles).await?;
+        if let Err(err) = self.schedule_intent_bundles(intent_bundles).await {
+            let mut result_listeners = self
+                .pending_result_listeners
+                .lock()
+                .expect(POISONED_MUTEX_MSG);
+            for id in &inserted_ids {
+                result_listeners.remove(id);
+            }
+            return Err(err);
+        }
+
         let results = join_all(receivers.into_iter())
             .await
             .into_iter()
