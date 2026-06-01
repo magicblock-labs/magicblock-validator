@@ -276,8 +276,13 @@ mod tests {
     // ---------- Helpers for ATA/eATA remapping tests ----------
     // Use shared SPL/ATA/eATA constants and helpers
     // Reuse test helper to create proper SPL ATA account data
-    use magicblock_chainlink::testing::eatas::create_ata_account;
-    use magicblock_core::token_programs::{derive_ata, derive_eata};
+    use magicblock_chainlink::testing::eatas::{
+        create_ata_account, create_token_2022_ata_account,
+    };
+    use magicblock_core::token_programs::{
+        derive_ata, derive_ata_with_token_program, derive_eata,
+        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+    };
     use serial_test::serial;
     use solana_seed_derivable::SeedDerivable;
     use test_kit::init_logger;
@@ -290,6 +295,16 @@ mod tests {
         mint: &Pubkey,
     ) -> AccountSharedData {
         let ata_account = create_ata_account(owner, mint);
+        let mut acc = AccountSharedData::from(ata_account);
+        acc.set_delegated(true);
+        acc
+    }
+
+    fn make_delegated_token_2022_ata_account(
+        owner: &Pubkey,
+        mint: &Pubkey,
+    ) -> AccountSharedData {
+        let ata_account = create_token_2022_ata_account(owner, mint);
         let mut acc = AccountSharedData::from(ata_account);
         acc.set_delegated(true);
         acc
@@ -648,6 +663,69 @@ mod tests {
         assert_eq!(
             scheduled[0].intent_bundle.get_all_committed_pubkeys(),
             vec![eata_pubkey]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_allows_token_2022_ata_from_eata_parent() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_token_2022_ata_eata_parent")
+                .unwrap();
+        let eata_parent_owned_committee = Pubkey::new_unique();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata_pubkey = derive_ata_with_token_program(
+            &wallet_owner,
+            &mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+        let eata_pubkey = derive_eata(&wallet_owner, &mint);
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                EATA_PROGRAM_ID,
+                eata_parent_owned_committee,
+            );
+        account_data.insert(
+            ata_pubkey,
+            make_delegated_token_2022_ata_account(&wallet_owner, &mint),
+        );
+
+        let ix = instruction_from_account_metas(vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new_readonly(eata_parent_owned_committee, false),
+            AccountMeta::new_readonly(ata_pubkey, false),
+        ]);
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+        let magic_context_acc = assert_non_accepted_actions(
+            &processed_scheduled,
+            &payer.pubkey(),
+            1,
+        );
+        let magic_context =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap();
+        let scheduled = &magic_context.scheduled_base_intents[0];
+
+        assert_eq!(
+            scheduled.get_all_committed_pubkeys(),
+            vec![eata_parent_owned_committee, eata_pubkey]
         );
     }
 
