@@ -554,9 +554,7 @@ where
     fn local_delegated_clone_target_active(&self, pubkey: Pubkey) -> bool {
         self.accounts_bank
             .get_account(&pubkey)
-            .is_some_and(|account| {
-                account.delegated() || account.undelegating()
-            })
+            .is_some_and(|account| account.delegated())
     }
 
     /// Start listening to subscription updates.
@@ -981,6 +979,14 @@ where
         &self,
         request: AccountCloneRequest,
     ) -> ChainlinkResult<Signature> {
+        if self
+            .accounts_bank
+            .get_account(&request.pubkey)
+            .is_some_and(|account| account.undelegating())
+        {
+            return Ok(Signature::default());
+        }
+
         self.clone_account_with_post_delegation_action_invariants(request)
             .await
     }

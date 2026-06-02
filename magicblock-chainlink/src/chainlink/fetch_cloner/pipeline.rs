@@ -365,7 +365,7 @@ where
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
-                    continue;
+                    (None, None, DelegationActions::default())
                 };
             let cleanup_delegated_subscription = account.delegated();
             let cleanup_undelegation_tracking = cleanup_delegated_subscription

@@ -3112,6 +3112,89 @@ async fn test_same_slot_delegated_subscription_update_overrides_plain_bank_accou
 }
 
 #[tokio::test]
+async fn test_same_slot_delegated_subscription_update_overrides_undelegating_bank_account(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        CURRENT_SLOT + 1,
+    );
+
+    let mut undelegating_in_bank =
+        AccountSharedData::from(delegated_account.clone());
+    undelegating_in_bank.set_remote_slot(CURRENT_SLOT);
+    undelegating_in_bank.set_delegated(false);
+    undelegating_in_bank.set_undelegating(true);
+    accounts_bank.insert(account_pubkey, undelegating_in_bank);
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                delegated_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let refreshed = accounts_bank
+                .get_account(&account_pubkey)
+                .is_some_and(|account| {
+                    account.delegated()
+                        && !account.undelegating()
+                        && account.remote_slot() == CURRENT_SLOT
+                        && account.owner() == &account_owner
+                });
+            if refreshed {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for same-slot undelegating refresh");
+}
+
+#[tokio::test]
 async fn test_discovered_dlp_owned_account_delegated_elsewhere_is_ignored() {
     init_logger();
     let validator_keypair = Keypair::new();
