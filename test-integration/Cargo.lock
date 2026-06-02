@@ -7471,7 +7471,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "3.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=fix%2Fpost-action-executor-privileged-access#16afe26b3ba173dd3d8de4abd3c0979ae1b74675"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=fix%2Fpost-action-executor-privileged-access#caf74fd8f6b0a2bc54b41ee9cc7724b0dee8ce9e"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -9010,7 +9010,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=fix%2Fpost-action-executor-privileged-access#16afe26b3ba173dd3d8de4abd3c0979ae1b74675"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=fix%2Fpost-action-executor-privileged-access#caf74fd8f6b0a2bc54b41ee9cc7724b0dee8ce9e"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -9904,7 +9904,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=fix%2Fpost-action-executor-privileged-access#16afe26b3ba173dd3d8de4abd3c0979ae1b74675"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=fix%2Fpost-action-executor-privileged-access#caf74fd8f6b0a2bc54b41ee9cc7724b0dee8ce9e"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -10237,7 +10237,7 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=fix%2Fpost-action-executor-privileged-access#16afe26b3ba173dd3d8de4abd3c0979ae1b74675"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=fix%2Fpost-action-executor-privileged-access#caf74fd8f6b0a2bc54b41ee9cc7724b0dee8ce9e"
 dependencies = [
  "bincode",
  "qualifier_attr",
