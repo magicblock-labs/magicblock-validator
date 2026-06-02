@@ -42,7 +42,8 @@ use crate::{
     },
 };
 
-const RECOVERY_MIN_AGE_SECS: u64 = 30 * 60;
+const RECOVERY_MIN_AGE_SECS: u64 = 5 * 60;
+const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;
 
 pub(crate) struct CommittorProcessor {
     pub(crate) magicblock_rpc_client: MagicblockRpcClient,
@@ -177,7 +178,11 @@ impl CommittorProcessor {
     pub async fn pending_intent_bundles(
         &self,
     ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
-        let rows = self.persister.get_pending_commit_statuses()?;
+        let recovery_time = unix_timestamp();
+        let rows = self.persister.get_pending_commit_statuses(
+            recovery_time.saturating_sub(RECOVERY_MAX_AGE_SECS),
+            recovery_time.saturating_sub(RECOVERY_MIN_AGE_SECS),
+        )?;
         if rows.is_empty() {
             return Ok(Vec::new());
         }
@@ -187,7 +192,7 @@ impl CommittorProcessor {
             rows,
             self.auth_pubkey(),
             recovery_base_slot,
-            unix_timestamp(),
+            recovery_time,
         );
         if !bundles.is_empty() {
             let accounts_count: usize = bundles
@@ -274,13 +279,13 @@ fn pending_rows_to_scheduled_intent_bundles(
     grouped_rows
         .into_iter()
         .filter_map(|(message_id, rows)| {
-            if rows
-                .iter()
-                .any(|row| !pending_row_is_old_enough(row, recovery_time))
+            if rows.iter().any(|row| {
+                !pending_row_is_in_recovery_window(row, recovery_time)
+            })
             {
                 warn!(
                     intent_id = message_id,
-                    "Skipping pending commit intent because it is not old enough to recover"
+                    "Skipping pending commit intent outside recovery window"
                 );
                 return None;
             }
@@ -343,11 +348,12 @@ fn pending_rows_to_scheduled_intent_bundles(
         .collect()
 }
 
-fn pending_row_is_old_enough(
+fn pending_row_is_in_recovery_window(
     row: &CommitStatusRow,
     recovery_time: u64,
 ) -> bool {
     recovery_time.saturating_sub(row.last_retried_at) > RECOVERY_MIN_AGE_SECS
+        && recovery_time.saturating_sub(row.created_at) <= RECOVERY_MAX_AGE_SECS
 }
 
 fn unix_timestamp() -> u64 {
@@ -427,6 +433,24 @@ mod tests {
         }
     }
 
+    fn pending_row_with_timestamps(
+        message_id: u64,
+        created_at: u64,
+        last_retried_at: u64,
+    ) -> CommitStatusRow {
+        let mut row = pending_row(
+            message_id,
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Hash::new_unique(),
+            false,
+            Some(vec![1]),
+        );
+        row.created_at = created_at;
+        row.last_retried_at = last_retried_at;
+        row
+    }
+
     #[test]
     fn pending_rows_reconstruct_commit_finalize_bundle() {
         let payer = Pubkey::new_unique();
@@ -473,5 +497,47 @@ mod tests {
         assert_eq!(undelegate_accounts[0].pubkey, undelegate_pubkey);
         assert_eq!(undelegate_accounts[0].account.owner, owner);
         assert!(bundle.has_undelegate_intent());
+    }
+
+    #[test]
+    fn pending_rows_skip_intents_outside_recovery_window() {
+        let payer = Pubkey::new_unique();
+        let recovery_time = RECOVERY_MAX_AGE_SECS + RECOVERY_MIN_AGE_SECS;
+
+        let recoverable = pending_rows_to_scheduled_intent_bundles(
+            vec![pending_row_with_timestamps(
+                1,
+                recovery_time - RECOVERY_MAX_AGE_SECS,
+                recovery_time - RECOVERY_MIN_AGE_SECS - 1,
+            )],
+            payer,
+            7,
+            recovery_time,
+        );
+        assert_eq!(recoverable.len(), 1);
+
+        let too_recent = pending_rows_to_scheduled_intent_bundles(
+            vec![pending_row_with_timestamps(
+                2,
+                recovery_time - RECOVERY_MIN_AGE_SECS,
+                recovery_time - RECOVERY_MIN_AGE_SECS,
+            )],
+            payer,
+            7,
+            recovery_time,
+        );
+        assert!(too_recent.is_empty());
+
+        let too_old = pending_rows_to_scheduled_intent_bundles(
+            vec![pending_row_with_timestamps(
+                3,
+                recovery_time - RECOVERY_MAX_AGE_SECS - 1,
+                recovery_time - RECOVERY_MAX_AGE_SECS - 1,
+            )],
+            payer,
+            7,
+            recovery_time,
+        );
+        assert!(too_old.is_empty());
     }
 }
