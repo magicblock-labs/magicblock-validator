@@ -2997,12 +2997,17 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
+    let mut dlp_owned_account_shared =
+        AccountSharedData::from(dlp_owned_account.clone());
+    dlp_owned_account_shared.set_remote_slot(CURRENT_SLOT);
+    dlp_owned_account_shared.set_delegated(true);
+    dlp_owned_account_shared.set_confined(true);
+
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
-            account: RemoteAccount::from_fresh_account(
-                dlp_owned_account,
-                CURRENT_SLOT,
+            account: RemoteAccount::from_fresh_account_shared_data(
+                dlp_owned_account_shared,
                 RemoteAccountUpdateSource::Subscription,
             ),
         })
@@ -3026,6 +3031,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
         .expect("account should be cloned by fallback subscription path");
     assert_eq!(*cloned_account.owner(), dlp_api::id());
     assert!(!cloned_account.delegated());
+    assert!(!cloned_account.confined());
     assert_eq!(cloned_account.remote_slot(), CURRENT_SLOT);
 }
 
@@ -3802,6 +3808,107 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
 }
 
 #[tokio::test]
+async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let account_pubkey = random_pubkey();
+    let mut account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    account.set_remote_slot(CURRENT_SLOT);
+    account.set_delegated(true);
+    account.set_confined(true);
+
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: account_pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect("DLP-owned normal clone should be normalized, not rejected");
+
+    let clone_requests = cloner.clone_requests();
+    assert_eq!(clone_requests.len(), 1);
+    let cloned_account = &clone_requests[0].account;
+    assert_eq!(cloned_account.owner(), &dlp_api::id());
+    assert!(!cloned_account.delegated());
+    assert!(!cloned_account.confined());
+}
+
+#[tokio::test]
+async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let account_pubkey =
+        dlp_api::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
+    let mut account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![0; 8],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    account.set_remote_slot(CURRENT_SLOT);
+    account.set_delegated(true);
+
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: account_pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect("DLP-owned magic fee vault should remain delegated");
+
+    let clone_requests = cloner.clone_requests();
+    assert_eq!(clone_requests.len(), 1);
+    let cloned_account = &clone_requests[0].account;
+    assert_eq!(cloned_account.owner(), &dlp_api::id());
+    assert!(cloned_account.delegated());
+    assert!(!cloned_account.confined());
+}
+
+#[tokio::test]
 async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
 ) {
     init_logger();
@@ -3969,113 +4076,6 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
     assert!(
         !target_requests[0].delegation_actions.is_empty(),
         "the first clone remains the only action-bearing clone"
-    );
-}
-
-#[tokio::test]
-async fn test_concurrent_post_delegation_actions_execute_once_across_remote_slots(
-) {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    const CURRENT_SLOT: u64 = 100;
-
-    let FetcherTestCtx {
-        cloner,
-        fetch_cloner,
-        ..
-    } = setup(
-        std::iter::empty::<(Pubkey, Account)>(),
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    cloner.set_clone_delay(Duration::from_millis(100));
-
-    let target_pubkey = random_pubkey();
-    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
-        system_program::id(),
-        &[1],
-        vec![],
-    )]);
-
-    fn make_delegated_action_request(
-        target_pubkey: Pubkey,
-        remote_slot: u64,
-        delegation_actions: DelegationActions,
-    ) -> AccountCloneRequest {
-        let mut target_account = AccountSharedData::from(Account {
-            lamports: 1_000_000,
-            data: vec![1, 2, 3, 4],
-            owner: system_program::id(),
-            executable: false,
-            rent_epoch: 0,
-        });
-        target_account.set_remote_slot(remote_slot);
-        target_account.set_delegated(true);
-        AccountCloneRequest {
-            pubkey: target_pubkey,
-            account: target_account,
-            commit_frequency_ms: None,
-            delegation_actions,
-            delegated_to_other: None,
-        }
-    }
-
-    let first = {
-        let fetch_cloner = fetch_cloner.clone();
-        let actions = actions.clone();
-        tokio::spawn(async move {
-            fetch_cloner
-                .clone_account_with_post_delegation_action_invariants(
-                    make_delegated_action_request(
-                        target_pubkey,
-                        CURRENT_SLOT,
-                        actions,
-                    ),
-                )
-                .await
-        })
-    };
-    tokio::time::sleep(Duration::from_millis(10)).await;
-    let second = {
-        let fetch_cloner = fetch_cloner.clone();
-        let actions = actions.clone();
-        tokio::spawn(async move {
-            fetch_cloner
-                .clone_account_with_post_delegation_action_invariants(
-                    make_delegated_action_request(
-                        target_pubkey,
-                        CURRENT_SLOT + 1,
-                        actions,
-                    ),
-                )
-                .await
-        })
-    };
-
-    first
-        .await
-        .expect("first action clone task should join")
-        .expect("first action clone should succeed");
-    second
-        .await
-        .expect("second action clone task should join")
-        .expect("second action clone should succeed");
-
-    let clone_requests = cloner.clone_requests();
-    let target_requests = clone_requests
-        .iter()
-        .filter(|request| request.pubkey == target_pubkey)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        target_requests.len(),
-        1,
-        "concurrent remote-slot updates must share one action-bearing clone"
-    );
-    assert!(
-        !target_requests[0].delegation_actions.is_empty(),
-        "the owner clone is the only action-bearing clone"
     );
 }
 

@@ -4158,6 +4158,7 @@ dependencies = [
  "lazy_static",
  "magicblock-chainlink",
  "magicblock-core",
+ "magicblock-delegation-program-api",
  "magicblock-magic-program-api",
  "num-derive",
  "num-traits",

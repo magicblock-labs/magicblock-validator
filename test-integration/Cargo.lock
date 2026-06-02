@@ -4719,6 +4719,7 @@ dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core",
+ "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
  "magicblock-magic-program-api 0.11.3",
  "num-derive",
  "num-traits",

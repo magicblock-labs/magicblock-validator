@@ -10,6 +10,7 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
+    delegation,
     subscription::{acquire_subs, release_subs, SubscriptionRelease},
     types::{
         AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
@@ -362,6 +363,7 @@ where
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
+                    delegation::clear_unresolved_delegation_state(&mut account);
                     (None, None, DelegationActions::default())
                 };
             let cleanup_delegated_subscription = account.delegated();
@@ -693,8 +695,8 @@ where
     V: AccountsBank,
     C: Cloner,
 {
-    // 1) Clone programs first so post-delegation action instructions can load
-    // their program accounts when action txs are sent during account cloning.
+    // 1) Clone programs first so embedded post-delegation actions can load
+    // their program accounts during account cloning.
     let mut program_join_set = JoinSet::new();
     for acc in loaded_programs {
         if !this.is_program_allowed(&acc.program_id) {
@@ -710,8 +712,8 @@ where
         .into_iter()
         .collect::<ClonerResult<Vec<_>>>()?;
 
-    // 2) Clone accounts without post-delegation actions first so all action
-    // dependencies are materialized in the bank before action tx execution.
+    // 2) Clone accounts without post-delegation actions first so common action
+    // dependencies are materialized before action-bearing clone instructions.
     let (accounts_with_actions, accounts_without_actions): (Vec<_>, Vec<_>) =
         accounts_to_clone
             .into_iter()
@@ -741,7 +743,7 @@ where
         .into_iter()
         .collect::<ChainlinkResult<Vec<_>>>()?;
 
-    // 3) Finally clone accounts that carry post-delegation actions.
+    // 3) Finally clone accounts that carry embedded post-delegation actions.
     let mut action_accounts_join_set = JoinSet::new();
     for request in accounts_with_actions {
         if tracing::enabled!(tracing::Level::TRACE) {

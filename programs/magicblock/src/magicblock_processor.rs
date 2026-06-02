@@ -1,5 +1,5 @@
 use magicblock_magic_program_api::instruction::{
-    CallbackInstruction, MagicBlockInstruction,
+    CallbackInstruction, MagicBlockInstruction, PostDelegationActionInstruction,
 };
 use solana_instruction::error::InstructionError;
 use solana_program_runtime::{
@@ -10,7 +10,8 @@ use crate::{
     clone_account::{
         process_cleanup_partial_clone, process_clone_account,
         process_clone_account_continue, process_clone_account_init,
-        process_evict_account, process_finalize_program_from_buffer,
+        process_evict_account, process_execute_post_delegation_actions,
+        process_finalize_program_from_buffer,
         process_finalize_v1_program_from_buffer, process_set_program_authority,
     },
     ephemeral_accounts::{
@@ -153,22 +154,20 @@ declare_process_instruction!(
                 pubkey,
                 data,
                 fields,
-                actions_tx_sig,
+                actions,
             } => process_clone_account(
                 &signers,
                 invoke_context,
-                transaction_context,
                 pubkey,
                 data,
                 fields,
-                actions_tx_sig,
+                actions,
             ),
             CloneAccountInit {
                 pubkey,
                 total_data_len,
                 initial_data,
                 fields,
-                actions_tx_sig,
             } => process_clone_account_init(
                 &signers,
                 invoke_context,
@@ -177,21 +176,21 @@ declare_process_instruction!(
                 total_data_len,
                 initial_data,
                 fields,
-                actions_tx_sig,
             ),
             CloneAccountContinue {
                 pubkey,
                 offset,
                 data,
                 is_last,
+                actions,
             } => process_clone_account_continue(
                 &signers,
                 invoke_context,
-                transaction_context,
                 pubkey,
                 offset,
                 data,
                 is_last,
+                actions,
             ),
             CleanupPartialClone { pubkey } => process_cleanup_partial_clone(
                 &signers,
@@ -275,6 +274,30 @@ declare_process_instruction!(
         match instruction {
             CallbackInstruction::ExecuteCallback { instruction } => {
                 process_execute_callback(signers, invoke_context, instruction)
+            }
+        }
+    }
+);
+
+declare_process_instruction!(
+    PostDelegationActionEntrypoint,
+    DEFAULT_COMPUTE_UNITS,
+    |invoke_context| {
+        let instruction: PostDelegationActionInstruction =
+            deserialize_instruction(invoke_context)?;
+        let transaction_context = &invoke_context.transaction_context;
+        let instruction_context =
+            transaction_context.get_current_instruction_context()?;
+        let signers = instruction_context.get_signers()?;
+
+        match instruction {
+            PostDelegationActionInstruction::Execute { pubkey, actions } => {
+                process_execute_post_delegation_actions(
+                    signers,
+                    invoke_context,
+                    pubkey,
+                    actions,
+                )
             }
         }
     }
