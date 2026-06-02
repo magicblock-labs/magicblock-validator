@@ -559,12 +559,22 @@ impl CommittsDb {
 
     pub(crate) fn get_pending_commit_statuses(
         &self,
+        min_created_at: u64,
+        max_last_retried_at: u64,
     ) -> CommitPersistResult<Vec<CommitStatusRow>> {
         let query = format!(
-            "{SELECT_ALL_COMMIT_STATUS_COLUMNS} WHERE commit_status = ?1 ORDER BY message_id, created_at, pubkey"
+            "{SELECT_ALL_COMMIT_STATUS_COLUMNS}
+             WHERE commit_status = ?1
+               AND created_at >= ?2
+               AND last_retried_at < ?3
+             ORDER BY message_id, created_at, pubkey"
         );
         let stmt = &mut self.conn.prepare(&query)?;
-        let mut rows = stmt.query(params![CommitStatus::Pending.as_str()])?;
+        let mut rows = stmt.query(params![
+            CommitStatus::Pending.as_str(),
+            u64_into_i64(min_created_at),
+            u64_into_i64(max_last_retried_at)
+        ])?;
 
         extract_committor_rows(&mut rows)
     }
@@ -854,7 +864,27 @@ mod tests {
         db.insert_commit_status_rows(&[pending.clone(), succeeded])
             .unwrap();
 
-        let rows = db.get_pending_commit_statuses().unwrap();
+        let rows = db.get_pending_commit_statuses(0, u64::MAX).unwrap();
+        assert_eq!(rows, vec![pending]);
+    }
+
+    #[test]
+    fn test_get_pending_commit_statuses_filters_recovery_window() {
+        let (mut db, _file) = setup_test_db();
+        let mut pending = create_test_row(1, 0);
+        pending.created_at = 10;
+        pending.last_retried_at = 19;
+        let mut too_old = create_test_row(2, 0);
+        too_old.created_at = 9;
+        too_old.last_retried_at = 9;
+        let mut too_recent = create_test_row(3, 0);
+        too_recent.created_at = 20;
+        too_recent.last_retried_at = 20;
+
+        db.insert_commit_status_rows(&[pending.clone(), too_old, too_recent])
+            .unwrap();
+
+        let rows = db.get_pending_commit_statuses(10, 20).unwrap();
         assert_eq!(rows, vec![pending]);
     }
 
