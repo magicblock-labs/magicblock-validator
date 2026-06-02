@@ -552,6 +552,24 @@ impl TableMania {
         }
     }
 
+    async fn wait_until_remote_readiness_target(
+        target: RemoteReadinessTarget,
+        wait_for_remote_table_match: Duration,
+    ) {
+        let Some(deadline) = target.wall_clock_deadline else {
+            return;
+        };
+
+        let now = Instant::now();
+        if deadline <= now {
+            return;
+        }
+
+        let remaining_until_deadline = deadline.duration_since(now);
+        let delay = remaining_until_deadline.min(wait_for_remote_table_match);
+        sleep(delay).await;
+    }
+
     /// Attempts to find a table that holds each of the pubkeys.
     /// It only returns once the needed pubkeys are also present remotely in the
     /// finalized table accounts.
@@ -593,8 +611,16 @@ impl TableMania {
                         if !matching_keys.is_empty() {
                             keys_to_match
                                 .retain(|pk| !matching_keys.contains(pk));
-                            matching_tables
-                                .insert(*table.table_address(), matching_keys);
+                            matching_tables.insert(
+                                *table.table_address(),
+                                MatchingTableReadiness {
+                                    latest_update_sent_at: table
+                                        .latest_update_sent_at_for(
+                                            &matching_keys,
+                                        ),
+                                    local_keys: matching_keys,
+                                },
+                            );
                         }
                     }
                     if keys_to_match.is_empty() {
@@ -632,6 +658,26 @@ impl TableMania {
                 .map(|x| x.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
+
+            let readiness_target =
+                Self::remote_readiness_target(matching_tables.values());
+            let wait_delay_ms = readiness_target
+                .wall_clock_deadline
+                .map(|deadline| {
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_millis() as u64
+                })
+                .unwrap_or(0);
+            debug!(
+                wait_delay_ms,
+                "Delaying first finalized remote table fetch using required-pubkey transaction send-time estimate"
+            );
+            Self::wait_until_remote_readiness_target(
+                readiness_target,
+                wait_for_remote_table_match,
+            )
+            .await;
 
             loop {
                 metrics::inc_table_mania_a_count();
@@ -672,10 +718,11 @@ impl TableMania {
                 if remote_tables.len() == matching_tables.len() {
                     // And that all locally matched keys are in the finalized remote table
                     let all_matches_are_remote =
-                        matching_tables.iter().all(|(address, local_keys)| {
+                        matching_tables.iter().all(|(address, readiness)| {
                             remote_tables.get(address).is_some_and(
                                 |remote_keys| {
-                                    local_keys
+                                    readiness
+                                        .local_keys
                                         .iter()
                                         .all(|pk| remote_keys.contains(pk))
                                 },
@@ -700,13 +747,7 @@ impl TableMania {
                     );
                 }
 
-                if let Err(err) = self.rpc_client.wait_for_next_slot().await {
-                    trace!(
-                        error = ?err,
-                        "Failed to wait for next slot; falling back to timed retry"
-                    );
-                    sleep(Duration::from_millis(450)).await;
-                }
+                sleep(REMOTE_TABLE_FALLBACK_POLL_INTERVAL).await;
                 if last_wait_log.elapsed() > Duration::from_secs(8) {
                     debug!("Still waiting for remote tables");
                     last_wait_log = Instant::now();
