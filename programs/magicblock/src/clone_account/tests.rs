@@ -500,7 +500,7 @@ fn test_clone_account_rejects_actions_without_executor() {
         fields,
         vec![schedule_task_action(payer)],
     );
-    insert_instructions_sysvar(&mut accounts, &[ix.clone()], 0);
+    insert_instructions_sysvar(&mut accounts, std::slice::from_ref(&ix), 0);
 
     process_instruction(
         &ix.data,
