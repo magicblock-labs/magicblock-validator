@@ -2,12 +2,13 @@ use std::{collections::HashSet, sync::Arc};
 
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
+use magicblock_config::config::QueryFilteringConfig;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
 use crate::{
-    auth::{AuthConfig, AuthError, AuthService},
+    auth::{AuthError, AuthService},
     types::{
         ChallengeResponse, LoginRequest, LoginResponse, Permission,
         PermissionEntry, PermissionError,
@@ -31,15 +32,18 @@ pub struct QueryFilteringService {
 }
 
 impl QueryFilteringService {
-    pub fn new(config: AuthConfig, risk: Option<Arc<RiskService>>) -> Self {
-        Self {
-            auth_service: Arc::new(AuthService::new(
-                config.jwt_secret,
+    pub fn try_new(
+        config: &QueryFilteringConfig,
+        risk: Option<Arc<RiskService>>,
+    ) -> QueryFilteringResult<Self> {
+        Ok(Self {
+            auth_service: Arc::new(AuthService::try_new(
+                &config.jwt_secret,
                 config.token_expiry_days,
                 config.challenge_ttl_seconds,
                 risk,
-            )),
-        }
+            )?),
+        })
     }
 
     pub fn verify_token(&self, token: &str) -> QueryFilteringResult<String> {

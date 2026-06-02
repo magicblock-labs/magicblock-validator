@@ -519,7 +519,8 @@ fn auth_error_status(error: &AuthError) -> StatusCode {
         | AuthError::ParseSignature(_)
         | AuthError::InvalidChallengeDate
         | AuthError::InvalidChallengeFormat
-        | AuthError::InvalidChallengeUserPubkey => StatusCode::BAD_REQUEST,
+        | AuthError::InvalidChallengeUserPubkey
+        | AuthError::InvalidChallengeTtlSeconds => StatusCode::BAD_REQUEST,
         AuthError::ChallengeExpired
         | AuthError::SignatureVerification
         | AuthError::TokenExpired => StatusCode::UNAUTHORIZED,

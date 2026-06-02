@@ -4219,6 +4219,7 @@ dependencies = [
  "jsonwebtoken",
  "magicblock-accounts-db",
  "magicblock-aml",
+ "magicblock-config",
  "magicblock-core",
  "rand 0.9.4",
  "scc",
@@ -4239,6 +4240,7 @@ dependencies = [
  "spl-token-interface",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -29,10 +29,10 @@ impl AuthTokenGenerator {
     ///
     /// # Returns
     /// The new AuthTokenGenerator
-    pub fn new(jwt_secret: String, token_expiry_days: i64) -> Self {
+    pub fn new(jwt_secret: &str, token_expiry_days: i64) -> Self {
         Self {
-            encoding_key: EncodingKey::from_secret(jwt_secret.as_ref()),
-            decoding_key: DecodingKey::from_secret(jwt_secret.as_ref()),
+            encoding_key: EncodingKey::from_secret(jwt_secret.as_bytes()),
+            decoding_key: DecodingKey::from_secret(jwt_secret.as_bytes()),
             token_expiry_days,
         }
     }
@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn test_generate_and_verify() {
-        let generator = AuthTokenGenerator::new("test-secret".to_owned(), 30);
+        let generator = AuthTokenGenerator::new("test-secret", 30);
         let token = generator.generate("test-pubkey").unwrap();
         let claims = generator.verify(&token).unwrap();
         assert_eq!(claims.pubkey, "test-pubkey");
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn test_verify_invalid_token() {
-        let generator = AuthTokenGenerator::new("test-secret".to_owned(), 30);
+        let generator = AuthTokenGenerator::new("test-secret", 30);
         let token = "invalid-token";
         let result = generator.verify(token);
         assert!(result.is_err());
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn test_verify_expired_token() {
-        let generator = AuthTokenGenerator::new("test-secret".to_owned(), 30);
+        let generator = AuthTokenGenerator::new("test-secret", 30);
         let token = generator.generate("test-pubkey").unwrap();
         let claims = generator.verify(&token).unwrap();
         assert_eq!(claims.pubkey, "test-pubkey");
@@ -105,9 +105,8 @@ mod tests {
 
     #[test]
     fn test_verify_invalid_secret() {
-        let generator = AuthTokenGenerator::new("valid-secret".to_owned(), 30);
-        let wrong_generator =
-            AuthTokenGenerator::new("invalid-secret".to_owned(), 30);
+        let generator = AuthTokenGenerator::new("valid-secret", 30);
+        let wrong_generator = AuthTokenGenerator::new("invalid-secret", 30);
         let token = generator.generate("test-pubkey").unwrap();
         let result = wrong_generator.verify(&token);
         assert!(result.is_err());
@@ -115,7 +114,7 @@ mod tests {
 
     #[test]
     fn test_verify_invalid_expiry() {
-        let generator = AuthTokenGenerator::new("test-secret".to_owned(), 30);
+        let generator = AuthTokenGenerator::new("test-secret", 30);
         let token = generator.generate("test-pubkey").unwrap();
         let claims = generator.verify(&token).unwrap();
         assert_eq!(claims.pubkey, "test-pubkey");

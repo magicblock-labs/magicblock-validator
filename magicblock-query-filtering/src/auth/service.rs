@@ -2,9 +2,11 @@ use std::{str::FromStr, sync::Arc};
 
 use chrono::{Duration, Utc};
 use magicblock_aml::{RiskError, RiskService};
+use magicblock_config::consts;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use thiserror::Error;
+use tracing::*;
 
 use crate::{
     auth::token::AuthTokenGenerator,
@@ -12,14 +14,6 @@ use crate::{
 };
 
 pub type AuthResult<T> = Result<T, AuthError>;
-
-/// Configuration for the authentication layer of the query filtering service.
-#[derive(Debug, Clone)]
-pub struct AuthConfig {
-    pub jwt_secret: String,
-    pub token_expiry_days: i64,
-    pub challenge_ttl_seconds: i64,
-}
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -45,6 +39,8 @@ pub enum AuthError {
     Risk(#[from] RiskError),
     #[error("token expired")]
     TokenExpired,
+    #[error("challenge_ttl_seconds is less than 0!")]
+    InvalidChallengeTtlSeconds,
 }
 
 pub struct AuthService {
@@ -54,20 +50,32 @@ pub struct AuthService {
 }
 
 impl AuthService {
-    pub fn new(
-        jwt_secret: String,
+    pub fn try_new(
+        jwt_secret: &str,
         token_expiry_days: i64,
         challenge_ttl_seconds: i64,
         risk: Option<Arc<RiskService>>,
-    ) -> Self {
-        Self {
+    ) -> AuthResult<Self> {
+        if jwt_secret == consts::DEFAULT_JWT_SECRET {
+            // Not failing here so that test setups can use the default secret
+            error!(
+                "query_filtering is enabled but default jwt_secret is used!"
+            );
+        }
+
+        if challenge_ttl_seconds < 0 {
+            error!("query_filtering is enabled but challenge_ttl_seconds is less than 0!");
+            return Err(AuthError::InvalidChallengeTtlSeconds);
+        }
+
+        Ok(Self {
             risk,
             challenge_ttl_seconds,
             token_generator: AuthTokenGenerator::new(
                 jwt_secret,
                 token_expiry_days,
             ),
-        }
+        })
     }
 
     pub fn generate_challenge(&self, user_pubkey: &str) -> String {
@@ -152,7 +160,7 @@ mod tests {
 
     #[tokio::test]
     async fn login_issues_verifiable_token() {
-        let auth = AuthService::new("test-secret".to_owned(), 30, 60, None);
+        let auth = AuthService::try_new("test-secret", 30, 60, None).unwrap();
         let keypair = Keypair::new();
         let pubkey = keypair.pubkey().to_string();
         let challenge = auth.generate_challenge(&pubkey);
@@ -173,7 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn login_rejects_challenge_for_other_pubkey() {
-        let auth = AuthService::new("test-secret".to_owned(), 30, 60, None);
+        let auth = AuthService::try_new("test-secret", 30, 60, None).unwrap();
         let signer = Keypair::new();
         let other = Keypair::new().pubkey().to_string();
         let challenge = auth.generate_challenge(&other);

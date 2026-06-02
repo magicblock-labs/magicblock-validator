@@ -113,6 +113,9 @@ pub enum ApiError {
 
     #[error("Risk service failed: {0}")]
     Risk(#[from] magicblock_aml::RiskError),
+
+    #[error("QueryFiltering service failed: {0}")]
+    QueryFiltering(#[from] magicblock_query_filtering::QueryFilteringError),
 }
 
 impl From<magicblock_accounts::errors::AccountsError> for ApiError {

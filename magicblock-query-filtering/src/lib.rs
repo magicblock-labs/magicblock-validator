@@ -10,7 +10,7 @@ pub use service::{
     filter_account, filter_accounts, filter_keyed_accounts,
     filter_program_accounts, filter_signatures, permission_for_account,
     permissions_for_accounts, visible_transaction_accounts,
-    QueryFilteringService,
+    QueryFilteringError, QueryFilteringService,
 };
 pub use transaction::{
     check_transaction_admission, filter_confirmed_transaction,

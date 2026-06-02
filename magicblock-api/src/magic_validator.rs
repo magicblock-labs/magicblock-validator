@@ -32,7 +32,7 @@ use magicblock_config::{
         validator::ReplicationMode, ChainOperationConfig, LedgerConfig,
         LifecycleMode, LoadableProgram,
     },
-    consts, ValidatorParams,
+    ValidatorParams,
 };
 use magicblock_core::{
     coordination_mode::CoordinationMode,
@@ -58,7 +58,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
-use magicblock_query_filtering::auth::{AuthConfig, QueryFilteringService};
+use magicblock_query_filtering::auth::QueryFilteringService;
 use magicblock_replicator::{nats::Broker, ReplicationService};
 use magicblock_services::actions_callback_service::ActionsCallbackService;
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
@@ -166,22 +166,14 @@ impl MagicValidator {
         log_timing("startup", "risk_service_init", step_start);
 
         let step_start = Instant::now();
-        let query_filtering = config.query_filtering.enabled.then(|| {
-            if config.query_filtering.jwt_secret == consts::DEFAULT_JWT_SECRET {
-                // Not failing here so that test setups can use the default secret
-                error!("query_filtering is enabled but default jwt_secret is used!");
-            }
-            Arc::new(QueryFilteringService::new(
-                AuthConfig {
-                    jwt_secret: config.query_filtering.jwt_secret.clone(),
-                    token_expiry_days: config.query_filtering.token_expiry_days,
-                    challenge_ttl_seconds: config
-                        .query_filtering
-                        .challenge_ttl_seconds,
-                },
+        let query_filtering = if config.query_filtering.enabled {
+            Some(Arc::new(QueryFilteringService::try_new(
+                &config.query_filtering,
                 risk_service.clone(),
-            ))
-        });
+            )?))
+        } else {
+            None
+        };
         log_timing("startup", "query_filtering_init", step_start);
 
         let step_start = Instant::now();

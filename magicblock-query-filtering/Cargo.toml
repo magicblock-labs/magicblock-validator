@@ -13,6 +13,7 @@ chrono = { workspace = true }
 ed25519-dalek = { workspace = true }
 jsonwebtoken = { workspace = true }
 magicblock-accounts-db = { workspace = true }
+magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-aml = { workspace = true }
 rand = { workspace = true }
@@ -27,10 +28,13 @@ solana-program-pack = { workspace = true }
 solana-pubkey = { workspace = true, features = ["curve25519"] }
 solana-signature = { workspace = true }
 solana-transaction = { workspace = true }
-solana-transaction-status = { workspace = true, features = ["agave-unstable-api"] }
+solana-transaction-status = { workspace = true, features = [
+    "agave-unstable-api",
+] }
 spl-token = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 solana-hash = { workspace = true }
