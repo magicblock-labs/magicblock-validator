@@ -516,10 +516,6 @@ where
         )
         .await?;
 
-        if self.local_delegated_clone_target_active(request.pubkey) {
-            return Ok(Signature::default());
-        }
-
         Ok(self.clone_account_with_ownership(request).await?)
     }
 
@@ -1368,9 +1364,6 @@ where
                         } else {
                             // If no delegation record exists we must assume the account itself is
                             // a delegation record or metadata
-                            delegation::clear_unresolved_delegation_state(
-                                &mut account,
-                            );
                             (
                                 Some(account.into_account_shared_data()),
                                 None,

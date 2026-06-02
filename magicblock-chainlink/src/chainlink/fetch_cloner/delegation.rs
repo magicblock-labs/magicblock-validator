@@ -133,12 +133,6 @@ where
     }
 }
 
-pub(crate) fn clear_unresolved_delegation_state(
-    account: &mut ResolvedAccountSharedData,
-) {
-    account.set_delegated(false).set_confined(false);
-}
-
 pub(crate) fn parse_raw_eata_pda(
     account_pubkey: &Pubkey,
     data: &[u8],

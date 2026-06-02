@@ -10,7 +10,6 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
-    delegation,
     subscription::{acquire_subs, release_subs, SubscriptionRelease},
     types::{
         AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
@@ -363,7 +362,6 @@ where
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
-                    delegation::clear_unresolved_delegation_state(&mut account);
                     (None, None, DelegationActions::default())
                 };
             let cleanup_delegated_subscription = account.delegated();
