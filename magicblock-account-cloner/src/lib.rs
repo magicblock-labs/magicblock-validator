@@ -65,6 +65,7 @@ use tracing::*;
 
 /// Max data that fits in a single transaction (~63KB)
 pub const MAX_INLINE_DATA_SIZE: usize = 63 * 1024;
+const MAX_INLINE_TRANSACTION_SIZE: usize = u16::MAX as usize;
 
 mod account_cloner;
 mod util;
@@ -111,6 +112,39 @@ impl ChainlinkCloner {
             &[&kp],
             blockhash,
         )
+    }
+
+    fn short_vec_len(mut len: usize) -> usize {
+        let mut size = 1;
+        while len >= 0x80 {
+            len >>= 7;
+            size += 1;
+        }
+        size
+    }
+
+    fn transaction_size(tx: &Transaction) -> usize {
+        // Estimate the legacy transaction wire size without serializing it.
+        let message = tx.message();
+        let instructions_size: usize = message
+            .instructions
+            .iter()
+            .map(|ix| {
+                1 + Self::short_vec_len(ix.accounts.len())
+                    + ix.accounts.len()
+                    + Self::short_vec_len(ix.data.len())
+                    + ix.data.len()
+            })
+            .sum();
+
+        Self::short_vec_len(tx.signatures.len())
+            + tx.signatures.len() * 64
+            + 3
+            + Self::short_vec_len(message.account_keys.len())
+            + message.account_keys.len() * 32
+            + 32
+            + Self::short_vec_len(message.instructions.len())
+            + instructions_size
     }
 
     // -----------------
@@ -573,18 +607,28 @@ impl Cloner for ChainlinkCloner {
         let blockhash = self.block.load().blockhash;
         let data_len = request.account.data().len();
 
-        // Small account: single tx
         if data_len <= MAX_INLINE_DATA_SIZE {
             let tx = self.build_small_account_tx(&request, blockhash);
+            let tx_size = Self::transaction_size(&tx);
+            if tx_size > MAX_INLINE_TRANSACTION_SIZE
+                && !request.delegation_actions.is_empty()
+            {
+                debug!(
+                    pubkey = %request.pubkey,
+                    data_len,
+                    tx_size,
+                    "Small account clone transaction is too large, using chunked clone"
+                );
+            } else {
+                let signature = self.send_tx(tx).await.map_err(|err| {
+                    ClonerError::FailedToCloneRegularAccount(
+                        request.pubkey,
+                        Box::new(err),
+                    )
+                })?;
 
-            let signature = self.send_tx(tx).await.map_err(|err| {
-                ClonerError::FailedToCloneRegularAccount(
-                    request.pubkey,
-                    Box::new(err),
-                )
-            })?;
-
-            return Ok(signature);
+                return Ok(signature);
+            }
         }
 
         // Large account: multi-tx with cleanup on failure
