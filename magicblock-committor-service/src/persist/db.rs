@@ -563,10 +563,19 @@ impl CommittsDb {
         max_last_retried_at: u64,
     ) -> CommitPersistResult<Vec<CommitStatusRow>> {
         let query = format!(
-            "{SELECT_ALL_COMMIT_STATUS_COLUMNS}
+            "WITH eligible_messages AS (
+                 SELECT message_id
+                 FROM commit_status
+                 WHERE commit_status = ?1
+                 GROUP BY message_id
+                 HAVING MIN(created_at) >= ?2
+                    AND MAX(last_retried_at) < ?3
+             )
+             {SELECT_ALL_COMMIT_STATUS_COLUMNS}
              WHERE commit_status = ?1
-               AND created_at >= ?2
-               AND last_retried_at < ?3
+               AND message_id IN (
+                   SELECT message_id FROM eligible_messages
+               )
              ORDER BY message_id, created_at, pubkey"
         );
         let stmt = &mut self.conn.prepare(&query)?;
@@ -864,7 +873,7 @@ mod tests {
         db.insert_commit_status_rows(&[pending.clone(), succeeded])
             .unwrap();
 
-        let rows = db.get_pending_commit_statuses(0, u64::MAX).unwrap();
+        let rows = db.get_pending_commit_statuses(0, 1001).unwrap();
         assert_eq!(rows, vec![pending]);
     }
 
@@ -874,18 +883,34 @@ mod tests {
         let mut pending = create_test_row(1, 0);
         pending.created_at = 10;
         pending.last_retried_at = 19;
+        let mut pending_same_message = create_test_row(1, 0);
+        pending_same_message.created_at = 11;
+        pending_same_message.last_retried_at = 18;
         let mut too_old = create_test_row(2, 0);
         too_old.created_at = 9;
         too_old.last_retried_at = 9;
         let mut too_recent = create_test_row(3, 0);
         too_recent.created_at = 20;
         too_recent.last_retried_at = 20;
+        let mut partially_eligible = create_test_row(4, 0);
+        partially_eligible.created_at = 10;
+        partially_eligible.last_retried_at = 19;
+        let mut partially_too_recent = create_test_row(4, 0);
+        partially_too_recent.created_at = 10;
+        partially_too_recent.last_retried_at = 20;
 
-        db.insert_commit_status_rows(&[pending.clone(), too_old, too_recent])
-            .unwrap();
+        db.insert_commit_status_rows(&[
+            pending.clone(),
+            pending_same_message.clone(),
+            too_old,
+            too_recent,
+            partially_eligible,
+            partially_too_recent,
+        ])
+        .unwrap();
 
         let rows = db.get_pending_commit_statuses(10, 20).unwrap();
-        assert_eq!(rows, vec![pending]);
+        assert_eq!(rows, vec![pending, pending_same_message]);
     }
 
     #[test]
