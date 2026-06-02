@@ -522,7 +522,7 @@ mod tests {
             commit_and_undelegate: None,
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
-            standalone_actions: vec![],
+            base_pre_actions: vec![],
         }
     }
 
@@ -535,7 +535,7 @@ mod tests {
             }),
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
-            standalone_actions: vec![],
+            base_pre_actions: vec![],
         }
     }
 
@@ -548,7 +548,7 @@ mod tests {
             }),
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
-            standalone_actions: vec![],
+            base_pre_actions: vec![],
         }
     }
 
@@ -558,7 +558,7 @@ mod tests {
             commit_and_undelegate: None,
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
-            standalone_actions: vec![],
+            base_pre_actions: vec![],
         }
     }
 

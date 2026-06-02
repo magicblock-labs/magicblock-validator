@@ -44,9 +44,10 @@ pub struct BaseActionArgs {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum CommitTypeArgs {
     Standalone(Vec<u8>), // indices on accounts
-    WithBaseActions {
+    /// Commit accounts, then execute Base-layer post-actions.
+    BasePostActions {
         committed_accounts: Vec<u8>, // indices of accounts
-        base_actions: Vec<BaseActionArgs>,
+        base_post_actions: Vec<BaseActionArgs>,
     },
 }
 
@@ -54,7 +55,7 @@ impl CommitTypeArgs {
     pub fn committed_accounts_indices(&self) -> &Vec<u8> {
         match self {
             Self::Standalone(value) => value,
-            Self::WithBaseActions {
+            Self::BasePostActions {
                 committed_accounts, ..
             } => committed_accounts,
         }
@@ -64,7 +65,10 @@ impl CommitTypeArgs {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum UndelegateTypeArgs {
     Standalone,
-    WithBaseActions { base_actions: Vec<BaseActionArgs> },
+    /// Execute Base-layer post-actions after undelegation.
+    BasePostActions {
+        base_post_actions: Vec<BaseActionArgs>,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -81,7 +85,9 @@ impl CommitAndUndelegateArgs {
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBaseIntentArgs {
-    BaseActions(Vec<BaseActionArgs>),
+    /// Execute Base-layer pre-actions before lifecycle work if present;
+    /// otherwise this is action-only Base work.
+    BasePreActions(Vec<BaseActionArgs>),
     Commit(CommitTypeArgs),
     CommitAndUndelegate(CommitAndUndelegateArgs),
     CommitFinalize(CommitTypeArgs),
@@ -94,15 +100,15 @@ pub struct MagicIntentBundleArgs {
     pub commit_and_undelegate: Option<CommitAndUndelegateArgs>,
     pub commit_finalize: Option<CommitTypeArgs>,
     pub commit_finalize_and_undelegate: Option<CommitAndUndelegateArgs>,
-    pub standalone_actions: Vec<BaseActionArgs>,
+    pub base_pre_actions: Vec<BaseActionArgs>,
 }
 
 impl From<MagicBaseIntentArgs> for MagicIntentBundleArgs {
     fn from(value: MagicBaseIntentArgs) -> Self {
         let mut this = Self::default();
         match value {
-            MagicBaseIntentArgs::BaseActions(value) => {
-                this.standalone_actions.extend(value)
+            MagicBaseIntentArgs::BasePreActions(value) => {
+                this.base_pre_actions.extend(value)
             }
             MagicBaseIntentArgs::Commit(value) => this.commit = Some(value),
             MagicBaseIntentArgs::CommitAndUndelegate(value) => {
@@ -160,7 +166,7 @@ impl<'a> From<&AccountInfo<'a>> for ShortAccountMeta {
 pub struct AddActionCallbackArgs {
     /// Flat index of the action to attach the callback to, ordered as:
     /// commit actions, commit_and_undelegate commit actions,
-    /// commit_and_undelegate undelegate actions, standalone actions.
+    /// commit_and_undelegate undelegate actions, Base pre-actions.
     pub action_index: u8,
     pub destination_program: Pubkey,
     pub discriminator: Vec<u8>,

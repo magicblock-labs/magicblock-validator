@@ -221,9 +221,9 @@ impl TasksBuilder for TaskBuilderImpl {
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
         let mut tasks = Vec::new();
-        // Add standalone actions first
+        // Add Base pre-actions first.
         tasks.extend(Self::create_action_tasks(
-            intent_bundle.standalone_actions().as_slice(),
+            intent_bundle.base_pre_actions().as_slice(),
         ));
 
         // Fetch data necessary for task creation
@@ -314,16 +314,16 @@ impl TasksBuilder for TaskBuilderImpl {
                 CommitType::Standalone(accounts) => {
                     accounts.iter().map(finalize_task).collect()
                 }
-                CommitType::WithBaseActions {
+                CommitType::BasePostActions {
                     committed_accounts,
-                    base_actions,
+                    base_post_actions,
                 } => {
                     let mut tasks = committed_accounts
                         .iter()
                         .map(finalize_task)
                         .collect::<Vec<_>>();
                     tasks.extend(TaskBuilderImpl::create_action_tasks(
-                        base_actions,
+                        base_post_actions,
                     ));
                     tasks
                 }
@@ -358,7 +358,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 })
                 .collect::<Vec<_>>();
 
-            if let UndelegateType::WithBaseActions(actions) =
+            if let UndelegateType::BasePostActions(actions) =
                 &commit_and_undelegate.undelegate_action
             {
                 tasks.extend(TaskBuilderImpl::create_action_tasks(actions));
@@ -467,11 +467,14 @@ impl<'a> CommitFinalizeBuilder<'a> {
                 .into()
             })
             .collect();
-        if let CommitType::WithBaseActions {
-            ref base_actions, ..
+        if let CommitType::BasePostActions {
+            ref base_post_actions,
+            ..
         } = commit_type
         {
-            tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
+            tasks.extend(TaskBuilderImpl::create_action_tasks(
+                base_post_actions,
+            ));
         }
         tasks
     }
@@ -500,11 +503,14 @@ impl<'a> CommitFinalizeAndUndelegateBuilder<'a> {
                 .into()
             })
             .collect();
-        if let CommitType::WithBaseActions {
-            ref base_actions, ..
+        if let CommitType::BasePostActions {
+            ref base_post_actions,
+            ..
         } = commit_type
         {
-            tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
+            tasks.extend(TaskBuilderImpl::create_action_tasks(
+                base_post_actions,
+            ));
         }
         tasks
     }

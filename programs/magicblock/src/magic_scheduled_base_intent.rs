@@ -194,16 +194,17 @@ impl ScheduledIntentBundle {
         self.intent_bundle.is_empty()
     }
 
-    pub fn standalone_actions(&self) -> &Vec<BaseAction> {
-        &self.intent_bundle.standalone_actions
+    pub fn base_pre_actions(&self) -> &Vec<BaseAction> {
+        &self.intent_bundle.base_pre_actions
     }
 }
 
 // BaseIntent user wants to send to base layer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MagicBaseIntent {
-    /// Actions without commitment or undelegation
-    BaseActions(Vec<BaseAction>),
+    /// Base-layer pre-actions before lifecycle work if present;
+    /// otherwise action-only Base work.
+    BasePreActions(Vec<BaseAction>),
     Commit(CommitType),
     CommitAndUndelegate(CommitAndUndelegate),
     CommitFinalize(CommitType),
@@ -217,15 +218,15 @@ pub struct MagicIntentBundle {
     pub commit_and_undelegate: Option<CommitAndUndelegate>,
     pub commit_finalize: Option<CommitType>,
     pub commit_finalize_and_undelegate: Option<CommitAndUndelegate>,
-    pub standalone_actions: Vec<BaseAction>,
+    pub base_pre_actions: Vec<BaseAction>,
 }
 
 impl From<MagicBaseIntent> for MagicIntentBundle {
     fn from(value: MagicBaseIntent) -> Self {
         let mut this = Self::default();
         match value {
-            MagicBaseIntent::BaseActions(value) => {
-                this.standalone_actions.extend(value)
+            MagicBaseIntent::BasePreActions(value) => {
+                this.base_pre_actions.extend(value)
             }
             MagicBaseIntent::Commit(value) => this.commit = Some(value),
             MagicBaseIntent::CommitAndUndelegate(value) => {
@@ -271,7 +272,7 @@ impl MagicIntentBundle {
             .transpose()?;
 
         let actions = args
-            .standalone_actions
+            .base_pre_actions
             .into_iter()
             .map(|args| BaseAction::try_from_args(args, context))
             .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
@@ -281,7 +282,7 @@ impl MagicIntentBundle {
             commit_and_undelegate,
             commit_finalize,
             commit_finalize_and_undelegate,
-            standalone_actions: actions,
+            base_pre_actions: actions,
         };
         this.post_validation(context)?;
 
@@ -384,7 +385,7 @@ impl MagicIntentBundle {
         if let Some(ref cau) = self.commit_and_undelegate {
             fee += cau.calculate_fee(commit_nonces)?;
         }
-        fee += calculate_actions_fee(&self.standalone_actions);
+        fee += calculate_actions_fee(&self.base_pre_actions);
         Ok(fee)
     }
 
@@ -541,7 +542,7 @@ impl MagicIntentBundle {
             .map(|el| el.is_empty())
             .unwrap_or(true);
 
-        let no_actions = self.standalone_actions.is_empty();
+        let no_actions = self.base_pre_actions.is_empty();
 
         no_committed
             && no_committed_and_undelegated
@@ -561,10 +562,7 @@ impl MagicIntentBundle {
             .as_ref()
             .map(|el| el.has_callbacks())
             .unwrap_or(false);
-        let z = self
-            .standalone_actions
-            .iter()
-            .any(|el| el.callback.is_some());
+        let z = self.base_pre_actions.iter().any(|el| el.callback.is_some());
 
         x || y || z
     }
@@ -588,7 +586,7 @@ impl MagicIntentBundle {
             offset += count;
         }
 
-        self.standalone_actions.get_mut(index.checked_sub(offset)?)
+        self.base_pre_actions.get_mut(index.checked_sub(offset)?)
     }
 }
 
@@ -598,12 +596,12 @@ impl MagicBaseIntent {
         context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<MagicBaseIntent, InstructionError> {
         match args {
-            MagicBaseIntentArgs::BaseActions(base_actions) => {
-                let base_actions = base_actions
+            MagicBaseIntentArgs::BasePreActions(base_pre_actions) => {
+                let base_pre_actions = base_pre_actions
                     .into_iter()
                     .map(|args| BaseAction::try_from_args(args, context))
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
-                Ok(MagicBaseIntent::BaseActions(base_actions))
+                Ok(MagicBaseIntent::BasePreActions(base_pre_actions))
             }
             MagicBaseIntentArgs::Commit(type_) => {
                 let commit = CommitType::try_from_args(type_, context)?;
@@ -630,7 +628,7 @@ impl MagicBaseIntent {
 
     pub fn is_undelegate(&self) -> bool {
         match &self {
-            MagicBaseIntent::BaseActions(_) => false,
+            MagicBaseIntent::BasePreActions(_) => false,
             MagicBaseIntent::Commit(_) => false,
             MagicBaseIntent::CommitAndUndelegate(_) => true,
             MagicBaseIntent::CommitFinalize(_) => false,
@@ -640,7 +638,7 @@ impl MagicBaseIntent {
 
     pub fn is_commit_finalize(&self) -> bool {
         match &self {
-            MagicBaseIntent::BaseActions(_) => false,
+            MagicBaseIntent::BasePreActions(_) => false,
             MagicBaseIntent::Commit(_) => false,
             MagicBaseIntent::CommitAndUndelegate(_) => false,
             MagicBaseIntent::CommitFinalize(_) => true,
@@ -650,7 +648,7 @@ impl MagicBaseIntent {
 
     pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccount>> {
         match self {
-            MagicBaseIntent::BaseActions(_) => None,
+            MagicBaseIntent::BasePreActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
                 Some(t.get_committed_accounts())
@@ -668,7 +666,7 @@ impl MagicBaseIntent {
         &mut self,
     ) -> Option<&mut Vec<CommittedAccount>> {
         match self {
-            MagicBaseIntent::BaseActions(_) => None,
+            MagicBaseIntent::BasePreActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts_mut()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
                 Some(t.get_committed_accounts_mut())
@@ -690,7 +688,7 @@ impl MagicBaseIntent {
 
     pub fn is_empty(&self) -> bool {
         match self {
-            MagicBaseIntent::BaseActions(actions) => actions.is_empty(),
+            MagicBaseIntent::BasePreActions(actions) => actions.is_empty(),
             MagicBaseIntent::Commit(t) => t.is_empty(),
             MagicBaseIntent::CommitAndUndelegate(t) => t.is_empty(),
             MagicBaseIntent::CommitFinalize(t) => t.is_empty(),
@@ -780,7 +778,7 @@ impl CommitAndUndelegate {
 
     pub fn has_callbacks(&self) -> bool {
         let x = self.commit_action.has_callbacks();
-        let y = if let UndelegateType::WithBaseActions(actions) =
+        let y = if let UndelegateType::BasePostActions(actions) =
             &self.undelegate_action
         {
             actions.iter().any(|el| el.callback.is_some())
@@ -896,10 +894,10 @@ impl BaseAction {
 pub enum CommitType {
     /// Regular commit without actions
     Standalone(Vec<CommittedAccount>), // accounts to commit
-    /// Commits accounts and runs actions
-    WithBaseActions {
+    /// Commits accounts, then runs Base-layer post-actions.
+    BasePostActions {
         committed_accounts: Vec<CommittedAccount>,
-        base_actions: Vec<BaseAction>,
+        base_post_actions: Vec<BaseAction>,
     },
 }
 
@@ -1003,9 +1001,9 @@ impl CommitType {
 
                 Ok(CommitType::Standalone(committed_accounts))
             }
-            CommitTypeArgs::WithBaseActions {
+            CommitTypeArgs::BasePostActions {
                 committed_accounts,
-                base_actions,
+                base_post_actions,
             } => {
                 let committed_accounts_ref = Self::extract_commit_accounts(
                     &committed_accounts,
@@ -1013,7 +1011,7 @@ impl CommitType {
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;
 
-                let base_actions = base_actions
+                let base_post_actions = base_post_actions
                     .into_iter()
                     .map(|args| BaseAction::try_from_args(args, context))
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
@@ -1029,9 +1027,9 @@ impl CommitType {
                     })
                     .collect::<Result<_, InstructionError>>()?;
 
-                Ok(CommitType::WithBaseActions {
+                Ok(CommitType::BasePostActions {
                     committed_accounts,
-                    base_actions,
+                    base_post_actions,
                 })
             }
         }
@@ -1047,12 +1045,12 @@ impl CommitType {
             CommitType::Standalone(ref committed_accounts) => {
                 fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
             }
-            CommitType::WithBaseActions {
+            CommitType::BasePostActions {
                 committed_accounts,
-                base_actions,
+                base_post_actions,
             } => {
                 fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
-                fee += calculate_actions_fee(base_actions);
+                fee += calculate_actions_fee(base_post_actions);
             }
         }
 
@@ -1062,7 +1060,7 @@ impl CommitType {
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
-            Self::WithBaseActions {
+            Self::BasePostActions {
                 committed_accounts, ..
             } => committed_accounts,
         }
@@ -1071,7 +1069,7 @@ impl CommitType {
     pub fn get_committed_accounts_mut(&mut self) -> &mut Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
-            Self::WithBaseActions {
+            Self::BasePostActions {
                 committed_accounts, ..
             } => committed_accounts,
         }
@@ -1089,19 +1087,19 @@ impl CommitType {
             Self::Standalone(committed_accounts) => {
                 committed_accounts.is_empty()
             }
-            Self::WithBaseActions {
+            Self::BasePostActions {
                 committed_accounts, ..
             } => committed_accounts.is_empty(),
         }
     }
 
     pub fn has_callbacks(&self) -> bool {
-        if let Self::WithBaseActions {
+        if let Self::BasePostActions {
             committed_accounts: _,
-            base_actions,
+            base_post_actions,
         } = self
         {
-            base_actions.iter().any(|el| el.callback.is_some())
+            base_post_actions.iter().any(|el| el.callback.is_some())
         } else {
             false
         }
@@ -1110,13 +1108,18 @@ impl CommitType {
     pub fn action_count(&self) -> usize {
         match self {
             Self::Standalone(_) => 0,
-            Self::WithBaseActions { base_actions, .. } => base_actions.len(),
+            Self::BasePostActions {
+                base_post_actions, ..
+            } => base_post_actions.len(),
         }
     }
 
     pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        if let Self::WithBaseActions { base_actions, .. } = self {
-            base_actions.get_mut(index)
+        if let Self::BasePostActions {
+            base_post_actions, ..
+        } = self
+        {
+            base_post_actions.get_mut(index)
         } else {
             None
         }
@@ -1127,19 +1130,20 @@ impl CommitType {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UndelegateType {
     Standalone,
-    WithBaseActions(Vec<BaseAction>),
+    /// Runs Base-layer post-actions after undelegation.
+    BasePostActions(Vec<BaseAction>),
 }
 
 impl UndelegateType {
     pub fn action_count(&self) -> usize {
         match self {
             Self::Standalone => 0,
-            Self::WithBaseActions(actions) => actions.len(),
+            Self::BasePostActions(actions) => actions.len(),
         }
     }
 
     pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        if let Self::WithBaseActions(actions) = self {
+        if let Self::BasePostActions(actions) = self {
             actions.get_mut(index)
         } else {
             None
@@ -1152,14 +1156,14 @@ impl UndelegateType {
     ) -> Result<UndelegateType, InstructionError> {
         match args {
             UndelegateTypeArgs::Standalone => Ok(UndelegateType::Standalone),
-            UndelegateTypeArgs::WithBaseActions { base_actions } => {
-                let base_actions = base_actions
+            UndelegateTypeArgs::BasePostActions { base_post_actions } => {
+                let base_post_actions = base_post_actions
                     .into_iter()
                     .map(|base_action| {
                         BaseAction::try_from_args(base_action, context)
                     })
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
-                Ok(UndelegateType::WithBaseActions(base_actions))
+                Ok(UndelegateType::BasePostActions(base_post_actions))
             }
         }
     }
@@ -1170,7 +1174,7 @@ impl UndelegateType {
     ) -> Result<u64, InstructionError> {
         match self {
             UndelegateType::Standalone => Ok(0),
-            UndelegateType::WithBaseActions(actions) => {
+            UndelegateType::BasePostActions(actions) => {
                 Ok(calculate_actions_fee(actions))
             }
         }
@@ -1366,7 +1370,7 @@ mod tests {
         use solana_hash::Hash;
         use solana_transaction::Transaction;
 
-        // commit WithBaseActions: pk1 above limit (charged), pk2 at limit (free)
+        // commit BasePostActions: pk1 above limit (charged), pk2 at limit (free)
         let pk1 = Pubkey::new_unique();
         let pk2 = Pubkey::new_unique();
         // cau commit: pk3 above limit (charged); undelegate has actions too
@@ -1379,24 +1383,24 @@ mod tests {
             sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
             intent_bundle: MagicIntentBundle {
-                commit: Some(CommitType::WithBaseActions {
+                commit: Some(CommitType::BasePostActions {
                     committed_accounts: vec![
                         make_committed_account(pk1),
                         make_committed_account(pk2),
                     ],
-                    base_actions: vec![make_base_action(200_000)],
+                    base_post_actions: vec![make_base_action(200_000)],
                 }),
                 commit_and_undelegate: Some(CommitAndUndelegate {
                     commit_action: CommitType::Standalone(vec![
                         make_committed_account(pk3),
                     ]),
-                    undelegate_action: UndelegateType::WithBaseActions(vec![
+                    undelegate_action: UndelegateType::BasePostActions(vec![
                         make_base_action(100_000),
                     ]),
                 }),
                 commit_finalize: None,
                 commit_finalize_and_undelegate: None,
-                standalone_actions: vec![make_base_action(50_000)],
+                base_pre_actions: vec![make_base_action(50_000)],
             },
         };
 
@@ -1410,12 +1414,12 @@ mod tests {
 
         // commit: pk1 (100_000) + action 200k CUs (10_000) = 110_000
         // cau:    pk3 (100_000) + undelegate action 100k CUs (5_000) = 105_000
-        // standalone: action 50k CUs (2_500)
+        // base pre-action: action 50k CUs (2_500)
         let expected = COMMIT_FEE_LAMPORTS       // pk1
             + 10_000                             // 200k CU action
             + COMMIT_FEE_LAMPORTS               // pk3
             + 5_000                              // 100k CU undelegate action
-            + 2_500; // 50k CU standalone action
+            + 2_500; // 50k CU base pre-action
         assert_eq!(fee, expected);
     }
 }

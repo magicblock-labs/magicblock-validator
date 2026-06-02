@@ -1206,7 +1206,7 @@ async fn test_action_callback_fired_on_failure() {
     let commit_action = CommitType::Standalone(vec![committed_account.clone()]);
     let undelegate_action =
         failing_undelegate_action(payer.pubkey(), committed_account.pubkey);
-    let UndelegateType::WithBaseActions(ref actions) = undelegate_action else {
+    let UndelegateType::BasePostActions(ref actions) = undelegate_action else {
         panic!("expected base actions");
     };
     let expected_callback = actions[0].callback.clone().unwrap();
@@ -1260,7 +1260,7 @@ async fn test_action_callback_fired_on_timeout() {
     let commit_action = CommitType::Standalone(vec![committed_account.clone()]);
     let undelegate_action =
         failing_undelegate_action(payer.pubkey(), committed_account.pubkey);
-    let UndelegateType::WithBaseActions(ref actions) = undelegate_action else {
+    let UndelegateType::BasePostActions(ref actions) = undelegate_action else {
         panic!("expected base actions");
     };
     let expected_callback = actions[0].callback.clone().unwrap();
@@ -1336,15 +1336,15 @@ async fn test_callbacks_fired_in_two_stage() {
         remote_slot: Default::default(),
     };
 
-    // commit-stage action: goes into standalone_actions → commit strategy
+    // commit-stage action: goes into base_pre_actions → commit strategy
     let commit_base_action =
         succeeding_commit_action(payer.pubkey(), counter_pubkey);
     let expected_commit_callback = commit_base_action.callback.clone().unwrap();
 
-    // finalize-stage action: goes into UndelegateType::WithBaseActions → finalize strategy
+    // finalize-stage action: goes into UndelegateType::BasePostActions → finalize strategy
     let undelegate_action =
         succeeding_undelegate_action(payer.pubkey(), counter_pubkey);
-    let UndelegateType::WithBaseActions(ref actions) = undelegate_action else {
+    let UndelegateType::BasePostActions(ref actions) = undelegate_action else {
         panic!("expected base actions");
     };
     let expected_finalize_callback = actions[0].callback.clone().unwrap();
@@ -1356,7 +1356,7 @@ async fn test_callbacks_fired_in_two_stage() {
             ]),
             undelegate_action,
         }),
-        standalone_actions: vec![commit_base_action],
+        base_pre_actions: vec![commit_base_action],
         ..Default::default()
     });
     let committed_pubkeys = intent.get_all_committed_pubkeys();
@@ -1383,7 +1383,7 @@ async fn test_callbacks_fired_in_two_stage() {
         .await
         .expect("commit must succeed");
 
-    // standalone_actions land in the commit strategy as a BaseAction
+    // base_pre_actions land in the commit strategy as a BaseAction
     let calls = callback_executor.calls();
     assert_eq!(
         calls.len(),
@@ -1520,7 +1520,7 @@ fn succeeding_undelegate_action(
         },
     ];
 
-    UndelegateType::WithBaseActions(vec![BaseAction {
+    UndelegateType::BasePostActions(vec![BaseAction {
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
@@ -1563,7 +1563,7 @@ fn failing_undelegate_action(
         },
     ];
 
-    UndelegateType::WithBaseActions(vec![BaseAction {
+    UndelegateType::BasePostActions(vec![BaseAction {
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),

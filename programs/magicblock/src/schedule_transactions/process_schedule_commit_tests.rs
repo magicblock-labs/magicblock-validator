@@ -441,7 +441,7 @@ mod tests {
             commit_and_undelegate: None,
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
-            standalone_actions: vec![BaseActionArgs {
+            base_pre_actions: vec![BaseActionArgs {
                 args: ActionArgs::new(vec![1, 2, 3]).with_escrow_index(0),
                 compute_units: 100_000,
                 escrow_authority: 0,
@@ -483,7 +483,7 @@ mod tests {
             bincode::deserialize::<MagicContext>(magic_context_acc.data())
                 .unwrap();
         let scheduled = &magic_context.scheduled_base_intents[0];
-        let actions = scheduled.standalone_actions();
+        let actions = scheduled.base_pre_actions();
 
         assert!(scheduled.get_all_committed_pubkeys().is_empty());
         assert_eq!(actions.len(), 1);
