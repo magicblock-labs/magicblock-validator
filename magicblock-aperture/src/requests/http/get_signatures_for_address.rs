@@ -62,7 +62,7 @@ impl HttpDispatcher {
                 &[address],
                 AccountFetchOrigin::GetAccount,
             )
-            .await;
+            .await?;
             let permission =
                 magicblock_query_filtering::permission_for_account(
                     &*self.accountsdb,

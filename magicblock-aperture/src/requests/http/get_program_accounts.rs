@@ -41,7 +41,7 @@ impl HttpDispatcher {
                 &account_pubkeys,
                 AccountFetchOrigin::GetMultipleAccounts,
             )
-            .await;
+            .await?;
             let permissions =
                 magicblock_query_filtering::permissions_for_accounts(
                     &*self.accountsdb,

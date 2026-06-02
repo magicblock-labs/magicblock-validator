@@ -326,7 +326,7 @@ impl HttpDispatcher {
             &account_keys,
             AccountFetchOrigin::SendTransaction(*transaction.signature()),
         )
-        .await;
+        .await?;
         magicblock_query_filtering::check_transaction_admission(
             &*self.accountsdb,
             &account_keys,
@@ -356,9 +356,9 @@ impl HttpDispatcher {
         &self,
         accounts: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
-    ) {
+    ) -> RpcResult<()> {
         if !self.needs_onchain_interactions() || accounts.is_empty() {
-            return;
+            return Ok(());
         }
         let permission_pdas: Vec<Pubkey> = accounts
             .iter()
@@ -366,7 +366,7 @@ impl HttpDispatcher {
             .map(magicblock_query_filtering::types::Permission::pda)
             .collect();
         if permission_pdas.is_empty() {
-            return;
+            return Ok(());
         }
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["permission"])
@@ -379,10 +379,8 @@ impl HttpDispatcher {
                 fetch_origin,
                 None,
             )
-            .await
-            .inspect_err(|err| {
-                warn!(error = ?err, "Failed to ensure permission accounts");
-            });
+            .await;
+        Ok(())
     }
 
     /// Ensures all accounts required for a transaction are present in the `AccountsDb`.

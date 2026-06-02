@@ -37,7 +37,7 @@ impl HttpDispatcher {
                 &touched,
                 AccountFetchOrigin::GetMultipleAccounts,
             )
-            .await;
+            .await?;
             magicblock_query_filtering::filter_confirmed_transaction(
                 &*self.accountsdb,
                 confirmed,
