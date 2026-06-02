@@ -808,9 +808,16 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
         rent_epoch: 0,
     };
 
+    let delegation_record = DelegationRecord {
+        authority: validator_pubkey,
+        owner: account_owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
     let delegation_record_account = Account {
         lamports: 2_000_000,
-        data: vec![100, 101, 102],
+        data: delegation_record_to_vec(&delegation_record),
         owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
@@ -2967,7 +2974,7 @@ async fn test_non_raw_eata_owned_account_subscription_update_stays_delegated() {
 }
 
 #[tokio::test]
-async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
+async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
 ) {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -2984,7 +2991,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
 
     let FetcherTestCtx {
         accounts_bank,
-        subscription_tx,
+        fetch_cloner,
         ..
     } = setup(
         [(account_pubkey, dlp_owned_account.clone())],
@@ -3003,11 +3010,80 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
     dlp_owned_account_shared.set_delegated(true);
     dlp_owned_account_shared.set_confined(true);
 
+    let (resolved_account, delegation_record, delegation_actions) =
+        fetch_cloner
+            .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
+                ForwardedSubscriptionUpdate {
+                    pubkey: account_pubkey,
+                    account: RemoteAccount::from_fresh_account_shared_data(
+                        dlp_owned_account_shared,
+                        RemoteAccountUpdateSource::Subscription,
+                    ),
+                },
+            )
+            .await;
+
+    assert!(resolved_account.is_none());
+    assert!(delegation_record.is_none());
+    assert!(delegation_actions.is_empty());
+    assert!(accounts_bank.get_account(&account_pubkey).is_none());
+}
+
+#[tokio::test]
+async fn test_same_slot_delegated_subscription_update_overrides_plain_bank_account(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let plain_account = Account {
+        owner: account_owner,
+        ..delegated_account.clone()
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    let mut plain_in_bank = AccountSharedData::from(plain_account);
+    plain_in_bank.set_remote_slot(CURRENT_SLOT);
+    accounts_bank.insert(account_pubkey, plain_in_bank);
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
-            account: RemoteAccount::from_fresh_account_shared_data(
-                dlp_owned_account_shared,
+            account: RemoteAccount::from_fresh_account(
+                delegated_account,
+                CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
         })
@@ -3015,24 +3091,24 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
         .unwrap();
 
     const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
-    const TIMEOUT: std::time::Duration = Duration::from_millis(200);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
     tokio::time::timeout(TIMEOUT, async {
-        while accounts_bank.get_account(&account_pubkey).is_none() {
+        loop {
+            let refreshed = accounts_bank
+                .get_account(&account_pubkey)
+                .is_some_and(|account| {
+                    account.delegated()
+                        && account.remote_slot() == CURRENT_SLOT
+                        && account.owner() == &account_owner
+                });
+            if refreshed {
+                break;
+            }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     })
     .await
-    .expect(
-        "timed out waiting for fallback clone of discovered DLP-owned account",
-    );
-
-    let cloned_account = accounts_bank
-        .get_account(&account_pubkey)
-        .expect("account should be cloned by fallback subscription path");
-    assert_eq!(*cloned_account.owner(), dlp_api::id());
-    assert!(!cloned_account.delegated());
-    assert!(!cloned_account.confined());
-    assert_eq!(cloned_account.remote_slot(), CURRENT_SLOT);
+    .expect("timed out waiting for same-slot delegated refresh");
 }
 
 #[tokio::test]

@@ -78,6 +78,7 @@ use crate::{
     },
     remote_account_provider::{
         program_account::get_loaderv3_get_program_data_address,
+        pubsub_common::is_internal_dlp_account_data,
         CapacityEvictionProtection, ChainPubsubClient, ChainRpcClient,
         ForwardedSubscriptionUpdate, MatchSlotsConfig, RemoteAccount,
         RemoteAccountProvider, ResolvedAccountSharedData, SubscriptionReason,
@@ -669,8 +670,16 @@ where
         // we don't already hold a newer version of the account in our bank
         let out_of_order_slot =
             self.accounts_bank.get_account(&pubkey).and_then(|in_bank| {
-                if in_bank.remote_slot() >= account.remote_slot() {
-                    Some(in_bank.remote_slot())
+                let bank_slot = in_bank.remote_slot();
+                let update_slot = account.remote_slot();
+                let same_slot_delegated_refresh = bank_slot == update_slot
+                    && account.delegated()
+                    && (!in_bank.delegated() || in_bank.undelegating());
+                if bank_slot > update_slot
+                    || (bank_slot == update_slot
+                        && !same_slot_delegated_refresh)
+                {
+                    Some(bank_slot)
                 } else {
                     None
                 }
@@ -1361,14 +1370,18 @@ where
                                 // use, etc.
                                 (None, None, DelegationActions::default())
                             }
-                        } else {
-                            // If no delegation record exists we must assume the account itself is
-                            // a delegation record or metadata
+                        } else if is_internal_dlp_account_data(account.data()) {
                             (
                                 Some(account.into_account_shared_data()),
                                 None,
                                 DelegationActions::default(),
                             )
+                        } else {
+                            trace!(
+                                pubkey = %pubkey,
+                                "Skipping DLP-owned subscription update without delegation record"
+                            );
+                            (None, None, DelegationActions::default())
                         };
 
                         if !subs_to_remove.is_empty() {

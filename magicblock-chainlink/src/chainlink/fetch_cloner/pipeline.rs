@@ -27,6 +27,7 @@ use crate::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
             LOADER_V3,
         },
+        pubsub_common::is_internal_dlp_account_data,
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         ResolvedAccount, SubscriptionReason,
     },
@@ -359,10 +360,12 @@ where
                     };
 
                     (commit_freq, delegated_to_other, delegation_actions)
+                } else if is_internal_dlp_account_data(account.data()) {
+                    (None, None, DelegationActions::default())
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
-                    (None, None, DelegationActions::default())
+                    continue;
                 };
             let cleanup_delegated_subscription = account.delegated();
             let cleanup_undelegation_tracking = cleanup_delegated_subscription
