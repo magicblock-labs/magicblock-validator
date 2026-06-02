@@ -27,18 +27,13 @@ use crate::{
     TableManiaComputeBudget, TableManiaComputeBudgets,
 };
 
-#[allow(dead_code)]
 const REMOTE_TABLE_FINALIZATION_DEPTH_SLOTS: u32 = 32;
-#[allow(dead_code)]
 const REMOTE_TABLE_FINALIZATION_SLOT_TIME: Duration =
     Duration::from_millis(400);
-#[allow(dead_code)]
 const REMOTE_TABLE_FINALIZATION_BUFFER: Duration = Duration::from_millis(200);
-#[allow(dead_code)]
 const REMOTE_TABLE_FALLBACK_POLL_INTERVAL: Duration =
     Duration::from_millis(1_500);
 
-#[allow(dead_code)]
 fn remote_table_finalization_delay() -> Duration {
     REMOTE_TABLE_FINALIZATION_SLOT_TIME
         .saturating_mul(REMOTE_TABLE_FINALIZATION_DEPTH_SLOTS)
@@ -84,14 +79,12 @@ enum ExistingPubkeyAction {
     LeaveUnreserved,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct MatchingTableReadiness {
     local_keys: HashSet<Pubkey>,
     latest_update_sent_at: Option<Instant>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RemoteReadinessTarget {
     wall_clock_deadline: Option<Instant>,
@@ -530,7 +523,6 @@ impl TableMania {
     // Tables for Reserved Pubkeys
     // -----------------
 
-    #[allow(dead_code)]
     fn remote_readiness_target<'a>(
         matching_tables: impl Iterator<Item = &'a MatchingTableReadiness>,
     ) -> RemoteReadinessTarget {
