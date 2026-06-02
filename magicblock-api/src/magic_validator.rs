@@ -168,6 +168,7 @@ impl MagicValidator {
         let step_start = Instant::now();
         let query_filtering = config.query_filtering.enabled.then(|| {
             if config.query_filtering.jwt_secret == consts::DEFAULT_JWT_SECRET {
+                // Not failing here so that test setups can use the default secret
                 error!("query_filtering is enabled but default jwt_secret is used!");
             }
             Arc::new(QueryFilteringService::new(
