@@ -407,7 +407,6 @@ async fn test_fetch_and_clone_single_non_delegated_account() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -446,7 +445,6 @@ async fn test_fetch_and_clone_single_non_existing_account() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -507,7 +505,6 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -663,7 +660,6 @@ async fn test_fetch_and_clone_single_delegated_account_with_different_authority(
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -744,7 +740,6 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
     assert!(result.is_ok());
@@ -759,7 +754,6 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -859,7 +853,6 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -961,7 +954,6 @@ async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_d
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -1033,7 +1025,6 @@ async fn test_deleg_record_stale() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -1055,7 +1046,6 @@ async fn test_deleg_record_stale() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
     debug!(result = ?result, "Test result after updating delegation record");
@@ -1111,7 +1101,6 @@ async fn test_account_stale() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -1132,7 +1121,6 @@ async fn test_account_stale() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
     debug!(result = ?result, "Test result after updating account");
@@ -1195,7 +1183,6 @@ async fn test_delegation_record_unsub_race_condition_prevention() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -1265,7 +1252,6 @@ async fn test_fetch_and_clone_with_dedup_concurrent_requests() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -1343,7 +1329,6 @@ async fn test_undelegation_requested_subscription_behavior() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
     assert!(result.is_ok());
@@ -1418,7 +1403,6 @@ async fn test_delegated_discovered_after_direct_subscribe_releases_direct_withou
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await
         .expect("delegated account fetch should succeed");
@@ -1802,7 +1786,6 @@ async fn test_delegated_subscription_update_keeps_externally_acquired_undelegati
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await
         .expect("delegated account fetch should succeed");
@@ -1986,7 +1969,6 @@ async fn test_parallel_fetch_prevention_multiple_accounts() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -2073,7 +2055,6 @@ async fn test_fetch_with_some_acounts_marked_as_empty_if_not_found() {
             Some(&[marked_non_existing_account_pubkey]),
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await
         .expect("Fetch and clone failed");
@@ -2176,7 +2157,6 @@ async fn test_confined_delegation_behavior() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await
         .expect("Failed to fetch and clone accounts");
@@ -2249,7 +2229,6 @@ async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -2468,7 +2447,6 @@ async fn test_allowed_programs_filters_programs() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            Some(&[program_id_allowed, program_id_blocked]),
         )
         .await;
 
@@ -2541,7 +2519,6 @@ async fn test_allowed_programs_none_allows_all() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            Some(&[program_id1, program_id2]),
         )
         .await;
 
@@ -2613,7 +2590,6 @@ async fn test_allowed_programs_empty_allows_all() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            Some(&[program_id1, program_id2]),
         )
         .await;
 
@@ -2680,7 +2656,6 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_fetch() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -2749,7 +2724,6 @@ async fn test_no_program_subscription_for_undelegated_account() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
 
@@ -3000,7 +2974,6 @@ async fn test_fetch_and_clone_non_raw_eata_owned_account_as_delegated() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await
         .expect("Failed to fetch and clone delegated EATA-owned account");
@@ -4548,7 +4521,6 @@ async fn test_fetch_subscription_race_duplicate_clone() {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
-                None,
             )
             .await
         })
@@ -4669,7 +4641,6 @@ async fn test_delegated_account_fetch_subscription_race() {
                 None,
                 Some(CURRENT_SLOT),
                 AccountFetchOrigin::GetAccount,
-                None,
             )
             .await
         })
@@ -4777,7 +4748,6 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
                 None,
                 None,
                 AccountFetchOrigin::GetAccount,
-                None,
             )
             .await
         })
@@ -4812,7 +4782,6 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
     assert!(
@@ -4869,7 +4838,6 @@ async fn test_ata_projection_releases_ata_direct_ref_after_fetch() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await
         .expect("ATA projection fetch should not fail");
@@ -4931,7 +4899,6 @@ async fn test_token_2022_ata_projection_preserves_token_program_and_layout() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await
         .expect("Token-2022 ATA projection fetch should not fail");
@@ -5012,7 +4979,6 @@ async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await
         .expect("fetch should succeed");
@@ -5277,7 +5243,6 @@ async fn test_owned_operation_concurrent_calls_spawn_one_owner_fetch() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5344,7 +5309,6 @@ async fn test_owned_operation_waiters_share_not_found_metadata() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5415,7 +5379,6 @@ async fn test_owned_operation_waiters_share_missing_delegation_record_metadata()
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5548,7 +5511,6 @@ async fn test_owned_operation_waiter_cancellation_is_local() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5566,7 +5528,6 @@ async fn test_owned_operation_waiter_cancellation_is_local() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5646,7 +5607,6 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5662,7 +5622,6 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5752,7 +5711,6 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5768,7 +5726,6 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5782,7 +5739,6 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -5879,7 +5835,6 @@ async fn test_cancel_all_pending_on_shutdown() {
                         None,
                         None,
                         AccountFetchOrigin::GetAccount,
-                        None,
                     )
                     .await
             }),
@@ -5901,7 +5856,6 @@ async fn test_cancel_all_pending_on_shutdown() {
                         None,
                         None,
                         AccountFetchOrigin::GetAccount,
-                        None,
                     )
                     .await
             }),
@@ -5984,7 +5938,6 @@ async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -6002,7 +5955,6 @@ async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
                     None,
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                 )
                 .await
         })
@@ -6178,7 +6130,6 @@ async fn test_delegated_account_owned_by_token_program_does_not_subscribe_progra
             None,
             None,
             AccountFetchOrigin::GetAccount,
-            None,
         )
         .await;
     assert!(result.is_ok());

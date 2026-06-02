@@ -56,7 +56,7 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     let pubkeys = [ata_pubkey];
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
         .await
         .expect("ensure_accounts ok");
     debug!("res: {:?}", res);
@@ -97,7 +97,7 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated() {
     let pubkeys = [ata_pubkey];
     let _res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
         .await
         .expect("ensure_accounts ok");
 
@@ -147,7 +147,7 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated_to_us() {
     let pubkeys = [ata_pubkey];
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount, None)
+        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
         .await
         .expect("ensure_accounts ok");
     debug!("res: {:?}", res);
