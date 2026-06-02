@@ -507,7 +507,7 @@ fn status_result_for_commitment(
     status: &TransactionStatus,
     commitment: CommitmentConfig,
 ) -> Option<TransactionResult<()>> {
-    if status.err.is_some() || status.satisfies_commitment(commitment) {
+    if status.satisfies_commitment(commitment) {
         Some(status.status.clone())
     } else {
         None
@@ -593,6 +593,33 @@ mod tests {
         assert_eq!(first, Some(Ok(())));
         assert_eq!(second, Some(Ok(())));
         assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn transaction_errors_wait_for_requested_commitment() {
+        let err = TransactionError::AccountNotFound;
+        let status = TransactionStatus {
+            status: Err(err.clone()),
+            slot: 1,
+            confirmations: Some(1),
+            err: Some(err.clone()),
+            confirmation_status: Some(TransactionConfirmationStatus::Processed),
+        };
+
+        assert_eq!(
+            status_result_for_commitment(
+                &status,
+                CommitmentConfig::confirmed()
+            ),
+            None
+        );
+        assert_eq!(
+            status_result_for_commitment(
+                &status,
+                CommitmentConfig::processed()
+            ),
+            Some(Err(err))
+        );
     }
 
     fn test_confirmer(sender: RecordingSender) -> SignatureConfirmer {
