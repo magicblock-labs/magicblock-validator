@@ -32,7 +32,7 @@ const REMOTE_TABLE_FINALIZATION_SLOT_TIME: Duration =
     Duration::from_millis(400);
 const REMOTE_TABLE_FINALIZATION_BUFFER: Duration = Duration::from_millis(200);
 const REMOTE_TABLE_FALLBACK_POLL_INTERVAL: Duration =
-    Duration::from_millis(1_500);
+    Duration::from_millis(500);
 
 fn remote_table_finalization_delay() -> Duration {
     REMOTE_TABLE_FINALIZATION_SLOT_TIME
