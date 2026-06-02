@@ -27,6 +27,24 @@ use crate::{
     TableManiaComputeBudget, TableManiaComputeBudgets,
 };
 
+#[allow(dead_code)]
+const REMOTE_TABLE_FINALIZATION_DEPTH_SLOTS: u32 = 32;
+#[allow(dead_code)]
+const REMOTE_TABLE_FINALIZATION_SLOT_TIME: Duration =
+    Duration::from_millis(400);
+#[allow(dead_code)]
+const REMOTE_TABLE_FINALIZATION_BUFFER: Duration = Duration::from_millis(200);
+#[allow(dead_code)]
+const REMOTE_TABLE_FALLBACK_POLL_INTERVAL: Duration =
+    Duration::from_millis(1_500);
+
+#[allow(dead_code)]
+fn remote_table_finalization_delay() -> Duration {
+    REMOTE_TABLE_FINALIZATION_SLOT_TIME
+        .saturating_mul(REMOTE_TABLE_FINALIZATION_DEPTH_SLOTS)
+        .saturating_add(REMOTE_TABLE_FINALIZATION_BUFFER)
+}
+
 // -----------------
 // GarbageCollectorConfig
 // -----------------
@@ -64,6 +82,19 @@ pub struct TableMania {
 enum ExistingPubkeyAction {
     Reserve,
     LeaveUnreserved,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct MatchingTableReadiness {
+    local_keys: HashSet<Pubkey>,
+    latest_update_sent_at: Option<Instant>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RemoteReadinessTarget {
+    wall_clock_deadline: Option<Instant>,
 }
 
 impl TableMania {
@@ -499,6 +530,28 @@ impl TableMania {
     // Tables for Reserved Pubkeys
     // -----------------
 
+    #[allow(dead_code)]
+    fn remote_readiness_target<'a>(
+        matching_tables: impl Iterator<Item = &'a MatchingTableReadiness>,
+    ) -> RemoteReadinessTarget {
+        let delay = remote_table_finalization_delay();
+        let mut wall_clock_deadline = None;
+
+        for table in matching_tables {
+            if let Some(update_sent_at) = table.latest_update_sent_at {
+                let target = update_sent_at + delay;
+                wall_clock_deadline = Some(
+                    wall_clock_deadline
+                        .map_or(target, |x: Instant| x.max(target)),
+                );
+            }
+        }
+
+        RemoteReadinessTarget {
+            wall_clock_deadline,
+        }
+    }
+
     /// Attempts to find a table that holds each of the pubkeys.
     /// It only returns once the needed pubkeys are also present remotely in the
     /// finalized table accounts.
@@ -884,5 +937,55 @@ fn randomize_lookup_table_slot() -> bool {
     #[cfg(not(feature = "randomize_lookup_table_slot"))]
     {
         std::env::var("RANDOMIZE_LOOKUP_TABLE_SLOT").is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_table_finalization_delay_uses_slot_count_slot_time_and_buffer() {
+        assert_eq!(
+            remote_table_finalization_delay(),
+            REMOTE_TABLE_FINALIZATION_SLOT_TIME
+                .saturating_mul(REMOTE_TABLE_FINALIZATION_DEPTH_SLOTS)
+                .saturating_add(REMOTE_TABLE_FINALIZATION_BUFFER)
+        );
+    }
+
+    #[test]
+    fn remote_readiness_target_uses_latest_required_pubkey_update_send_time() {
+        let now = Instant::now();
+        let earlier = now - Duration::from_secs(5);
+        let tables = [
+            MatchingTableReadiness {
+                local_keys: HashSet::new(),
+                latest_update_sent_at: Some(earlier),
+            },
+            MatchingTableReadiness {
+                local_keys: HashSet::new(),
+                latest_update_sent_at: Some(now),
+            },
+        ];
+
+        let target = TableMania::remote_readiness_target(tables.iter());
+
+        assert_eq!(
+            target.wall_clock_deadline,
+            Some(now + remote_table_finalization_delay())
+        );
+    }
+
+    #[test]
+    fn remote_readiness_target_handles_missing_metadata() {
+        let tables = [MatchingTableReadiness {
+            local_keys: HashSet::new(),
+            latest_update_sent_at: None,
+        }];
+
+        let target = TableMania::remote_readiness_target(tables.iter());
+
+        assert_eq!(target.wall_clock_deadline, None);
     }
 }
