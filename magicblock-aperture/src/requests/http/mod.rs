@@ -375,7 +375,6 @@ impl HttpDispatcher {
                 &permission_pdas,
                 Some(&permission_pdas),
                 fetch_origin,
-                None,
             )
             .await;
         Ok(())
