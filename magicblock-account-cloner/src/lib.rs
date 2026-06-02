@@ -26,13 +26,7 @@
 //! The buffer is a temporary account that holds the raw ELF data during cloning.
 //! It's derived as a PDA: `["buffer", program_id]` owned by validator authority.
 
-use std::{
-    num::NonZeroUsize,
-    sync::{Arc, Mutex, MutexGuard},
-};
-
 use async_trait::async_trait;
-use lru::LruCache;
 use magicblock_chainlink::{
     cloner::{
         errors::{ClonerError, ClonerResult},
@@ -79,16 +73,9 @@ mod util;
 pub use account_cloner::*;
 pub use util::derive_buffer_pubkey;
 
-/// Keep only a bounded history of sent action tx signatures to avoid
-/// unbounded memory growth while still preventing near-term duplicate sends.
-const SENT_ACTION_TXS_MAX_ENTRIES: usize = 16_384;
-
-type ActionTxDedupCache = LruCache<Signature, ()>;
-
 pub struct ChainlinkCloner {
     tx_scheduler: TransactionSchedulerHandle,
     block: LatestBlock,
-    sent_action_txs: Arc<Mutex<ActionTxDedupCache>>,
 }
 
 impl ChainlinkCloner {
@@ -99,18 +86,7 @@ impl ChainlinkCloner {
         Self {
             tx_scheduler,
             block,
-            sent_action_txs: Arc::new(Mutex::new(ActionTxDedupCache::new(
-                NonZeroUsize::new(SENT_ACTION_TXS_MAX_ENTRIES)
-                    .expect("SENT_ACTION_TXS_MAX_ENTRIES must be non-zero"),
-            ))),
         }
-    }
-
-    fn lock_sent_action_txs(&self) -> MutexGuard<'_, ActionTxDedupCache> {
-        self.sent_action_txs.lock().unwrap_or_else(|poisoned| {
-            warn!("sent_action_txs mutex poisoned; recovering inner state");
-            poisoned.into_inner()
-        })
     }
 
     // -----------------
@@ -569,20 +545,8 @@ impl ChainlinkCloner {
             return Ok(None);
         };
         let action_tx_sig = *sanitized_tx.txn.signature();
-        {
-            let mut sent = self.lock_sent_action_txs();
-            if sent.contains(&action_tx_sig) {
-                warn!(
-                    tx_sig = %action_tx_sig,
-                    "Skipping duplicate post-delegation actions transaction"
-                );
-                return Ok(Some(()));
-            }
-            sent.put(action_tx_sig, ());
-        }
 
         if let Err(err) = self.send_sanitized_tx(sanitized_tx).await {
-            self.lock_sent_action_txs().pop(&action_tx_sig);
             debug!(
                 tx_sig = %action_tx_sig,
                 error = ?err,

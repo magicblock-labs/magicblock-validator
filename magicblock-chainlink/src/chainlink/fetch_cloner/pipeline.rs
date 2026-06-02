@@ -686,7 +686,7 @@ pub(crate) async fn clone_accounts_and_programs<T, U, V, C>(
     loaded_programs: Vec<
         crate::remote_account_provider::program_account::LoadedProgram,
     >,
-) -> ClonerResult<()>
+) -> ChainlinkResult<()>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -730,14 +730,16 @@ where
 
         let this_clone = this.clone();
         accounts_join_set.spawn(async move {
-            this_clone.clone_account_with_ownership(request).await
+            this_clone
+                .clone_account_with_post_delegation_action_invariants(request)
+                .await
         });
     }
     accounts_join_set
         .join_all()
         .await
         .into_iter()
-        .collect::<ClonerResult<Vec<_>>>()?;
+        .collect::<ChainlinkResult<Vec<_>>>()?;
 
     // 3) Finally clone accounts that carry post-delegation actions.
     let mut action_accounts_join_set = JoinSet::new();
@@ -753,14 +755,16 @@ where
 
         let this_clone = this.clone();
         action_accounts_join_set.spawn(async move {
-            this_clone.clone_account_with_ownership(request).await
+            this_clone
+                .clone_account_with_post_delegation_action_invariants(request)
+                .await
         });
     }
     action_accounts_join_set
         .join_all()
         .await
         .into_iter()
-        .collect::<ClonerResult<Vec<_>>>()?;
+        .collect::<ChainlinkResult<Vec<_>>>()?;
 
     Ok(())
 }

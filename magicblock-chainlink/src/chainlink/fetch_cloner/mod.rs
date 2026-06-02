@@ -145,6 +145,7 @@ const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
         Some(n) => n,
         None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
     };
+const POST_DELEGATION_ACTION_CLONE_SLOT_KEY: u64 = u64::MAX;
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
 /// bounds that are not satisfied (`AccountsBank` and `Cloner` don't
@@ -485,6 +486,107 @@ where
         }
     }
 
+    async fn clone_account_with_post_delegation_action_invariants(
+        &self,
+        request: AccountCloneRequest,
+    ) -> ChainlinkResult<Signature> {
+        if request.delegation_actions.is_empty() {
+            if request.account.delegated()
+                && self.local_delegated_clone_target_active(request.pubkey)
+            {
+                return Ok(Signature::default());
+            }
+            return Ok(self.clone_account_with_ownership(request).await?);
+        }
+
+        if !request.account.delegated() {
+            return Err(ChainlinkError::InvalidDelegationActions(
+                request.pubkey,
+                "post-delegation actions attached to non-delegated clone target"
+                    .to_string(),
+            ));
+        }
+
+        let pubkey = request.pubkey;
+        match self
+            .claim_pending_clone(pubkey, POST_DELEGATION_ACTION_CLONE_SLOT_KEY)
+        {
+            CloneClaim::Owner => {
+                let mut guard = PendingCloneGuard::new(
+                    Arc::clone(&self.pending_clones),
+                    pubkey,
+                    POST_DELEGATION_ACTION_CLONE_SLOT_KEY,
+                );
+                let result = self
+                    .clone_account_with_owned_post_delegation_actions(request)
+                    .await;
+                let completion = if result.is_ok() {
+                    CloneCompletion::Success
+                } else {
+                    CloneCompletion::Failed
+                };
+                self.finish_pending_clone(
+                    pubkey,
+                    POST_DELEGATION_ACTION_CLONE_SLOT_KEY,
+                    completion,
+                );
+                guard.dismiss();
+                result
+            }
+            CloneClaim::Waiter(rx) => match rx.await {
+                Ok(CloneCompletion::Success) => Ok(Signature::default()),
+                Ok(CloneCompletion::Failed) => {
+                    Err(ClonerError::FailedToCloneRegularAccount(
+                        pubkey,
+                        Box::new(ClonerError::CommittorServiceError(
+                            "Post-delegation action clone owner failed"
+                                .to_string(),
+                        )),
+                    )
+                    .into())
+                }
+                Err(_) => Err(ClonerError::FailedToCloneRegularAccount(
+                    pubkey,
+                    Box::new(ClonerError::CommittorServiceError(
+                        "Post-delegation action clone owner dropped"
+                            .to_string(),
+                    )),
+                )
+                .into()),
+            },
+        }
+    }
+
+    async fn clone_account_with_owned_post_delegation_actions(
+        &self,
+        request: AccountCloneRequest,
+    ) -> ChainlinkResult<Signature> {
+        if self.local_delegated_clone_target_active(request.pubkey) {
+            return Ok(Signature::default());
+        }
+
+        self.ensure_delegation_action_dependencies(
+            request.pubkey,
+            request.account.remote_slot(),
+            &request.delegation_actions,
+        )
+        .await?;
+
+        if self.local_delegated_clone_target_active(request.pubkey) {
+            return Ok(Signature::default());
+        }
+
+        Ok(self.clone_account_with_ownership(request).await?)
+    }
+
+    fn local_delegated_clone_target_active(&self, pubkey: Pubkey) -> bool {
+        self.accounts_bank
+            .get_account(&pubkey)
+            .is_some_and(|account| {
+                account.delegated() || account.undelegating()
+            })
+    }
+
     /// Start listening to subscription updates.
     /// Uses a JoinSet-based loop with try_recv/select! for backpressure
     /// and task lifecycle management instead of unbounded tokio::spawn.
@@ -705,22 +807,6 @@ where
             .as_ref()
             .and_then(|dr| self.get_delegated_to_other(dr));
 
-        if let Err(err) = self
-            .ensure_delegation_action_dependencies(
-                pubkey,
-                account.remote_slot(),
-                &delegation_actions,
-            )
-            .await
-        {
-            error!(
-                pubkey = %pubkey,
-                error = %err,
-                "Failed to ensure delegation action dependencies for subscription update"
-            );
-            return;
-        }
-
         // Delegated subscription cleanup is limited to direct subscription/LRU
         // ownership here; undelegation tracking owns protected subscriptions
         // until undelegation is explicitly complete.
@@ -745,14 +831,23 @@ where
                     .eq(&self.validator_pubkey)
                     .then_some(dr.commit_frequency_ms)
             });
+            let raw_delegation_actions = if account.delegated()
+                && projected_ata_clone_request.is_none()
+            {
+                delegation_actions
+            } else {
+                DelegationActions::default()
+            };
             if let Err(err) = self
-                .clone_account_with_ownership(AccountCloneRequest {
-                    pubkey,
-                    account,
-                    commit_frequency_ms,
-                    delegation_actions,
-                    delegated_to_other,
-                })
+                .clone_account_with_post_delegation_action_invariants(
+                    AccountCloneRequest {
+                        pubkey,
+                        account,
+                        commit_frequency_ms,
+                        delegation_actions: raw_delegation_actions,
+                        delegated_to_other,
+                    },
+                )
                 .await
             {
                 error!(
@@ -764,7 +859,7 @@ where
                 projected_ata_clone_request
             {
                 if let Err(err) = self
-                    .clone_account_with_ownership(projected_ata_clone_request)
+                    .clone_projected_ata_request(projected_ata_clone_request)
                     .await
                 {
                     error!(
@@ -790,30 +885,58 @@ where
         self.validate_post_delegation_action_signers(delegation_actions)
             .await?;
 
-        let dependencies = delegation_actions
-            .iter()
-            .flat_map(|instruction| {
-                std::iter::once(instruction.program_id)
-                    .chain(instruction.accounts.iter().map(|meta| meta.pubkey))
-            })
+        let mut dependencies = HashSet::new();
+        let mut writable_dependencies = HashSet::new();
+        for instruction in delegation_actions.iter() {
+            dependencies.insert(instruction.program_id);
+            for meta in &instruction.accounts {
+                if meta.pubkey == pubkey {
+                    continue;
+                }
+                dependencies.insert(meta.pubkey);
+                if meta.is_writable {
+                    writable_dependencies.insert(meta.pubkey);
+                }
+            }
+        }
+
+        let dependencies_to_fetch = dependencies
+            .into_iter()
             .filter(|dependency| dependency != &pubkey)
+            .filter(|dependency| {
+                self.accounts_bank.get_account(dependency).is_none()
+                    || writable_dependencies.contains(dependency)
+                        && self
+                            .accounts_bank
+                            .get_account(dependency)
+                            .is_some_and(|account| {
+                                !account.delegated() || account.undelegating()
+                            })
+            })
             .collect::<HashSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
 
-        if dependencies.is_empty() {
+        if dependencies_to_fetch.is_empty() {
+            self.validate_writable_delegation_action_dependencies(
+                &writable_dependencies,
+            )?;
             return Ok(());
         }
 
         let result = self
-            .fetch_and_clone_accounts_with_dedup(
-                &dependencies,
+            .fetch_and_clone_accounts_with_dedup_forced_refresh(
+                &dependencies_to_fetch,
                 None,
                 Some(remote_slot),
                 AccountFetchOrigin::GetAccount,
+                &writable_dependencies,
             )
             .await?;
         if result.missing_delegation_record.is_empty() {
+            self.validate_writable_delegation_action_dependencies(
+                &writable_dependencies,
+            )?;
             return Ok(());
         }
 
@@ -828,6 +951,28 @@ where
         Err(ChainlinkError::MissingDelegationActionAccounts(
             missing_accounts,
         ))
+    }
+
+    fn validate_writable_delegation_action_dependencies(
+        &self,
+        writable_dependencies: &HashSet<Pubkey>,
+    ) -> ChainlinkResult<()> {
+        let mut not_ready = writable_dependencies
+            .iter()
+            .copied()
+            .filter(|dependency| {
+                self.accounts_bank.get_account(dependency).is_none_or(
+                    |account| !account.delegated() || account.undelegating(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        if not_ready.is_empty() {
+            return Ok(());
+        }
+
+        not_ready.sort_unstable();
+        Err(ChainlinkError::MissingDelegationActionAccounts(not_ready))
     }
 
     async fn validate_post_delegation_action_signers(
@@ -863,14 +1008,8 @@ where
         &self,
         request: AccountCloneRequest,
     ) -> ChainlinkResult<Signature> {
-        self.ensure_delegation_action_dependencies(
-            request.pubkey,
-            request.account.remote_slot(),
-            &request.delegation_actions,
-        )
-        .await?;
-
-        Ok(self.clone_account_with_ownership(request).await?)
+        self.clone_account_with_post_delegation_action_invariants(request)
+            .await
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(
@@ -1925,6 +2064,24 @@ where
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<FetchAndCloneResult> {
+        self.fetch_and_clone_accounts_with_dedup_forced_refresh(
+            pubkeys,
+            mark_empty_if_not_found,
+            slot,
+            fetch_origin,
+            &HashSet::new(),
+        )
+        .await
+    }
+
+    async fn fetch_and_clone_accounts_with_dedup_forced_refresh(
+        &self,
+        pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
+        slot: Option<u64>,
+        fetch_origin: AccountFetchOrigin,
+        force_refresh_pubkeys: &HashSet<Pubkey>,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
         // in the bank (e.g. native programs) or they don't exist and the transaction
         // will fail later
@@ -1945,6 +2102,9 @@ where
         // synchronously)
         let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
         for pubkey in pubkeys.iter() {
+            if force_refresh_pubkeys.contains(*pubkey) {
+                continue;
+            }
             if let Some(account_in_bank) =
                 self.accounts_bank.get_account(pubkey)
             {
