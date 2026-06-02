@@ -96,7 +96,6 @@ async fn test_owned_pending_operation_dedups_concurrent_delegated_fetches() {
                 &[account_pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
     });
@@ -108,7 +107,6 @@ async fn test_owned_pending_operation_dedups_concurrent_delegated_fetches() {
                 &[account_pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
     });
@@ -120,7 +118,6 @@ async fn test_owned_pending_operation_dedups_concurrent_delegated_fetches() {
                 &[account_pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
     });
@@ -193,7 +190,6 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
                 &[account_pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
     });
@@ -204,7 +200,6 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
                 &[account_pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
     });
@@ -215,7 +210,6 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
                 &[account_pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
     });
