@@ -111,8 +111,9 @@ impl AuthService {
             .ok_or(AuthError::InvalidChallengeDate)?;
         let now = Utc::now();
 
-        if now.signed_duration_since(challenge_time)
-            > Duration::seconds(self.challenge_ttl_seconds)
+        let age = now.signed_duration_since(challenge_time);
+        if age > Duration::seconds(self.challenge_ttl_seconds)
+            || age < Duration::zero()
         {
             return Err(AuthError::ChallengeExpired);
         }
