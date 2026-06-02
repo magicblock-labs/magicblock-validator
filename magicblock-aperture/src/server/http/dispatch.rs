@@ -463,7 +463,7 @@ fn json_response(status: StatusCode, error: &str) -> Response<JsonBody> {
         .status(status)
         .header("content-type", "application/json")
         .body(JsonBody(serde_json::to_vec(&body).unwrap_or_default()))
-        .expect("building JSON response failed")
+        .unwrap_or_else(|_| Response::new(JsonBody(Vec::new())))
 }
 
 fn quote_json_response<T: serde::Serialize>(body: &T) -> Response<JsonBody> {
@@ -472,7 +472,7 @@ fn quote_json_response<T: serde::Serialize>(body: &T) -> Response<JsonBody> {
             .status(StatusCode::OK)
             .header("content-type", "application/json")
             .body(JsonBody(body))
-            .expect("building quote response failed"),
+            .unwrap_or_else(|_| Response::new(JsonBody(Vec::new()))),
         Err(err) => json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             &format!("failed to serialize quote response: {err}"),
