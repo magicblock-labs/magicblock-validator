@@ -98,9 +98,20 @@ mod tests {
     #[test]
     fn test_verify_expired_token() {
         let generator = AuthTokenGenerator::new("test-secret", 30);
-        let token = generator.generate("test-pubkey").unwrap();
-        let claims = generator.verify(&token).unwrap();
-        assert_eq!(claims.pubkey, "test-pubkey");
+        let past_time = Utc::now() - Duration::days(31);
+        let claims = Claims {
+            pubkey: "test-pubkey".to_owned(),
+            exp: past_time.timestamp() as usize,
+            iat: (past_time - Duration::days(1)).timestamp() as usize,
+        };
+        let token =
+            encode(&Header::default(), &claims, &generator.encoding_key)
+                .unwrap();
+        let result = generator.verify(&token);
+        assert!(
+            result.is_err(),
+            "Expected expired token to fail verification"
+        );
     }
 
     #[test]
@@ -110,13 +121,5 @@ mod tests {
         let token = generator.generate("test-pubkey").unwrap();
         let result = wrong_generator.verify(&token);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_verify_invalid_expiry() {
-        let generator = AuthTokenGenerator::new("test-secret", 30);
-        let token = generator.generate("test-pubkey").unwrap();
-        let claims = generator.verify(&token).unwrap();
-        assert_eq!(claims.pubkey, "test-pubkey");
     }
 }
