@@ -4777,6 +4777,7 @@ name = "magicblock-rpc-client"
 version = "0.11.3"
 dependencies = [
  "futures-util",
+ "magicblock-metrics",
  "serde_json",
  "solana-account",
  "solana-account-decoder-client-types",
@@ -4786,6 +4787,7 @@ dependencies = [
  "solana-hash 3.1.0",
  "solana-instruction",
  "solana-pubkey 3.0.0",
+ "solana-pubsub-client",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-signature",
