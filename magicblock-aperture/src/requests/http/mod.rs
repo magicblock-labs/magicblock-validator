@@ -181,7 +181,6 @@ impl HttpDispatcher {
                 &to_ensure,
                 Some(&to_ensure),
                 AccountFetchOrigin::GetAccount,
-                None,
             )
             .await
             .inspect_err(|e| {
@@ -228,7 +227,6 @@ impl HttpDispatcher {
                 &to_ensure,
                 Some(&to_ensure),
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
             .inspect_err(|e| {
