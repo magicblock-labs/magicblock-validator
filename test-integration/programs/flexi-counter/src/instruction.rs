@@ -467,7 +467,8 @@ pub fn create_update_permission_ix(
             ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID,
             false,
         ),
-        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new(EPHEMERAL_VAULT_ID, false),
     ];
 
     Instruction::new_with_borsh(
