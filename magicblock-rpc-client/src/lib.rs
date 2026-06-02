@@ -1,8 +1,10 @@
 #![allow(deprecated)]
 
+mod signature_confirmer;
 pub mod utils;
 
 use std::{
+    collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -12,6 +14,7 @@ use std::{
 
 use futures_util::future::try_join_all;
 use serde_json::json;
+use signature_confirmer::{SignatureConfirmer, SignatureConfirmerConfig};
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_address_lookup_table_interface::state::{
@@ -38,7 +41,7 @@ use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
-use tokio::{sync::Mutex as TMutex, time::sleep};
+use tokio::sync::Mutex as TMutex;
 use tracing::*;
 
 /// The encoding to use when sending transactions
@@ -241,8 +244,14 @@ const SLOT_CACHE_TTL: Duration = Duration::from_millis(400);
 
 #[derive(Default)]
 struct RpcClientCache {
-    blockhash: TMutex<Option<CachedBlockhash>>,
+    blockhash: TMutex<BlockhashCache>,
     slot: TMutex<Option<CachedSlot>>,
+}
+
+#[derive(Default)]
+struct BlockhashCache {
+    latest: Option<CachedBlockhash>,
+    recent: HashMap<Hash, CachedBlockhash>,
 }
 
 #[derive(Clone, Copy)]
@@ -266,6 +275,7 @@ pub struct MagicblockRpcClient {
     client: Arc<RpcClient>,
     cache: Arc<RpcClientCache>,
     chain_slot: Option<Arc<AtomicU64>>,
+    confirmer: Arc<SignatureConfirmer>,
 }
 
 impl From<RpcClient> for MagicblockRpcClient {
@@ -277,21 +287,45 @@ impl From<RpcClient> for MagicblockRpcClient {
 impl MagicblockRpcClient {
     /// Create a new [MagicBlockRpcClient] from an existing [RpcClient].
     pub fn new(client: Arc<RpcClient>) -> Self {
-        Self {
-            client,
-            cache: Arc::new(RpcClientCache::default()),
-            chain_slot: None,
-        }
+        Self::new_with_options(client, None, None)
     }
 
     pub fn new_with_chain_slot(
         client: Arc<RpcClient>,
         chain_slot: Arc<AtomicU64>,
     ) -> Self {
+        Self::new_with_options(client, Some(chain_slot), None)
+    }
+
+    pub fn new_with_websocket(
+        client: Arc<RpcClient>,
+        websocket_url: Option<String>,
+    ) -> Self {
+        Self::new_with_options(client, None, websocket_url)
+    }
+
+    pub fn new_with_chain_slot_and_websocket(
+        client: Arc<RpcClient>,
+        chain_slot: Arc<AtomicU64>,
+        websocket_url: Option<String>,
+    ) -> Self {
+        Self::new_with_options(client, Some(chain_slot), websocket_url)
+    }
+
+    fn new_with_options(
+        client: Arc<RpcClient>,
+        chain_slot: Option<Arc<AtomicU64>>,
+        websocket_url: Option<String>,
+    ) -> Self {
+        let confirmer = Arc::new(SignatureConfirmer::new(
+            client.clone(),
+            SignatureConfirmerConfig::with_websocket_url(websocket_url),
+        ));
         Self {
             client,
             cache: Arc::new(RpcClientCache::default()),
-            chain_slot: Some(chain_slot),
+            chain_slot,
+            confirmer,
         }
     }
 
@@ -305,12 +339,15 @@ impl MagicblockRpcClient {
 
         let (blockhash, context_slot, last_valid_block_height) =
             self.fetch_latest_blockhash_with_context().await?;
-        *cached = Some(CachedBlockhash {
-            blockhash,
-            context_slot,
-            last_valid_block_height,
-            fetched_at: Instant::now(),
-        });
+        Self::cache_blockhash(
+            &mut cached,
+            CachedBlockhash {
+                blockhash,
+                context_slot,
+                last_valid_block_height,
+                fetched_at: Instant::now(),
+            },
+        );
         drop(cached);
 
         self.record_observed_slot(context_slot).await;
@@ -376,13 +413,12 @@ impl MagicblockRpcClient {
 
     pub async fn invalidate_cached_blockhash(&self) {
         let mut cached = self.cache.blockhash.lock().await;
-        *cached = None;
+        cached.latest = None;
     }
 
-    fn fresh_cached_blockhash(
-        cached: &Option<CachedBlockhash>,
-    ) -> Option<Hash> {
+    fn fresh_cached_blockhash(cached: &BlockhashCache) -> Option<Hash> {
         cached
+            .latest
             .as_ref()
             .filter(|value| value.fetched_at.elapsed() < BLOCKHASH_CACHE_TTL)
             .map(|value| {
@@ -393,6 +429,25 @@ impl MagicblockRpcClient {
                 );
                 value.blockhash
             })
+    }
+
+    fn cache_blockhash(
+        cached: &mut BlockhashCache,
+        blockhash: CachedBlockhash,
+    ) {
+        cached.latest = Some(blockhash);
+        cached.recent.insert(blockhash.blockhash, blockhash);
+        cached.recent.retain(|_, value| {
+            value.fetched_at.elapsed() < DEFAULT_MAX_TIME_TO_PROCESSED
+        });
+    }
+
+    async fn cached_blockhash_metadata(
+        &self,
+        blockhash: &Hash,
+    ) -> Option<CachedBlockhash> {
+        let cached = self.cache.blockhash.lock().await;
+        cached.recent.get(blockhash).copied()
     }
 
     fn fresh_cached_slot(cached: &Option<CachedSlot>) -> Option<Slot> {
@@ -580,8 +635,8 @@ impl MagicblockRpcClient {
 
     /// Sends a transaction skipping preflight checks and then attempts to confirm
     /// it if so configured
-    /// To confirm a transaction it uses the `client.commitment()` when requesting
-    /// `get_signature_status_with_commitment`
+    /// To confirm a transaction it uses the `client.commitment()` when waiting
+    /// for a signature status.
     ///
     /// Does not support:
     /// - durable nonce transactions
@@ -672,83 +727,40 @@ impl MagicblockRpcClient {
         recent_blockhash: &Hash,
         timeout: Duration,
         check_interval: Duration,
-        blockhash_valid_timeout: &Option<Duration>,
+        _blockhash_valid_timeout: &Option<Duration>,
     ) -> MagicBlockRpcClientResult<TransactionResult<()>> {
-        let mut last_err =
-            MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
-                *signature,
-                "blockhash was not found".into(),
-            );
-
-        let start = Instant::now();
-        while start.elapsed() < timeout {
-            let status = self
-                .client
-                .get_signature_status_with_commitment(
-                    signature,
-                    CommitmentConfig::processed(),
-                )
-                .await;
-            let status = match status {
-                Ok(value) => value,
-                Err(err) => {
-                    trace!(error = ?err, "Failed to get signature status");
-                    last_err = err.into();
-                    sleep(check_interval).await;
-                    continue;
-                }
-            };
-
-            if let Some(status) = status {
-                return Ok(status);
-            }
-
-            // Check if blockhash is still valid
-            let Some(blockhash_valid_timeout) = blockhash_valid_timeout else {
-                return Err(MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
-                    *signature,
-                    "timed out finding blockhash".to_string()
-                ));
-            };
-
-            let blockhash_found = self
-                .client
-                .is_blockhash_valid(
-                    recent_blockhash,
-                    CommitmentConfig::processed(),
-                )
-                .await;
-            let blockhash_found = match blockhash_found {
-                Ok(value) => value,
-                Err(err) => {
-                    trace!(error = ?err, "Failed to check blockhash validity");
-                    last_err = err.into();
-                    sleep(check_interval).await;
-                    continue;
-                }
-            };
-
-            if !blockhash_found && &start.elapsed() < blockhash_valid_timeout {
-                trace!(
-                    elapsed_ms = start.elapsed().as_millis() as u64,
-                    "Waiting for blockhash validity"
-                );
-                tokio::time::sleep(Duration::from_millis(400)).await;
-                continue;
-            } else {
-                last_err = MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
-                    *signature,
-                    format!("blockhash {} found", if blockhash_found {
-                        "was"
-                    } else {
-                        "was not"
-                    }),
-                );
-                tokio::time::sleep(check_interval).await;
-            }
+        if let Some(status) = Box::pin(self.confirmer.wait_for_status(
+            signature,
+            CommitmentConfig::processed(),
+            timeout,
+            check_interval,
+        ))
+        .await
+        {
+            return Ok(status);
         }
 
-        Err(last_err)
+        let blockhash_message = match (
+            self.cached_blockhash_metadata(recent_blockhash).await,
+            self.observed_chain_slot(),
+        ) {
+            (Some(blockhash), Some(slot))
+                if slot <= blockhash.last_valid_block_height =>
+            {
+                "timed out while blockhash was still within observed slot window"
+            }
+            (Some(_), Some(_)) => {
+                "timed out waiting for processed signature status"
+            }
+            _ => "timed out waiting for processed signature status",
+        };
+
+        Err(
+            MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
+                *signature,
+                blockhash_message.to_string(),
+            ),
+        )
     }
 
     /// Waits for a transaction to reach confirmed status
@@ -758,33 +770,26 @@ impl MagicblockRpcClient {
         timeout: &Duration,
         check_interval: &Option<Duration>,
     ) -> MagicBlockRpcClientResult<TransactionResult<()>> {
-        let start = Instant::now();
         let check_interval =
             check_interval.unwrap_or_else(|| Duration::from_millis(200));
 
-        loop {
-            let status = self
-                .client
-                .get_signature_status_with_commitment(
-                    signature,
-                    self.client.commitment(),
-                )
-                .await;
-
-            if let Ok(Some(status)) = status {
-                return Ok(status);
-            }
-
-            if &start.elapsed() < timeout {
-                tokio::time::sleep(check_interval).await;
-                continue;
-            } else {
-                return Err(MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
-                    *signature,
-                    self.client.commitment().commitment,
-                ));
-            }
+        if let Some(status) = Box::pin(self.confirmer.wait_for_status(
+            signature,
+            self.client.commitment(),
+            *timeout,
+            check_interval,
+        ))
+        .await
+        {
+            return Ok(status);
         }
+
+        Err(
+            MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
+                *signature,
+                self.client.commitment().commitment,
+            ),
+        )
     }
 
     pub async fn get_transaction(
