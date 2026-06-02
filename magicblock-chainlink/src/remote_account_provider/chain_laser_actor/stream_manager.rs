@@ -1078,6 +1078,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_optimize_failure_preserves_existing_account_topology() {
+        let (mut mgr, factory) = create_manager();
+
+        // Create three promoted unoptimized streams and no optimized streams.
+        let pks = subscribe_in_batches(&mut mgr, 18, 6).await;
+        assert_eq!(mgr.unoptimized_old_stream_count(), 3);
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+        assert_eq!(mgr.account_stream_count(), 3);
+
+        // Fail the second replacement stream creation so the test covers
+        // a partial local rebuild attempt.
+        let fail_call = factory.subscribe_call_count() + 2;
+        factory.fail_on_subscribe_call(fail_call);
+
+        let err = mgr.optimize(&COMMITMENT).await.unwrap_err();
+        assert!(
+            err.to_string().contains("mock subscribe failure"),
+            "unexpected error: {err:?}",
+        );
+
+        assert_eq!(mgr.unoptimized_old_stream_count(), 3);
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+        assert_eq!(mgr.account_stream_count(), 3);
+        assert_subscriptions_eq(&mgr, &pks);
+
+        factory.clear_subscribe_failure();
+        mgr.optimize(&COMMITMENT).await.unwrap();
+
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+        assert_eq!(mgr.optimized_old_stream_count(), 2);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+        assert_eq!(mgr.account_stream_count(), 2);
+        assert_subscriptions_eq(&mgr, &pks);
+    }
+
+    #[tokio::test]
     async fn test_optimize_clears_unoptimized_old_streams() {
         let (mut mgr, _factory) = create_manager();
         // Create several unoptimized old streams.
