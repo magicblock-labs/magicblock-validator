@@ -530,20 +530,20 @@ where
             return Ok(());
         }
 
-        if !request.delegation_actions.is_empty() {
-            return Err(ChainlinkError::InvalidDelegationActions(
-                request.pubkey,
-                "post-delegation actions attached to unresolved DLP-owned clone target"
-                    .to_string(),
-            ));
-        }
-
         if request.pubkey
             == dlp_api::pda::magic_fee_vault_pda_from_validator(
                 &self.validator_pubkey,
             )
         {
             return Ok(());
+        }
+
+        if !request.delegation_actions.is_empty() {
+            return Err(ChainlinkError::InvalidDelegationActions(
+                request.pubkey,
+                "post-delegation actions attached to unresolved DLP-owned clone target"
+                    .to_string(),
+            ));
         }
 
         request.account.set_delegated(false);

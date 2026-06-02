@@ -222,11 +222,12 @@ where
             .await?;
 
             // Standalone actions executed in single stage
-            let strategy = TaskStrategist::build_strategy(
+            let mut strategy = TaskStrategist::build_strategy(
                 commit_tasks,
                 &self.authority.pubkey(),
                 persister,
             )?;
+            strategy.standalone_action_nonce = Some(intent_bundle.id);
             return self
                 .single_stage_execution_flow(
                     intent_bundle,

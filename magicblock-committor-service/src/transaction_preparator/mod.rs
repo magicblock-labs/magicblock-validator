@@ -84,11 +84,12 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
                 &tx_strategy.lookup_tables_keys,
             );
-            let _ = TransactionUtils::assemble_tasks_tx(
+            let _ = TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
                 authority,
                 &tx_strategy.optimized_tasks,
                 self.compute_budget_config.compute_unit_price,
                 &dummy_lookup_tables,
+                tx_strategy.standalone_action_nonce,
             )?;
         }
 
@@ -98,14 +99,16 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .prepare_for_delivery(authority, tx_strategy, intent_persister)
             .await?;
 
-        let message = TransactionUtils::assemble_tasks_tx(
-            authority,
-            &tx_strategy.optimized_tasks,
-            self.compute_budget_config.compute_unit_price,
-            &lookup_tables,
-        )
-        .expect("Possibility to assemble checked above")
-        .message;
+        let message =
+            TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
+                authority,
+                &tx_strategy.optimized_tasks,
+                self.compute_budget_config.compute_unit_price,
+                &lookup_tables,
+                tx_strategy.standalone_action_nonce,
+            )
+            .expect("Possibility to assemble checked above")
+            .message;
 
         Ok(message)
     }
