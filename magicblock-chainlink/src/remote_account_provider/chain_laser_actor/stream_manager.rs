@@ -465,9 +465,31 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         commitment: &CommitmentLevel,
     ) -> RemoteAccountProviderResult<()> {
-        // Remove all account streams from the map but keep them
-        // alive until the new optimized streams are created to
-        // avoid a gap without any active streams (race condition).
+        // Collect all active subscriptions and chunk them.
+        let all_pks: Vec<Pubkey> =
+            self.subscriptions.read().iter().copied().collect();
+        let from_slot = self.compute_from_slot();
+
+        // Create replacement streams before mutating existing account
+        // topology. If any subscribe call fails, the previous topology
+        // remains unchanged.
+        let mut new_optimized_streams = Vec::new();
+        let mut new_optimized_handles = Vec::new();
+        for (i, chunk) in all_pks
+            .chunks(self.config.max_subs_in_old_optimized)
+            .enumerate()
+        {
+            let refs: Vec<&Pubkey> = chunk.iter().collect();
+            let LaserStreamWithHandle { stream, handle } = self
+                .stream_factory
+                .subscribe(Self::build_account_request(
+                    &refs, commitment, from_slot,
+                ))
+                .await?;
+            new_optimized_streams.push((StreamKey::OptimizedOld(i), stream));
+            new_optimized_handles.push(handle);
+        }
+
         let prev_current_new = self.stream_map.remove(&StreamKey::CurrentNew);
         let prev_unoptimized: Vec<_> = (0..self.unoptimized_old_handles.len())
             .filter_map(|i| {
@@ -482,32 +504,12 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             + prev_unoptimized.len()
             + prev_optimized.len();
 
-        // Collect all active subscriptions and chunk them.
-        let all_pks: Vec<Pubkey> =
-            self.subscriptions.read().iter().copied().collect();
-
-        // Build optimized old streams from chunks.
-        let from_slot = self.compute_from_slot();
-        self.optimized_old_handles = Vec::new();
-        for (i, chunk) in all_pks
-            .chunks(self.config.max_subs_in_old_optimized)
-            .enumerate()
-        {
-            let refs: Vec<&Pubkey> = chunk.iter().collect();
-            let LaserStreamWithHandle { stream, handle } = self
-                .stream_factory
-                .subscribe(Self::build_account_request(
-                    &refs, commitment, from_slot,
-                ))
-                .await?;
-            self.stream_map.insert(StreamKey::OptimizedOld(i), stream);
-            self.optimized_old_handles.push(handle);
+        for (key, stream) in new_optimized_streams {
+            self.stream_map.insert(key, stream);
         }
 
-        // Clear unoptimized old handles.
+        self.optimized_old_handles = new_optimized_handles;
         self.unoptimized_old_handles.clear();
-
-        // Reset the current-new stream.
         self.current_new_subs.clear();
         self.current_new_handle = None;
 
