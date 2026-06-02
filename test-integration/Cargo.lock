@@ -4731,6 +4731,7 @@ dependencies = [
  "solana-fee-calculator",
  "solana-hash 3.1.0",
  "solana-instruction",
+ "solana-instructions-sysvar",
  "solana-keypair",
  "solana-loader-v3-interface",
  "solana-loader-v4-interface",

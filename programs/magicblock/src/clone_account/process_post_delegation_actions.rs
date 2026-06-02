@@ -24,11 +24,12 @@ pub(crate) fn process_execute_post_delegation_actions(
     validate_authority(&signers, invoke_context)?;
     validate_program_account(invoke_context)?;
 
-    let sysvar_data = load_instructions_sysvar_data(invoke_context)?;
-    let current_index = instruction_sysvar::load_current_index(&sysvar_data)?;
+    let mut sysvar_data = load_instructions_sysvar_data(invoke_context)?;
+    let current_index =
+        instruction_sysvar::load_current_index(&mut sysvar_data)?;
     validate_current_top_level_instruction(
         invoke_context,
-        &sysvar_data,
+        &mut sysvar_data,
         current_index,
     )?;
     if current_index == 0 {
@@ -44,7 +45,7 @@ pub(crate) fn process_execute_post_delegation_actions(
     // The executor mutates process-global pending-clone state for final chunked
     // clones, so it must be the last top-level instruction in the transaction.
     if instruction_sysvar::load_instruction_at(
-        &sysvar_data,
+        &mut sysvar_data,
         current_index.saturating_add(1),
     )
     .is_ok()
@@ -59,7 +60,7 @@ pub(crate) fn process_execute_post_delegation_actions(
     }
 
     let previous_instruction = instruction_sysvar::load_instruction_at(
-        &sysvar_data,
+        &mut sysvar_data,
         current_index - 1,
     )?;
     if previous_instruction.program_id != crate::ID {
@@ -155,7 +156,7 @@ fn validate_program_account(
 
 fn validate_current_top_level_instruction(
     invoke_context: &mut InvokeContext,
-    sysvar_data: &[u8],
+    sysvar_data: &mut [u8],
     current_index: usize,
 ) -> Result<(), InstructionError> {
     if invoke_context

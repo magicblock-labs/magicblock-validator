@@ -189,10 +189,11 @@ pub fn validate_post_delegation_action_sibling(
         actions,
     )?;
 
-    let sysvar_data = load_instructions_sysvar_data(invoke_context)?;
-    let current_index = instruction_sysvar::load_current_index(&sysvar_data)?;
+    let mut sysvar_data = load_instructions_sysvar_data(invoke_context)?;
+    let current_index =
+        instruction_sysvar::load_current_index(&mut sysvar_data)?;
     let next_instruction = instruction_sysvar::load_instruction_at(
-        &sysvar_data,
+        &mut sysvar_data,
         current_index.saturating_add(1),
     )
     .map_err(|_| -> InstructionError {
