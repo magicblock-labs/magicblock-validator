@@ -53,6 +53,9 @@ function runMbTestValidator(): void {
     "--bpf-program",
     "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1",
     p("DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1.so"),
+    "--bpf-program",
+    "KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5",
+    p("KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5.so"),
     // accounts
     "--account",
     "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
@@ -94,6 +97,7 @@ function runMbTestValidator(): void {
     "EnhkomtzKms55jXi3ijn9XsMKYpMT4BJjmbuDQmPo3YS.so",
     "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2.so",
     "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1.so",
+    "KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5.so",
     "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev.json",
     "EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX.json",
     "7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg.json",
