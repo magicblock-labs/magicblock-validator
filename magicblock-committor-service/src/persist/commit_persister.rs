@@ -67,7 +67,7 @@ pub trait IntentPersister: Send + Sync + Clone + 'static {
     fn pending_intent_bundles<F>(
         &self,
         min_created_at: u64,
-        max_created_at: u64,
+        max_last_retried_at: u64,
         predicate: F,
     ) -> CommitPersistResult<Vec<ScheduledIntentBundle>>
     where
@@ -633,9 +633,8 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::*;
-
-    const RECOVERY_MIN_AGE_SECS: u64 = 30 * 60;
     use crate::{
+        committor_processor::{RECOVERY_MAX_AGE_SECS, RECOVERY_MIN_AGE_SECS},
         persist::{types, CommitStatusSignatures},
         test_utils,
     };
@@ -990,7 +989,7 @@ mod tests {
         let undelegate_pubkey = Pubkey::new_unique();
 
         let recovery_time = RECOVERY_MIN_AGE_SECS + 2;
-        // filter returns true = skip; rows with last_retried_at=1 are old enough → don't skip
+        // filter returns true = skip; default rows (last_retried_at=1, created_at=1) are in recovery window → don't skip
         let bundles = pending_rows_to_scheduled_intent_bundles(
             vec![
                 pending_row(
@@ -1006,6 +1005,8 @@ mod tests {
             |row| {
                 recovery_time.saturating_sub(row.last_retried_at)
                     <= RECOVERY_MIN_AGE_SECS
+                    || recovery_time.saturating_sub(row.created_at)
+                        > RECOVERY_MAX_AGE_SECS
             },
         );
 
@@ -1029,5 +1030,73 @@ mod tests {
         assert_eq!(undelegate_accounts[0].pubkey, undelegate_pubkey);
         assert_eq!(undelegate_accounts[0].account.owner, owner);
         assert!(bundle.has_undelegate_intent());
+    }
+
+    fn make_predicate(recovery_time: u64) -> impl Fn(&CommitStatusRow) -> bool {
+        move |row| {
+            recovery_time.saturating_sub(row.last_retried_at)
+                <= RECOVERY_MIN_AGE_SECS
+                || recovery_time.saturating_sub(row.created_at)
+                    > RECOVERY_MAX_AGE_SECS
+        }
+    }
+
+    #[test]
+    fn pending_rows_skip_intents_outside_recovery_window() {
+        let owner = Pubkey::new_unique();
+        let blockhash = Hash::new_unique();
+        let recovery_time = RECOVERY_MAX_AGE_SECS + RECOVERY_MIN_AGE_SECS;
+
+        // Within window: last_retried_at old enough, created_at not too old → included
+        let mut in_window = pending_row(
+            1,
+            Pubkey::new_unique(),
+            owner,
+            blockhash,
+            false,
+            Some(vec![1]),
+        );
+        in_window.created_at = recovery_time - RECOVERY_MAX_AGE_SECS;
+        in_window.last_retried_at = recovery_time - RECOVERY_MIN_AGE_SECS - 1;
+        let included = pending_rows_to_scheduled_intent_bundles(
+            vec![in_window],
+            make_predicate(recovery_time),
+        );
+        assert_eq!(included.len(), 1);
+        assert_eq!(included[0].id, 1);
+
+        // Too recently retried → excluded
+        let mut too_recent = pending_row(
+            2,
+            Pubkey::new_unique(),
+            owner,
+            blockhash,
+            false,
+            Some(vec![1]),
+        );
+        too_recent.created_at = recovery_time - RECOVERY_MAX_AGE_SECS;
+        too_recent.last_retried_at = recovery_time - RECOVERY_MIN_AGE_SECS;
+        let excluded_recent = pending_rows_to_scheduled_intent_bundles(
+            vec![too_recent],
+            make_predicate(recovery_time),
+        );
+        assert!(excluded_recent.is_empty());
+
+        // Too old by created_at → excluded
+        let mut too_old = pending_row(
+            3,
+            Pubkey::new_unique(),
+            owner,
+            blockhash,
+            false,
+            Some(vec![1]),
+        );
+        too_old.created_at = recovery_time - RECOVERY_MAX_AGE_SECS - 1;
+        too_old.last_retried_at = recovery_time - RECOVERY_MIN_AGE_SECS - 1;
+        let excluded_old = pending_rows_to_scheduled_intent_bundles(
+            vec![too_old],
+            make_predicate(recovery_time),
+        );
+        assert!(excluded_old.is_empty());
     }
 }
