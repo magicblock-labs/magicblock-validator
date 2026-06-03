@@ -685,7 +685,10 @@ where
                 let same_slot_delegated_refresh = bank_slot == update_slot
                     && account.delegated()
                     && (!in_bank.delegated() || in_bank.undelegating());
-                if bank_slot >= update_slot && !same_slot_delegated_refresh {
+                if bank_slot > update_slot
+                    || (bank_slot == update_slot
+                        && !same_slot_delegated_refresh)
+                {
                     Some(bank_slot)
                 } else {
                     None
