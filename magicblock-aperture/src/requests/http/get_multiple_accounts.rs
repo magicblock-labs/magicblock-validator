@@ -31,12 +31,14 @@ impl HttpDispatcher {
         // Bundles each pubkey's permission PDA into the same chainlink ensure
         // when the request is authenticated, so query-filtering doesn't pay
         // an extra round-trip.
+        #[cfg_attr(not(feature = "query-filtering"), allow(unused_mut))]
         let mut raw_accounts = self
             .read_accounts_with_ensure_for_user(
                 &pubkeys,
                 request.authenticated_user.as_ref(),
             )
             .await;
+        #[cfg(feature = "query-filtering")]
         if let Some(user) = &request.authenticated_user {
             let permissions =
                 magicblock_query_filtering::permissions_for_accounts(

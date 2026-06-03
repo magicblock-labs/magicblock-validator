@@ -166,12 +166,16 @@ impl HttpDispatcher {
             return self.accountsdb.get_account(pubkey);
         }
 
+        #[cfg_attr(not(feature = "query-filtering"), allow(unused_mut))]
         let mut to_ensure = vec![*pubkey];
+        #[cfg(feature = "query-filtering")]
         if authenticated_user.is_some() && !self.is_permission_account(pubkey) {
             to_ensure.push(magicblock_query_filtering::types::Permission::pda(
                 pubkey,
             ));
         }
+        #[cfg(not(feature = "query-filtering"))]
+        let _ = authenticated_user;
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["account"])
             .start_timer();
@@ -208,7 +212,9 @@ impl HttpDispatcher {
                 .collect();
         }
 
+        #[cfg_attr(not(feature = "query-filtering"), allow(unused_mut))]
         let mut to_ensure: Vec<Pubkey> = pubkeys.to_vec();
+        #[cfg(feature = "query-filtering")]
         if authenticated_user.is_some() {
             to_ensure.extend(
                 pubkeys
@@ -217,6 +223,8 @@ impl HttpDispatcher {
                     .map(magicblock_query_filtering::types::Permission::pda),
             );
         }
+        #[cfg(not(feature = "query-filtering"))]
+        let _ = authenticated_user;
         trace!("Ensuring accounts");
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["multi-account"])
@@ -241,6 +249,7 @@ impl HttpDispatcher {
     /// Cheap local check: does the address already resolve to an account
     /// owned by the permission program? Used to short-circuit meta-permission
     /// ensures for accounts we know to be permission accounts themselves.
+    #[cfg(feature = "query-filtering")]
     fn is_permission_account(&self, pubkey: &Pubkey) -> bool {
         self.accountsdb.get_account(pubkey).is_some_and(|account| {
             account.owner()
@@ -309,6 +318,7 @@ impl HttpDispatcher {
     /// Enforces send/simulate transaction admission against query-filtering
     /// permissions when the caller is authenticated. No-op when query
     /// filtering is disabled or the request has no authenticated user.
+    #[cfg(feature = "query-filtering")]
     pub(crate) async fn enforce_transaction_admission(
         &self,
         transaction: &SanitizedTransaction,
@@ -326,16 +336,16 @@ impl HttpDispatcher {
         )
         .await?;
         magicblock_query_filtering::check_transaction_admission(
-            &*self.accountsdb,
-            &account_keys,
-            message.instructions(),
-        )
-        .map_err(|err| match err {
-            magicblock_query_filtering::service::QueryFilteringError::AccessDenied => {
-                RpcError::invalid_request(err)
-            }
-            other => RpcError::internal(other),
-        })
+                &*self.accountsdb,
+                &account_keys,
+                message.instructions(),
+            )
+            .map_err(|err| match err {
+                magicblock_query_filtering::service::QueryFilteringError::AccessDenied => {
+                    RpcError::invalid_request(err)
+                }
+                other => RpcError::internal(other),
+            })
     }
 
     /// Ensures the permission PDAs for the given data accounts are present in
@@ -350,6 +360,7 @@ impl HttpDispatcher {
     /// `mark_empty_if_not_found` is set so PDAs that don't exist on chain are
     /// cached as empty locally — subsequent reads short-circuit through the
     /// `permission_for_account` owner gate without re-fetching.
+    #[cfg(feature = "query-filtering")]
     pub(crate) async fn ensure_permission_accounts(
         &self,
         accounts: &[Pubkey],

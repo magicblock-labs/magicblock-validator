@@ -7,6 +7,13 @@ homepage.workspace = true
 license.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+# Full Trusted Execution Environment integration: query filtering plus the TDX
+# attestation quote endpoints. When `tee` is off the quote endpoints return an
+# error
+tee = []
+
 [dependencies]
 base64 = { workspace = true }
 chrono = { workspace = true }

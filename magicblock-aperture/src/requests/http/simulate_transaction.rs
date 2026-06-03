@@ -48,13 +48,18 @@ impl HttpDispatcher {
             .inspect_err(|err| {
                 debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
-        // Run the chainlink tx-account ensure in parallel with the admission
-        // ensure (and check) so query filtering doesn't add an extra
-        // network round-trip on the simulate hot path.
-        tokio::try_join!(
-            self.ensure_transaction_accounts(&transaction.txn),
-            self.enforce_transaction_admission(&transaction.txn, request),
-        )?;
+
+        #[cfg(not(feature = "query-filtering"))]
+        {
+            self.ensure_transaction_accounts(&transaction.txn).await?;
+        }
+        #[cfg(feature = "query-filtering")]
+        {
+            tokio::try_join!(
+                self.ensure_transaction_accounts(&transaction.txn),
+                self.enforce_transaction_admission(&transaction.txn, request),
+            )?;
+        }
         // Captured before the transaction is moved into the scheduler so the
         // response redaction below can look up each touched account's
         // permission.
@@ -147,6 +152,7 @@ impl HttpDispatcher {
                 // isn't permitted to read. Without this, `simulateTransaction`
                 // would expose restricted account state that `getAccountInfo`
                 // and `getMultipleAccounts` redact.
+                #[cfg(feature = "query-filtering")]
                 let encoded = if let Some(user) = &request.authenticated_user {
                     let permissions =
                         magicblock_query_filtering::permissions_for_accounts(
@@ -193,6 +199,7 @@ impl HttpDispatcher {
                 .collect::<Vec<_>>()
         });
 
+        #[cfg_attr(not(feature = "query-filtering"), allow(unused_mut))]
         let mut result = RpcSimulateTransactionResult {
             logs,
             accounts,
@@ -216,6 +223,7 @@ impl HttpDispatcher {
         // flag (execution observability); inner instructions on the `message`
         // flag. Permission PDAs for these accounts were already ensured by
         // `enforce_transaction_admission` above.
+        #[cfg(feature = "query-filtering")]
         if let Some(user) = &request.authenticated_user {
             let permissions =
                 magicblock_query_filtering::permissions_for_accounts(

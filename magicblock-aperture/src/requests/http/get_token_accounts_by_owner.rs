@@ -1,4 +1,3 @@
-use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_rpc_client_api::config::{
     RpcAccountInfoConfig, RpcTokenAccountsFilter,
 };
@@ -60,16 +59,19 @@ impl HttpDispatcher {
             self.accountsdb.get_program_accounts(&program, move |a| {
                 filters.matches(a.data())
             })?;
+        #[cfg_attr(not(feature = "query-filtering"), allow(unused_mut))]
         let mut accounts = accounts.collect::<Vec<_>>();
 
+        #[cfg(feature = "query-filtering")]
         if let Some(user) = &request.authenticated_user {
+            use magicblock_metrics::metrics::AccountFetchOrigin::*;
             let account_pubkeys = accounts
                 .iter()
                 .map(|(pubkey, _)| *pubkey)
                 .collect::<Vec<_>>();
             self.ensure_permission_accounts(
                 &account_pubkeys,
-                AccountFetchOrigin::GetMultipleAccounts,
+                GetMultipleAccounts,
             )
             .await?;
             let permissions =

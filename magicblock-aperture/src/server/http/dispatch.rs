@@ -1,5 +1,7 @@
 use core::str;
-use std::{collections::HashMap, convert::Infallible, str::FromStr, sync::Arc};
+#[cfg(feature = "query-filtering")]
+use std::{collections::HashMap, str::FromStr};
+use std::{convert::Infallible, sync::Arc};
 
 use futures::{stream::FuturesOrdered, StreamExt};
 use hyper::{
@@ -20,15 +22,18 @@ use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics::{
     RPC_REQUESTS_COUNT, RPC_REQUEST_HANDLING_TIME,
 };
+#[cfg(feature = "query-filtering")]
 use magicblock_query_filtering::{
     auth::AuthError, quote, service::QueryFilteringError, types::LoginRequest,
     QueryFilteringService,
 };
 use solana_pubkey::Pubkey;
 
+#[cfg(feature = "query-filtering")]
+use crate::requests::http::Data;
 use crate::{
     requests::{
-        http::{extract_bytes, parse_body, Data, HandlerResult},
+        http::{extract_bytes, parse_body, HandlerResult},
         payload::ResponseErrorPayload,
         JsonHttpRequest, RpcRequest,
     },
@@ -64,6 +69,7 @@ pub(crate) struct HttpDispatcher {
     /// `sendTransaction` and `simulateTransaction`.
     pub(crate) transactions_scheduler: TransactionSchedulerHandle,
     /// Query filtering service and local authentication state.
+    #[cfg(feature = "query-filtering")]
     pub(crate) query_filtering: Option<Arc<QueryFilteringService>>,
 }
 
@@ -73,7 +79,9 @@ impl HttpDispatcher {
     /// This constructor clones the necessary handles from the global `SharedState` and
     /// `DispatchEndpoints`, making it cheap to create multiple `Arc<Self>` pointers.
     pub(super) fn new(
-        query_filtering: Option<Arc<QueryFilteringService>>,
+        #[cfg(feature = "query-filtering")] query_filtering: Option<
+            Arc<QueryFilteringService>,
+        >,
         state: SharedState,
         channels: &DispatchEndpoints,
     ) -> Arc<Self> {
@@ -85,6 +93,7 @@ impl HttpDispatcher {
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             transactions_scheduler: channels.transaction_scheduler.clone(),
+            #[cfg(feature = "query-filtering")]
             query_filtering,
         })
     }
@@ -110,7 +119,11 @@ impl HttpDispatcher {
             Err(request) => request,
         };
 
-        // Extract the authenticated user from the request.
+        // Extract the authenticated user from the request. With query filtering
+        // compiled out there is no authentication and every request is anonymous.
+        #[cfg(not(feature = "query-filtering"))]
+        let authenticated_user: Option<Pubkey> = None;
+        #[cfg(feature = "query-filtering")]
         let authenticated_user =
             if let Some(query_filtering) = &self.query_filtering {
                 let Some(token) = extract_token(&request) else {
@@ -298,33 +311,40 @@ impl HttpDispatcher {
             return Ok(response);
         }
 
-        // Functions below are only available if query filtering is enabled.
-        let Some(query_filtering) = &self.query_filtering else {
-            return Err(request);
-        };
+        // The quote/auth endpoints below are only compiled in (and only
+        // available) when query filtering is enabled.
+        #[cfg(feature = "query-filtering")]
+        {
+            let Some(query_filtering) = &self.query_filtering else {
+                return Err(request);
+            };
 
-        if request.method() == Method::GET && request.uri().path() == "/quote" {
-            return Ok(Self::quote_response(&request, false).await);
-        }
-        if request.method() == Method::GET
-            && request.uri().path() == "/fast-quote"
-        {
-            return Ok(Self::quote_response(&request, true).await);
-        }
-        if request.method() == Method::GET
-            && request.uri().path() == "/auth/challenge"
-        {
-            return Ok(self.challenge_response(query_filtering, &request));
-        }
-        if request.method() == Method::POST
-            && request.uri().path() == "/auth/login"
-        {
-            return Ok(self.login_response(query_filtering, request).await);
+            if request.method() == Method::GET
+                && request.uri().path() == "/quote"
+            {
+                return Ok(Self::quote_response(&request, false).await);
+            }
+            if request.method() == Method::GET
+                && request.uri().path() == "/fast-quote"
+            {
+                return Ok(Self::quote_response(&request, true).await);
+            }
+            if request.method() == Method::GET
+                && request.uri().path() == "/auth/challenge"
+            {
+                return Ok(self.challenge_response(query_filtering, &request));
+            }
+            if request.method() == Method::POST
+                && request.uri().path() == "/auth/login"
+            {
+                return Ok(self.login_response(query_filtering, request).await);
+            }
         }
 
         Err(request)
     }
 
+    #[cfg(feature = "query-filtering")]
     async fn quote_response(
         request: &Request<Incoming>,
         fast: bool,
@@ -355,6 +375,7 @@ impl HttpDispatcher {
         response
     }
 
+    #[cfg(feature = "query-filtering")]
     fn challenge_response(
         &self,
         query_filtering: &QueryFilteringService,
@@ -378,6 +399,7 @@ impl HttpDispatcher {
         cors_quote_json_response(&query_filtering.get_challenge(&pubkey))
     }
 
+    #[cfg(feature = "query-filtering")]
     async fn login_response(
         &self,
         query_filtering: &QueryFilteringService,
@@ -427,6 +449,7 @@ impl HttpDispatcher {
     }
 }
 
+#[cfg(feature = "query-filtering")]
 fn query_params<B>(req: &Request<B>) -> HashMap<String, String> {
     req.uri()
         .query()
@@ -438,6 +461,7 @@ fn query_params<B>(req: &Request<B>) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
+#[cfg(feature = "query-filtering")]
 fn extract_token<B>(req: &Request<B>) -> Option<String> {
     query_params(req).get("token").cloned().or_else(|| {
         req.headers()
@@ -457,6 +481,7 @@ fn extract_token<B>(req: &Request<B>) -> Option<String> {
     })
 }
 
+#[cfg(feature = "query-filtering")]
 fn json_response(status: StatusCode, error: &str) -> Response<JsonBody> {
     let body = serde_json::json!({ "error": error });
     Response::builder()
@@ -466,6 +491,7 @@ fn json_response(status: StatusCode, error: &str) -> Response<JsonBody> {
         .unwrap_or_else(|_| Response::new(JsonBody(Vec::new())))
 }
 
+#[cfg(feature = "query-filtering")]
 fn quote_json_response<T: serde::Serialize>(body: &T) -> Response<JsonBody> {
     match serde_json::to_vec(body) {
         Ok(body) => Response::builder()
@@ -480,12 +506,14 @@ fn quote_json_response<T: serde::Serialize>(body: &T) -> Response<JsonBody> {
     }
 }
 
+#[cfg(feature = "query-filtering")]
 fn cors_json_response(status: StatusCode, error: &str) -> Response<JsonBody> {
     let mut response = json_response(status, error);
     HttpDispatcher::set_access_control_headers(&mut response);
     response
 }
 
+#[cfg(feature = "query-filtering")]
 fn cors_quote_json_response<T: serde::Serialize>(
     body: &T,
 ) -> Response<JsonBody> {
@@ -494,6 +522,7 @@ fn cors_quote_json_response<T: serde::Serialize>(
     response
 }
 
+#[cfg(feature = "query-filtering")]
 fn body_data_to_vec(body: Data) -> Vec<u8> {
     match body {
         Data::Empty => Vec::new(),
@@ -502,16 +531,21 @@ fn body_data_to_vec(body: Data) -> Vec<u8> {
     }
 }
 
+#[cfg(feature = "query-filtering")]
 fn quote_error_status(error: &quote::QuoteError) -> StatusCode {
     match error {
         quote::QuoteError::InvalidChallenge | quote::QuoteError::Base64(_) => {
             StatusCode::BAD_REQUEST
         }
-        quote::QuoteError::TdxGuest(_) => StatusCode::NOT_IMPLEMENTED,
-        quote::QuoteError::Join(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        quote::QuoteError::Disabled => StatusCode::NOT_IMPLEMENTED,
+        #[cfg(feature = "tee")]
+        quote::QuoteError::TdxGuest(_) | quote::QuoteError::Join(_) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
+#[cfg(feature = "query-filtering")]
 fn auth_error_status(error: &AuthError) -> StatusCode {
     match error {
         AuthError::Json(_)
@@ -530,6 +564,7 @@ fn auth_error_status(error: &AuthError) -> StatusCode {
     }
 }
 
+#[cfg(feature = "query-filtering")]
 fn query_filtering_auth_error_status(
     error: &QueryFilteringError,
 ) -> StatusCode {
@@ -539,10 +574,11 @@ fn query_filtering_auth_error_status(
             StatusCode::INTERNAL_SERVER_ERROR
         }
         QueryFilteringError::AccessDenied => StatusCode::UNAUTHORIZED,
+        QueryFilteringError::Disabled => StatusCode::NOT_IMPLEMENTED,
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "query-filtering"))]
 mod tests {
     use hyper::header::AUTHORIZATION;
 

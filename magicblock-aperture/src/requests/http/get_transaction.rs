@@ -1,9 +1,9 @@
 use json::{JsonContainerTrait, JsonValueMutTrait, JsonValueTrait};
-use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_rpc_client_api::config::RpcTransactionConfig;
+use solana_transaction_status::UiTransactionEncoding;
+#[cfg(feature = "query-filtering")]
 use solana_transaction_status::{
     ConfirmedTransactionWithStatusMeta, TransactionWithStatusMeta,
-    UiTransactionEncoding,
 };
 
 use super::prelude::*;
@@ -26,18 +26,18 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
 
         // Fetch the complete transaction details from the persistent ledger.
+        #[cfg_attr(not(feature = "query-filtering"), allow(unused_mut))]
         let mut transaction =
             self.ledger.get_complete_transaction(signature, u64::MAX)?;
 
+        #[cfg(feature = "query-filtering")]
         if let (Some(user), Some(confirmed)) =
             (&request.authenticated_user, transaction.as_mut())
         {
+            use magicblock_metrics::metrics::AccountFetchOrigin::*;
             let touched = collect_static_account_keys(confirmed);
-            self.ensure_permission_accounts(
-                &touched,
-                AccountFetchOrigin::GetMultipleAccounts,
-            )
-            .await?;
+            self.ensure_permission_accounts(&touched, GetMultipleAccounts)
+                .await?;
             magicblock_query_filtering::filter_confirmed_transaction(
                 &*self.accountsdb,
                 confirmed,
@@ -80,6 +80,7 @@ fn value_from_serializable<T: json::Serialize>(
 /// Collects every account key the confirmed transaction touches — static keys
 /// plus any address-table lookups already resolved into the meta. Used to
 /// determine which permission PDAs must be fetched before filtering.
+#[cfg(feature = "query-filtering")]
 fn collect_static_account_keys(
     confirmed: &ConfirmedTransactionWithStatusMeta,
 ) -> Vec<Pubkey> {

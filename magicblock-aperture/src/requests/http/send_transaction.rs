@@ -42,14 +42,17 @@ impl HttpDispatcher {
             return Err(TransactionError::AlreadyProcessed.into());
         }
 
-        // Run the chainlink tx-account ensure in parallel with the admission
-        // ensure (and check). Without try_join! these would serialize and the
-        // permission lookup would add an extra network round-trip to the
-        // hot path.
-        tokio::try_join!(
-            self.ensure_transaction_accounts(&transaction.txn),
-            self.enforce_transaction_admission(&transaction.txn, request),
-        )?;
+        #[cfg(not(feature = "query-filtering"))]
+        {
+            self.ensure_transaction_accounts(&transaction.txn).await?;
+        }
+        #[cfg(feature = "query-filtering")]
+        {
+            tokio::try_join!(
+                self.ensure_transaction_accounts(&transaction.txn),
+                self.enforce_transaction_admission(&transaction.txn, request),
+            )?;
+        }
 
         // Based on the preflight flag, either execute and await the result,
         // or schedule (fire-and-forget) for background processing.

@@ -129,6 +129,7 @@ impl RpcTestEnv {
         };
         let server = initialize_aperture(
             &config,
+            #[cfg(feature = "query-filtering")]
             None,
             state,
             &execution.dispatch,

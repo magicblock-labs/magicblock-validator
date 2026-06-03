@@ -32,6 +32,7 @@ impl HttpDispatcher {
         // Bundles the permission PDA into the same chainlink ensure when the
         // request is authenticated so we don't pay a second round-trip just to
         // run query filtering.
+        #[cfg_attr(not(feature = "query-filtering"), allow(unused_mut))]
         let mut account = self
             .read_account_with_ensure_for_user(
                 &pubkey,
@@ -43,6 +44,7 @@ impl HttpDispatcher {
             .map(|acc| {
                 LockedAccount::new(pubkey, acc).ui_encode(encoding, slice)
             });
+        #[cfg(feature = "query-filtering")]
         if let Some(user) = &request.authenticated_user {
             let permission =
                 magicblock_query_filtering::permission_for_account(

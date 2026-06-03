@@ -7,6 +7,15 @@ homepage.workspace = true
 license.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+# Permission-aware query filtering. When disabled, the optional
+# `magicblock-query-filtering` dependency is not compiled in and the entire
+# filtering/auth integration is removed from the request path.
+query-filtering = ["dep:magicblock-query-filtering"]
+# Full TEE integration: query filtering + TDX attestation quote.
+tee = ["query-filtering", "magicblock-query-filtering/tee"]
+
 [dependencies]
 # network
 http-body-util = { workspace = true }
@@ -35,7 +44,7 @@ magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-metrics = { workspace = true }
-magicblock-query-filtering = { workspace = true }
+magicblock-query-filtering = { workspace = true, optional = true }
 magicblock-version = { workspace = true }
 
 # solana

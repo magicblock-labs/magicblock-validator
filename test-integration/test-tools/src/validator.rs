@@ -69,7 +69,11 @@ pub fn start_magic_block_validator_with_config(
         }
 
         let mut c = process::Command::new("cargo");
-        c.arg("run").arg("--").arg(config_path);
+        c.arg("run")
+            .arg("--features")
+            .arg("query-filtering")
+            .arg("--")
+            .arg(config_path);
         c
     };
 

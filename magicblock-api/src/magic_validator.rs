@@ -58,6 +58,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
+#[cfg(feature = "query-filtering")]
 use magicblock_query_filtering::auth::QueryFilteringService;
 use magicblock_replicator::{nats::Broker, ReplicationService};
 use magicblock_services::actions_callback_service::ActionsCallbackService;
@@ -122,6 +123,7 @@ pub struct MagicValidator {
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
+    #[cfg(feature = "query-filtering")]
     query_filtering: Option<Arc<QueryFilteringService>>,
     transaction_execution: thread::JoinHandle<()>,
     replication_handle:
@@ -165,16 +167,20 @@ impl MagicValidator {
                 .map(Arc::new);
         log_timing("startup", "risk_service_init", step_start);
 
-        let step_start = Instant::now();
-        let query_filtering = if config.query_filtering.enabled {
-            Some(Arc::new(QueryFilteringService::try_new(
-                &config.query_filtering,
-                risk_service.clone(),
-            )?))
-        } else {
-            None
+        #[cfg(feature = "query-filtering")]
+        let query_filtering = {
+            let step_start = Instant::now();
+            let query_filtering = if config.query_filtering.enabled {
+                Some(Arc::new(QueryFilteringService::try_new(
+                    &config.query_filtering,
+                    risk_service.clone(),
+                )?))
+            } else {
+                None
+            };
+            log_timing("startup", "query_filtering_init", step_start);
+            query_filtering
         };
-        log_timing("startup", "query_filtering_init", step_start);
 
         let step_start = Instant::now();
         Self::sync_validator_keypair_with_ledger(
@@ -402,6 +408,7 @@ impl MagicValidator {
         let step_start = Instant::now();
         let rpc = initialize_aperture(
             &config.aperture,
+            #[cfg(feature = "query-filtering")]
             query_filtering.clone(),
             shared_state,
             &dispatch,
@@ -464,6 +471,7 @@ impl MagicValidator {
             identity: validator_pubkey,
             transaction_scheduler: dispatch.transaction_scheduler,
             task_scheduler: Some(task_scheduler),
+            #[cfg(feature = "query-filtering")]
             query_filtering,
             transaction_execution,
             replication_handle: None,
@@ -1072,6 +1080,7 @@ impl MagicValidator {
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
+        #[cfg(feature = "query-filtering")]
         if let Some(service) = self.query_filtering.take() {
             service.stop()
         }

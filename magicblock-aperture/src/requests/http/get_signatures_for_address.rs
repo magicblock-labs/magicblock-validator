@@ -1,4 +1,3 @@
-use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature;
 use solana_transaction_status::TransactionConfirmationStatus;
 
@@ -44,6 +43,7 @@ impl HttpDispatcher {
                 limit,
             )?;
 
+        #[cfg_attr(not(feature = "query-filtering"), allow(unused_mut))]
         let mut signatures = signatures_result
             .infos
             .into_iter()
@@ -57,12 +57,11 @@ impl HttpDispatcher {
                 rpc_status
             })
             .collect::<Vec<_>>();
+        #[cfg(feature = "query-filtering")]
         if let Some(user) = &request.authenticated_user {
-            self.ensure_permission_accounts(
-                &[address],
-                AccountFetchOrigin::GetAccount,
-            )
-            .await?;
+            use magicblock_metrics::metrics::AccountFetchOrigin::*;
+            self.ensure_permission_accounts(&[address], GetAccount)
+                .await?;
             let permission =
                 magicblock_query_filtering::permission_for_account(
                     &*self.accountsdb,

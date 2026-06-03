@@ -22,5 +22,13 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [features]
 default = []
-tokio-console = ["console-subscriber", "tokio/tracing", "magicblock-core/tokio-console"]
+# Permission-aware query filtering
+query-filtering = ["magicblock-api/query-filtering"]
+# Full TEE integration: query filtering + TDX attestation quote.
+tee = ["magicblock-api/tee", "query-filtering"]
+tokio-console = [
+    "console-subscriber",
+    "tokio/tracing",
+    "magicblock-core/tokio-console",
+]
 tui = ["magicblock-tui-client"]

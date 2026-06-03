@@ -25,6 +25,8 @@ pub enum QueryFilteringError {
     Auth(#[from] AuthError),
     #[error("access denied: transaction touches a restricted account")]
     AccessDenied,
+    #[error("query filtering feature (`query-filtering`) is not enabled in this build")]
+    Disabled,
 }
 
 pub struct QueryFilteringService {

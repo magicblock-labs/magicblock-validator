@@ -1,8 +1,11 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
+#[cfg(feature = "query-filtering")]
+use std::sync::Arc;
 
 use error::{ApertureError, RpcError};
 use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_core::link::DispatchEndpoints;
+#[cfg(feature = "query-filtering")]
 use magicblock_query_filtering::QueryFilteringService;
 use processor::EventProcessor;
 use server::{http::HttpServer, websocket::WebsocketServer};
@@ -16,13 +19,16 @@ type ApertureResult<T> = Result<T, ApertureError>;
 
 pub async fn initialize_aperture(
     config: &ApertureConfig,
-    query_filtering: Option<Arc<QueryFilteringService>>,
+    #[cfg(feature = "query-filtering")] query_filtering: Option<
+        Arc<QueryFilteringService>,
+    >,
     state: SharedState,
     dispatch: &DispatchEndpoints,
     cancel: CancellationToken,
 ) -> ApertureResult<JsonRpcServer> {
     let server = JsonRpcServer::new(
         config,
+        #[cfg(feature = "query-filtering")]
         query_filtering,
         state.clone(),
         dispatch,
@@ -47,7 +53,9 @@ impl JsonRpcServer {
     /// Create a new instance of JSON-RPC server, hooked into validator via dispatch channels
     async fn new(
         config: &ApertureConfig,
-        query_filtering: Option<Arc<QueryFilteringService>>,
+        #[cfg(feature = "query-filtering")] query_filtering: Option<
+            Arc<QueryFilteringService>,
+        >,
         state: SharedState,
         dispatch: &DispatchEndpoints,
         cancel: CancellationToken,
@@ -74,9 +82,15 @@ impl JsonRpcServer {
             let cancel = cancel.clone();
             WebsocketServer::new(ws, &state, cancel).await?
         };
-        let http =
-            HttpServer::new(http, query_filtering, state, cancel, dispatch)
-                .await?;
+        let http = HttpServer::new(
+            http,
+            #[cfg(feature = "query-filtering")]
+            query_filtering,
+            state,
+            cancel,
+            dispatch,
+        )
+        .await?;
         Ok(Self {
             http,
             websocket,

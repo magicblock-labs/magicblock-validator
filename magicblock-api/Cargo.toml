@@ -7,6 +7,17 @@ homepage.workspace = true
 license.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+# Permission-aware query filtering. When disabled, the optional
+# `magicblock-query-filtering` dependency is not compiled in.
+query-filtering = [
+    "dep:magicblock-query-filtering",
+    "magicblock-aperture/query-filtering",
+]
+# Full TEE integration: query filtering + TDX attestation quote.
+tee = ["query-filtering", "magicblock-query-filtering/tee"]
+
 [dependencies]
 anyhow = { workspace = true }
 borsh = "1.5.3"
@@ -29,7 +40,7 @@ magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
-magicblock-query-filtering = { workspace = true }
+magicblock-query-filtering = { workspace = true, optional = true }
 magicblock-services = { workspace = true }
 magicblock-replicator = { workspace = true }
 magicblock-task-scheduler = { workspace = true }

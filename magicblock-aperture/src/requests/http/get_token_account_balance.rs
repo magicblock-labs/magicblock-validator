@@ -3,7 +3,7 @@ use std::mem::size_of;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{
     parse_account_data::SplTokenAdditionalDataV2,
-    parse_token::{token_amount_to_ui_amount_v3, UiTokenAmount},
+    parse_token::token_amount_to_ui_amount_v3,
 };
 
 use super::{
@@ -34,7 +34,9 @@ impl HttpDispatcher {
             )
             .await;
 
+        #[cfg(feature = "query-filtering")]
         if let Some(user) = &request.authenticated_user {
+            use solana_account_decoder::parse_token::UiTokenAmount;
             let permission =
                 magicblock_query_filtering::permission_for_account(
                     &*self.accountsdb,
