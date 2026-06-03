@@ -458,6 +458,10 @@ impl MagicValidator {
         let base_chain_config = ChainConfig {
             rpc_uri: config.rpc_url().to_owned(),
             commitment: CommitmentConfig::confirmed(),
+            websocket_uri: config
+                .websocket_urls()
+                .next()
+                .map(ToOwned::to_owned),
             compute_budget_config: ComputeBudgetConfig::new(
                 config.commit.compute_unit_price,
             ),

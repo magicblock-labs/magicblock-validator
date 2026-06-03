@@ -37,6 +37,9 @@ use crate::{
 };
 const POISONED_MUTEX_MSG: &str =
     "CommittorProcessor pending messages mutex poisoned!";
+pub(crate) const RECOVERY_MIN_AGE_SECS: u64 = 5 * 60;
+pub(crate) const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;
+
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
 pub struct CommittorProcessor {
@@ -66,10 +69,22 @@ impl CommittorProcessor {
             chain_config.commitment,
         );
         let rpc_client = Arc::new(rpc_client);
-        let magic_block_rpc_client = if let Some(chain_slot) = chain_slot {
-            MagicblockRpcClient::new_with_chain_slot(rpc_client, chain_slot)
-        } else {
-            MagicblockRpcClient::new(rpc_client)
+        let websocket_uri = chain_config.websocket_uri.clone();
+        let magic_block_rpc_client = match (chain_slot, websocket_uri) {
+            (Some(chain_slot), websocket_uri) => {
+                MagicblockRpcClient::new_with_chain_slot_and_websocket(
+                    rpc_client,
+                    chain_slot,
+                    websocket_uri,
+                )
+            }
+            (None, Some(websocket_uri)) => {
+                MagicblockRpcClient::new_with_websocket(
+                    rpc_client,
+                    Some(websocket_uri),
+                )
+            }
+            (None, None) => MagicblockRpcClient::new(rpc_client),
         };
 
         // Create TableMania
@@ -144,16 +159,20 @@ impl CommittorProcessor {
     pub async fn pending_intent_bundles(
         &self,
     ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
-        const RECOVERY_MIN_AGE_SECS: u64 = 30 * 60;
-
         // Extract pending bundles satisfying predicate
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let mut bundles = self.persister.pending_intent_bundles(|row| {
-            now.saturating_sub(row.last_retried_at) <= RECOVERY_MIN_AGE_SECS
-        })?;
+        let mut bundles = self.persister.pending_intent_bundles(
+            now.saturating_sub(RECOVERY_MAX_AGE_SECS),
+            now.saturating_sub(RECOVERY_MIN_AGE_SECS),
+            |row| {
+                now.saturating_sub(row.last_retried_at) <= RECOVERY_MIN_AGE_SECS
+                    || now.saturating_sub(row.created_at)
+                        > RECOVERY_MAX_AGE_SECS
+            },
+        )?;
 
         if bundles.is_empty() {
             return Ok(bundles);
