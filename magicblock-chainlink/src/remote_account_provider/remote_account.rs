@@ -188,6 +188,13 @@ impl RemoteAccount {
     ) -> Self {
         let mut account_shared_data = AccountSharedData::from(account);
         account_shared_data.set_remote_slot(slot);
+        Self::from_fresh_account_shared_data(account_shared_data, source)
+    }
+
+    pub(crate) fn from_fresh_account_shared_data(
+        account_shared_data: AccountSharedData,
+        source: RemoteAccountUpdateSource,
+    ) -> Self {
         RemoteAccount::Found(RemoteAccountState {
             account: ResolvedAccount::Fresh(account_shared_data),
             source,
