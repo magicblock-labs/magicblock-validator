@@ -665,9 +665,20 @@ where
             )
             .await;
 
+        //
         // Ensure that the subscription update isn't out of order, i.e.
-        // we don't already hold a newer version of the account in our bank
-        let out_of_order_slot =
+        // we already hold a newer version of the account in our bank.
+        //
+        // The stricter intent is to ignore non-advancing subscription updates: if the bank
+        // already has the account at the same slot, then a normal/plain update at that slot is
+        // treated as stale/duplicate and should not overwrite local state, with the following
+        // exception:
+        //
+        //  - In the undelegate/redelegate same-slot path, the bank can still hold a plain
+        //    or undelegating version while the subscription update carries the delegated state
+        //    at the same slot, so we must allow that update.
+        //
+        let non_advancing_slot =
             self.accounts_bank.get_account(&pubkey).and_then(|in_bank| {
                 let bank_slot = in_bank.remote_slot();
                 let update_slot = account.remote_slot();
@@ -683,7 +694,8 @@ where
                     None
                 }
             });
-        if let Some(in_bank_slot) = out_of_order_slot {
+
+        if let Some(in_bank_slot) = non_advancing_slot {
             let update_slot = account.remote_slot();
             if in_bank_slot == update_slot {
                 if let Some(projected_ata_clone_request) =
