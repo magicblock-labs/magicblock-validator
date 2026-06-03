@@ -3902,7 +3902,6 @@ name = "magicblock-committor-service"
 version = "0.11.3"
 dependencies = [
  "async-trait",
- "base64 0.21.7",
  "bincode",
  "borsh",
  "futures-util",

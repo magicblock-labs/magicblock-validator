@@ -1,18 +1,9 @@
-use base64::{prelude::BASE64_STANDARD, Engine};
 use solana_packet::PACKET_DATA_SIZE;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use static_assertions::const_assert;
 
 /// Maximum serialized transaction size that can be sent over the wire.
 pub(crate) const MAX_TRANSACTION_WIRE_SIZE: usize = PACKET_DATA_SIZE;
-
-/// From agave rpc/src/rpc.rs [MAX_BASE64_SIZE].
-///
-/// This is only the RPC's pre-decode base64 string limit. Use
-/// [`MAX_TRANSACTION_WIRE_SIZE`] for transaction fit/sendability checks.
-#[allow(unused)] // serves as documentation and is asserted in tests
-pub(crate) const MAX_ENCODED_TRANSACTION_SIZE: usize =
-    (MAX_TRANSACTION_WIRE_SIZE + 2) / 3 * 4;
 
 /// How many process and commit buffer instructions fit into a single transaction
 #[allow(unused)] // serves as documentation as well
@@ -75,14 +66,6 @@ const_assert!(
     MAX_PROCESS_PER_TX_USING_LOOKUP <= MAX_UNDELEGATE_PER_TX_USING_LOOKUP
 );
 
-pub fn serialize_and_encode_base64(
-    transaction: &impl SerializableTransaction,
-) -> String {
-    // SAFETY: runs statically
-    let serialized = bincode::serialize(transaction).unwrap();
-    BASE64_STANDARD.encode(serialized)
-}
-
 pub fn serialized_transaction_size(
     transaction: &impl SerializableTransaction,
 ) -> usize {
@@ -94,7 +77,6 @@ pub fn serialized_transaction_size(
 mod test {
     use std::collections::HashSet;
 
-    use base64::{prelude::BASE64_STANDARD, Engine};
     use dlp_api::args::{CommitStateArgs, CommitStateFromBufferArgs};
     use lazy_static::lazy_static;
     use magicblock_committor_program::instruction_builder::close_buffer::{
@@ -183,24 +165,6 @@ mod test {
         })?;
 
         Ok(serialized_transaction_size(&versioned_tx))
-    }
-
-    #[test]
-    fn encoded_size_limit_is_not_a_wire_size_limit() {
-        assert_eq!(MAX_TRANSACTION_WIRE_SIZE, 1232);
-        assert_eq!(MAX_ENCODED_TRANSACTION_SIZE, 1644);
-
-        let max_wire_bytes = vec![0; MAX_TRANSACTION_WIRE_SIZE];
-        let oversized_wire_bytes = vec![0; MAX_TRANSACTION_WIRE_SIZE + 1];
-
-        assert_eq!(
-            BASE64_STANDARD.encode(max_wire_bytes).len(),
-            MAX_ENCODED_TRANSACTION_SIZE
-        );
-        assert_eq!(
-            BASE64_STANDARD.encode(oversized_wire_bytes).len(),
-            MAX_ENCODED_TRANSACTION_SIZE
-        );
     }
 
     // -----------------
@@ -384,7 +348,7 @@ mod test {
         run(auth, 15);
         run(auth, 20);
         // This logs raw wire sizes. The sendability limit is
-        // MAX_TRANSACTION_WIRE_SIZE, not base64 encoded length.
+        // MAX_TRANSACTION_WIRE_SIZE.
     }
 
     // -----------------
