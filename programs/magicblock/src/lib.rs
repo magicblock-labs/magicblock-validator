@@ -5,7 +5,6 @@ mod magic_context;
 pub mod magic_sys;
 mod mutate_accounts;
 mod schedule_task;
-mod schedule_transactions;
 pub use magic_context::MagicContext;
 pub mod magic_scheduled_base_intent;
 pub mod magicblock_processor;
@@ -13,6 +12,8 @@ pub mod outbox_intent_bundles;
 pub mod test_utils;
 mod utils;
 pub mod validator;
+mod intent_bundles;
+use intent_bundles::schedule as schedule_transactions;
 
 pub use magic_sys::init_magic_sys;
 pub use magicblock_magic_program_api::*;
