@@ -200,7 +200,7 @@ pub enum MagicBlockInstruction {
         pubkey: Pubkey,
         data: Vec<u8>,
         fields: AccountCloneFields,
-        actions_tx_sig: Option<String>,
+        actions: Vec<Instruction>,
     },
 
     /// Initialize a multi-transaction clone for a large account.
@@ -215,7 +215,6 @@ pub enum MagicBlockInstruction {
         total_data_len: u32,
         initial_data: Vec<u8>,
         fields: AccountCloneFields,
-        actions_tx_sig: Option<String>,
     },
 
     /// Continue a multi-transaction clone with the next data chunk.
@@ -229,6 +228,7 @@ pub enum MagicBlockInstruction {
         offset: u32,
         data: Vec<u8>,
         is_last: bool,
+        actions: Vec<Instruction>,
     },
 
     /// Cleanup a partial clone on failure. Removes from PENDING_CLONES
@@ -356,4 +356,21 @@ pub enum CallbackInstruction {
     /// - **1.**   `[]`        Callback signer PDA
     /// - **2..n** `[]`        Accounts required by the embedded instructions
     ExecuteCallback { instruction: Instruction },
+}
+
+/// Instruction(s) for the post-delegation action executor builtin-program.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum PostDelegationActionExecutorInstruction {
+    /// Executes post-delegation actions immediately after a matching delegated
+    /// clone instruction in the same transaction.
+    ///
+    /// # Account references
+    /// - **0.**   `[SIGNER]`  Validator authority
+    /// - **1.**   `[]`        Delegated clone target
+    /// - **2.**   `[]`        Instructions sysvar
+    /// - **3..n** `[]`        Accounts required by the embedded instructions
+    Execute {
+        cloned_account_pubkey: Pubkey,
+        actions: Vec<Instruction>,
+    },
 }
