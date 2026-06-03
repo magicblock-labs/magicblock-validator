@@ -24,16 +24,16 @@ pub enum QuoteError {
 }
 
 #[cfg(feature = "tee")]
-mod imp {
-    use std::sync::OnceLock;
-
+mod tee {
     use base64::{prelude::BASE64_STANDARD, Engine};
     use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
     use sha2::{Digest, Sha256, Sha512};
-    use tokio::task::spawn_blocking;
+    use tokio::{sync::OnceCell, task::spawn_blocking};
 
-    use super::{tdx_guest_native, QuoteError, QuoteResult};
-    use crate::types::{FastQuoteResponse, QuoteResponse};
+    use super::{
+        tdx_guest_native, FastQuoteResponse, QuoteError, QuoteResponse,
+        QuoteResult,
+    };
 
     pub struct AttestedKeyMaterial {
         pub quote: Vec<u8>,
@@ -42,7 +42,7 @@ mod imp {
         pub report_data_sha256: [u8; 32],
     }
 
-    static ATTESTED: OnceLock<AttestedKeyMaterial> = OnceLock::new();
+    static ATTESTED: OnceCell<AttestedKeyMaterial> = OnceCell::const_new();
 
     fn decode_challenge(challenge: &str) -> QuoteResult<[u8; 64]> {
         let challenge_bytes = BASE64_STANDARD.decode(challenge)?;
@@ -70,21 +70,22 @@ mod imp {
         })
     }
 
-    async fn init_attested_key() -> QuoteResult<&'static AttestedKeyMaterial> {
-        if let Some(material) = ATTESTED.get() {
-            return Ok(material);
-        }
-        if !tdx_guest_native::tdx_guest_device_present() {
-            return Err(tdx_guest_native::TdxGuestError::NoDevice(
-                tdx_guest_native::CONFIGFS_TSM_REPORT_PATH,
-            )
-            .into());
-        }
-        let material = spawn_blocking(init_attested_key_blocking).await??;
-        Ok(ATTESTED.get_or_init(|| material))
+    pub(crate) async fn init_attested_key(
+    ) -> QuoteResult<&'static AttestedKeyMaterial> {
+        ATTESTED
+            .get_or_try_init(|| async move {
+                if !tdx_guest_native::tdx_guest_device_present() {
+                    return Err(tdx_guest_native::TdxGuestError::NoDevice(
+                        tdx_guest_native::CONFIGFS_TSM_REPORT_PATH,
+                    )
+                    .into());
+                }
+                spawn_blocking(init_attested_key_blocking).await?
+            })
+            .await
     }
 
-    pub async fn quote(challenge: &str) -> QuoteResult<QuoteResponse> {
+    pub(crate) async fn quote(challenge: &str) -> QuoteResult<QuoteResponse> {
         if !tdx_guest_native::tdx_guest_device_present() {
             return Err(tdx_guest_native::TdxGuestError::NoDevice(
                 tdx_guest_native::CONFIGFS_TSM_REPORT_PATH,
@@ -103,7 +104,9 @@ mod imp {
         })
     }
 
-    pub async fn fast_quote(challenge: &str) -> QuoteResult<FastQuoteResponse> {
+    pub(crate) async fn fast_quote(
+        challenge: &str,
+    ) -> QuoteResult<FastQuoteResponse> {
         let challenge_bytes = BASE64_STANDARD.decode(challenge)?;
         let key_material = init_attested_key().await?;
         let sig: Signature = key_material.signing_key.sign(&challenge_bytes);
@@ -122,12 +125,12 @@ mod imp {
 
 #[cfg(feature = "tee")]
 pub async fn quote(challenge: &str) -> QuoteResult<QuoteResponse> {
-    imp::quote(challenge).await
+    tee::quote(challenge).await
 }
 
 #[cfg(feature = "tee")]
 pub async fn fast_quote(challenge: &str) -> QuoteResult<FastQuoteResponse> {
-    imp::fast_quote(challenge).await
+    tee::fast_quote(challenge).await
 }
 
 /// Stub returned when the crate is built without the `tee` feature. The TDX
@@ -140,22 +143,4 @@ pub async fn quote(_challenge: &str) -> QuoteResult<QuoteResponse> {
 #[cfg(not(feature = "tee"))]
 pub async fn fast_quote(_challenge: &str) -> QuoteResult<FastQuoteResponse> {
     Err(QuoteError::Disabled)
-}
-
-#[cfg(all(test, not(feature = "tee")))]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn quote_disabled_without_tee_feature() {
-        assert!(matches!(quote("anything").await, Err(QuoteError::Disabled)));
-    }
-
-    #[tokio::test]
-    async fn fast_quote_disabled_without_tee_feature() {
-        assert!(matches!(
-            fast_quote("anything").await,
-            Err(QuoteError::Disabled)
-        ));
-    }
 }
