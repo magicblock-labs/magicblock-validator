@@ -9,6 +9,7 @@ mod schedule_transactions;
 pub use magic_context::MagicContext;
 pub mod magic_scheduled_base_intent;
 pub mod magicblock_processor;
+pub mod outbox_intent_bundles;
 pub mod test_utils;
 mod utils;
 pub mod validator;

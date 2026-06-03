@@ -17,8 +17,15 @@ use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tracing::{debug, error};
 
+use crate::service::outbox_intent_bundles_reader::{
+    InternalOutboxIntentBundlesReader, OutboxIntentBundlesReader,
+};
+
 #[async_trait]
 pub trait ERIntentClient: Send + Sync + 'static {
+    /// Type that is able to read IntentBundles from Outbox
+    /// Can be via AccountsDB, RpcClient or any other means
+    type OutboxReader: OutboxIntentBundlesReader;
     type Error: std::error::Error + Send;
 
     /// Executes `Accept` tx and returns accepted intents
@@ -32,6 +39,9 @@ pub trait ERIntentClient: Send + Sync + 'static {
         sent_tx: Transaction,
         sent_commit: SentCommit,
     ) -> Result<(), Self::Error>;
+
+    /// Returns reader capable of reading IntentBundles from Outbox
+    fn outbox_reader(&self) -> Self::OutboxReader;
 
     // TODO(edwin): probably more proper place to load pending intent
     // CommittorProcessor::pending_intent_bundles could be moved here in the future
@@ -82,6 +92,7 @@ impl<L: LatestBlockProvider> InternalIntentRpcClient<L> {
 #[async_trait]
 impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
     type Error = InternalIntentClientError;
+    type OutboxReader = InternalOutboxIntentBundlesReader;
 
     async fn accept_scheduled_intents(
         &self,
@@ -120,6 +131,10 @@ impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
             )?;
 
         Ok(())
+    }
+
+    fn outbox_reader(&self) -> Self::OutboxReader {
+        InternalOutboxIntentBundlesReader::new(self.accounts_db.clone())
     }
 }
 

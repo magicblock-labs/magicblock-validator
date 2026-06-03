@@ -1,9 +1,11 @@
 pub mod intent_client;
+pub mod outbox_intent_bundles_reader;
 
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
     mem,
+    num::NonZeroUsize,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -27,9 +29,13 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
 
 use crate::{
-    committor_processor::CommittorProcessor, error::CommittorServiceResult,
+    committor_processor::CommittorProcessor,
+    error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
+    service::outbox_intent_bundles_reader::{
+        InternalOutboxIntentBundlesReaderError, OutboxIntentBundlesReader,
+    },
 };
 
 const POISONED_MUTEX_MSG: &str = "ServiceInner intents_meta_map mutex poisoned";
@@ -47,18 +53,22 @@ pub enum IntentExecutionService<R> {
 impl<R> IntentExecutionService<R>
 where
     R: ERIntentClient,
+    // ERIntentClient errors should be convertible to Service errors
     R::Error: Into<IntentExecutionServiceError>,
+    // OutboxReader errors should be convertible to Service errors
+    <R::OutboxReader as OutboxIntentBundlesReader>::Error:
+        Into<IntentExecutionServiceError>,
 {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
-        intent_rpc_client: R,
+        intent_client: R,
         processor: Arc<CommittorProcessor>,
         slot_interval: Duration,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self::Created(ServiceInner::new(
             chainlink,
-            intent_rpc_client,
+            intent_client,
             processor,
             slot_interval,
             cancellation_token,
@@ -98,7 +108,7 @@ pub struct ServiceInner<R> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
     /// ER client specific for Intent needs. Could be switched to RpcClient
-    intent_rpc_client: Arc<R>,
+    intent_client: Arc<R>,
     /// Processor of accepted intents
     processor: Arc<CommittorProcessor>,
     /// Time interval to scrape MagicContext(ER slot interval)
@@ -112,7 +122,11 @@ pub struct ServiceInner<R> {
 impl<R> ServiceInner<R>
 where
     R: ERIntentClient,
+    // ERIntentClient errors should be convertible to Service errors
     R::Error: Into<IntentExecutionServiceError>,
+    // OutboxReader errors should be convertible to Service errors
+    <R::OutboxReader as OutboxIntentBundlesReader>::Error:
+        Into<IntentExecutionServiceError>,
 {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
@@ -123,7 +137,7 @@ where
     ) -> Self {
         Self {
             chainlink,
-            intent_rpc_client: Arc::new(intent_rpc_client),
+            intent_client: Arc::new(intent_rpc_client),
             processor,
             slot_interval,
             cancellation_token,
@@ -139,16 +153,27 @@ where
             result_subscriber,
             cancellation_token,
             self.intents_meta_map.clone(),
-            self.intent_rpc_client.clone(),
+            self.intent_client.clone(),
         ));
 
         tokio::task::spawn(self.accept_worker())
     }
 
     async fn accept_worker(self) {
-        if let Err(err) = self.reschedule_pending_bundles().await {
-            error!(error = ?err, "Failed to reschedule pending bundles")
-        }
+        // Reschedule existing outbox intents first
+        // We need to ensure that accounts in outbox a scheduled before
+        // we accept new incoming Intents
+        self.reschedule_intents()
+            .await
+            .inspect_err(|err| {
+                error!(error = ?err, "Failed to reschedule pending bundles")
+            })
+            // TODO(edwin): early shutdown or cleanup errors to avoid this
+            .expect("Failed to reschedule intents");
+
+        // if let Err(err) = self.reschedule_pending_bundles().await {
+        //     error!(error = ?err, "Failed to reschedule pending bundles")
+        // }
 
         let mut interval = tokio::time::interval(self.slot_interval);
         loop {
@@ -159,7 +184,7 @@ where
                 }
                 _ = interval.tick() => {
                     let accept_result = self
-                        .intent_rpc_client
+                        .intent_client
                         .accept_scheduled_intents()
                         .await;
                     let intent_bundles = match accept_result {
@@ -174,6 +199,48 @@ where
                         error!("Failed to schedule intent execution: {}", err);
                     }
                 }
+            }
+        }
+    }
+
+    async fn reschedule_intents(
+        &self,
+    ) -> Result<(), IntentExecutionServiceError> {
+        /// Number of intents rescheduled at once
+        const RESCHEDULE_CHUNK_SIZE: NonZeroUsize =
+            NonZeroUsize::new(1000).unwrap();
+
+        let mut outbox_bundles_reader = self.intent_client.outbox_reader();
+        loop {
+            // Read by chunks in order not to overload `IntentExecutionEngine`
+            let intent_bundles_chunk = outbox_bundles_reader
+                .read(RESCHEDULE_CHUNK_SIZE)
+                .await
+                .map_err(Into::into)?;
+            if intent_bundles_chunk.is_empty() {
+                return Ok(());
+            }
+
+            // TODO(edwin): use status
+            let read_len = intent_bundles_chunk.len();
+            let intent_bundles = intent_bundles_chunk
+                .into_iter()
+                .map(|el| el.intent_bundle)
+                .collect();
+
+            // Schedule  without initial persistence as bundle already exists in db
+            let result = self
+                .process_intent_bundles(intent_bundles, |bundles| {
+                    self.processor.schedule_recovered_intent_bundles(bundles)
+                })
+                .await;
+            if let Err(err) = result {
+                error!(error = ?err, "Failed to reschedule pending bundles")
+            }
+
+            // Check if we've rescheduled intents from Outbox
+            if read_len != RESCHEDULE_CHUNK_SIZE.get() {
+                return Ok(());
             }
         }
     }
@@ -526,4 +593,6 @@ pub enum IntentExecutionServiceError {
     JoinError(#[from] JoinError),
     #[error("IntentRpcClientError: {0}")]
     IntentRpcClientError(#[from] InternalIntentClientError),
+    #[error("OutboxReaderError")]
+    OutboxReaderError(#[from] InternalOutboxIntentBundlesReaderError),
 }
