@@ -2,9 +2,9 @@ use std::{num::NonZeroUsize, sync::Arc};
 
 use async_trait::async_trait;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 // TODO(edwin): name - OutboxIntentAccount/PendingIntentAccount
 
 // TODO(edwin): name - PendingIntentBundlesReader?

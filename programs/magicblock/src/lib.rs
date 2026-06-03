@@ -7,13 +7,15 @@ mod mutate_accounts;
 mod schedule_task;
 pub use magic_context::MagicContext;
 mod intent_bundles;
-pub mod magic_scheduled_base_intent;
 pub mod magicblock_processor;
-pub mod outbox_intent_bundles;
 pub mod test_utils;
 mod utils;
 pub mod validator;
-use intent_bundles::schedule as schedule_transactions;
+// TODO(edwin): safe to just rename or will break integrations?
+pub use intent_bundles::{
+    magic_scheduled_base_intent, outbox_intent_bundles,
+    schedule as schedule_transactions,
+};
 pub use magic_sys::init_magic_sys;
 pub use magicblock_magic_program_api::*;
 pub use schedule_transactions::{
