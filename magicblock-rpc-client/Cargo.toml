@@ -12,6 +12,8 @@ doctest = false
 
 [dependencies]
 tracing = { workspace = true }
+magicblock-metrics = { workspace = true }
+solana-pubsub-client = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
@@ -34,4 +36,5 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
