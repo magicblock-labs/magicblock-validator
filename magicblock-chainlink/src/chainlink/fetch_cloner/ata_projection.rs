@@ -94,12 +94,6 @@ pub(crate) fn mark_eata_empty<T, U, V, C>(
     this.known_empty_eatas.lock().put(eata_pubkey, ());
 }
 
-#[derive(Clone, Copy)]
-enum BaseAtaLookup {
-    BankOnly,
-    BankThenRemote,
-}
-
 pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_update<
     T,
     U,
@@ -125,7 +119,6 @@ where
             eata_account,
             deleg_record,
             delegation_actions,
-            BaseAtaLookup::BankOnly,
         )
         .await;
     }
@@ -152,7 +145,6 @@ where
         eata_account,
         &deleg_record,
         &delegation_actions,
-        BaseAtaLookup::BankThenRemote,
     )
     .await
 }
@@ -163,7 +155,6 @@ async fn maybe_build_projected_ata_clone_request_from_eata<T, U, V, C>(
     eata_account: &AccountSharedData,
     deleg_record: &DelegationRecord,
     delegation_actions: &DelegationActions,
-    base_ata_lookup: BaseAtaLookup,
 ) -> Option<AccountCloneRequest>
 where
     T: ChainRpcClient,
@@ -200,7 +191,7 @@ where
     }
     let (ata_pubkey, base_ata) = match base_ata {
         Some(base_ata) => base_ata,
-        None if matches!(base_ata_lookup, BaseAtaLookup::BankThenRemote) => {
+        None => {
             fetch_remote_base_ata(
                 this,
                 &ata_pubkeys,
@@ -208,7 +199,6 @@ where
             )
             .await?
         }
-        None => return None,
     };
 
     if base_ata.delegated() || base_ata.undelegating() {

@@ -371,7 +371,8 @@ fn test_clone_account_rejects_same_slot_duplicate_delegated_update() {
 }
 
 #[test]
-fn test_clone_account_rejects_delegated_clone_over_undelegating_target() {
+fn test_clone_account_allows_newer_slot_delegated_clone_over_undelegating_target(
+) {
     init_logger!();
     let pubkey = Pubkey::new_unique();
     let mut account = AccountSharedData::new(100, 0, &pubkey);
@@ -391,12 +392,19 @@ fn test_clone_account_rejects_delegated_clone_over_undelegating_target() {
         Vec::new(),
     );
 
-    process_instruction(
+    let mut result = process_instruction(
         &ix.data,
         tx_accounts(accounts, &ix.accounts),
         ix.accounts,
-        Err(MagicBlockProgramError::DuplicateDelegatedAccountClone.into()),
+        Ok(()),
     );
+    result.drain(0..1);
+    let account = result.drain(0..1).next().unwrap();
+
+    assert_eq!(account.lamports(), 200);
+    assert!(account.delegated());
+    assert!(!account.undelegating());
+    assert_eq!(account.remote_slot(), 43);
 }
 
 #[test]

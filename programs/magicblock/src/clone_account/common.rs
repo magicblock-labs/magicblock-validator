@@ -401,9 +401,9 @@ pub fn set_account_from_fields(
 
     // A delegated clone is still allowed to override a plain clone, which can
     // happen when an eATA projection catches up after the underlying ATA was
-    // cloned without delegation metadata. Once the local target is delegated or
-    // undelegating, another delegated clone would re-run post-delegation
-    // actions and is rejected.
+    // cloned without delegation metadata. Same-slot delegated refreshes over an
+    // already delegated/undelegating target would re-run post-delegation actions
+    // for the same delegation event and are rejected.
     if fields.delegated
         && fields.owner == dlp_api::id()
         && !is_validator_magic_fee_vault(pubkey)
@@ -412,7 +412,10 @@ pub fn set_account_from_fields(
             MagicBlockProgramError::DelegatedCloneOwnerIsDelegationProgram
                 .into(),
         );
-    } else if fields.delegated && (acc.delegated() || acc.undelegating()) {
+    } else if fields.delegated
+        && (acc.delegated() || acc.undelegating())
+        && acc.remote_slot() == fields.remote_slot
+    {
         return Err(
             MagicBlockProgramError::DuplicateDelegatedAccountClone.into()
         );

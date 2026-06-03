@@ -3887,7 +3887,7 @@ async fn test_delegated_eata_subscription_update_projects_remote_ata() {
 
     let eata_pubkey = derive_eata(&wallet_owner, &mint);
     let ata_pubkey = derive_ata(&wallet_owner, &mint);
-    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, false);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
     let ata_account = create_ata_account(&wallet_owner, &mint);
     let action_program_account = Account {
         lamports: 1_000_000,
