@@ -181,6 +181,7 @@ solana-program = "3.0"
 solana-program-option = { version = "3.0" }
 solana-program-pack = { version = "3.0" }
 solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb" }
+solana-packet = { version = "3.0" }
 solana-pubkey = { version = "3.0" }
 solana-pubsub-client = { version = "3.1" }
 solana-rent = { version = "3.0" }
