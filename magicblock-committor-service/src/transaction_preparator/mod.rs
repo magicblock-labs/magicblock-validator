@@ -8,14 +8,16 @@ use solana_pubkey::Pubkey;
 use crate::{
     persist::IntentPersister,
     tasks::{
-        commit_task::CommitBufferStage, task_strategist::TransactionStrategy,
-        utils::TransactionUtils, BaseTaskImpl,
+        commit_task::CommitBufferStage,
+        task_strategist::{TaskStrategistError, TransactionStrategy},
+        utils::TransactionUtils,
+        BaseTaskImpl,
     },
     transaction_preparator::{
         delivery_preparator::{
             BufferExecutionError, DeliveryPreparator, DeliveryPreparatorResult,
         },
-        error::PreparatorResult,
+        error::{PreparatorResult, TransactionPreparatorError},
     },
     ComputeBudgetConfig,
 };
@@ -90,7 +92,15 @@ impl TransactionPreparator for TransactionPreparatorImpl {
                 self.compute_budget_config.compute_unit_price,
                 &dummy_lookup_tables,
                 tx_strategy.standalone_action_nonce,
-            )?;
+            )
+            .map_err(|err| match err {
+                TaskStrategistError::FailedToFitError => {
+                    TransactionPreparatorError::PreflightFailedToFitError
+                }
+                TaskStrategistError::SignerError(err) => {
+                    TransactionPreparatorError::SignerError(err)
+                }
+            })?;
         }
 
         // Prepare lookup tables before buffers so real ALT layout is checked

@@ -326,7 +326,7 @@ where
         // We can recover that Error by splitting execution
         // in 2 stages - commit & finalize
         // Otherwise we return error
-        let execution_err = match res {
+        let (execution_err, cleanup_lookup_tables) = match res {
             Err(IntentExecutorError::FailedToFinalizeError {
                 err,
                 commit_signature: _,
@@ -334,17 +334,28 @@ where
             }) if !committed_pubkeys.is_empty()
                 && err.is_single_stage_split_limit_error() =>
             {
-                Some(err)
+                (Some(err), true)
             }
             Err(IntentExecutorError::FailedFinalizePreparationError(
                 TransactionPreparatorError::FailedToFitError,
-            )) if !committed_pubkeys.is_empty() => None,
+            )) if !committed_pubkeys.is_empty() => (None, true),
+            Err(IntentExecutorError::FailedFinalizePreparationError(
+                TransactionPreparatorError::PreflightFailedToFitError,
+            )) if !committed_pubkeys.is_empty() => (None, false),
             res => {
                 let signature = res.as_ref().ok().copied();
                 single_stage_executor
                     .execute_callbacks(signature, res.as_ref().map(|_| ()));
-                let transaction_strategy =
+                let mut transaction_strategy =
                     single_stage_executor.consume_strategy();
+                if matches!(
+                    &res,
+                    Err(IntentExecutorError::FailedFinalizePreparationError(
+                        TransactionPreparatorError::PreflightFailedToFitError
+                    ))
+                ) {
+                    transaction_strategy.lookup_tables_keys.clear();
+                }
                 execution_report.dispose(transaction_strategy);
                 return res.map(ExecutionOutput::SingleStage);
             }
@@ -355,7 +366,11 @@ where
         // Note that this not necessarily will pass at the end due to the same reason
         let strategy = single_stage_executor.consume_strategy();
         let (commit_strategy, finalize_strategy, cleanup) =
-            handle_cpi_limit_error(&self.authority.pubkey(), strategy);
+            handle_cpi_limit_error(
+                &self.authority.pubkey(),
+                strategy,
+                cleanup_lookup_tables,
+            );
         execution_report.dispose(cleanup);
         if let Some(execution_err) = execution_err {
             execution_report.add_patched_error(execution_err);
@@ -469,7 +484,8 @@ where
                 TransactionPreparatorError::SignerError(_),
             )) => Some(CommitStatus::Failed),
             Err(IntentExecutorError::FailedCommitPreparationError(
-                TransactionPreparatorError::FailedToFitError,
+                TransactionPreparatorError::FailedToFitError
+                | TransactionPreparatorError::PreflightFailedToFitError,
             )) => Some(CommitStatus::PartOfTooLargeBundleToProcess),
             Err(IntentExecutorError::FailedCommitPreparationError(
                 TransactionPreparatorError::DeliveryPreparationError(_),

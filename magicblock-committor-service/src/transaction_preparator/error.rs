@@ -11,6 +11,8 @@ use crate::{
 pub enum TransactionPreparatorError {
     #[error("Failed to fit in single TX")]
     FailedToFitError,
+    #[error("Preflight failed to fit in single TX")]
+    PreflightFailedToFitError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
     #[error("DeliveryPreparationError: {0}")]

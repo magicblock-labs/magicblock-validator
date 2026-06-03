@@ -143,6 +143,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
 pub(in crate::intent_executor) fn handle_cpi_limit_error(
     authority: &Pubkey,
     strategy: TransactionStrategy,
+    cleanup_lookup_tables: bool,
 ) -> (
     TransactionStrategy,
     TransactionStrategy,
@@ -197,7 +198,11 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     // We clean up only ALTs
     let to_cleanup = TransactionStrategy {
         optimized_tasks: vec![],
-        lookup_tables_keys: strategy.lookup_tables_keys,
+        lookup_tables_keys: if cleanup_lookup_tables {
+            strategy.lookup_tables_keys
+        } else {
+            vec![]
+        },
         standalone_action_nonce: None,
     };
 
