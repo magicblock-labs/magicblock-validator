@@ -51,6 +51,7 @@ impl InternalError {
                     RpcClientErrorKind::RpcError(
                         RpcError::RpcResponseError { code: -32602, message, .. }
                     ) if message.contains("VersionedTransaction too large")
+                        || message.contains("base64 encoded too large")
                 )
         }
 
@@ -433,13 +434,15 @@ mod tests {
 
     use super::{InternalError, TransactionStrategyExecutionError};
 
-    fn send_transaction_too_large_error() -> TransactionStrategyExecutionError {
+    fn send_transaction_error(
+        message: impl Into<String>,
+    ) -> TransactionStrategyExecutionError {
         let rpc_error = RpcClientError {
             request: Some(RpcRequest::SendTransaction),
             kind: Box::new(RpcClientErrorKind::RpcError(
                 RpcError::RpcResponseError {
                     code: -32602,
-                    message: "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)".to_string(),
+                    message: message.into(),
                     data: RpcResponseErrorData::Empty,
                 },
             )),
@@ -454,7 +457,18 @@ mod tests {
 
     #[test]
     fn send_transaction_too_large_triggers_single_stage_split() {
-        let err = send_transaction_too_large_error();
+        let err = send_transaction_error(
+            "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)",
+        );
+
+        assert!(err.is_single_stage_split_limit_error());
+    }
+
+    #[test]
+    fn send_transaction_short_too_large_message_triggers_single_stage_split() {
+        let err = send_transaction_error(
+            "Invalid Request: ErrorObject { code: InvalidParams, message: \"Invalid Request: base64 encoded too large\", data: None }",
+        );
 
         assert!(err.is_single_stage_split_limit_error());
     }

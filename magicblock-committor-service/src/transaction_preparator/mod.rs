@@ -93,24 +93,31 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             )?;
         }
 
-        // Pre tx preparations. Create buffer accs + lookup tables
+        // Prepare lookup tables before buffers so real ALT layout is checked
+        // before creating buffer accounts.
         let lookup_tables = self
             .delivery_preparator
-            .prepare_for_delivery(authority, tx_strategy, intent_persister)
+            .prepare_lookup_tables_for_delivery(authority, tx_strategy)
             .await?;
 
-        let message =
+        let tx =
             TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
                 authority,
                 &tx_strategy.optimized_tasks,
                 self.compute_budget_config.compute_unit_price,
                 &lookup_tables,
                 tx_strategy.standalone_action_nonce,
-            )
-            .expect("Possibility to assemble checked above")
-            .message;
+            )?;
 
-        Ok(message)
+        self.delivery_preparator
+            .prepare_tasks_for_delivery(
+                authority,
+                tx_strategy,
+                intent_persister,
+            )
+            .await?;
+
+        Ok(tx.message)
     }
 
     async fn cleanup_for_strategy(

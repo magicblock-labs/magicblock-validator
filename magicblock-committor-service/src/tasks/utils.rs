@@ -12,8 +12,12 @@ use solana_pubkey::{pubkey, Pubkey};
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
-use crate::tasks::{
-    task_strategist::TaskStrategistResult, BaseTask, BaseTaskImpl,
+use crate::{
+    tasks::{
+        task_strategist::{TaskStrategistError, TaskStrategistResult},
+        BaseTask, BaseTaskImpl,
+    },
+    transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
 
 pub struct TransactionUtils;
@@ -146,6 +150,11 @@ impl TransactionUtils {
             &[authority],
         )?;
 
+        if serialize_and_encode_base64(&tx).len() > MAX_ENCODED_TRANSACTION_SIZE
+        {
+            return Err(TaskStrategistError::FailedToFitError);
+        }
+
         Ok(tx)
     }
 
@@ -198,5 +207,26 @@ impl TransactionUtils {
                 compute_unit_price,
             ),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tasks::task_strategist::TaskStrategistError;
+
+    #[test]
+    fn assemble_tx_raw_rejects_oversized_transaction() {
+        let authority = Keypair::new();
+        let ix = Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![],
+            data: vec![0; MAX_ENCODED_TRANSACTION_SIZE],
+        };
+
+        let result =
+            TransactionUtils::assemble_tx_raw(&authority, &[ix], &[], &[]);
+
+        assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
     }
 }

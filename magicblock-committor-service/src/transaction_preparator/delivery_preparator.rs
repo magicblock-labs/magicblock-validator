@@ -1,6 +1,6 @@
 use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
-use futures_util::future::{join, join_all, try_join_all};
+use futures_util::future::{join_all, try_join_all};
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
@@ -58,13 +58,13 @@ impl DeliveryPreparator {
         }
     }
 
-    /// Prepares buffers and necessary pieces for optimized TX
-    pub async fn prepare_for_delivery<P: IntentPersister>(
+    /// Prepares buffers for optimized TX
+    pub async fn prepare_tasks_for_delivery<P: IntentPersister>(
         &self,
         authority: &Keypair,
         strategy: &mut TransactionStrategy,
         persister: &Option<P>,
-    ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
+    ) -> DeliveryPreparatorResult<()> {
         let preparation_futures =
             strategy.optimized_tasks.iter_mut().map(|task| async move {
                 let _timer =
@@ -75,21 +75,39 @@ impl DeliveryPreparator {
                     .await
             });
 
-        let task_preparations = join_all(preparation_futures);
-        let alts_preparations = async {
-            let _timer =
-                metrics::observe_committor_intent_alt_preparation_time();
-            self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
-                .await
-        };
-
-        let (res1, res2) = join(task_preparations, alts_preparations).await;
-        res1.into_iter()
+        join_all(preparation_futures)
+            .await
+            .into_iter()
             .collect::<Result<Vec<_>, _>>()
             .map_err(DeliveryPreparatorError::FailedToPrepareBufferAccounts)?;
-        let lookup_tables =
-            res2.map_err(DeliveryPreparatorError::FailedToCreateALTError)?;
 
+        Ok(())
+    }
+
+    /// Prepares ALTs for optimized TX
+    pub async fn prepare_lookup_tables_for_delivery(
+        &self,
+        authority: &Keypair,
+        strategy: &TransactionStrategy,
+    ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
+        let _timer = metrics::observe_committor_intent_alt_preparation_time();
+        self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
+            .await
+            .map_err(DeliveryPreparatorError::FailedToCreateALTError)
+    }
+
+    /// Prepares buffers and necessary pieces for optimized TX
+    pub async fn prepare_for_delivery<P: IntentPersister>(
+        &self,
+        authority: &Keypair,
+        strategy: &mut TransactionStrategy,
+        persister: &Option<P>,
+    ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
+        let lookup_tables = self
+            .prepare_lookup_tables_for_delivery(authority, strategy)
+            .await?;
+        self.prepare_tasks_for_delivery(authority, strategy, persister)
+            .await?;
         Ok(lookup_tables)
     }
 

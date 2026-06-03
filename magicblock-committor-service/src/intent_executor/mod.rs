@@ -334,8 +334,11 @@ where
             }) if !committed_pubkeys.is_empty()
                 && err.is_single_stage_split_limit_error() =>
             {
-                err
+                Some(err)
             }
+            Err(IntentExecutorError::FailedFinalizePreparationError(
+                TransactionPreparatorError::FailedToFitError,
+            )) if !committed_pubkeys.is_empty() => None,
             res => {
                 let signature = res.as_ref().ok().copied();
                 single_stage_executor
@@ -354,7 +357,9 @@ where
         let (commit_strategy, finalize_strategy, cleanup) =
             handle_cpi_limit_error(&self.authority.pubkey(), strategy);
         execution_report.dispose(cleanup);
-        execution_report.add_patched_error(execution_err);
+        if let Some(execution_err) = execution_err {
+            execution_report.add_patched_error(execution_err);
+        }
 
         self.two_stage_execution_flow(
             &committed_pubkeys,
