@@ -19,6 +19,7 @@ use crate::{
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,
+    pub standalone_action_nonce: Option<u64>,
 }
 
 impl TransactionStrategy {
@@ -72,6 +73,7 @@ impl TransactionStrategy {
         TransactionStrategy {
             optimized_tasks: action_tasks,
             lookup_tables_keys: old_alts,
+            standalone_action_nonce: self.standalone_action_nonce,
         }
     }
 
@@ -230,6 +232,7 @@ impl TaskStrategist {
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys: vec![],
+                standalone_action_nonce: None,
             })
         }
         // In case task optimization didn't work
@@ -246,6 +249,7 @@ impl TaskStrategist {
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys,
+                standalone_action_nonce: None,
             })
         } else {
             Err(TaskStrategistError::FailedToFitError)
