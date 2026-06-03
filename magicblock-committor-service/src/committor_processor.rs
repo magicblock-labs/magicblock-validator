@@ -157,17 +157,22 @@ impl CommittorProcessor {
         &self,
     ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
         const RECOVERY_MIN_AGE_SECS: u64 = 30 * 60;
-		const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;
+        const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;
 
         // Extract pending bundles satisfying predicate
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let mut bundles = self.persister.pending_intent_bundles(|row| {
-            now.saturating_sub(row.last_retried_at) <= RECOVERY_MIN_AGE_SECS
-            && now.saturating_sub(row.last_retried_at) >= RECOVERY_MAX_AGE_SECS
-        })?;
+        let mut bundles = self.persister.pending_intent_bundles(
+            now.saturating_sub(RECOVERY_MAX_AGE_SECS),
+            now.saturating_sub(RECOVERY_MIN_AGE_SECS),
+            |row| {
+                now.saturating_sub(row.last_retried_at) <= RECOVERY_MIN_AGE_SECS
+                    && now.saturating_sub(row.last_retried_at)
+                        >= RECOVERY_MAX_AGE_SECS
+            },
+        )?;
 
         if bundles.is_empty() {
             return Ok(bundles);
