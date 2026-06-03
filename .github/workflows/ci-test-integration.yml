@@ -8,33 +8,33 @@ on:
   push:
     branches: [master, dev]
     paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'Makefile'
-      - 'test-integration/**'
-      - 'rust-toolchain.toml'
-      - 'test-integration/rust-toolchain.toml'
-      - '.github/workflows/ci-test-integration.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "**/build.rs"
+      - "**/*.proto"
+      - "Makefile"
+      - "test-integration/**"
+      - "rust-toolchain.toml"
+      - "test-integration/rust-toolchain.toml"
+      - ".github/workflows/ci-test-integration.yml"
+      - ".github/actions/setup-build-env/**"
+      - ".github/actions/setup-solana/**"
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'Makefile'
-      - 'test-integration/**'
-      - 'rust-toolchain.toml'
-      - 'test-integration/rust-toolchain.toml'
-      - '.github/workflows/ci-test-integration.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "**/build.rs"
+      - "**/*.proto"
+      - "Makefile"
+      - "test-integration/**"
+      - "rust-toolchain.toml"
+      - "test-integration/rust-toolchain.toml"
+      - ".github/workflows/ci-test-integration.yml"
+      - ".github/actions/setup-build-env/**"
+      - ".github/actions/setup-solana/**"
 
 jobs:
   # These producer jobs exist purely to produce reusable artifacts so matrix
@@ -67,7 +67,7 @@ jobs:
       - name: Build validator binary
         run: |
           RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
-            cargo build --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
+            cargo build --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS" --features query-filtering
           strip target/debug/magicblock-validator || true
         shell: bash
         working-directory: magicblock-validator
