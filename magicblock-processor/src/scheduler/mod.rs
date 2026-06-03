@@ -270,7 +270,8 @@ impl TransactionScheduler {
                 biased;
                 Ok(latest) = block_produced.recv() => {
                     if !self.coordinator.is_primary() && latest.slot >= self.slot {
-                        self.transition_to_new_slot(Some(latest)).await;
+                        let slot = self.transition_to_new_slot(Some(latest)).await;
+                        self.handle_superblock(slot).await;
                     }
                 }
                 _ = self.slot_ticker.tick() => {
@@ -342,8 +343,10 @@ impl TransactionScheduler {
             error!("failed to create accountsdb snapshot");
             return;
         };
-        let msg = Message::SuperBlock(SuperBlock { slot, checksum });
-        self.send_replication(msg).await;
+        if self.coordinator.is_primary() {
+            let msg = Message::SuperBlock(SuperBlock { slot, checksum });
+            self.send_replication(msg).await;
+        }
     }
 
     async fn pause_executors_for_snapshot(&mut self) -> OwnedSemaphorePermit {
@@ -380,7 +383,7 @@ impl TransactionScheduler {
             );
         }
 
-        let _permit = self
+        let permit = self
             .pause_permit
             .clone()
             .acquire_owned()
@@ -395,7 +398,13 @@ impl TransactionScheduler {
             .map_err(|error| error.to_string())?;
         self.accountsdb.set_slot(block.slot);
         self.update_sysvars(&block);
-        self.notify_executors_of_block(block).await
+        let slot = block.slot;
+        let result = self.notify_executors_of_block(block).await;
+        drop(permit);
+        if result.is_ok() {
+            self.handle_superblock(slot).await;
+        }
+        result
     }
 
     async fn notify_executors_of_block(
