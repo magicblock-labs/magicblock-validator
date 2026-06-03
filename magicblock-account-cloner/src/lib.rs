@@ -26,25 +26,18 @@
 //! The buffer is a temporary account that holds the raw ELF data during cloning.
 //! It's derived as a PDA: `["buffer", program_id]` owned by validator authority.
 
-use std::{
-    num::NonZeroUsize,
-    sync::{Arc, Mutex, MutexGuard},
-};
-
 use async_trait::async_trait;
-use lru::LruCache;
 use magicblock_chainlink::{
     cloner::{
         errors::{ClonerError, ClonerResult},
-        AccountCloneRequest, Cloner, DelegationActions,
+        AccountCloneRequest, Cloner,
     },
     remote_account_provider::program_account::{
         LoadedProgram, RemoteProgramLoader,
     },
 };
 use magicblock_core::link::transactions::{
-    with_encoded, SanitizeableTransaction, TransactionSchedulerHandle,
-    WithEncoded,
+    with_encoded, TransactionSchedulerHandle,
 };
 use magicblock_ledger::LatestBlock;
 use magicblock_magic_program_api::{
@@ -67,11 +60,12 @@ use solana_sdk_ids::{bpf_loader_upgradeable, loader_v4};
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_sysvar::rent::Rent;
-use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
+use solana_transaction::Transaction;
 use tracing::*;
 
 /// Max data that fits in a single transaction (~63KB)
 pub const MAX_INLINE_DATA_SIZE: usize = 63 * 1024;
+const MAX_INLINE_TRANSACTION_SIZE: usize = u16::MAX as usize;
 
 mod account_cloner;
 mod util;
@@ -79,16 +73,9 @@ mod util;
 pub use account_cloner::*;
 pub use util::derive_buffer_pubkey;
 
-/// Keep only a bounded history of sent action tx signatures to avoid
-/// unbounded memory growth while still preventing near-term duplicate sends.
-const SENT_ACTION_TXS_MAX_ENTRIES: usize = 16_384;
-
-type ActionTxDedupCache = LruCache<Signature, ()>;
-
 pub struct ChainlinkCloner {
     tx_scheduler: TransactionSchedulerHandle,
     block: LatestBlock,
-    sent_action_txs: Arc<Mutex<ActionTxDedupCache>>,
 }
 
 impl ChainlinkCloner {
@@ -99,18 +86,7 @@ impl ChainlinkCloner {
         Self {
             tx_scheduler,
             block,
-            sent_action_txs: Arc::new(Mutex::new(ActionTxDedupCache::new(
-                NonZeroUsize::new(SENT_ACTION_TXS_MAX_ENTRIES)
-                    .expect("SENT_ACTION_TXS_MAX_ENTRIES must be non-zero"),
-            ))),
         }
-    }
-
-    fn lock_sent_action_txs(&self) -> MutexGuard<'_, ActionTxDedupCache> {
-        self.sent_action_txs.lock().unwrap_or_else(|poisoned| {
-            warn!("sent_action_txs mutex poisoned; recovering inner state");
-            poisoned.into_inner()
-        })
     }
 
     // -----------------
@@ -121,14 +97,6 @@ impl ChainlinkCloner {
         let sig = tx.signatures[0];
         self.tx_scheduler.execute(with_encoded(tx)?).await?;
         Ok(sig)
-    }
-
-    async fn send_sanitized_tx(
-        &self,
-        tx: WithEncoded<SanitizedTransaction>,
-    ) -> ClonerResult<()> {
-        self.tx_scheduler.execute(tx).await?;
-        Ok(())
     }
 
     // -----------------
@@ -146,6 +114,35 @@ impl ChainlinkCloner {
         )
     }
 
+    fn transaction_size(tx: &Transaction) -> ClonerResult<usize> {
+        Ok(bincode::serialized_size(tx)?.try_into()?)
+    }
+
+    fn ensure_transaction_fits(
+        pubkey: Pubkey,
+        tx: &Transaction,
+    ) -> ClonerResult<usize> {
+        let tx_size = Self::transaction_size(tx)?;
+        if tx_size > MAX_INLINE_TRANSACTION_SIZE {
+            return Err(ClonerError::CloneTransactionTooLarge {
+                pubkey,
+                size: tx_size,
+                max_size: MAX_INLINE_TRANSACTION_SIZE,
+            });
+        }
+        Ok(tx_size)
+    }
+
+    fn ensure_transactions_fit(
+        pubkey: Pubkey,
+        txs: &[Transaction],
+    ) -> ClonerResult<()> {
+        for tx in txs {
+            Self::ensure_transaction_fits(pubkey, tx)?;
+        }
+        Ok(())
+    }
+
     // -----------------
     // Instruction Builders (delegates to InstructionUtils)
     // -----------------
@@ -154,13 +151,10 @@ impl ChainlinkCloner {
         pubkey: Pubkey,
         data: Vec<u8>,
         fields: AccountCloneFields,
-        actions_tx_sig: Option<Signature>,
+        actions: Vec<Instruction>,
     ) -> Instruction {
         InstructionUtils::clone_account_instruction(
-            pubkey,
-            data,
-            fields,
-            actions_tx_sig,
+            pubkey, data, fields, actions,
         )
     }
 
@@ -169,14 +163,12 @@ impl ChainlinkCloner {
         total_len: u32,
         initial_data: Vec<u8>,
         fields: AccountCloneFields,
-        actions_tx_sig: Option<Signature>,
     ) -> Instruction {
         InstructionUtils::clone_account_init_instruction(
             pubkey,
             total_len,
             initial_data,
             fields,
-            actions_tx_sig,
         )
     }
 
@@ -185,14 +177,25 @@ impl ChainlinkCloner {
         offset: u32,
         data: Vec<u8>,
         is_last: bool,
+        actions: Vec<Instruction>,
     ) -> Instruction {
         InstructionUtils::clone_account_continue_instruction(
-            pubkey, offset, data, is_last,
+            pubkey, offset, data, is_last, actions,
         )
     }
 
     fn cleanup_ix(pubkey: Pubkey) -> Instruction {
         InstructionUtils::cleanup_partial_clone_instruction(pubkey)
+    }
+
+    fn post_delegation_action_ix(
+        delegated_account_pubkey: Pubkey,
+        actions: Vec<Instruction>,
+    ) -> Instruction {
+        InstructionUtils::post_delegation_action_executor_instruction(
+            delegated_account_pubkey,
+            actions,
+        )
     }
 
     fn finalize_program_ix(
@@ -234,14 +237,15 @@ impl ChainlinkCloner {
         &self,
         request: &AccountCloneRequest,
         blockhash: Hash,
-        actions_tx_sig: Option<Signature>,
     ) -> Transaction {
         let fields = Self::clone_fields(request);
+        let actions: Vec<Instruction> =
+            request.delegation_actions.clone().into();
         let clone_ix = Self::clone_ix(
             request.pubkey,
             request.account.data().to_vec(),
             fields,
-            actions_tx_sig,
+            actions.clone(),
         );
 
         // TODO(#625): Re-enable frequency commits when proper limits are in place:
@@ -251,7 +255,10 @@ impl ChainlinkCloner {
         //
         // To re-enable, uncomment the following and use `ixs` instead of `[clone_ix]`:
         // let ixs = self.maybe_add_crank_commits_ix(request, clone_ix);
-        let ixs = vec![clone_ix];
+        let mut ixs = vec![clone_ix];
+        if !actions.is_empty() {
+            ixs.push(Self::post_delegation_action_ix(request.pubkey, actions));
+        }
 
         self.create_signed_tx(&ixs, blockhash)
     }
@@ -288,7 +295,6 @@ impl ChainlinkCloner {
         &self,
         request: &AccountCloneRequest,
         blockhash: Hash,
-        actions_tx_sig: Option<Signature>,
     ) -> Vec<Transaction> {
         let data = request.account.data();
         let fields = Self::clone_fields(request);
@@ -304,9 +310,11 @@ impl ChainlinkCloner {
             data.len() as u32,
             first_chunk,
             fields,
-            actions_tx_sig,
         );
         txs.push(self.create_signed_tx(&[init_ix], blockhash));
+
+        let actions: Vec<Instruction> =
+            request.delegation_actions.clone().into();
 
         // Continue txs for remaining chunks
         let mut offset = MAX_INLINE_DATA_SIZE;
@@ -314,15 +322,32 @@ impl ChainlinkCloner {
             let end = (offset + MAX_INLINE_DATA_SIZE).min(data.len());
             let chunk = data[offset..end].to_vec();
             let is_last = end == data.len();
+            let final_without_actions = is_last && actions.is_empty();
 
             let continue_ix = Self::clone_continue_ix(
                 request.pubkey,
                 offset as u32,
                 chunk,
-                is_last,
+                final_without_actions,
+                Vec::new(),
             );
             txs.push(self.create_signed_tx(&[continue_ix], blockhash));
             offset = end;
+        }
+
+        if !actions.is_empty() {
+            let continue_ix = Self::clone_continue_ix(
+                request.pubkey,
+                data.len() as u32,
+                Vec::new(),
+                true,
+                actions.clone(),
+            );
+            let action_ix =
+                Self::post_delegation_action_ix(request.pubkey, actions);
+            txs.push(
+                self.create_signed_tx(&[continue_ix, action_ix], blockhash),
+            );
         }
 
         txs
@@ -379,7 +404,7 @@ impl ChainlinkCloner {
                 buffer_pubkey,
                 program_data,
                 buffer_fields,
-                None,
+                Vec::new(),
             )];
             ixs.extend(finalize_ixs);
             vec![self.create_signed_tx(&ixs, blockhash)]
@@ -525,7 +550,6 @@ impl ChainlinkCloner {
             total_len,
             first_chunk.to_vec(),
             fields,
-            None,
         );
         let mut txs = vec![self.create_signed_tx(&[init_ix], blockhash)];
 
@@ -540,6 +564,7 @@ impl ChainlinkCloner {
                 offset as u32,
                 chunk.to_vec(),
                 false,
+                Vec::new(),
             );
             txs.push(self.create_signed_tx(&[continue_ix], blockhash));
         }
@@ -551,70 +576,12 @@ impl ChainlinkCloner {
             last_offset as u32,
             last_chunk.to_vec(),
             true,
+            Vec::new(),
         )];
         ixs.extend(finalize_ixs);
         txs.push(self.create_signed_tx(&ixs, blockhash));
 
         txs
-    }
-
-    // -----------------
-    // Lookup Tables
-    // -----------------
-
-    async fn send_actions_tx(
-        &self,
-        actions_tx: Option<WithEncoded<SanitizedTransaction>>,
-    ) -> ClonerResult<Option<()>> {
-        let Some(sanitized_tx) = actions_tx else {
-            return Ok(None);
-        };
-        let action_tx_sig = *sanitized_tx.txn.signature();
-        {
-            let mut sent = self.lock_sent_action_txs();
-            if sent.contains(&action_tx_sig) {
-                warn!(
-                    tx_sig = %action_tx_sig,
-                    "Skipping duplicate post-delegation actions transaction"
-                );
-                return Ok(Some(()));
-            }
-            sent.put(action_tx_sig, ());
-        }
-
-        if let Err(err) = self.send_sanitized_tx(sanitized_tx).await {
-            self.lock_sent_action_txs().pop(&action_tx_sig);
-            debug!(
-                tx_sig = %action_tx_sig,
-                error = ?err,
-                "Failed to execute post-delegation actions transaction"
-            );
-            return Err(err);
-        }
-
-        Ok(Some(()))
-    }
-
-    fn create_actions_tx(
-        &self,
-        actions: &DelegationActions,
-        recent_blockhash: Hash,
-    ) -> ClonerResult<Option<WithEncoded<SanitizedTransaction>>> {
-        if actions.is_empty() {
-            return Ok(None);
-        }
-
-        let mut tx = Transaction::new_with_payer(
-            actions,
-            Some(&validator_authority_id()),
-        );
-        tx.partial_sign(&[&validator_authority()], recent_blockhash);
-        let tx = with_encoded(tx)?;
-        let tx = WithEncoded {
-            encoded: tx.encoded,
-            txn: tx.txn.sanitize(false)?,
-        };
-        Ok(Some(tx))
     }
 }
 
@@ -637,33 +604,34 @@ impl Cloner for ChainlinkCloner {
     ) -> ClonerResult<Signature> {
         let blockhash = self.block.load().blockhash;
         let data_len = request.account.data().len();
-        let actions_tx =
-            self.create_actions_tx(&request.delegation_actions, blockhash)?;
-        let actions_tx_sig = actions_tx.as_ref().map(|tx| *tx.txn.signature());
 
-        // Small account: single tx
         if data_len <= MAX_INLINE_DATA_SIZE {
-            let tx = self.build_small_account_tx(
-                &request,
-                blockhash,
-                actions_tx_sig,
-            );
+            let tx = self.build_small_account_tx(&request, blockhash);
+            let tx_size = Self::transaction_size(&tx)?;
+            if tx_size > MAX_INLINE_TRANSACTION_SIZE
+                && !request.delegation_actions.is_empty()
+            {
+                debug!(
+                    pubkey = %request.pubkey,
+                    data_len,
+                    tx_size,
+                    "Small account clone transaction is too large, using chunked clone"
+                );
+            } else {
+                let signature = self.send_tx(tx).await.map_err(|err| {
+                    ClonerError::FailedToCloneRegularAccount(
+                        request.pubkey,
+                        Box::new(err),
+                    )
+                })?;
 
-            let signature = self.send_tx(tx).await.map_err(|err| {
-                ClonerError::FailedToCloneRegularAccount(
-                    request.pubkey,
-                    Box::new(err),
-                )
-            })?;
-
-            self.send_actions_tx(actions_tx).await?;
-
-            return Ok(signature);
+                return Ok(signature);
+            }
         }
 
         // Large account: multi-tx with cleanup on failure
-        let txs =
-            self.build_large_account_txs(&request, blockhash, actions_tx_sig);
+        let txs = self.build_large_account_txs(&request, blockhash);
+        Self::ensure_transactions_fit(request.pubkey, &txs)?;
 
         let mut last_sig = None;
         for tx in txs {
@@ -680,8 +648,6 @@ impl Cloner for ChainlinkCloner {
                 }
             }
         }
-
-        self.send_actions_tx(actions_tx).await?;
 
         Ok(last_sig.unwrap_or_default())
     }
@@ -733,5 +699,203 @@ impl Cloner for ChainlinkCloner {
         }
 
         Ok(last_sig.unwrap_or_default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use magicblock_chainlink::cloner::DelegationActions;
+    use magicblock_core::link::link;
+    use magicblock_magic_program_api::{
+        instruction::{
+            MagicBlockInstruction, PostDelegationActionExecutorInstruction,
+        },
+        POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
+    };
+    use solana_account::AccountSharedData;
+    use solana_sdk_ids::system_program;
+
+    use super::*;
+
+    fn cloner() -> ChainlinkCloner {
+        magicblock_program::validator::generate_validator_authority_if_needed();
+        let (dispatch, _) = link();
+        ChainlinkCloner::new(
+            dispatch.transaction_scheduler,
+            LatestBlock::default(),
+        )
+    }
+
+    fn request(
+        pubkey: Pubkey,
+        data: Vec<u8>,
+        actions: Vec<Instruction>,
+    ) -> AccountCloneRequest {
+        let mut account =
+            AccountSharedData::new(1_000, data.len(), &system_program::id());
+        account.set_data_from_slice(&data);
+        account.set_delegated(true);
+        AccountCloneRequest {
+            pubkey,
+            account,
+            commit_frequency_ms: None,
+            delegation_actions: DelegationActions::from(actions),
+            delegated_to_other: None,
+        }
+    }
+
+    fn action() -> Instruction {
+        Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![AccountMeta::new(Pubkey::new_unique(), true)],
+            data: vec![1, 2, 3],
+        }
+    }
+
+    fn action_with_data_len(data_len: usize) -> Instruction {
+        Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![AccountMeta::new(Pubkey::new_unique(), true)],
+            data: vec![1; data_len],
+        }
+    }
+
+    fn instruction_program_id(tx: &Transaction, ix_idx: usize) -> Pubkey {
+        let ix = &tx.message().instructions[ix_idx];
+        tx.message().account_keys[ix.program_id_index as usize]
+    }
+
+    fn instruction_data(tx: &Transaction, ix_idx: usize) -> &[u8] {
+        &tx.message().instructions[ix_idx].data
+    }
+
+    #[test]
+    fn transaction_size_matches_bincode_serialized_len() {
+        let pubkey = Pubkey::new_unique();
+        let tx = cloner().build_small_account_tx(
+            &request(pubkey, vec![1, 2, 3], vec![action()]),
+            Hash::default(),
+        );
+
+        assert_eq!(
+            ChainlinkCloner::transaction_size(&tx).unwrap(),
+            bincode::serialize(&tx).unwrap().len()
+        );
+    }
+
+    #[test]
+    fn oversized_chunked_action_transaction_fails_preflight() {
+        let pubkey = Pubkey::new_unique();
+        let actions =
+            vec![action_with_data_len(MAX_INLINE_TRANSACTION_SIZE / 2 + 1024)];
+        let txs = cloner().build_large_account_txs(
+            &request(pubkey, vec![1, 2, 3], actions),
+            Hash::default(),
+        );
+        let final_tx_size =
+            ChainlinkCloner::transaction_size(txs.last().unwrap()).unwrap();
+
+        assert!(final_tx_size > MAX_INLINE_TRANSACTION_SIZE);
+
+        let err =
+            ChainlinkCloner::ensure_transactions_fit(pubkey, &txs).unwrap_err();
+        match err {
+            ClonerError::CloneTransactionTooLarge {
+                pubkey: err_pubkey,
+                size,
+                max_size,
+            } => {
+                assert_eq!(err_pubkey, pubkey);
+                assert_eq!(size, final_tx_size);
+                assert_eq!(max_size, MAX_INLINE_TRANSACTION_SIZE);
+            }
+            err => panic!("unexpected error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn small_delegated_clone_with_actions_emits_executor_sibling() {
+        let pubkey = Pubkey::new_unique();
+        let actions = vec![action()];
+        let tx = cloner().build_small_account_tx(
+            &request(pubkey, vec![1, 2, 3], actions.clone()),
+            Hash::default(),
+        );
+
+        assert_eq!(tx.message().instructions.len(), 2);
+        assert_eq!(instruction_program_id(&tx, 0), magicblock_program::ID);
+        assert_eq!(
+            instruction_program_id(&tx, 1),
+            POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID
+        );
+
+        match bincode::deserialize(instruction_data(&tx, 0)).unwrap() {
+            MagicBlockInstruction::CloneAccount {
+                pubkey: clone_pubkey,
+                actions: clone_actions,
+                fields,
+                ..
+            } => {
+                assert_eq!(clone_pubkey, pubkey);
+                assert!(fields.delegated);
+                assert_eq!(clone_actions, actions);
+            }
+            _ => panic!("expected clone account instruction"),
+        }
+        match bincode::deserialize(instruction_data(&tx, 1)).unwrap() {
+            PostDelegationActionExecutorInstruction::Execute {
+                cloned_account_pubkey: executor_pubkey,
+                actions: executor_actions,
+            } => {
+                assert_eq!(executor_pubkey, pubkey);
+                assert_eq!(executor_actions, actions);
+            }
+        }
+    }
+
+    #[test]
+    fn large_delegated_clone_with_actions_uses_empty_final_continue_then_executor(
+    ) {
+        let pubkey = Pubkey::new_unique();
+        let actions = vec![action()];
+        let data = vec![7; MAX_INLINE_DATA_SIZE + 1];
+        let txs = cloner().build_large_account_txs(
+            &request(pubkey, data, actions.clone()),
+            Hash::default(),
+        );
+
+        let final_tx = txs.last().unwrap();
+        assert_eq!(final_tx.message().instructions.len(), 2);
+        assert_eq!(instruction_program_id(final_tx, 0), magicblock_program::ID);
+        assert_eq!(
+            instruction_program_id(final_tx, 1),
+            POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID
+        );
+
+        match bincode::deserialize(instruction_data(final_tx, 0)).unwrap() {
+            MagicBlockInstruction::CloneAccountContinue {
+                pubkey: continue_pubkey,
+                offset,
+                data,
+                is_last,
+                actions: continue_actions,
+            } => {
+                assert_eq!(continue_pubkey, pubkey);
+                assert_eq!(offset, (MAX_INLINE_DATA_SIZE + 1) as u32);
+                assert!(data.is_empty());
+                assert!(is_last);
+                assert_eq!(continue_actions, actions);
+            }
+            _ => panic!("expected clone account continue instruction"),
+        }
+        match bincode::deserialize(instruction_data(final_tx, 1)).unwrap() {
+            PostDelegationActionExecutorInstruction::Execute {
+                cloned_account_pubkey: executor_pubkey,
+                actions: executor_actions,
+            } => {
+                assert_eq!(executor_pubkey, pubkey);
+                assert_eq!(executor_actions, actions);
+            }
+        }
     }
 }

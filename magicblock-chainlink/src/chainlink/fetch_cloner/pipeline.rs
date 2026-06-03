@@ -28,6 +28,7 @@ use crate::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
             LOADER_V3,
         },
+        pubsub_common::is_internal_dlp_account_data,
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         RemoteAccountUpdateSource, ResolvedAccount, SubscriptionReason,
     },
@@ -371,6 +372,8 @@ where
                     };
 
                     (commit_freq, delegated_to_other, delegation_actions)
+                } else if is_internal_dlp_account_data(account.data()) {
+                    (None, None, DelegationActions::default())
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
@@ -563,7 +566,7 @@ where
                 (errors, successes)
             }
         }
-        Err(err) => (vec![ChainlinkError::from(err)], vec![]),
+        Err(err) => (vec![err.into()], vec![]),
     };
 
     let mut loaded_programs = vec![];
@@ -730,7 +733,7 @@ pub(crate) async fn clone_accounts_and_programs<T, U, V, C, P>(
     loaded_programs: Vec<
         crate::remote_account_provider::program_account::LoadedProgram,
     >,
-) -> ClonerResult<()>
+) -> ChainlinkResult<()>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -765,8 +768,8 @@ where
         .into_iter()
         .collect::<ClonerResult<Vec<_>>>()?;
 
-    // 2) Clone accounts without post-delegation actions first so all action
-    // dependencies are materialized in the bank before action tx execution.
+    // 2) Clone accounts without post-delegation actions first so common action
+    // dependencies are materialized before action-bearing clone instructions.
     let (accounts_with_actions, accounts_without_actions): (Vec<_>, Vec<_>) =
         accounts_to_clone
             .into_iter()
@@ -785,16 +788,18 @@ where
 
         let this_clone = this.clone();
         accounts_join_set.spawn(async move {
-            this_clone.clone_account_with_ownership(request).await
+            this_clone
+                .clone_account_with_post_delegation_action_invariants(request)
+                .await
         });
     }
     accounts_join_set
         .join_all()
         .await
         .into_iter()
-        .collect::<ClonerResult<Vec<_>>>()?;
+        .collect::<ChainlinkResult<Vec<_>>>()?;
 
-    // 3) Finally clone accounts that carry post-delegation actions.
+    // 3) Finally clone accounts that carry embedded post-delegation actions.
     let mut action_accounts_join_set = JoinSet::new();
     for request in accounts_with_actions {
         if tracing::enabled!(tracing::Level::TRACE) {
@@ -808,14 +813,16 @@ where
 
         let this_clone = this.clone();
         action_accounts_join_set.spawn(async move {
-            this_clone.clone_account_with_ownership(request).await
+            this_clone
+                .clone_account_with_post_delegation_action_invariants(request)
+                .await
         });
     }
     action_accounts_join_set
         .join_all()
         .await
         .into_iter()
-        .collect::<ClonerResult<Vec<_>>>()?;
+        .collect::<ChainlinkResult<Vec<_>>>()?;
 
     Ok(())
 }

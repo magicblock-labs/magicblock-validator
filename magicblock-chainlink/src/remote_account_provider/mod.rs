@@ -67,12 +67,12 @@ mod tests;
 
 pub use endpoint::{Endpoint, Endpoints};
 use magicblock_metrics::metrics::{
-    self, inc_account_fetches_found, inc_account_fetches_not_found,
-    inc_account_fetches_success, inc_compressed_account_fetches_found,
+    self, inc_account_fetches_failed, inc_account_fetches_found,
+    inc_account_fetches_not_found, inc_account_fetches_success,
+    inc_compressed_account_fetches_found,
     inc_compressed_account_fetches_not_found,
-    inc_compressed_account_fetches_success,
-    inc_per_program_account_fetch_stats, set_monitored_accounts_count,
-    AccountFetchOrigin, ProgramFetchResult,
+    inc_compressed_account_fetches_success, set_monitored_accounts_count,
+    AccountFetchOrigin,
 };
 use remote_account::{
     is_synthetic_mark_empty_fresh,
@@ -1041,7 +1041,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         pubkey: Pubkey,
         fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], None, fetch_origin, None, None)
+        self.try_get_multi(&[pubkey], None, fetch_origin, None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -1060,7 +1060,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
         let mut remote_accounts = self
-            .try_get_multi(pubkeys, None, fetch_origin, None, None)
+            .try_get_multi(pubkeys, None, fetch_origin, None)
             .await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
@@ -1184,13 +1184,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     /// Gets the accounts for the given pubkeys by fetching from RPC.
     /// Always fetches fresh data. FetchCloner handles request deduplication.
     /// Subscribes first to catch any updates that arrive during fetch.
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids))]
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found))]
     pub async fn try_get_multi(
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
         fetch_start_slot: Option<u64>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
@@ -1276,7 +1275,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 mark_empty_if_not_found,
                 min_context_slot,
                 fetch_origin,
-                program_ids,
             );
         }
 
@@ -1931,14 +1929,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         mark_empty_if_not_found: Option<&[Pubkey]>,
         min_context_slot: u64,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) {
         let rpc_client = self.rpc_client.clone();
         let photon_client = self.photon_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
-        let program_ids = program_ids.map(|ids| ids.to_vec());
         tokio::spawn(async move {
             let results = if let Some(photon_client) = photon_client {
                 let (rpc_accounts, photon_accounts) = tokio::join!(
@@ -1995,6 +1991,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                         compressed_not_found_count += nfc;
                     }
                     Err(err) => {
+                        inc_account_fetches_failed(pubkeys.len() as u64);
                         error!("Failed to fetch accounts: {err:?}");
                         fetch_errors.push(err.to_string());
                     }
@@ -2090,26 +2087,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     fetch_origin,
                     compressed_not_found_count,
                 );
-            }
-
-            // Record per-program metrics if programs were provided
-            if let Some(program_ids) = &program_ids {
-                for program_id in program_ids {
-                    if found_cnt > 0 {
-                        inc_per_program_account_fetch_stats(
-                            &program_id.to_string(),
-                            ProgramFetchResult::Found,
-                            found_cnt,
-                        );
-                    }
-                    if not_found_cnt > 0 {
-                        inc_per_program_account_fetch_stats(
-                            &program_id.to_string(),
-                            ProgramFetchResult::NotFound,
-                            not_found_cnt,
-                        );
-                    }
-                }
             }
 
             if tracing::enabled!(tracing::Level::TRACE) {

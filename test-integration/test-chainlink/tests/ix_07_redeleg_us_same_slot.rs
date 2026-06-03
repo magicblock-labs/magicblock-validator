@@ -34,12 +34,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot() {
         info!("1. Account delegated to us");
 
         ctx.chainlink
-            .ensure_accounts(
-                &pubkeys,
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
+            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
             .await
             .unwrap();
         sleep_ms(1_500).await;
@@ -115,7 +110,6 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot_compressed() {
                 &pubkeys,
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
             .unwrap();

@@ -2,9 +2,14 @@
 
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::instruction::AccountCloneFields;
+use magicblock_magic_program_api::{
+    instruction::{
+        AccountCloneFields, PostDelegationActionExecutorInstruction,
+    },
+    POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
+};
 use solana_account::{ReadableAccount, WritableAccount};
-use solana_instruction::error::InstructionError;
+use solana_instruction::{error::InstructionError, Instruction};
 use solana_loader_v4_interface::state::LoaderV4State;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -15,7 +20,9 @@ use solana_transaction_context::{
 };
 
 use crate::{
-    errors::MagicBlockProgramError, validator::effective_validator_authority_id,
+    errors::MagicBlockProgramError,
+    utils::instruction_sysvar,
+    validator::{effective_validator_authority_id, validator_authority_id},
 };
 
 /// Converts a LoaderV4State reference to a byte slice.
@@ -169,6 +176,163 @@ pub fn adjust_authority_lamports(
     Ok(())
 }
 
+const INSTRUCTIONS_SYSVAR_IDX: u16 = 2;
+
+pub fn validate_post_delegation_action_sibling(
+    invoke_context: &mut InvokeContext,
+    pubkey: &Pubkey,
+    delegated_target: bool,
+    actions: &[Instruction],
+) -> Result<(), InstructionError> {
+    validate_post_delegation_actions_payload(
+        invoke_context,
+        pubkey,
+        delegated_target,
+        actions,
+    )?;
+
+    let mut sysvar_data = load_instructions_sysvar_data(invoke_context)?;
+    let current_index =
+        instruction_sysvar::load_current_index(&mut sysvar_data)?;
+    let next_instruction = instruction_sysvar::load_instruction_at(
+        &mut sysvar_data,
+        current_index.saturating_add(1),
+    )
+    .map_err(|_| -> InstructionError {
+        ic_msg!(
+            invoke_context,
+            "Post-delegation action executor missing after clone for {}",
+            pubkey
+        );
+        MagicBlockProgramError::PostDelegationActionExecutorMissing.into()
+    })?;
+
+    if next_instruction.program_id != POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID
+    {
+        ic_msg!(
+            invoke_context,
+            "Post-delegation action executor mismatch after clone for {}",
+            pubkey
+        );
+        return Err(
+            MagicBlockProgramError::PostDelegationActionExecutorMismatch.into(),
+        );
+    }
+
+    let instruction: PostDelegationActionExecutorInstruction =
+        bincode::deserialize(&next_instruction.data)
+            .map_err(|_| InstructionError::InvalidInstructionData)?;
+    match instruction {
+        PostDelegationActionExecutorInstruction::Execute {
+            cloned_account_pubkey: next_pubkey,
+            actions: next_actions,
+        } if next_pubkey == *pubkey && next_actions == actions => Ok(()),
+        _ => {
+            ic_msg!(
+                invoke_context,
+                "Post-delegation action executor payload mismatch for {}",
+                pubkey
+            );
+            Err(MagicBlockProgramError::PostDelegationActionExecutorMismatch
+                .into())
+        }
+    }
+}
+
+pub fn validate_post_delegation_actions_payload(
+    invoke_context: &mut InvokeContext,
+    pubkey: &Pubkey,
+    delegated_target: bool,
+    actions: &[Instruction],
+) -> Result<(), InstructionError> {
+    if actions.is_empty() {
+        return Ok(());
+    }
+    if !delegated_target {
+        ic_msg!(
+            invoke_context,
+            "Post-delegation actions require delegated clone target {}",
+            pubkey
+        );
+        return Err(
+            MagicBlockProgramError::PostDelegationActionsRequireDelegatedClone
+                .into(),
+        );
+    }
+
+    let validator_authority = validator_authority_id();
+    let effective_validator_authority = effective_validator_authority_id();
+    for action in actions {
+        let signers = post_delegation_action_signers(action);
+        if signers.contains(&validator_authority)
+            || signers.contains(&effective_validator_authority)
+        {
+            ic_msg!(
+                invoke_context,
+                "Post-delegation action for {} uses validator authority as signer",
+                pubkey
+            );
+            return Err(
+                MagicBlockProgramError::PostDelegationActionUsesValidatorAuthority
+                    .into(),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+pub fn execute_post_delegation_actions(
+    invoke_context: &mut InvokeContext,
+    pubkey: &Pubkey,
+    delegated_target: bool,
+    actions: Vec<Instruction>,
+) -> Result<(), InstructionError> {
+    validate_post_delegation_actions_payload(
+        invoke_context,
+        pubkey,
+        delegated_target,
+        &actions,
+    )?;
+    for action in actions {
+        let signers = post_delegation_action_signers(&action);
+        invoke_context.native_invoke(action, &signers)?;
+    }
+    Ok(())
+}
+
+pub fn load_instructions_sysvar_data(
+    invoke_context: &mut InvokeContext,
+) -> Result<Vec<u8>, InstructionError> {
+    let transaction_context = &invoke_context.transaction_context;
+    let ctx = transaction_context.get_current_instruction_context()?;
+    let tx_idx = ctx.get_index_of_instruction_account_in_transaction(
+        INSTRUCTIONS_SYSVAR_IDX,
+    )?;
+    let key = transaction_context.get_key_of_account_at_index(tx_idx)?;
+    if key != &solana_sdk_ids::sysvar::instructions::id() {
+        ic_msg!(
+            invoke_context,
+            "Instructions sysvar account missing at index {}",
+            INSTRUCTIONS_SYSVAR_IDX
+        );
+        return Err(InstructionError::UnsupportedSysvar);
+    }
+    Ok(transaction_context
+        .accounts()
+        .try_borrow(tx_idx)?
+        .data()
+        .to_vec())
+}
+
+fn post_delegation_action_signers(action: &Instruction) -> Vec<Pubkey> {
+    action
+        .accounts
+        .iter()
+        .filter_map(|account| account.is_signer.then_some(account.pubkey))
+        .collect()
+}
+
 /// Closes a buffer/temporary account by resetting it to default state.
 /// The account will be removed from accountsdb due to the ephemeral flag.
 pub fn close_buffer_account(mut acc: AccountRefMut<'_>) {
@@ -206,6 +370,7 @@ pub fn minimum_balance(
 /// Sets account fields from AccountCloneFields and data.
 pub fn set_account_from_fields(
     invoke_context: &InvokeContext,
+    pubkey: &Pubkey,
     mut acc: AccountRefMut<'_>,
     data: &[u8],
     fields: &AccountCloneFields,
@@ -236,23 +401,21 @@ pub fn set_account_from_fields(
         acc.data().len()
     );
 
-    // In the same slot, we do not expect an account to be delegated,
-    // undelegated and then delegated. So if we see the same account being
-    // delegated twice (ore more) in the same slot, we consider such cases
-    // as "duplicates". A delegated clone is still allowed to override a
-    // same-slot plain clone, which can happen when an eATA projection catches
-    // up after the underlying ATA was cloned without delegation metadata.
-    //
-    // Under current design, we clone with "CONFIRMED" commitment and thus:
-    //
-    //  - [delegation -> undelegation -> delegation] is currently not possible in the same tx.
-    //    - though [undelegation -> delegation] is still possible though unlikely and allowed by
-    //    design.
-    //
-    // Given this, same slot re-delegation is impossible therefore this this totally acceptable.
-    //
+    // A delegated clone is still allowed to override a plain clone, which can
+    // happen when an eATA projection catches up after the underlying ATA was
+    // cloned without delegation metadata. Same-slot delegated refreshes over an
+    // already delegated/undelegating target would re-run post-delegation actions
+    // for the same delegation event and are rejected.
     if fields.delegated
-        && acc.delegated()
+        && fields.owner == dlp_api::id()
+        && !is_validator_magic_fee_vault(pubkey)
+    {
+        return Err(
+            MagicBlockProgramError::DelegatedCloneOwnerIsDelegationProgram
+                .into(),
+        );
+    } else if fields.delegated
+        && (acc.delegated() || acc.undelegating())
         && acc.remote_slot() == fields.remote_slot
     {
         return Err(
@@ -273,4 +436,11 @@ pub fn set_account_from_fields(
     acc.set_undelegating(false);
 
     Ok(())
+}
+
+fn is_validator_magic_fee_vault(pubkey: &Pubkey) -> bool {
+    pubkey
+        == &dlp_api::pda::magic_fee_vault_pda_from_validator(
+            &validator_authority_id(),
+        )
 }

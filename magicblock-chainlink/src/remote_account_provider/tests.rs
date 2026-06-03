@@ -182,7 +182,6 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
                     None,
                     AccountFetchOrigin::GetAccount,
                     None,
-                    None,
                 )
                 .await
         }
@@ -205,13 +204,7 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
 
     _pubsub_client.try_reconnect().await.unwrap();
     let retry = provider
-        .try_get_multi(
-            &[pubkey],
-            None,
-            AccountFetchOrigin::GetAccount,
-            None,
-            None,
-        )
+        .try_get_multi(&[pubkey], None, AccountFetchOrigin::GetAccount, None)
         .await
         .expect("retry after cleanup should succeed");
     assert_eq!(retry.len(), 1);
@@ -246,7 +239,6 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
                     None,
                     AccountFetchOrigin::GetAccount,
                     None,
-                    None,
                 )
                 .await
         }
@@ -263,7 +255,6 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
                     &[pubkey],
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                     None,
                 )
                 .await
@@ -822,7 +813,6 @@ async fn test_try_get_multi_owner_success_cleans_up_pending_entry() {
                     &[pubkey],
                     None,
                     AccountFetchOrigin::GetAccount,
-                    None,
                     None,
                 )
                 .await

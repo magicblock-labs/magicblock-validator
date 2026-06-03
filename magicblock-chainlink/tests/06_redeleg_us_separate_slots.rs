@@ -210,7 +210,6 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots_compressed() {
                 &[pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
             .unwrap();

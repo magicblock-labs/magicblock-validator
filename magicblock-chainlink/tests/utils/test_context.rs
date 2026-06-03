@@ -227,7 +227,6 @@ impl TestContext {
                 &[*pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
     }

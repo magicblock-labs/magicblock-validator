@@ -479,6 +479,10 @@ impl MagicValidator {
                     .compression
                     .as_ref()
                     .and_then(|compression| compression.photon_url.clone()),
+                websocket_uri: config
+                    .websocket_urls()
+                    .next()
+                    .map(ToOwned::to_owned),
                 commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,

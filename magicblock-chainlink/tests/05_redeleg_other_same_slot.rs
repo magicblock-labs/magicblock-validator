@@ -181,7 +181,6 @@ async fn test_undelegate_redelegate_to_other_in_same_slot_compressed() {
                 &[pubkey],
                 None,
                 AccountFetchOrigin::GetMultipleAccounts,
-                None,
             )
             .await
             .unwrap();

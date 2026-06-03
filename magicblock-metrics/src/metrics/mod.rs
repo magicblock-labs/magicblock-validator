@@ -7,7 +7,6 @@ use prometheus::{
 };
 pub use types::{
     AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
-    ProgramFetchResult,
 };
 
 mod types;
@@ -438,6 +437,31 @@ lazy_static::lazy_static! {
         "table_mania_closed_a_count", "Get account counter"
     ).unwrap();
 
+    static ref RPC_CLIENT_SIGNATURE_WS_SUBSCRIBE_COUNT: IntCounter = IntCounter::new(
+        "rpc_client_signature_ws_subscribe_count",
+        "Number of signatureSubscribe registrations created by MagicblockRpcClient"
+    ).unwrap();
+
+    static ref RPC_CLIENT_SIGNATURE_WS_NOTIFICATION_COUNT: IntCounter = IntCounter::new(
+        "rpc_client_signature_ws_notification_count",
+        "Number of signatureSubscribe notifications received by MagicblockRpcClient"
+    ).unwrap();
+
+    static ref RPC_CLIENT_SIGNATURE_WS_FALLBACK_COUNT: IntCounter = IntCounter::new(
+        "rpc_client_signature_ws_fallback_count",
+        "Number of signature confirmations that fell back to batched polling"
+    ).unwrap();
+
+    static ref RPC_CLIENT_SIGNATURE_STATUS_BATCH_COUNT: IntCounter = IntCounter::new(
+        "rpc_client_signature_status_batch_count",
+        "Number of batched getSignatureStatuses requests sent by MagicblockRpcClient"
+    ).unwrap();
+
+    static ref RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT: IntCounter = IntCounter::new(
+        "rpc_client_signature_status_batch_signatures_count",
+        "Number of signatures included in batched getSignatureStatuses requests"
+    ).unwrap();
+
 
     static ref COMMITTOR_INTENT_TASK_PREPARATION_TIME: HistogramVec = HistogramVec::new(
         HistogramOpts::new(
@@ -642,7 +666,6 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
-        register!(PER_PROGRAM_ACCOUNT_FETCH_STATS);
         register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
@@ -655,6 +678,11 @@ pub(crate) fn register() {
         register!(TASK_INFO_FETCHER_RETIRING_GAUGE);
         register!(TABLE_MANIA_A_COUNT);
         register!(TABLE_MANIA_CLOSED_A_COUNT);
+        register!(RPC_CLIENT_SIGNATURE_WS_SUBSCRIBE_COUNT);
+        register!(RPC_CLIENT_SIGNATURE_WS_NOTIFICATION_COUNT);
+        register!(RPC_CLIENT_SIGNATURE_WS_FALLBACK_COUNT);
+        register!(RPC_CLIENT_SIGNATURE_STATUS_BATCH_COUNT);
+        register!(RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT);
         register!(CONNECTED_PUBSUB_CLIENTS_GAUGE);
         register!(CONNECTED_DIRECT_PUBSUB_CLIENTS_GAUGE);
         register!(PUBSUB_CLIENT_UPTIME_GAUGE);
@@ -909,16 +937,6 @@ pub fn inc_account_subscription_activations_count(client_id: &impl LabelValue) {
         .inc();
 }
 
-pub fn inc_per_program_account_fetch_stats(
-    program_id: &str,
-    result: ProgramFetchResult,
-    count: u64,
-) {
-    PER_PROGRAM_ACCOUNT_FETCH_STATS
-        .with_label_values(&[program_id, result.value()])
-        .inc_by(count);
-}
-
 pub fn inc_per_program_account_updates_count(
     client_id: &str,
     program_id: &str,
@@ -958,6 +976,26 @@ pub fn inc_table_mania_a_count() {
 
 pub fn inc_table_mania_close_a_count() {
     TABLE_MANIA_CLOSED_A_COUNT.inc()
+}
+
+pub fn inc_rpc_client_signature_ws_subscribe_count() {
+    RPC_CLIENT_SIGNATURE_WS_SUBSCRIBE_COUNT.inc()
+}
+
+pub fn inc_rpc_client_signature_ws_notification_count() {
+    RPC_CLIENT_SIGNATURE_WS_NOTIFICATION_COUNT.inc()
+}
+
+pub fn inc_rpc_client_signature_ws_fallback_count() {
+    RPC_CLIENT_SIGNATURE_WS_FALLBACK_COUNT.inc()
+}
+
+pub fn inc_rpc_client_signature_status_batch_count() {
+    RPC_CLIENT_SIGNATURE_STATUS_BATCH_COUNT.inc()
+}
+
+pub fn inc_rpc_client_signature_status_batch_signatures_count(count: u64) {
+    RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT.inc_by(count)
 }
 
 pub fn set_connected_pubsub_clients_count(count: usize) {

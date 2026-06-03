@@ -223,12 +223,7 @@ impl TestContext {
         pubkey: &Pubkey,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         self.chainlink
-            .ensure_accounts(
-                &[*pubkey],
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
+            .ensure_accounts(&[*pubkey], None, AccountFetchOrigin::GetAccount)
             .await
     }
 

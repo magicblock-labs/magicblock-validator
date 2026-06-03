@@ -243,6 +243,13 @@ impl RemoteAccount {
         account_shared_data.set_remote_slot(slot);
         account_shared_data
             .set_compressed(source == RemoteAccountUpdateSource::Compressed);
+        Self::from_fresh_account_shared_data(account_shared_data, source)
+    }
+
+    pub(crate) fn from_fresh_account_shared_data(
+        account_shared_data: AccountSharedData,
+        source: RemoteAccountUpdateSource,
+    ) -> Self {
         RemoteAccount::Found(RemoteAccountState {
             account: ResolvedAccount::Fresh(account_shared_data),
             source,

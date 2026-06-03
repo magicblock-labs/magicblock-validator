@@ -2,11 +2,13 @@
 
 use std::collections::HashMap;
 
-use magicblock_magic_program_api::instruction::{
-    AccountCloneFields, MagicBlockInstruction,
+use magicblock_magic_program_api::{
+    args::ScheduleTaskArgs,
+    instruction::{AccountCloneFields, MagicBlockInstruction},
 };
 use solana_account::{AccountSharedData, ReadableAccount};
-use solana_instruction::{error::InstructionError, AccountMeta};
+use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
+use solana_sdk_ids::system_program;
 use test_kit::init_logger;
 
 use super::*;
@@ -37,6 +39,102 @@ fn setup_with_account(
     map.insert(pubkey, account);
     ensure_started_validator(&mut map, None);
     map
+}
+
+fn schedule_task_action(payer: Pubkey) -> Instruction {
+    InstructionUtils::schedule_task_instruction(
+        &payer,
+        ScheduleTaskArgs {
+            task_id: 1,
+            execution_interval_millis: 1,
+            iterations: 1,
+            instructions: vec![InstructionUtils::noop_instruction(0)],
+        },
+    )
+}
+
+#[test]
+fn test_post_delegation_executor_target_is_writable_only_for_writable_action() {
+    crate::validator::generate_validator_authority_if_needed();
+    let pubkey = Pubkey::new_unique();
+    let readonly_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            pubkey,
+            vec![],
+        );
+    let readonly_target = readonly_ix
+        .accounts
+        .iter()
+        .find(|account| account.pubkey == pubkey)
+        .unwrap();
+    assert!(!readonly_target.is_writable);
+
+    let action = Instruction {
+        program_id: Pubkey::new_unique(),
+        accounts: vec![AccountMeta::new(pubkey, false)],
+        data: vec![],
+    };
+    let writable_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            pubkey,
+            vec![action],
+        );
+    let writable_target = writable_ix
+        .accounts
+        .iter()
+        .find(|account| account.pubkey == pubkey)
+        .unwrap();
+    assert!(writable_target.is_writable);
+}
+
+fn instructions_sysvar_data(
+    instructions: &[Instruction],
+    current_index: u16,
+) -> Vec<u8> {
+    let mut data = Vec::new();
+    push_u16(&mut data, instructions.len() as u16);
+    data.resize(2 + instructions.len() * 2, 0);
+
+    for (idx, instruction) in instructions.iter().enumerate() {
+        let start = data.len() as u16;
+        let offset = 2 + idx * 2;
+        data[offset..offset + 2].copy_from_slice(&start.to_le_bytes());
+
+        push_u16(&mut data, instruction.accounts.len() as u16);
+        for account in &instruction.accounts {
+            let mut flags = 0u8;
+            if account.is_signer {
+                flags |= 1;
+            }
+            if account.is_writable {
+                flags |= 1 << 1;
+            }
+            data.push(flags);
+            data.extend_from_slice(account.pubkey.as_ref());
+        }
+        data.extend_from_slice(instruction.program_id.as_ref());
+        push_u16(&mut data, instruction.data.len() as u16);
+        data.extend_from_slice(&instruction.data);
+    }
+
+    data.extend_from_slice(&current_index.to_le_bytes());
+    data
+}
+
+fn push_u16(data: &mut Vec<u8>, value: u16) {
+    data.extend_from_slice(&value.to_le_bytes());
+}
+
+fn insert_instructions_sysvar(
+    accounts: &mut HashMap<Pubkey, AccountSharedData>,
+    instructions: &[Instruction],
+    current_index: u16,
+) {
+    let data = instructions_sysvar_data(instructions, current_index);
+    let mut account =
+        AccountSharedData::new(1, data.len(), &solana_sdk_ids::sysvar::id());
+    account.set_data_from_slice(&data);
+    accounts.insert(solana_sdk_ids::sysvar::instructions::id(), account);
 }
 
 // Build transaction_accounts in instruction order (matching ix.accounts)
@@ -75,7 +173,7 @@ fn test_rejects_wrong_signer_pubkey() {
             pubkey,
             data: vec![],
             fields: clone_fields(200, 0),
-            actions_tx_sig: None,
+            actions: Vec::new(),
         },
         vec![
             AccountMeta::new(wrong_signer, true), // wrong signer!
@@ -110,7 +208,7 @@ fn test_clone_account_basic() {
         pubkey,
         vec![1, 2, 3],
         fields,
-        None,
+        Vec::new(),
     );
 
     let mut result = process_instruction(
@@ -142,7 +240,7 @@ fn test_clone_account_rejects_stale_slot() {
         pubkey,
         vec![],
         clone_fields(200, 50), // slot 50 < current 100
-        None,
+        Vec::new(),
     );
 
     process_instruction(
@@ -166,7 +264,7 @@ fn test_clone_account_allows_same_slot_delegated_update_over_plain_account() {
         pubkey,
         vec![],
         fields,
-        None,
+        Vec::new(),
     );
 
     let mut result = process_instruction(
@@ -181,6 +279,67 @@ fn test_clone_account_allows_same_slot_delegated_update_over_plain_account() {
     assert_eq!(account.lamports(), 200);
     assert!(account.delegated());
     assert_eq!(account.remote_slot(), 42);
+}
+
+#[test]
+fn test_clone_account_rejects_delegated_clone_owned_by_delegation_program() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let accounts = setup_with_account(pubkey, 100, 42);
+
+    let mut fields = clone_fields(200, 43);
+    fields.delegated = true;
+    fields.owner = dlp_api::id();
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        fields,
+        Vec::new(),
+    );
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(
+            MagicBlockProgramError::DelegatedCloneOwnerIsDelegationProgram
+                .into(),
+        ),
+    );
+}
+
+#[test]
+fn test_clone_account_allows_delegated_magic_fee_vault_owned_by_delegation_program(
+) {
+    init_logger!();
+    crate::validator::generate_validator_authority_if_needed();
+    let pubkey = crate::schedule_transactions::magic_fee_vault_pubkey();
+    let accounts = setup_with_account(pubkey, 100, 42);
+
+    let mut fields = clone_fields(200, 43);
+    fields.delegated = true;
+    fields.owner = dlp_api::id();
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        fields,
+        Vec::new(),
+    );
+
+    let mut result = process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Ok(()),
+    );
+    result.drain(0..1);
+    let account = result.drain(0..1).next().unwrap();
+
+    assert_eq!(account.owner(), &dlp_api::id());
+    assert!(account.delegated());
+    assert_eq!(account.remote_slot(), 43);
 }
 
 #[test]
@@ -202,7 +361,7 @@ fn test_clone_account_rejects_same_slot_duplicate_delegated_update() {
         pubkey,
         vec![],
         fields,
-        None,
+        Vec::new(),
     );
 
     process_instruction(
@@ -211,6 +370,43 @@ fn test_clone_account_rejects_same_slot_duplicate_delegated_update() {
         ix.accounts,
         Err(MagicBlockProgramError::DuplicateDelegatedAccountClone.into()),
     );
+}
+
+#[test]
+fn test_clone_account_allows_newer_slot_delegated_clone_over_undelegating_target(
+) {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let mut account = AccountSharedData::new(100, 0, &pubkey);
+    account.set_undelegating(true);
+    account.set_remote_slot(42);
+    let mut accounts = HashMap::new();
+    accounts.insert(pubkey, account);
+    ensure_started_validator(&mut accounts, None);
+
+    let mut fields = clone_fields(200, 43);
+    fields.delegated = true;
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        fields,
+        Vec::new(),
+    );
+
+    let mut result = process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Ok(()),
+    );
+    result.drain(0..1);
+    let account = result.drain(0..1).next().unwrap();
+
+    assert_eq!(account.lamports(), 200);
+    assert!(account.delegated());
+    assert!(!account.undelegating());
+    assert_eq!(account.remote_slot(), 43);
 }
 
 #[test]
@@ -227,7 +423,7 @@ fn test_clone_account_rejects_delegated_account() {
         pubkey,
         vec![],
         clone_fields(200, 0),
-        None,
+        Vec::new(),
     );
 
     process_instruction(
@@ -252,7 +448,7 @@ fn test_clone_account_rejects_ephemeral_account() {
         pubkey,
         vec![],
         clone_fields(200, 0),
-        None,
+        Vec::new(),
     );
 
     process_instruction(
@@ -273,7 +469,7 @@ fn test_clone_account_adjusts_authority_lamports() {
         pubkey,
         vec![],
         clone_fields(300, 0),
-        None,
+        Vec::new(),
     );
     let mut result = process_instruction(
         &ix.data,
@@ -284,6 +480,139 @@ fn test_clone_account_adjusts_authority_lamports() {
 
     let authority = result.drain(0..1).next().unwrap();
     assert_eq!(authority.lamports(), AUTHORITY_BALANCE - 200); // 300 - 100 delta
+}
+
+#[test]
+fn test_clone_account_with_actions_requires_matching_executor() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let mut accounts = setup_with_account(pubkey, 100, 0);
+    accounts.insert(
+        payer,
+        AccountSharedData::new(1_000_000, 0, &system_program::id()),
+    );
+
+    let mut fields = clone_fields(200, 1);
+    fields.delegated = true;
+    let actions = vec![schedule_task_action(payer)];
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        fields,
+        actions.clone(),
+    );
+    let executor_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            pubkey, actions,
+        );
+    insert_instructions_sysvar(&mut accounts, &[ix.clone(), executor_ix], 0);
+
+    assert!(ix
+        .accounts
+        .iter()
+        .any(|account| account.pubkey == payer && !account.is_signer));
+
+    let mut result = process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Ok(()),
+    );
+    result.drain(0..1);
+    let account = result.drain(0..1).next().unwrap();
+    assert!(account.delegated());
+    assert_eq!(account.lamports(), 200);
+}
+
+#[test]
+fn test_clone_account_rejects_actions_without_executor() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let mut accounts = setup_with_account(pubkey, 100, 0);
+    accounts.insert(
+        payer,
+        AccountSharedData::new(1_000_000, 0, &system_program::id()),
+    );
+
+    let mut fields = clone_fields(200, 1);
+    fields.delegated = true;
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        fields,
+        vec![schedule_task_action(payer)],
+    );
+    insert_instructions_sysvar(&mut accounts, std::slice::from_ref(&ix), 0);
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(MagicBlockProgramError::PostDelegationActionExecutorMissing.into()),
+    );
+}
+
+#[test]
+fn test_clone_account_rejects_actions_for_non_delegated_clone() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let mut accounts = setup_with_account(pubkey, 100, 0);
+    accounts.insert(
+        payer,
+        AccountSharedData::new(1_000_000, 0, &system_program::id()),
+    );
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        clone_fields(200, 1),
+        vec![schedule_task_action(payer)],
+    );
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(
+            MagicBlockProgramError::PostDelegationActionsRequireDelegatedClone
+                .into(),
+        ),
+    );
+}
+
+#[test]
+fn test_clone_account_rejects_actions_with_validator_authority_signer() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let mut accounts = setup_with_account(pubkey, 100, 0);
+    let validator_authority = crate::validator::validator_authority_id();
+    accounts.insert(
+        validator_authority,
+        AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id()),
+    );
+
+    let mut fields = clone_fields(200, 1);
+    fields.delegated = true;
+    let action = schedule_task_action(validator_authority);
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        fields,
+        vec![action],
+    );
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(
+            MagicBlockProgramError::PostDelegationActionUsesValidatorAuthority
+                .into(),
+        ),
+    );
 }
 
 // -----------------
@@ -301,7 +630,6 @@ fn test_clone_init_allocates_buffer() {
         10,
         vec![1, 2, 3, 4],
         clone_fields(1000, 50),
-        None,
     );
     let mut result = process_instruction(
         &ix.data,
@@ -335,6 +663,7 @@ fn test_clone_continue_writes_at_offset() {
         4,
         vec![5, 6, 7],
         false,
+        Vec::new(),
     );
     let mut result = process_instruction(
         &ix.data,
@@ -366,6 +695,7 @@ fn test_clone_continue_completes_clone() {
         7,
         vec![8, 9, 10],
         true,
+        Vec::new(),
     );
     let mut result = process_instruction(
         &ix.data,
@@ -381,6 +711,91 @@ fn test_clone_continue_completes_clone() {
 }
 
 #[test]
+fn test_clone_continue_with_actions_waits_for_executor_to_clear_pending() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let mut account = AccountSharedData::new(1000, 10, &pubkey);
+    account.set_delegated(true);
+    account.set_remote_slot(50);
+    let mut accounts = HashMap::new();
+    accounts.insert(pubkey, account);
+    accounts.insert(
+        payer,
+        AccountSharedData::new(1_000_000, 0, &system_program::id()),
+    );
+    ensure_started_validator(&mut accounts, None);
+
+    add_pending_clone(pubkey);
+
+    let actions = vec![schedule_task_action(payer)];
+    let ix = InstructionUtils::clone_account_continue_instruction(
+        pubkey,
+        7,
+        vec![8, 9, 10],
+        true,
+        actions.clone(),
+    );
+    let executor_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            pubkey, actions,
+        );
+    insert_instructions_sysvar(&mut accounts, &[ix.clone(), executor_ix], 0);
+
+    assert!(ix
+        .accounts
+        .iter()
+        .any(|account| account.pubkey == payer && !account.is_signer));
+
+    let mut result = process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Ok(()),
+    );
+
+    result.drain(0..1);
+    let account = result.drain(0..1).next().unwrap();
+    assert_eq!(&account.data()[7..10], &[8, 9, 10]);
+    assert!(is_pending_clone(&pubkey));
+}
+
+#[test]
+fn test_clone_continue_rejects_actions_before_final_chunk() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let mut account = AccountSharedData::new(1000, 10, &pubkey);
+    account.set_delegated(true);
+    account.set_remote_slot(50);
+    let mut accounts = HashMap::new();
+    accounts.insert(pubkey, account);
+    accounts.insert(
+        payer,
+        AccountSharedData::new(1_000_000, 0, &system_program::id()),
+    );
+    ensure_started_validator(&mut accounts, None);
+
+    add_pending_clone(pubkey);
+
+    let ix = InstructionUtils::clone_account_continue_instruction(
+        pubkey,
+        4,
+        vec![5, 6, 7],
+        false,
+        vec![schedule_task_action(payer)],
+    );
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(InstructionError::InvalidArgument),
+    );
+    assert!(is_pending_clone(&pubkey));
+}
+
+#[test]
 fn test_clone_init_rejects_double_init() {
     init_logger!();
     let pubkey = Pubkey::new_unique();
@@ -393,7 +808,6 @@ fn test_clone_init_rejects_double_init() {
         10,
         vec![],
         clone_fields(100, 0),
-        None,
     );
     process_instruction(
         &ix.data,
@@ -414,7 +828,6 @@ fn test_clone_init_rejects_oversized_initial_data() {
         5,
         vec![1, 2, 3, 4, 5, 6],
         clone_fields(100, 0),
-        None,
     );
     process_instruction(
         &ix.data,
@@ -435,6 +848,7 @@ fn test_clone_continue_rejects_without_init() {
         0,
         vec![1],
         true,
+        Vec::new(),
     );
     process_instruction(
         &ix.data,
@@ -457,6 +871,7 @@ fn test_clone_continue_rejects_offset_overflow() {
         5,
         vec![1],
         true,
+        Vec::new(),
     );
     process_instruction(
         &ix.data,

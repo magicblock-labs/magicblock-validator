@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     path::Path,
     sync::{atomic::AtomicU64, Arc},
 };
@@ -153,7 +152,6 @@ impl<
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         match self {
             Self::Enabled(chainlink) => {
@@ -162,7 +160,6 @@ impl<
                         pubkeys,
                         mark_empty_if_not_found,
                         fetch_origin,
-                        program_ids,
                     )
                     .await
             }
@@ -188,13 +185,10 @@ impl<
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
         match self {
             Self::Enabled(chainlink) => {
-                chainlink
-                    .fetch_accounts(pubkeys, fetch_origin, program_ids)
-                    .await
+                chainlink.fetch_accounts(pubkeys, fetch_origin).await
             }
             Self::Disabled { .. } => Ok(vec![None; pubkeys.len()]),
         }
@@ -539,16 +533,12 @@ impl<
         // Mark *all* pubkeys as empty-if-not-found
         let mark_empty_if_not_found = Some(pubkeys.as_slice());
 
-        // Extract programs from transaction instructions for metrics
-        let program_ids = extract_program_ids_from_transaction(tx);
-
         // Ensure accounts
         let res = self
             .ensure_accounts(
                 &pubkeys,
                 mark_empty_if_not_found,
                 AccountFetchOrigin::SendTransaction(*tx.signature()),
-                Some(&program_ids),
             )
             .await?;
 
@@ -558,13 +548,12 @@ impl<
     /// Same as fetch accounts, but does not return the accounts, just
     /// ensures were cloned into our validator if they exist on chain.
     /// If we're offline and not syncing accounts then this is a no-op.
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids))]
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found))]
     pub async fn ensure_accounts(
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(FetchAndCloneResult::default());
@@ -574,7 +563,6 @@ impl<
             pubkeys,
             mark_empty_if_not_found,
             fetch_origin,
-            program_ids,
         )
         .await
     }
@@ -583,12 +571,11 @@ impl<
     /// Otherwise ensures that the accounts exist on chain and were cloned into our validator
     /// and returns their state from the bank (which may be None if the account does not
     /// exist locally or on chain).
-    #[instrument(skip(self, pubkeys, program_ids))]
+    #[instrument(skip(self, pubkeys))]
     pub async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
         if tracing::enabled!(tracing::Level::TRACE) {
             let count = pubkeys.len();
@@ -602,13 +589,7 @@ impl<
                 .collect());
         };
         let _ = self
-            .fetch_accounts_common(
-                fetch_cloner,
-                pubkeys,
-                None,
-                fetch_origin,
-                program_ids,
-            )
+            .fetch_accounts_common(fetch_cloner, pubkeys, None, fetch_origin)
             .await?;
 
         let accounts = pubkeys
@@ -656,20 +637,13 @@ impl<
             .collect())
     }
 
-    #[instrument(skip(
-        self,
-        fetch_cloner,
-        pubkeys,
-        mark_empty_if_not_found,
-        program_ids
-    ))]
+    #[instrument(skip(self, fetch_cloner, pubkeys, mark_empty_if_not_found))]
     async fn fetch_accounts_common(
         &self,
         fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
-        program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if tracing::enabled!(tracing::Level::TRACE) {
             let count = pubkeys.len();
@@ -689,7 +663,6 @@ impl<
                 mark_empty_if_not_found,
                 None,
                 fetch_origin,
-                program_ids,
             )
             .await?;
         trace!("Fetched and cloned accounts");
@@ -744,24 +717,13 @@ impl<
 // Helper Functions
 // -----------------
 
-/// Extracts all unique program IDs from a transaction's instructions.
-fn extract_program_ids_from_transaction(
-    tx: &SanitizedTransaction,
-) -> Vec<Pubkey> {
-    let program_ids = tx
-        .message()
-        .program_instructions_iter()
-        .map(|(program_id, _)| *program_id)
-        .collect::<HashSet<_>>();
-    program_ids.into_iter().collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::{sync::Arc, time::Duration};
 
     use magicblock_accounts_db::traits::AccountsBank;
     use magicblock_config::config::ChainLinkConfig;
+    use magicblock_magic_program_api as magic_program;
     use magicblock_metrics::metrics::AccountFetchOrigin;
     use solana_account::AccountSharedData;
     use solana_message::legacy::Message;
@@ -809,12 +771,7 @@ mod tests {
         let pubkey = Pubkey::new_unique();
 
         let result = chainlink
-            .ensure_accounts(
-                &[pubkey],
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
+            .ensure_accounts(&[pubkey], None, AccountFetchOrigin::GetAccount)
             .await;
 
         assert!(result
@@ -831,11 +788,7 @@ mod tests {
         let pubkeys = vec![Pubkey::new_unique(), Pubkey::new_unique()];
 
         let result = chainlink
-            .fetch_accounts(
-                &pubkeys,
-                AccountFetchOrigin::GetMultipleAccounts,
-                None,
-            )
+            .fetch_accounts(&pubkeys, AccountFetchOrigin::GetMultipleAccounts)
             .await;
 
         let accounts = result.expect("disabled fetch_accounts should succeed");
@@ -850,12 +803,17 @@ mod tests {
         let kept_feature_pubkey = Pubkey::new_unique();
         let validator_id = Pubkey::new_unique();
         let blacklisted_validator_account = AccountSharedData::default();
+        let blacklisted_executor_account = AccountSharedData::default();
         let removable_account = AccountSharedData::default();
         let kept_feature_account = AccountSharedData::new(1, 0, &feature::ID);
 
         accounts_bank.insert(removable_pubkey, removable_account);
         accounts_bank.insert(kept_feature_pubkey, kept_feature_account);
         accounts_bank.insert(validator_id, blacklisted_validator_account);
+        accounts_bank.insert(
+            magic_program::POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
+            blacklisted_executor_account,
+        );
 
         let chainlink = TestReplicationModeAwareChainlink::disabled(
             &accounts_bank,
@@ -871,6 +829,11 @@ mod tests {
         assert!(accounts_bank.get_account(&removable_pubkey).is_none());
         assert!(accounts_bank.get_account(&kept_feature_pubkey).is_some());
         assert!(accounts_bank.get_account(&validator_id).is_some());
+        assert!(accounts_bank
+            .get_account(
+                &magic_program::POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID
+            )
+            .is_some());
     }
 
     #[tokio::test]
