@@ -114,37 +114,33 @@ impl ChainlinkCloner {
         )
     }
 
-    fn short_vec_len(mut len: usize) -> usize {
-        let mut size = 1;
-        while len >= 0x80 {
-            len >>= 7;
-            size += 1;
-        }
-        size
+    fn transaction_size(tx: &Transaction) -> ClonerResult<usize> {
+        Ok(bincode::serialized_size(tx)?.try_into()?)
     }
 
-    fn transaction_size(tx: &Transaction) -> usize {
-        // Estimate the legacy transaction wire size without serializing it.
-        let message = tx.message();
-        let instructions_size: usize = message
-            .instructions
-            .iter()
-            .map(|ix| {
-                1 + Self::short_vec_len(ix.accounts.len())
-                    + ix.accounts.len()
-                    + Self::short_vec_len(ix.data.len())
-                    + ix.data.len()
-            })
-            .sum();
+    fn ensure_transaction_fits(
+        pubkey: Pubkey,
+        tx: &Transaction,
+    ) -> ClonerResult<usize> {
+        let tx_size = Self::transaction_size(tx)?;
+        if tx_size > MAX_INLINE_TRANSACTION_SIZE {
+            return Err(ClonerError::CloneTransactionTooLarge {
+                pubkey,
+                size: tx_size,
+                max_size: MAX_INLINE_TRANSACTION_SIZE,
+            });
+        }
+        Ok(tx_size)
+    }
 
-        Self::short_vec_len(tx.signatures.len())
-            + tx.signatures.len() * 64
-            + 3
-            + Self::short_vec_len(message.account_keys.len())
-            + message.account_keys.len() * 32
-            + 32
-            + Self::short_vec_len(message.instructions.len())
-            + instructions_size
+    fn ensure_transactions_fit(
+        pubkey: Pubkey,
+        txs: &[Transaction],
+    ) -> ClonerResult<()> {
+        for tx in txs {
+            Self::ensure_transaction_fits(pubkey, tx)?;
+        }
+        Ok(())
     }
 
     // -----------------
@@ -610,7 +606,7 @@ impl Cloner for ChainlinkCloner {
 
         if data_len <= MAX_INLINE_DATA_SIZE {
             let tx = self.build_small_account_tx(&request, blockhash);
-            let tx_size = Self::transaction_size(&tx);
+            let tx_size = Self::transaction_size(&tx)?;
             if tx_size > MAX_INLINE_TRANSACTION_SIZE
                 && !request.delegation_actions.is_empty()
             {
@@ -634,6 +630,7 @@ impl Cloner for ChainlinkCloner {
 
         // Large account: multi-tx with cleanup on failure
         let txs = self.build_large_account_txs(&request, blockhash);
+        Self::ensure_transactions_fit(request.pubkey, &txs)?;
 
         let mut last_sig = None;
         for tx in txs {
@@ -754,6 +751,14 @@ mod tests {
         }
     }
 
+    fn action_with_data_len(data_len: usize) -> Instruction {
+        Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![AccountMeta::new(Pubkey::new_unique(), true)],
+            data: vec![1; data_len],
+        }
+    }
+
     fn instruction_program_id(tx: &Transaction, ix_idx: usize) -> Pubkey {
         let ix = &tx.message().instructions[ix_idx];
         tx.message().account_keys[ix.program_id_index as usize]
@@ -761,6 +766,50 @@ mod tests {
 
     fn instruction_data(tx: &Transaction, ix_idx: usize) -> &[u8] {
         &tx.message().instructions[ix_idx].data
+    }
+
+    #[test]
+    fn transaction_size_matches_bincode_serialized_len() {
+        let pubkey = Pubkey::new_unique();
+        let tx = cloner().build_small_account_tx(
+            &request(pubkey, vec![1, 2, 3], vec![action()]),
+            Hash::default(),
+        );
+
+        assert_eq!(
+            ChainlinkCloner::transaction_size(&tx).unwrap(),
+            bincode::serialize(&tx).unwrap().len()
+        );
+    }
+
+    #[test]
+    fn oversized_chunked_action_transaction_fails_preflight() {
+        let pubkey = Pubkey::new_unique();
+        let actions =
+            vec![action_with_data_len(MAX_INLINE_TRANSACTION_SIZE / 2 + 1024)];
+        let txs = cloner().build_large_account_txs(
+            &request(pubkey, vec![1, 2, 3], actions),
+            Hash::default(),
+        );
+        let final_tx_size =
+            ChainlinkCloner::transaction_size(txs.last().unwrap()).unwrap();
+
+        assert!(final_tx_size > MAX_INLINE_TRANSACTION_SIZE);
+
+        let err =
+            ChainlinkCloner::ensure_transactions_fit(pubkey, &txs).unwrap_err();
+        match err {
+            ClonerError::CloneTransactionTooLarge {
+                pubkey: err_pubkey,
+                size,
+                max_size,
+            } => {
+                assert_eq!(err_pubkey, pubkey);
+                assert_eq!(size, final_tx_size);
+                assert_eq!(max_size, MAX_INLINE_TRANSACTION_SIZE);
+            }
+            err => panic!("unexpected error: {err:?}"),
+        }
     }
 
     #[test]

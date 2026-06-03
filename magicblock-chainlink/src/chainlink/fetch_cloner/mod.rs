@@ -657,12 +657,13 @@ where
             return;
         };
         let projected_ata_clone_request = self
-            .maybe_build_projected_ata_clone_request_from_eata_sub_update(
+            .maybe_build_projected_ata_clone_request_from_subscription_update(
                 pubkey,
                 &account,
                 deleg_record.as_ref(),
                 &delegation_actions,
-            );
+            )
+            .await;
 
         // Ensure that the subscription update isn't out of order, i.e.
         // we don't already hold a newer version of the account in our bank
@@ -774,10 +775,13 @@ where
                 );
             }
         } else {
-            warn!(
+            debug!(
                 pubkey = %pubkey,
                 "Received update for account not in bank"
             );
+            if account.delegated() {
+                undelegation_completed_on_chain = true;
+            }
         }
 
         // Determine if delegated to another validator
@@ -1053,17 +1057,31 @@ where
         let mut pubkeys_to_clone =
             Vec::with_capacity(1 + greedy_ata_pubkeys.len());
         pubkeys_to_clone.push(pubkey);
-        pubkeys_to_clone.extend(greedy_ata_pubkeys.iter().copied());
+        pubkeys_to_clone.extend(greedy_ata_pubkeys.iter().copied().filter(
+            |ata_pubkey| self.accounts_bank.get_account(ata_pubkey).is_none(),
+        ));
 
-        match self
-            .fetch_and_clone_accounts_with_dedup(
+        // Keep eATA discovery with its candidate base ATAs in one clone batch
+        // so the normal ATA projection path runs for the same update.
+        let clone_result = if greedy_ata_pubkeys.is_empty() {
+            self.fetch_and_clone_accounts_with_dedup(
                 &pubkeys_to_clone,
                 None,
                 Some(account.remote_slot()),
                 AccountFetchOrigin::GetAccount,
             )
             .await
-        {
+        } else {
+            self.fetch_and_clone_accounts(
+                &pubkeys_to_clone,
+                None,
+                Some(account.remote_slot()),
+                AccountFetchOrigin::GetAccount,
+            )
+            .await
+        };
+
+        match clone_result {
             Ok(result)
                 if result
                     .not_found_on_chain
@@ -1087,12 +1105,13 @@ where
                     );
                     false
                 } else if let Some(projected_ata_clone_request) = self
-                    .maybe_build_projected_ata_clone_request_from_eata_sub_update(
+                    .maybe_build_projected_ata_clone_request_from_subscription_update(
                         pubkey,
                         &account,
                         Some(&deleg_record),
                         &delegation_actions,
                     )
+                    .await
                 {
                     let projected_ata_pubkey =
                         projected_ata_clone_request.pubkey;
@@ -1461,20 +1480,21 @@ where
         }
     }
 
-    fn maybe_build_projected_ata_clone_request_from_eata_sub_update(
+    async fn maybe_build_projected_ata_clone_request_from_subscription_update(
         &self,
         eata_pubkey: Pubkey,
         eata_account: &AccountSharedData,
         deleg_record: Option<&DelegationRecord>,
         delegation_actions: &DelegationActions,
     ) -> Option<AccountCloneRequest> {
-        ata_projection::maybe_build_projected_ata_clone_request_from_eata_sub_update(
+        ata_projection::maybe_build_projected_ata_clone_request_from_subscription_update(
             self,
             eata_pubkey,
             eata_account,
             deleg_record,
             delegation_actions,
         )
+        .await
     }
 
     #[cfg(test)]

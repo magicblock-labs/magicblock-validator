@@ -366,7 +366,7 @@ pub enum PostDelegationActionExecutorInstruction {
     ///
     /// # Account references
     /// - **0.**   `[SIGNER]`  Validator authority
-    /// - **1.**   `[WRITE]`   Delegated clone target
+    /// - **1.**   `[]`        Delegated clone target
     /// - **2.**   `[]`        Instructions sysvar
     /// - **3..n** `[]`        Accounts required by the embedded instructions
     Execute {

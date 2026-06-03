@@ -94,7 +94,13 @@ pub(crate) fn mark_eata_empty<T, U, V, C>(
     this.known_empty_eatas.lock().put(eata_pubkey, ());
 }
 
-pub(crate) fn maybe_build_projected_ata_clone_request_from_eata_sub_update<
+#[derive(Clone, Copy)]
+enum BaseAtaLookup {
+    BankOnly,
+    BankThenRemote,
+}
+
+pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_update<
     T,
     U,
     V,
@@ -112,8 +118,59 @@ where
     V: AccountsBank,
     C: Cloner,
 {
-    let deleg_record = deleg_record?;
+    if let Some(deleg_record) = deleg_record {
+        return maybe_build_projected_ata_clone_request_from_eata(
+            this,
+            eata_pubkey,
+            eata_account,
+            deleg_record,
+            delegation_actions,
+            BaseAtaLookup::BankOnly,
+        )
+        .await;
+    }
 
+    delegation::parse_raw_eata_pda(
+        &eata_pubkey,
+        eata_account.data(),
+        EATA_PROGRAM_ID,
+    )?;
+
+    let (deleg_record, delegation_actions) =
+        delegation::fetch_and_parse_delegation_record(
+            this,
+            eata_pubkey,
+            eata_account.remote_slot(),
+            metrics::AccountFetchOrigin::ProjectAta,
+        )
+        .await?;
+    let delegation_actions = delegation_actions.unwrap_or_default();
+
+    maybe_build_projected_ata_clone_request_from_eata(
+        this,
+        eata_pubkey,
+        eata_account,
+        &deleg_record,
+        &delegation_actions,
+        BaseAtaLookup::BankThenRemote,
+    )
+    .await
+}
+
+async fn maybe_build_projected_ata_clone_request_from_eata<T, U, V, C>(
+    this: &FetchCloner<T, U, V, C>,
+    eata_pubkey: Pubkey,
+    eata_account: &AccountSharedData,
+    deleg_record: &DelegationRecord,
+    delegation_actions: &DelegationActions,
+    base_ata_lookup: BaseAtaLookup,
+) -> Option<AccountCloneRequest>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    V: AccountsBank,
+    C: Cloner,
+{
     if deleg_record.authority != this.validator_pubkey {
         return None;
     }
@@ -123,33 +180,47 @@ where
         deleg_record.owner,
     )?;
     let ata_pubkeys = try_derive_supported_ata_pubkeys(&wallet_owner, &mint);
+    let ata_pubkeys = ata_pubkeys
+        .token_2022_first()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
 
-    // eATA updates only carry the projected balance fields. The in-bank ATA is
-    // required as the base so the clone preserves the actual token program
-    // owner and any Token-2022 account layout extensions.
-    let mut ata_pubkey = None;
-    let mut in_bank_ata = None;
-    for candidate_pubkey in ata_pubkeys.token_2022_first().into_iter().flatten()
-    {
+    // eATA updates only carry the projected balance fields. The base ATA is
+    // required so the clone preserves the actual token program owner and any
+    // Token-2022 account layout extensions.
+    let mut base_ata = None;
+    for candidate_pubkey in ata_pubkeys.iter().copied() {
         if let Some(candidate_account) =
             this.accounts_bank.get_account(&candidate_pubkey)
         {
-            ata_pubkey = Some(candidate_pubkey);
-            in_bank_ata = Some(candidate_account);
+            base_ata = Some((candidate_pubkey, candidate_account));
             break;
         }
     }
-    let in_bank_ata = in_bank_ata.as_ref()?;
-    let ata_pubkey = ata_pubkey?;
-    if in_bank_ata.delegated() || in_bank_ata.undelegating() {
+    let (ata_pubkey, base_ata) = match base_ata {
+        Some(base_ata) => base_ata,
+        None if matches!(base_ata_lookup, BaseAtaLookup::BankThenRemote) => {
+            fetch_remote_base_ata(
+                this,
+                &ata_pubkeys,
+                eata_account.remote_slot(),
+            )
+            .await?
+        }
+        None => return None,
+    };
+
+    if base_ata.delegated() || base_ata.undelegating() {
         return None;
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(
         this,
-        in_bank_ata,
+        &base_ata,
         eata_account,
         deleg_record,
     )?;
+
     Some(AccountCloneRequest {
         pubkey: ata_pubkey,
         account: projected_ata,
@@ -157,6 +228,49 @@ where
         delegation_actions: delegation_actions.clone(),
         delegated_to_other: None,
     })
+}
+
+async fn fetch_remote_base_ata<T, U, V, C>(
+    this: &FetchCloner<T, U, V, C>,
+    ata_pubkeys: &[Pubkey],
+    min_context_slot: u64,
+) -> Option<(Pubkey, AccountSharedData)>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    V: AccountsBank,
+    C: Cloner,
+{
+    let remote_accounts = match this
+        .remote_account_provider
+        .try_get_multi_until_slots_match(
+            ata_pubkeys,
+            Some(MatchSlotsConfig {
+                min_context_slot: Some(min_context_slot),
+                ..Default::default()
+            }),
+            metrics::AccountFetchOrigin::ProjectAta,
+        )
+        .await
+    {
+        Ok(accounts) => accounts,
+        Err(err) => {
+            debug!(
+                error = ?err,
+                pubkeys = ?ata_pubkeys,
+                "Failed to fetch base ATA for eATA projection"
+            );
+            return None;
+        }
+    };
+
+    ata_pubkeys.iter().copied().zip(remote_accounts).find_map(
+        |(ata_pubkey, remote_account)| {
+            let account = remote_account.fresh_account()?;
+            is_ata(&ata_pubkey, &account)?;
+            Some((ata_pubkey, account))
+        },
+    )
 }
 
 pub(crate) async fn maybe_project_ata_from_subscription_update<T, U, V, C>(

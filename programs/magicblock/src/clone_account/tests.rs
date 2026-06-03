@@ -53,6 +53,40 @@ fn schedule_task_action(payer: Pubkey) -> Instruction {
     )
 }
 
+#[test]
+fn test_post_delegation_executor_target_is_writable_only_for_writable_action() {
+    crate::validator::generate_validator_authority_if_needed();
+    let pubkey = Pubkey::new_unique();
+    let readonly_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            pubkey,
+            vec![],
+        );
+    let readonly_target = readonly_ix
+        .accounts
+        .iter()
+        .find(|account| account.pubkey == pubkey)
+        .unwrap();
+    assert!(!readonly_target.is_writable);
+
+    let action = Instruction {
+        program_id: Pubkey::new_unique(),
+        accounts: vec![AccountMeta::new(pubkey, false)],
+        data: vec![],
+    };
+    let writable_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            pubkey,
+            vec![action],
+        );
+    let writable_target = writable_ix
+        .accounts
+        .iter()
+        .find(|account| account.pubkey == pubkey)
+        .unwrap();
+    assert!(writable_target.is_writable);
+}
+
 fn instructions_sysvar_data(
     instructions: &[Instruction],
     current_index: u16,

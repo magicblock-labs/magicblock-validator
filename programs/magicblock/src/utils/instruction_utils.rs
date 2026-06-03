@@ -475,7 +475,7 @@ impl InstructionUtils {
     ) -> Instruction {
         let mut account_metas = vec![
             AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new(cloned_account_pubkey, false),
+            AccountMeta::new_readonly(cloned_account_pubkey, false),
             AccountMeta::new_readonly(
                 solana_sdk_ids::sysvar::instructions::id(),
                 false,
