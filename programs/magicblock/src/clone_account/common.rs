@@ -3,7 +3,9 @@
 use std::collections::HashSet;
 
 use magicblock_magic_program_api::{
-    instruction::{AccountCloneFields, PostDelegationActionInstruction},
+    instruction::{
+        AccountCloneFields, PostDelegationActionExecutorInstruction,
+    },
     POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
 };
 use solana_account::{ReadableAccount, WritableAccount};
@@ -217,12 +219,12 @@ pub fn validate_post_delegation_action_sibling(
         );
     }
 
-    let instruction: PostDelegationActionInstruction =
+    let instruction: PostDelegationActionExecutorInstruction =
         bincode::deserialize(&next_instruction.data)
             .map_err(|_| InstructionError::InvalidInstructionData)?;
     match instruction {
-        PostDelegationActionInstruction::Execute {
-            pubkey: next_pubkey,
+        PostDelegationActionExecutorInstruction::Execute {
+            cloned_account_pubkey: next_pubkey,
             actions: next_actions,
         } if next_pubkey == *pubkey && next_actions == actions => Ok(()),
         _ => {

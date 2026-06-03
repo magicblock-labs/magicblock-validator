@@ -7,7 +7,7 @@ use magicblock_magic_program_api::{
     args::ScheduleTaskArgs,
     instruction::{
         AccountModification, AccountModificationForInstruction,
-        MagicBlockInstruction, PostDelegationActionInstruction,
+        MagicBlockInstruction, PostDelegationActionExecutorInstruction,
     },
     pda::crank_signer_pda,
     CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY,
@@ -470,12 +470,12 @@ impl InstructionUtils {
     }
 
     pub fn post_delegation_action_executor_instruction(
-        pubkey: Pubkey,
+        cloned_account_pubkey: Pubkey,
         actions: Vec<Instruction>,
     ) -> Instruction {
         let mut account_metas = vec![
             AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new(pubkey, false),
+            AccountMeta::new(cloned_account_pubkey, false),
             AccountMeta::new_readonly(
                 solana_sdk_ids::sysvar::instructions::id(),
                 false,
@@ -484,7 +484,10 @@ impl InstructionUtils {
         Self::append_action_accounts(&mut account_metas, &actions);
         Instruction::new_with_bincode(
             POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
-            &PostDelegationActionInstruction::Execute { pubkey, actions },
+            &PostDelegationActionExecutorInstruction::Execute {
+                cloned_account_pubkey,
+                actions,
+            },
             account_metas,
         )
     }

@@ -18,7 +18,7 @@ use crate::{errors::MagicBlockProgramError, utils::instruction_sysvar};
 pub(crate) fn process_execute_post_delegation_actions(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
-    pubkey: Pubkey,
+    cloned_account_pubkey: Pubkey,
     actions: Vec<Instruction>,
 ) -> Result<(), InstructionError> {
     validate_authority(&signers, invoke_context)?;
@@ -82,7 +82,9 @@ pub(crate) fn process_execute_post_delegation_actions(
             fields,
             actions: previous_actions,
             ..
-        } if previous_pubkey == pubkey && previous_actions == actions => {
+        } if previous_pubkey == cloned_account_pubkey
+            && previous_actions == actions =>
+        {
             if !fields.delegated {
                 return Err(
                     MagicBlockProgramError::PostDelegationActionsRequireDelegatedClone
@@ -96,7 +98,11 @@ pub(crate) fn process_execute_post_delegation_actions(
             is_last: true,
             actions: previous_actions,
             ..
-        } if previous_pubkey == pubkey && previous_actions == actions => true,
+        } if previous_pubkey == cloned_account_pubkey
+            && previous_actions == actions =>
+        {
+            true
+        }
         _ => {
             ic_msg!(
                 invoke_context,
@@ -114,7 +120,7 @@ pub(crate) fn process_execute_post_delegation_actions(
         let tx_idx = validate_and_get_index(
             transaction_context,
             1,
-            &pubkey,
+            &cloned_account_pubkey,
             "ExecutePostDelegationActions",
             invoke_context,
         )?;
@@ -126,13 +132,13 @@ pub(crate) fn process_execute_post_delegation_actions(
 
     execute_post_delegation_actions(
         invoke_context,
-        &pubkey,
+        &cloned_account_pubkey,
         delegated_target,
         actions,
     )?;
 
     if previous_was_final_continue {
-        remove_pending_clone(&pubkey);
+        remove_pending_clone(&cloned_account_pubkey);
     }
 
     Ok(())

@@ -360,7 +360,7 @@ pub enum CallbackInstruction {
 
 /// Instruction(s) for the post-delegation action executor builtin-program.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub enum PostDelegationActionInstruction {
+pub enum PostDelegationActionExecutorInstruction {
     /// Executes post-delegation actions immediately after a matching delegated
     /// clone instruction in the same transaction.
     ///
@@ -370,7 +370,7 @@ pub enum PostDelegationActionInstruction {
     /// - **2.**   `[]`        Instructions sysvar
     /// - **3..n** `[]`        Accounts required by the embedded instructions
     Execute {
-        pubkey: Pubkey,
+        cloned_account_pubkey: Pubkey,
         actions: Vec<Instruction>,
     },
 }

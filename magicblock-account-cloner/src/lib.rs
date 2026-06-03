@@ -193,11 +193,12 @@ impl ChainlinkCloner {
     }
 
     fn post_delegation_action_ix(
-        pubkey: Pubkey,
+        delegated_account_pubkey: Pubkey,
         actions: Vec<Instruction>,
     ) -> Instruction {
         InstructionUtils::post_delegation_action_executor_instruction(
-            pubkey, actions,
+            delegated_account_pubkey,
+            actions,
         )
     }
 
@@ -708,7 +709,9 @@ mod tests {
     use magicblock_chainlink::cloner::DelegationActions;
     use magicblock_core::link::link;
     use magicblock_magic_program_api::{
-        instruction::{MagicBlockInstruction, PostDelegationActionInstruction},
+        instruction::{
+            MagicBlockInstruction, PostDelegationActionExecutorInstruction,
+        },
         POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
     };
     use solana_account::AccountSharedData;
@@ -790,8 +793,8 @@ mod tests {
             _ => panic!("expected clone account instruction"),
         }
         match bincode::deserialize(instruction_data(&tx, 1)).unwrap() {
-            PostDelegationActionInstruction::Execute {
-                pubkey: executor_pubkey,
+            PostDelegationActionExecutorInstruction::Execute {
+                cloned_account_pubkey: executor_pubkey,
                 actions: executor_actions,
             } => {
                 assert_eq!(executor_pubkey, pubkey);
@@ -836,8 +839,8 @@ mod tests {
             _ => panic!("expected clone account continue instruction"),
         }
         match bincode::deserialize(instruction_data(final_tx, 1)).unwrap() {
-            PostDelegationActionInstruction::Execute {
-                pubkey: executor_pubkey,
+            PostDelegationActionExecutorInstruction::Execute {
+                cloned_account_pubkey: executor_pubkey,
                 actions: executor_actions,
             } => {
                 assert_eq!(executor_pubkey, pubkey);

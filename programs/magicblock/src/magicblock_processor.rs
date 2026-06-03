@@ -1,5 +1,6 @@
 use magicblock_magic_program_api::instruction::{
-    CallbackInstruction, MagicBlockInstruction, PostDelegationActionInstruction,
+    CallbackInstruction, MagicBlockInstruction,
+    PostDelegationActionExecutorInstruction,
 };
 use solana_instruction::error::InstructionError;
 use solana_program_runtime::{
@@ -283,7 +284,7 @@ declare_process_instruction!(
     PostDelegationActionEntrypoint,
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
-        let instruction: PostDelegationActionInstruction =
+        let instruction: PostDelegationActionExecutorInstruction =
             deserialize_instruction(invoke_context)?;
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context =
@@ -291,14 +292,15 @@ declare_process_instruction!(
         let signers = instruction_context.get_signers()?;
 
         match instruction {
-            PostDelegationActionInstruction::Execute { pubkey, actions } => {
-                process_execute_post_delegation_actions(
-                    signers,
-                    invoke_context,
-                    pubkey,
-                    actions,
-                )
-            }
+            PostDelegationActionExecutorInstruction::Execute {
+                cloned_account_pubkey,
+                actions,
+            } => process_execute_post_delegation_actions(
+                signers,
+                invoke_context,
+                cloned_account_pubkey,
+                actions,
+            ),
         }
     }
 );
