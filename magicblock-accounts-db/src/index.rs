@@ -21,6 +21,23 @@ const PROGRAMS_INDEX: &str = "programs-idx";
 const DEALLOCATIONS_INDEX: &str = "deallocations-idx";
 const OWNERS_INDEX: &str = "owners-idx";
 
+#[derive(Clone, Copy)]
+pub(crate) struct AccountAllocation {
+    pub(crate) pubkey: Pubkey,
+    pub(crate) owner: Pubkey,
+    pub(crate) offset: Offset,
+    pub(crate) blocks: Blocks,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct AccountMove {
+    pub(crate) pubkey: Pubkey,
+    pub(crate) owner: Pubkey,
+    pub(crate) old_offset: Offset,
+    pub(crate) new_offset: Offset,
+    pub(crate) blocks: Blocks,
+}
+
 /// LMDB Index manager.
 ///
 /// Handles secondary indices for mapping Pubkeys to storage offsets,
@@ -334,6 +351,112 @@ impl AccountsDbIndex {
         })
     }
 
+    pub(crate) fn accounts_by_offset(
+        &self,
+    ) -> AccountsDbResult<Vec<AccountAllocation>> {
+        let txn = self.env.begin_ro_txn()?;
+        let mut accounts = Vec::new();
+
+        {
+            let mut cursor = self.accounts.cursor_ro(&txn)?;
+            for item in cursor.iter_start() {
+                let (key_bytes, value_bytes) = item?;
+                let pubkey = Pubkey::try_from(key_bytes).map_err(|_| {
+                    AccountsDbError::Internal(
+                        "accounts index contains invalid pubkey".into(),
+                    )
+                })?;
+                let (offset, blocks) =
+                    bytes!(#unpack, value_bytes, Offset, Blocks);
+                accounts.push((pubkey, offset, blocks));
+            }
+        }
+
+        let mut allocations = Vec::with_capacity(accounts.len());
+        for (pubkey, offset, blocks) in accounts {
+            let owner_bytes = self.owners.get(&txn, pubkey)?;
+            let owner = owner_bytes
+                .ok_or_else(|| {
+                    AccountsDbError::Internal(format!(
+                        "account {pubkey} missing from owners index"
+                    ))
+                })
+                .and_then(|bytes| {
+                    Pubkey::try_from(bytes).map_err(|_| {
+                        AccountsDbError::Internal(format!(
+                            "account {pubkey} has invalid owner index entry"
+                        ))
+                    })
+                })?;
+
+            allocations.push(AccountAllocation {
+                pubkey,
+                owner,
+                offset,
+                blocks,
+            });
+        }
+
+        allocations.sort_by_key(|allocation| allocation.offset);
+        Ok(allocations)
+    }
+
+    pub(crate) fn apply_account_moves(
+        &self,
+        moves: &[AccountMove],
+    ) -> AccountsDbResult<()> {
+        let mut txn = self.env.begin_rw_txn()?;
+
+        for account_move in moves {
+            if account_move.old_offset == account_move.new_offset {
+                continue;
+            }
+
+            let account_value = bytes!(
+                #pack,
+                account_move.new_offset,
+                Offset,
+                account_move.blocks,
+                Blocks
+            );
+            self.accounts.upsert(
+                &mut txn,
+                account_move.pubkey,
+                account_value,
+            )?;
+
+            let old_program_value = bytes!(
+                #pack,
+                account_move.old_offset,
+                Offset,
+                account_move.pubkey,
+                Pubkey
+            );
+            self.programs.remove(
+                &mut txn,
+                account_move.owner,
+                Some(&old_program_value),
+            )?;
+
+            let new_program_value = bytes!(
+                #pack,
+                account_move.new_offset,
+                Offset,
+                account_move.pubkey,
+                Pubkey
+            );
+            self.programs.upsert(
+                &mut txn,
+                account_move.owner,
+                new_program_value,
+            )?;
+        }
+
+        self.deallocations.clear(&mut txn)?;
+        txn.commit()?;
+        Ok(())
+    }
+
     // --- Iterators & Accessors ---
 
     pub(crate) fn get_program_accounts_iter(
@@ -365,8 +488,17 @@ impl AccountsDbIndex {
         self.owners.entries(&txn)
     }
 
-    pub(crate) fn flush(&self) {
-        let _ = self.env.sync(true).log_err(|| "main index flushing");
+    #[cfg(test)]
+    pub(crate) fn get_deallocations_count(&self) -> usize {
+        let Ok(txn) = self.env.begin_ro_txn() else {
+            return 0;
+        };
+        self.deallocations.entries(&txn)
+    }
+
+    pub(crate) fn flush(&self) -> AccountsDbResult<()> {
+        self.env.sync(true).log_err(|| "main index flushing")?;
+        Ok(())
     }
 
     pub(crate) fn reload(&mut self, dbpath: &Path) -> AccountsDbResult<()> {

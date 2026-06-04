@@ -77,6 +77,12 @@ impl Table {
         }
     }
 
+    /// Removes all entries from the table.
+    #[inline]
+    pub(super) fn clear(&self, txn: &mut RwTransaction) -> lmdb::Result<()> {
+        txn.clear_db(self.db)
+    }
+
     /// Opens a read-only cursor.
     #[inline]
     pub(super) fn cursor_ro<'txn, T: Transaction>(
