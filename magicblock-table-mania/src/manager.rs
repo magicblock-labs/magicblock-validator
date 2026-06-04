@@ -74,6 +74,7 @@ pub struct TableMania {
     pub rpc_client: MagicblockRpcClient,
     randomize_lookup_table_slot: bool,
     compute_budgets: TableManiaComputeBudgets,
+    remote_readiness_waiters: Arc<RemoteReadinessWaiters>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -346,6 +347,7 @@ impl TableMania {
             rpc_client,
             randomize_lookup_table_slot: randomize_lookup_table_slot(),
             compute_budgets: TableManiaComputeBudgets::default(),
+            remote_readiness_waiters: Arc::default(),
         };
         if let Some(config) = garbage_collector_config {
             Self::launch_garbage_collector(
@@ -805,6 +807,25 @@ impl TableMania {
         sleep(delay).await;
     }
 
+    async fn wait_for_remote_tables_readiness_shared(
+        &self,
+        matching_tables: HashMap<Pubkey, MatchingTableReadiness>,
+        wait_for_remote_table_match: Duration,
+    ) -> TableManiaResult<RemoteReadinessAddresses> {
+        let key = RemoteReadinessWaiterKey::new(&matching_tables);
+        let rpc_client = self.rpc_client.clone();
+        self.remote_readiness_waiters
+            .wait_or_spawn(key, move || async move {
+                Self::wait_for_remote_tables_readiness_batch(
+                    rpc_client,
+                    matching_tables,
+                    wait_for_remote_table_match,
+                )
+                .await
+            })
+            .await
+    }
+
     async fn wait_for_remote_tables_readiness_batch(
         rpc_client: MagicblockRpcClient,
         matching_tables: HashMap<Pubkey, MatchingTableReadiness>,
@@ -988,12 +1009,12 @@ impl TableMania {
         );
 
         // 2. Ensure that all matching keys are also present remotely and have been finalized
-        let remote_tables = Self::wait_for_remote_tables_readiness_batch(
-            self.rpc_client.clone(),
-            matching_tables.clone(),
-            wait_for_remote_table_match,
-        )
-        .await?;
+        let remote_tables = self
+            .wait_for_remote_tables_readiness_shared(
+                matching_tables.clone(),
+                wait_for_remote_table_match,
+            )
+            .await?;
 
         Ok(matching_tables
             .into_keys()
