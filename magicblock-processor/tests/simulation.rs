@@ -138,7 +138,8 @@ async fn test_simulation_honors_heap_frame_request() {
     );
 
     env.advance_slot();
-    let default_heap_txn = env.build_transaction(&[guinea_ix.clone()]);
+    let default_heap_txn =
+        env.build_transaction(std::slice::from_ref(&guinea_ix));
     let default_heap_result = env.simulate_transaction(default_heap_txn).await;
     assert!(
         default_heap_result.result.is_ok(),
