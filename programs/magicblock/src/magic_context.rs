@@ -59,6 +59,14 @@ impl MagicContext {
         mem::take(&mut self.scheduled_base_intents)
     }
 
+    pub(crate) fn take_front_scheduled_commits(
+        &mut self,
+        n: usize,
+    ) -> Vec<ScheduledIntentBundle> {
+        let n = n.min(self.scheduled_base_intents.len());
+        self.scheduled_base_intents.drain(..n).collect()
+    }
+
     pub fn has_scheduled_commits(data: &[u8]) -> bool {
         const LEN_OFF: usize = mem::size_of::<u64>();
         const LEN_END: usize = LEN_OFF + mem::size_of::<u64>();

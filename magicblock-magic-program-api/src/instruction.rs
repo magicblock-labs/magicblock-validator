@@ -57,15 +57,18 @@ pub enum MagicBlockInstruction {
     /// - **2..n** `[]`              Accounts to be committed and undelegated
     ScheduleCommitAndUndelegate,
 
-    /// Moves the scheduled commit from the MagicContext to the global scheduled commits
-    /// map. This is the second part of scheduling a commit.
+    /// Pops up to N intents from the front of `MagicContext.scheduled_base_intents`
+    /// and for each creates an outbox intent ephemeral account (`MagicIntentAccount`)
+    /// with `status = Accepted`. This is the second part of scheduling a commit.
     ///
-    /// It is run at the start of the slot to update the global scheduled commits map just
-    /// in time for the validator to realize the commits right after.
+    /// N is determined by the number of writable PDA accounts provided beyond
+    /// the two fixed accounts. It is run at the start of the slot.
     ///
     /// # Account references
-    /// - **0.**  `[SIGNER]` Validator Authority
-    /// - **1.**  `[WRITE]`  Magic Context Account containing the initially scheduled commits
+    /// - **0.**   `[SIGNER]` Validator Authority
+    /// - **1.**   `[WRITE]`  Magic Context Account containing the initially scheduled commits
+    /// - **2..n** `[WRITE]`  Outbox intent PDAs, one per accepted intent,
+    ///            seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     AcceptScheduleCommits,
 
     /// Records the attempt to realize a scheduled commit on chain.
