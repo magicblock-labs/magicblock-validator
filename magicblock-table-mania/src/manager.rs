@@ -34,7 +34,6 @@ const REMOTE_TABLE_FINALIZATION_SLOT_TIME: Duration =
 const REMOTE_TABLE_FINALIZATION_BUFFER: Duration = Duration::from_millis(200);
 const REMOTE_TABLE_FALLBACK_POLL_INTERVAL: Duration =
     Duration::from_millis(500);
-#[allow(dead_code)]
 const REMOTE_READINESS_SUCCESS_TTL: Duration = Duration::from_millis(750);
 
 fn remote_table_finalization_delay() -> Duration {
@@ -94,16 +93,12 @@ struct RemoteReadinessTarget {
     wall_clock_deadline: Option<Instant>,
 }
 
-#[allow(dead_code)]
 type RemoteReadinessAddresses = HashMap<Pubkey, Vec<Pubkey>>;
-#[allow(dead_code)]
 type SharedRemoteReadinessResult =
     Arc<TableManiaResult<RemoteReadinessAddresses>>;
-#[allow(dead_code)]
 type RemoteReadinessReceiver =
     watch::Receiver<Option<SharedRemoteReadinessResult>>;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RemoteReadinessTableRequirement {
     table_address: Pubkey,
@@ -111,39 +106,33 @@ struct RemoteReadinessTableRequirement {
     latest_update_sent_at: Option<Instant>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RemoteReadinessWaiterKey {
     tables: Vec<RemoteReadinessTableRequirement>,
 }
 
-#[allow(dead_code)]
 struct ActiveRemoteReadinessWaiter {
     key: RemoteReadinessWaiterKey,
     receiver: RemoteReadinessReceiver,
 }
 
-#[allow(dead_code)]
 struct CachedRemoteReadinessResult {
     key: RemoteReadinessWaiterKey,
     remote_tables: RemoteReadinessAddresses,
     expires_at: Instant,
 }
 
-#[allow(dead_code)]
 #[derive(Default)]
 struct RemoteReadinessWaiterState {
     active: Vec<ActiveRemoteReadinessWaiter>,
     successful: Vec<CachedRemoteReadinessResult>,
 }
 
-#[allow(dead_code)]
 #[derive(Default)]
 struct RemoteReadinessWaiters {
     state: Mutex<RemoteReadinessWaiterState>,
 }
 
-#[allow(dead_code)]
 impl RemoteReadinessWaiterKey {
     fn new(matching_tables: &HashMap<Pubkey, MatchingTableReadiness>) -> Self {
         let mut tables = matching_tables
@@ -187,7 +176,6 @@ impl RemoteReadinessWaiterKey {
     }
 }
 
-#[allow(dead_code)]
 impl RemoteReadinessWaiterState {
     fn prune_expired_successes(&mut self, now: Instant) {
         self.successful.retain(|result| result.expires_at > now);
@@ -214,7 +202,6 @@ impl RemoteReadinessWaiterState {
     }
 }
 
-#[allow(dead_code)]
 impl RemoteReadinessWaiters {
     async fn wait_or_spawn<F, Fut>(
         self: &Arc<Self>,
@@ -295,7 +282,6 @@ impl RemoteReadinessWaiters {
     }
 }
 
-#[allow(dead_code)]
 trait CloneForSharedReadiness {
     fn clone_for_shared_readiness(&self) -> TableManiaError;
 }
