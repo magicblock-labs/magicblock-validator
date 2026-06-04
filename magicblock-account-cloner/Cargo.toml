@@ -10,7 +10,6 @@ edition.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 bincode = { workspace = true }
-lru = { workspace = true }
 tracing = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-core = { workspace = true }
