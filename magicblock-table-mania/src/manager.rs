@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -16,7 +17,7 @@ use solana_message::AddressLookupTableAccount;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use tokio::{
-    sync::{Mutex, RwLock},
+    sync::{watch, Mutex, RwLock},
     time::sleep,
 };
 use tracing::*;
@@ -33,6 +34,8 @@ const REMOTE_TABLE_FINALIZATION_SLOT_TIME: Duration =
 const REMOTE_TABLE_FINALIZATION_BUFFER: Duration = Duration::from_millis(200);
 const REMOTE_TABLE_FALLBACK_POLL_INTERVAL: Duration =
     Duration::from_millis(500);
+#[allow(dead_code)]
+const REMOTE_READINESS_SUCCESS_TTL: Duration = Duration::from_millis(750);
 
 fn remote_table_finalization_delay() -> Duration {
     REMOTE_TABLE_FINALIZATION_SLOT_TIME
@@ -88,6 +91,246 @@ struct MatchingTableReadiness {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RemoteReadinessTarget {
     wall_clock_deadline: Option<Instant>,
+}
+
+#[allow(dead_code)]
+type RemoteReadinessAddresses = HashMap<Pubkey, Vec<Pubkey>>;
+#[allow(dead_code)]
+type SharedRemoteReadinessResult =
+    Arc<TableManiaResult<RemoteReadinessAddresses>>;
+#[allow(dead_code)]
+type RemoteReadinessReceiver =
+    watch::Receiver<Option<SharedRemoteReadinessResult>>;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteReadinessTableRequirement {
+    table_address: Pubkey,
+    required_pubkeys: Vec<Pubkey>,
+    latest_update_sent_at: Option<Instant>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RemoteReadinessWaiterKey {
+    tables: Vec<RemoteReadinessTableRequirement>,
+}
+
+#[allow(dead_code)]
+struct ActiveRemoteReadinessWaiter {
+    key: RemoteReadinessWaiterKey,
+    receiver: RemoteReadinessReceiver,
+}
+
+#[allow(dead_code)]
+struct CachedRemoteReadinessResult {
+    key: RemoteReadinessWaiterKey,
+    remote_tables: RemoteReadinessAddresses,
+    expires_at: Instant,
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+struct RemoteReadinessWaiterState {
+    active: Vec<ActiveRemoteReadinessWaiter>,
+    successful: Vec<CachedRemoteReadinessResult>,
+}
+
+#[allow(dead_code)]
+#[derive(Default)]
+struct RemoteReadinessWaiters {
+    state: Mutex<RemoteReadinessWaiterState>,
+}
+
+#[allow(dead_code)]
+impl RemoteReadinessWaiterKey {
+    fn new(matching_tables: &HashMap<Pubkey, MatchingTableReadiness>) -> Self {
+        let mut tables = matching_tables
+            .iter()
+            .map(|(table_address, readiness)| {
+                let mut required_pubkeys =
+                    readiness.local_keys.iter().copied().collect::<Vec<_>>();
+                required_pubkeys.sort_unstable();
+                RemoteReadinessTableRequirement {
+                    table_address: *table_address,
+                    required_pubkeys,
+                    latest_update_sent_at: readiness.latest_update_sent_at,
+                }
+            })
+            .collect::<Vec<_>>();
+        tables.sort_unstable_by_key(|requirement| requirement.table_address);
+        Self { tables }
+    }
+
+    fn is_satisfied_by(&self, other: &Self) -> bool {
+        self.tables.iter().all(|requirement| {
+            other
+                .tables
+                .iter()
+                .find(|other_requirement| {
+                    other_requirement.table_address == requirement.table_address
+                })
+                .is_some_and(|other_requirement| {
+                    requirement.required_pubkeys.iter().all(|pk| {
+                        other_requirement.required_pubkeys.contains(pk)
+                    }) && match requirement.latest_update_sent_at {
+                        Some(required_update) => {
+                            other_requirement.latest_update_sent_at.is_some_and(
+                                |other_update| other_update >= required_update,
+                            )
+                        }
+                        None => true,
+                    }
+                })
+        })
+    }
+}
+
+#[allow(dead_code)]
+impl RemoteReadinessWaiterState {
+    fn prune_expired_successes(&mut self, now: Instant) {
+        self.successful.retain(|result| result.expires_at > now);
+    }
+
+    fn find_success(
+        &self,
+        key: &RemoteReadinessWaiterKey,
+    ) -> Option<RemoteReadinessAddresses> {
+        self.successful
+            .iter()
+            .find(|result| key.is_satisfied_by(&result.key))
+            .map(|result| result.remote_tables.clone())
+    }
+
+    fn find_active(
+        &self,
+        key: &RemoteReadinessWaiterKey,
+    ) -> Option<RemoteReadinessReceiver> {
+        self.active
+            .iter()
+            .find(|waiter| key.is_satisfied_by(&waiter.key))
+            .map(|waiter| waiter.receiver.clone())
+    }
+}
+
+#[allow(dead_code)]
+impl RemoteReadinessWaiters {
+    async fn wait_or_spawn<F, Fut>(
+        self: &Arc<Self>,
+        key: RemoteReadinessWaiterKey,
+        spawn_future: F,
+    ) -> TableManiaResult<RemoteReadinessAddresses>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = TableManiaResult<RemoteReadinessAddresses>>
+            + Send
+            + 'static,
+    {
+        let receiver = {
+            let mut state = self.state.lock().await;
+            state.prune_expired_successes(Instant::now());
+            if let Some(remote_tables) = state.find_success(&key) {
+                return Ok(remote_tables);
+            }
+            if let Some(receiver) = state.find_active(&key) {
+                receiver
+            } else {
+                let (sender, receiver) = watch::channel(None);
+                state.active.push(ActiveRemoteReadinessWaiter {
+                    key: key.clone(),
+                    receiver: receiver.clone(),
+                });
+                let waiters = self.clone();
+                tokio::spawn(async move {
+                    let result = Arc::new(spawn_future().await);
+                    {
+                        let mut state = waiters.state.lock().await;
+                        state.active.retain(|waiter| waiter.key != key);
+                        if let Ok(remote_tables) = result.as_ref() {
+                            state.successful.push(
+                                CachedRemoteReadinessResult {
+                                    key,
+                                    remote_tables: remote_tables.clone(),
+                                    expires_at: Instant::now()
+                                        + REMOTE_READINESS_SUCCESS_TTL,
+                                },
+                            );
+                        }
+                    }
+                    let _ = sender.send(Some(result));
+                });
+                receiver
+            }
+        };
+
+        Self::wait_for_result(receiver).await
+    }
+
+    async fn wait_for_result(
+        mut receiver: RemoteReadinessReceiver,
+    ) -> TableManiaResult<RemoteReadinessAddresses> {
+        loop {
+            if let Some(result) = receiver.borrow().as_ref() {
+                return match result.as_ref() {
+                    Ok(remote_tables) => Ok(remote_tables.clone()),
+                    Err(err) => {
+                        Err(TableManiaError::SharedRemoteReadinessFailure(
+                            Arc::new(err.clone_for_shared_readiness()),
+                        ))
+                    }
+                };
+            }
+            if receiver.changed().await.is_err() {
+                return Err(TableManiaError::SharedRemoteReadinessFailure(
+                    Arc::new(
+                        TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                            "remote readiness waiter closed before result"
+                                .to_string(),
+                        ),
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+trait CloneForSharedReadiness {
+    fn clone_for_shared_readiness(&self) -> TableManiaError;
+}
+
+impl CloneForSharedReadiness for TableManiaError {
+    fn clone_for_shared_readiness(&self) -> TableManiaError {
+        match self {
+            TableManiaError::MagicBlockRpcClientError(err) => {
+                TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                    err.to_string(),
+                )
+            }
+            TableManiaError::CannotExtendDeactivatedTable(pubkey) => {
+                TableManiaError::CannotExtendDeactivatedTable(*pubkey)
+            }
+            TableManiaError::InvalidAuthority(actual, expected) => {
+                TableManiaError::InvalidAuthority(*actual, *expected)
+            }
+            TableManiaError::MaxExtendPubkeysExceeded(max, provided) => {
+                TableManiaError::MaxExtendPubkeysExceeded(*max, *provided)
+            }
+            TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                message,
+            ) => TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                message.clone(),
+            ),
+            TableManiaError::TimedOutWaitingForLocalTablesToUpdate(message) => {
+                TableManiaError::TimedOutWaitingForLocalTablesToUpdate(
+                    message.clone(),
+                )
+            }
+            TableManiaError::SharedRemoteReadinessFailure(err) => {
+                TableManiaError::SharedRemoteReadinessFailure(err.clone())
+            }
+        }
+    }
 }
 
 impl TableMania {
@@ -970,5 +1213,206 @@ fn randomize_lookup_table_slot() -> bool {
     #[cfg(not(feature = "randomize_lookup_table_slot"))]
     {
         std::env::var("RANDOMIZE_LOOKUP_TABLE_SLOT").is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicUsize;
+
+    use super::*;
+
+    fn readiness(
+        pubkeys: impl IntoIterator<Item = Pubkey>,
+        latest_update_sent_at: Option<Instant>,
+    ) -> MatchingTableReadiness {
+        MatchingTableReadiness {
+            local_keys: pubkeys.into_iter().collect(),
+            latest_update_sent_at,
+        }
+    }
+
+    fn key_for(
+        entries: impl IntoIterator<Item = (Pubkey, Vec<Pubkey>, Option<Instant>)>,
+    ) -> RemoteReadinessWaiterKey {
+        let matching_tables = entries
+            .into_iter()
+            .map(|(table, pubkeys, latest_update_sent_at)| {
+                (table, readiness(pubkeys, latest_update_sent_at))
+            })
+            .collect::<HashMap<_, _>>();
+        RemoteReadinessWaiterKey::new(&matching_tables)
+    }
+
+    #[test]
+    fn remote_readiness_key_sorts_tables_and_pubkeys() {
+        let table_a = Pubkey::new_unique();
+        let table_b = Pubkey::new_unique();
+        let pk_a = Pubkey::new_unique();
+        let pk_b = Pubkey::new_unique();
+        let pk_c = Pubkey::new_unique();
+
+        let key = key_for([
+            (table_b, vec![pk_c], None),
+            (table_a, vec![pk_b, pk_a], None),
+        ]);
+
+        let mut expected_tables = vec![table_a, table_b];
+        expected_tables.sort_unstable();
+        assert_eq!(
+            key.tables
+                .iter()
+                .map(|requirement| requirement.table_address)
+                .collect::<Vec<_>>(),
+            expected_tables
+        );
+        for requirement in key.tables {
+            let mut sorted_pubkeys = requirement.required_pubkeys.clone();
+            sorted_pubkeys.sort_unstable();
+            assert_eq!(requirement.required_pubkeys, sorted_pubkeys);
+        }
+    }
+
+    #[test]
+    fn remote_readiness_key_accepts_compatible_superset() {
+        let table = Pubkey::new_unique();
+        let pk_a = Pubkey::new_unique();
+        let pk_b = Pubkey::new_unique();
+        let base = Instant::now();
+        let subset = key_for([(table, vec![pk_a], Some(base))]);
+        let superset = key_for([(
+            table,
+            vec![pk_a, pk_b],
+            Some(base + Duration::from_millis(1)),
+        )]);
+
+        assert!(subset.is_satisfied_by(&superset));
+    }
+
+    #[test]
+    fn remote_readiness_key_rejects_missing_table() {
+        let requested =
+            key_for([(Pubkey::new_unique(), vec![Pubkey::new_unique()], None)]);
+        let other =
+            key_for([(Pubkey::new_unique(), vec![Pubkey::new_unique()], None)]);
+
+        assert!(!requested.is_satisfied_by(&other));
+    }
+
+    #[test]
+    fn remote_readiness_key_rejects_missing_pubkey() {
+        let table = Pubkey::new_unique();
+        let pk_a = Pubkey::new_unique();
+        let pk_b = Pubkey::new_unique();
+        let requested = key_for([(table, vec![pk_a, pk_b], None)]);
+        let other = key_for([(table, vec![pk_a], None)]);
+
+        assert!(!requested.is_satisfied_by(&other));
+    }
+
+    #[test]
+    fn remote_readiness_key_rejects_older_update() {
+        let table = Pubkey::new_unique();
+        let pk = Pubkey::new_unique();
+        let base = Instant::now();
+        let requested = key_for([(table, vec![pk], Some(base))]);
+        let older =
+            key_for([(table, vec![pk], Some(base - Duration::from_millis(1)))]);
+
+        assert!(!requested.is_satisfied_by(&older));
+    }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_share_active_waiter() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table = Pubkey::new_unique();
+        let pk = Pubkey::new_unique();
+        let key = key_for([(table, vec![pk], None)]);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_waiters = waiters.clone();
+        let first_key = key.clone();
+        let first_calls = calls.clone();
+        let first = tokio::spawn(async move {
+            first_waiters
+                .wait_or_spawn(first_key, move || async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    sleep(Duration::from_millis(50)).await;
+                    Ok(HashMap::from([(table, vec![pk])]))
+                })
+                .await
+        });
+
+        sleep(Duration::from_millis(10)).await;
+        let second = waiters
+            .wait_or_spawn(key, || async {
+                panic!("compatible active waiter should be reused")
+            })
+            .await
+            .unwrap();
+        let first = first.await.unwrap().unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_reuse_success_cache() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table = Pubkey::new_unique();
+        let pk = Pubkey::new_unique();
+        let key = key_for([(table, vec![pk], None)]);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_calls = calls.clone();
+        waiters
+            .wait_or_spawn(key.clone(), move || async move {
+                first_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(HashMap::from([(table, vec![pk])]))
+            })
+            .await
+            .unwrap();
+        waiters
+            .wait_or_spawn(key, || async {
+                panic!("compatible success should be reused")
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_do_not_cache_failure() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table = Pubkey::new_unique();
+        let pk = Pubkey::new_unique();
+        let key = key_for([(table, vec![pk], None)]);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_calls = calls.clone();
+        let first = waiters
+            .wait_or_spawn(key.clone(), move || async move {
+                first_calls.fetch_add(1, Ordering::SeqCst);
+                Err(TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                    "expected failure".to_string(),
+                ))
+            })
+            .await;
+        assert!(matches!(
+            first,
+            Err(TableManiaError::SharedRemoteReadinessFailure(_))
+        ));
+
+        let second_calls = calls.clone();
+        waiters
+            .wait_or_spawn(key, move || async move {
+                second_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(HashMap::from([(table, vec![pk])]))
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

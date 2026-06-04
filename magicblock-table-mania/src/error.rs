@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use thiserror::Error;
@@ -25,6 +27,9 @@ pub enum TableManiaError {
 
     #[error("Timed out waiting for local tables to update: {0}")]
     TimedOutWaitingForLocalTablesToUpdate(String),
+
+    #[error("Shared remote table readiness waiter failed: {0}")]
+    SharedRemoteReadinessFailure(Arc<TableManiaError>),
 }
 
 impl TableManiaError {
@@ -32,6 +37,9 @@ impl TableManiaError {
     pub fn signature(&self) -> Option<Signature> {
         match self {
             TableManiaError::MagicBlockRpcClientError(err) => err.signature(),
+            TableManiaError::SharedRemoteReadinessFailure(err) => {
+                err.signature()
+            }
             _ => None,
         }
     }
