@@ -3,6 +3,7 @@ use solana_pubkey::Pubkey;
 pub mod account_actions;
 pub mod accounts;
 pub(crate) mod instruction_context_frames;
+pub(crate) mod instruction_sysvar;
 pub mod instruction_utils;
 
 // NOTE: there is no low level SDK currently that exposes the program address

@@ -134,6 +134,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     Ok(TransactionStrategy {
         optimized_tasks: to_cleanup,
         lookup_tables_keys: old_alts,
+        standalone_action_nonce: None,
     })
 }
 
@@ -176,6 +177,7 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     let commit_strategy = TransactionStrategy {
         optimized_tasks: commit_stage_tasks,
         lookup_tables_keys: commit_alt_pubkeys,
+        standalone_action_nonce: None,
     };
 
     let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
@@ -189,12 +191,14 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     let finalize_strategy = TransactionStrategy {
         optimized_tasks: finalize_stage_tasks,
         lookup_tables_keys: finalize_alt_pubkeys,
+        standalone_action_nonce: None,
     };
 
     // We clean up only ALTs
     let to_cleanup = TransactionStrategy {
         optimized_tasks: vec![],
         lookup_tables_keys: strategy.lookup_tables_keys,
+        standalone_action_nonce: None,
     };
 
     (commit_strategy, finalize_strategy, to_cleanup)
@@ -218,11 +222,13 @@ pub(in crate::intent_executor) fn handle_undelegation_error(
         TransactionStrategy {
             optimized_tasks: removed_task,
             lookup_tables_keys: old_alts,
+            standalone_action_nonce: None,
         }
     } else {
         TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
+            standalone_action_nonce: None,
         }
     }
 }

@@ -698,6 +698,7 @@ mod tests {
 
     use magicblock_accounts_db::traits::AccountsBank;
     use magicblock_config::config::ChainLinkConfig;
+    use magicblock_magic_program_api as magic_program;
     use magicblock_metrics::metrics::AccountFetchOrigin;
     use solana_account::AccountSharedData;
     use solana_message::legacy::Message;
@@ -775,12 +776,17 @@ mod tests {
         let kept_feature_pubkey = Pubkey::new_unique();
         let validator_id = Pubkey::new_unique();
         let blacklisted_validator_account = AccountSharedData::default();
+        let blacklisted_executor_account = AccountSharedData::default();
         let removable_account = AccountSharedData::default();
         let kept_feature_account = AccountSharedData::new(1, 0, &feature::ID);
 
         accounts_bank.insert(removable_pubkey, removable_account);
         accounts_bank.insert(kept_feature_pubkey, kept_feature_account);
         accounts_bank.insert(validator_id, blacklisted_validator_account);
+        accounts_bank.insert(
+            magic_program::POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
+            blacklisted_executor_account,
+        );
 
         let chainlink = TestReplicationModeAwareChainlink::disabled(
             &accounts_bank,
@@ -796,6 +802,11 @@ mod tests {
         assert!(accounts_bank.get_account(&removable_pubkey).is_none());
         assert!(accounts_bank.get_account(&kept_feature_pubkey).is_some());
         assert!(accounts_bank.get_account(&validator_id).is_some());
+        assert!(accounts_bank
+            .get_account(
+                &magic_program::POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID
+            )
+            .is_some());
     }
 
     #[tokio::test]

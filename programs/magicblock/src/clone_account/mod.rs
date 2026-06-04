@@ -32,6 +32,7 @@ mod process_clone_init;
 mod process_evict;
 mod process_finalize_buffer;
 mod process_finalize_v1_buffer;
+mod process_post_delegation_actions;
 mod process_set_authority;
 #[cfg(test)]
 mod tests;
@@ -48,6 +49,7 @@ pub(crate) use process_clone_init::process_clone_account_init;
 pub(crate) use process_evict::process_evict_account;
 pub(crate) use process_finalize_buffer::process_finalize_program_from_buffer;
 pub(crate) use process_finalize_v1_buffer::process_finalize_v1_program_from_buffer;
+pub(crate) use process_post_delegation_actions::process_execute_post_delegation_actions;
 pub(crate) use process_set_authority::process_set_program_authority;
 use solana_pubkey::Pubkey;
 

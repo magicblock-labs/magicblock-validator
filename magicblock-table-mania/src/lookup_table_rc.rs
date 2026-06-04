@@ -6,6 +6,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
+    time::Instant,
 };
 
 use magicblock_metrics::metrics;
@@ -39,16 +40,29 @@ use crate::{
 
 /// A map of reference counted pubkeys that can be used to track the number of
 /// reservations that exist for a pubkey in a lookup table
+pub struct RefcountedPubkeyEntry {
+    refcount: AtomicUsize,
+    update_sent_at: Instant,
+}
+
 pub struct RefcountedPubkeys {
-    pubkeys: HashMap<Pubkey, AtomicUsize>,
+    pubkeys: HashMap<Pubkey, RefcountedPubkeyEntry>,
 }
 
 impl RefcountedPubkeys {
-    fn new(pubkeys: &[Pubkey]) -> Self {
+    fn new(pubkeys: &[Pubkey], update_sent_at: Instant) -> Self {
         Self {
             pubkeys: pubkeys
                 .iter()
-                .map(|pubkey| (*pubkey, AtomicUsize::new(1)))
+                .map(|pubkey| {
+                    (
+                        *pubkey,
+                        RefcountedPubkeyEntry {
+                            refcount: AtomicUsize::new(1),
+                            update_sent_at,
+                        },
+                    )
+                })
                 .collect(),
         }
     }
@@ -56,16 +70,22 @@ impl RefcountedPubkeys {
     /// This should only be called for pubkeys that are not already in this table.
     /// It is called when extending a lookup table with pubkeys that were not
     /// found in any other table.
-    fn insert_many(&mut self, pubkeys: &[Pubkey]) {
+    fn insert_many(&mut self, pubkeys: &[Pubkey], update_sent_at: Instant) {
         for pubkey in pubkeys {
-            if let Some(pubkey_rc) = self.pubkeys.get_mut(pubkey) {
+            if let Some(entry) = self.pubkeys.get_mut(pubkey) {
                 debug!(
                     "Pubkey {} exists in the table. Not inserting, but increasing ref count instead",
                     pubkey
                 );
-                pubkey_rc.fetch_add(1, Ordering::Relaxed);
+                entry.refcount.fetch_add(1, Ordering::Relaxed);
             } else {
-                self.pubkeys.insert(*pubkey, AtomicUsize::new(1));
+                self.pubkeys.insert(
+                    *pubkey,
+                    RefcountedPubkeyEntry {
+                        refcount: AtomicUsize::new(1),
+                        update_sent_at,
+                    },
+                );
             }
         }
     }
@@ -76,7 +96,13 @@ impl RefcountedPubkeys {
         let mut inserted = 0;
         for pubkey in pubkeys {
             if !self.pubkeys.contains_key(pubkey) {
-                self.pubkeys.insert(*pubkey, AtomicUsize::new(0));
+                self.pubkeys.insert(
+                    *pubkey,
+                    RefcountedPubkeyEntry {
+                        refcount: AtomicUsize::new(0),
+                        update_sent_at: Instant::now(),
+                    },
+                );
                 inserted += 1;
             }
         }
@@ -87,8 +113,8 @@ impl RefcountedPubkeys {
     /// - *pubkey* to reserve
     /// - *returns* `true` if the pubkey could be reserved
     fn reserve(&self, pubkey: &Pubkey) -> bool {
-        if let Some(count) = self.pubkeys.get(pubkey) {
-            count.fetch_add(1, Ordering::SeqCst);
+        if let Some(entry) = self.pubkeys.get(pubkey) {
+            entry.refcount.fetch_add(1, Ordering::SeqCst);
             true
         } else {
             false
@@ -101,8 +127,9 @@ impl RefcountedPubkeys {
     /// - *pubkey* to release
     /// - *returns* `true` if the pubkey was released
     fn release(&self, pubkey: &Pubkey) -> bool {
-        if let Some(count) = self.pubkeys.get(pubkey) {
-            count
+        if let Some(entry) = self.pubkeys.get(pubkey) {
+            entry
+                .refcount
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
                     if x == 0 {
                         None
@@ -120,7 +147,7 @@ impl RefcountedPubkeys {
     fn has_reservations(&self) -> bool {
         self.pubkeys
             .values()
-            .any(|rc_pubkey| rc_pubkey.load(Ordering::SeqCst) > 0)
+            .any(|entry| entry.refcount.load(Ordering::SeqCst) > 0)
     }
 
     /// Returns the refcount of a pubkey if it exists in this table
@@ -129,12 +156,24 @@ impl RefcountedPubkeys {
     fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
         self.pubkeys
             .get(pubkey)
-            .map(|count| count.load(Ordering::Relaxed))
+            .map(|entry| entry.refcount.load(Ordering::Relaxed))
+    }
+
+    fn latest_update_sent_at_for(
+        &self,
+        pubkeys: &HashSet<Pubkey>,
+    ) -> Option<Instant> {
+        pubkeys
+            .iter()
+            .filter_map(|pubkey| {
+                self.pubkeys.get(pubkey).map(|entry| entry.update_sent_at)
+            })
+            .max()
     }
 }
 
 impl Deref for RefcountedPubkeys {
-    type Target = HashMap<Pubkey, AtomicUsize>;
+    type Target = HashMap<Pubkey, RefcountedPubkeyEntry>;
 
     fn deref(&self) -> &Self::Target {
         &self.pubkeys
@@ -334,7 +373,7 @@ impl LookupTableRc {
         self.pubkeys().is_some_and(|pubkeys| {
             pubkeys
                 .get(pubkey)
-                .is_some_and(|count| count.load(Ordering::SeqCst) > 0)
+                .is_some_and(|entry| entry.refcount.load(Ordering::SeqCst) > 0)
         })
     }
 
@@ -442,6 +481,15 @@ impl LookupTableRc {
         }
     }
 
+    pub fn latest_update_sent_at_for(
+        &self,
+        pubkeys: &HashSet<Pubkey>,
+    ) -> Option<Instant> {
+        self.pubkeys().and_then(|table_pubkeys| {
+            table_pubkeys.latest_update_sent_at_for(pubkeys)
+        })
+    }
+
     /// Initializes an address lookup table deriving its authority from the provided
     /// [authority] keypair. The table is extended with the provided [pubkeys].
     /// The [authority] keypair pays for the transaction.
@@ -505,6 +553,7 @@ impl LookupTableRc {
             latest_blockhash,
         );
 
+        let update_sent_at = Instant::now();
         let outcome = rpc_client
             .send_transaction(
                 &tx,
@@ -524,7 +573,10 @@ impl LookupTableRc {
         Ok(Self::Active {
             derived_auth,
             table_address,
-            pubkeys: RwLock::new(RefcountedPubkeys::new(pubkeys)),
+            pubkeys: RwLock::new(RefcountedPubkeys::new(
+                pubkeys,
+                update_sent_at,
+            )),
             creation_slot: latest_slot,
             creation_sub_slot: sub_slot,
             init_signature: signature,
@@ -587,6 +639,7 @@ impl LookupTableRc {
             latest_blockhash,
         );
 
+        let update_sent_at = Instant::now();
         let outcome = rpc_client
             .send_transaction(
                 &tx,
@@ -605,7 +658,7 @@ impl LookupTableRc {
             pubkeys
                 .write()
                 .expect("pubkeys rwlock poisoned")
-                .insert_many(extra_pubkeys);
+                .insert_many(extra_pubkeys, update_sent_at);
             extend_signatures
                 .lock()
                 .expect("extend_signatures mutex poisoned")

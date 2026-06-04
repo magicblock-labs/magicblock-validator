@@ -43,6 +43,7 @@ programs=(
   ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1
   EnhkomtzKms55jXi3ijn9XsMKYpMT4BJjmbuDQmPo3YS
   SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2
+  KeyspM2ssCJbqUhQ4k7sveSiY4WjnYsrXkC8oDbwde5
 )
 
 for prog in "${programs[@]}"; do
