@@ -25,7 +25,6 @@ use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
-use tokio::try_join;
 use tracing::{error, info};
 
 use crate::{
@@ -496,7 +495,7 @@ impl DeliveryPreparator {
         join_all(close_futs)
             .await
             .into_iter()
-            .map(|(cleanup_tasks, res)| {
+            .try_for_each(|(cleanup_tasks, res)| {
                 res.inspect_err(|err| {
                     let buffer_pdas = cleanup_tasks
                         .into_iter()
@@ -505,7 +504,6 @@ impl DeliveryPreparator {
                     error!(error = ?err, "Failed to cleanup buffers: {:?}", buffer_pdas);
                 })
             })
-            .collect::<Result<(), _>>()
     }
 }
 
