@@ -4,6 +4,10 @@ use magicblock_rpc_client::{
     utils::TransactionErrorMapper, MagicBlockRpcClientError,
 };
 use solana_instruction::error::InstructionError;
+use solana_rpc_client_api::{
+    client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
+    request::{RpcError, RpcRequest},
+};
 use solana_signature::Signature;
 use solana_signer::SignerError;
 use solana_transaction_error::TransactionError;
@@ -36,6 +40,29 @@ impl InternalError {
         match self {
             Self::SignerError(_) => None,
             Self::MagicBlockRpcClientError(err) => err.signature(),
+        }
+    }
+
+    pub fn is_transaction_too_large(&self) -> bool {
+        fn is_send_transaction_too_large(err: &RpcClientError) -> bool {
+            matches!(err.request, Some(RpcRequest::SendTransaction))
+                && matches!(
+                    &*err.kind,
+                    RpcClientErrorKind::RpcError(
+                        RpcError::RpcResponseError { code: -32602, message, .. }
+                    ) if message.contains("VersionedTransaction too large")
+                )
+        }
+
+        match self {
+            Self::MagicBlockRpcClientError(err) => match err.as_ref() {
+                MagicBlockRpcClientError::RpcClientError(err)
+                | MagicBlockRpcClientError::SendTransaction(err) => {
+                    is_send_transaction_too_large(err)
+                }
+                _ => false,
+            },
+            Self::SignerError(_) => false,
         }
     }
 }
@@ -172,6 +199,14 @@ impl TransactionStrategyExecutionError {
             Self::CpiLimitError(_, _)
                 | Self::LoadedAccountsDataSizeExceeded(_, _)
         )
+    }
+
+    pub fn is_single_stage_split_limit_error(&self) -> bool {
+        self.is_cpi_limit_error()
+            || matches!(
+                self,
+                Self::InternalError(err) if err.is_transaction_too_large()
+            )
     }
 
     pub fn task_index(&self) -> Option<u8> {
@@ -385,3 +420,55 @@ impl From<&IntentExecutorError> for ActionError {
 }
 
 pub type IntentExecutorResult<T, E = IntentExecutorError> = Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use magicblock_rpc_client::MagicBlockRpcClientError;
+    use solana_rpc_client_api::{
+        client_error::{
+            Error as RpcClientError, ErrorKind as RpcClientErrorKind,
+        },
+        request::{RpcError, RpcRequest, RpcResponseErrorData},
+    };
+
+    use super::{InternalError, TransactionStrategyExecutionError};
+
+    fn send_transaction_too_large_error() -> TransactionStrategyExecutionError {
+        let rpc_error = RpcClientError {
+            request: Some(RpcRequest::SendTransaction),
+            kind: Box::new(RpcClientErrorKind::RpcError(
+                RpcError::RpcResponseError {
+                    code: -32602,
+                    message: "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)".to_string(),
+                    data: RpcResponseErrorData::Empty,
+                },
+            )),
+        };
+
+        TransactionStrategyExecutionError::InternalError(
+            InternalError::MagicBlockRpcClientError(Box::new(
+                MagicBlockRpcClientError::SendTransaction(Box::new(rpc_error)),
+            )),
+        )
+    }
+
+    #[test]
+    fn send_transaction_too_large_triggers_single_stage_split() {
+        let err = send_transaction_too_large_error();
+
+        assert!(err.is_single_stage_split_limit_error());
+    }
+
+    #[test]
+    fn unrelated_internal_errors_do_not_trigger_single_stage_split() {
+        let err = TransactionStrategyExecutionError::InternalError(
+            InternalError::MagicBlockRpcClientError(Box::new(
+                MagicBlockRpcClientError::LookupTableDeserialize(
+                    solana_instruction::error::InstructionError::GenericError,
+                ),
+            )),
+        );
+
+        assert!(!err.is_single_stage_split_limit_error());
+    }
+}
