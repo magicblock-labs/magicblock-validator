@@ -291,7 +291,7 @@ impl TableMania {
         while !remaining.is_empty() {
             // First try to use existing tables
             let mut stored_in_existing = false;
-            let mut force_new_table = false;
+            let mut force_new_table_after = None;
             {
                 // Taking a write lock here to prevent multiple tasks from
                 // updating tables at the same time
@@ -321,7 +321,8 @@ impl TableMania {
                                         "Failed to extend table with invalid instruction data; creating a new table"
                                     );
                                     table.mark_non_extendable();
-                                    force_new_table = true;
+                                    force_new_table_after =
+                                        Some(*table.table_address());
                                 }
                                 ExtendTableErrorAction::Retry => {
                                     error!(
@@ -349,19 +350,19 @@ impl TableMania {
                     self.active_tables.write().await;
 
                 // Double-check if a new table was created while we were waiting for the lock
-                if !force_new_table {
-                    if let Some(table) = active_tables_write_lock.last() {
-                        if !table.is_full() {
-                            // Another task created a table we can use, so drop the write lock
-                            // and try again with the read lock
-                            drop(active_tables_write_lock);
-                            continue;
-                        }
+                if let Some(table) = active_tables_write_lock.last() {
+                    if !table.is_full()
+                        && force_new_table_after != Some(*table.table_address())
+                    {
+                        // Another task created a table we can use, so drop the write lock
+                        // and try again with the read lock
+                        drop(active_tables_write_lock);
+                        continue;
                     }
                 }
 
                 // Create a new table and add it to active_tables
-                let initial_pubkey_limit = if force_new_table {
+                let initial_pubkey_limit = if force_new_table_after.is_some() {
                     FALLBACK_NEW_TABLE_INIT_PUBKEYS
                 } else {
                     MAX_ENTRIES_AS_PART_OF_EXTEND as usize
