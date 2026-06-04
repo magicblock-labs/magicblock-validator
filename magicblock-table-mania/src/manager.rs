@@ -320,6 +320,7 @@ impl TableMania {
                                         table_address = %table.table_address(),
                                         "Failed to extend table with invalid instruction data; creating a new table"
                                     );
+                                    table.mark_non_extendable();
                                     force_new_table = true;
                                 }
                                 ExtendTableErrorAction::Retry => {
