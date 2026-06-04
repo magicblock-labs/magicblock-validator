@@ -12,13 +12,15 @@ use crate::{
         commit_task::CommitDelivery, utils::TransactionUtils, BaseActionTask,
         BaseTask, BaseTaskImpl,
     },
-    transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
+    transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
 };
 
 #[derive(Default)]
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,
+    // TODO(edwin): remove this
+    pub standalone_action_nonce: Option<u64>,
 }
 
 impl TransactionStrategy {
@@ -72,6 +74,7 @@ impl TransactionStrategy {
         TransactionStrategy {
             optimized_tasks: action_tasks,
             lookup_tables_keys: old_alts,
+            standalone_action_nonce: self.standalone_action_nonce,
         }
     }
 
@@ -220,7 +223,7 @@ impl TaskStrategist {
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
         if Self::try_optimize_tx_size_if_needed(&mut tasks)?
-            <= MAX_ENCODED_TRANSACTION_SIZE
+            <= MAX_TRANSACTION_WIRE_SIZE
         {
             // Persist tasks strategy
             if let Some(persistor) = persistor {
@@ -230,6 +233,7 @@ impl TaskStrategist {
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys: vec![],
+                standalone_action_nonce: None,
             })
         }
         // In case task optimization didn't work
@@ -246,6 +250,7 @@ impl TaskStrategist {
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys,
+                standalone_action_nonce: None,
             })
         } else {
             Err(TaskStrategistError::FailedToFitError)
@@ -288,8 +293,7 @@ impl TaskStrategist {
             return false;
         };
 
-        let encoded_alt_tx = serialize_and_encode_base64(&alt_tx);
-        encoded_alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE
+        serialized_transaction_size(&alt_tx) <= MAX_TRANSACTION_WIRE_SIZE
     }
 
     pub fn collect_lookup_table_keys(
@@ -382,10 +386,10 @@ impl TaskStrategist {
         }
     }
 
-    /// Optimizes tasks so as to bring the transaction size within the limit [`MAX_ENCODED_TRANSACTION_SIZE`]
+    /// Optimizes tasks so as to bring the transaction size within the limit [`MAX_TRANSACTION_WIRE_SIZE`]
     /// Returns Ok(size of tx after optimizations) else Err(SignerError).
     /// Note that the returned size, though possibly optimized one, may still not be under
-    /// the limit MAX_ENCODED_TRANSACTION_SIZE. The caller needs to check and make decision accordingly.
+    /// the limit MAX_TRANSACTION_WIRE_SIZE. The caller needs to check and make decision accordingly.
     fn try_optimize_tx_size_if_needed(
         tasks: &mut [BaseTaskImpl],
     ) -> Result<usize, SignerError> {
@@ -397,7 +401,7 @@ impl TaskStrategist {
                 u64::default(), // placeholder
                 &[],
             ) {
-                Ok(tx) => Ok(serialize_and_encode_base64(&tx).len()),
+                Ok(tx) => Ok(serialized_transaction_size(&tx)),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
                 Err(TaskStrategistError::SignerError(err)) => Err(err),
             }
@@ -406,7 +410,7 @@ impl TaskStrategist {
         // Get initial transaction size
         let mut current_tx_length = calculate_tx_length(tasks)?;
 
-        if current_tx_length <= MAX_ENCODED_TRANSACTION_SIZE {
+        if current_tx_length <= MAX_TRANSACTION_WIRE_SIZE {
             return Ok(current_tx_length);
         }
 
@@ -428,7 +432,7 @@ impl TaskStrategist {
 
         // We keep popping heaviest el-ts & try to optimize while heap is non-empty
         while let Some((_, index)) = map.pop() {
-            if current_tx_length <= MAX_ENCODED_TRANSACTION_SIZE {
+            if current_tx_length <= MAX_TRANSACTION_WIRE_SIZE {
                 break;
             }
 

@@ -3,7 +3,7 @@ use std::{
     fmt,
     ops::Deref,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
     time::Instant,
@@ -200,6 +200,7 @@ pub enum LookupTableRc {
         creation_sub_slot: u64,
         init_signature: Signature,
         extend_signatures: Mutex<Vec<Signature>>,
+        extendable: AtomicBool,
     },
     Deactivated {
         derived_auth: Keypair,
@@ -220,6 +221,7 @@ impl fmt::Display for LookupTableRc {
                 creation_sub_slot,
                 init_signature,
                 extend_signatures,
+                ..
             } => {
                 let comma_separated_pubkeys = pubkeys
                     .read()
@@ -349,8 +351,24 @@ impl LookupTableRc {
 
     /// Returns `true` if the table has more capacity to add pubkeys
     pub fn has_more_capacity(&self) -> bool {
-        self.pubkeys()
-            .is_some_and(|x| x.len() < LOOKUP_TABLE_MAX_ADDRESSES)
+        match self {
+            Self::Active {
+                pubkeys,
+                extendable,
+                ..
+            } => {
+                extendable.load(Ordering::Relaxed)
+                    && pubkeys.read().expect("pubkeys rwlock poisoned").len()
+                        < LOOKUP_TABLE_MAX_ADDRESSES
+            }
+            Self::Deactivated { .. } => false,
+        }
+    }
+
+    pub fn mark_non_extendable(&self) {
+        if let Self::Active { extendable, .. } = self {
+            extendable.store(false, Ordering::Relaxed);
+        }
     }
 
     pub fn is_full(&self) -> bool {
@@ -581,6 +599,7 @@ impl LookupTableRc {
             creation_sub_slot: sub_slot,
             init_signature: signature,
             extend_signatures: vec![].into(),
+            extendable: AtomicBool::new(true),
         })
     }
 

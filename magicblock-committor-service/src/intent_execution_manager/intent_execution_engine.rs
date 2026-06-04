@@ -308,12 +308,6 @@ where
             .expect("Valid completion of previously scheduled message");
 
         tokio::spawn(async move {
-            // Cleanup after intent
-            // Note: in some cases it maybe critical to execute cleanup synchronously
-            // Example: if commit nonces were invalid during execution
-            // next intent could use wrongly initiated buffers by current intent
-            // We assume that this case is highly unlikely since it would mean:
-            // user redelegates amd reaches current commit id faster than we execute transactions below
             if let Err(err) = executor.cleanup().await {
                 error!(error = ?err, "Failed to cleanup after intent");
             }

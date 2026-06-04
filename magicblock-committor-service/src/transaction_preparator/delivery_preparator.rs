@@ -169,7 +169,7 @@ impl DeliveryPreparator {
                     signature,
                 ),
             )) => {
-                info!(error = ?err, signature = ?signature, "Buffer already initialized");
+                info!(error = ?err, signature = ?signature, "Buffer already was initialized");
             }
             // Return in any other case
             res => return res,
@@ -192,7 +192,7 @@ impl DeliveryPreparator {
         let preparation_task = preparation_task.clone();
         let cleanup_task = preparation_task.cleanup_task();
 
-        self.cleanup(authority, &[cleanup_task], &[]).await?;
+        self.cleanup_buffers(authority, &[cleanup_task]).await?;
         self.rpc_client.invalidate_cached_blockhash().await;
 
         // Restore preparation stage for retry
@@ -439,20 +439,42 @@ impl DeliveryPreparator {
         Ok(alts)
     }
 
-    /// Releases pubkeys from TableMania and
-    /// cleans up after buffer tasks
+    /// Releases pubkeys from TableMania and cleans up after buffer tasks.
+    //
+    // Cleaning buffers on failure isn't safe due to potential race condition:
+    // Assume pubkey set A being committed
+    // Intent1 fails and cleans up, another Intent2 with set A executes right away
+    // That could lead for Intent2 init of buffers executing prior of Intent1 buffer cleanup
+    // With same set A buffers will have same address
+    //
+    // To avoid this race on buffers we cleanup only succesfully executed intents
+    // With intent retries all buffers will be eventually closed once intent succeeds
     pub async fn cleanup(
         &self,
         authority: &Keypair,
         cleanup_tasks: &[CleanupTask],
         lookup_table_keys: &[Pubkey],
+        close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
-        self.table_mania
-            .release_pubkeys(&HashSet::from_iter(
-                lookup_table_keys.iter().cloned(),
-            ))
-            .await;
+        let alt_set = HashSet::from_iter(lookup_table_keys.iter().cloned());
+        let fut2 = self.table_mania.release_pubkeys(&alt_set);
 
+        if close_buffers {
+            let (res, ()) =
+                join(self.cleanup_buffers(authority, cleanup_tasks), fut2)
+                    .await;
+            res
+        } else {
+            fut2.await;
+            Ok(())
+        }
+    }
+
+    async fn cleanup_buffers(
+        &self,
+        authority: &Keypair,
+        cleanup_tasks: &[CleanupTask],
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         if cleanup_tasks.is_empty() {
             return Ok(());
         }
@@ -477,19 +499,26 @@ impl DeliveryPreparator {
                 );
 
                 async move {
-                    self.send_ixs_with_retry(&instructions, authority, 1).await
+                    (
+                        cleanup_tasks,
+                        self.send_ixs_with_retry(&instructions, authority, 1)
+                            .await,
+                    )
                 }
             });
 
         join_all(close_futs)
             .await
             .into_iter()
-            .inspect(|res| {
-                if let Err(err) = res {
-                    error!(error = ?err, "Failed to cleanup buffers");
-                }
+            .try_for_each(|(cleanup_tasks, res)| {
+                res.inspect_err(|err| {
+                    let buffer_pdas = cleanup_tasks
+                        .iter()
+                        .map(|el| el.buffer_pda(&authority.pubkey()))
+                        .collect::<Vec<_>>();
+                    error!(error = ?err, "Failed to cleanup buffers: {:?}", buffer_pdas);
+                })
             })
-            .collect::<Result<(), _>>()
     }
 }
 

@@ -28,6 +28,7 @@ solana-account = { workspace = true }
 solana-bpf-loader-program = { workspace = true }
 solana-compute-budget-program = { workspace = true }
 solana-compute-budget = { workspace = true }
+solana-compute-budget-instruction = { workspace = true }
 solana-feature-gate-interface = { workspace = true, features = ["bincode"] }
 solana-feature-set = { workspace = true }
 solana-fee-structure = { workspace = true }
@@ -54,6 +55,7 @@ rustc-hash = { workspace = true }
 [dev-dependencies]
 guinea = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
+solana-compute-budget-interface = { workspace = true }
 solana-keypair = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
