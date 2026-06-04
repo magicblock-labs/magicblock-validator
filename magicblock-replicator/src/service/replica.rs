@@ -97,7 +97,6 @@ impl Replica {
             if let Err(error) = result {
                 error!(slot, %error, "message processing error");
             }
-            return;
         }
         let (slot, index) = message.slot_and_index();
 
@@ -125,8 +124,8 @@ impl Replica {
                 }
                 result
             }
-            Message::SuperBlock(sb) => self.ctx.verify_checksum(&sb).await,
-            Message::Reset(_) => unreachable!("reset handled before replay"),
+            Message::SuperBlock(ref sb) => self.ctx.verify_checksum(sb).await,
+            Message::Reset(_) => return,
         };
 
         if let Err(error) = result {
