@@ -22,6 +22,9 @@ pub enum TableManiaError {
     #[error("Can only extend by {0} pubkeys at a time, but was provided {1}")]
     MaxExtendPubkeysExceeded(usize, usize),
 
+    #[error("Contract violation: {0}")]
+    ContractViolation(String),
+
     #[error("Timed out waiting for remote tables to update: {0}")]
     TimedOutWaitingForRemoteTablesToUpdate(String),
 

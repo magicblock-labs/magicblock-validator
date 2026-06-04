@@ -770,15 +770,21 @@ impl TableMania {
             )
             .await?;
 
-        Ok(matching_tables
+        matching_tables
             .into_keys()
-            .map(|address| AddressLookupTableAccount {
-                key: address,
-                // SAFETY: we confirmed above that we have a remote table for all matching
-                // tables and that they contain the addresses we need
-                addresses: remote_tables.get(&address).unwrap().to_vec(),
+            .map(|address| {
+                let addresses =
+                    remote_tables.get(&address).cloned().ok_or_else(|| {
+                        TableManiaError::ContractViolation(format!(
+                            "missing remote table for address {address}"
+                        ))
+                    })?;
+                Ok(AddressLookupTableAccount {
+                    key: address,
+                    addresses,
+                })
             })
-            .collect())
+            .collect()
     }
 
     // -----------------
