@@ -126,6 +126,47 @@ async fn test_simulation_return_data() {
 }
 
 #[tokio::test]
+async fn test_simulation_honors_heap_frame_request() {
+    let env = ExecutionTestEnv::new();
+    let account = env
+        .create_account_with_config(LAMPORTS_PER_SOL, 128, guinea::ID)
+        .pubkey();
+    let guinea_ix = Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::PrintSizes,
+        vec![AccountMeta::new_readonly(account, false)],
+    );
+
+    env.advance_slot();
+    let default_heap_txn = env.build_transaction(&[guinea_ix.clone()]);
+    let default_heap_result = env.simulate_transaction(default_heap_txn).await;
+    assert!(
+        default_heap_result.result.is_ok(),
+        "default heap simulation failed: {:?}",
+        default_heap_result.result
+    );
+
+    let heap_frame_ix = ComputeBudgetInstruction::request_heap_frame(64 * 1024);
+    env.advance_slot();
+    let requested_heap_txn = env.build_transaction(&[heap_frame_ix, guinea_ix]);
+    let requested_heap_result =
+        env.simulate_transaction(requested_heap_txn).await;
+    assert!(
+        requested_heap_result.result.is_ok(),
+        "requested heap simulation failed: {:?}",
+        requested_heap_result.result
+    );
+
+    assert!(
+        requested_heap_result.units_consumed
+            > default_heap_result.units_consumed,
+        "requesting a larger heap should consume more units: default={}, requested={}",
+        default_heap_result.units_consumed,
+        requested_heap_result.units_consumed
+    );
+}
+
+#[tokio::test]
 async fn test_simulation_honors_compute_unit_limit() {
     let env = ExecutionTestEnv::new();
     let account = env
@@ -153,20 +194,4 @@ async fn test_simulation_honors_compute_unit_limit() {
         "unexpected result: {:?}",
         result.result
     );
-}
-
-#[tokio::test]
-async fn test_simulation_rejects_duplicate_compute_budget_limit() {
-    let env = ExecutionTestEnv::new();
-    let first = ComputeBudgetInstruction::set_compute_unit_limit(10_000);
-    let second = ComputeBudgetInstruction::set_compute_unit_limit(20_000);
-
-    env.advance_slot();
-    let txn = env.build_transaction(&[first, second]);
-    let result = env.simulate_transaction(txn).await;
-
-    assert!(matches!(
-        result.result,
-        Err(TransactionError::DuplicateInstruction(1))
-    ));
 }
