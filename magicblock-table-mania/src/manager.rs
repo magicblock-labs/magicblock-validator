@@ -1441,4 +1441,226 @@ mod tests {
 
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_share_identical_batch_requests() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table = Pubkey::new_unique();
+        let pk = Pubkey::new_unique();
+        let key = key_for([(table, vec![pk], None)]);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_waiters = waiters.clone();
+        let first_key = key.clone();
+        let first_calls = calls.clone();
+        let first = tokio::spawn(async move {
+            first_waiters
+                .wait_or_spawn(first_key, move || async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    sleep(Duration::from_millis(50)).await;
+                    Ok(HashMap::from([(table, vec![pk])]))
+                })
+                .await
+        });
+
+        sleep(Duration::from_millis(10)).await;
+        let second = waiters
+            .wait_or_spawn(key, || async {
+                panic!("identical active waiter should be reused")
+            })
+            .await
+            .unwrap();
+        let first = first.await.unwrap().unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_share_subset_batch_requests() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table = Pubkey::new_unique();
+        let pk_a = Pubkey::new_unique();
+        let pk_b = Pubkey::new_unique();
+        let superset_key = key_for([(table, vec![pk_a, pk_b], None)]);
+        let subset_key = key_for([(table, vec![pk_a], None)]);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_waiters = waiters.clone();
+        let first_calls = calls.clone();
+        let first = tokio::spawn(async move {
+            first_waiters
+                .wait_or_spawn(superset_key, move || async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    sleep(Duration::from_millis(50)).await;
+                    Ok(HashMap::from([(table, vec![pk_a, pk_b])]))
+                })
+                .await
+        });
+
+        sleep(Duration::from_millis(10)).await;
+        let second = waiters
+            .wait_or_spawn(subset_key, || async {
+                panic!("subset request should reuse compatible superset")
+            })
+            .await
+            .unwrap();
+        let first = first.await.unwrap().unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_do_not_share_disjoint_pubkeys() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table = Pubkey::new_unique();
+        let pk_a = Pubkey::new_unique();
+        let pk_b = Pubkey::new_unique();
+        let key_a = key_for([(table, vec![pk_a], None)]);
+        let key_b = key_for([(table, vec![pk_b], None)]);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_waiters = waiters.clone();
+        let first_calls = calls.clone();
+        let first = tokio::spawn(async move {
+            first_waiters
+                .wait_or_spawn(key_a, move || async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    sleep(Duration::from_millis(50)).await;
+                    Ok(HashMap::from([(table, vec![pk_a])]))
+                })
+                .await
+        });
+
+        sleep(Duration::from_millis(10)).await;
+        let second_calls = calls.clone();
+        let second = waiters
+            .wait_or_spawn(key_b, move || async move {
+                second_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(HashMap::from([(table, vec![pk_b])]))
+            })
+            .await
+            .unwrap();
+        let first = first.await.unwrap().unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(first, HashMap::from([(table, vec![pk_a])]));
+        assert_eq!(second, HashMap::from([(table, vec![pk_b])]));
+    }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_share_only_true_table_supersets() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table_a = Pubkey::new_unique();
+        let table_b = Pubkey::new_unique();
+        let pk_a = Pubkey::new_unique();
+        let pk_b = Pubkey::new_unique();
+        let superset_key =
+            key_for([(table_a, vec![pk_a], None), (table_b, vec![pk_b], None)]);
+        let subset_key = key_for([(table_a, vec![pk_a], None)]);
+        let incompatible_key = key_for([(table_b, vec![pk_a], None)]);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_waiters = waiters.clone();
+        let first_calls = calls.clone();
+        let first = tokio::spawn(async move {
+            first_waiters
+                .wait_or_spawn(superset_key, move || async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    sleep(Duration::from_millis(50)).await;
+                    Ok(HashMap::from([
+                        (table_a, vec![pk_a]),
+                        (table_b, vec![pk_b]),
+                    ]))
+                })
+                .await
+        });
+
+        sleep(Duration::from_millis(10)).await;
+        waiters
+            .wait_or_spawn(subset_key, || async {
+                panic!("table subset should reuse table superset")
+            })
+            .await
+            .unwrap();
+
+        let incompatible_calls = calls.clone();
+        waiters
+            .wait_or_spawn(incompatible_key, move || async move {
+                incompatible_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(HashMap::from([(table_b, vec![pk_a])]))
+            })
+            .await
+            .unwrap();
+        first.await.unwrap().unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_expire_success_cache_after_ttl() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table = Pubkey::new_unique();
+        let pk = Pubkey::new_unique();
+        let key = key_for([(table, vec![pk], None)]);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_calls = calls.clone();
+        waiters
+            .wait_or_spawn(key.clone(), move || async move {
+                first_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(HashMap::from([(table, vec![pk])]))
+            })
+            .await
+            .unwrap();
+
+        sleep(REMOTE_READINESS_SUCCESS_TTL + Duration::from_millis(25)).await;
+
+        let second_calls = calls.clone();
+        waiters
+            .wait_or_spawn(key, move || async move {
+                second_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(HashMap::from([(table, vec![pk])]))
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_do_not_cancel_when_awaiter_drops() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table = Pubkey::new_unique();
+        let pk = Pubkey::new_unique();
+        let key = key_for([(table, vec![pk], None)]);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_waiters = waiters.clone();
+        let first_key = key.clone();
+        let first_calls = calls.clone();
+        let first = tokio::spawn(async move {
+            first_waiters
+                .wait_or_spawn(first_key, move || async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    sleep(Duration::from_millis(50)).await;
+                    Ok(HashMap::from([(table, vec![pk])]))
+                })
+                .await
+        });
+
+        sleep(Duration::from_millis(10)).await;
+        first.abort();
+
+        let second = waiters
+            .wait_or_spawn(key, || async {
+                panic!("shared task should still be active after awaiter drop")
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(second, HashMap::from([(table, vec![pk])]));
+    }
 }
