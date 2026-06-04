@@ -398,11 +398,16 @@ impl TransactionScheduler {
             .map_err(|error| error.to_string())?;
         self.accountsdb.set_slot(block.slot);
         self.update_sysvars(&block);
+        let slot = block.slot;
         let result = self.notify_executors_of_block(block).await;
         drop(permit);
-        // `ledger.write_block` publishes through latest_block; the
-        // block_produced receiver then calls transition_to_new_slot and
-        // handle_superblock for the replayed slot.
+        // apply_replayed_block advances self.slot before the queued
+        // latest_block notification can be received. The block_produced path
+        // then skips transition_to_new_slot for this already-applied slot, so
+        // handle_superblock must run here for replayed superblock snapshots.
+        if result.is_ok() {
+            self.handle_superblock(slot).await;
+        }
         result
     }
 
