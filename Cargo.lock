@@ -4287,6 +4287,7 @@ dependencies = [
  "solana-signer",
  "solana-slot-hashes 3.0.1",
  "solana-transaction",
+ "solana-transaction-error 3.2.0",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
