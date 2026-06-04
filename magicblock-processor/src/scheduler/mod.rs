@@ -398,12 +398,11 @@ impl TransactionScheduler {
             .map_err(|error| error.to_string())?;
         self.accountsdb.set_slot(block.slot);
         self.update_sysvars(&block);
-        let slot = block.slot;
         let result = self.notify_executors_of_block(block).await;
         drop(permit);
-        if result.is_ok() {
-            self.handle_superblock(slot).await;
-        }
+        // `ledger.write_block` publishes through latest_block; the
+        // block_produced receiver then calls transition_to_new_slot and
+        // handle_superblock for the replayed slot.
         result
     }
 
