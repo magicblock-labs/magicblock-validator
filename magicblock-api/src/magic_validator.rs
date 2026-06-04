@@ -941,31 +941,44 @@ impl MagicValidator {
             .task_scheduler
             .take()
             .expect("task_scheduler should be initialized");
-        tokio::spawn(async move {
-            let step_start = Instant::now();
-            let join_handle = match task_scheduler.start().await {
-                Ok(join_handle) => join_handle,
-                Err(err) => {
-                    error!(error = ?err, "Failed to start task scheduler");
-                    error!("Exiting process");
-                    std::process::exit(1);
+        let is_primary_mode = {
+            let mut mode = CoordinationMode::current();
+            while mode == CoordinationMode::StartingUp {
+                tokio::select! {
+                    _ = self.token.cancelled() => break,
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {}
                 }
-            };
-            log_timing("startup", "task_scheduler_start", step_start);
-            match join_handle.await {
-                Ok(Ok(())) => {}
-                Ok(Err(err)) => {
-                    error!(error = ?err, "Task scheduler failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
-                Err(err) => {
-                    error!(error = ?err, "Task scheduler join failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
+                mode = CoordinationMode::current();
             }
-        });
+            mode == CoordinationMode::Primary
+        };
+        if is_primary_mode {
+            tokio::spawn(async move {
+                let step_start = Instant::now();
+                let join_handle = match task_scheduler.start().await {
+                    Ok(join_handle) => join_handle,
+                    Err(err) => {
+                        error!(error = ?err, "Failed to start task scheduler");
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                };
+                log_timing("startup", "task_scheduler_start", step_start);
+                match join_handle.await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        error!(error = ?err, "Task scheduler failed");
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                    Err(err) => {
+                        error!(error = ?err, "Task scheduler join failed");
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
 
         Ok(())
     }
