@@ -87,6 +87,15 @@ function runMbTestValidator(): void {
     "--account",
     "FRqXJqfCi3o6gF3Yqnkx1gKA3YnbRDJbBs6hKpme3NHJ",
     p("FRqXJqfCi3o6gF3Yqnkx1gKA3YnbRDJbBs6hKpme3NHJ.json"),
+    "--account",
+    "Sc9MJUngNbQXSXGP3F67KvKwVnhaYn6kcioxXNVowYT",
+    p("Sc9MJUngNbQXSXGP3F67KvKwVnhaYn6kcioxXNVowYT.json"),
+    "--account",
+    "9yvg9551MmE8mhWd88jAPLE3noTXHoopYG1BDhmtkCeR",
+    p("9yvg9551MmE8mhWd88jAPLE3noTXHoopYG1BDhmtkCeR.json"),
+    "--account",
+    "7L9eCRv52UpGVePGj9P1zop8kzmh4SpYzYn6YhoAKHBg",
+    p("7L9eCRv52UpGVePGj9P1zop8kzmh4SpYzYn6YhoAKHBg.json"),
   ];
 
   const expectedFiles = [
@@ -108,6 +117,9 @@ function runMbTestValidator(): void {
     "CXMc1eCiEp9YXjanBNB6HUvbWCmxeVmhcR3bPXw8exJA.json",
     "GKE6d7iv8kCBrsxr78W3xVdjGLLLJnxsGiuzrsZCGEvb.json",
     "FRqXJqfCi3o6gF3Yqnkx1gKA3YnbRDJbBs6hKpme3NHJ.json",
+    "Sc9MJUngNbQXSXGP3F67KvKwVnhaYn6kcioxXNVowYT.json",
+    "9yvg9551MmE8mhWd88jAPLE3noTXHoopYG1BDhmtkCeR.json",
+    "7L9eCRv52UpGVePGj9P1zop8kzmh4SpYzYn6YhoAKHBg.json",
   ];
   const missingFiles = expectedFiles
     .map((f) => p(f))
