@@ -167,6 +167,18 @@ fn pop_scheduled_intents(
 
     let intents =
         magic_context.take_front_scheduled_commits(num_accept_intents);
+    if intents.len() != num_accept_intents {
+        ic_msg!(
+            invoke_context,
+            "AcceptScheduledCommits ERR: requested {} intents but only {} available",
+            num_accept_intents,
+            intents.len()
+        );
+
+        return Err(InstructionError::InvalidArgument);
+    }
+
+    // Write updated account data
     magic_context
         .write_to(magic_context_acc.borrow_mut()?.data_as_mut_slice())?;
 
@@ -179,7 +191,7 @@ fn create_outbox_account_cpi(
     pda: Pubkey,
     outbox_account: OutboxIntentBundle,
 ) -> Result<(), InstructionError> {
-    let intent_id = outbox_account.intent_bundle.id;
+    let intent_id = outbox_account.inner.id;
     let data = outbox_account.try_to_bytes().map_err(|_| {
         ic_msg!(
             invoke_context,

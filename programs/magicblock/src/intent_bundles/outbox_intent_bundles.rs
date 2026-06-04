@@ -6,7 +6,7 @@ use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OutboxIntentBundle {
-    pub intent_bundle: ScheduledIntentBundle,
+    pub inner: ScheduledIntentBundle,
     pub status: OutboxIntentBundleStatus,
 }
 
@@ -34,7 +34,7 @@ pub enum TwoStageProgress {
 impl OutboxIntentBundle {
     pub fn accepted(intent_bundle: ScheduledIntentBundle) -> Self {
         Self {
-            intent_bundle,
+            inner: intent_bundle,
             status: OutboxIntentBundleStatus::Accepted,
         }
     }

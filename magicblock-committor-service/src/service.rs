@@ -225,7 +225,7 @@ where
             let read_len = intent_bundles_chunk.len();
             let intent_bundles = intent_bundles_chunk
                 .into_iter()
-                .map(|el| el.intent_bundle)
+                .map(|el| el.inner)
                 .collect();
 
             // Schedule  without initial persistence as bundle already exists in db
