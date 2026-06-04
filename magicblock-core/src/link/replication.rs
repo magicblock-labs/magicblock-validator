@@ -11,6 +11,10 @@ use crate::{Slot, TransactionIndex};
 /// Used to identify Block messages in slot/index comparisons.
 pub const BLOCK_INDEX: TransactionIndex = TransactionIndex::MAX - 1;
 
+/// Index for startup reset markers (TransactionIndex::MAX - 2).
+/// Used to identify Reset messages in slot/index comparisons.
+pub const RESET_INDEX: TransactionIndex = TransactionIndex::MAX - 2;
+
 /// Index for superblock checkpoint markers (TransactionIndex::MAX).
 /// Used to identify SuperBlock messages in slot/index comparisons.
 pub const SUPERBLOCK_INDEX: TransactionIndex = TransactionIndex::MAX;
@@ -26,6 +30,8 @@ pub enum Message {
     Block(Block),
     /// Periodic checkpoint for state verification.
     SuperBlock(SuperBlock),
+    /// Startup marker requiring replicas to reset stale local bank state.
+    Reset(Slot),
 }
 
 impl Message {
@@ -34,6 +40,7 @@ impl Message {
             Self::Transaction(_) => "transaction",
             Self::Block(_) => "block",
             Self::SuperBlock(_) => "superblock",
+            Self::Reset(_) => "reset",
         }
     }
     /// Returns the (slot, index) position of this message.
@@ -43,6 +50,7 @@ impl Message {
             Self::Transaction(tx) => (tx.slot, tx.index),
             Self::Block(block) => (block.slot, BLOCK_INDEX),
             Self::SuperBlock(superblock) => (superblock.slot, SUPERBLOCK_INDEX),
+            Self::Reset(slot) => (*slot, RESET_INDEX),
         }
     }
 }

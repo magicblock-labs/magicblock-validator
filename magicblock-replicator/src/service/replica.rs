@@ -83,6 +83,22 @@ impl Replica {
                 return;
             }
         };
+        if let Message::Reset(slot) = &message {
+            let slot = *slot;
+            if self.ctx.slot > slot {
+                return;
+            }
+            let result = self.ctx.reset_bank().await;
+            if result.is_ok() {
+                if let Err(error) = msg.ack().await {
+                    warn!(%error, "failed to ack nats message");
+                }
+            }
+            if let Err(error) = result {
+                error!(slot, %error, "message processing error");
+            }
+            return;
+        }
         let (slot, index) = message.slot_and_index();
 
         let current_slot = self.ctx.slot;
@@ -110,6 +126,7 @@ impl Replica {
                 result
             }
             Message::SuperBlock(sb) => self.ctx.verify_checksum(&sb).await,
+            Message::Reset(_) => unreachable!("reset handled before replay"),
         };
 
         if let Err(error) = result {

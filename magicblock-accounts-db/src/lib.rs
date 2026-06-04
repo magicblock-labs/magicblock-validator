@@ -10,6 +10,7 @@ use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
 };
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::feature;
 use storage::AccountsStorage;
 use tracing::{error, info, warn};
 use twox_hash::xxhash3_64;
@@ -335,6 +336,65 @@ impl AccountsDb {
         Ok(restored_slot)
     }
 
+    /// Removes stale non-delegated accounts from the bank after startup.
+    pub fn reset_bank(&self, validator_id: &Pubkey) -> AccountsDbResult<()> {
+        let protected_accounts = reset::protected_accounts(validator_id);
+
+        let mut delegated_only = 0;
+        let mut kept_ephemeral = 0;
+        let mut undelegating = 0;
+        let mut confined = 0;
+        let mut protected = 0;
+        let mut remaining = 0u32;
+
+        let removed = self.remove_where(|pubkey, account| {
+            if protected_accounts.contains(pubkey) {
+                protected += 1;
+                return false;
+            }
+            // Undelegating accounts are normally also delegated, but if that ever
+            // changes we should keep the account until chain state is clear.
+            let should_remove = if account.undelegating() {
+                undelegating += 1;
+                false
+            } else if account.ephemeral() {
+                kept_ephemeral += 1;
+                false
+            } else if account.confined() {
+                confined += 1;
+                false
+            } else if account.delegated() {
+                delegated_only += 1;
+                false
+            } else {
+                *account.owner() != feature::ID
+            };
+            if should_remove {
+                tracing::trace!(
+                    pubkey = %pubkey,
+                    account = %format!("{account:#?}"),
+                    "Removing non-delegated account during accountsdb reset"
+                );
+            } else {
+                remaining += 1;
+            }
+            should_remove
+        })?;
+
+        info!(
+            total_removed = removed,
+            delegated_not_undelegating = delegated_only,
+            delegated_and_undelegating = undelegating,
+            kept_confined = confined,
+            kept_delegated = delegated_only,
+            kept_protected = protected,
+            kept_ephemeral,
+            remaining,
+            "Removed accounts from bank"
+        );
+        Ok(())
+    }
+
     pub fn storage_size(&self) -> u64 {
         self.storage.size_bytes()
     }
@@ -518,6 +578,7 @@ impl AccountsDb {
 
 pub mod error;
 mod index;
+mod reset;
 mod snapshot;
 mod storage;
 #[cfg(test)]
