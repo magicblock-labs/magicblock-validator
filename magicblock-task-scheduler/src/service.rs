@@ -764,9 +764,7 @@ fn is_retryable_task_execution_error(error: &TaskSchedulerError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::coordination_mode::{
-        switch_to_primary_mode, switch_to_replica_mode,
-    };
+    use magicblock_core::coordination_mode::switch_to_primary_mode;
     use magicblock_program::{
         args::ScheduleTaskRequest,
         validator::generate_validator_authority_if_needed,
