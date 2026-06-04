@@ -17,13 +17,16 @@ accounts=(
   mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
   EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX
   7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg
-  Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh
-  5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc
+  Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh  # vrf oracle queue
+  5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc  # vrf oracle ephemeral queue
   F72HqCR8nwYsVyeVd38pgKkjXmXFzVAM8rjZZsXWbdE
   paywJiVATrVDLYLmowJqzG6MsaCt77L8WyTnBb2754t   # vrf oracle identity
   CXMc1eCiEp9YXjanBNB6HUvbWCmxeVmhcR3bPXw8exJA  # vrf oracle data
   GKE6d7iv8kCBrsxr78W3xVdjGLLLJnxsGiuzrsZCGEvb  # queue for paywJiVATrVDLYLmowJqzG6MsaCt77L8WyTnBb2754t
   FRqXJqfCi3o6gF3Yqnkx1gKA3YnbRDJbBs6hKpme3NHJ  # deleted queue for paywJiVATrVDLYLmowJqzG6MsaCt77L8WyTnBb2754t
+  Sc9MJUngNbQXSXGP3F67KvKwVnhaYn6kcioxXNVowYT  # ephemeral (delegated) test queue, index 1 for paywJ
+  9yvg9551MmE8mhWd88jAPLE3noTXHoopYG1BDhmtkCeR  # delegation record for Sc9MJ ephemeral test queue
+  7L9eCRv52UpGVePGj9P1zop8kzmh4SpYzYn6YhoAKHBg  # delegation metadata for Sc9MJ ephemeral test queue
 )
 
 for acc in "${accounts[@]}"; do

@@ -156,6 +156,7 @@ solana-clock = { version = "3.0" }
 solana-cluster-type = { version = "3.1" }
 solana-commitment-config = { version = "3.1" }
 solana-compute-budget = { version = "=3.1.12" }
+solana-compute-budget-instruction = { version = "=3.1.12" }
 solana-compute-budget-interface = { version = "3.0" }
 solana-compute-budget-program = { version = "=3.1.12" }
 solana-feature-gate-interface = { version = "3.1" }
@@ -181,6 +182,7 @@ solana-program = "3.0"
 solana-program-option = { version = "3.0" }
 solana-program-pack = { version = "3.0" }
 solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb" }
+solana-packet = { version = "3.0" }
 solana-pubkey = { version = "3.0" }
 solana-pubsub-client = { version = "3.1" }
 solana-rent = { version = "3.0" }

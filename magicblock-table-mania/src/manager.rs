@@ -33,6 +33,11 @@ const REMOTE_TABLE_FINALIZATION_SLOT_TIME: Duration =
 const REMOTE_TABLE_FINALIZATION_BUFFER: Duration = Duration::from_millis(200);
 const REMOTE_TABLE_FALLBACK_POLL_INTERVAL: Duration =
     Duration::from_millis(500);
+const MAX_ALLOWED_EXTEND_ERRORS: u8 = 5;
+/// Keep the create+extend fallback payload minimal after an existing table rejects an extend.
+const FALLBACK_NEW_TABLE_INIT_PUBKEYS: usize = 1;
+/// Existing-table extend transactions are: compute budget, compute unit price, extend ALT.
+const EXTEND_LOOKUP_TABLE_INSTRUCTION_INDEX: u8 = 2;
 
 fn remote_table_finalization_delay() -> Duration {
     REMOTE_TABLE_FINALIZATION_SLOT_TIME
@@ -88,6 +93,13 @@ struct MatchingTableReadiness {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RemoteReadinessTarget {
     wall_clock_deadline: Option<Instant>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ExtendTableErrorAction {
+    CreateNewTable,
+    Retry,
+    ReturnError,
 }
 
 impl TableMania {
@@ -273,13 +285,13 @@ impl TableMania {
         let mut remaining = pubkeys.iter().cloned().collect::<Vec<_>>();
         let mut tables_used = HashSet::new();
 
-        const MAX_ALLOWED_EXTEND_ERRORS: u8 = 5;
         let mut extend_errors = 0;
 
         // Keep trying to store pubkeys until we're done
         while !remaining.is_empty() {
             // First try to use existing tables
             let mut stored_in_existing = false;
+            let mut force_new_table_after = None;
             {
                 // Taking a write lock here to prevent multiple tasks from
                 // updating tables at the same time
@@ -298,15 +310,30 @@ impl TableMania {
                             )
                             .await
                         {
-                            error!(
-                                error = ?err,
-                                table_address = %table.table_address(),
-                                "Failed to extend table"
-                            );
-                            if extend_errors <= MAX_ALLOWED_EXTEND_ERRORS {
-                                extend_errors += 1;
-                            } else {
-                                return Err(err);
+                            match Self::handle_extend_table_error(
+                                &err,
+                                &mut extend_errors,
+                            ) {
+                                ExtendTableErrorAction::CreateNewTable => {
+                                    error!(
+                                        error = ?err,
+                                        table_address = %table.table_address(),
+                                        "Failed to extend table with invalid instruction data; creating a new table"
+                                    );
+                                    table.mark_non_extendable();
+                                    force_new_table_after =
+                                        Some(*table.table_address());
+                                }
+                                ExtendTableErrorAction::Retry => {
+                                    error!(
+                                        error = ?err,
+                                        table_address = %table.table_address(),
+                                        "Failed to extend table"
+                                    );
+                                }
+                                ExtendTableErrorAction::ReturnError => {
+                                    return Err(err);
+                                }
                             }
                         } else {
                             stored_in_existing = true;
@@ -324,7 +351,9 @@ impl TableMania {
 
                 // Double-check if a new table was created while we were waiting for the lock
                 if let Some(table) = active_tables_write_lock.last() {
-                    if !table.is_full() {
+                    if !table.is_full()
+                        && force_new_table_after != Some(*table.table_address())
+                    {
                         // Another task created a table we can use, so drop the write lock
                         // and try again with the read lock
                         drop(active_tables_write_lock);
@@ -333,8 +362,17 @@ impl TableMania {
                 }
 
                 // Create a new table and add it to active_tables
+                let initial_pubkey_limit = if force_new_table_after.is_some() {
+                    FALLBACK_NEW_TABLE_INIT_PUBKEYS
+                } else {
+                    MAX_ENTRIES_AS_PART_OF_EXTEND as usize
+                };
                 let table = self
-                    .create_new_table_and_extend(authority, &mut remaining)
+                    .create_new_table_and_extend(
+                        authority,
+                        &mut remaining,
+                        initial_pubkey_limit,
+                    )
                     .await?;
 
                 tables_used.insert(*table.table_address());
@@ -348,6 +386,22 @@ impl TableMania {
         }
 
         Ok(())
+    }
+
+    fn handle_extend_table_error(
+        err: &TableManiaError,
+        extend_errors: &mut u8,
+    ) -> ExtendTableErrorAction {
+        if err.is_sent_transaction_invalid_instruction_data_at(
+            EXTEND_LOOKUP_TABLE_INSTRUCTION_INDEX,
+        ) {
+            return ExtendTableErrorAction::CreateNewTable;
+        }
+        if *extend_errors < MAX_ALLOWED_EXTEND_ERRORS {
+            *extend_errors += 1;
+            return ExtendTableErrorAction::Retry;
+        }
+        ExtendTableErrorAction::ReturnError
     }
 
     fn filter_pubkeys_present_in_table(
@@ -448,6 +502,7 @@ impl TableMania {
         &self,
         authority: &Keypair,
         pubkeys: &mut Vec<Pubkey>,
+        initial_pubkey_limit: usize,
     ) -> TableManiaResult<LookupTableRc> {
         static SUB_SLOT: AtomicU64 = AtomicU64::new(0);
 
@@ -469,7 +524,9 @@ impl TableMania {
             }
         }
 
-        let len = pubkeys_len.min(MAX_ENTRIES_AS_PART_OF_EXTEND as usize);
+        let len = pubkeys_len
+            .min(initial_pubkey_limit)
+            .min(MAX_ENTRIES_AS_PART_OF_EXTEND as usize);
         let table = LookupTableRc::init(
             &self.rpc_client,
             authority,
@@ -970,5 +1027,61 @@ fn randomize_lookup_table_slot() -> bool {
     #[cfg(not(feature = "randomize_lookup_table_slot"))]
     {
         std::env::var("RANDOMIZE_LOOKUP_TABLE_SLOT").is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use magicblock_rpc_client::MagicBlockRpcClientError;
+    use solana_instruction::error::InstructionError;
+    use solana_signature::Signature;
+    use solana_transaction_error::TransactionError;
+
+    use super::{
+        ExtendTableErrorAction, TableMania, TableManiaError,
+        MAX_ALLOWED_EXTEND_ERRORS,
+    };
+
+    fn sent_transaction_error(
+        instruction_error: InstructionError,
+    ) -> TableManiaError {
+        TableManiaError::MagicBlockRpcClientError(
+            MagicBlockRpcClientError::SentTransactionError(
+                TransactionError::InstructionError(2, instruction_error),
+                Signature::default(),
+            ),
+        )
+    }
+
+    #[test]
+    fn invalid_instruction_data_forces_new_table_without_retrying() {
+        let mut extend_errors = 0;
+        let err =
+            sent_transaction_error(InstructionError::InvalidInstructionData);
+
+        assert_eq!(
+            TableMania::handle_extend_table_error(&err, &mut extend_errors),
+            ExtendTableErrorAction::CreateNewTable
+        );
+        assert_eq!(extend_errors, 0);
+    }
+
+    #[test]
+    fn other_extend_errors_use_retry_budget() {
+        let mut extend_errors = 0;
+        let err = sent_transaction_error(InstructionError::InvalidArgument);
+
+        for expected_errors in 1..=MAX_ALLOWED_EXTEND_ERRORS {
+            assert_eq!(
+                TableMania::handle_extend_table_error(&err, &mut extend_errors),
+                ExtendTableErrorAction::Retry
+            );
+            assert_eq!(extend_errors, expected_errors);
+        }
+
+        assert_eq!(
+            TableMania::handle_extend_table_error(&err, &mut extend_errors),
+            ExtendTableErrorAction::ReturnError
+        );
     }
 }

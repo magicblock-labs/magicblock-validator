@@ -1,12 +1,12 @@
-use base64::{prelude::BASE64_STANDARD, Engine};
+use solana_packet::PACKET_DATA_SIZE;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 
-/// From agave rpc/src/rpc.rs [MAX_BASE64_SIZE]
-pub(crate) const MAX_ENCODED_TRANSACTION_SIZE: usize = 1644;
+/// Maximum serialized transaction size that can be sent over the wire.
+pub(crate) const MAX_TRANSACTION_WIRE_SIZE: usize = PACKET_DATA_SIZE;
 
-pub fn serialize_and_encode_base64(
+pub fn serialized_transaction_size(
     transaction: &impl SerializableTransaction,
-) -> String {
-    let serialized = bincode::serialize(transaction).unwrap();
-    BASE64_STANDARD.encode(serialized)
+) -> usize {
+    // SAFETY: runs on transactions we already serialize before sending.
+    usize::try_from(bincode::serialized_size(transaction).unwrap()).unwrap()
 }
