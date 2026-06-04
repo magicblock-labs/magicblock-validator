@@ -216,32 +216,55 @@ impl ChainPubsubActor {
     // calling PubSubConnectionPool::reconnect(). Explicit unsubscribe may cancel
     // listeners without waiting because it does not drop pooled clients and leaves
     // the map entry visible until listener cleanup completes.
+    //
+    // Entries are removed from the maps only after their listener completion
+    // signal has fired. Timed-out entries are intentionally left in the map so
+    // that a reconnect retry will see them and wait again before dropping
+    // pooled clients out from under still-running listener tasks.
     async fn drain_and_wait_for_listener_completion(
         client_id: &str,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
     ) -> RemoteAccountProviderResult<()> {
-        let account_subs = subscriptions
-            .lock()
-            .expect("subscriptions lock poisoned")
-            .drain()
-            .collect::<Vec<_>>();
-        let program_subs = program_subs
-            .lock()
-            .expect("program subs lock poisoned")
-            .drain()
-            .collect::<Vec<_>>();
+        fn snapshot(
+            map: &Mutex<HashMap<Pubkey, AccountSubscription>>,
+        ) -> Vec<(Pubkey, AccountSubscription)> {
+            map.lock()
+                .expect("subscriptions lock poisoned")
+                .iter()
+                .map(|(pubkey, sub)| {
+                    (
+                        *pubkey,
+                        AccountSubscription {
+                            cancellation_token: sub.cancellation_token.clone(),
+                            completion_token: sub.completion_token.clone(),
+                        },
+                    )
+                })
+                .collect()
+        }
 
-        let cancellation_waits = account_subs
+        let account_snapshot = snapshot(&subscriptions);
+        let program_snapshot = snapshot(&program_subs);
+
+        let cancellation_waits = account_snapshot
             .into_iter()
             .map(|(pubkey, sub)| {
-                Self::cancel_and_wait_for_stream_drop(
-                    client_id, "account", pubkey, sub,
+                Self::cancel_wait_and_remove_on_success(
+                    client_id,
+                    "account",
+                    pubkey,
+                    sub,
+                    subscriptions.clone(),
                 )
             })
-            .chain(program_subs.into_iter().map(|(pubkey, sub)| {
-                Self::cancel_and_wait_for_stream_drop(
-                    client_id, "program", pubkey, sub,
+            .chain(program_snapshot.into_iter().map(|(pubkey, sub)| {
+                Self::cancel_wait_and_remove_on_success(
+                    client_id,
+                    "program",
+                    pubkey,
+                    sub,
+                    program_subs.clone(),
                 )
             }))
             .collect::<Vec<_>>();
@@ -257,6 +280,28 @@ impl ChainPubsubActor {
             Some(err) => Err(err),
             None => Ok(()),
         }
+    }
+
+    // Cancels the listener and waits for it to drop its stream. On success,
+    // removes the entry from `map`. On timeout, leaves the entry in place so
+    // a reconnect retry can wait for it again before pooled clients are
+    // dropped.
+    async fn cancel_wait_and_remove_on_success(
+        client_id: &str,
+        kind: &'static str,
+        pubkey: Pubkey,
+        sub: AccountSubscription,
+        map: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+    ) -> RemoteAccountProviderResult<()> {
+        let result =
+            Self::cancel_and_wait_for_stream_drop(client_id, kind, pubkey, sub)
+                .await;
+        if result.is_ok() {
+            map.lock()
+                .expect("subscriptions lock poisoned")
+                .remove(&pubkey);
+        }
+        result
     }
 
     pub fn subscriptions(&self) -> HashSet<Pubkey> {
@@ -1117,10 +1162,12 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+        // Timed-out entries must remain in the map so a reconnect retry can
+        // wait for them again before pooled clients are dropped.
         assert!(subscriptions
             .lock()
             .expect("subscriptions lock poisoned")
-            .is_empty());
+            .contains_key(&account_pubkey));
         assert!(cancellation_token.is_cancelled());
     }
 
