@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::{pda::CRANK_SIGNER, CRANK_PROGRAM_ID};
+use magicblock_magic_program_api::{pda::crank_signer_pda, CRANK_PROGRAM_ID};
 use solana_instruction::{error::InstructionError, Instruction};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -15,10 +15,12 @@ use crate::{
 pub(crate) fn process_execute_crank(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
+    authority: &Pubkey,
     instructions: Vec<Instruction>,
 ) -> Result<(), InstructionError> {
     const VALIDATOR_IDX: u16 = 0;
     const CRANK_SIGNER_IDX: u16 = 1;
+    let crank_signer = crank_signer_pda(authority);
 
     const ACCOUNTS_START: usize = CRANK_SIGNER_IDX as usize + 1;
 
@@ -75,7 +77,7 @@ pub(crate) fn process_execute_crank(
             transaction_context,
             CRANK_SIGNER_IDX,
         )?;
-        if crank_signer_pubkey != &CRANK_SIGNER {
+        if crank_signer_pubkey != &crank_signer {
             ic_msg!(
                 invoke_context,
                 "ExecuteCrank ERR: crank signer pubkey {} is not the expected Crank signer",
@@ -87,11 +89,11 @@ pub(crate) fn process_execute_crank(
 
     // Already validated when scheduling the task.
     // This check prevents the validator from manually sending transactions disguised as cranks.
-    validate_cranks_instructions(invoke_context, &instructions)?;
+    validate_cranks_instructions(invoke_context, authority, &instructions)?;
 
     let len = instructions.len();
     for ix in instructions {
-        invoke_context.native_invoke(ix, &[CRANK_SIGNER])?;
+        invoke_context.native_invoke(ix, &[crank_signer])?;
     }
 
     ic_msg!(invoke_context, "Executed crank with {} instructions", len);
@@ -123,16 +125,19 @@ mod test {
     #[test]
     fn test_execute_task_simple() {
         init_validator_authority(Keypair::new());
-        let ix = InstructionUtils::execute_task_instruction(vec![
-            InstructionUtils::noop_instruction(0),
-        ]);
+        let authority = Pubkey::new_unique();
+        let crank_signer = crank_signer_pda(&authority);
+        let ix = InstructionUtils::execute_task_instruction(
+            authority,
+            vec![InstructionUtils::noop_instruction(0)],
+        );
         let transaction_accounts = vec![
             (
                 validator_authority_id(),
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
             (
-                CRANK_SIGNER,
+                crank_signer,
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
         ];
@@ -147,16 +152,20 @@ mod test {
     #[test]
     fn test_execute_task_complex() {
         init_validator_authority(Keypair::new());
+        let authority = Pubkey::new_unique();
+        let crank_signer = crank_signer_pda(&authority);
         let payer = Pubkey::new_unique();
-        let ix =
-            InstructionUtils::execute_task_instruction(vec![complex_ix(payer)]);
+        let ix = InstructionUtils::execute_task_instruction(
+            authority,
+            vec![complex_ix(payer)],
+        );
         let transaction_accounts = vec![
             (
                 validator_authority_id(),
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
             (
-                CRANK_SIGNER,
+                crank_signer,
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
             (
@@ -175,16 +184,19 @@ mod test {
     #[test]
     fn fail_execute_task_without_crank_signer() {
         init_validator_authority(Keypair::new());
-        let ix = InstructionUtils::execute_task_instruction(vec![
-            InstructionUtils::noop_instruction(0),
-        ]);
+        let authority = Pubkey::new_unique();
+        let crank_signer = crank_signer_pda(&authority);
+        let ix = InstructionUtils::execute_task_instruction(
+            authority,
+            vec![InstructionUtils::noop_instruction(0)],
+        );
         let transaction_accounts = vec![
             (
                 validator_authority_id(),
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
             (
-                CRANK_SIGNER,
+                crank_signer,
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
         ];
@@ -199,9 +211,12 @@ mod test {
     #[test]
     fn fail_execute_task_wrong_validator() {
         init_validator_authority(Keypair::new());
-        let ix = InstructionUtils::execute_task_instruction(vec![
-            InstructionUtils::noop_instruction(0),
-        ]);
+        let authority = Pubkey::new_unique();
+        let crank_signer = crank_signer_pda(&authority);
+        let ix = InstructionUtils::execute_task_instruction(
+            authority,
+            vec![InstructionUtils::noop_instruction(0)],
+        );
         let wrong_validator = Pubkey::new_unique();
         let transaction_accounts = vec![
             (
@@ -209,7 +224,7 @@ mod test {
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
             (
-                CRANK_SIGNER,
+                crank_signer,
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
         ];
@@ -224,9 +239,12 @@ mod test {
     #[test]
     fn fail_execute_task_validator_not_in_signers() {
         init_validator_authority(Keypair::new());
-        let mut ix = InstructionUtils::execute_task_instruction(vec![
-            InstructionUtils::noop_instruction(0),
-        ]);
+        let authority = Pubkey::new_unique();
+        let crank_signer = crank_signer_pda(&authority);
+        let mut ix = InstructionUtils::execute_task_instruction(
+            authority,
+            vec![InstructionUtils::noop_instruction(0)],
+        );
         ix.accounts[0].is_signer = false;
         let transaction_accounts = vec![
             (
@@ -234,7 +252,7 @@ mod test {
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
             (
-                CRANK_SIGNER,
+                crank_signer,
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
         ];
@@ -249,9 +267,11 @@ mod test {
     #[test]
     fn fail_execute_task_wrong_crank_signer() {
         init_validator_authority(Keypair::new());
-        let ix = InstructionUtils::execute_task_instruction(vec![
-            InstructionUtils::noop_instruction(0),
-        ]);
+        let authority = Pubkey::new_unique();
+        let ix = InstructionUtils::execute_task_instruction(
+            authority,
+            vec![InstructionUtils::noop_instruction(0)],
+        );
         let wrong_crank_signer = Pubkey::new_unique();
         let transaction_accounts = vec![
             (
@@ -275,15 +295,19 @@ mod test {
     fn fail_execute_task_missing_accounts() {
         init_validator_authority(Keypair::new());
         let payer = Pubkey::new_unique();
-        let ix =
-            InstructionUtils::execute_task_instruction(vec![complex_ix(payer)]);
+        let authority = Pubkey::new_unique();
+        let crank_signer = crank_signer_pda(&authority);
+        let ix = InstructionUtils::execute_task_instruction(
+            authority,
+            vec![complex_ix(payer)],
+        );
         let transaction_accounts = vec![
             (
                 validator_authority_id(),
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
             (
-                CRANK_SIGNER,
+                crank_signer,
                 AccountSharedData::new(0, 0, &system_program::id()),
             ),
         ];
@@ -298,6 +322,8 @@ mod test {
     #[test]
     fn fail_execute_task_with_invalid_instructions() {
         init_validator_authority(Keypair::new());
+        let authority = Pubkey::new_unique();
+        let crank_signer = crank_signer_pda(&authority);
         let payer = Pubkey::new_unique();
         let mut inner_ix = InstructionUtils::schedule_task_instruction(
             &payer,
@@ -316,7 +342,7 @@ mod test {
                 Pubkey::new_unique(),
                 InstructionError::MissingRequiredSignature,
             ),
-            (false, true, CRANK_SIGNER, InstructionError::Immutable),
+            (false, true, crank_signer, InstructionError::Immutable),
             (
                 false,
                 false,
@@ -327,9 +353,10 @@ mod test {
             inner_ix.accounts[0].is_signer = signer;
             inner_ix.accounts[0].is_writable = writable;
             inner_ix.accounts[0].pubkey = pubkey;
-            let ix = InstructionUtils::execute_task_instruction(vec![
-                inner_ix.clone()
-            ]);
+            let ix = InstructionUtils::execute_task_instruction(
+                authority,
+                vec![inner_ix.clone()],
+            );
 
             let transaction_accounts = vec![
                 (
@@ -337,7 +364,7 @@ mod test {
                     AccountSharedData::new(0, 0, &system_program::id()),
                 ),
                 (
-                    CRANK_SIGNER,
+                    crank_signer,
                     AccountSharedData::new(0, 0, &system_program::id()),
                 ),
             ];

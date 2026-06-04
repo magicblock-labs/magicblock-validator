@@ -114,6 +114,7 @@ where
                     break Err(execution_err);
                 }
             };
+            self.intent_client.invalidate_cached_blockhash().await;
             self.execution_report.dispose(cleanup);
 
             if self.current_attempt >= RECURSION_CEILING {
@@ -282,6 +283,7 @@ where
             &mut TransactionStrategy {
                 optimized_tasks: vec![finalize_task],
                 lookup_tables_keys: vec![],
+                standalone_action_nonce: None,
             },
             &None::<IntentPersisterImpl>,
         )
@@ -296,6 +298,7 @@ where
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
+            standalone_action_nonce: None,
         }))
     }
 }

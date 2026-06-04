@@ -7,9 +7,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 ///
 /// Valid Transitions:
 ///   StartingUp (0) → Primary (1)   [Standalone validators]
-///   StartingUp (0) → Replica (2)   [StandBy/ReplicaOnly validators]
-///   Primary (1) → Replica (2)      [Failover: primary to replica]
-///   Replica (2) → Primary (1)      [Failover: replica takeover becomes primary]
+///   StartingUp (0) → Replica (2)   [Replica validators]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CoordinationMode {

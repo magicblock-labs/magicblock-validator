@@ -47,6 +47,9 @@ pub enum RemoteAccountProviderError {
     #[error("Invalid pubsub endpoint: {0}")]
     InvalidPubsubEndpoint(String),
 
+    #[error("No evictable subscription capacity available for {pubkey}")]
+    NoEvictableSubscriptionCapacity { pubkey: Pubkey },
+
     #[error("All pubsub clients failed to connect")]
     AllPubsubClientsFailed,
 
@@ -59,13 +62,13 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to resolve account ({0}) to track slots")]
     ClockAccountCouldNotBeResolved(String),
 
-    #[error("Failed to resolve accounts to same slot ({0}) to track slots hit limit: {2}")]
+    #[error("Failed to resolve accounts to same slot ({0}) with slots {1:?} to track slots hit limit: {2}")]
     SlotsDidNotMatch(String, Vec<u64>, String),
 
     #[error("The message {0} is not supported by this actor")]
     UnsupportedActorMessage(String),
 
-    #[error("Accounts matched same slot ({0}), but it's less than min required context slot {2} hit limit: {3}")]
+    #[error("Accounts matched same slot ({0}) with slots {1:?}, but it's less than min required context slot {2} hit limit: {3}")]
     MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64, String),
 
     #[error("LRU capacity must be greater than 0")]

@@ -4,6 +4,9 @@ pub type TaskSchedulerResult<T> = Result<T, TaskSchedulerError>;
 
 #[derive(Error, Debug)]
 pub enum TaskSchedulerError {
+    #[error("Invalid configuration: {0}")]
+    InvalidConfiguration(String),
+
     #[error(transparent)]
     DatabaseConnection(#[from] rusqlite::Error),
 

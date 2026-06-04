@@ -222,11 +222,12 @@ where
             .await?;
 
             // Standalone actions executed in single stage
-            let strategy = TaskStrategist::build_strategy(
+            let mut strategy = TaskStrategist::build_strategy(
                 commit_tasks,
                 &self.authority.pubkey(),
                 persister,
             )?;
+            strategy.standalone_action_nonce = Some(intent_bundle.id);
             return self
                 .single_stage_execution_flow(
                     intent_bundle,
@@ -327,20 +328,20 @@ where
         // Otherwise we return error
         let execution_err = match res {
             Err(IntentExecutorError::FailedToFinalizeError {
-                err:
-                    err
-                    @ (TransactionStrategyExecutionError::CpiLimitError(_, _)
-                        | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
-                            _,
-                            _,
-                        )),
+                err,
                 commit_signature: _,
                 finalize_signature: _,
-            }) if !committed_pubkeys.is_empty() => err,
+            }) if !committed_pubkeys.is_empty()
+                && err.is_single_stage_split_limit_error() =>
+            {
+                err
+            }
             res => {
                 let signature = res.as_ref().ok().copied();
-            	single_stage_executor.execute_callbacks(signature, res.as_ref().map(|_| ()));
-                let transaction_strategy = single_stage_executor.consume_strategy();
+                single_stage_executor
+                    .execute_callbacks(signature, res.as_ref().map(|_| ()));
+                let transaction_strategy =
+                    single_stage_executor.consume_strategy();
                 execution_report.dispose(transaction_strategy);
                 return res.map(ExecutionOutput::SingleStage);
             }

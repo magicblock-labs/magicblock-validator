@@ -1,5 +1,6 @@
 use magicblock_magic_program_api::instruction::{
     CallbackInstruction, MagicBlockInstruction,
+    PostDelegationActionExecutorInstruction,
 };
 use solana_instruction::error::InstructionError;
 use solana_program_runtime::{
@@ -10,7 +11,8 @@ use crate::{
     clone_account::{
         process_cleanup_partial_clone, process_clone_account,
         process_clone_account_continue, process_clone_account_init,
-        process_evict_account, process_finalize_program_from_buffer,
+        process_evict_account, process_execute_post_delegation_actions,
+        process_finalize_program_from_buffer,
         process_finalize_v1_program_from_buffer, process_set_program_authority,
     },
     ephemeral_accounts::{
@@ -153,22 +155,20 @@ declare_process_instruction!(
                 pubkey,
                 data,
                 fields,
-                actions_tx_sig,
+                actions,
             } => process_clone_account(
                 &signers,
                 invoke_context,
-                transaction_context,
                 pubkey,
                 data,
                 fields,
-                actions_tx_sig,
+                actions,
             ),
             CloneAccountInit {
                 pubkey,
                 total_data_len,
                 initial_data,
                 fields,
-                actions_tx_sig,
             } => process_clone_account_init(
                 &signers,
                 invoke_context,
@@ -177,21 +177,21 @@ declare_process_instruction!(
                 total_data_len,
                 initial_data,
                 fields,
-                actions_tx_sig,
             ),
             CloneAccountContinue {
                 pubkey,
                 offset,
                 data,
                 is_last,
+                actions,
             } => process_clone_account_continue(
                 &signers,
                 invoke_context,
-                transaction_context,
                 pubkey,
                 offset,
                 data,
                 is_last,
+                actions,
             ),
             CleanupPartialClone { pubkey } => process_cleanup_partial_clone(
                 &signers,
@@ -223,9 +223,15 @@ declare_process_instruction!(
                 remote_slot,
                 authority,
             ),
-            ExecuteCrank { instructions } => {
-                process_execute_crank(signers, invoke_context, instructions)
-            }
+            ExecuteCrank {
+                authority,
+                instructions,
+            } => process_execute_crank(
+                signers,
+                invoke_context,
+                &authority,
+                instructions,
+            ),
         }
     }
 );
@@ -241,9 +247,15 @@ declare_process_instruction!(
         let signers = instruction_context.get_signers()?;
 
         match instruction {
-            MagicBlockInstruction::ExecuteCrank { instructions } => {
-                process_execute_crank(signers, invoke_context, instructions)
-            }
+            MagicBlockInstruction::ExecuteCrank {
+                authority,
+                instructions,
+            } => process_execute_crank(
+                signers,
+                invoke_context,
+                &authority,
+                instructions,
+            ),
             _ => Err(InstructionError::InvalidInstructionData),
         }
     }
@@ -264,6 +276,31 @@ declare_process_instruction!(
             CallbackInstruction::ExecuteCallback { instruction } => {
                 process_execute_callback(signers, invoke_context, instruction)
             }
+        }
+    }
+);
+
+declare_process_instruction!(
+    PostDelegationActionEntrypoint,
+    DEFAULT_COMPUTE_UNITS,
+    |invoke_context| {
+        let instruction: PostDelegationActionExecutorInstruction =
+            deserialize_instruction(invoke_context)?;
+        let transaction_context = &invoke_context.transaction_context;
+        let instruction_context =
+            transaction_context.get_current_instruction_context()?;
+        let signers = instruction_context.get_signers()?;
+
+        match instruction {
+            PostDelegationActionExecutorInstruction::Execute {
+                cloned_account_pubkey,
+                actions,
+            } => process_execute_post_delegation_actions(
+                signers,
+                invoke_context,
+                cloned_account_pubkey,
+                actions,
+            ),
         }
     }
 );

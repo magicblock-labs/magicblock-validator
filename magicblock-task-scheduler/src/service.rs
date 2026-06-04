@@ -97,6 +97,12 @@ impl TaskSchedulerService {
         slot_interval: Duration,
         token: CancellationToken,
     ) -> TaskSchedulerResult<Self> {
+        if config.min_interval.as_millis() > u32::MAX as u128 {
+            return Err(TaskSchedulerError::InvalidConfiguration(format!(
+                "min_interval must be less than or equal to u32::MAX: {}",
+                config.min_interval.as_millis()
+            )));
+        }
         if config.reset {
             match std::fs::remove_file(path) {
                 Ok(_) => {}
@@ -403,6 +409,7 @@ impl TaskSchedulerService {
                         tx_counter.fetch_add(1, Ordering::Relaxed),
                     ),
                     InstructionUtils::execute_task_instruction(
+                        task.authority,
                         task.instructions.clone(),
                     ),
                 ];

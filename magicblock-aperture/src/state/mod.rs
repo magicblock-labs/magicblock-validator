@@ -4,26 +4,16 @@ use blocks::{BlocksCache, LastCachedBlock};
 use cache::ExpiringCache;
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::{
-    remote_account_provider::{
-        chain_rpc_client::ChainRpcClientImpl,
-        chain_updates_client::ChainUpdatesClient,
-    },
-    submux::SubMuxClient,
-    Chainlink,
-};
+use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
 use magicblock_ledger::Ledger;
 use solana_feature_set::FeatureSet;
 use solana_pubkey::Pubkey;
 use subscriptions::SubscriptionsDb;
 use transactions::TransactionsCache;
 
-pub type ChainlinkImpl = Chainlink<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainUpdatesClient>,
-    AccountsDb,
-    ChainlinkCloner,
->;
+pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
+
+pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
 /// A container for the shared, global state of the RPC service.
 ///

@@ -7,16 +7,16 @@ use magicblock_magic_program_api::{
     args::ScheduleTaskArgs,
     instruction::{
         AccountModification, AccountModificationForInstruction,
-        MagicBlockInstruction,
+        MagicBlockInstruction, PostDelegationActionExecutorInstruction,
     },
-    pda::CRANK_SIGNER,
+    pda::crank_signer_pda,
     CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY,
+    POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
@@ -259,11 +259,12 @@ impl InstructionUtils {
     // Execute Crank
     // -----------------
     pub fn execute_task_instruction(
+        authority: Pubkey,
         instructions: Vec<Instruction>,
     ) -> Instruction {
         let mut account_metas = vec![
             AccountMeta::new_readonly(validator_authority_id(), true),
-            AccountMeta::new_readonly(CRANK_SIGNER, false),
+            AccountMeta::new_readonly(crank_signer_pda(&authority), false),
         ];
         for instruction in &instructions {
             account_metas
@@ -278,16 +279,20 @@ impl InstructionUtils {
         }
         Instruction::new_with_bincode(
             CRANK_PROGRAM_ID,
-            &MagicBlockInstruction::ExecuteCrank { instructions },
+            &MagicBlockInstruction::ExecuteCrank {
+                authority,
+                instructions,
+            },
             account_metas,
         )
     }
 
     pub fn execute_task(
+        authority: Pubkey,
         instructions: Vec<Instruction>,
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix = Self::execute_task_instruction(instructions);
+        let ix = Self::execute_task_instruction(authority, instructions);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
@@ -346,24 +351,74 @@ impl InstructionUtils {
     // -----------------
     // CloneAccount
     // -----------------
+    fn append_action_accounts(
+        account_metas: &mut Vec<AccountMeta>,
+        actions: &[Instruction],
+    ) {
+        for action in actions {
+            Self::push_or_update_account_meta(
+                account_metas,
+                AccountMeta::new_readonly(action.program_id, false),
+            );
+            for account in &action.accounts {
+                let mut account = account.clone();
+                account.is_signer = false;
+                Self::push_or_update_account_meta(account_metas, account);
+            }
+        }
+    }
+
+    fn push_or_update_account_meta(
+        account_metas: &mut Vec<AccountMeta>,
+        account_meta: AccountMeta,
+    ) {
+        if let Some(existing) = account_metas
+            .iter_mut()
+            .find(|existing| existing.pubkey == account_meta.pubkey)
+        {
+            existing.is_writable |= account_meta.is_writable;
+            existing.is_signer |= account_meta.is_signer;
+            return;
+        }
+        account_metas.push(account_meta);
+    }
+
+    fn append_instructions_sysvar_account(
+        account_metas: &mut Vec<AccountMeta>,
+        actions: &[Instruction],
+    ) {
+        if !actions.is_empty() {
+            Self::push_or_update_account_meta(
+                account_metas,
+                AccountMeta::new_readonly(
+                    solana_sdk_ids::sysvar::instructions::id(),
+                    false,
+                ),
+            );
+        }
+    }
+
     pub fn clone_account_instruction(
         pubkey: Pubkey,
         data: Vec<u8>,
         fields: magicblock_magic_program_api::instruction::AccountCloneFields,
-        actions_tx_sig: Option<Signature>,
+        actions: Vec<Instruction>,
     ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new(pubkey, false),
+        ];
+        Self::append_instructions_sysvar_account(&mut account_metas, &actions);
+        Self::append_action_accounts(&mut account_metas, &actions);
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::CloneAccount {
                 pubkey,
                 data,
                 fields,
-                actions_tx_sig: actions_tx_sig.map(|sig| sig.to_string()),
+                actions,
             },
-            vec![
-                AccountMeta::new(validator_authority_id(), true),
-                AccountMeta::new(pubkey, false),
-            ],
+            account_metas,
         )
     }
 
@@ -372,7 +427,6 @@ impl InstructionUtils {
         total_data_len: u32,
         initial_data: Vec<u8>,
         fields: magicblock_magic_program_api::instruction::AccountCloneFields,
-        actions_tx_sig: Option<Signature>,
     ) -> Instruction {
         Instruction::new_with_bincode(
             crate::id(),
@@ -381,7 +435,6 @@ impl InstructionUtils {
                 total_data_len,
                 initial_data,
                 fields,
-                actions_tx_sig: actions_tx_sig.map(|sig| sig.to_string()),
             },
             vec![
                 AccountMeta::new(validator_authority_id(), true),
@@ -395,7 +448,14 @@ impl InstructionUtils {
         offset: u32,
         data: Vec<u8>,
         is_last: bool,
+        actions: Vec<Instruction>,
     ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new(pubkey, false),
+        ];
+        Self::append_instructions_sysvar_account(&mut account_metas, &actions);
+        Self::append_action_accounts(&mut account_metas, &actions);
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::CloneAccountContinue {
@@ -403,11 +463,32 @@ impl InstructionUtils {
                 offset,
                 data,
                 is_last,
+                actions,
             },
-            vec![
-                AccountMeta::new(validator_authority_id(), true),
-                AccountMeta::new(pubkey, false),
-            ],
+            account_metas,
+        )
+    }
+
+    pub fn post_delegation_action_executor_instruction(
+        cloned_account_pubkey: Pubkey,
+        actions: Vec<Instruction>,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new_readonly(cloned_account_pubkey, false),
+            AccountMeta::new_readonly(
+                solana_sdk_ids::sysvar::instructions::id(),
+                false,
+            ),
+        ];
+        Self::append_action_accounts(&mut account_metas, &actions);
+        Instruction::new_with_bincode(
+            POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
+            &PostDelegationActionExecutorInstruction::Execute {
+                cloned_account_pubkey,
+                actions,
+            },
+            account_metas,
         )
     }
 

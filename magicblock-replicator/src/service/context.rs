@@ -1,10 +1,8 @@
-//! Shared context for primary and standby roles.
+//! Shared context for primary and replica roles.
 
 use std::sync::Arc;
 
-use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::StubbedChainlink;
 use magicblock_core::{
     link::{
         replication::{Block, Message, SuperBlock},
@@ -13,6 +11,7 @@ use magicblock_core::{
     Slot, TransactionIndex,
 };
 use magicblock_ledger::Ledger;
+use solana_pubkey::Pubkey;
 use tokio::{
     fs::File,
     sync::mpsc::{Receiver, Sender},
@@ -20,17 +19,19 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use super::{Primary, Standby, CONSUMER_RETRY_DELAY};
+use super::{Primary, Replica, CONSUMER_RETRY_DELAY};
 use crate::{
-    nats::{Broker, Consumer, LockWatcher, Producer},
+    nats::{Broker, Consumer, Producer},
     watcher::SnapshotWatcher,
     Error, Result,
 };
 
-/// Shared state for both primary and standby roles.
+/// Shared state for both primary and replica roles.
 pub struct ReplicationContext {
-    /// Node identifier for leader election.
-    pub id: String,
+    /// Producer lock owner identifier.
+    pub producer_id: String,
+    /// Durable consumer identifier.
+    pub consumer_id: String,
     /// NATS broker.
     pub broker: Broker,
     /// Global shutdown signal
@@ -39,10 +40,6 @@ pub struct ReplicationContext {
     pub mode_tx: Sender<SchedulerMode>,
     /// Accounts database.
     pub accountsdb: Arc<AccountsDb>,
-    /// Mocked chainlink to reset accountsdb
-    /// TODO(bmuddha): this is a temporary hack, which will be removed
-    /// once the accounts management is moved to the accountsdb
-    pub chainlink: StubbedChainlink<AccountsDb>,
     /// Transaction ledger.
     pub ledger: Arc<Ledger>,
     /// Transaction scheduler.
@@ -51,8 +48,6 @@ pub struct ReplicationContext {
     pub slot: Slot,
     /// Position of the last transaction within slot
     pub index: TransactionIndex,
-    /// Whether this node can promote from standby to primary.
-    pub can_promote: bool,
 }
 
 impl ReplicationContext {
@@ -63,34 +58,31 @@ impl ReplicationContext {
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        chainlink: StubbedChainlink<AccountsDb>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
-        can_promote: bool,
+        validator_identity: Pubkey,
     ) -> Result<Self> {
-        let id = IdBuilder::new(machineid_rs::Encryption::SHA256)
-            .add_component(machineid_rs::HWIDComponent::SystemID)
-            .build("magicblock")
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        let node_id = validator_identity.to_string();
+        let producer_id = format!("{node_id}-producer");
+        let consumer_id = format!("{node_id}-consumer");
 
         let slot = accountsdb.slot();
         let index = ledger
             .get_highest_transaction_index_for_slot(slot)?
             .unwrap_or_default();
 
-        info!(%id, slot, can_promote, "context initialized");
+        info!(%node_id, %producer_id, %consumer_id, slot, "context initialized");
         Ok(Self {
-            id,
+            producer_id,
+            consumer_id,
             broker,
             cancel,
             mode_tx,
             accountsdb,
-            chainlink,
             ledger,
             scheduler,
             slot,
             index,
-            can_promote,
         })
     }
 
@@ -131,7 +123,8 @@ impl ReplicationContext {
 
     /// Attempts to acquire producer lock for primary role.
     pub async fn try_acquire_producer(&self) -> Result<Option<Producer>> {
-        let mut producer = self.broker.create_producer(&self.id).await?;
+        let mut producer =
+            self.broker.create_producer(&self.producer_id).await?;
         producer
             .acquire()
             .await
@@ -158,7 +151,7 @@ impl ReplicationContext {
     pub async fn create_consumer(&self, reset: bool) -> Option<Consumer> {
         loop {
             tokio::select! {
-                result = self.broker.create_consumer(&self.id, reset) => {
+                result = self.broker.create_consumer(&self.consumer_id, reset) => {
                     match result {
                         Ok(c) => return Some(c),
                         Err(e) => {
@@ -182,36 +175,20 @@ impl ReplicationContext {
         messages: Receiver<Message>,
     ) -> Result<Primary> {
         let snapshots = self.create_snapshot_watcher()?;
-        // TODO(bmuddha): remove dependency on the chainlink
-        let _guard = self.scheduler.wait_for_idle().await;
-        self.chainlink.reset_accounts_bank()?;
         self.enter_primary_mode().await;
         Ok(Primary::new(self, producer, messages, snapshots))
     }
 
-    /// Transitions to standby role.
+    /// Transitions to replica role.
     /// Returns `None` if shutdown is triggered during consumer creation.
     /// reset parameter controls where in the stream the consumption starts:
     /// true - the last known position that we know
     /// false - the last known position that message broker tracks for us
-    pub async fn into_standby(
-        self,
-        messages: Receiver<Message>,
-        reset: bool,
-    ) -> Result<Option<Standby>> {
+    pub async fn into_replica(self, reset: bool) -> Result<Option<Replica>> {
         let Some(consumer) = self.create_consumer(reset).await else {
             return Ok(None);
         };
-        let Some(watcher) = LockWatcher::new(&self.broker, &self.cancel).await
-        else {
-            return Ok(None);
-        };
         self.enter_replica_mode().await;
-        Ok(Some(Standby::new(
-            self,
-            Box::new(consumer),
-            messages,
-            watcher,
-        )))
+        Ok(Some(Replica::new(self, Box::new(consumer))))
     }
 }

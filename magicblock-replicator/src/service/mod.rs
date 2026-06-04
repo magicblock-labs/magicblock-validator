@@ -1,4 +1,4 @@
-//! Primary-standby state synchronization via NATS JetStream.
+//! Primary-Replica state synchronization via NATS JetStream.
 //!
 //! # Architecture
 //!
@@ -9,7 +9,7 @@
 //!       ┌─────────┴─────────┐
 //!       ▼                   ▼
 //!  ┌─────────┐       ┌─────────┐
-//!  │ Primary │ ←────→│ Standby │
+//!  │ Primary │       │ Replica │
 //!  └────┬────┘       └────┬────┘
 //!       │                 │
 //!   ┌───┴───┐         ┌───┴───┐
@@ -21,27 +21,28 @@
 
 mod context;
 mod primary;
-mod standby;
+mod replica;
 
 use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
 pub use context::ReplicationContext;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::StubbedChainlink;
+use magicblock_config::config::validator::ReplicationMode;
 use magicblock_core::link::{
     replication::Message,
     transactions::{SchedulerMode, TransactionSchedulerHandle},
 };
 use magicblock_ledger::Ledger;
 pub use primary::Primary;
-pub use standby::Standby;
+pub use replica::Replica;
+use solana_pubkey::Pubkey;
 use tokio::{
     runtime::Builder,
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{nats::Broker, Result};
+use crate::{nats::Broker, Error, Result};
 
 // =============================================================================
 // Constants
@@ -55,96 +56,82 @@ const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 // Service
 // =============================================================================
 
-/// Replication service with automatic role transitions.
+/// Replication service for the selected replication role.
 pub enum Service {
     Primary(Primary),
-    Standby(Standby),
+    Replica(Replica),
 }
 
 impl Service {
     /// Creates service, attempting primary role first if allowed.
     ///
     /// When `can_promote` is false (ReplicaOnly mode), skips lock acquisition
-    /// and goes directly to standby mode.
+    /// and goes directly to Replica mode.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         broker: Broker,
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        chainlink: StubbedChainlink<AccountsDb>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
         cancel: CancellationToken,
         reset: bool,
-        can_promote: bool,
+        mode: &ReplicationMode,
+        validator_identity: Pubkey,
     ) -> crate::Result<Option<Self>> {
         let ctx = ReplicationContext::new(
             broker,
             mode_tx,
             accountsdb,
             ledger,
-            chainlink,
             scheduler,
             cancel,
-            can_promote,
+            validator_identity,
         )
         .await?;
 
-        // Try to become primary only if promotion is allowed.
-        if can_promote {
+        if let ReplicationMode::Primary(_) = mode {
+            // Try to become primary
             match ctx.try_acquire_producer().await? {
                 Some(producer) => Ok(Some(Self::Primary(
                     ctx.into_primary(producer, messages).await?,
                 ))),
-                None => {
-                    let Some(standby) =
-                        ctx.into_standby(messages, reset).await?
-                    else {
-                        // Shutdown during consumer creation
-                        return Ok(None);
-                    };
-                    Ok(Some(Self::Standby(standby)))
-                }
+                None => Err(Error::Internal(
+                    "Failed to acquire producer lock".into(),
+                )),
             }
         } else {
-            // ReplicaOnly mode: skip lock acquisition, go directly to standby
-            let Some(standby) = ctx.into_standby(messages, reset).await? else {
+            // Replica mode: skip lock acquisition, go directly to Replica
+            let Some(replica) = ctx.into_replica(reset).await? else {
                 // Shutdown during consumer creation
                 return Ok(None);
             };
-            Ok(Some(Self::Standby(standby)))
+            Ok(Some(Self::Replica(replica)))
         }
     }
 
-    /// Runs service with automatic role transitions.
-    pub async fn run(mut self) -> Result<()> {
-        loop {
-            self = match self {
-                Service::Primary(p) => match p.run().await? {
-                    Some(s) => Service::Standby(s),
-                    None => return Ok(()),
-                },
-                Service::Standby(s) => match s.run().await? {
-                    Some(p) => Service::Primary(p),
-                    None => return Ok(()),
-                },
-            };
+    /// Runs the configured replication role until it exits.
+    pub async fn run(self) {
+        match self {
+            Service::Primary(p) => p.run().await,
+            Service::Replica(s) => s.run().await,
         }
     }
 
     /// Spawns the service in a dedicated OS thread with a single-threaded runtime.
     ///
-    /// Returns a `JoinHandle` that can be used to wait for the service to complete.
+    /// Returns a `JoinHandle` that yields startup/runtime errors from the
+    /// service thread.
     pub fn spawn(self) -> JoinHandle<Result<()>> {
         std::thread::spawn(move || {
             let runtime = Builder::new_current_thread()
                 .enable_all()
                 .thread_name("replication-service")
-                .build()
-                .expect("Failed to build replication service runtime");
+                .build()?;
 
-            runtime.block_on(tokio::task::unconstrained(self.run()))
+            runtime.block_on(tokio::task::unconstrained(self.run()));
+            Ok(())
         })
     }
 }

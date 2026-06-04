@@ -3,9 +3,10 @@ use std::{
     fmt,
     ops::Deref,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
+    time::Instant,
 };
 
 use magicblock_metrics::metrics;
@@ -39,16 +40,29 @@ use crate::{
 
 /// A map of reference counted pubkeys that can be used to track the number of
 /// reservations that exist for a pubkey in a lookup table
+pub struct RefcountedPubkeyEntry {
+    refcount: AtomicUsize,
+    update_sent_at: Instant,
+}
+
 pub struct RefcountedPubkeys {
-    pubkeys: HashMap<Pubkey, AtomicUsize>,
+    pubkeys: HashMap<Pubkey, RefcountedPubkeyEntry>,
 }
 
 impl RefcountedPubkeys {
-    fn new(pubkeys: &[Pubkey]) -> Self {
+    fn new(pubkeys: &[Pubkey], update_sent_at: Instant) -> Self {
         Self {
             pubkeys: pubkeys
                 .iter()
-                .map(|pubkey| (*pubkey, AtomicUsize::new(1)))
+                .map(|pubkey| {
+                    (
+                        *pubkey,
+                        RefcountedPubkeyEntry {
+                            refcount: AtomicUsize::new(1),
+                            update_sent_at,
+                        },
+                    )
+                })
                 .collect(),
         }
     }
@@ -56,26 +70,51 @@ impl RefcountedPubkeys {
     /// This should only be called for pubkeys that are not already in this table.
     /// It is called when extending a lookup table with pubkeys that were not
     /// found in any other table.
-    fn insert_many(&mut self, pubkeys: &[Pubkey]) {
+    fn insert_many(&mut self, pubkeys: &[Pubkey], update_sent_at: Instant) {
         for pubkey in pubkeys {
-            if let Some(pubkey_rc) = self.pubkeys.get_mut(pubkey) {
+            if let Some(entry) = self.pubkeys.get_mut(pubkey) {
                 debug!(
                     "Pubkey {} exists in the table. Not inserting, but increasing ref count instead",
                     pubkey
                 );
-                pubkey_rc.fetch_add(1, Ordering::Relaxed);
+                entry.refcount.fetch_add(1, Ordering::Relaxed);
             } else {
-                self.pubkeys.insert(*pubkey, AtomicUsize::new(1));
+                self.pubkeys.insert(
+                    *pubkey,
+                    RefcountedPubkeyEntry {
+                        refcount: AtomicUsize::new(1),
+                        update_sent_at,
+                    },
+                );
             }
         }
+    }
+
+    /// Adds pubkeys already present on chain without creating local
+    /// reservations for them.
+    fn insert_unreserved_many(&mut self, pubkeys: &[Pubkey]) -> usize {
+        let mut inserted = 0;
+        for pubkey in pubkeys {
+            if !self.pubkeys.contains_key(pubkey) {
+                self.pubkeys.insert(
+                    *pubkey,
+                    RefcountedPubkeyEntry {
+                        refcount: AtomicUsize::new(0),
+                        update_sent_at: Instant::now(),
+                    },
+                );
+                inserted += 1;
+            }
+        }
+        inserted
     }
 
     /// Add a reservation to the pubkey if it is part of this table
     /// - *pubkey* to reserve
     /// - *returns* `true` if the pubkey could be reserved
     fn reserve(&self, pubkey: &Pubkey) -> bool {
-        if let Some(count) = self.pubkeys.get(pubkey) {
-            count.fetch_add(1, Ordering::SeqCst);
+        if let Some(entry) = self.pubkeys.get(pubkey) {
+            entry.refcount.fetch_add(1, Ordering::SeqCst);
             true
         } else {
             false
@@ -88,8 +127,9 @@ impl RefcountedPubkeys {
     /// - *pubkey* to release
     /// - *returns* `true` if the pubkey was released
     fn release(&self, pubkey: &Pubkey) -> bool {
-        if let Some(count) = self.pubkeys.get(pubkey) {
-            count
+        if let Some(entry) = self.pubkeys.get(pubkey) {
+            entry
+                .refcount
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
                     if x == 0 {
                         None
@@ -107,7 +147,7 @@ impl RefcountedPubkeys {
     fn has_reservations(&self) -> bool {
         self.pubkeys
             .values()
-            .any(|rc_pubkey| rc_pubkey.load(Ordering::SeqCst) > 0)
+            .any(|entry| entry.refcount.load(Ordering::SeqCst) > 0)
     }
 
     /// Returns the refcount of a pubkey if it exists in this table
@@ -116,12 +156,24 @@ impl RefcountedPubkeys {
     fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
         self.pubkeys
             .get(pubkey)
-            .map(|count| count.load(Ordering::Relaxed))
+            .map(|entry| entry.refcount.load(Ordering::Relaxed))
+    }
+
+    fn latest_update_sent_at_for(
+        &self,
+        pubkeys: &HashSet<Pubkey>,
+    ) -> Option<Instant> {
+        pubkeys
+            .iter()
+            .filter_map(|pubkey| {
+                self.pubkeys.get(pubkey).map(|entry| entry.update_sent_at)
+            })
+            .max()
     }
 }
 
 impl Deref for RefcountedPubkeys {
-    type Target = HashMap<Pubkey, AtomicUsize>;
+    type Target = HashMap<Pubkey, RefcountedPubkeyEntry>;
 
     fn deref(&self) -> &Self::Target {
         &self.pubkeys
@@ -148,6 +200,7 @@ pub enum LookupTableRc {
         creation_sub_slot: u64,
         init_signature: Signature,
         extend_signatures: Mutex<Vec<Signature>>,
+        extendable: AtomicBool,
     },
     Deactivated {
         derived_auth: Keypair,
@@ -168,6 +221,7 @@ impl fmt::Display for LookupTableRc {
                 creation_sub_slot,
                 init_signature,
                 extend_signatures,
+                ..
             } => {
                 let comma_separated_pubkeys = pubkeys
                     .read()
@@ -297,8 +351,24 @@ impl LookupTableRc {
 
     /// Returns `true` if the table has more capacity to add pubkeys
     pub fn has_more_capacity(&self) -> bool {
-        self.pubkeys()
-            .is_some_and(|x| x.len() < LOOKUP_TABLE_MAX_ADDRESSES)
+        match self {
+            Self::Active {
+                pubkeys,
+                extendable,
+                ..
+            } => {
+                extendable.load(Ordering::Relaxed)
+                    && pubkeys.read().expect("pubkeys rwlock poisoned").len()
+                        < LOOKUP_TABLE_MAX_ADDRESSES
+            }
+            Self::Deactivated { .. } => false,
+        }
+    }
+
+    pub fn mark_non_extendable(&self) {
+        if let Self::Active { extendable, .. } = self {
+            extendable.store(false, Ordering::Relaxed);
+        }
     }
 
     pub fn is_full(&self) -> bool {
@@ -321,7 +391,7 @@ impl LookupTableRc {
         self.pubkeys().is_some_and(|pubkeys| {
             pubkeys
                 .get(pubkey)
-                .is_some_and(|count| count.load(Ordering::SeqCst) > 0)
+                .is_some_and(|entry| entry.refcount.load(Ordering::SeqCst) > 0)
         })
     }
 
@@ -331,6 +401,49 @@ impl LookupTableRc {
     pub fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
         self.pubkeys()?.get_refcount(pubkey)
     }
+
+    /// Reconciles local capacity tracking with the on-chain lookup table.
+    ///
+    /// Remote-only keys are added with refcount 0 so existing reservations are
+    /// preserved while local fullness reflects chain state.
+    pub async fn reconcile_with_chain(
+        &self,
+        rpc_client: &MagicblockRpcClient,
+    ) -> TableManiaResult<()> {
+        if self.is_deactivated() {
+            return Err(TableManiaError::CannotExtendDeactivatedTable(
+                *self.table_address(),
+            ));
+        }
+
+        let Some(chain_pubkeys) = self.get_chain_pubkeys(rpc_client).await?
+        else {
+            debug!(
+                table_address = %self.table_address(),
+                "Skipping lookup table reconciliation; remote table missing"
+            );
+            return Ok(());
+        };
+
+        let Some(mut local_pubkeys) = self.pubkeys_mut() else {
+            return Err(TableManiaError::CannotExtendDeactivatedTable(
+                *self.table_address(),
+            ));
+        };
+        let inserted = local_pubkeys.insert_unreserved_many(&chain_pubkeys);
+        if inserted > 0 {
+            debug!(
+                table_address = %self.table_address(),
+                inserted,
+                remote_count = chain_pubkeys.len(),
+                local_count = local_pubkeys.len(),
+                "Reconciled lookup table pubkeys from chain"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Returns `true` if the we requested to deactivate this table.
     /// NOTE: this doesn't mean that the deactivation period passed, thus
     ///       the table could still be considered _deactivating_ on chain.
@@ -384,6 +497,15 @@ impl LookupTableRc {
                 .collect::<HashSet<_>>(),
             None => HashSet::new(),
         }
+    }
+
+    pub fn latest_update_sent_at_for(
+        &self,
+        pubkeys: &HashSet<Pubkey>,
+    ) -> Option<Instant> {
+        self.pubkeys().and_then(|table_pubkeys| {
+            table_pubkeys.latest_update_sent_at_for(pubkeys)
+        })
     }
 
     /// Initializes an address lookup table deriving its authority from the provided
@@ -449,6 +571,7 @@ impl LookupTableRc {
             latest_blockhash,
         );
 
+        let update_sent_at = Instant::now();
         let outcome = rpc_client
             .send_transaction(
                 &tx,
@@ -468,11 +591,15 @@ impl LookupTableRc {
         Ok(Self::Active {
             derived_auth,
             table_address,
-            pubkeys: RwLock::new(RefcountedPubkeys::new(pubkeys)),
+            pubkeys: RwLock::new(RefcountedPubkeys::new(
+                pubkeys,
+                update_sent_at,
+            )),
             creation_slot: latest_slot,
             creation_sub_slot: sub_slot,
             init_signature: signature,
             extend_signatures: vec![].into(),
+            extendable: AtomicBool::new(true),
         })
     }
 
@@ -531,6 +658,7 @@ impl LookupTableRc {
             latest_blockhash,
         );
 
+        let update_sent_at = Instant::now();
         let outcome = rpc_client
             .send_transaction(
                 &tx,
@@ -549,7 +677,7 @@ impl LookupTableRc {
             pubkeys
                 .write()
                 .expect("pubkeys rwlock poisoned")
-                .insert_many(extra_pubkeys);
+                .insert_many(extra_pubkeys, update_sent_at);
             extend_signatures
                 .lock()
                 .expect("extend_signatures mutex poisoned")
@@ -757,23 +885,41 @@ impl LookupTableRc {
             latest_blockhash,
         );
 
-        let outcome = rpc_client
+        let send_result = rpc_client
             .send_transaction(
                 &tx,
                 &Self::get_send_transaction_config(rpc_client),
             )
-            .await?;
+            .await;
 
-        let (signature, error) = outcome.into_signature_and_error();
-        if let Some(error) = &error {
-            debug!(
-                error = ?error,
-                signature = %signature,
-                "Error closing lookup table - may need longer deactivation time"
-            );
-        }
+        let signature = match send_result {
+            Ok(outcome) => {
+                let (sig, error) = outcome.into_signature_and_error();
+                if let Some(error) = &error {
+                    debug!(
+                        error = ?error,
+                        signature = %sig,
+                        "Error closing lookup table - may need longer deactivation time"
+                    );
+                }
+                Some(sig)
+            }
+            Err(err) => {
+                // The ALT program returns InvalidAccountOwner when the table
+                // account no longer exists (e.g. a prior close attempt landed
+                // on chain but its outcome was lost, or it was closed out of
+                // band). Without this salvage the GC would re-issue the close
+                // every cycle indefinitely.
+                let sig = err.signature();
+                if self.is_closed(rpc_client).await.unwrap_or(false) {
+                    return Ok((true, sig));
+                }
+                return Err(err.into());
+            }
+        };
+
         let is_closed = self.is_closed(rpc_client).await?;
-        Ok((is_closed, Some(signature)))
+        Ok((is_closed, signature))
     }
 
     pub async fn get_meta(

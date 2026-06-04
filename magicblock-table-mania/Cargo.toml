@@ -30,6 +30,7 @@ solana-transaction = { workspace = true }
 solana-compute-budget-interface = { workspace = true }
 solana-instruction = { workspace = true }
 solana-message = { workspace = true }
+solana-transaction-error = { workspace = true }
 tokio = { workspace = true }
 
 [features]

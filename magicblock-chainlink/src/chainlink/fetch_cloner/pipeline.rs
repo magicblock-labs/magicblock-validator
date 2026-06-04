@@ -27,6 +27,7 @@ use crate::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
             LOADER_V3,
         },
+        pubsub_common::is_internal_dlp_account_data,
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         ResolvedAccount, SubscriptionReason,
     },
@@ -359,11 +360,18 @@ where
                     };
 
                     (commit_freq, delegated_to_other, delegation_actions)
+                } else if is_internal_dlp_account_data(account.data()) {
+                    (None, None, DelegationActions::default())
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));
                     (None, None, DelegationActions::default())
                 };
+            let cleanup_delegated_subscription = account.delegated();
+            let cleanup_undelegation_tracking = cleanup_delegated_subscription
+                && this.accounts_bank.get_account(&pubkey).is_some_and(
+                    |in_bank| in_bank.undelegating() || !in_bank.delegated(),
+                );
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account: account.into_account_shared_data(),
@@ -371,6 +379,16 @@ where
                 delegation_actions,
                 delegated_to_other,
             });
+            if cleanup_delegated_subscription {
+                if cleanup_undelegation_tracking {
+                    this.cleanup_undelegation_tracking_for_completed_account(
+                        pubkey,
+                    )
+                    .await;
+                }
+                this.cleanup_direct_subscription_for_delegated_account(pubkey)
+                    .await;
+            }
         }
 
         release_subs(
@@ -671,15 +689,15 @@ pub(crate) async fn clone_accounts_and_programs<T, U, V, C>(
     loaded_programs: Vec<
         crate::remote_account_provider::program_account::LoadedProgram,
     >,
-) -> ClonerResult<()>
+) -> ChainlinkResult<()>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
 {
-    // 1) Clone programs first so post-delegation action instructions can load
-    // their program accounts when action txs are sent during account cloning.
+    // 1) Clone programs first so embedded post-delegation actions can load
+    // their program accounts during account cloning.
     let mut program_join_set = JoinSet::new();
     for acc in loaded_programs {
         if !this.is_program_allowed(&acc.program_id) {
@@ -695,8 +713,8 @@ where
         .into_iter()
         .collect::<ClonerResult<Vec<_>>>()?;
 
-    // 2) Clone accounts without post-delegation actions first so all action
-    // dependencies are materialized in the bank before action tx execution.
+    // 2) Clone accounts without post-delegation actions first so common action
+    // dependencies are materialized before action-bearing clone instructions.
     let (accounts_with_actions, accounts_without_actions): (Vec<_>, Vec<_>) =
         accounts_to_clone
             .into_iter()
@@ -715,16 +733,18 @@ where
 
         let this_clone = this.clone();
         accounts_join_set.spawn(async move {
-            this_clone.clone_account_with_ownership(request).await
+            this_clone
+                .clone_account_with_post_delegation_action_invariants(request)
+                .await
         });
     }
     accounts_join_set
         .join_all()
         .await
         .into_iter()
-        .collect::<ClonerResult<Vec<_>>>()?;
+        .collect::<ChainlinkResult<Vec<_>>>()?;
 
-    // 3) Finally clone accounts that carry post-delegation actions.
+    // 3) Finally clone accounts that carry embedded post-delegation actions.
     let mut action_accounts_join_set = JoinSet::new();
     for request in accounts_with_actions {
         if tracing::enabled!(tracing::Level::TRACE) {
@@ -738,14 +758,16 @@ where
 
         let this_clone = this.clone();
         action_accounts_join_set.spawn(async move {
-            this_clone.clone_account_with_ownership(request).await
+            this_clone
+                .clone_account_with_post_delegation_action_invariants(request)
+                .await
         });
     }
     action_accounts_join_set
         .join_all()
         .await
         .into_iter()
-        .collect::<ClonerResult<Vec<_>>>()?;
+        .collect::<ChainlinkResult<Vec<_>>>()?;
 
     Ok(())
 }

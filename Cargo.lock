@@ -1397,25 +1397,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-deque"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-epoch"
-version = "0.9.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1968,7 +1949,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2029,7 +2010,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2438,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "magicblock-magic-program-api",
@@ -3627,26 +3608,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "machineid-rs"
-version = "1.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35ceb4d434d69d7199abc3036541ba6ef86767a4356e3077d5a3419f85b70b14"
-dependencies = [
- "hex",
- "hmac 0.12.1",
- "md-5",
- "serde",
- "serde_json",
- "sha-1",
- "sha2 0.10.9",
- "sysinfo",
- "uuid",
- "whoami",
- "winreg 0.11.0",
- "wmi",
-]
-
-[[package]]
 name = "magic-domain-program"
 version = "0.3.0"
 source = "git+https://github.com/magicblock-labs/magic-domain-program.git?rev=335a22#335a22ba5aa7b8c4bc84d5053444c74c3b05cdac"
@@ -3659,11 +3620,10 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "async-trait",
  "bincode",
- "lru 0.16.4",
  "magicblock-accounts-db",
  "magicblock-chainlink",
  "magicblock-committor-service",
@@ -3692,7 +3652,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "async-trait",
  "magicblock-account-cloner",
@@ -3715,7 +3675,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "flate2",
  "lmdb-rkv",
@@ -3735,7 +3695,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3753,7 +3713,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "agave-geyser-plugin-interface",
@@ -3804,7 +3764,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "anyhow",
@@ -3866,7 +3826,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -3924,7 +3884,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "borsh",
  "paste",
@@ -3939,10 +3899,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "async-trait",
- "base64 0.21.7",
  "bincode",
  "borsh",
  "futures-util",
@@ -3967,6 +3926,7 @@ dependencies = [
  "solana-instruction 3.4.0",
  "solana-keypair",
  "solana-message 3.1.0",
+ "solana-packet",
  "solana-program 3.0.0",
  "solana-pubkey 3.0.0",
  "solana-rpc-client",
@@ -3990,7 +3950,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "clap",
  "derive_more",
@@ -4010,7 +3970,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "bytes",
@@ -4070,7 +4030,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -4112,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "const-crypto",
@@ -4125,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "http-body-util",
  "hyper 1.9.0",
@@ -4140,7 +4100,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -4160,6 +4120,8 @@ dependencies = [
  "solana-account 3.4.0",
  "solana-bpf-loader-program",
  "solana-compute-budget",
+ "solana-compute-budget-instruction",
+ "solana-compute-budget-interface",
  "solana-compute-budget-program",
  "solana-feature-gate-interface 3.1.0",
  "solana-fee-structure",
@@ -4191,13 +4153,14 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "assert_matches",
  "bincode",
  "lazy_static",
  "magicblock-chainlink",
  "magicblock-core",
+ "magicblock-delegation-program-api",
  "magicblock-magic-program-api",
  "num-derive",
  "num-traits",
@@ -4211,6 +4174,7 @@ dependencies = [
  "solana-fee-calculator 3.2.0",
  "solana-hash 3.1.0",
  "solana-instruction 3.4.0",
+ "solana-instructions-sysvar 3.0.0",
  "solana-keypair",
  "solana-loader-v3-interface 6.1.1",
  "solana-loader-v4-interface 3.1.0",
@@ -4230,20 +4194,20 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "async-nats",
  "bincode",
  "bytes",
  "futures",
- "machineid-rs",
  "magicblock-accounts-db",
- "magicblock-chainlink",
+ "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
  "notify",
  "serde",
  "solana-hash 3.1.0",
+ "solana-pubkey 3.0.0",
  "solana-transaction",
  "solana-transaction-error 3.2.0",
  "tempfile",
@@ -4256,9 +4220,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
+ "async-trait",
  "futures-util",
+ "magicblock-metrics",
+ "serde_json",
  "solana-account 3.4.0",
  "solana-account-decoder-client-types",
  "solana-address-lookup-table-interface 3.1.0",
@@ -4267,6 +4234,7 @@ dependencies = [
  "solana-hash 3.1.0",
  "solana-instruction 3.4.0",
  "solana-pubkey 3.0.0",
+ "solana-pubsub-client",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-signature 3.4.0",
@@ -4279,7 +4247,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "futures-util",
@@ -4300,7 +4268,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -4319,6 +4287,7 @@ dependencies = [
  "solana-signer",
  "solana-slot-hashes 3.0.1",
  "solana-transaction",
+ "solana-transaction-error 3.2.0",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4326,7 +4295,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "chrono",
@@ -4353,7 +4322,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-tui-client"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "chrono",
  "clap",
@@ -4375,7 +4344,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "console-subscriber",
  "magicblock-api",
@@ -4391,7 +4360,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "magicblock-delegation-program-api",
  "magicblock-program",
@@ -4408,7 +4377,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "agave-feature-set",
  "git-version",
@@ -4440,16 +4409,6 @@ name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
-
-[[package]]
-name = "md-5"
-version = "0.10.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
-dependencies = [
- "cfg-if",
- "digest 0.10.7",
-]
 
 [[package]]
 name = "memchr"
@@ -4650,21 +4609,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "ntapi"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5646,26 +5596,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rayon"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
-dependencies = [
- "either",
- "rayon-core",
-]
-
-[[package]]
-name = "rayon-core"
-version = "1.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
-dependencies = [
- "crossbeam-deque",
- "crossbeam-utils",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5712,7 +5642,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "rustix 1.1.4",
- "windows 0.62.2",
+ "windows",
 ]
 
 [[package]]
@@ -5802,7 +5732,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "webpki-roots 0.25.4",
- "winreg 0.50.0",
+ "winreg",
 ]
 
 [[package]]
@@ -6014,7 +5944,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6027,7 +5957,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6449,17 +6379,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha-1"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5058ada175748e33390e40e872bd0fe59a19f265d0158daa551c5a88a76009c"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.2.17",
- "digest 0.10.7",
-]
-
-[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6650,7 +6569,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "3.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=2bbd342#2bbd3424e4307c6687609fac9340914280ede003"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b91ab7dad6642c63b9ea177fb318840b4c64c6cb#b91ab7dad6642c63b9ea177fb318840b4c64c6cb"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -6965,6 +6884,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-builtins-default-costs"
+version = "3.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c6cd4d41f391f427e64e03fb00fb0c93443f18464dafd71e06f996ac03a3982"
+dependencies = [
+ "agave-feature-set",
+ "ahash 0.8.12",
+ "log",
+ "solana-bpf-loader-program",
+ "solana-compute-budget-program",
+ "solana-loader-v4-program",
+ "solana-pubkey 3.0.0",
+ "solana-sdk-ids 3.1.0",
+ "solana-system-program",
+ "solana-vote-program",
+]
+
+[[package]]
 name = "solana-clock"
 version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7029,11 +6966,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-compute-budget-instruction"
+version = "3.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6bf47dcc57b770cee0432899ac89cd7e85896f9e28e3d5e5542a0b8a8f5839f"
+dependencies = [
+ "agave-feature-set",
+ "log",
+ "solana-borsh",
+ "solana-builtins-default-costs",
+ "solana-compute-budget",
+ "solana-compute-budget-interface",
+ "solana-instruction 3.4.0",
+ "solana-packet",
+ "solana-pubkey 3.0.0",
+ "solana-sdk-ids 3.1.0",
+ "solana-svm-transaction",
+ "solana-transaction-error 3.2.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "solana-compute-budget-interface"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8292c436b269ad23cecc8b24f7da3ab07ca111661e25e00ce0e1d22771951ab9"
 dependencies = [
+ "borsh",
  "solana-instruction 3.4.0",
  "solana-sdk-ids 3.1.0",
 ]
@@ -8155,7 +8114,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=2bbd342#2bbd3424e4307c6687609fac9340914280ede003"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b91ab7dad6642c63b9ea177fb318840b4c64c6cb#b91ab7dad6642c63b9ea177fb318840b4c64c6cb"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -8827,7 +8786,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "bincode",
  "bs58",
@@ -8850,7 +8809,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=2bbd342#2bbd3424e4307c6687609fac9340914280ede003"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b91ab7dad6642c63b9ea177fb318840b4c64c6cb#b91ab7dad6642c63b9ea177fb318840b4c64c6cb"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -9172,7 +9131,7 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=2bbd342#2bbd3424e4307c6687609fac9340914280ede003"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b91ab7dad6642c63b9ea177fb318840b4c64c6cb#b91ab7dad6642c63b9ea177fb318840b4c64c6cb"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -9337,6 +9296,38 @@ dependencies = [
  "solana-serialize-utils 3.1.1",
  "solana-short-vec 3.2.1",
  "solana-system-interface 2.0.0",
+]
+
+[[package]]
+name = "solana-vote-program"
+version = "3.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac7f37540da27c0ec132ee1b5380ad32d98663afba7ade3581f2d963fd2f63c2"
+dependencies = [
+ "agave-feature-set",
+ "bincode",
+ "log",
+ "num-derive",
+ "num-traits",
+ "serde",
+ "solana-account 3.4.0",
+ "solana-bincode 3.1.0",
+ "solana-clock 3.0.1",
+ "solana-epoch-schedule 3.1.0",
+ "solana-hash 3.1.0",
+ "solana-instruction 3.4.0",
+ "solana-keypair",
+ "solana-packet",
+ "solana-program-runtime",
+ "solana-pubkey 3.0.0",
+ "solana-rent 3.1.0",
+ "solana-sdk-ids 3.1.0",
+ "solana-signer",
+ "solana-slot-hashes 3.0.1",
+ "solana-transaction",
+ "solana-transaction-context",
+ "solana-vote-interface 4.0.4",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -9799,21 +9790,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sysinfo"
-version = "0.29.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd727fc423c2060f6c92d9534cef765c65a6ed3f428a03d7def74a8c4348e666"
-dependencies = [
- "cfg-if",
- "core-foundation-sys",
- "libc",
- "ntapi",
- "once_cell",
- "rayon",
- "winapi",
-]
-
-[[package]]
 name = "system-configuration"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9882,12 +9858,12 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
 name = "test-kit"
-version = "0.11.1"
+version = "0.11.3"
 dependencies = [
  "guinea",
  "magicblock-accounts-db",
@@ -10779,12 +10755,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasite"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8dad83b4f25e74f184f64c43b150b91efe7647395b42289f38e50566d82855b"
-
-[[package]]
 name = "wasm-bindgen"
 version = "0.2.120"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10918,17 +10888,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "whoami"
-version = "1.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d4a4db5077702ca3015d3d02d74974948aba2ad9e12ab7df718ee64ccd7e97d"
-dependencies = [
- "libredox",
- "wasite",
- "web-sys",
-]
-
-[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10986,17 +10945,6 @@ dependencies = [
 
 [[package]]
 name = "windows"
-version = "0.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e686886bc078bc1b0b600cac0147aadb815089b6e4da64016cbd754b6342700f"
-dependencies = [
- "windows-implement 0.48.0",
- "windows-interface 0.48.0",
- "windows-targets 0.48.5",
-]
-
-[[package]]
-name = "windows"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
@@ -11022,8 +10970,8 @@ version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
 dependencies = [
- "windows-implement 0.60.2",
- "windows-interface 0.59.3",
+ "windows-implement",
+ "windows-interface",
  "windows-link",
  "windows-result",
  "windows-strings",
@@ -11042,17 +10990,6 @@ dependencies = [
 
 [[package]]
 name = "windows-implement"
-version = "0.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e2ee588991b9e7e6c8338edf3333fbe4da35dc72092643958ebb43f0ab2c49c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "windows-implement"
 version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
@@ -11060,17 +10997,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6fb8df20c9bcaa8ad6ab513f7b40104840c8867d5751126e4df3b08388d0cc7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -11143,15 +11069,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]
@@ -11389,16 +11306,6 @@ dependencies = [
 
 [[package]]
 name = "winreg"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76a1a57ff50e9b408431e8f97d5456f2807f8eb2a2cd79b06068fc87f8ecf189"
-dependencies = [
- "cfg-if",
- "winapi",
-]
-
-[[package]]
-name = "winreg"
 version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
@@ -11499,20 +11406,6 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
-]
-
-[[package]]
-name = "wmi"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daffb44abb7d2e87a1233aa17fdbde0d55b890b32a23a1f908895b87fa6f1a00"
-dependencies = [
- "chrono",
- "futures",
- "log",
- "serde",
- "thiserror 1.0.69",
- "windows 0.48.0",
 ]
 
 [[package]]

@@ -20,8 +20,8 @@ on:
 
 jobs:
   notify-review-requested:
-    if: github.event_name == 'pull_request' && github.event.action == 'review_requested'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: github.event_name == 'pull_request' && github.event.action == 'review_requested' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
     steps:
       - name: Build Slack review message
         id: message
@@ -70,8 +70,8 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   notify-review:
-    if: github.event_name == 'pull_request_review' && github.event.action == 'submitted'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: github.event_name == 'pull_request_review' && github.event.action == 'submitted' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
     steps:
       - name: Build Slack review message
         id: message
@@ -91,6 +91,21 @@ jobs:
             const pr = context.payload.pull_request;
             const reviewer = context.payload.review.user.login;
             const author = pr.user.login;
+            const reviewerKey = reviewer.toLowerCase();
+            const authorKey = author.toLowerCase();
+            const ignoredReviewers = new Set([
+              "codex",
+              "codex[bot]",
+              "chatgpt-codex-connector[bot]",
+              "coderabbit",
+              "coderabbit[bot]",
+              "coderabbitai",
+              "coderabbitai[bot]",
+            ]);
+            if (ignoredReviewers.has(reviewerKey) || reviewerKey === authorKey) {
+              core.setOutput("should_notify", "false");
+              return;
+            }
             const states = {
               approved: "approved",
               changes_requested: "changes requested",
@@ -99,9 +114,11 @@ jobs:
             const state = states[context.payload.review.state] || context.payload.review.state || "submitted";
             const text = `📝 ${mention(author)} *${escapeMrkdwn(reviewer)}* submitted a *${escapeMrkdwn(state)}* review for PR #${pr.number}: <${pr.html_url}|${escapeMrkdwn(pr.title)}>.`;
 
+            core.setOutput("should_notify", "true");
             core.setOutput("text", text);
 
       - name: Send Slack Notification
+        if: steps.message.outputs.should_notify == 'true'
         uses: slackapi/slack-github-action@v1.24.0
         with:
           payload: |

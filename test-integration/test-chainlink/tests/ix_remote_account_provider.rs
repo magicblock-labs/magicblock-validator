@@ -47,6 +47,7 @@ async fn init_remote_account_provider(
         &RemoteAccountProviderConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         ),
+        None,
     )
     .await
     .expect("Failed to create RemoteAccountProvider")
@@ -166,7 +167,6 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
                 None,
                 AccountFetchOrigin::GetAccount,
                 None,
-                None,
             )
             .await
             .unwrap();
@@ -198,7 +198,6 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
                 &all_pubkeys,
                 None,
                 AccountFetchOrigin::GetAccount,
-                None,
                 None,
             )
             .await
@@ -233,7 +232,6 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
                 &all_pubkeys,
                 None,
                 AccountFetchOrigin::GetAccount,
-                None,
                 None,
             )
             .await

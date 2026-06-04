@@ -1,4 +1,6 @@
-use solana_account::{Account, AccountSharedData, ReadableAccount};
+use solana_account::{
+    Account, AccountSharedData, ReadableAccount, WritableAccount,
+};
 use solana_program::{
     program_error::ProgramError, program_option::COption, program_pack::Pack,
     rent::Rent,
@@ -12,6 +14,10 @@ use spl_token::state::{Account as SplAccount, AccountState};
 pub const TOKEN_PROGRAM_ID: Pubkey =
     pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
+// Token-2022 Program ID (Tokenz...)
+pub const TOKEN_2022_PROGRAM_ID: Pubkey =
+    pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
 // Associated Token Account Program ID (ATokenG...)
 pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
     pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
@@ -19,6 +25,9 @@ pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
 // Enhanced ATA (eATA) Program ID (SPLxh1...)
 pub const EATA_PROGRAM_ID: Pubkey =
     pubkey!("SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2");
+
+pub const EPHEMERAL_ATA_LEN: usize = 80;
+const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
 
 /// Derives the standard Associated Token Account (ATA) address for the given wallet owner and token mint.
 ///
@@ -29,8 +38,16 @@ pub const EATA_PROGRAM_ID: Pubkey =
 /// # Returns
 /// The derived ATA address as `Pubkey`.
 pub fn derive_ata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+    derive_ata_with_token_program(owner, mint, &TOKEN_PROGRAM_ID)
+}
+
+pub fn derive_ata_with_token_program(
+    owner: &Pubkey,
+    mint: &Pubkey,
+    token_program: &Pubkey,
+) -> Pubkey {
     Pubkey::find_program_address(
-        &[owner.as_ref(), TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
+        &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
         &ASSOCIATED_TOKEN_PROGRAM_ID,
     )
     .0
@@ -48,10 +65,59 @@ pub fn try_derive_ata_address_and_bump(
     owner: &Pubkey,
     mint: &Pubkey,
 ) -> Option<(Pubkey, u8)> {
+    try_derive_ata_address_and_bump_with_token_program(
+        owner,
+        mint,
+        &TOKEN_PROGRAM_ID,
+    )
+}
+
+pub fn try_derive_ata_address_and_bump_with_token_program(
+    owner: &Pubkey,
+    mint: &Pubkey,
+    token_program: &Pubkey,
+) -> Option<(Pubkey, u8)> {
     Pubkey::try_find_program_address(
-        &[owner.as_ref(), TOKEN_PROGRAM_ID.as_ref(), mint.as_ref()],
+        &[owner.as_ref(), token_program.as_ref(), mint.as_ref()],
         &ASSOCIATED_TOKEN_PROGRAM_ID,
     )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SupportedAtaPubkeys {
+    pub legacy: Option<Pubkey>,
+    pub token_2022: Option<Pubkey>,
+}
+
+impl SupportedAtaPubkeys {
+    pub fn token_2022_first(&self) -> [Option<Pubkey>; 2] {
+        [self.token_2022, self.legacy]
+    }
+
+    pub fn contains(&self, pubkey: &Pubkey) -> bool {
+        self.legacy.as_ref() == Some(pubkey)
+            || self.token_2022.as_ref() == Some(pubkey)
+    }
+}
+
+pub fn try_derive_supported_ata_pubkeys(
+    owner: &Pubkey,
+    mint: &Pubkey,
+) -> SupportedAtaPubkeys {
+    SupportedAtaPubkeys {
+        legacy: try_derive_ata_address_and_bump_with_token_program(
+            owner,
+            mint,
+            &TOKEN_PROGRAM_ID,
+        )
+        .map(|(pubkey, _)| pubkey),
+        token_2022: try_derive_ata_address_and_bump_with_token_program(
+            owner,
+            mint,
+            &TOKEN_2022_PROGRAM_ID,
+        )
+        .map(|(pubkey, _)| pubkey),
+    }
 }
 
 /// Derives the Enhanced Associated Token Account (eATA) Program Derived Address (PDA) for the given wallet owner and token mint.
@@ -107,7 +173,7 @@ pub fn is_ata(
     // The account must be owned by the SPL Token program (legacy) or Token-2022
     let token_program_owner = account.owner();
     let is_spl_token = *token_program_owner == spl_token::id();
-    let is_token_2022 = *token_program_owner == spl_token_2022::id();
+    let is_token_2022 = *token_program_owner == TOKEN_2022_PROGRAM_ID;
     if !(is_spl_token || is_token_2022) {
         return None;
     }
@@ -155,7 +221,10 @@ pub fn try_remap_ata_to_eata(
     pubkey: &Pubkey,
     account: &AccountSharedData,
 ) -> Option<(Pubkey, EphemeralAta)> {
-    if account.owner() != &TOKEN_PROGRAM_ID || !account.delegated() {
+    let token_program_owner = account.owner();
+    let is_spl_token = *token_program_owner == TOKEN_PROGRAM_ID;
+    let is_token_2022 = *token_program_owner == TOKEN_2022_PROGRAM_ID;
+    if !(is_spl_token || is_token_2022) || !account.delegated() {
         return None;
     }
 
@@ -168,7 +237,8 @@ pub fn try_remap_ata_to_eata(
     let owner = Pubkey::new_from_array(data[32..64].try_into().ok()?);
     let amount = u64::from_le_bytes(data[64..72].try_into().ok()?);
 
-    let ata = derive_ata(&owner, &mint);
+    let (eata_pubkey, bump) = try_derive_eata_address_and_bump(&owner, &mint)?;
+    let ata = derive_ata_with_token_program(&owner, &mint, token_program_owner);
     if ata != *pubkey {
         return None;
     }
@@ -177,9 +247,10 @@ pub fn try_remap_ata_to_eata(
         owner,
         mint,
         amount,
+        bump,
     };
 
-    Some((derive_eata(&owner, &mint), eata))
+    Some((eata_pubkey, eata))
 }
 
 // ---------------- eATA -> ATA projection helpers ----------------
@@ -204,6 +275,60 @@ pub struct EphemeralAta {
     pub mint: Pubkey,
     /// The amount of tokens this account holds.
     pub amount: u64,
+    /// The bump of the eATA PDA.
+    pub bump: u8,
+}
+
+impl EphemeralAta {
+    pub fn try_from_account_data(data: &[u8]) -> Option<Self> {
+        let owner = Pubkey::new_from_array(data.get(0..32)?.try_into().ok()?);
+        let mint = Pubkey::new_from_array(data.get(32..64)?.try_into().ok()?);
+        if mint == Pubkey::default() {
+            return None;
+        }
+        let amount = u64::from_le_bytes(data.get(64..72)?.try_into().ok()?);
+        let bump = match data.len() {
+            EPHEMERAL_ATA_LEN => data[72],
+            LEGACY_EPHEMERAL_ATA_LEN => {
+                try_derive_eata_address_and_bump(&owner, &mint)?.1
+            }
+            _ => return None,
+        };
+
+        Some(Self {
+            owner,
+            mint,
+            amount,
+            bump,
+        })
+    }
+
+    pub fn project_into_ata_account(
+        &self,
+        ata_account: &AccountSharedData,
+    ) -> Option<AccountSharedData> {
+        let token_program_owner = ata_account.owner();
+        let is_spl_token = *token_program_owner == TOKEN_PROGRAM_ID;
+        let is_token_2022 = *token_program_owner == TOKEN_2022_PROGRAM_ID;
+        if !(is_spl_token || is_token_2022) {
+            return None;
+        }
+
+        let data = ata_account.data();
+        if data.len() < 72 {
+            return None;
+        }
+        if &data[0..32] != self.mint.as_ref()
+            || &data[32..64] != self.owner.as_ref()
+        {
+            return None;
+        }
+
+        let mut projected = ata_account.clone();
+        projected.data_as_mut_slice()[64..72]
+            .copy_from_slice(&self.amount.to_le_bytes());
+        Some(projected)
+    }
 }
 
 impl TryFrom<EphemeralAta> for AccountSharedData {
@@ -240,11 +365,12 @@ impl TryFrom<EphemeralAta> for AccountSharedData {
 
 impl From<EphemeralAta> for Account {
     fn from(val: EphemeralAta) -> Self {
-        // Encode as: owner(32) | mint(32) | amount(8)
-        let mut data = Vec::with_capacity(72);
+        let mut data = Vec::with_capacity(EPHEMERAL_ATA_LEN);
         data.extend_from_slice(val.owner.as_ref());
         data.extend_from_slice(val.mint.as_ref());
         data.extend_from_slice(&val.amount.to_le_bytes());
+        data.push(val.bump);
+        data.extend_from_slice(&[0; 7]);
 
         Account {
             lamports: Rent::default().minimum_balance(data.len()),
@@ -265,19 +391,7 @@ impl MaybeIntoAta<AccountSharedData> for AccountSharedData {
             return None;
         }
 
-        let data = self.data();
-        // Expect at least owner(32) + mint(32) + amount(8)
-        if data.len() < 72 {
-            return None;
-        }
-        let owner = Pubkey::new_from_array(data[0..32].try_into().ok()?);
-        let mint = Pubkey::new_from_array(data[32..64].try_into().ok()?);
-        let amount = u64::from_le_bytes(data[64..72].try_into().ok()?);
-        let eata = EphemeralAta {
-            owner,
-            mint,
-            amount,
-        };
+        let eata = EphemeralAta::try_from_account_data(self.data())?;
         eata.try_into().ok()
     }
 }

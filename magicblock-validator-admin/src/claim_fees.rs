@@ -81,7 +81,7 @@ async fn run_claim_fees_loop(
 }
 
 #[instrument(fields(validator = %validator_authority().pubkey()))]
-async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
+pub async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
     info!("Claiming validator fees");
 
     let rpc_client =
