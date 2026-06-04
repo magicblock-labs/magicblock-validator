@@ -58,6 +58,37 @@ struct RemoteReadinessWaiterState {
     successful: Vec<CachedRemoteReadinessResult>,
 }
 
+/// Shared waiter pool that deduplicates the finalization-poll loop run by
+/// `wait_for_remote_tables_readiness_batch` across compatible concurrent
+/// callers.
+///
+/// ## When this actually reduces RPC calls
+///
+/// Sharing kicks in only when a later caller's request is *compatible*
+/// with an already in-flight (or just-succeeded within
+/// `REMOTE_READINESS_SUCCESS_TTL`) request: same table set, the later
+/// caller's `required_pubkeys` is a subset of the in-flight caller's
+/// `required_pubkeys` for every table, and the in-flight caller's
+/// `latest_update_sent_at` is no older. See
+/// [`RemoteReadinessWaiterKey::is_satisfied_by`].
+///
+/// The wait being deduplicated is meaningful only inside the
+/// ~13 s remote-finalization window (`REMOTE_TABLE_FINALIZATION_*` in
+/// `manager.rs`). After that window, the very first poll resolves, so
+/// there is essentially no loop to share.
+///
+/// In practice this helps for:
+///   1. A burst of identical reservations awaiting the same fresh pubkeys.
+///   2. Smaller callers awaiting a subset of an in-flight wide reservation
+///      on the same tables.
+///   3. A sub-`REMOTE_READINESS_SUCCESS_TTL` thundering herd hitting the
+///      success cache right after a shared resolution.
+///
+/// It does **not** reduce RPC calls when multiple concurrent callers ask
+/// for disjoint pubkey sets on the same table (e.g. several transactions
+/// each extending different pubkeys into the same table and then awaiting
+/// readiness on only their own additions). Each such caller still spawns
+/// its own batch waiter and polls the table independently.
 #[derive(Default)]
 pub(crate) struct RemoteReadinessWaiters {
     state: Mutex<RemoteReadinessWaiterState>,
