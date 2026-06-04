@@ -78,9 +78,10 @@ use crate::{
     },
     remote_account_provider::{
         program_account::get_loaderv3_get_program_data_address,
-        CapacityEvictionProtection, ChainPubsubClient, ChainRpcClient,
-        ForwardedSubscriptionUpdate, MatchSlotsConfig, RemoteAccount,
-        RemoteAccountProvider, ResolvedAccountSharedData, SubscriptionReason,
+        pubsub_common::SubscriptionSource, CapacityEvictionProtection,
+        ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
+        MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
+        ResolvedAccountSharedData, SubscriptionReason,
     },
 };
 
@@ -590,8 +591,18 @@ where
         // If stale state is still present locally, cleanup is routed through the
         // existing removal listener, which serializes the final is_watching check and
         // eviction submission against same-pubkey subscription transitions.
+        //
+        // The guard only applies to account-subscription updates: the
+        // account-sub LRU is the source of truth for `is_watching`. Program
+        // subscription updates can legitimately arrive for pubkeys that are
+        // *not* in the account-sub LRU (e.g. delegated accounts whose direct
+        // subscription was released after cloning and are now tracked only via
+        // their owner program). Dropping those would leave the bank stuck in a
+        // stale delegated/undelegated state.
         let update_slot = update.account.slot();
-        if !self.remote_account_provider.is_watching(&pubkey) {
+        if matches!(update.source, SubscriptionSource::Account)
+            && !self.remote_account_provider.is_watching(&pubkey)
+        {
             trace!(
                 pubkey = %pubkey,
                 update_slot,
@@ -1159,7 +1170,11 @@ where
         Option<DelegationRecord>,
         DelegationActions,
     ) {
-        let ForwardedSubscriptionUpdate { pubkey, account } = update;
+        let ForwardedSubscriptionUpdate {
+            pubkey,
+            account,
+            source: _,
+        } = update;
         let owned_by_delegation_program =
             account.is_owned_by_delegation_program();
 

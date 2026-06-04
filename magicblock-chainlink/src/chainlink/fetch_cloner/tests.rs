@@ -21,8 +21,9 @@ use crate::{
     assert_subscribed_without_delegation_record,
     remote_account_provider::{
         chain_pubsub_client::mock::ChainPubsubClientMock,
-        chain_slot::ChainSlot, RemoteAccountProvider,
-        RemoteAccountUpdateSource, SubscriptionReleaseMode,
+        chain_slot::ChainSlot, pubsub_common::SubscriptionSource,
+        RemoteAccountProvider, RemoteAccountUpdateSource,
+        SubscriptionReleaseMode,
     },
     testing::{
         accounts::{
@@ -589,6 +590,7 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
                     CURRENT_SLOT,
                     RemoteAccountUpdateSource::Subscription,
                 ),
+                source: SubscriptionSource::Account,
             },
         )
         .await;
@@ -1444,6 +1446,7 @@ async fn test_delegated_discovered_after_direct_subscribe_releases_direct_withou
                 CURRENT_SLOT + 1,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -1665,6 +1668,7 @@ async fn test_subscription_update_for_unwatched_absent_account_is_dropped() {
                 42,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -1713,6 +1717,7 @@ async fn test_subscription_update_for_unwatched_present_account_enqueues_removal
                 43,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -1833,6 +1838,7 @@ async fn test_delegated_subscription_update_keeps_externally_acquired_undelegati
                 CURRENT_SLOT + 1,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -2785,6 +2791,7 @@ async fn send_subscription_update_and_get_subscribed_programs(
     let update = ForwardedSubscriptionUpdate {
         pubkey: account_pubkey,
         account: remote_account,
+        source: SubscriptionSource::Account,
     };
     subscription_tx.send(update).await.unwrap();
 
@@ -3042,6 +3049,7 @@ async fn test_non_raw_eata_owned_account_subscription_update_stays_delegated() {
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -3115,6 +3123,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -3187,6 +3196,7 @@ async fn test_discovered_dlp_owned_account_delegated_elsewhere_is_ignored() {
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -3274,6 +3284,7 @@ async fn test_out_of_order_delegated_eata_subscription_update_still_projects_ata
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -3374,6 +3385,7 @@ async fn test_out_of_order_delegated_eata_update_clones_action_dependencies() {
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -3475,6 +3487,7 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -3569,6 +3582,7 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -3683,6 +3697,7 @@ async fn test_ata_subscription_update_projects_eata_when_chain_slot_lags() {
                 ATA_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -3802,6 +3817,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -4086,6 +4102,7 @@ async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -4172,6 +4189,7 @@ async fn test_delegated_eata_update_projects_existing_plain_ata_in_bank() {
                 EATA_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -4281,6 +4299,7 @@ async fn test_delegated_eata_update_projects_existing_token_2022_ata_in_bank() {
                 EATA_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -4395,6 +4414,7 @@ async fn test_greedy_delegated_eata_update_projects_remote_token_2022_ata() {
                 EATA_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -4505,6 +4525,7 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
             account: subscription_account,
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -4626,6 +4647,7 @@ async fn test_delegated_account_fetch_subscription_race() {
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
             account: subscription_account,
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -4733,6 +4755,7 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
             account: subscription_account,
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -5072,6 +5095,7 @@ async fn test_undelegating_projected_ata_subscription_update_stays_locked() {
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -5170,6 +5194,7 @@ async fn test_delegated_eata_update_does_not_override_undelegating_ata_in_bank()
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
+            source: SubscriptionSource::Account,
         })
         .await
         .unwrap();
@@ -6034,6 +6059,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
                         slot,
                         RemoteAccountUpdateSource::Subscription,
                     ),
+                    source: SubscriptionSource::Account,
                 })
                 .await
                 .unwrap();

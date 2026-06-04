@@ -302,7 +302,8 @@ pub mod mock {
 
     use super::*;
     use crate::remote_account_provider::{
-        RemoteAccountProviderError, RemoteAccountProviderResult,
+        pubsub_common::SubscriptionSource, RemoteAccountProviderError,
+        RemoteAccountProviderResult,
     };
 
     #[derive(Clone)]
@@ -396,7 +397,11 @@ pub mod mock {
                 },
                 value: ui_acc,
             };
-            let update = SubscriptionUpdate::from((pubkey, rpc_response));
+            let update = SubscriptionUpdate::from_rpc_response(
+                pubkey,
+                rpc_response,
+                SubscriptionSource::Account,
+            );
             self.send(update).await;
         }
 

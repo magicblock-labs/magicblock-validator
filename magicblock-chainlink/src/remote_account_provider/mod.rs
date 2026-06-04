@@ -79,7 +79,7 @@ use crate::{
     errors::ChainlinkResult,
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient,
-        pubsub_common::SubscriptionUpdate,
+        pubsub_common::{SubscriptionSource, SubscriptionUpdate},
     },
     submux::SubMuxClient,
 };
@@ -358,6 +358,11 @@ type SharedCapacityEvictionProtectionPredicate =
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
     pub account: RemoteAccount,
+    /// The upstream subscription stream that produced this update. Consumers
+    /// must distinguish account-sub vs program-sub updates because a pubkey
+    /// can be tracked solely via a program subscription (e.g. delegated
+    /// accounts whose direct subscription was released after cloning).
+    pub source: SubscriptionSource,
 }
 
 unsafe impl Send for ForwardedSubscriptionUpdate {}
@@ -968,6 +973,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             Some(ForwardedSubscriptionUpdate {
                                 pubkey: update.pubkey,
                                 account: remote_account,
+                                source: update.source,
                             })
                         }
                     };
