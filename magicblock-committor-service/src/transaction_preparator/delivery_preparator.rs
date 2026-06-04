@@ -169,7 +169,7 @@ impl DeliveryPreparator {
                     signature,
                 ),
             )) => {
-                info!(error = ?err, signature = ?signature, "Buffer already initialized");
+                info!(error = ?err, signature = ?signature, "Buffer already was initialized");
             }
             // Return in any other case
             res => return res,
@@ -477,17 +477,25 @@ impl DeliveryPreparator {
                 );
 
                 async move {
-                    self.send_ixs_with_retry(&instructions, authority, 1).await
+                    (
+                        cleanup_tasks,
+                        self.send_ixs_with_retry(&instructions, authority, 1)
+                            .await,
+                    )
                 }
             });
 
         join_all(close_futs)
             .await
             .into_iter()
-            .inspect(|res| {
-                if let Err(err) = res {
-                    error!(error = ?err, "Failed to cleanup buffers");
-                }
+            .map(|(cleanup_tasks, res)| {
+                res.inspect_err(|err| {
+                    let buffer_pdas = cleanup_tasks
+                        .into_iter()
+                        .map(|el| el.buffer_pda(&authority.pubkey()))
+                        .collect::<Vec<_>>();
+                    error!(error = ?err, "Failed to cleanup buffers: {:?}", buffer_pdas);
+                })
             })
             .collect::<Result<(), _>>()
     }
