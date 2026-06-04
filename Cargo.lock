@@ -3902,7 +3902,6 @@ name = "magicblock-committor-service"
 version = "0.11.3"
 dependencies = [
  "async-trait",
- "base64 0.21.7",
  "bincode",
  "borsh",
  "futures-util",
@@ -3927,6 +3926,7 @@ dependencies = [
  "solana-instruction 3.4.0",
  "solana-keypair",
  "solana-message 3.1.0",
+ "solana-packet",
  "solana-program 3.0.0",
  "solana-pubkey 3.0.0",
  "solana-rpc-client",
