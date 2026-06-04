@@ -95,7 +95,7 @@ struct RemoteReadinessTarget {
 
 type RemoteReadinessAddresses = HashMap<Pubkey, Vec<Pubkey>>;
 type SharedRemoteReadinessResult =
-    Arc<TableManiaResult<RemoteReadinessAddresses>>;
+    Arc<Result<RemoteReadinessAddresses, Arc<TableManiaError>>>;
 type RemoteReadinessReceiver =
     watch::Receiver<Option<SharedRemoteReadinessResult>>;
 
@@ -230,7 +230,8 @@ impl RemoteReadinessWaiters {
                 });
                 let waiters = self.clone();
                 tokio::spawn(async move {
-                    let result = Arc::new(spawn_future().await);
+                    let result =
+                        Arc::new(spawn_future().await.map_err(Arc::new));
                     {
                         let mut state = waiters.state.lock().await;
                         state.active.retain(|waiter| waiter.key != key);
@@ -263,7 +264,7 @@ impl RemoteReadinessWaiters {
                     Ok(remote_tables) => Ok(remote_tables.clone()),
                     Err(err) => {
                         Err(TableManiaError::SharedRemoteReadinessFailure(
-                            Arc::new(err.clone_for_shared_readiness()),
+                            err.clone(),
                         ))
                     }
                 };
@@ -277,44 +278,6 @@ impl RemoteReadinessWaiters {
                         ),
                     ),
                 ));
-            }
-        }
-    }
-}
-
-trait CloneForSharedReadiness {
-    fn clone_for_shared_readiness(&self) -> TableManiaError;
-}
-
-impl CloneForSharedReadiness for TableManiaError {
-    fn clone_for_shared_readiness(&self) -> TableManiaError {
-        match self {
-            TableManiaError::MagicBlockRpcClientError(err) => {
-                TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
-                    err.to_string(),
-                )
-            }
-            TableManiaError::CannotExtendDeactivatedTable(pubkey) => {
-                TableManiaError::CannotExtendDeactivatedTable(*pubkey)
-            }
-            TableManiaError::InvalidAuthority(actual, expected) => {
-                TableManiaError::InvalidAuthority(*actual, *expected)
-            }
-            TableManiaError::MaxExtendPubkeysExceeded(max, provided) => {
-                TableManiaError::MaxExtendPubkeysExceeded(*max, *provided)
-            }
-            TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
-                message,
-            ) => TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
-                message.clone(),
-            ),
-            TableManiaError::TimedOutWaitingForLocalTablesToUpdate(message) => {
-                TableManiaError::TimedOutWaitingForLocalTablesToUpdate(
-                    message.clone(),
-                )
-            }
-            TableManiaError::SharedRemoteReadinessFailure(err) => {
-                TableManiaError::SharedRemoteReadinessFailure(err.clone())
             }
         }
     }
