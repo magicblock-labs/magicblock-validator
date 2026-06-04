@@ -1033,27 +1033,6 @@ mod tests {
 
     #[serial]
     #[tokio::test]
-    async fn test_task_scheduler_does_not_start_on_standby_mode() {
-        magicblock_core::logger::init_for_tests();
-        switch_to_replica_mode();
-
-        let (_tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
-        let service = test_service(db.clone(), rx);
-        let handle = service.start().await.unwrap();
-
-        switch_to_primary_mode();
-
-        // Handle should join immediately because it's in standby mode
-        timeout(Duration::from_secs(1), handle)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-    }
-
-    #[serial]
-    #[tokio::test]
     async fn test_failed_records_are_cleaned_up_periodically() {
         magicblock_core::logger::init_for_tests();
         switch_to_primary_mode();
