@@ -560,7 +560,6 @@ impl CommittsDb {
     pub(crate) fn get_pending_commit_statuses(
         &self,
         min_created_at: u64,
-        max_last_retried_at: u64,
     ) -> CommitPersistResult<Vec<CommitStatusRow>> {
         let query = format!(
             "WITH eligible_messages AS (
@@ -569,7 +568,6 @@ impl CommittsDb {
                  WHERE commit_status = ?1
                  GROUP BY message_id
                  HAVING MIN(created_at) >= ?2
-                    AND MAX(last_retried_at) < ?3
              )
              {SELECT_ALL_COMMIT_STATUS_COLUMNS}
              WHERE commit_status = ?1
@@ -581,8 +579,7 @@ impl CommittsDb {
         let stmt = &mut self.conn.prepare(&query)?;
         let mut rows = stmt.query(params![
             CommitStatus::Pending.as_str(),
-            u64_into_i64(min_created_at),
-            u64_into_i64(max_last_retried_at)
+            u64_into_i64(min_created_at)
         ])?;
 
         extract_committor_rows(&mut rows)
@@ -873,7 +870,7 @@ mod tests {
         db.insert_commit_status_rows(&[pending.clone(), succeeded])
             .unwrap();
 
-        let rows = db.get_pending_commit_statuses(0, 1001).unwrap();
+        let rows = db.get_pending_commit_statuses(0).unwrap();
         assert_eq!(rows, vec![pending]);
     }
 
@@ -903,14 +900,23 @@ mod tests {
             pending.clone(),
             pending_same_message.clone(),
             too_old,
-            too_recent,
-            partially_eligible,
-            partially_too_recent,
+            too_recent.clone(),
+            partially_eligible.clone(),
+            partially_too_recent.clone(),
         ])
         .unwrap();
 
-        let rows = db.get_pending_commit_statuses(10, 20).unwrap();
-        assert_eq!(rows, vec![pending, pending_same_message]);
+        let rows = db.get_pending_commit_statuses(10).unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                pending,
+                pending_same_message,
+                too_recent,
+                partially_eligible,
+                partially_too_recent
+            ]
+        );
     }
 
     #[test]
