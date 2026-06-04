@@ -465,8 +465,7 @@ impl super::TransactionExecutor {
             txn,
             self.environment.blockhash_lamports_per_signature,
         );
-        let fee_details =
-            FeeDetails::new(signature_fee, limits.get_prioritization_fee());
+        let fee_details = FeeDetails::new(signature_fee, 0);
         let raise_cpi_limit = self
             .feature_set
             .is_active(&raise_cpi_nesting_limit_to_8::id());
