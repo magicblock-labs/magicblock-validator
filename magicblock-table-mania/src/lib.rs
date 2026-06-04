@@ -4,6 +4,7 @@ pub mod error;
 mod find_tables;
 mod lookup_table_rc;
 mod manager;
+mod remote_readiness_waiters;
 
 pub use compute_budget::*;
 pub use find_tables::find_open_tables;
