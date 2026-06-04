@@ -158,6 +158,10 @@ pub struct IntentExecutorImpl<T, F, A> {
     pub started_at: Instant,
     /// Junk that needs to be cleaned up
     junk: Vec<TransactionStrategy>,
+    /// Set to false on execution failure so cleanup only releases ALT
+    /// reservations without closing buffer PDAs (see race condition note in
+    /// intent_execution_engine)
+    close_buffers: bool,
 }
 
 impl<T, F, A> IntentExecutorImpl<T, F, A>
@@ -185,6 +189,7 @@ where
 
             started_at: Instant::now(),
             junk: vec![],
+            close_buffers: true,
         }
     }
 
@@ -567,6 +572,7 @@ where
             });
         });
 
+        self.close_buffers = result.is_ok();
         self.junk = execution_report.junk;
         IntentExecutionResult {
             inner: result,
@@ -575,13 +581,14 @@ where
         }
     }
 
-    /// Cleanup after intent using junk
     async fn cleanup(mut self) -> Result<(), BufferExecutionError> {
+        let close_buffers = self.close_buffers;
         let cleanup_futs = self.junk.iter().map(|to_cleanup| {
             self.transaction_preparator.cleanup_for_strategy(
                 &self.authority,
                 &to_cleanup.optimized_tasks,
                 &to_cleanup.lookup_tables_keys,
+                close_buffers,
             )
         });
 
