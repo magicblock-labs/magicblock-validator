@@ -498,7 +498,7 @@ impl DeliveryPreparator {
             .try_for_each(|(cleanup_tasks, res)| {
                 res.inspect_err(|err| {
                     let buffer_pdas = cleanup_tasks
-                        .into_iter()
+                        .iter()
                         .map(|el| el.buffer_pda(&authority.pubkey()))
                         .collect::<Vec<_>>();
                     error!(error = ?err, "Failed to cleanup buffers: {:?}", buffer_pdas);
