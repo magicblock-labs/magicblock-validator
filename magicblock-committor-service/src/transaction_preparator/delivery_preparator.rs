@@ -25,6 +25,7 @@ use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
+use tokio::try_join;
 use tracing::{error, info};
 
 use crate::{
@@ -447,12 +448,19 @@ impl DeliveryPreparator {
         cleanup_tasks: &[CleanupTask],
         lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
-        self.table_mania
-            .release_pubkeys(&HashSet::from_iter(
-                lookup_table_keys.iter().cloned(),
-            ))
-            .await;
+        let fut1 = self.cleanup_buffers(authority, cleanup_tasks);
+        let alt_set = HashSet::from_iter(lookup_table_keys.iter().cloned());
+        let fut2 = self.table_mania.release_pubkeys(&alt_set);
 
+        let (res, ()) = join(fut1, fut2).await;
+        res
+    }
+
+    async fn cleanup_buffers(
+        &self,
+        authority: &Keypair,
+        cleanup_tasks: &[CleanupTask],
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         if cleanup_tasks.is_empty() {
             return Ok(());
         }
