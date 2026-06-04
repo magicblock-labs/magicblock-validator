@@ -805,6 +805,112 @@ impl TableMania {
         sleep(delay).await;
     }
 
+    async fn wait_for_remote_tables_readiness_batch(
+        rpc_client: MagicblockRpcClient,
+        matching_tables: HashMap<Pubkey, MatchingTableReadiness>,
+        wait_for_remote_table_match: Duration,
+    ) -> TableManiaResult<RemoteReadinessAddresses> {
+        let matching_table_keys =
+            matching_tables.keys().cloned().collect::<Vec<_>>();
+
+        let start = Instant::now();
+        let mut last_wait_log = Instant::now();
+        let table_keys_str = matching_table_keys
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let readiness_target =
+            Self::remote_readiness_target(matching_tables.values());
+        let wait_delay_ms = readiness_target
+            .wall_clock_deadline
+            .map(|deadline| {
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis() as u64
+            })
+            .unwrap_or(0);
+        debug!(
+            wait_delay_ms,
+            "Delaying first finalized remote table fetch using required-pubkey transaction send-time estimate"
+        );
+        Self::wait_until_remote_readiness_target(
+            readiness_target,
+            wait_for_remote_table_match,
+        )
+        .await;
+
+        loop {
+            metrics::inc_table_mania_a_count();
+            // Fetch the tables from chain
+            let remote_table_accs = rpc_client
+                .get_multiple_accounts_with_commitment(
+                    &matching_table_keys,
+                    // For lookup tables to be useful in a transaction all create/extend
+                    // transactions on the table need to be finalized
+                    CommitmentConfig::finalized(),
+                    None,
+                )
+                .await?;
+
+            let remote_tables = remote_table_accs
+                .into_iter()
+                .enumerate()
+                .flat_map(|(idx, acc)| {
+                    acc.and_then(|acc| {
+                        match AddressLookupTable::deserialize(&acc.data) {
+                            Ok(table) => Some((
+                                matching_table_keys[idx],
+                                table.addresses.to_vec(),
+                            )),
+                            Err(err) => {
+                                error!(error = ?err, "Failed to deserialize table");
+                                None
+                            }
+                        }
+                    })
+                })
+                .collect::<HashMap<_, _>>();
+
+            // Ensure we got the same amount of tables
+            if remote_tables.len() == matching_tables.len() {
+                // And that all locally matched keys are in the finalized remote table
+                let all_matches_are_remote =
+                    matching_tables.iter().all(|(address, readiness)| {
+                        remote_tables.get(address).is_some_and(|remote_keys| {
+                            readiness
+                                .local_keys
+                                .iter()
+                                .all(|pk| remote_keys.contains(pk))
+                        })
+                    });
+                if all_matches_are_remote {
+                    return Ok(remote_tables);
+                }
+            }
+
+            if start.elapsed() > wait_for_remote_table_match {
+                error!(
+                    timeout_ms = wait_for_remote_table_match.as_millis() as u64,
+                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    "Timed out waiting for remote tables to match"
+                );
+                return Err(
+                    TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                        table_keys_str,
+                    ),
+                );
+            }
+
+            sleep(REMOTE_TABLE_FALLBACK_POLL_INTERVAL).await;
+            if last_wait_log.elapsed() > Duration::from_secs(8) {
+                debug!("Still waiting for remote tables");
+                last_wait_log = Instant::now();
+            }
+        }
+    }
+
     /// Attempts to find a table that holds each of the pubkeys.
     /// It only returns once the needed pubkeys are also present remotely in the
     /// finalized table accounts.
@@ -882,113 +988,12 @@ impl TableMania {
         );
 
         // 2. Ensure that all matching keys are also present remotely and have been finalized
-        let remote_tables = {
-            let matching_table_keys =
-                matching_tables.keys().cloned().collect::<Vec<_>>();
-
-            let start = Instant::now();
-            let mut last_wait_log = Instant::now();
-            let table_keys_str = matching_table_keys
-                .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            let readiness_target =
-                Self::remote_readiness_target(matching_tables.values());
-            let wait_delay_ms = readiness_target
-                .wall_clock_deadline
-                .map(|deadline| {
-                    deadline
-                        .saturating_duration_since(Instant::now())
-                        .as_millis() as u64
-                })
-                .unwrap_or(0);
-            debug!(
-                wait_delay_ms,
-                "Delaying first finalized remote table fetch using required-pubkey transaction send-time estimate"
-            );
-            Self::wait_until_remote_readiness_target(
-                readiness_target,
-                wait_for_remote_table_match,
-            )
-            .await;
-
-            loop {
-                metrics::inc_table_mania_a_count();
-                // Fetch the tables from chain
-                let remote_table_accs = self
-                    .rpc_client
-                    .get_multiple_accounts_with_commitment(
-                        &matching_table_keys,
-                        // For lookup tables to be useful in a transaction all create/extend
-                        // transactions on the table need to be finalized
-                        CommitmentConfig::finalized(),
-                        None,
-                    )
-                    .await?;
-
-                let remote_tables = remote_table_accs
-                    .into_iter()
-                    .enumerate()
-                    .flat_map(|(idx, acc)| {
-                        acc.and_then(
-                            |acc| match AddressLookupTable::deserialize(
-                                &acc.data,
-                            ) {
-                                Ok(table) => Some((
-                                    matching_table_keys[idx],
-                                    table.addresses.to_vec(),
-                                )),
-                                Err(err) => {
-                                    error!(error = ?err, "Failed to deserialize table");
-                                    None
-                                }
-                            },
-                        )
-                    })
-                    .collect::<HashMap<_, _>>();
-
-                // Ensure we got the same amount of tables
-                if remote_tables.len() == matching_tables.len() {
-                    // And that all locally matched keys are in the finalized remote table
-                    let all_matches_are_remote =
-                        matching_tables.iter().all(|(address, readiness)| {
-                            remote_tables.get(address).is_some_and(
-                                |remote_keys| {
-                                    readiness
-                                        .local_keys
-                                        .iter()
-                                        .all(|pk| remote_keys.contains(pk))
-                                },
-                            )
-                        });
-                    if all_matches_are_remote {
-                        break remote_tables;
-                    }
-                }
-
-                if start.elapsed() > wait_for_remote_table_match {
-                    error!(
-                        timeout_ms =
-                            wait_for_remote_table_match.as_millis() as u64,
-                        elapsed_ms = start.elapsed().as_millis() as u64,
-                        "Timed out waiting for remote tables to match"
-                    );
-                    return Err(
-                        TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
-                            table_keys_str,
-                        ),
-                    );
-                }
-
-                sleep(REMOTE_TABLE_FALLBACK_POLL_INTERVAL).await;
-                if last_wait_log.elapsed() > Duration::from_secs(8) {
-                    debug!("Still waiting for remote tables");
-                    last_wait_log = Instant::now();
-                }
-            }
-        };
+        let remote_tables = Self::wait_for_remote_tables_readiness_batch(
+            self.rpc_client.clone(),
+            matching_tables.clone(),
+            wait_for_remote_table_match,
+        )
+        .await?;
 
         Ok(matching_tables
             .into_keys()
