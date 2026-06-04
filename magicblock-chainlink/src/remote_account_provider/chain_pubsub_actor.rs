@@ -606,11 +606,31 @@ impl ChainPubsubActor {
         let mut retries = retries.unwrap_or(DEFAULT_SUBSCRIPTION_RETRIES);
         let initial_tries = retries;
         let (mut update_stream, unsubscribe) = loop {
+            // Race the subscription RPC with cancellation so that a reconnect
+            // or unsubscribe arriving while the RPC is pending doesn't have to
+            // wait for a listener task that hasn't been spawned yet. The
+            // listener completion signal is what drain_and_wait_for_listener_completion
+            // blocks on, so if cancellation hits during setup we must clean up
+            // the map entry and fire completion_token ourselves.
+            let subscribe_result = tokio::select! {
+                biased;
+                _ = cancellation_token.cancelled() => {
+                    trace!("Subscription cancelled during setup");
+                    subs.lock()
+                        .expect("subscriptions lock poisoned")
+                        .remove(&pubkey);
+                    completion_token.cancel();
+                    let _ = sub_response.send(Err(
+                        RemoteAccountProviderError::AccountSubscriptionsFailed(
+                            format!("Subscription for {pubkey} cancelled during setup"),
+                        ),
+                    ));
+                    return;
+                }
+                res = pubsub_connection.account_subscribe(&pubkey, config.clone()) => res,
+            };
             // Perform the subscription
-            match pubsub_connection
-                .account_subscribe(&pubkey, config.clone())
-                .await
-            {
+            match subscribe_result {
                 Ok(res) => break res,
                 Err(err) => {
                     if retries > 0 {
@@ -783,10 +803,33 @@ impl ChainPubsubActor {
             ..Default::default()
         };
 
-        let (mut update_stream, unsubscribe) = match pubsub_connection
-            .program_subscribe(&program_pubkey, config.clone())
-            .await
-        {
+        // Race the subscription RPC with cancellation so that a reconnect or
+        // unsubscribe arriving while the RPC is pending doesn't have to wait
+        // for a listener task that hasn't been spawned yet. The listener
+        // completion signal is what drain_and_wait_for_listener_completion
+        // blocks on, so if cancellation hits during setup we must clean up the
+        // map entry and fire completion_token ourselves.
+        let subscribe_result = tokio::select! {
+            biased;
+            _ = cancellation_token.cancelled() => {
+                trace!("Program subscription cancelled during setup");
+                program_subs
+                    .lock()
+                    .expect("program_subs lock poisoned")
+                    .remove(&program_pubkey);
+                completion_token.cancel();
+                let _ = sub_response.send(Err(
+                    RemoteAccountProviderError::AccountSubscriptionsFailed(
+                        format!(
+                            "Program subscription for {program_pubkey} cancelled during setup"
+                        ),
+                    ),
+                ));
+                return;
+            }
+            res = pubsub_connection.program_subscribe(&program_pubkey, config.clone()) => res,
+        };
+        let (mut update_stream, unsubscribe) = match subscribe_result {
             Ok(res) => res,
             Err(err) => {
                 static SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
