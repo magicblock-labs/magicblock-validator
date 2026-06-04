@@ -767,7 +767,7 @@ fn test_close_buffer_limit() {
     use crate::{
         test_utils,
         transactions::{
-            serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,
+            serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
         },
     };
 
@@ -797,9 +797,9 @@ fn test_close_buffer_limit() {
         .collect();
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-    let tx_size = serialize_and_encode_base64(&tx).len();
+    let tx_size = serialized_transaction_size(&tx);
     info!(transaction_size = tx_size, "Cleanup task transaction size");
-    assert!(tx_size <= MAX_ENCODED_TRANSACTION_SIZE);
+    assert!(tx_size <= MAX_TRANSACTION_WIRE_SIZE);
 
     // One more unique task should overflow
     let overflow_task = CleanupTask {
@@ -810,7 +810,5 @@ fn test_close_buffer_limit() {
     ixs.push(overflow_task.instruction(&authority.pubkey()));
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-    assert!(
-        serialize_and_encode_base64(&tx).len() > MAX_ENCODED_TRANSACTION_SIZE
-    );
+    assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);
 }

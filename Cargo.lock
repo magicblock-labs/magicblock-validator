@@ -4743,7 +4743,6 @@ name = "magicblock-committor-service"
 version = "0.11.3"
 dependencies = [
  "async-trait",
- "base64 0.21.7",
  "bincode",
  "borsh 1.6.1",
  "compressed-delegation-api",
@@ -4772,6 +4771,7 @@ dependencies = [
  "solana-instruction 3.4.0",
  "solana-keypair 3.1.0",
  "solana-message 3.1.0",
+ "solana-packet",
  "solana-program 3.0.0",
  "solana-pubkey 3.0.0",
  "solana-rpc-client 3.1.12",
@@ -4968,6 +4968,8 @@ dependencies = [
  "solana-account 3.4.0",
  "solana-bpf-loader-program",
  "solana-compute-budget",
+ "solana-compute-budget-instruction",
+ "solana-compute-budget-interface 3.0.0",
  "solana-compute-budget-program",
  "solana-feature-gate-interface 3.1.0",
  "solana-fee-structure",
@@ -5133,6 +5135,7 @@ dependencies = [
  "solana-signer 3.0.0",
  "solana-slot-hashes 3.0.2",
  "solana-transaction 3.1.0",
+ "solana-transaction-error 3.2.0",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -7903,6 +7906,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-builtins-default-costs"
+version = "3.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c6cd4d41f391f427e64e03fb00fb0c93443f18464dafd71e06f996ac03a3982"
+dependencies = [
+ "agave-feature-set 3.1.12",
+ "ahash 0.8.12",
+ "log",
+ "solana-bpf-loader-program",
+ "solana-compute-budget-program",
+ "solana-loader-v4-program",
+ "solana-pubkey 3.0.0",
+ "solana-sdk-ids 3.1.0",
+ "solana-system-program",
+ "solana-vote-program",
+]
+
+[[package]]
 name = "solana-clock"
 version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7977,6 +7998,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-compute-budget-instruction"
+version = "3.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6bf47dcc57b770cee0432899ac89cd7e85896f9e28e3d5e5542a0b8a8f5839f"
+dependencies = [
+ "agave-feature-set 3.1.12",
+ "log",
+ "solana-borsh 3.0.2",
+ "solana-builtins-default-costs",
+ "solana-compute-budget",
+ "solana-compute-budget-interface 3.0.0",
+ "solana-instruction 3.4.0",
+ "solana-packet",
+ "solana-pubkey 3.0.0",
+ "solana-sdk-ids 3.1.0",
+ "solana-svm-transaction",
+ "solana-transaction-error 3.2.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "solana-compute-budget-interface"
 version = "2.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7992,6 +8034,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8292c436b269ad23cecc8b24f7da3ab07ca111661e25e00ce0e1d22771951ab9"
 dependencies = [
+ "borsh 1.6.1",
  "solana-instruction 3.4.0",
  "solana-sdk-ids 3.1.0",
 ]
@@ -10594,6 +10637,38 @@ dependencies = [
  "solana-serialize-utils 3.1.2",
  "solana-short-vec 3.2.1",
  "solana-system-interface 2.0.0",
+]
+
+[[package]]
+name = "solana-vote-program"
+version = "3.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac7f37540da27c0ec132ee1b5380ad32d98663afba7ade3581f2d963fd2f63c2"
+dependencies = [
+ "agave-feature-set 3.1.12",
+ "bincode",
+ "log",
+ "num-derive",
+ "num-traits",
+ "serde",
+ "solana-account 3.4.0",
+ "solana-bincode 3.1.0",
+ "solana-clock 3.1.0",
+ "solana-epoch-schedule 3.1.0",
+ "solana-hash 3.1.0",
+ "solana-instruction 3.4.0",
+ "solana-keypair 3.1.0",
+ "solana-packet",
+ "solana-program-runtime",
+ "solana-pubkey 3.0.0",
+ "solana-rent 3.1.0",
+ "solana-sdk-ids 3.1.0",
+ "solana-signer 3.0.0",
+ "solana-slot-hashes 3.0.2",
+ "solana-transaction 3.1.0",
+ "solana-transaction-context 3.1.12",
+ "solana-vote-interface 4.0.4",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
