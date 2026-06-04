@@ -122,13 +122,26 @@ impl RemoteReadinessWaiterState {
     }
 
     fn find_active(
-        &self,
+        &mut self,
         key: &RemoteReadinessWaiterKey,
     ) -> Option<RemoteReadinessReceiver> {
-        self.active
-            .iter()
-            .find(|waiter| key.is_satisfied_by(&waiter.key))
-            .map(|waiter| waiter.receiver.clone())
+        let mut index = 0;
+        while index < self.active.len() {
+            let waiter = &self.active[index];
+            if !Self::receiver_is_live_or_ready(&waiter.receiver) {
+                self.active.remove(index);
+                continue;
+            }
+            if key.is_satisfied_by(&waiter.key) {
+                return Some(waiter.receiver.clone());
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn receiver_is_live_or_ready(receiver: &RemoteReadinessReceiver) -> bool {
+        receiver.borrow().is_some() || receiver.has_changed().is_ok()
     }
 }
 
@@ -136,6 +149,7 @@ impl RemoteReadinessWaiters {
     pub(crate) async fn wait_or_spawn<F, Fut>(
         self: &Arc<Self>,
         matching_tables: &HashMap<Pubkey, MatchingTableReadiness>,
+        wait_for_remote_table_match: Duration,
         spawn_future: F,
     ) -> TableManiaResult<RemoteReadinessAddresses>
     where
@@ -144,6 +158,7 @@ impl RemoteReadinessWaiters {
             + Send
             + 'static,
     {
+        let caller_deadline = Instant::now() + wait_for_remote_table_match;
         let key = RemoteReadinessWaiterKey::new(matching_tables);
         let receiver = {
             let mut state = self.state.lock().await;
@@ -183,7 +198,26 @@ impl RemoteReadinessWaiters {
             }
         };
 
-        Self::wait_for_result(receiver).await
+        Self::wait_for_result_until(receiver, caller_deadline).await
+    }
+
+    async fn wait_for_result_until(
+        receiver: RemoteReadinessReceiver,
+        caller_deadline: Instant,
+    ) -> TableManiaResult<RemoteReadinessAddresses> {
+        match tokio::time::timeout_at(
+            tokio::time::Instant::from_std(caller_deadline),
+            Self::wait_for_result(receiver),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                Err(TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                    "shared remote readiness waiter timed out".to_string(),
+                ))
+            }
+        }
     }
 
     async fn wait_for_result(
@@ -346,17 +380,21 @@ mod tests {
         let first_calls = calls.clone();
         let first = tokio::spawn(async move {
             first_waiters
-                .wait_or_spawn(&first_matching_tables, move || async move {
-                    first_calls.fetch_add(1, Ordering::SeqCst);
-                    sleep(Duration::from_millis(50)).await;
-                    Ok(HashMap::from([(table, vec![pk])]))
-                })
+                .wait_or_spawn(
+                    &first_matching_tables,
+                    Duration::from_secs(1),
+                    move || async move {
+                        first_calls.fetch_add(1, Ordering::SeqCst);
+                        sleep(Duration::from_millis(50)).await;
+                        Ok(HashMap::from([(table, vec![pk])]))
+                    },
+                )
                 .await
         });
 
         sleep(Duration::from_millis(10)).await;
         let second = waiters
-            .wait_or_spawn(&matching_tables, || async {
+            .wait_or_spawn(&matching_tables, Duration::from_secs(1), || async {
                 panic!("compatible active waiter should be reused")
             })
             .await
@@ -377,14 +415,18 @@ mod tests {
 
         let first_calls = calls.clone();
         waiters
-            .wait_or_spawn(&matching_tables, move || async move {
-                first_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(HashMap::from([(table, vec![pk])]))
-            })
+            .wait_or_spawn(
+                &matching_tables,
+                Duration::from_secs(1),
+                move || async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(HashMap::from([(table, vec![pk])]))
+                },
+            )
             .await
             .unwrap();
         waiters
-            .wait_or_spawn(&matching_tables, || async {
+            .wait_or_spawn(&matching_tables, Duration::from_secs(1), || async {
                 panic!("compatible success should be reused")
             })
             .await
@@ -403,12 +445,18 @@ mod tests {
 
         let first_calls = calls.clone();
         let first = waiters
-            .wait_or_spawn(&matching_tables, move || async move {
-                first_calls.fetch_add(1, Ordering::SeqCst);
-                Err(TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
-                    "expected failure".to_string(),
-                ))
-            })
+            .wait_or_spawn(
+                &matching_tables,
+                Duration::from_secs(1),
+                move || async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    Err(
+                        TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                            "expected failure".to_string(),
+                        ),
+                    )
+                },
+            )
             .await;
         assert!(matches!(
             first,
@@ -417,10 +465,14 @@ mod tests {
 
         let second_calls = calls.clone();
         waiters
-            .wait_or_spawn(&matching_tables, move || async move {
-                second_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(HashMap::from([(table, vec![pk])]))
-            })
+            .wait_or_spawn(
+                &matching_tables,
+                Duration::from_secs(1),
+                move || async move {
+                    second_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(HashMap::from([(table, vec![pk])]))
+                },
+            )
             .await
             .unwrap();
 
@@ -440,17 +492,21 @@ mod tests {
         let first_calls = calls.clone();
         let first = tokio::spawn(async move {
             first_waiters
-                .wait_or_spawn(&first_matching_tables, move || async move {
-                    first_calls.fetch_add(1, Ordering::SeqCst);
-                    sleep(Duration::from_millis(50)).await;
-                    Ok(HashMap::from([(table, vec![pk])]))
-                })
+                .wait_or_spawn(
+                    &first_matching_tables,
+                    Duration::from_secs(1),
+                    move || async move {
+                        first_calls.fetch_add(1, Ordering::SeqCst);
+                        sleep(Duration::from_millis(50)).await;
+                        Ok(HashMap::from([(table, vec![pk])]))
+                    },
+                )
                 .await
         });
 
         sleep(Duration::from_millis(10)).await;
         let second = waiters
-            .wait_or_spawn(&matching_tables, || async {
+            .wait_or_spawn(&matching_tables, Duration::from_secs(1), || async {
                 panic!("identical active waiter should be reused")
             })
             .await
@@ -475,17 +531,21 @@ mod tests {
         let first_calls = calls.clone();
         let first = tokio::spawn(async move {
             first_waiters
-                .wait_or_spawn(&superset, move || async move {
-                    first_calls.fetch_add(1, Ordering::SeqCst);
-                    sleep(Duration::from_millis(50)).await;
-                    Ok(HashMap::from([(table, vec![pk_a, pk_b])]))
-                })
+                .wait_or_spawn(
+                    &superset,
+                    Duration::from_secs(1),
+                    move || async move {
+                        first_calls.fetch_add(1, Ordering::SeqCst);
+                        sleep(Duration::from_millis(50)).await;
+                        Ok(HashMap::from([(table, vec![pk_a, pk_b])]))
+                    },
+                )
                 .await
         });
 
         sleep(Duration::from_millis(10)).await;
         let second = waiters
-            .wait_or_spawn(&subset, || async {
+            .wait_or_spawn(&subset, Duration::from_secs(1), || async {
                 panic!("subset request should reuse compatible superset")
             })
             .await
@@ -510,18 +570,22 @@ mod tests {
         let first_calls = calls.clone();
         let first = tokio::spawn(async move {
             first_waiters
-                .wait_or_spawn(&key_a, move || async move {
-                    first_calls.fetch_add(1, Ordering::SeqCst);
-                    sleep(Duration::from_millis(50)).await;
-                    Ok(HashMap::from([(table, vec![pk_a])]))
-                })
+                .wait_or_spawn(
+                    &key_a,
+                    Duration::from_secs(1),
+                    move || async move {
+                        first_calls.fetch_add(1, Ordering::SeqCst);
+                        sleep(Duration::from_millis(50)).await;
+                        Ok(HashMap::from([(table, vec![pk_a])]))
+                    },
+                )
                 .await
         });
 
         sleep(Duration::from_millis(10)).await;
         let second_calls = calls.clone();
         let second = waiters
-            .wait_or_spawn(&key_b, move || async move {
+            .wait_or_spawn(&key_b, Duration::from_secs(1), move || async move {
                 second_calls.fetch_add(1, Ordering::SeqCst);
                 Ok(HashMap::from([(table, vec![pk_b])]))
             })
@@ -553,20 +617,24 @@ mod tests {
         let first_calls = calls.clone();
         let first = tokio::spawn(async move {
             first_waiters
-                .wait_or_spawn(&superset, move || async move {
-                    first_calls.fetch_add(1, Ordering::SeqCst);
-                    sleep(Duration::from_millis(50)).await;
-                    Ok(HashMap::from([
-                        (table_a, vec![pk_a]),
-                        (table_b, vec![pk_b]),
-                    ]))
-                })
+                .wait_or_spawn(
+                    &superset,
+                    Duration::from_secs(1),
+                    move || async move {
+                        first_calls.fetch_add(1, Ordering::SeqCst);
+                        sleep(Duration::from_millis(50)).await;
+                        Ok(HashMap::from([
+                            (table_a, vec![pk_a]),
+                            (table_b, vec![pk_b]),
+                        ]))
+                    },
+                )
                 .await
         });
 
         sleep(Duration::from_millis(10)).await;
         waiters
-            .wait_or_spawn(&subset, || async {
+            .wait_or_spawn(&subset, Duration::from_secs(1), || async {
                 panic!("table subset should reuse table superset")
             })
             .await
@@ -574,10 +642,14 @@ mod tests {
 
         let incompatible_calls = calls.clone();
         waiters
-            .wait_or_spawn(&incompatible, move || async move {
-                incompatible_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(HashMap::from([(table_b, vec![pk_a])]))
-            })
+            .wait_or_spawn(
+                &incompatible,
+                Duration::from_secs(1),
+                move || async move {
+                    incompatible_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(HashMap::from([(table_b, vec![pk_a])]))
+                },
+            )
             .await
             .unwrap();
         first.await.unwrap().unwrap();
@@ -595,10 +667,14 @@ mod tests {
 
         let first_calls = calls.clone();
         waiters
-            .wait_or_spawn(&matching_tables, move || async move {
-                first_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(HashMap::from([(table, vec![pk])]))
-            })
+            .wait_or_spawn(
+                &matching_tables,
+                Duration::from_secs(1),
+                move || async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(HashMap::from([(table, vec![pk])]))
+                },
+            )
             .await
             .unwrap();
 
@@ -606,14 +682,53 @@ mod tests {
 
         let second_calls = calls.clone();
         waiters
-            .wait_or_spawn(&matching_tables, move || async move {
-                second_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(HashMap::from([(table, vec![pk])]))
-            })
+            .wait_or_spawn(
+                &matching_tables,
+                Duration::from_secs(1),
+                move || async move {
+                    second_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(HashMap::from([(table, vec![pk])]))
+                },
+            )
             .await
             .unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn remote_readiness_waiters_prune_closed_active_waiters() {
+        let waiters = Arc::new(RemoteReadinessWaiters::default());
+        let table = Pubkey::new_unique();
+        let pk = Pubkey::new_unique();
+        let matching_tables = matching_tables_for([(table, vec![pk], None)]);
+        let key = RemoteReadinessWaiterKey::new(&matching_tables);
+        let (_sender, receiver) = watch::channel(None);
+        drop(_sender);
+        waiters
+            .state
+            .lock()
+            .await
+            .active
+            .push(ActiveRemoteReadinessWaiter { key, receiver });
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let new_calls = calls.clone();
+        let remote_tables = waiters
+            .wait_or_spawn(
+                &matching_tables,
+                Duration::from_secs(1),
+                move || async move {
+                    new_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(HashMap::from([(table, vec![pk])]))
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(remote_tables, HashMap::from([(table, vec![pk])]));
+        assert!(waiters.state.lock().await.active.is_empty());
     }
 
     #[tokio::test]
@@ -629,11 +744,15 @@ mod tests {
         let first_calls = calls.clone();
         let first = tokio::spawn(async move {
             first_waiters
-                .wait_or_spawn(&first_matching_tables, move || async move {
-                    first_calls.fetch_add(1, Ordering::SeqCst);
-                    sleep(Duration::from_millis(50)).await;
-                    Ok(HashMap::from([(table, vec![pk])]))
-                })
+                .wait_or_spawn(
+                    &first_matching_tables,
+                    Duration::from_secs(1),
+                    move || async move {
+                        first_calls.fetch_add(1, Ordering::SeqCst);
+                        sleep(Duration::from_millis(50)).await;
+                        Ok(HashMap::from([(table, vec![pk])]))
+                    },
+                )
                 .await
         });
 
@@ -641,7 +760,7 @@ mod tests {
         first.abort();
 
         let second = waiters
-            .wait_or_spawn(&matching_tables, || async {
+            .wait_or_spawn(&matching_tables, Duration::from_secs(1), || async {
                 panic!("shared task should still be active after awaiter drop")
             })
             .await

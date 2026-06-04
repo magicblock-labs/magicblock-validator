@@ -565,14 +565,18 @@ impl TableMania {
         let rpc_client = self.rpc_client.clone();
         let matching_tables_for_batch = matching_tables.clone();
         self.remote_readiness_waiters
-            .wait_or_spawn(&matching_tables, move || async move {
-                Self::wait_for_remote_tables_readiness_batch(
-                    rpc_client,
-                    matching_tables_for_batch,
-                    wait_for_remote_table_match,
-                )
-                .await
-            })
+            .wait_or_spawn(
+                &matching_tables,
+                wait_for_remote_table_match,
+                move || async move {
+                    Self::wait_for_remote_tables_readiness_batch(
+                        rpc_client,
+                        matching_tables_for_batch,
+                        wait_for_remote_table_match,
+                    )
+                    .await
+                },
+            )
             .await
     }
 
