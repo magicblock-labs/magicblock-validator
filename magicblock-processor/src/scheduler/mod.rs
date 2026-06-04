@@ -107,8 +107,6 @@ pub struct TransactionScheduler {
     accountsdb: Arc<AccountsDb>,
     /// Global transactions ledger
     ledger: Arc<Ledger>,
-    /// Latest block metadata (slot, clock, blockhash)
-    latest_block: LatestBlock,
     /// Global shutdown signal.
     shutdown: CancellationToken,
     /// Receives mode transition commands (Primary or Replica) at runtime.
@@ -174,7 +172,6 @@ impl TransactionScheduler {
             transactions_rx: state.txn_to_process_rx,
             ready_rx,
             executors,
-            latest_block,
             ledger: state.ledger,
             program_cache,
             accountsdb: state.accountsdb,
@@ -236,7 +233,6 @@ impl TransactionScheduler {
     /// 4. New transactions
     #[instrument(skip(self))]
     async fn run(mut self) {
-        let mut block_produced = self.latest_block.subscribe();
         // Holds the scheduling permit while transactions are being processed.
         // Released when idle so external callers can acquire exclusive access.
         let mut scheduling_permit = None;
@@ -268,12 +264,6 @@ impl TransactionScheduler {
             }
             tokio::select! {
                 biased;
-                Ok(latest) = block_produced.recv() => {
-                    if !self.coordinator.is_primary() && latest.slot >= self.slot {
-                        let slot = self.transition_to_new_slot(Some(latest)).await;
-                        self.handle_superblock(slot).await;
-                    }
-                }
                 _ = self.slot_ticker.tick() => {
                     if self.coordinator.is_primary() {
                         let slot = self.transition_to_new_slot(None).await;
