@@ -165,10 +165,6 @@ impl CommittorProcessor {
             .as_secs();
         let mut bundles = self.persister.pending_intent_bundles(
             now.saturating_sub(RECOVERY_MAX_AGE_SECS),
-            |row| {
-				now.saturating_sub(row.created_at)
-                    > RECOVERY_MAX_AGE_SECS
-            },
         )?;
 
         if bundles.is_empty() {

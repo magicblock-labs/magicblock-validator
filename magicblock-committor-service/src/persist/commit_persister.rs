@@ -64,13 +64,10 @@ pub trait IntentPersister: Send + Sync + Clone + 'static {
         &self,
         message_id: u64,
     ) -> CommitPersistResult<Vec<CommitStatusRow>>;
-    fn pending_intent_bundles<F>(
+    fn pending_intent_bundles(
         &self,
         min_created_at: u64,
-        predicate: F,
-    ) -> CommitPersistResult<Vec<ScheduledIntentBundle>>
-    where
-        F: Fn(&CommitStatusRow) -> bool;
+    ) -> CommitPersistResult<Vec<ScheduledIntentBundle>>;
     fn get_commit_status_by_message(
         &self,
         message_id: u64,
@@ -257,26 +254,25 @@ impl IntentPersister for IntentPersisterImpl {
             .get_commit_statuses_by_id(message_id)
     }
 
-    /// Returns pending bundles satisfying predicate
-    /// NOTE: this constructs `ScheduleIntentBundle` only from existing information
-    /// As persister doesn't save `ScheduleIntentBundle::payer` info, Pubkey::default is used
-    /// `CommittedAccount` information like slot maybe also outdated
-    /// It is responsibility of calling site to refresh data in intent
-    fn pending_intent_bundles<F>(
+    /// Returns pending bundles created at or after `min_created_at`.
+    /// NOTE: this constructs `ScheduleIntentBundle` only from existing information.
+    /// As persister doesn't save `ScheduleIntentBundle::payer` info, Pubkey::default is used.
+    /// `CommittedAccount` information like slot may also be outdated.
+    /// It is the responsibility of the calling site to refresh data in intent.
+    fn pending_intent_bundles(
         &self,
         min_created_at: u64,
-        predicate: F,
-    ) -> CommitPersistResult<Vec<ScheduledIntentBundle>>
-    where
-        F: Fn(&CommitStatusRow) -> bool,
-    {
+    ) -> CommitPersistResult<Vec<ScheduledIntentBundle>> {
         let rows = self
             .commits_db
             .lock()
-            .expect(POISONED_MUTEX_MSG)	
+            .expect(POISONED_MUTEX_MSG)
             .get_pending_commit_statuses(min_created_at)?;
 
-        Ok(pending_rows_to_scheduled_intent_bundles(rows, predicate))
+        Ok(pending_rows_to_scheduled_intent_bundles(
+            rows,
+            min_created_at,
+        ))
     }
 
     fn get_commit_status_by_message(
@@ -425,19 +421,12 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
         }
     }
 
-    fn pending_intent_bundles<F>(
+    fn pending_intent_bundles(
         &self,
         min_created_at: u64,
-        predicate: F,
-    ) -> CommitPersistResult<Vec<ScheduledIntentBundle>>
-    where
-        F: Fn(&CommitStatusRow) -> bool,
-    {
+    ) -> CommitPersistResult<Vec<ScheduledIntentBundle>> {
         match self {
-            Some(persister) => persister.pending_intent_bundles(
-                min_created_at,
-                predicate,
-            ),
+            Some(persister) => persister.pending_intent_bundles(min_created_at),
             None => Ok(Vec::new()),
         }
     }
@@ -492,13 +481,10 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
     }
 }
 
-fn pending_rows_to_scheduled_intent_bundles<F>(
+fn pending_rows_to_scheduled_intent_bundles(
     rows: Vec<CommitStatusRow>,
-    predicate: F,
-) -> Vec<ScheduledIntentBundle>
-where
-    F: Fn(&CommitStatusRow) -> bool,
-{
+    min_created_at: u64,
+) -> Vec<ScheduledIntentBundle> {
     let mut grouped_rows = BTreeMap::<u64, Vec<CommitStatusRow>>::new();
     for row in rows {
         grouped_rows.entry(row.message_id).or_default().push(row);
@@ -506,12 +492,12 @@ where
 
     grouped_rows
         .into_iter()
-        // Filter row if any item doesn't satisfy predicate
+        // Filter bundles where any row is older than the recovery window
         .filter(|(message_id, rows)| {
-            if rows.iter().any(&predicate) {
+            if rows.iter().any(|row| row.created_at < min_created_at) {
                 warn!(
                     intent_id = message_id,
-                    "Skipping pending commit intent because it is not old enough to recover"
+                    "Skipping pending commit intent: too old to recover"
                 );
                 false
             } else {
@@ -630,7 +616,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        committor_processor::{RECOVERY_MAX_AGE_SECS, RECOVERY_MIN_AGE_SECS},
+        committor_processor::RECOVERY_MAX_AGE_SECS,
         persist::{types, CommitStatusSignatures},
         test_utils,
     };
@@ -984,8 +970,7 @@ mod tests {
         let commit_pubkey = Pubkey::new_unique();
         let undelegate_pubkey = Pubkey::new_unique();
 
-        let recovery_time = RECOVERY_MIN_AGE_SECS + 2;
-        // filter returns true = skip; default rows (last_retried_at=1, created_at=1) are in recovery window → don't skip
+        // default rows have created_at=1; use min_created_at=0 so nothing is filtered
         let bundles = pending_rows_to_scheduled_intent_bundles(
             vec![
                 pending_row(
@@ -998,12 +983,7 @@ mod tests {
                 ),
                 pending_row(9, undelegate_pubkey, owner, blockhash, true, None),
             ],
-            |row| {
-                recovery_time.saturating_sub(row.last_retried_at)
-                    <= RECOVERY_MIN_AGE_SECS
-                    || recovery_time.saturating_sub(row.created_at)
-                        > RECOVERY_MAX_AGE_SECS
-            },
+            0,
         );
 
         assert_eq!(bundles.len(), 1);
@@ -1028,22 +1008,14 @@ mod tests {
         assert!(bundle.has_undelegate_intent());
     }
 
-    fn make_predicate(recovery_time: u64) -> impl Fn(&CommitStatusRow) -> bool {
-        move |row| {
-            recovery_time.saturating_sub(row.last_retried_at)
-                <= RECOVERY_MIN_AGE_SECS
-                || recovery_time.saturating_sub(row.created_at)
-                    > RECOVERY_MAX_AGE_SECS
-        }
-    }
-
     #[test]
-    fn pending_rows_skip_intents_outside_recovery_window() {
+    fn pending_rows_skip_intents_older_than_recovery_window() {
         let owner = Pubkey::new_unique();
         let blockhash = Hash::new_unique();
-        let recovery_time = RECOVERY_MAX_AGE_SECS + RECOVERY_MIN_AGE_SECS;
+        let recovery_time = RECOVERY_MAX_AGE_SECS + 1;
+        let min_created_at = recovery_time - RECOVERY_MAX_AGE_SECS; // = 1
 
-        // Within window: last_retried_at old enough, created_at not too old → included
+        // At the boundary → included
         let mut in_window = pending_row(
             1,
             Pubkey::new_unique(),
@@ -1052,17 +1024,16 @@ mod tests {
             false,
             Some(vec![1]),
         );
-        in_window.created_at = recovery_time - RECOVERY_MAX_AGE_SECS;
-        in_window.last_retried_at = recovery_time - RECOVERY_MIN_AGE_SECS - 1;
+        in_window.created_at = min_created_at;
         let included = pending_rows_to_scheduled_intent_bundles(
             vec![in_window],
-            make_predicate(recovery_time),
+            min_created_at,
         );
         assert_eq!(included.len(), 1);
         assert_eq!(included[0].id, 1);
 
-        // Too recently retried → excluded
-        let mut too_recent = pending_row(
+        // Recent (just created) → included
+        let mut recent = pending_row(
             2,
             Pubkey::new_unique(),
             owner,
@@ -1070,15 +1041,14 @@ mod tests {
             false,
             Some(vec![1]),
         );
-        too_recent.created_at = recovery_time - RECOVERY_MAX_AGE_SECS;
-        too_recent.last_retried_at = recovery_time - RECOVERY_MIN_AGE_SECS;
-        let excluded_recent = pending_rows_to_scheduled_intent_bundles(
-            vec![too_recent],
-            make_predicate(recovery_time),
+        recent.created_at = recovery_time;
+        let recent_result = pending_rows_to_scheduled_intent_bundles(
+            vec![recent],
+            min_created_at,
         );
-        assert!(excluded_recent.is_empty());
+        assert_eq!(recent_result.len(), 1);
 
-        // Too old by created_at → excluded
+        // Too old → excluded
         let mut too_old = pending_row(
             3,
             Pubkey::new_unique(),
@@ -1087,11 +1057,10 @@ mod tests {
             false,
             Some(vec![1]),
         );
-        too_old.created_at = recovery_time - RECOVERY_MAX_AGE_SECS - 1;
-        too_old.last_retried_at = recovery_time - RECOVERY_MIN_AGE_SECS - 1;
+        too_old.created_at = min_created_at - 1; // = 0
         let excluded_old = pending_rows_to_scheduled_intent_bundles(
             vec![too_old],
-            make_predicate(recovery_time),
+            min_created_at,
         );
         assert!(excluded_old.is_empty());
     }
