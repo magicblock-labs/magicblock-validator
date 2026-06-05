@@ -31,6 +31,8 @@ pub struct MockStreamFactory {
     /// here so the test can drive updates.
     stream_senders: Arc<Mutex<Vec<Arc<mpsc::UnboundedSender<LaserResult>>>>>,
 
+    pending_handle_write_failures: Arc<Mutex<usize>>,
+
     /// Total number of calls made to `subscribe()`.
     subscribe_calls: Arc<Mutex<usize>>,
 
@@ -45,6 +47,7 @@ impl MockStreamFactory {
             captured_requests: Arc::new(Mutex::new(Vec::new())),
             handle_requests: Arc::new(Mutex::new(Vec::new())),
             stream_senders: Arc::new(Mutex::new(Vec::new())),
+            pending_handle_write_failures: Arc::new(Mutex::new(0)),
             subscribe_calls: Arc::new(Mutex::new(0)),
             fail_on_subscribe_call: Arc::new(Mutex::new(None)),
         }
@@ -72,6 +75,10 @@ impl MockStreamFactory {
     /// Get the captured subscription requests (from `subscribe()`)
     pub fn captured_requests(&self) -> Vec<SubscribeRequest> {
         self.captured_requests.lock().unwrap().clone()
+    }
+
+    pub fn fail_next_handle_writes(&self, n: usize) {
+        *self.pending_handle_write_failures.lock().unwrap() = n;
     }
 
     /// Get the requests sent through stream handles (from
@@ -121,6 +128,7 @@ impl Default for MockStreamFactory {
 #[derive(Clone)]
 pub struct MockStreamHandle {
     handle_requests: Arc<Mutex<Vec<SubscribeRequest>>>,
+    pending_handle_write_failures: Arc<Mutex<usize>>,
 }
 
 #[async_trait]
@@ -129,6 +137,18 @@ impl StreamHandle for MockStreamHandle {
         &self,
         request: SubscribeRequest,
     ) -> Result<(), LaserstreamError> {
+        {
+            let mut to_fail =
+                self.pending_handle_write_failures.lock().unwrap();
+            if *to_fail > 0 {
+                *to_fail -= 1;
+                return Err(LaserstreamError::Status(tonic::Status::new(
+                    tonic::Code::Internal,
+                    "mock: forced handle write failure",
+                )));
+            }
+        }
+
         self.handle_requests.lock().unwrap().push(request);
         Ok(())
     }
@@ -177,6 +197,9 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
         // every write is visible to tests immediately.
         let handle = MockStreamHandle {
             handle_requests: Arc::clone(&self.handle_requests),
+            pending_handle_write_failures: Arc::clone(
+                &self.pending_handle_write_failures,
+            ),
         };
 
         // Write the actual request to the handle (mirroring

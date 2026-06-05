@@ -37,7 +37,6 @@ use crate::{
 };
 const POISONED_MUTEX_MSG: &str =
     "CommittorProcessor pending messages mutex poisoned!";
-pub(crate) const RECOVERY_MIN_AGE_SECS: u64 = 5 * 60;
 pub(crate) const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;
 
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
@@ -166,11 +165,9 @@ impl CommittorProcessor {
             .as_secs();
         let mut bundles = self.persister.pending_intent_bundles(
             now.saturating_sub(RECOVERY_MAX_AGE_SECS),
-            now.saturating_sub(RECOVERY_MIN_AGE_SECS),
             |row| {
-                now.saturating_sub(row.last_retried_at) <= RECOVERY_MIN_AGE_SECS
-                    || now.saturating_sub(row.created_at)
-                        > RECOVERY_MAX_AGE_SECS
+				now.saturating_sub(row.created_at)
+                    > RECOVERY_MAX_AGE_SECS
             },
         )?;
 

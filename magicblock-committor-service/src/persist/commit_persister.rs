@@ -67,7 +67,6 @@ pub trait IntentPersister: Send + Sync + Clone + 'static {
     fn pending_intent_bundles<F>(
         &self,
         min_created_at: u64,
-        max_last_retried_at: u64,
         predicate: F,
     ) -> CommitPersistResult<Vec<ScheduledIntentBundle>>
     where
@@ -266,7 +265,6 @@ impl IntentPersister for IntentPersisterImpl {
     fn pending_intent_bundles<F>(
         &self,
         min_created_at: u64,
-        max_last_retried_at: u64,
         predicate: F,
     ) -> CommitPersistResult<Vec<ScheduledIntentBundle>>
     where
@@ -275,8 +273,8 @@ impl IntentPersister for IntentPersisterImpl {
         let rows = self
             .commits_db
             .lock()
-            .expect(POISONED_MUTEX_MSG)
-            .get_pending_commit_statuses(min_created_at, max_last_retried_at)?;
+            .expect(POISONED_MUTEX_MSG)	
+            .get_pending_commit_statuses(min_created_at)?;
 
         Ok(pending_rows_to_scheduled_intent_bundles(rows, predicate))
     }
@@ -430,7 +428,6 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
     fn pending_intent_bundles<F>(
         &self,
         min_created_at: u64,
-        max_last_retried_at: u64,
         predicate: F,
     ) -> CommitPersistResult<Vec<ScheduledIntentBundle>>
     where
@@ -439,7 +436,6 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
         match self {
             Some(persister) => persister.pending_intent_bundles(
                 min_created_at,
-                max_last_retried_at,
                 predicate,
             ),
             None => Ok(Vec::new()),
