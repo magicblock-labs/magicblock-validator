@@ -107,8 +107,6 @@ pub struct TransactionScheduler {
     accountsdb: Arc<AccountsDb>,
     /// Global transactions ledger
     ledger: Arc<Ledger>,
-    /// Latest block metadata (slot, clock, blockhash)
-    latest_block: LatestBlock,
     /// Global shutdown signal.
     shutdown: CancellationToken,
     /// Receives mode transition commands (Primary or Replica) at runtime.
@@ -174,7 +172,6 @@ impl TransactionScheduler {
             transactions_rx: state.txn_to_process_rx,
             ready_rx,
             executors,
-            latest_block,
             ledger: state.ledger,
             program_cache,
             accountsdb: state.accountsdb,
@@ -236,7 +233,6 @@ impl TransactionScheduler {
     /// 4. New transactions
     #[instrument(skip(self))]
     async fn run(mut self) {
-        let mut block_produced = self.latest_block.subscribe();
         // Holds the scheduling permit while transactions are being processed.
         // Released when idle so external callers can acquire exclusive access.
         let mut scheduling_permit = None;
@@ -268,11 +264,6 @@ impl TransactionScheduler {
             }
             tokio::select! {
                 biased;
-                Ok(latest) = block_produced.recv() => {
-                    if !self.coordinator.is_primary() && latest.slot >= self.slot {
-                        self.transition_to_new_slot(Some(latest)).await;
-                    }
-                }
                 _ = self.slot_ticker.tick() => {
                     if self.coordinator.is_primary() {
                         let slot = self.transition_to_new_slot(None).await;
@@ -342,8 +333,10 @@ impl TransactionScheduler {
             error!("failed to create accountsdb snapshot");
             return;
         };
-        let msg = Message::SuperBlock(SuperBlock { slot, checksum });
-        self.send_replication(msg).await;
+        if self.coordinator.is_primary() {
+            let msg = Message::SuperBlock(SuperBlock { slot, checksum });
+            self.send_replication(msg).await;
+        }
     }
 
     async fn pause_executors_for_snapshot(&mut self) -> OwnedSemaphorePermit {
@@ -380,7 +373,7 @@ impl TransactionScheduler {
             );
         }
 
-        let _permit = self
+        let permit = self
             .pause_permit
             .clone()
             .acquire_owned()
@@ -395,7 +388,17 @@ impl TransactionScheduler {
             .map_err(|error| error.to_string())?;
         self.accountsdb.set_slot(block.slot);
         self.update_sysvars(&block);
-        self.notify_executors_of_block(block).await
+        let slot = block.slot;
+        let result = self.notify_executors_of_block(block).await;
+        drop(permit);
+        // apply_replayed_block advances self.slot before the queued
+        // latest_block notification can be received. The block_produced path
+        // then skips transition_to_new_slot for this already-applied slot, so
+        // handle_superblock must run here for replayed superblock snapshots.
+        if result.is_ok() {
+            self.handle_superblock(slot).await;
+        }
+        result
     }
 
     async fn notify_executors_of_block(

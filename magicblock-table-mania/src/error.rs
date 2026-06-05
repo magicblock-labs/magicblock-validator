@@ -46,4 +46,67 @@ impl TableManiaError {
             _ => None,
         }
     }
+
+    pub fn is_sent_transaction_invalid_instruction_data_at(
+        &self,
+        instruction_index: u8,
+    ) -> bool {
+        use magicblock_rpc_client::MagicBlockRpcClientError;
+        use solana_instruction::error::InstructionError;
+        use solana_transaction_error::TransactionError;
+
+        match self {
+            TableManiaError::MagicBlockRpcClientError(
+                MagicBlockRpcClientError::SentTransactionError(
+                    TransactionError::InstructionError(
+                        index,
+                        InstructionError::InvalidInstructionData,
+                    ),
+                    _,
+                ),
+            ) => *index == instruction_index,
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use magicblock_rpc_client::MagicBlockRpcClientError;
+    use solana_instruction::error::InstructionError;
+    use solana_signature::Signature;
+    use solana_transaction_error::TransactionError;
+
+    use super::TableManiaError;
+
+    #[test]
+    fn classifies_sent_transaction_invalid_instruction_data_at_index() {
+        let err = TableManiaError::MagicBlockRpcClientError(
+            MagicBlockRpcClientError::SentTransactionError(
+                TransactionError::InstructionError(
+                    2,
+                    InstructionError::InvalidInstructionData,
+                ),
+                Signature::default(),
+            ),
+        );
+
+        assert!(err.is_sent_transaction_invalid_instruction_data_at(2));
+        assert!(!err.is_sent_transaction_invalid_instruction_data_at(1));
+    }
+
+    #[test]
+    fn does_not_classify_other_sent_transaction_errors() {
+        let err = TableManiaError::MagicBlockRpcClientError(
+            MagicBlockRpcClientError::SentTransactionError(
+                TransactionError::InstructionError(
+                    2,
+                    InstructionError::InvalidArgument,
+                ),
+                Signature::default(),
+            ),
+        );
+
+        assert!(!err.is_sent_transaction_invalid_instruction_data_at(2));
+    }
 }

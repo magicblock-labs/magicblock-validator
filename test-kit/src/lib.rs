@@ -121,12 +121,43 @@ impl ExecutionTestEnv {
         Self::new_internal(Self::BASE_FEE, executors, defer_startup, false)
     }
 
+    /// Creates a replica-mode environment with a custom superblock interval.
+    pub fn new_replica_mode_with_superblock_size(
+        executors: u32,
+        defer_startup: bool,
+        superblock_size: u64,
+    ) -> Self {
+        Self::new_internal_with_superblock_size(
+            Self::BASE_FEE,
+            executors,
+            defer_startup,
+            false,
+            superblock_size,
+        )
+    }
+
     /// Internal constructor with all parameters.
     fn new_internal(
         fee: u64,
         executors: u32,
         defer_startup: bool,
         primary_mode: bool,
+    ) -> Self {
+        Self::new_internal_with_superblock_size(
+            fee,
+            executors,
+            defer_startup,
+            primary_mode,
+            SUPERBLOCK_SIZE,
+        )
+    }
+
+    fn new_internal_with_superblock_size(
+        fee: u64,
+        executors: u32,
+        defer_startup: bool,
+        primary_mode: bool,
+        superblock_size: u64,
     ) -> Self {
         init_logger!();
         let dir =
@@ -181,7 +212,7 @@ impl ExecutionTestEnv {
             mode_rx,
             pause_permit: validator_channels.pause_permit,
             block_time: BLOCK_TIME,
-            superblock_size: SUPERBLOCK_SIZE,
+            superblock_size,
         };
 
         // Pre-send the target mode so the scheduler picks it up once running.

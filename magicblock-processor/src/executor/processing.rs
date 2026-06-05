@@ -14,7 +14,8 @@ use magicblock_metrics::metrics::{
     FAILED_TRANSACTIONS_COUNT, TRANSACTION_COUNT,
 };
 use solana_account::AccountSharedData;
-use solana_compute_budget::compute_budget_limits::ComputeBudgetLimits;
+use solana_compute_budget_instruction::instructions_processor::process_compute_budget_instructions;
+use solana_feature_set::raise_cpi_nesting_limit_to_8;
 use solana_fee_structure::FeeDetails;
 use solana_program_runtime::execution_budget::SVMTransactionExecutionAndFeeBudgetLimits;
 use solana_pubkey::Pubkey;
@@ -175,7 +176,10 @@ impl super::TransactionExecutor {
         &self,
         txn: &[SanitizedTransaction; 1],
     ) -> (TransactionProcessingResult, Option<BalanceCollector>) {
-        let limits = self.compute_budget_limits(&txn[0]);
+        let limits = match self.compute_budget_limits(&txn[0]) {
+            Ok(limits) => limits,
+            Err(err) => return (Err(err), None),
+        };
         let checked = CheckedTransactionDetails::new(None, limits);
         let mut output =
             self.processor.load_and_execute_sanitized_transactions(
@@ -452,19 +456,25 @@ impl super::TransactionExecutor {
     fn compute_budget_limits(
         &self,
         txn: &SanitizedTransaction,
-    ) -> SVMTransactionExecutionAndFeeBudgetLimits {
-        let limits = ComputeBudgetLimits::default();
+    ) -> TransactionResult<SVMTransactionExecutionAndFeeBudgetLimits> {
+        let limits = process_compute_budget_instructions(
+            txn.program_instructions_iter(),
+            &self.feature_set,
+        )?;
         let signature_fee = signature_fee(
             txn,
             self.environment.blockhash_lamports_per_signature,
         );
         let fee_details = FeeDetails::new(signature_fee, 0);
+        let raise_cpi_limit = self
+            .feature_set
+            .is_active(&raise_cpi_nesting_limit_to_8::id());
 
-        limits.get_compute_budget_and_limits(
+        Ok(limits.get_compute_budget_and_limits(
             limits.loaded_accounts_bytes,
             fee_details,
-            false,
-        )
+            raise_cpi_limit,
+        ))
     }
 }
 

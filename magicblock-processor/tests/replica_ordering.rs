@@ -9,7 +9,10 @@ use std::{
 };
 
 use guinea::GuineaInstruction;
-use magicblock_core::link::{replication::Block, transactions::ReplayPosition};
+use magicblock_core::link::{
+    replication::{Block, Message},
+    transactions::ReplayPosition,
+};
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -19,7 +22,7 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use test_kit::{ExecutionTestEnv, Signer};
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 const STRESS_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_BALANCE: u64 = LAMPORTS_PER_SOL * 10;
@@ -28,6 +31,17 @@ const DEFAULT_BALANCE: u64 = LAMPORTS_PER_SOL * 10;
 
 fn setup_replica_env(executors: u32) -> ExecutionTestEnv {
     ExecutionTestEnv::new_replica_mode(executors, true)
+}
+
+fn setup_replica_env_with_superblock_size(
+    executors: u32,
+    superblock_size: u64,
+) -> ExecutionTestEnv {
+    ExecutionTestEnv::new_replica_mode_with_superblock_size(
+        executors,
+        true,
+        superblock_size,
+    )
 }
 
 fn create_accounts(env: &mut ExecutionTestEnv, count: usize) -> Vec<Pubkey> {
@@ -214,6 +228,52 @@ async fn test_replay_block_waits_for_queued_transactions() {
     assert_eq!(env.get_account(acc).data()[0], 77);
     assert_eq!(env.ledger.latest_block().load().slot, slot);
     assert_eq!(env.accountsdb.slot(), slot);
+}
+
+#[tokio::test]
+async fn test_replica_replayed_superblock_takes_snapshot_without_publishing() {
+    let mut env = setup_replica_env_with_superblock_size(1, 2);
+    env.run_scheduler();
+    env.yield_to_scheduler().await;
+
+    let slot = 2;
+    let snapshot = env
+        .accountsdb
+        .database_directory()
+        .join(format!("snapshot-{slot:0>12}.tar.gz"));
+    let prev_hash = env.ledger.latest_block().load().blockhash;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(prev_hash.as_ref());
+    let hash = (*hasher.finalize().as_bytes()).into();
+
+    env.transaction_scheduler
+        .replay_block(Block {
+            slot,
+            hash,
+            timestamp: slot as i64,
+        })
+        .await
+        .expect("failed to apply replayed superblock boundary");
+
+    timeout(Duration::from_secs(5), async {
+        while !snapshot.exists() {
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for replica accountsdb snapshot");
+
+    let replication = env
+        .dispatch
+        .replication_messages
+        .as_mut()
+        .expect("missing replication receiver");
+    while let Ok(message) = replication.try_recv() {
+        assert!(
+            !matches!(message, Message::SuperBlock(_)),
+            "replica must not publish SuperBlock messages"
+        );
+    }
 }
 
 /// Stress test: Multiple accounts with cross-conflicts.

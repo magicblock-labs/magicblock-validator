@@ -1,9 +1,9 @@
-use base64::{prelude::BASE64_STANDARD, Engine};
+use solana_packet::PACKET_DATA_SIZE;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use static_assertions::const_assert;
 
-/// From agave rpc/src/rpc.rs [MAX_BASE64_SIZE]
-pub(crate) const MAX_ENCODED_TRANSACTION_SIZE: usize = 1644;
+/// Maximum serialized transaction size that can be sent over the wire.
+pub(crate) const MAX_TRANSACTION_WIRE_SIZE: usize = PACKET_DATA_SIZE;
 
 /// How many process and commit buffer instructions fit into a single transaction
 #[allow(unused)] // serves as documentation as well
@@ -34,7 +34,7 @@ pub const MAX_PROCESS_AND_CLOSE_PER_TX: u8 = 2;
 /// close buffer instructions fit into a single transaction when
 /// using lookup tables but not including the buffer account
 #[allow(unused)] // serves as documentation as well
-pub const MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP: u8 = 5;
+pub const MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP: u8 = 4;
 
 /// How many finalize instructions fit into a single transaction
 #[allow(unused)] // serves as documentation as well
@@ -54,7 +54,7 @@ pub const MAX_UNDELEGATE_PER_TX: u8 = 3;
 /// when using address lookup tables
 /// NOTE: that we assume the rent reimbursement account to be the delegated account
 #[allow(unused)] // serves as documentation as well
-pub const MAX_UNDELEGATE_PER_TX_USING_LOOKUP: u8 = 16;
+pub const MAX_UNDELEGATE_PER_TX_USING_LOOKUP: u8 = 15;
 
 // Allows us to run undelegate instructions without rechunking them since we know
 // that we didn't process more than we also can undelegate
@@ -66,12 +66,11 @@ const_assert!(
     MAX_PROCESS_PER_TX_USING_LOOKUP <= MAX_UNDELEGATE_PER_TX_USING_LOOKUP
 );
 
-pub fn serialize_and_encode_base64(
+pub fn serialized_transaction_size(
     transaction: &impl SerializableTransaction,
-) -> String {
-    // SAFETY: runs statically
-    let serialized = bincode::serialize(transaction).unwrap();
-    BASE64_STANDARD.encode(serialized)
+) -> usize {
+    // SAFETY: runs on transactions we already serialize before sending.
+    usize::try_from(bincode::serialized_size(transaction).unwrap()).unwrap()
 }
 
 #[cfg(test)]
@@ -131,7 +130,7 @@ mod test {
         NoLookupTable,
         UseLookupTable,
     }
-    fn encoded_tx_size(
+    fn transaction_wire_size(
         auth: &Keypair,
         ixs: &[Instruction],
         opts: &TransactionOpts,
@@ -165,8 +164,7 @@ mod test {
             )
         })?;
 
-        let encoded = serialize_and_encode_base64(&versioned_tx);
-        Ok(encoded.len())
+        Ok(serialized_transaction_size(&versioned_tx))
     }
 
     // -----------------
@@ -309,7 +307,7 @@ mod test {
                         .collect::<Vec<_>>();
 
                     let tx_size =
-                        encoded_tx_size(auth, &ixs, &tx_opts).unwrap();
+                        transaction_wire_size(auth, &ixs, &tx_opts).unwrap();
                     tx_sizes.push((size, tx_size));
                 }
                 tx_lines.push(tx_sizes);
@@ -349,51 +347,8 @@ mod test {
         run(auth, 10);
         run(auth, 15);
         run(auth, 20);
-        /*
-         0 ixs:
-          0:  184|  10:  184|  20:  184|  50:  184| 100:  184| 200:  184| 500:  184|1024:  184
-          0:  184|  10:  184|  20:  184|  50:  184| 100:  184| 200:  184| 500:  184|1024:  184
-         1 ixs:
-          0:  620|  10:  636|  20:  648|  50:  688| 100:  756| 200:  888| 500: 1288|1024: 1988
-          0:  336|  10:  348|  20:  364|  50:  404| 100:  472| 200:  604| 500: 1004|1024: 1704
-         2 ixs:
-          0:  932|  10:  960|  20:  984|  50: 1064| 100: 1200| 200: 1468| 500: 2268|1024: 3664
-          0:  400|  10:  424|  20:  452|  50:  532| 100:  668| 200:  936| 500: 1736|1024: 3132
-         5 ixs:
-          0: 1864|  10: 1932|  20: 1996|  50: 2196| 100: 2536| 200: 3204| 500: 5204|1024: 8696
-          0:  588|  10:  652|  20:  720|  50:  920| 100: 1260| 200: 1928| 500: 3928|1024: 7420
-         8 ixs:
-          0: 2796|  10: 2904|  20: 3008|  50: 3328| 100: 3872| 200: 4940| 500: 8140|1024:13728
-          0:  776|  10:  880|  20:  988|  50: 1308| 100: 1852| 200: 2920| 500: 6120|1024:11708
-        10 ixs:
-          0: 3416|  10: 3552|  20: 3684|  50: 4084| 100: 4764| 200: 6096| 500:10096|1024:17084
-          0:  900|  10: 1032|  20: 1168|  50: 1568| 100: 2248| 200: 3580| 500: 7580|1024:14568
-        15 ixs:
-          0: 4972|  10: 5172|  20: 5372|  50: 5972| 100: 6992| 200: 8992| 500:14992|1024:25472
-          0: 1212|  10: 1412|  20: 1612|  50: 2212| 100: 3232| 200: 5232| 500:11232|1024:21712
-        20 ixs:
-          0: 6524|  10: 6792|  20: 7056|  50: 7856| 100: 9216| 200:11884| 500:19884|1024:33856
-          0: 1528|  10: 1792|  20: 2060|  50: 2860| 100: 4220| 200: 6888| 500:14888|1024:28860
-
-        Legend:
-
-        x ixs:
-            data size/ix: encoded size | ...
-            data size/ix: encoded size | ...  (using lookup tables)
-
-        Given that max transaction size is 1644 bytes, we can see that the max data size is:
-
-        -  1 ixs: slightly larger than 500 bytes
-        -  2 ixs: slightly larger than 200 bytes
-        -  5 ixs: slightly larger than 100 bytes
-        -  8 ixs: slightly larger than  50 bytes
-        - 10 ixs: slightly larger than  20 bytes
-        - 15 ixs: slightly larger than  10 bytes
-        - 20 ixs: no data supported (only lamport changes)
-
-        Also it is clear that using a lookup table makes a huge difference especially if we commit
-        lots of different accounts.
-        */
+        // This logs raw wire sizes. The sendability limit is
+        // MAX_TRANSACTION_WIRE_SIZE.
     }
 
     // -----------------
@@ -573,13 +528,13 @@ mod test {
                 &[&auth],
             )
             .unwrap();
-            let encoded = serialize_and_encode_base64(&versioned_tx);
+            let tx_size = serialized_transaction_size(&versioned_tx);
             info!(
                 chunks = chunks,
-                size_bytes = encoded.len(),
+                size_bytes = tx_size,
                 "Transaction size measured"
             );
-            if encoded.len() > MAX_ENCODED_TRANSACTION_SIZE {
+            if tx_size > MAX_TRANSACTION_WIRE_SIZE {
                 return chunks - 1;
             }
         }
@@ -662,13 +617,13 @@ mod test {
                 &[&auth],
             )
             .unwrap();
-            let encoded = serialize_and_encode_base64(&versioned_tx);
+            let tx_size = serialized_transaction_size(&versioned_tx);
             info!(
                 chunks = chunks,
-                size_bytes = encoded.len(),
+                size_bytes = tx_size,
                 "Transaction size measured with lookup table"
             );
-            if encoded.len() > MAX_ENCODED_TRANSACTION_SIZE {
+            if tx_size > MAX_TRANSACTION_WIRE_SIZE {
                 return chunks - 1;
             }
         }
