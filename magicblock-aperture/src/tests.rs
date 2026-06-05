@@ -8,7 +8,6 @@ use std::{
 
 use hyper::body::Bytes;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_config::config::ChainLinkConfig;
 use solana_account_decoder::UiAccountEncoding;
 use solana_pubkey::Pubkey;
 use test_kit::{
@@ -41,14 +40,8 @@ fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
 }
 
 fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
-    let cfg = ChainLinkConfig::default();
-    let real = InnerChainlinkImpl::try_new(
-        accounts_db,
-        None,
-        Pubkey::new_unique(),
-        &cfg,
-    )
-    .expect("Failed to create Chainlink");
+    let real = InnerChainlinkImpl::try_new(accounts_db, None)
+        .expect("Failed to create Chainlink");
     ChainlinkImpl::enabled(real)
 }
 
