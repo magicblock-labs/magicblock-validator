@@ -1338,6 +1338,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             ));
         }
 
+        let response_value_len = response.value.len();
+        if response_value_len != pubkeys.len() {
+            return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                format!(
+                    "RPC returned {response_value_len} account results for {} requested accounts: {}",
+                    pubkeys.len(),
+                    pubkeys_str(pubkeys)
+                ),
+            ));
+        }
+
         let mut found_count = 0u64;
         let mut not_found_count = 0u64;
         let remote_accounts = response
@@ -2118,6 +2129,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             // TODO: should we retry if not or respond with an error?
             let (response_slot, response_value) = response;
             assert!(response_slot >= min_context_slot);
+
+            if response_value.len() != pubkeys.len() {
+                let err_msg = format!(
+                    "RPC returned {} account results for {} requested accounts: {}",
+                    response_value.len(),
+                    pubkeys.len(),
+                    pubkeys_str(&pubkeys)
+                );
+                notify_error(&err_msg);
+                return;
+            }
 
             let mut found_count = 0u64;
             let mut not_found_count = 0u64;

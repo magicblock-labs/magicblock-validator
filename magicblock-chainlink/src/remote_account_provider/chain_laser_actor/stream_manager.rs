@@ -465,9 +465,31 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         commitment: &CommitmentLevel,
     ) -> RemoteAccountProviderResult<()> {
-        // Remove all account streams from the map but keep them
-        // alive until the new optimized streams are created to
-        // avoid a gap without any active streams (race condition).
+        // Collect all active subscriptions and chunk them.
+        let all_pks: Vec<Pubkey> =
+            self.subscriptions.read().iter().copied().collect();
+        let from_slot = self.compute_from_slot();
+
+        // Create replacement streams before mutating existing account
+        // topology. If any subscribe call fails, the previous topology
+        // remains unchanged.
+        let mut new_optimized_streams = Vec::new();
+        let mut new_optimized_handles = Vec::new();
+        for (i, chunk) in all_pks
+            .chunks(self.config.max_subs_in_old_optimized)
+            .enumerate()
+        {
+            let refs: Vec<&Pubkey> = chunk.iter().collect();
+            let LaserStreamWithHandle { stream, handle } = self
+                .stream_factory
+                .subscribe(Self::build_account_request(
+                    &refs, commitment, from_slot,
+                ))
+                .await?;
+            new_optimized_streams.push((StreamKey::OptimizedOld(i), stream));
+            new_optimized_handles.push(handle);
+        }
+
         let prev_current_new = self.stream_map.remove(&StreamKey::CurrentNew);
         let prev_unoptimized: Vec<_> = (0..self.unoptimized_old_handles.len())
             .filter_map(|i| {
@@ -482,32 +504,12 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             + prev_unoptimized.len()
             + prev_optimized.len();
 
-        // Collect all active subscriptions and chunk them.
-        let all_pks: Vec<Pubkey> =
-            self.subscriptions.read().iter().copied().collect();
-
-        // Build optimized old streams from chunks.
-        let from_slot = self.compute_from_slot();
-        self.optimized_old_handles = Vec::new();
-        for (i, chunk) in all_pks
-            .chunks(self.config.max_subs_in_old_optimized)
-            .enumerate()
-        {
-            let refs: Vec<&Pubkey> = chunk.iter().collect();
-            let LaserStreamWithHandle { stream, handle } = self
-                .stream_factory
-                .subscribe(Self::build_account_request(
-                    &refs, commitment, from_slot,
-                ))
-                .await?;
-            self.stream_map.insert(StreamKey::OptimizedOld(i), stream);
-            self.optimized_old_handles.push(handle);
+        for (key, stream) in new_optimized_streams {
+            self.stream_map.insert(key, stream);
         }
 
-        // Clear unoptimized old handles.
+        self.optimized_old_handles = new_optimized_handles;
         self.unoptimized_old_handles.clear();
-
-        // Reset the current-new stream.
         self.current_new_subs.clear();
         self.current_new_handle = None;
 
@@ -661,6 +663,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                     self.program_sub = Some((subscribed_programs, handle));
                 }
                 Err(e) => {
+                    subscribed_programs.remove(&program_id);
                     self.program_sub = Some((subscribed_programs, handle));
                     return Err(e);
                 }
@@ -1075,6 +1078,44 @@ mod tests {
 
         // ceil(25 / 10) = 3
         assert_eq!(mgr.optimized_old_stream_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_optimize_failure_preserves_existing_account_topology() {
+        let (mut mgr, factory) = create_manager();
+
+        // Create three promoted unoptimized streams and no optimized streams.
+        let pks = subscribe_in_batches(&mut mgr, 18, 6).await;
+        assert_eq!(mgr.unoptimized_old_stream_count(), 3);
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+        assert_eq!(mgr.account_stream_count(), 3);
+
+        // Fail the second replacement stream creation so the test covers
+        // a partial local rebuild attempt.
+        let fail_call = factory.subscribe_call_count() + 2;
+        factory.fail_on_subscribe_call(fail_call);
+
+        let err = mgr.optimize(&COMMITMENT).await.unwrap_err();
+        assert!(
+            err.to_string().contains("mock subscribe failure"),
+            "unexpected error: {err:?}",
+        );
+
+        assert_eq!(mgr.unoptimized_old_stream_count(), 3);
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+        assert_eq!(mgr.account_stream_count(), 3);
+        assert_subscriptions_eq(&mgr, &pks);
+
+        factory.clear_subscribe_failure();
+        mgr.optimize(&COMMITMENT).await.unwrap();
+
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+        assert_eq!(mgr.optimized_old_stream_count(), 2);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+        assert_eq!(mgr.account_stream_count(), 2);
+        assert_subscriptions_eq(&mgr, &pks);
     }
 
     #[tokio::test]
@@ -1602,6 +1643,45 @@ mod tests {
         let handle_reqs = factory.handle_requests();
         assert_eq!(handle_reqs.len(), 1);
         assert_eq!(handle_reqs[0].from_slot, Some(expected_from_slot));
+    }
+
+    #[tokio::test]
+    async fn test_program_subscription_retry_after_update_failure_writes_again()
+    {
+        let (mut mgr, factory) = create_manager();
+        let first_program = Pubkey::new_unique();
+        let second_program = Pubkey::new_unique();
+
+        mgr.add_program_subscription(first_program, &COMMITMENT)
+            .await
+            .unwrap();
+
+        let writes_after_first = factory.handle_requests().len();
+        factory.fail_next_handle_writes(6);
+
+        let err = mgr
+            .add_program_subscription(second_program, &COMMITMENT)
+            .await
+            .expect_err("program stream update should fail");
+        assert!(
+            err.to_string().contains("program_subscribe"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(factory.handle_requests().len(), writes_after_first);
+
+        mgr.add_program_subscription(second_program, &COMMITMENT)
+            .await
+            .expect("retry should write the expanded program request");
+
+        let handle_reqs = factory.handle_requests();
+        assert_eq!(handle_reqs.len(), writes_after_first + 1);
+        let owners = &handle_reqs
+            .last()
+            .expect("retry should record a handle request")
+            .accounts["program_sub"]
+            .owner;
+        assert!(owners.contains(&first_program.to_string()));
+        assert!(owners.contains(&second_program.to_string()));
     }
 
     #[tokio::test]

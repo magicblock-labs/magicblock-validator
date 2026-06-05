@@ -1,7 +1,10 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use dlp_api::state::DelegationRecord;
-use solana_account::{Account, AccountSharedData, WritableAccount};
+use solana_account::{
+    Account, AccountSharedData, ReadableAccount, WritableAccount,
+};
+use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_sdk_ids::system_program;
 use solana_signer::Signer;
@@ -60,6 +63,7 @@ type TestFetchClonerResult = (
         >,
     >,
     mpsc::Sender<ForwardedSubscriptionUpdate>,
+    Arc<ClonerStub>,
 );
 
 macro_rules! _cloned_account {
@@ -126,6 +130,8 @@ struct FetcherTestCtx {
     >,
     #[allow(unused)]
     subscription_tx: mpsc::Sender<ForwardedSubscriptionUpdate>,
+    #[allow(unused)]
+    cloner: Arc<ClonerStub>,
 }
 
 async fn setup<I>(
@@ -181,7 +187,7 @@ where
         .await
         .unwrap(),
     );
-    let (fetch_cloner, subscription_tx) = init_fetch_cloner(
+    let (fetch_cloner, subscription_tx, cloner) = init_fetch_cloner(
         remote_account_provider.clone(),
         &accounts_bank,
         validator_keypair,
@@ -194,6 +200,7 @@ where
         forward_rx,
         fetch_cloner,
         subscription_tx,
+        cloner,
     }
 }
 
@@ -268,7 +275,7 @@ fn add_delegation_record_with_slot_for(
 }
 
 /// Helper function to initialize FetchCloner for tests with subscription updates
-/// Returns (FetchCloner, subscription_sender) for simulating subscription updates in tests
+/// Returns (FetchCloner, subscription_sender, cloner) for simulating subscription updates in tests.
 fn init_fetch_cloner(
     remote_account_provider: Arc<
         RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
@@ -287,7 +294,7 @@ fn init_fetch_cloner(
         None,
         None,
     );
-    (fetch_cloner, subscription_tx)
+    (fetch_cloner, subscription_tx, cloner)
 }
 
 async fn acquire_direct_subscription_for_update(
@@ -815,9 +822,16 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
         rent_epoch: 0,
     };
 
+    let delegation_record = DelegationRecord {
+        authority: validator_pubkey,
+        owner: account_owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
     let delegation_record_account = Account {
         lamports: 2_000_000,
-        data: vec![100, 101, 102],
+        data: delegation_record_to_vec(&delegation_record),
         owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
@@ -1729,6 +1743,85 @@ async fn test_subscription_update_for_unwatched_present_account_enqueues_removal
     assert_eq!(removed, Some(pubkey));
     assert!(removed_rx.try_recv().is_err());
     assert_eq!(ctx.fetch_cloner.cloner().clone_request_count(), 0);
+}
+
+#[tokio::test]
+async fn test_missing_bank_delegated_update_cleans_undelegation_tracking() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    remote_account_provider
+        .acquire_subscription(
+            &account_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .expect("failed to acquire direct subscription");
+    remote_account_provider
+        .acquire_subscription(
+            &account_pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .expect("failed to acquire undelegation tracking subscription");
+
+    let mut delegated_account = AccountSharedData::from(account);
+    delegated_account.set_remote_slot(CURRENT_SLOT);
+    delegated_account.set_delegated(true);
+
+    fetch_cloner
+        .process_subscription_update(
+            account_pubkey,
+            ForwardedSubscriptionUpdate {
+                pubkey: account_pubkey,
+                account: RemoteAccount::from_fresh_account_shared_data(
+                    delegated_account,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+                source: SubscriptionSource::Account,
+            },
+        )
+        .await;
+
+    assert_not_subscribed!(remote_account_provider, &[&account_pubkey]);
+    assert!(
+        !remote_account_provider
+            .has_subscription_reason(
+                &account_pubkey,
+                SubscriptionReason::DirectAccount,
+            )
+            .await
+    );
+    assert!(
+        !remote_account_provider
+            .has_subscription_reason(
+                &account_pubkey,
+                SubscriptionReason::UndelegationTracking,
+            )
+            .await
+    );
 }
 
 // End-to-end variant of the test above that drives the cleanup through
@@ -3079,7 +3172,7 @@ async fn test_non_raw_eata_owned_account_subscription_update_stays_delegated() {
 }
 
 #[tokio::test]
-async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
+async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
 ) {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -3095,9 +3188,8 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
     };
 
     let FetcherTestCtx {
-        remote_account_provider,
         accounts_bank,
-        subscription_tx,
+        fetch_cloner,
         ..
     } = setup(
         [(account_pubkey, dlp_owned_account.clone())],
@@ -3105,6 +3197,82 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
         validator_keypair.insecure_clone(),
     )
     .await;
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    let mut dlp_owned_account_shared =
+        AccountSharedData::from(dlp_owned_account.clone());
+    dlp_owned_account_shared.set_remote_slot(CURRENT_SLOT);
+    dlp_owned_account_shared.set_delegated(true);
+    dlp_owned_account_shared.set_confined(true);
+
+    let (resolved_account, delegation_record, delegation_actions) =
+        fetch_cloner
+            .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
+                ForwardedSubscriptionUpdate {
+                    pubkey: account_pubkey,
+                    account: RemoteAccount::from_fresh_account_shared_data(
+                        dlp_owned_account_shared,
+                        RemoteAccountUpdateSource::Subscription,
+                    ),
+                    source: SubscriptionSource::Account,
+                },
+            )
+            .await;
+
+    assert!(resolved_account.is_none());
+    assert!(delegation_record.is_none());
+    assert!(delegation_actions.is_empty());
+    assert!(accounts_bank.get_account(&account_pubkey).is_none());
+}
+
+#[tokio::test]
+async fn test_same_slot_delegated_subscription_update_overrides_plain_bank_account(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let plain_account = Account {
+        owner: account_owner,
+        ..delegated_account.clone()
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    let mut plain_in_bank = AccountSharedData::from(plain_account);
+    plain_in_bank.set_remote_slot(CURRENT_SLOT);
+    accounts_bank.insert(account_pubkey, plain_in_bank);
 
     use crate::remote_account_provider::{
         RemoteAccount, RemoteAccountUpdateSource,
@@ -3119,7 +3287,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
             account: RemoteAccount::from_fresh_account(
-                dlp_owned_account,
+                delegated_account,
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
@@ -3129,23 +3297,114 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
         .unwrap();
 
     const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
-    const TIMEOUT: std::time::Duration = Duration::from_millis(200);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
     tokio::time::timeout(TIMEOUT, async {
-        while accounts_bank.get_account(&account_pubkey).is_none() {
+        loop {
+            let refreshed = accounts_bank
+                .get_account(&account_pubkey)
+                .is_some_and(|account| {
+                    account.delegated()
+                        && account.remote_slot() == CURRENT_SLOT
+                        && account.owner() == &account_owner
+                });
+            if refreshed {
+                break;
+            }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     })
     .await
-    .expect(
-        "timed out waiting for fallback clone of discovered DLP-owned account",
+    .expect("timed out waiting for same-slot delegated refresh");
+}
+
+#[tokio::test]
+async fn test_same_slot_delegated_subscription_update_overrides_undelegating_bank_account(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        CURRENT_SLOT + 1,
     );
 
-    let cloned_account = accounts_bank
-        .get_account(&account_pubkey)
-        .expect("account should be cloned by fallback subscription path");
-    assert_eq!(*cloned_account.owner(), dlp_api::id());
-    assert!(!cloned_account.delegated());
-    assert_eq!(cloned_account.remote_slot(), CURRENT_SLOT);
+    let mut undelegating_in_bank =
+        AccountSharedData::from(delegated_account.clone());
+    undelegating_in_bank.set_remote_slot(CURRENT_SLOT);
+    undelegating_in_bank.set_delegated(false);
+    undelegating_in_bank.set_undelegating(true);
+    accounts_bank.insert(account_pubkey, undelegating_in_bank);
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &account_pubkey,
+    )
+    .await;
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                delegated_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Account,
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let refreshed = accounts_bank
+                .get_account(&account_pubkey)
+                .is_some_and(|account| {
+                    account.delegated()
+                        && !account.undelegating()
+                        && account.remote_slot() == CURRENT_SLOT
+                        && account.owner() == &account_owner
+                });
+            if refreshed {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for same-slot undelegating refresh");
 }
 
 #[tokio::test]
@@ -3280,7 +3539,7 @@ async fn test_out_of_order_delegated_eata_subscription_update_still_projects_ata
         .send(ForwardedSubscriptionUpdate {
             pubkey: eata_pubkey,
             account: RemoteAccount::from_fresh_account(
-                eata_account,
+                eata_account.clone(),
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
@@ -3381,7 +3640,7 @@ async fn test_out_of_order_delegated_eata_update_clones_action_dependencies() {
         .send(ForwardedSubscriptionUpdate {
             pubkey: eata_pubkey,
             account: RemoteAccount::from_fresh_account(
-                eata_account,
+                eata_account.clone(),
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
@@ -3445,6 +3704,7 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
     let FetcherTestCtx {
         remote_account_provider,
         accounts_bank,
+        cloner,
         rpc_client,
         subscription_tx,
         ..
@@ -3520,6 +3780,17 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
     assert!(
         accounts_bank.get_account(&action_program_pubkey).is_some(),
         "subscription update should clone action program dependencies before running post-delegation actions",
+    );
+
+    let clone_requests = cloner.clone_requests();
+    let action_request = clone_requests
+        .iter()
+        .find(|request| request.pubkey == account_pubkey)
+        .expect("delegated account should be cloned");
+    assert!(action_request.account.delegated());
+    assert!(
+        !action_request.delegation_actions.is_empty(),
+        "post-delegation actions must stay attached to the delegated target"
     );
 }
 
@@ -3632,6 +3903,251 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
     assert_eq!(projected_mint, mint);
     assert_eq!(projected_owner, wallet_owner);
     assert_eq!(projected_amount, AMOUNT);
+}
+
+#[tokio::test]
+async fn test_raw_eata_subscription_update_without_actions_projects_remote_ata_once(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, false);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        cloner,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (eata_pubkey, eata_account.clone()),
+            (ata_pubkey, ata_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    assert!(
+        accounts_bank.get_account(&ata_pubkey).is_none(),
+        "test must start without the ATA in bank"
+    );
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &eata_pubkey,
+    )
+    .await;
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Account,
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let has_eata = accounts_bank.get_account(&eata_pubkey).is_some();
+            let has_projected_ata = accounts_bank
+                .get_account(&ata_pubkey)
+                .map(|account| account.delegated())
+                .unwrap_or(false);
+            if has_eata && has_projected_ata {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for no-action remote ATA projection");
+
+    let projected_ata = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("ATA should be projected from raw eATA update");
+    assert!(projected_ata.delegated());
+    assert_eq!(projected_ata.remote_slot(), CURRENT_SLOT);
+    let projected_amount =
+        u64::from_le_bytes(projected_ata.data()[64..72].try_into().unwrap());
+    assert_eq!(projected_amount, AMOUNT);
+
+    let projected_request_count = cloner
+        .clone_requests()
+        .iter()
+        .filter(|request| request.pubkey == ata_pubkey)
+        .count();
+    assert_eq!(projected_request_count, 1);
+
+    let newer_eata_account =
+        create_eata_account(&wallet_owner, &mint, AMOUNT + 1, false);
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                newer_eata_account,
+                CURRENT_SLOT + 1,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Account,
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let projected_ata = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("projected ATA should remain in bank");
+    let projected_amount =
+        u64::from_le_bytes(projected_ata.data()[64..72].try_into().unwrap());
+    assert_eq!(
+        projected_amount, AMOUNT,
+        "delegated projected ATA must not be overwritten by later raw eATA updates"
+    );
+    assert_eq!(
+        cloner
+            .clone_requests()
+            .iter()
+            .filter(|request| request.pubkey == ata_pubkey)
+            .count(),
+        1,
+        "delegated projected ATA should only be cloned once"
+    );
+}
+
+#[tokio::test]
+async fn test_delegated_eata_subscription_update_projects_remote_ata() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let action_program_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+    let action_program_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_sdk_ids::bpf_loader::id(),
+        executable: true,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        cloner,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (eata_pubkey, eata_account.clone()),
+            (ata_pubkey, ata_account),
+            (action_program_pubkey, action_program_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_actions_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        action_program_pubkey,
+    );
+
+    assert!(
+        accounts_bank.get_account(&ata_pubkey).is_none(),
+        "test must start without the ATA in bank"
+    );
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &eata_pubkey,
+    )
+    .await;
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Account,
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let has_eata = accounts_bank.get_account(&eata_pubkey).is_some();
+            let has_projected_ata = accounts_bank
+                .get_account(&ata_pubkey)
+                .map(|account| account.delegated())
+                .unwrap_or(false);
+            let has_action_program =
+                accounts_bank.get_account(&action_program_pubkey).is_some();
+            if has_eata && has_projected_ata && has_action_program {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for remote ATA projection");
+
+    let clone_requests = cloner.clone_requests();
+    let projected_ata_request = clone_requests
+        .iter()
+        .find(|request| request.pubkey == ata_pubkey)
+        .expect("projected ATA should be cloned");
+    assert!(projected_ata_request.account.delegated());
+    assert!(
+        !projected_ata_request.delegation_actions.is_empty(),
+        "post-delegation actions must stay attached to the projected ATA"
+    );
 }
 
 #[tokio::test]
@@ -3772,6 +4288,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
     let FetcherTestCtx {
         remote_account_provider,
         accounts_bank,
+        cloner,
         rpc_client,
         subscription_tx,
         ..
@@ -3813,7 +4330,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
         .send(ForwardedSubscriptionUpdate {
             pubkey: eata_pubkey,
             account: RemoteAccount::from_fresh_account(
-                eata_account,
+                eata_account.clone(),
                 CURRENT_SLOT,
                 RemoteAccountUpdateSource::Subscription,
             ),
@@ -3848,6 +4365,444 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
         accounts_bank.get_account(&action_program_pubkey).is_some(),
         "projected ATA clone should ensure action dependencies before running post-delegation actions",
     );
+
+    let clone_requests = cloner.clone_requests();
+    let raw_eata_request = clone_requests
+        .iter()
+        .find(|request| request.pubkey == eata_pubkey)
+        .expect("raw eATA should be cloned");
+    assert!(!raw_eata_request.account.delegated());
+    assert!(
+        raw_eata_request.delegation_actions.is_empty(),
+        "raw eATA must never carry post-delegation actions"
+    );
+
+    let projected_ata_request = clone_requests
+        .iter()
+        .find(|request| request.pubkey == ata_pubkey)
+        .expect("projected ATA should be cloned");
+    assert!(projected_ata_request.account.delegated());
+    assert!(
+        !projected_ata_request.delegation_actions.is_empty(),
+        "projected delegated ATA must be the action-bearing clone target"
+    );
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Account,
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let action_request_count = cloner
+        .clone_requests()
+        .iter()
+        .filter(|request| !request.delegation_actions.is_empty())
+        .count();
+    assert_eq!(
+        action_request_count, 1,
+        "duplicate eATA updates must not create another action-bearing clone"
+    );
+}
+
+#[tokio::test]
+async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let account_pubkey = random_pubkey();
+    let mut account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    account.set_remote_slot(CURRENT_SLOT);
+
+    let action_program = random_pubkey();
+    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
+        action_program,
+        &[1],
+        vec![],
+    )]);
+
+    let err = fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: account_pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegation_actions: actions,
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect_err("actions on non-delegated target must be rejected");
+
+    assert!(
+        matches!(err, ChainlinkError::InvalidDelegationActions(pubkey, _) if pubkey == account_pubkey)
+    );
+    assert!(
+        cloner.clone_requests().is_empty(),
+        "non-delegated action target must not be cloned"
+    );
+}
+
+#[tokio::test]
+async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let account_pubkey = random_pubkey();
+    let mut account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    account.set_remote_slot(CURRENT_SLOT);
+    account.set_delegated(true);
+    account.set_confined(true);
+
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: account_pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect("DLP-owned normal clone should be normalized, not rejected");
+
+    let clone_requests = cloner.clone_requests();
+    assert_eq!(clone_requests.len(), 1);
+    let cloned_account = &clone_requests[0].account;
+    assert_eq!(cloned_account.owner(), &dlp_api::id());
+    assert!(!cloned_account.delegated());
+    assert!(!cloned_account.confined());
+}
+
+#[tokio::test]
+async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let account_pubkey =
+        dlp_api::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
+    let mut account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![0; 8],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    account.set_remote_slot(CURRENT_SLOT);
+    account.set_delegated(true);
+
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: account_pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect("DLP-owned magic fee vault should remain delegated");
+
+    let clone_requests = cloner.clone_requests();
+    assert_eq!(clone_requests.len(), 1);
+    let cloned_account = &clone_requests[0].account;
+    assert_eq!(cloned_account.owner(), &dlp_api::id());
+    assert!(cloned_account.delegated());
+    assert!(!cloned_account.confined());
+}
+
+#[tokio::test]
+async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let target_pubkey = random_pubkey();
+    let dependency_pubkey = random_pubkey();
+    let dependency_owner = random_pubkey();
+    let dependency_account = Account {
+        lamports: 1_000_000,
+        data: vec![9, 8, 7, 6],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(dependency_pubkey, dependency_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        dependency_pubkey,
+        validator_pubkey,
+        dependency_owner,
+    );
+
+    let mut stale_dependency = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![9, 8, 7, 6],
+        owner: dependency_owner,
+        executable: false,
+        rent_epoch: 0,
+    });
+    stale_dependency.set_remote_slot(CURRENT_SLOT - 1);
+    stale_dependency.set_delegated(false);
+    accounts_bank.insert(dependency_pubkey, stale_dependency);
+
+    let mut target_account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    target_account.set_remote_slot(CURRENT_SLOT);
+    target_account.set_delegated(true);
+
+    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
+        system_program::id(),
+        &[1],
+        vec![AccountMeta::new(dependency_pubkey, false)],
+    )]);
+
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: target_pubkey,
+                account: target_account,
+                commit_frequency_ms: None,
+                delegation_actions: actions,
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect(
+            "stale writable dependency should be refreshed before target clone",
+        );
+
+    let cloned_dependency = accounts_bank
+        .get_account(&dependency_pubkey)
+        .expect("writable dependency should be refreshed");
+    assert!(cloned_dependency.delegated());
+    assert_eq!(cloned_dependency.remote_slot(), CURRENT_SLOT);
+
+    let clone_requests = cloner.clone_requests();
+    let dependency_idx = clone_requests
+        .iter()
+        .position(|request| request.pubkey == dependency_pubkey)
+        .expect("dependency clone request should exist");
+    let target_idx = clone_requests
+        .iter()
+        .position(|request| request.pubkey == target_pubkey)
+        .expect("target clone request should exist");
+    assert!(
+        dependency_idx < target_idx,
+        "writable dependency must be cloned before the action target"
+    );
+    assert!(
+        !clone_requests[target_idx].delegation_actions.is_empty(),
+        "actions must stay attached to the delegated target"
+    );
+}
+
+#[tokio::test]
+async fn test_post_delegation_actions_execute_once_across_remote_slots() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let target_pubkey = random_pubkey();
+    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
+        system_program::id(),
+        &[1],
+        vec![],
+    )]);
+
+    for remote_slot in [CURRENT_SLOT, CURRENT_SLOT + 1] {
+        let mut target_account = AccountSharedData::from(Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3, 4],
+            owner: system_program::id(),
+            executable: false,
+            rent_epoch: 0,
+        });
+        target_account.set_remote_slot(remote_slot);
+        target_account.set_delegated(true);
+
+        fetch_cloner
+            .clone_account_with_post_delegation_action_invariants(
+                AccountCloneRequest {
+                    pubkey: target_pubkey,
+                    account: target_account,
+                    commit_frequency_ms: None,
+                    delegation_actions: actions.clone(),
+                    delegated_to_other: None,
+                },
+            )
+            .await
+            .expect("action-bearing clone should not fail");
+    }
+
+    let clone_requests = cloner.clone_requests();
+    let target_requests = clone_requests
+        .iter()
+        .filter(|request| request.pubkey == target_pubkey)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        target_requests.len(),
+        1,
+        "newer remote-slot updates must not reclone an already delegated action target"
+    );
+    assert!(
+        !target_requests[0].delegation_actions.is_empty(),
+        "the first clone remains the only action-bearing clone"
+    );
+}
+
+#[tokio::test]
+async fn test_delegated_clone_does_not_override_active_local_target() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let target_pubkey = random_pubkey();
+    let mut local_target = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    local_target.set_remote_slot(CURRENT_SLOT);
+    local_target.set_delegated(true);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+    accounts_bank.insert(target_pubkey, local_target);
+
+    let mut newer_remote_target = AccountSharedData::from(Account {
+        lamports: 2_000_000,
+        data: vec![9, 8, 7, 6],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    newer_remote_target.set_remote_slot(CURRENT_SLOT + 1);
+    newer_remote_target.set_delegated(true);
+
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: target_pubkey,
+                account: newer_remote_target,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect("active delegated targets should be skipped without failing");
+
+    assert!(
+        cloner.clone_requests().is_empty(),
+        "active delegated target must not be recloned"
+    );
+    let target = accounts_bank
+        .get_account(&target_pubkey)
+        .expect("target should remain in bank");
+    assert_eq!(target.remote_slot(), CURRENT_SLOT);
+    assert_eq!(target.lamports(), 1_000_000);
+    assert_eq!(target.data(), &[1, 2, 3, 4]);
 }
 
 #[tokio::test]
@@ -3904,7 +4859,7 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
     eata_shared.set_remote_slot(CURRENT_SLOT);
 
     let projected_ata_request = fetch_cloner
-        .maybe_build_projected_ata_clone_request_from_eata_sub_update(
+        .maybe_build_projected_ata_clone_request_from_subscription_update(
             eata_pubkey,
             &eata_shared,
             Some(&deleg_record),
@@ -3912,6 +4867,7 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
                 "delegation actions should be parsed for our validator",
             ),
         )
+        .await
         .expect(
             "delegated eATA update should build projected ATA clone request",
         );
@@ -3967,12 +4923,13 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
     eata_shared.set_remote_slot(CURRENT_SLOT);
 
     let projected_ata_request = fetch_cloner
-        .maybe_build_projected_ata_clone_request_from_eata_sub_update(
+        .maybe_build_projected_ata_clone_request_from_subscription_update(
             eata_pubkey,
             &eata_shared,
             Some(&deleg_record),
             &DelegationActions::default(),
-        );
+        )
+        .await;
 
     assert!(
         projected_ata_request.is_none(),

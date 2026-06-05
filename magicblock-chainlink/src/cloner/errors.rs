@@ -20,6 +20,15 @@ pub enum ClonerError {
     #[error("CommittorServiceError {0}")]
     CommittorServiceError(String),
 
+    #[error(
+        "Clone transaction for account {pubkey} is too large: {size} bytes (max {max_size} bytes)"
+    )]
+    CloneTransactionTooLarge {
+        pubkey: Pubkey,
+        size: usize,
+        max_size: usize,
+    },
+
     #[error("Failed to clone regular account {0} : {1:?}")]
     FailedToCloneRegularAccount(Pubkey, Box<ClonerError>),
 

@@ -152,6 +152,7 @@ impl fmt::Display for SubscriptionUpdate {
 
 pub struct AccountSubscription {
     pub cancellation_token: CancellationToken,
+    pub completion_token: CancellationToken,
 }
 
 #[derive(Debug)]

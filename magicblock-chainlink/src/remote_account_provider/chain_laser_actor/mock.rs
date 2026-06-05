@@ -8,7 +8,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use super::{LaserResult, StreamFactory};
 use crate::remote_account_provider::{
     chain_laser_actor::{LaserStreamWithHandle, StreamHandle},
-    RemoteAccountProviderResult,
+    RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
 /// A test mock that captures subscription requests and allows driving
@@ -30,6 +30,14 @@ pub struct MockStreamFactory {
     /// side becomes the returned stream, and the tx side is stored
     /// here so the test can drive updates.
     stream_senders: Arc<Mutex<Vec<Arc<mpsc::UnboundedSender<LaserResult>>>>>,
+
+    pending_handle_write_failures: Arc<Mutex<usize>>,
+
+    /// Total number of calls made to `subscribe()`.
+    subscribe_calls: Arc<Mutex<usize>>,
+
+    /// If set, the 1-based `subscribe()` call number that should fail.
+    fail_on_subscribe_call: Arc<Mutex<Option<usize>>>,
 }
 
 impl MockStreamFactory {
@@ -39,12 +47,38 @@ impl MockStreamFactory {
             captured_requests: Arc::new(Mutex::new(Vec::new())),
             handle_requests: Arc::new(Mutex::new(Vec::new())),
             stream_senders: Arc::new(Mutex::new(Vec::new())),
+            pending_handle_write_failures: Arc::new(Mutex::new(0)),
+            subscribe_calls: Arc::new(Mutex::new(0)),
+            fail_on_subscribe_call: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Fail the given 1-based `subscribe()` call number.
+    #[allow(dead_code)]
+    pub fn fail_on_subscribe_call(&self, call_number: usize) {
+        assert!(call_number > 0, "subscribe call numbers are 1-based");
+        *self.fail_on_subscribe_call.lock().unwrap() = Some(call_number);
+    }
+
+    /// Clear any configured `subscribe()` failure.
+    #[allow(dead_code)]
+    pub fn clear_subscribe_failure(&self) {
+        *self.fail_on_subscribe_call.lock().unwrap() = None;
+    }
+
+    /// Return the number of `subscribe()` calls seen so far.
+    #[allow(dead_code)]
+    pub fn subscribe_call_count(&self) -> usize {
+        *self.subscribe_calls.lock().unwrap()
     }
 
     /// Get the captured subscription requests (from `subscribe()`)
     pub fn captured_requests(&self) -> Vec<SubscribeRequest> {
         self.captured_requests.lock().unwrap().clone()
+    }
+
+    pub fn fail_next_handle_writes(&self, n: usize) {
+        *self.pending_handle_write_failures.lock().unwrap() = n;
     }
 
     /// Get the requests sent through stream handles (from
@@ -94,6 +128,7 @@ impl Default for MockStreamFactory {
 #[derive(Clone)]
 pub struct MockStreamHandle {
     handle_requests: Arc<Mutex<Vec<SubscribeRequest>>>,
+    pending_handle_write_failures: Arc<Mutex<usize>>,
 }
 
 #[async_trait]
@@ -102,6 +137,18 @@ impl StreamHandle for MockStreamHandle {
         &self,
         request: SubscribeRequest,
     ) -> Result<(), LaserstreamError> {
+        {
+            let mut to_fail =
+                self.pending_handle_write_failures.lock().unwrap();
+            if *to_fail > 0 {
+                *to_fail -= 1;
+                return Err(LaserstreamError::Status(tonic::Status::new(
+                    tonic::Code::Internal,
+                    "mock: forced handle write failure",
+                )));
+            }
+        }
+
         self.handle_requests.lock().unwrap().push(request);
         Ok(())
     }
@@ -114,6 +161,27 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
         request: SubscribeRequest,
     ) -> RemoteAccountProviderResult<LaserStreamWithHandle<MockStreamHandle>>
     {
+        let call_number = {
+            let mut calls = self.subscribe_calls.lock().unwrap();
+            *calls += 1;
+            *calls
+        };
+
+        if self
+            .fail_on_subscribe_call
+            .lock()
+            .unwrap()
+            .is_some_and(|fail_call| fail_call == call_number)
+        {
+            return Err(
+                RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
+                    "mock subscribe".to_string(),
+                    0,
+                    format!("mock subscribe failure on call {call_number}"),
+                ),
+            );
+        }
+
         // Record the initial subscribe request
         self.captured_requests.lock().unwrap().push(request.clone());
 
@@ -129,6 +197,9 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
         // every write is visible to tests immediately.
         let handle = MockStreamHandle {
             handle_requests: Arc::clone(&self.handle_requests),
+            pending_handle_write_failures: Arc::clone(
+                &self.pending_handle_write_failures,
+            ),
         };
 
         // Write the actual request to the handle (mirroring

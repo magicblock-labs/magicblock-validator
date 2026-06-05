@@ -27,7 +27,7 @@ use solana_rpc_client::{
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
-use tracing::error;
+use tracing::info;
 
 pub struct ActionsCallbackService<L> {
     rpc_client: Arc<RpcClient>,
@@ -217,7 +217,7 @@ impl<L: LatestBlockProvider> ActionsCallbackScheduler
                         if let Err(err) = result {
                             let signature =
                                 valid_transactions[i].get_signature();
-                            error!(
+                            info!(
                                 error = ?err,
                                 signature = ?signature,
                                 "Failed to send action callback transaction"
