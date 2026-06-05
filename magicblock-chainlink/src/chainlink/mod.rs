@@ -5,7 +5,7 @@ use std::{
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::{ChainlinkError, ChainlinkResult};
-use fetch_cloner::FetchCloner;
+use fetch_cloner::{FetchCloner, UndelegationScheduler};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
@@ -220,7 +220,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         accounts_bank,
         cloner,
         config,
-        chainlink_config
+        chainlink_config,
+        undelegation_scheduler
     ))]
     pub async fn try_new_from_endpoints(
         endpoints: &Endpoints,
@@ -232,6 +233,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         chainlink_config: &ChainLinkConfig,
         ledger_path: &Path,
         chain_slot: Arc<AtomicU64>,
+        undelegation_scheduler: Option<Arc<dyn UndelegationScheduler>>,
     ) -> ChainlinkResult<
         InnerChainlink<
             ChainRpcClientImpl,
@@ -266,6 +268,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 rx,
                 chainlink_config.allowed_programs.clone(),
                 risk_service,
+                undelegation_scheduler,
             );
             Some(fetch_cloner)
         } else {

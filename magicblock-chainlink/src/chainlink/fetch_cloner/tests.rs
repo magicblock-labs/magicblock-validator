@@ -1,6 +1,13 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+    net::TcpListener,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use dlp_api::state::DelegationRecord;
+use magicblock_config::config::RiskConfig;
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
 };
@@ -203,6 +210,111 @@ where
     }
 }
 
+#[derive(Default)]
+struct RecordingUndelegationScheduler {
+    requests: Mutex<Vec<UndelegationScheduleRequest>>,
+}
+
+impl RecordingUndelegationScheduler {
+    fn requests(&self) -> Vec<UndelegationScheduleRequest> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl UndelegationScheduler for RecordingUndelegationScheduler {
+    async fn schedule_undelegation(
+        &self,
+        request: UndelegationScheduleRequest,
+    ) -> ChainlinkResult<()> {
+        self.requests.lock().unwrap().push(request);
+        Ok(())
+    }
+}
+
+struct MockRiskServer {
+    base_url: String,
+    worker: tokio::task::JoinHandle<()>,
+}
+
+impl MockRiskServer {
+    async fn start(
+        address_scores: Vec<(String, u64)>,
+        expected_calls: usize,
+    ) -> Self {
+        let listener =
+            TcpListener::bind("127.0.0.1:0").expect("bind mock risk server");
+        let addr = listener.local_addr().expect("mock risk server address");
+        let score_by_address: HashMap<String, u64> =
+            address_scores.into_iter().collect();
+
+        let worker = tokio::task::spawn_blocking(move || {
+            for _ in 0..expected_calls {
+                let (mut stream, _) =
+                    listener.accept().expect("accept mock risk request");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .expect("set mock risk read timeout");
+
+                let mut buffer = [0u8; 4096];
+                let read = stream.read(&mut buffer).expect("read request");
+                let request = String::from_utf8_lossy(&buffer[..read]);
+                let address = extract_query_value(&request, "address")
+                    .expect("missing address query");
+                assert!(request.starts_with("GET /risk/address?"));
+                assert!(request.contains("network=solana"));
+
+                let score = score_by_address
+                    .get(&address)
+                    .expect("unexpected risk address");
+                let body = format!(r#"{{"riskScore":{score}}}"#);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write mock risk response");
+            }
+        });
+
+        Self {
+            base_url: format!("http://{addr}"),
+            worker,
+        }
+    }
+
+    async fn join(self) {
+        self.worker.await.expect("mock risk server panicked");
+    }
+}
+
+fn extract_query_value(request: &str, key: &str) -> Option<String> {
+    let query = request
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .split('?')
+        .nth(1)?;
+    query.split('&').find_map(|part| {
+        let (k, v) = part.split_once('=')?;
+        (k == key).then(|| v.to_string())
+    })
+}
+
+fn make_risk_config(base_url: String) -> RiskConfig {
+    RiskConfig {
+        enabled: true,
+        base_url,
+        api_key: Some("test-api-key".to_string()),
+        cache_ttl: Duration::from_secs(60),
+        request_timeout: Duration::from_secs(2),
+        risk_score_threshold: 7,
+    }
+}
+
 fn insert_plain_ata_in_bank(
     accounts_bank: &Arc<AccountsBankStub>,
     ata_pubkey: Pubkey,
@@ -290,6 +402,7 @@ fn init_fetch_cloner(
         &cloner,
         validator_keypair,
         subscription_rx,
+        None,
         None,
         None,
     );
@@ -2434,6 +2547,7 @@ async fn test_allowed_programs_filters_programs() {
         subscription_rx,
         allowed_programs,
         None,
+        None,
     );
 
     // Fetch and clone both programs
@@ -2506,6 +2620,7 @@ async fn test_allowed_programs_none_allows_all() {
         subscription_rx,
         None, // No restriction
         None,
+        None,
     );
 
     // Fetch and clone both programs
@@ -2576,6 +2691,7 @@ async fn test_allowed_programs_empty_allows_all() {
         validator_keypair.insecure_clone(),
         subscription_rx,
         allowed_programs,
+        None,
         None,
     );
 
@@ -4279,6 +4395,98 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
 }
 
 #[tokio::test]
+async fn test_post_delegation_action_aml_rejection_schedules_undelegation() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        accounts_bank,
+        remote_account_provider,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let high_risk_signer = random_pubkey();
+    let server =
+        MockRiskServer::start(vec![(high_risk_signer.to_string(), 9)], 1).await;
+    let temp_ledger = tempfile::tempdir().expect("temp ledger");
+    let risk_service = RiskService::try_from_config(
+        &make_risk_config(server.base_url.clone()),
+        temp_ledger.path(),
+    )
+    .expect("risk config should be valid")
+    .expect("risk service should be enabled");
+    let risk_service = Arc::new(risk_service);
+
+    let scheduler = Arc::new(RecordingUndelegationScheduler::default());
+    let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    let (_subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &remote_account_provider,
+        &accounts_bank,
+        &cloner,
+        validator_keypair.insecure_clone(),
+        subscription_rx,
+        None,
+        Some(risk_service),
+        Some(scheduler.clone() as Arc<dyn UndelegationScheduler>),
+    );
+
+    let target_pubkey = random_pubkey();
+    let mut target_account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    target_account.set_remote_slot(CURRENT_SLOT);
+    target_account.set_delegated(true);
+
+    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
+        system_program::id(),
+        &[1],
+        vec![AccountMeta::new_readonly(high_risk_signer, true)],
+    )]);
+
+    let err = fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: target_pubkey,
+                account: target_account.clone(),
+                commit_frequency_ms: None,
+                delegation_actions: actions,
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect_err("high-risk signer should reject the clone");
+
+    assert!(matches!(
+        err,
+        ChainlinkError::RangeRisk(
+            magicblock_aml::RiskError::HighRiskAddresses(_)
+        )
+    ));
+    assert!(
+        cloner.clone_requests().is_empty(),
+        "AML-rejected action target must not be cloned"
+    );
+
+    let scheduled = scheduler.requests();
+    assert_eq!(scheduled.len(), 1);
+    assert_eq!(scheduled[0].pubkey, target_pubkey);
+    assert_eq!(scheduled[0].account, target_account);
+
+    server.join().await;
+}
+
+#[tokio::test]
 async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -5275,6 +5483,7 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         subscription_rx,
         None,
         None,
+        None,
     );
 
     // Send subscription update (this will become the owner).
@@ -5396,6 +5605,7 @@ async fn test_delegated_account_fetch_subscription_race() {
         subscription_rx,
         None,
         None,
+        None,
     );
 
     // Send subscription update.
@@ -5501,6 +5711,7 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
         &cloner_stub,
         validator_keypair.insecure_clone(),
         subscription_rx,
+        None,
         None,
         None,
     );
@@ -6373,6 +6584,7 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
         subscription_rx,
         None,
         None,
+        None,
     );
     fetch_cloner.set_pending_operation_timeout(TEST_PENDING_REQUEST_TIMEOUT);
 
@@ -6476,6 +6688,7 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
         &blocking_cloner,
         validator_keypair.insecure_clone(),
         subscription_rx,
+        None,
         None,
         None,
     );
@@ -6597,6 +6810,7 @@ async fn test_cancel_all_pending_on_shutdown() {
         &blocking_cloner,
         validator_keypair.insecure_clone(),
         subscription_rx,
+        None,
         None,
         None,
     );

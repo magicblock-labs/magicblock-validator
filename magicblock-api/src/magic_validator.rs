@@ -19,8 +19,10 @@ use magicblock_aperture::{
     state::{NodeContext, SharedState},
 };
 use magicblock_chainlink::{
-    config::ChainlinkConfig, remote_account_provider::Endpoints, ProdChainlink,
-    ProdInnerChainlink,
+    config::ChainlinkConfig,
+    fetch_cloner::{UndelegationScheduleRequest, UndelegationScheduler},
+    remote_account_provider::Endpoints,
+    ProdChainlink, ProdInnerChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -99,6 +101,29 @@ use crate::{
 type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
+/// Bridges chainlink's [`UndelegationScheduler`] to the committor service so a
+/// delegated clone rejected by AML is undelegated on the base layer.
+struct CommittorUndelegationScheduler(Arc<CommittorService>);
+
+#[async_trait::async_trait]
+impl UndelegationScheduler for CommittorUndelegationScheduler {
+    async fn schedule_undelegation(
+        &self,
+        request: UndelegationScheduleRequest,
+    ) -> magicblock_chainlink::errors::ChainlinkResult<()> {
+        let pubkey = request.pubkey;
+        self.0
+            .schedule_undelegation(pubkey, request.account)
+            .await
+            .map_err(|err| format!("committor response channel closed: {err}"))
+            .and_then(|result| result.map_err(|err| err.to_string()))
+            .map_err(|message| {
+                magicblock_chainlink::errors::ChainlinkError::FailedToScheduleUndelegationAfterAmlRejection(
+                    pubkey, message,
+                )
+            })
+    }
+}
 
 // -----------------
 // MagicValidator
@@ -238,6 +263,7 @@ impl MagicValidator {
                 &ledger.latest_block().clone(),
                 &accountsdb,
                 shared_chain_slot.clone(),
+                committor_service.clone(),
             )
             .await?,
         );
@@ -495,6 +521,7 @@ impl MagicValidator {
         latest_block: &LatestBlock,
         accountsdb: &Arc<AccountsDb>,
         chain_slot: Option<Arc<AtomicU64>>,
+        committor_service: Option<Arc<CommittorService>>,
     ) -> ApiResult<ChainlinkImpl> {
         if Self::replication_mode_uses_disabled_chainlink(
             &config.validator.replication_mode,
@@ -550,6 +577,10 @@ impl MagicValidator {
             &config.chainlink,
             config.storage.as_path(),
             chain_slot.unwrap_or_default(),
+            committor_service.map(|committor_service| {
+                Arc::new(CommittorUndelegationScheduler(committor_service))
+                    as Arc<dyn UndelegationScheduler>
+            }),
         )
         .await?;
 

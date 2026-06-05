@@ -67,6 +67,11 @@ pub enum ChainlinkError {
     #[error("Failed to perform Range risk check: {0}")]
     RangeRisk(#[from] RiskError),
 
+    #[error(
+        "Failed to schedule undelegation for {0} after AML rejection: {1}"
+    )]
+    FailedToScheduleUndelegationAfterAmlRejection(Pubkey, String),
+
     #[error("Chainlink is disabled for non-primary mode")]
     DisabledForNonPrimaryMode,
 }

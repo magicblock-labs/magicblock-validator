@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use async_trait::async_trait;
 use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
@@ -85,6 +86,23 @@ use crate::{
     },
 };
 
+#[derive(Clone)]
+pub struct UndelegationScheduleRequest {
+    pub pubkey: Pubkey,
+    pub account: AccountSharedData,
+}
+
+/// Schedules an undelegation when a delegated clone is rejected by AML before
+/// it enters the local bank. Implemented outside chainlink (e.g. by the API
+/// layer bridging to the committor service) to keep chainlink decoupled.
+#[async_trait]
+pub trait UndelegationScheduler: Send + Sync {
+    async fn schedule_undelegation(
+        &self,
+        request: UndelegationScheduleRequest,
+    ) -> ChainlinkResult<()>;
+}
+
 pub struct FetchCloner<T, U, V, C>
 where
     T: ChainRpcClient,
@@ -138,6 +156,10 @@ where
 
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
+
+    /// Schedules undelegation when post-delegation action AML checks reject
+    /// a delegated clone before it enters the local bank.
+    undelegation_scheduler: Option<Arc<dyn UndelegationScheduler>>,
 }
 
 /// Negative-cache capacity for known-empty eATAs.
@@ -177,6 +199,7 @@ where
                 .pending_operation_timeout_ms
                 .clone(),
             risk_service: self.risk_service.clone(),
+            undelegation_scheduler: self.undelegation_scheduler.clone(),
         }
     }
 }
@@ -198,6 +221,7 @@ where
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
+        undelegation_scheduler: Option<Arc<dyn UndelegationScheduler>>,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts = blacklisted_accounts(&validator_pubkey);
@@ -225,6 +249,7 @@ where
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
             risk_service,
+            undelegation_scheduler,
         });
 
         let accounts_bank_for_eviction = accounts_bank.clone();
@@ -510,14 +535,47 @@ where
             ));
         }
 
-        self.ensure_delegation_action_dependencies(
-            request.pubkey,
-            request.account.remote_slot(),
-            &request.delegation_actions,
-        )
-        .await?;
+        if let Err(err) = self
+            .ensure_delegation_action_dependencies(
+                request.pubkey,
+                request.account.remote_slot(),
+                &request.delegation_actions,
+            )
+            .await
+        {
+            if matches!(
+                err,
+                ChainlinkError::RangeRisk(
+                    magicblock_aml::RiskError::HighRiskAddresses(_)
+                )
+            ) {
+                self.schedule_undelegation_after_aml_rejection(&request)
+                    .await?;
+            }
+            return Err(err);
+        }
 
         Ok(self.clone_account_with_ownership(request).await?)
+    }
+
+    async fn schedule_undelegation_after_aml_rejection(
+        &self,
+        request: &AccountCloneRequest,
+    ) -> ChainlinkResult<()> {
+        let Some(scheduler) = self.undelegation_scheduler.as_ref() else {
+            warn!(
+                pubkey = %request.pubkey,
+                "AML rejected post-delegation actions but undelegation scheduler is unavailable"
+            );
+            return Ok(());
+        };
+
+        scheduler
+            .schedule_undelegation(UndelegationScheduleRequest {
+                pubkey: request.pubkey,
+                account: request.account.clone(),
+            })
+            .await
     }
 
     fn normalize_unresolved_dlp_clone_request(

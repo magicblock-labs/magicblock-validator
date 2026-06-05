@@ -4318,6 +4318,7 @@ version = "0.12.0"
 dependencies = [
  "agave-feature-set",
  "anyhow",
+ "async-trait",
  "borsh",
  "fd-lock",
  "magic-domain-program",

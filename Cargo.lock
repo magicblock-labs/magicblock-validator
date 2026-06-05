@@ -3770,6 +3770,7 @@ version = "0.12.0"
 dependencies = [
  "agave-feature-set",
  "anyhow",
+ "async-trait",
  "borsh",
  "fd-lock",
  "magic-domain-program",
@@ -3875,6 +3876,7 @@ dependencies = [
  "solana-transaction-error 3.2.0",
  "spl-token-2022-interface",
  "spl-token-interface",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",

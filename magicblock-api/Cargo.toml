@@ -9,6 +9,7 @@ edition.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 borsh = "1.5.3"
 fd-lock = { workspace = true }
 tracing = { workspace = true }

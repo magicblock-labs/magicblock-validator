@@ -7,6 +7,7 @@ use std::{
 
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use solana_account::AccountSharedData;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -62,6 +63,11 @@ pub enum CommittorMessage {
     ScheduleIntentBundle {
         /// The [`ScheduleIntentBundle`]s to commit
         intent_bundles: Vec<ScheduledIntentBundle>,
+        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
+    },
+    ScheduleUndelegation {
+        pubkey: Pubkey,
+        account: AccountSharedData,
         respond_to: oneshot::Sender<CommittorServiceResult<()>>,
     },
     GetPendingIntentBundles {
@@ -205,6 +211,17 @@ impl CommittorActor {
                     self.processor.schedule_intent_bundle(intent_bundles).await;
                 if let Err(e) = respond_to.send(result) {
                     error!(message_type = "ScheduleBaseIntents", error = ?e, "Failed to send response");
+                }
+            }
+            ScheduleUndelegation {
+                pubkey,
+                account,
+                respond_to,
+            } => {
+                let result =
+                    self.processor.schedule_undelegation(pubkey, account).await;
+                if let Err(e) = respond_to.send(result) {
+                    error!(message_type = "ScheduleUndelegation", error = ?e, "Failed to send response");
                 }
             }
             GetPendingIntentBundles { respond_to } => {
@@ -502,6 +519,20 @@ impl BaseIntentCommittor for CommittorService {
         rx
     }
 
+    fn schedule_undelegation(
+        &self,
+        pubkey: Pubkey,
+        account: AccountSharedData,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::ScheduleUndelegation {
+            pubkey,
+            account,
+            respond_to: tx,
+        });
+        rx
+    }
+
     fn get_commit_statuses(
         &self,
         message_id: u64,
@@ -589,6 +620,13 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     fn schedule_intent_bundles(
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>>;
+
+    /// Schedules commit-and-undelegate for a single delegated account.
+    fn schedule_undelegation(
+        &self,
+        pubkey: Pubkey,
+        account: AccountSharedData,
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Subscribes for results of BaseIntent execution
