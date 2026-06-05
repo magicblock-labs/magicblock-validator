@@ -25,7 +25,11 @@ pub use crate::intent_bundles::outbox::process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
 pub(crate) use crate::intent_bundles::{
-    outbox::process_accept_scheduled_commits::*, process_execute_callback::*,
+    outbox::{
+        process_accept_scheduled_commits::*,
+        process_set_intent_execution_stage::process_set_intent_execution_stage,
+    },
+    process_execute_callback::*,
 };
 use crate::{
     magic_sys::{

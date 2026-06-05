@@ -27,7 +27,8 @@ use crate::{
     schedule_transactions::{
         process_accept_scheduled_commits, process_add_action_callback,
         process_execute_callback, process_schedule_commit,
-        process_schedule_intent_bundle, ProcessScheduleCommitOptions,
+        process_schedule_intent_bundle, process_set_intent_execution_stage,
+        ProcessScheduleCommitOptions,
     },
 };
 
@@ -94,6 +95,14 @@ declare_process_instruction!(
             }
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
+            }
+            SetIntentExecutionStage { intent_id, stage } => {
+                process_set_intent_execution_stage(
+                    signers,
+                    invoke_context,
+                    intent_id,
+                    stage,
+                )
             }
             ScheduledCommitSent((id, _bump)) => process_scheduled_commit_sent(
                 signers,
