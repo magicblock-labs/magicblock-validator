@@ -315,9 +315,11 @@ pub mod mock {
         connected: Arc<Mutex<bool>>,
         pending_resubscribe_failures: Arc<Mutex<usize>>,
         pending_unsubscribe_failures: Arc<Mutex<usize>>,
+        pending_program_subscribe_failures: Arc<Mutex<usize>>,
         reconnectable: Arc<Mutex<bool>>,
         subscribe_blocked: Arc<Mutex<bool>>,
         subscribe_attempts: Arc<AtomicU64>,
+        program_subscribe_attempts: Arc<AtomicU64>,
         subscribe_notify: Arc<Notify>,
         client_id: String,
     }
@@ -338,9 +340,11 @@ pub mod mock {
                 connected: Arc::new(Mutex::new(true)),
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
                 pending_unsubscribe_failures: Arc::new(Mutex::new(0)),
+                pending_program_subscribe_failures: Arc::new(Mutex::new(0)),
                 reconnectable: Arc::new(Mutex::new(true)),
                 subscribe_blocked: Arc::new(Mutex::new(false)),
                 subscribe_attempts: Arc::new(AtomicU64::new(0)),
+                program_subscribe_attempts: Arc::new(AtomicU64::new(0)),
                 subscribe_notify: Arc::new(Notify::new()),
                 client_id: format!(
                     "mock:{}",
@@ -364,6 +368,14 @@ pub mod mock {
 
         pub fn fail_next_unsubscriptions(&self, n: usize) {
             *self.pending_unsubscribe_failures.lock() = n;
+        }
+
+        pub fn fail_next_program_subscriptions(&self, n: usize) {
+            *self.pending_program_subscribe_failures.lock() = n;
+        }
+
+        pub fn program_subscribe_attempts(&self) -> u64 {
+            self.program_subscribe_attempts.load(AtomicOrdering::SeqCst)
         }
 
         async fn send(&self, update: SubscriptionUpdate) {
@@ -507,6 +519,23 @@ pub mod mock {
             &self,
             program_id: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
+            self.program_subscribe_attempts
+                .fetch_add(1, AtomicOrdering::SeqCst);
+
+            {
+                let mut to_fail =
+                    self.pending_program_subscribe_failures.lock();
+                if *to_fail > 0 {
+                    *to_fail -= 1;
+                    return Err(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            "mock: forced program subscribe failure"
+                                .to_string(),
+                        ),
+                    );
+                }
+            }
+
             if !*self.connected.lock() {
                 return Err(
                     RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
