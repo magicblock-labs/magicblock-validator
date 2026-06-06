@@ -34,12 +34,19 @@ pub(crate) fn process_evict_account(
             ic_msg!(
                 invoke_context,
                 "EvictAccount: account {} is delegated={} \
-                 undelegating={}, rejecting",
+                 undelegating={}, rejecting eviction",
                 pubkey,
                 acc.delegated(),
                 acc.undelegating()
             );
             return Err(MagicBlockProgramError::AccountIsDelegated.into());
+        } else if acc.ephemeral() {
+            ic_msg!(
+                invoke_context,
+                "EvictAccount: account {} is ephemeral, rejecting eviction",
+                pubkey,
+            );
+            return Err(MagicBlockProgramError::AccountIsEphemeral.into());
         }
     }
 

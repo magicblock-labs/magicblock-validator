@@ -4237,7 +4237,7 @@ dependencies = [
  "flate2",
  "lmdb-rkv",
  "magicblock-config",
- "magicblock-magic-program-api 0.11.4",
+ "magicblock-magic-program-api 0.12.0",
  "memmap2 0.9.9",
  "parking_lot",
  "reflink-copy",
