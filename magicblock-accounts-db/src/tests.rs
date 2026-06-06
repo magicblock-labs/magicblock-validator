@@ -1,8 +1,10 @@
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 
 use magicblock_config::config::AccountsDbConfig;
+use magicblock_magic_program_api as magic_program;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::feature;
 use tempfile::TempDir;
 
 use crate::{storage::ACCOUNTS_DB_FILENAME, traits::AccountsBank, AccountsDb};
@@ -698,6 +700,59 @@ fn test_checksum_detects_state_change() {
     }
 }
 
+#[test]
+fn test_reset_bank_removes_only_stale_accounts() {
+    let env = TestEnv::new();
+    let validator_id = Pubkey::new_unique();
+
+    let removable = Pubkey::new_unique();
+    env.insert_account(&removable, &AccountSharedData::default())
+        .unwrap();
+
+    let feature_owned = Pubkey::new_unique();
+    env.insert_account(
+        &feature_owned,
+        &AccountSharedData::new(1, 0, &feature::ID),
+    )
+    .unwrap();
+
+    let mut delegated_account = AccountSharedData::default();
+    delegated_account.set_delegated(true);
+    let delegated = Pubkey::new_unique();
+    env.insert_account(&delegated, &delegated_account).unwrap();
+
+    let mut undelegating_account = AccountSharedData::default();
+    undelegating_account.set_undelegating(true);
+    let undelegating = Pubkey::new_unique();
+    env.insert_account(&undelegating, &undelegating_account)
+        .unwrap();
+
+    let mut ephemeral_account = AccountSharedData::new(1, 0, &OWNER);
+    ephemeral_account.set_ephemeral(true);
+    let ephemeral = Pubkey::new_unique();
+    env.insert_account(&ephemeral, &ephemeral_account).unwrap();
+
+    env.insert_account(&validator_id, &AccountSharedData::default())
+        .unwrap();
+    env.insert_account(
+        &magic_program::POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
+        &AccountSharedData::default(),
+    )
+    .unwrap();
+
+    env.reset_bank(&validator_id)
+        .expect("bank reset should succeed");
+
+    assert!(env.get_account(&removable).is_none());
+    assert!(env.get_account(&feature_owned).is_some());
+    assert!(env.get_account(&delegated).is_some());
+    assert!(env.get_account(&undelegating).is_some());
+    assert!(env.get_account(&ephemeral).is_some());
+    assert!(env.get_account(&validator_id).is_some());
+    assert!(env
+        .get_account(&magic_program::POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID)
+        .is_some());
+}
 // ==============================================================
 //                      TEST UTILITIES
 // ==============================================================

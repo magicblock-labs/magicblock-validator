@@ -1055,23 +1055,46 @@ where
         &self,
         program_id: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        // Check if we already have this program subscription
+        // Tentatively record the program subscription BEFORE fanning out to
+        // connected clients. This closes a race where a client reconnecting
+        // concurrently could:
+        //   1) be excluded from `connected_clients_snapshot()` (still
+        //      disconnected when we take the snapshot), AND
+        //   2) snapshot `program_subs` for its resubscribe pass before we
+        //      insert the new program id.
+        // In that case the reconnected client would never subscribe to this
+        // program until another reconnect, silently dropping coverage.
+        //
+        // By inserting first, the reconnect path (which re-reads `program_subs`
+        // after marking the client connected) is guaranteed to observe this
+        // program id and resubscribe accordingly.
         {
-            let mut subs = self.program_subs.lock().unwrap();
-            if subs.contains(&program_id) {
+            let mut subs = self
+                .program_subs
+                .lock()
+                .expect("program_subs lock poisoned");
+            if !subs.insert(program_id) {
                 debug!(program_id = %program_id, "Program subscription already exists");
                 return Ok(());
             }
-            // Add to program_subs before subscribing to clients
-            subs.insert(program_id);
         }
 
-        AccountSubscriptionTask::SubscribeProgram(
+        if let Err(err) = AccountSubscriptionTask::SubscribeProgram(
             program_id,
             self.required_program_subscription_confirmations(),
         )
         .process(self.connected_clients_snapshot())
         .await
+        {
+            // Roll back the tentative insertion so a future call can retry.
+            self.program_subs
+                .lock()
+                .expect("program_subs lock poisoned")
+                .remove(&program_id);
+            return Err(err);
+        }
+
+        Ok(())
     }
 
     async fn unsubscribe(
@@ -1332,6 +1355,43 @@ mod tests {
         .expect("stream open");
         assert_eq!(update.pubkey, pk);
         assert_eq!(update.account.unwrap().lamports, 42);
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_program_retry_after_failure_reaches_client() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel(10_000);
+        let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
+        client.fail_next_program_subscriptions(1);
+
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client.clone()], Some(100));
+        let program_id = Pubkey::new_unique();
+
+        let err = mux
+            .subscribe_program(program_id)
+            .await
+            .expect_err("first program subscription should fail");
+        assert!(
+            err.to_string().contains("forced program subscribe failure"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            !mux.program_subs_lock().contains(&program_id),
+            "failed program subscription must not be recorded"
+        );
+        assert_eq!(client.program_subscribe_attempts(), 1);
+
+        mux.subscribe_program(program_id)
+            .await
+            .expect("retry should reach the client and succeed");
+
+        assert_eq!(client.program_subscribe_attempts(), 2);
+        assert!(mux.program_subs_lock().contains(&program_id));
+        assert!(client.subscribed_program_ids().contains(&program_id));
 
         mux.shutdown().await.unwrap();
     }

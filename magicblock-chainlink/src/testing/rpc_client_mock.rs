@@ -36,6 +36,7 @@ pub struct ChainRpcClientMockBuilder {
     accounts: HashMap<Pubkey, AccountAtSlot>,
     current_slot: u64,
     clock_sysvar: Option<Clock>,
+    multi_account_response_truncate: Option<usize>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -53,6 +54,7 @@ impl ChainRpcClientMockBuilder {
             accounts: HashMap::new(),
             current_slot: 0,
             clock_sysvar: None,
+            multi_account_response_truncate: None,
         }
     }
 
@@ -110,6 +112,11 @@ impl ChainRpcClientMockBuilder {
         self
     }
 
+    pub fn truncate_multi_account_response_to(mut self, len: usize) -> Self {
+        self.multi_account_response_truncate = Some(len);
+        self
+    }
+
     pub fn build(self) -> ChainRpcClientMock {
         let mock = ChainRpcClientMock {
             commitment: self.commitment,
@@ -119,6 +126,8 @@ impl ChainRpcClientMockBuilder {
             multi_account_fetches: Arc::<AtomicU64>::default(),
             block_fetches: Arc::new(AtomicBool::new(false)),
             fetch_block_notify: Arc::new(Notify::new()),
+            multi_account_response_truncate: self
+                .multi_account_response_truncate,
         };
         if let Some(clock_sysvar) = self.clock_sysvar {
             mock.set_clock_sysvar(clock_sysvar);
@@ -144,6 +153,7 @@ pub struct ChainRpcClientMock {
     multi_account_fetches: Arc<AtomicU64>,
     block_fetches: Arc<AtomicBool>,
     fetch_block_notify: Arc<Notify>,
+    multi_account_response_truncate: Option<usize>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -157,6 +167,7 @@ impl ChainRpcClientMock {
             multi_account_fetches: Arc::<AtomicU64>::default(),
             block_fetches: Arc::new(AtomicBool::new(false)),
             fetch_block_notify: Arc::new(Notify::new()),
+            multi_account_response_truncate: None,
         }
     }
 
@@ -368,6 +379,9 @@ impl ChainRpcClient for ChainRpcClientMock {
                 .await?
                 .value;
             accounts.push(val);
+        }
+        if let Some(len) = self.multi_account_response_truncate {
+            accounts.truncate(len);
         }
 
         let res = Response {
