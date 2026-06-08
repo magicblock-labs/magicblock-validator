@@ -83,6 +83,69 @@ struct TestSlotConfig {
     account2_slot: u64,
 }
 
+#[tokio::test]
+async fn test_try_get_multi_short_multi_account_response_returns_error() {
+    init_logger();
+
+    let pubkey1 = solana_pubkey::Pubkey::new_unique();
+    let pubkey2 = solana_pubkey::Pubkey::new_unique();
+    let account1 = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let account2 = Account {
+        lamports: 2_000_000,
+        data: vec![5, 6, 7, 8],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(100)
+        .clock_sysvar_for_slot(100)
+        .account(pubkey1, account1)
+        .account(pubkey2, account2)
+        .truncate_multi_account_response_to(1)
+        .build();
+
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+
+    let (forward_tx, _forward_rx) = mpsc::channel(1_000);
+    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let chain_slot = Arc::<AtomicU64>::default();
+
+    let provider = RemoteAccountProvider::new(
+        rpc_client,
+        pubsub_client,
+        forward_tx,
+        &config,
+        subscribed_accounts,
+        ChainSlot::new(chain_slot),
+    )
+    .await
+    .unwrap();
+
+    let result = tokio::time::timeout(
+        Duration::from_millis(500),
+        provider.try_get_multi(
+            &[pubkey1, pubkey2],
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        ),
+    )
+    .await;
+
+    let fetch_result = result.expect("try_get_multi should not hang");
+    assert!(fetch_result.is_err());
+}
+
 async fn setup_matching_slots(
     config: TestSlotConfig,
     pubkey1: Pubkey,

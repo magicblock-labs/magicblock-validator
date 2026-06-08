@@ -191,6 +191,11 @@ index-size = 16_777_216
 # Env: MBV_ACCOUNTSDB__MAX_SNAPSHOTS
 max-snapshots = 4
 
+# If true, compacts accounts storage on startup.
+# Default: false
+# Env: MBV_ACCOUNTSDB__DEFRAGMENT_ON_STARTUP
+defragment-on-startup = false
+
 # If true, wipes the accounts database on every startup.
 # Default: false
 # Env: MBV_ACCOUNTSDB__RESET

@@ -9,7 +9,7 @@ use magicblock_config::config::AccountsDbConfig;
 use solana_pubkey::Pubkey;
 use tempfile::TempDir;
 
-use super::{AccountsDbIndex, Allocation};
+use super::{AccountMove, AccountsDbIndex, Allocation};
 use crate::error::AccountsDbError;
 
 /// Verifies that `upsert_account` correctly handles both new insertions
@@ -270,6 +270,81 @@ fn test_recycle_allocation_split() {
 }
 
 #[test]
+fn test_accounts_by_offset_sorts_live_allocations() {
+    let env = IndexTestEnv::new();
+    let acc1 = env.new_account_at(8, 2);
+    let acc2 = env.new_account_at(0, 1);
+    let acc3 = env.new_account_at(4, 3);
+
+    env.persist_account(&acc1);
+    env.persist_account(&acc2);
+    env.persist_account(&acc3);
+
+    let offsets = env
+        .accounts_by_offset()
+        .unwrap()
+        .into_iter()
+        .map(|allocation| allocation.offset)
+        .collect::<Vec<_>>();
+
+    assert_eq!(offsets, [0, 4, 8]);
+}
+
+#[test]
+fn test_apply_account_moves_updates_offsets_and_clears_holes() {
+    let env = IndexTestEnv::new();
+    let dead = env.new_account_at(0, 1);
+    let acc1 = env.new_account_at(4, 2);
+    let acc2 = env.new_account_at(12, 3);
+
+    env.persist_account(&dead);
+    env.persist_account(&acc1);
+    env.persist_account(&acc2);
+
+    let mut txn = env.rw_txn();
+    env.remove(&dead.pubkey, &mut txn).unwrap();
+    txn.commit().unwrap();
+    assert_eq!(env.count_deallocations(), 1);
+
+    env.apply_account_moves(&[
+        AccountMove {
+            pubkey: acc1.pubkey,
+            owner: acc1.owner,
+            old_offset: acc1.allocation.offset,
+            new_offset: 0,
+            blocks: acc1.allocation.blocks,
+        },
+        AccountMove {
+            pubkey: acc2.pubkey,
+            owner: acc2.owner,
+            old_offset: acc2.allocation.offset,
+            new_offset: acc1.allocation.blocks,
+            blocks: acc2.allocation.blocks,
+        },
+    ])
+    .unwrap();
+
+    assert_eq!(env.get_offset(&acc1.pubkey).unwrap(), 0);
+    assert_eq!(
+        env.get_offset(&acc2.pubkey).unwrap(),
+        acc1.allocation.blocks
+    );
+    assert_eq!(env.count_deallocations(), 0);
+
+    let acc1_programs = env
+        .get_program_accounts_iter(&acc1.owner)
+        .unwrap()
+        .collect::<Vec<_>>();
+    assert_eq!(acc1_programs, [(0, acc1.pubkey)]);
+
+    let acc2_programs = env
+        .get_program_accounts_iter(&acc2.owner)
+        .unwrap()
+        .collect::<Vec<_>>();
+    assert_eq!(acc2_programs, [(acc1.allocation.blocks, acc2.pubkey)]);
+}
+
+#[test]
 fn test_byte_pack_unpack_macro() {
     macro_rules! check_pack {
         ($v1: expr, $t1: ty, $v2: expr, $t2: ty) => {{
@@ -341,12 +416,28 @@ impl IndexTestEnv {
         }
     }
 
+    fn allocation_at(&self, offset: u32, blocks: u32) -> Allocation {
+        Allocation {
+            ptr: NonNull::dangling(),
+            offset,
+            blocks,
+        }
+    }
+
     /// Generates a random account with a dummy allocation.
     fn new_account(&self) -> IndexAccount {
         IndexAccount {
             pubkey: Pubkey::new_unique(),
             owner: Pubkey::new_unique(),
             allocation: self.new_allocation(),
+        }
+    }
+
+    fn new_account_at(&self, offset: u32, blocks: u32) -> IndexAccount {
+        IndexAccount {
+            pubkey: Pubkey::new_unique(),
+            owner: Pubkey::new_unique(),
+            allocation: self.allocation_at(offset, blocks),
         }
     }
 

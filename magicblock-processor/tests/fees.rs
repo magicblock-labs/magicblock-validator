@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use guinea::GuineaInstruction;
 use solana_account::{ReadableAccount, WritableAccount};
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_keypair::Keypair;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -77,6 +78,36 @@ async fn test_separate_fee_payer() {
         env.get_account(recipient.pubkey()).lamports(),
         LAMPORTS_PER_SOL + AMOUNT
     );
+    assert_eq!(env.get_payer().lamports(), initial_payer_bal - BASE_FEE);
+}
+
+#[tokio::test]
+async fn test_compute_unit_price_does_not_change_fee() {
+    let env = ExecutionTestEnv::new();
+    let initial_payer_bal = env.get_payer().lamports();
+
+    let compute_limit_ix =
+        ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
+    let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(1);
+    let guinea_ix = Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::PrintSizes,
+        vec![],
+    );
+    let txn =
+        env.build_transaction(&[compute_limit_ix, compute_price_ix, guinea_ix]);
+
+    env.execute_transaction(txn)
+        .await
+        .expect("Transaction with CU price failed");
+
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(TIMEOUT)
+        .unwrap();
+    assert!(status.meta.status.is_ok());
+    assert_eq!(status.meta.fee, BASE_FEE);
     assert_eq!(env.get_payer().lamports(), initial_payer_bal - BASE_FEE);
 }
 
@@ -162,6 +193,46 @@ async fn test_transaction_gasless_mode() {
         .unwrap();
     assert_eq!(status.txn.signatures()[0], sig);
     assert!(status.meta.status.is_ok());
+    assert_eq!(
+        env.get_payer().lamports(),
+        initial_bal,
+        "Balance changed in gasless mode"
+    );
+}
+
+#[tokio::test]
+async fn test_transaction_gasless_mode_with_cu_price() {
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let mut payer = env.get_payer();
+    payer.set_lamports(1);
+    payer.set_delegated(false);
+    let initial_bal = payer.lamports();
+    payer.commit();
+
+    let compute_limit_ix =
+        ComputeBudgetInstruction::set_compute_unit_limit(1_400_000);
+    let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(1);
+    let guinea_ix = Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::PrintSizes,
+        vec![],
+    );
+    let txn =
+        env.build_transaction(&[compute_limit_ix, compute_price_ix, guinea_ix]);
+    let sig = txn.signatures[0];
+
+    env.execute_transaction(txn)
+        .await
+        .expect("Gasless tx with CU price failed");
+
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(TIMEOUT)
+        .unwrap();
+    assert_eq!(status.txn.signatures()[0], sig);
+    assert!(status.meta.status.is_ok());
+    assert_eq!(status.meta.fee, 0);
     assert_eq!(
         env.get_payer().lamports(),
         initial_bal,

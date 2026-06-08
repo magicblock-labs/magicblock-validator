@@ -169,7 +169,7 @@ impl DeliveryPreparator {
                     signature,
                 ),
             )) => {
-                info!(error = ?err, signature = ?signature, "Buffer already initialized");
+                info!(error = ?err, signature = ?signature, "Buffer already was initialized");
             }
             // Return in any other case
             res => return res,
@@ -447,12 +447,19 @@ impl DeliveryPreparator {
         cleanup_tasks: &[CleanupTask],
         lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
-        self.table_mania
-            .release_pubkeys(&HashSet::from_iter(
-                lookup_table_keys.iter().cloned(),
-            ))
-            .await;
+        let fut1 = self.cleanup_buffers(authority, cleanup_tasks);
+        let alt_set = HashSet::from_iter(lookup_table_keys.iter().cloned());
+        let fut2 = self.table_mania.release_pubkeys(&alt_set);
 
+        let (res, ()) = join(fut1, fut2).await;
+        res
+    }
+
+    async fn cleanup_buffers(
+        &self,
+        authority: &Keypair,
+        cleanup_tasks: &[CleanupTask],
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         if cleanup_tasks.is_empty() {
             return Ok(());
         }
@@ -477,19 +484,26 @@ impl DeliveryPreparator {
                 );
 
                 async move {
-                    self.send_ixs_with_retry(&instructions, authority, 1).await
+                    (
+                        cleanup_tasks,
+                        self.send_ixs_with_retry(&instructions, authority, 1)
+                            .await,
+                    )
                 }
             });
 
         join_all(close_futs)
             .await
             .into_iter()
-            .inspect(|res| {
-                if let Err(err) = res {
-                    error!(error = ?err, "Failed to cleanup buffers");
-                }
+            .try_for_each(|(cleanup_tasks, res)| {
+                res.inspect_err(|err| {
+                    let buffer_pdas = cleanup_tasks
+                        .iter()
+                        .map(|el| el.buffer_pda(&authority.pubkey()))
+                        .collect::<Vec<_>>();
+                    error!(error = ?err, "Failed to cleanup buffers: {:?}", buffer_pdas);
+                })
             })
-            .collect::<Result<(), _>>()
     }
 }
 

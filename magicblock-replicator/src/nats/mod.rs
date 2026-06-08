@@ -73,10 +73,16 @@ impl Subjects {
     pub const TRANSACTION: &'static str = "event.transaction";
     pub const BLOCK: &'static str = "event.block";
     pub const SUPERBLOCK: &'static str = "event.superblock";
+    pub const RESET: &'static str = "event.reset";
 
     /// All subjects for stream configuration.
-    pub const fn all() -> [&'static str; 3] {
-        [Self::TRANSACTION, Self::BLOCK, Self::SUPERBLOCK]
+    pub const fn all() -> [&'static str; 4] {
+        [
+            Self::TRANSACTION,
+            Self::BLOCK,
+            Self::SUPERBLOCK,
+            Self::RESET,
+        ]
     }
 
     const fn from(s: &'static str) -> Subject {
@@ -98,11 +104,17 @@ impl Subjects {
         Self::from(Self::SUPERBLOCK)
     }
 
+    /// Typed subject for startup reset events.
+    pub fn reset() -> Subject {
+        Self::from(Self::RESET)
+    }
+
     pub(crate) fn from_message(msg: &Message) -> Subject {
         match msg {
             Message::Transaction(_) => Subjects::transaction(),
             Message::Block(_) => Subjects::block(),
             Message::SuperBlock(_) => Subjects::superblock(),
+            Message::Reset(_) => Subjects::reset(),
         }
     }
 }

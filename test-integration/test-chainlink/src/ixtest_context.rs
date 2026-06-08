@@ -16,7 +16,7 @@ use magicblock_chainlink::{
     testing::cloner_stub::ClonerStub,
     InnerChainlink, ReplicationModeAwareChainlink,
 };
-use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
+use magicblock_config::config::LifecycleMode;
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::AccountSharedData;
 use solana_commitment_config::CommitmentConfig;
@@ -140,14 +140,9 @@ impl IxtestContext {
                 _ => (None, None),
             }
         };
-        let chainlink = InnerChainlink::try_new(
-            &bank,
-            fetch_cloner,
-            validator_kp.pubkey(),
-            &ChainLinkConfig::default(),
-        )
-        .map(ReplicationModeAwareChainlink::enabled)
-        .unwrap();
+        let chainlink = InnerChainlink::try_new(&bank, fetch_cloner)
+            .map(ReplicationModeAwareChainlink::enabled)
+            .unwrap();
 
         let rpc_client = IxtestContext::get_rpc_client(commitment);
         Self {
