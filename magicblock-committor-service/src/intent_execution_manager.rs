@@ -1,7 +1,7 @@
 pub(crate) mod db;
+pub mod intent_channerl;
 mod intent_execution_engine;
 pub mod intent_scheduler;
-pub mod intent_channerl;
 
 use std::sync::Arc;
 
@@ -82,7 +82,7 @@ impl<D: DB> IntentExecutionManager<D> {
         // Worker first will clean-up channel, and then DB.
         // Pushing into channel would break order of commits
         if !self.db.is_empty() {
-            self.db.store_intent_bundles(intent_bundles).await?;
+            self.db.store_intent_bundles(intent_bundles)?;
             return Ok(());
         }
 
@@ -99,7 +99,6 @@ impl<D: DB> IntentExecutionManager<D> {
                 let leftovers = std::iter::once(el).chain(iter).collect();
                 self.db
                     .store_intent_bundles(leftovers)
-                    .await
                     .map_err(IntentExecutionManagerError::from)
             }
         }

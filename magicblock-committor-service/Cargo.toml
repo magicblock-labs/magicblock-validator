@@ -32,6 +32,7 @@ magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
+pin-project = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
@@ -54,6 +55,7 @@ solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
 
 [dev-dependencies]
 solana-signature = { workspace = true, features = ["rand"] }

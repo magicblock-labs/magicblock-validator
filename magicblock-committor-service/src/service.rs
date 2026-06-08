@@ -1,6 +1,6 @@
+pub mod acceptor;
 pub mod intent_client;
 pub mod outbox_intent_bundles_reader;
-pub mod acceptor;
 
 use std::{
     collections::{HashMap, HashSet},
