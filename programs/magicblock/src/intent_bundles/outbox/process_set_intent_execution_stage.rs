@@ -26,8 +26,66 @@ pub fn process_set_intent_execution_stage(
     stage: ExecutionStage,
 ) -> Result<(), InstructionError> {
     let validator_auth = effective_validator_authority_id();
-    verify(&signers, invoke_context, &validator_auth, intent_id)?;
+    validate(&signers, invoke_context, &validator_auth, intent_id)?;
 
+    set_new_execution_stage(invoke_context, intent_id, stage)
+}
+
+fn validate(
+    signers: &HashSet<Pubkey>,
+    invoke_context: &InvokeContext,
+    validator_auth: &Pubkey,
+    intent_id: u64,
+) -> Result<(), InstructionError> {
+    let transaction_context = &*invoke_context.transaction_context;
+
+    // Check that validator authority signed the tx
+    let provided_validator_auth = get_instruction_pubkey_with_idx(
+        transaction_context,
+        VALIDATOR_AUTHORITY_IDX,
+    )?;
+    if provided_validator_auth != validator_auth {
+        ic_msg!(
+            invoke_context,
+            "SetIntentExecutionStage ERR: invalid validator authority {}, should be {}",
+            provided_validator_auth,
+            validator_auth
+        );
+        return Err(InstructionError::InvalidArgument);
+    }
+    if !signers.contains(validator_auth) {
+        ic_msg!(
+            invoke_context,
+            "SetIntentExecutionStage ERR: validator authority {} not in signers",
+            validator_auth
+        );
+        return Err(InstructionError::MissingRequiredSignature);
+    }
+
+    // Validate pda we about to apply transition to
+    let provided_pda =
+        get_instruction_pubkey_with_idx(transaction_context, INTENT_PDA_IDX)?;
+    let expected_pda = outbox_intent_pda(intent_id);
+    if *provided_pda != expected_pda {
+        ic_msg!(
+            invoke_context,
+            "SetIntentExecutionStage ERR: account at idx {} is {}, expected PDA {} for intent {}",
+            INTENT_PDA_IDX,
+            provided_pda,
+            expected_pda,
+            intent_id
+        );
+        return Err(InstructionError::InvalidArgument);
+    }
+
+    Ok(())
+}
+
+fn set_new_execution_stage(
+    invoke_context: &InvokeContext,
+    intent_id: u64,
+    stage: ExecutionStage,
+) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
     let intent_acc =
         get_instruction_account_with_idx(transaction_context, INTENT_PDA_IDX)?;
@@ -65,54 +123,6 @@ pub fn process_set_intent_execution_stage(
         .borrow_mut()?
         .data_as_mut_slice()
         .copy_from_slice(&data);
-
-    Ok(())
-}
-
-fn verify(
-    signers: &HashSet<Pubkey>,
-    invoke_context: &InvokeContext,
-    validator_auth: &Pubkey,
-    intent_id: u64,
-) -> Result<(), InstructionError> {
-    let transaction_context = &*invoke_context.transaction_context;
-
-    let provided_validator_auth = get_instruction_pubkey_with_idx(
-        transaction_context,
-        VALIDATOR_AUTHORITY_IDX,
-    )?;
-    if provided_validator_auth != validator_auth {
-        ic_msg!(
-            invoke_context,
-            "SetIntentExecutionStage ERR: invalid validator authority {}, should be {}",
-            provided_validator_auth,
-            validator_auth
-        );
-        return Err(InstructionError::InvalidArgument);
-    }
-    if !signers.contains(validator_auth) {
-        ic_msg!(
-            invoke_context,
-            "SetIntentExecutionStage ERR: validator authority {} not in signers",
-            validator_auth
-        );
-        return Err(InstructionError::MissingRequiredSignature);
-    }
-
-    let provided_pda =
-        get_instruction_pubkey_with_idx(transaction_context, INTENT_PDA_IDX)?;
-    let expected_pda = outbox_intent_pda(intent_id);
-    if *provided_pda != expected_pda {
-        ic_msg!(
-            invoke_context,
-            "SetIntentExecutionStage ERR: account at idx {} is {}, expected PDA {} for intent {}",
-            INTENT_PDA_IDX,
-            provided_pda,
-            expected_pda,
-            intent_id
-        );
-        return Err(InstructionError::InvalidArgument);
-    }
 
     Ok(())
 }

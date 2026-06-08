@@ -1,6 +1,7 @@
 pub(crate) mod db;
 mod intent_execution_engine;
 pub mod intent_scheduler;
+pub mod intent_channerl;
 
 use std::sync::Arc;
 

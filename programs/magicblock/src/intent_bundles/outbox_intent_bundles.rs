@@ -54,24 +54,33 @@ pub enum OutboxIntentBundleStatus {
 }
 
 impl OutboxIntentBundleStatus {
+    // TODO(edwin): split into is_valid_transition and apply_transaction
     fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,
     ) -> Result<(), &'static str> {
         match (self, stage) {
-            (
-                Self::Accepted,
-                ExecutionStage::TwoStage(TwoStageProgress::Finalizing {
-                    ..
-                }),
-            ) => Err("cannot transition from Accepted to Finalizing"),
-            (this @ Self::Accepted, stage) => {
-                *this = Self::Executing(stage);
-                Ok(())
+            (this @ Self::Accepted, ExecutionStage::TwoStage(stage)) => {
+                match stage {
+                    // Transition from Accepted to Committing stage
+                    val @ TwoStageProgress::Committing(_) => {
+                        *this = Self::Executing(ExecutionStage::TwoStage(val));
+                    }
+                    // Transition from Accepted state to TwoStage::Finalizing is invalid
+                    TwoStageProgress::Finalizing { .. } => {
+                        return Err(
+                            "cannot transition from Accepted to Finalizing",
+                        )
+                    }
+                }
+            }
+            (this @ Self::Accepted, val @ ExecutionStage::SingleStage(_)) => {
+                *this = Self::Executing(val);
             }
             (Self::Executing(ref mut this), stage) => {
-                this.apply_stage_transition(stage)
+                this.apply_stage_transition(stage)?;
             }
-        }
+        };
+        Ok(())
     }
 }

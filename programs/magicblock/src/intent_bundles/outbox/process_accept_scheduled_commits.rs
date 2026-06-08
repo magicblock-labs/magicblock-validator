@@ -31,7 +31,7 @@ pub fn process_accept_scheduled_commits(
 ) -> Result<(), InstructionError> {
     // Common conditions verification
     let validator_auth = effective_validator_authority_id();
-    verify(&signers, invoke_context, &validator_auth)?;
+    validate(&signers, invoke_context, &validator_auth)?;
 
     // pop first n intents
     // n - is number of OutboxIntentBundle PDAs passed
@@ -61,7 +61,7 @@ pub fn process_accept_scheduled_commits(
     Ok(())
 }
 
-fn verify(
+fn validate(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     validator_auth: &Pubkey,
