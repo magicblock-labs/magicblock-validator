@@ -9,7 +9,7 @@ use magicblock_aml::RiskService;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     errors::ChainlinkResult,
-    fetch_cloner::{FetchAndCloneResult, FetchCloner, UndelegationScheduler},
+    fetch_cloner::{FetchAndCloneResult, FetchCloner},
     remote_account_provider::{
         chain_pubsub_client::{mock::ChainPubsubClientMock, ChainPubsubClient},
         config::RemoteAccountProviderConfig,
@@ -56,13 +56,12 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn init(slot: Slot) -> Self {
-        Self::init_with_services(slot, None, None).await
+        Self::init_with_services(slot, None).await
     }
 
     pub async fn init_with_services(
         slot: Slot,
         risk_service: Option<Arc<RiskService>>,
-        undelegation_scheduler: Option<Arc<dyn UndelegationScheduler>>,
     ) -> Self {
         let (rpc_client, pubsub_client) = {
             let rpc_client =
@@ -112,7 +111,6 @@ impl TestContext {
                             rx,
                             None,
                             risk_service,
-                            undelegation_scheduler,
                         )),
                         Some(provider),
                     )

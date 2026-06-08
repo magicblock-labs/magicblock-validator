@@ -58,7 +58,6 @@ url = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 magicblock-chainlink = { path = ".", features = ["dev-context"] }
-tempfile = { workspace = true }
 
 [features]
 default = []

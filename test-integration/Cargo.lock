@@ -4318,7 +4318,6 @@ version = "0.12.0"
 dependencies = [
  "agave-feature-set",
  "anyhow",
- "async-trait",
  "borsh",
  "fd-lock",
  "magic-domain-program",
@@ -11137,8 +11136,10 @@ name = "test-chainlink"
 version = "0.0.0"
 dependencies = [
  "bincode",
+ "borsh",
  "futures",
  "integration-test-tools",
+ "magicblock-aml",
  "magicblock-chainlink",
  "magicblock-config",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
@@ -11156,6 +11157,7 @@ dependencies = [
  "solana-sdk-ids",
  "solana-system-interface 3.2.0",
  "spl-token-interface",
+ "tempfile",
  "tokio",
  "tracing",
 ]

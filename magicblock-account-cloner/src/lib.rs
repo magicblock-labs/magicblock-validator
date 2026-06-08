@@ -214,6 +214,13 @@ impl ChainlinkCloner {
         InstructionUtils::set_program_authority_instruction(program, authority)
     }
 
+    fn schedule_undelegation_ix(pubkey: Pubkey) -> Instruction {
+        InstructionUtils::schedule_commit_and_undelegate_instruction(
+            &validator_authority_id(),
+            vec![pubkey],
+        )
+    }
+
     // -----------------
     // Clone Fields Helper
     // -----------------
@@ -255,7 +262,9 @@ impl ChainlinkCloner {
         // To re-enable, uncomment the following and use `ixs` instead of `[clone_ix]`:
         // let ixs = self.maybe_add_crank_commits_ix(request, clone_ix);
         let mut ixs = vec![clone_ix];
-        if !actions.is_empty() {
+        if request.needs_undelegation {
+            ixs.push(Self::schedule_undelegation_ix(request.pubkey));
+        } else if !actions.is_empty() {
             ixs.push(Self::post_delegation_action_ix(request.pubkey, actions));
         }
 
@@ -321,7 +330,8 @@ impl ChainlinkCloner {
             let end = (offset + MAX_INLINE_DATA_SIZE).min(data.len());
             let chunk = data[offset..end].to_vec();
             let is_last = end == data.len();
-            let final_without_actions = is_last && actions.is_empty();
+            let final_without_actions =
+                is_last && actions.is_empty() && !request.needs_undelegation;
 
             let continue_ix = Self::clone_continue_ix(
                 request.pubkey,
@@ -334,7 +344,7 @@ impl ChainlinkCloner {
             offset = end;
         }
 
-        if !actions.is_empty() {
+        if request.needs_undelegation || !actions.is_empty() {
             let continue_ix = Self::clone_continue_ix(
                 request.pubkey,
                 data.len() as u32,
@@ -342,11 +352,12 @@ impl ChainlinkCloner {
                 true,
                 actions.clone(),
             );
-            let action_ix =
-                Self::post_delegation_action_ix(request.pubkey, actions);
-            txs.push(
-                self.create_signed_tx(&[continue_ix, action_ix], blockhash),
-            );
+            let ix = if request.needs_undelegation {
+                Self::schedule_undelegation_ix(request.pubkey)
+            } else {
+                Self::post_delegation_action_ix(request.pubkey, actions)
+            };
+            txs.push(self.create_signed_tx(&[continue_ix, ix], blockhash));
         }
 
         txs
@@ -740,6 +751,7 @@ mod tests {
             commit_frequency_ms: None,
             delegation_actions: DelegationActions::from(actions),
             delegated_to_other: None,
+            needs_undelegation: false,
         }
     }
 

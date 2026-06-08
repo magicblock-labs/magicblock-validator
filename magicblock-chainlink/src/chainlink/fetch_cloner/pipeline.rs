@@ -134,6 +134,7 @@ fn classify_single_account(
                             commit_frequency_ms: None,
                             delegation_actions: DelegationActions::default(),
                             delegated_to_other: None,
+                            needs_undelegation: false,
                         });
                     }
                 }
@@ -378,6 +379,7 @@ where
                 commit_frequency_ms,
                 delegation_actions,
                 delegated_to_other,
+                needs_undelegation: false,
             });
             if cleanup_delegated_subscription {
                 if cleanup_undelegation_tracking {

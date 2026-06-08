@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     net::TcpListener,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::Duration,
 };
 
@@ -15,41 +15,13 @@ use dlp_api::{
     state::DelegationRecord,
 };
 use magicblock_aml::RiskService;
-use magicblock_chainlink::{
-    chainlink::errors::ChainlinkResult,
-    fetch_cloner::{UndelegationScheduleRequest, UndelegationScheduler},
-    testing::init_logger,
-};
+use magicblock_chainlink::testing::init_logger;
 use magicblock_config::config::RiskConfig;
-use solana_account::{Account, ReadableAccount};
+use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
+use test_chainlink::test_context::TestContext;
 use tokio::task::JoinHandle;
-use utils::test_context::TestContext;
-
-mod utils;
-
-#[derive(Default)]
-struct RecordingUndelegationScheduler {
-    requests: Mutex<Vec<UndelegationScheduleRequest>>,
-}
-
-impl RecordingUndelegationScheduler {
-    fn requests(&self) -> Vec<UndelegationScheduleRequest> {
-        self.requests.lock().unwrap().clone()
-    }
-}
-
-#[async_trait::async_trait]
-impl UndelegationScheduler for RecordingUndelegationScheduler {
-    async fn schedule_undelegation(
-        &self,
-        request: UndelegationScheduleRequest,
-    ) -> ChainlinkResult<()> {
-        self.requests.lock().unwrap().push(request);
-        Ok(())
-    }
-}
 
 struct MockRiskServer {
     base_url: String,
@@ -178,13 +150,15 @@ fn add_delegation_record_with_signer_action(
     );
 }
 
-#[tokio::test]
-async fn post_delegation_aml_rejection_schedules_undelegation() {
+async fn setup(
+    risk_score: u64,
+) -> (TestContext, MockRiskServer, Pubkey, tempfile::TempDir) {
     init_logger();
 
-    let high_risk_signer = Pubkey::new_unique();
+    let signer = Pubkey::new_unique();
     let server =
-        MockRiskServer::start(vec![(high_risk_signer.to_string(), 9)], 1).await;
+        MockRiskServer::start(vec![(signer.to_string(), risk_score)], 1).await;
+    // Keep alive for the test: RiskService writes risk-cache.db under this path.
     let temp_ledger = tempfile::tempdir().expect("temp ledger");
     let risk_service = RiskService::try_from_config(
         &risk_config(server.base_url.clone()),
@@ -193,15 +167,10 @@ async fn post_delegation_aml_rejection_schedules_undelegation() {
     .expect("risk config should be valid")
     .expect("risk service should be enabled");
     let risk_service = Arc::new(risk_service);
-    let scheduler = Arc::new(RecordingUndelegationScheduler::default());
 
     let slot = 100;
-    let ctx = TestContext::init_with_services(
-        slot,
-        Some(risk_service),
-        Some(scheduler.clone() as Arc<dyn UndelegationScheduler>),
-    )
-    .await;
+    let ctx =
+        TestContext::init_with_risk_service(slot, Some(risk_service)).await;
 
     let delegated_pubkey = Pubkey::new_unique();
     let owner = system_program::id();
@@ -219,34 +188,43 @@ async fn post_delegation_aml_rejection_schedules_undelegation() {
         &ctx,
         delegated_pubkey,
         owner,
-        high_risk_signer,
+        signer,
     );
 
-    let err = ctx
-        .ensure_account(&delegated_pubkey)
+    (ctx, server, delegated_pubkey, temp_ledger)
+}
+
+#[tokio::test]
+async fn post_delegation_aml_rejection_schedules_undelegation_with_high_risk_signer(
+) {
+    let (ctx, server, delegated_pubkey, _temp_ledger) = setup(9).await;
+
+    ctx.ensure_account(&delegated_pubkey)
         .await
-        .expect_err("high-risk signer should reject the clone");
+        .expect("high-risk signer should still be cloned");
 
+    let req = ctx.cloner.clone_requests().first().cloned().unwrap();
     assert!(
-        matches!(
-            &err,
-            magicblock_chainlink::errors::ChainlinkError::PendingRequestOwnerFailed(
-                pubkey,
-                message,
-            ) if *pubkey == delegated_pubkey && message.contains("high risk")
-        ),
-        "unexpected error: {err:?}"
-    );
-    assert!(
-        ctx.cloner.clone_requests().is_empty(),
-        "AML-rejected action target must not be cloned"
+        req.needs_undelegation,
+        "AML-rejected action must schedule undelegation"
     );
 
-    let scheduled = scheduler.requests();
-    assert_eq!(scheduled.len(), 1);
-    assert_eq!(scheduled[0].pubkey, delegated_pubkey);
-    assert!(scheduled[0].account.delegated());
-    assert_eq!(scheduled[0].account.owner(), &owner);
+    server.join().await;
+}
+
+#[tokio::test]
+async fn post_delegation_aml_accepts_low_risk_signer() {
+    let (ctx, server, delegated_pubkey, _temp_ledger) = setup(1).await;
+
+    ctx.ensure_account(&delegated_pubkey)
+        .await
+        .expect("low-risk signer should be cloned");
+
+    let req = ctx.cloner.clone_requests().first().cloned().unwrap();
+    assert!(
+        !req.needs_undelegation,
+        "AML-accepted action must not schedule undelegation"
+    );
 
     server.join().await;
 }

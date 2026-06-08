@@ -14,7 +14,7 @@ use magicblock_program::magic_scheduled_base_intent::{
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
-use solana_account::{Account, AccountSharedData};
+use solana_account::Account;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -229,18 +229,6 @@ impl CommittorProcessor {
         Ok(())
     }
 
-    #[instrument(skip(self, account))]
-    pub async fn schedule_undelegation(
-        &self,
-        pubkey: Pubkey,
-        account: AccountSharedData,
-    ) -> CommittorServiceResult<()> {
-        self.schedule_intent_bundle(vec![undelegation_intent_bundle(
-            pubkey, account,
-        )])
-        .await
-    }
-
     #[instrument(skip(self, intent_bundles))]
     pub async fn schedule_recovered_intent_bundles(
         &self,
@@ -273,69 +261,6 @@ impl CommittorProcessor {
             .fetch_current_commit_nonces(pubkeys, min_context_slot)
             .await
     }
-}
-
-pub(crate) fn undelegation_intent_bundle(
-    pubkey: Pubkey,
-    account: AccountSharedData,
-) -> ScheduledIntentBundle {
-    let committed_account = CommittedAccount::from((pubkey, account));
-    let remote_slot = committed_account.remote_slot;
-    let intent_bundle = MagicIntentBundle {
-        commit_and_undelegate: Some(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(vec![committed_account]),
-            undelegate_action: UndelegateType::Standalone,
-        }),
-        ..Default::default()
-    };
-
-    ScheduledIntentBundle {
-        id: intent_id(),
-        slot: remote_slot,
-        blockhash: Default::default(),
-        sent_transaction: Default::default(),
-        payer: Default::default(),
-        intent_bundle,
-    }
-}
-
-fn intent_id() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()
-        .try_into()
-        .unwrap_or(u64::MAX)
-}
-
-/// Shared assertion that `bundle` is a standalone commit-and-undelegate for a
-/// single `(pubkey, owner, slot)` account. Used by the builder and stub tests.
-#[cfg(test)]
-pub(crate) fn assert_undelegation_bundle(
-    bundle: &ScheduledIntentBundle,
-    pubkey: Pubkey,
-    owner: Pubkey,
-    slot: u64,
-) {
-    assert_eq!(bundle.slot, slot);
-    assert!(bundle.intent_bundle.commit.is_none());
-    let commit_and_undelegate = bundle
-        .intent_bundle
-        .commit_and_undelegate
-        .as_ref()
-        .expect("commit-and-undelegate intent should be present");
-    assert!(matches!(
-        commit_and_undelegate.undelegate_action,
-        UndelegateType::Standalone
-    ));
-    let CommitType::Standalone(accounts) = &commit_and_undelegate.commit_action
-    else {
-        panic!("commit action should be standalone");
-    };
-    assert_eq!(accounts.len(), 1);
-    assert_eq!(accounts[0].pubkey, pubkey);
-    assert_eq!(accounts[0].remote_slot, slot);
-    assert_eq!(accounts[0].account.owner, owner);
 }
 
 fn pending_rows_to_scheduled_intent_bundles(
@@ -521,18 +446,6 @@ mod tests {
         row.created_at = created_at;
         row.last_retried_at = last_retried_at;
         row
-    }
-
-    #[test]
-    fn undelegation_intent_bundle_builds_commit_and_undelegate() {
-        let pubkey = Pubkey::new_unique();
-        let owner = Pubkey::new_unique();
-        let mut account = AccountSharedData::new(1_000, 4, &owner);
-        account.set_remote_slot(42);
-
-        let bundle = undelegation_intent_bundle(pubkey, account);
-
-        assert_undelegation_bundle(&bundle, pubkey, owner, 42);
     }
 
     #[test]

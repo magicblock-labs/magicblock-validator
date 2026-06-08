@@ -8,7 +8,6 @@ use std::{
 use async_trait::async_trait;
 use futures_util::future::join_all;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
-use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
@@ -174,14 +173,6 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         self.inner.schedule_intent_bundles(intent_bundles)
-    }
-
-    fn schedule_undelegation(
-        &self,
-        pubkey: Pubkey,
-        account: AccountSharedData,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
-        self.inner.schedule_undelegation(pubkey, account)
     }
 
     fn subscribe_for_results(

@@ -103,6 +103,7 @@ impl IxtestContext {
                         commit_frequency_ms: None,
                         delegation_actions: DelegationActions::default(),
                         delegated_to_other: None,
+                        needs_undelegation: false,
                     })
                     .await
                     .unwrap();
@@ -128,7 +129,6 @@ impl IxtestContext {
                             &cloner,
                             validator_kp.insecure_clone(),
                             rx,
-                            None,
                             None,
                             None,
                         )),

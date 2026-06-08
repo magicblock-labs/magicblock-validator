@@ -59,7 +59,6 @@ impl InstructionUtils {
     // -----------------
     // Schedule Commit and Undelegate
     // -----------------
-    #[cfg(test)]
     pub fn schedule_commit_and_undelegate(
         payer: &Keypair,
         pubkeys: Vec<Pubkey>,
@@ -72,8 +71,7 @@ impl InstructionUtils {
         Self::into_transaction(payer, ix, recent_blockhash)
     }
 
-    #[cfg(test)]
-    pub(crate) fn schedule_commit_and_undelegate_instruction(
+    pub fn schedule_commit_and_undelegate_instruction(
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Instruction {

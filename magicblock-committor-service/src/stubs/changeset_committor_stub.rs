@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, ScheduledIntentBundle, UndelegateType,
 };
-use solana_account::{Account, AccountSharedData};
+use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_status_client_types::{
@@ -19,7 +19,6 @@ use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 use crate::{
-    committor_processor::undelegation_intent_bundle,
     error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
@@ -99,16 +98,6 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         }
 
         receiver
-    }
-
-    fn schedule_undelegation(
-        &self,
-        pubkey: Pubkey,
-        account: AccountSharedData,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
-        self.schedule_intent_bundles(vec![undelegation_intent_bundle(
-            pubkey, account,
-        )])
     }
 
     fn subscribe_for_results(
@@ -307,32 +296,4 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards")
         .as_secs()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::committor_processor::assert_undelegation_bundle;
-
-    #[tokio::test]
-    async fn schedule_undelegation_exposes_commit_and_undelegate_api() {
-        let committor = ChangesetCommittorStub::default();
-        let pubkey = Pubkey::new_unique();
-        let owner = Pubkey::new_unique();
-        let mut account = AccountSharedData::new(1_000, 4, &owner);
-        account.set_remote_slot(42);
-
-        committor
-            .schedule_undelegation(pubkey, account.clone())
-            .await
-            .expect("committor response channel should be open")
-            .expect("undelegation should be scheduled");
-
-        assert_eq!(committor.len(), 1);
-        assert_eq!(committor.committed(&pubkey), Some(account.into()));
-
-        let changesets = committor.committed_changesets.lock().unwrap();
-        let intent = changesets.values().next().expect("scheduled intent");
-        assert_undelegation_bundle(intent, pubkey, owner, 42);
-    }
 }
