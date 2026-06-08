@@ -71,6 +71,7 @@ fn test_defaults_are_sane() {
     // Verify internal config defaults (not exposed to CLI)
     assert_eq!(config.accountsdb.database_size, 100 * 1024 * 1024); // 100MB
     assert!(matches!(config.accountsdb.block_size, BlockSize::Block256));
+    assert!(!config.accountsdb.defragment_on_startup);
 
     // gRPC defaults
     assert_eq!(config.grpc.max_subs_in_old_optimized, 5000);
@@ -93,6 +94,21 @@ fn test_load_basic_toml() {
 
     assert_eq!(config.lifecycle, LifecycleMode::Offline);
     assert_eq!(config.storage.to_str().unwrap(), "/var/lib/magicblock");
+}
+
+#[test]
+#[parallel]
+fn test_accountsdb_defragment_on_startup_toml() {
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [accountsdb]
+        defragment-on-startup = true
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap()]);
+
+    assert!(config.accountsdb.defragment_on_startup);
 }
 
 // ============================================================================
@@ -230,6 +246,16 @@ fn test_env_vars_deep_mapping() {
 
     let config = run_cli(vec![]);
     assert_eq!(config.accountsdb.database_size, 4096);
+}
+
+#[test]
+#[serial]
+fn test_accountsdb_defragment_on_startup_env_mapping() {
+    let _guard =
+        EnvVarGuard::new("MBV_ACCOUNTSDB__DEFRAGMENT_ON_STARTUP", "true");
+
+    let config = run_cli(vec![]);
+    assert!(config.accountsdb.defragment_on_startup);
 }
 
 #[test]

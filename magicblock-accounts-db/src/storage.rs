@@ -3,7 +3,7 @@ use std::{
     io::{self, Write},
     mem::size_of,
     path::Path,
-    ptr::NonNull,
+    ptr::{self, NonNull},
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
@@ -335,6 +335,106 @@ impl AccountsStorage {
             .fetch_sub(val, Ordering::Relaxed);
     }
 
+    pub(crate) fn validate_allocation(
+        &self,
+        offset: Offset,
+        blocks: Blocks,
+    ) -> AccountsDbResult<()> {
+        if blocks == 0 {
+            return Err(AccountsDbError::Internal(
+                "accountsdb allocation has zero blocks".into(),
+            ));
+        }
+
+        let end = offset.checked_add(blocks).ok_or_else(|| {
+            AccountsDbError::Internal(
+                "accountsdb allocation offset overflow".into(),
+            )
+        })? as u64;
+        let cursor = self.header().write_cursor.load(Ordering::Relaxed);
+        let capacity = self.header().capacity_blocks as u64;
+
+        if end > cursor || end > capacity {
+            return Err(AccountsDbError::Internal(format!(
+                "accountsdb allocation out of bounds: offset={offset}, blocks={blocks}, cursor={cursor}, capacity={capacity}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn validate_cursor(
+        &self,
+        cursor: Offset,
+    ) -> AccountsDbResult<()> {
+        let current = self.header().write_cursor.load(Ordering::Relaxed);
+        let capacity = self.header().capacity_blocks as u64;
+        let cursor = cursor as u64;
+
+        if cursor > current || cursor > capacity {
+            return Err(AccountsDbError::Internal(format!(
+                "accountsdb compacted cursor out of bounds: cursor={cursor}, current={current}, capacity={capacity}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Moves an allocated block range inside the mmap.
+    ///
+    /// # Safety
+    /// The caller must ensure no account references into the storage are live and
+    /// that `old_offset..old_offset + blocks` and
+    /// `new_offset..new_offset + blocks` are valid mapped block ranges.
+    pub(crate) unsafe fn move_allocation(
+        &self,
+        old_offset: Offset,
+        new_offset: Offset,
+        blocks: Blocks,
+        scratch: &mut Vec<u8>,
+    ) {
+        if old_offset == new_offset {
+            return;
+        }
+
+        let len = blocks as usize * self.block_size;
+        let src = self.resolve_ptr(old_offset).as_ptr();
+        let dst = self.resolve_ptr(new_offset).as_ptr();
+        scratch.resize(len, 0);
+        // SAFETY: The caller validated both block ranges. The temporary buffer
+        // prevents an earlier move from overwriting a later move's source.
+        unsafe {
+            ptr::copy_nonoverlapping(src, scratch.as_mut_ptr(), len);
+            ptr::copy_nonoverlapping(scratch.as_ptr(), dst, len);
+        };
+    }
+
+    /// Finalizes compaction metadata and clears bytes after the new cursor.
+    ///
+    /// # Safety
+    /// The caller must ensure all live allocations have already been moved below
+    /// `new_cursor` and no account references into the old tail are live.
+    pub(crate) unsafe fn finish_defragment(&self, new_cursor: Offset) {
+        let header = self.header();
+        let old_cursor = header
+            .write_cursor
+            .swap(new_cursor as u64, Ordering::Relaxed);
+        header.recycled_count.store(0, Ordering::Relaxed);
+
+        let new_cursor = new_cursor as u64;
+        if old_cursor <= new_cursor {
+            return;
+        }
+
+        let tail_blocks = old_cursor - new_cursor;
+        let tail_offset = new_cursor as usize * self.block_size;
+        let tail_len = tail_blocks as usize * self.block_size;
+        let tail_ptr = unsafe { self.data_region.as_ptr().add(tail_offset) };
+        // SAFETY: `old_cursor` was the previous active cursor, so the tail lies
+        // within the mapped data region.
+        unsafe { tail_ptr.write_bytes(0, tail_len) };
+    }
+
     /// Calculates how many blocks are needed to store `size_bytes`.
     pub(crate) fn blocks_required(&self, size_bytes: usize) -> Blocks {
         size_bytes.div_ceil(self.block_size) as Blocks
@@ -351,11 +451,11 @@ impl AccountsStorage {
     }
 
     /// Flushes changes to disk.
-    pub(crate) fn flush(&self) {
-        let _ = self
-            .mmap
+    pub(crate) fn flush(&self) -> AccountsDbResult<()> {
+        self.mmap
             .flush()
-            .log_err(|| "failed to sync flush the mmap");
+            .log_err(|| "failed to sync flush the mmap")?;
+        Ok(())
     }
 
     /// Reloads the database from a different path (used for snapshots).

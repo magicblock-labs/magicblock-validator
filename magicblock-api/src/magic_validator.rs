@@ -905,6 +905,15 @@ impl MagicValidator {
 
         log_timing("startup", "maybe_process_ledger", step_start);
 
+        if self.config.accountsdb.defragment_on_startup {
+            let step_start = Instant::now();
+            // SAFETY: ledger replay has completed, and normal startup has not
+            // yet enabled bank cleanup, scheduler modes, replication, slot
+            // ticks, or task recovery.
+            unsafe { self.accountsdb.defragment()? };
+            log_timing("startup", "accountsdb_defragment", step_start);
+        }
+
         // Ledger replay has completed; primary and standalone nodes can clean
         // stale non-delegated accounts before accepting new work. Replicas wait
         // for the primary's Reset message so they stay stream-ordered.
