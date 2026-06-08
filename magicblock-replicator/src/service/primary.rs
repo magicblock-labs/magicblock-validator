@@ -173,7 +173,7 @@ impl Primary {
         let subject = Subjects::from_message(msg);
         let (slot, index) = msg.slot_and_index();
         let msg_id = message_id(slot, index);
-        let ack = matches!(msg, Message::SuperBlock(_));
+        let ack = matches!(msg, Message::SuperBlock(_) | Message::Reset(_));
 
         self.ctx
             .broker
