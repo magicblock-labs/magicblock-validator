@@ -1,4 +1,4 @@
-use std::{mem, ops::ControlFlow};
+use std::{mem, ops::ControlFlow, sync::Arc};
 
 use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
 use solana_keypair::Keypair;
@@ -22,6 +22,7 @@ use crate::{
         },
         IntentExecutionReport,
     },
+    outbox_client::OutboxClient,
     tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
     transaction_preparator::TransactionPreparator,
 };
@@ -31,7 +32,8 @@ pub struct Initialized {
     commit_strategy: TransactionStrategy,
     /// Finalize stage strategy
     finalize_strategy: TransactionStrategy,
-
+    // ///
+    // commit_signature: Option<Signature>,
     current_attempt: u8,
 }
 
@@ -51,17 +53,19 @@ pub struct Finalized {
     pub finalize_signature: Signature,
 }
 
-pub struct TwoStageExecutor<'a, A, S: Sealed> {
+pub struct TwoStageExecutor<'a, A, O, S: Sealed> {
     state: S,
     authority: Keypair,
     intent_client: IntentExecutionClient,
+    outbox_client: Arc<O>,
     callback_scheduler: A,
     execution_report: &'a mut IntentExecutionReport,
 }
 
-impl<'a, A> TwoStageExecutor<'a, A, Initialized>
+impl<'a, A, O> TwoStageExecutor<'a, A, O, Initialized>
 where
     A: ActionsCallbackScheduler,
+    O: OutboxClient,
 {
     const RECURSION_CEILING: u8 = 10;
 
@@ -70,6 +74,7 @@ where
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
         intent_client: IntentExecutionClient,
+        outbox_client: Arc<O>,
         callback_scheduler: A,
         execution_report: &'a mut IntentExecutionReport,
     ) -> Self {
@@ -78,6 +83,7 @@ where
             intent_client,
             execution_report,
             callback_scheduler,
+            outbox_client,
             state: Initialized {
                 commit_strategy,
                 finalize_strategy,
@@ -86,6 +92,18 @@ where
         }
     }
 
+    // We need to:
+    // 1. Prepare everything for tx delivery
+    // 2. Sign Tx
+    // 3. Update outbox with Committing(signature)
+    // 4, Send Tx
+    // 5. Confirm signature
+    //   a. Success - terminate
+    //   b. jump to 1
+
+    // We can start from 5:
+    // Committing(sig) was loaded from outbox
+    // confirm signature
     #[instrument(
         skip(
             self,
@@ -338,10 +356,11 @@ where
     pub fn done(
         self,
         commit_signature: Signature,
-    ) -> TwoStageExecutor<'a, A, Committed> {
+    ) -> TwoStageExecutor<'a, A, O, Committed> {
         TwoStageExecutor {
             authority: self.authority,
             intent_client: self.intent_client,
+            outbox_client: self.outbox_client,
             callback_scheduler: self.callback_scheduler,
             execution_report: self.execution_report,
             state: Committed {
@@ -353,9 +372,10 @@ where
     }
 }
 
-impl<'a, A> TwoStageExecutor<'a, A, Committed>
+impl<'a, A, O> TwoStageExecutor<'a, A, O, Committed>
 where
     A: ActionsCallbackScheduler,
+    O: OutboxClient,
 {
     const RECURSION_CEILING: u8 = 10;
 

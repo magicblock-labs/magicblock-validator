@@ -103,10 +103,7 @@ where
     F: IntentExecutorFactory<Executor = E> + Send + Sync + 'static,
     E: IntentExecutor,
 {
-    pub fn new(
-        intent_stream: IntentStream<D>,
-        executor_factory: F,
-    ) -> Self {
+    pub fn new(intent_stream: IntentStream<D>, executor_factory: F) -> Self {
         Self {
             intent_stream,
             executor_factory,
@@ -272,6 +269,8 @@ where
             warn!(error = ?err, "No result listeners");
         }
 
+        // TODO(edwin): if intent is Err(T) we need to "lock" pubkeys somehow
+        // That would
         // Remove executed task from Scheduler to unblock other intents
         // SAFETY: Self::execute is called ONLY after IntentScheduler
         // successfully is able to schedule execution of some Intent
@@ -376,7 +375,8 @@ mod tests {
         } else {
             MockIntentExecutorFactory::new_failing()
         };
-        let worker = IntentExecutionEngine::new(intent_stream, executor_factory);
+        let worker =
+            IntentExecutionEngine::new(intent_stream, executor_factory);
 
         (handle, worker)
     }

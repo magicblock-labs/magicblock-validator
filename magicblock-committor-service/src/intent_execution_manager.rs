@@ -7,12 +7,10 @@ use std::sync::{Arc, Mutex};
 
 pub use intent_execution_engine::BroadcastedIntentExecutionResult;
 use magicblock_core::traits::ActionsCallbackScheduler;
-use magicblock_program::{
-    outbox_intent_bundles::OutboxIntentBundle,
-};
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
-use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
+use tokio::sync::broadcast;
 
 use crate::{
     intent_execution_manager::{
@@ -24,6 +22,7 @@ use crate::{
         intent_executor_factory::{ExecutorConfig, IntentExecutorFactoryImpl},
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     },
+    outbox_client::OutboxClient,
 };
 
 // TODO(edwin): rename
@@ -34,16 +33,18 @@ pub struct IntentExecutionManager<D: DB> {
 }
 
 impl<D: DB> IntentExecutionManager<D> {
-    pub fn new<A>(
+    pub fn new<A, O>(
         rpc_client: MagicblockRpcClient,
         db: D,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
+        outbox_client: Arc<O>,
         table_mania: TableMania,
         executor_config: ExecutorConfig,
         actions_callback_executor: A,
     ) -> Self
     where
         A: ActionsCallbackScheduler,
+        O: OutboxClient,
     {
         let db = Arc::new(Mutex::new(db));
 
@@ -51,15 +52,14 @@ impl<D: DB> IntentExecutionManager<D> {
             rpc_client,
             table_mania,
             executor_config,
+            outbox_client,
             task_info_fetcher,
             actions_callback_executor,
         };
 
         let (handle, intent_stream) = channel(&db, 1000);
-        let worker = IntentExecutionEngine::new(
-            intent_stream,
-            executor_factory,
-        );
+        let worker =
+            IntentExecutionEngine::new(intent_stream, executor_factory);
         let result_subscriber = worker.spawn();
 
         Self {

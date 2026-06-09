@@ -19,9 +19,8 @@ use magicblock_chainlink::{
     ProdInnerChainlink,
 };
 use magicblock_committor_service::{
-    committor_processor::CommittorProcessor,
-    config::ChainConfig,
-    service::{intent_client::InternalIntentRpcClient, IntentExecutionService},
+    committor_processor::CommittorProcessor, config::ChainConfig,
+    outbox_client::InternalOutboxClient, service::IntentExecutionService,
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{
@@ -99,7 +98,7 @@ type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
 type IntentExecutionServiceImpl =
-    IntentExecutionService<InternalIntentRpcClient<LatestBlock>>;
+    IntentExecutionService<InternalOutboxClient<LatestBlock>>;
 
 // -----------------
 // MagicValidator
@@ -493,7 +492,7 @@ impl MagicValidator {
         slot_interval: Duration,
         cancellation_token: &CancellationToken,
     ) -> IntentExecutionServiceImpl {
-        let intent_client = InternalIntentRpcClient::new(
+        let intent_client = InternalOutboxClient::new(
             accounts_db.clone(),
             transaction_scheduler.clone(),
             latest_block.clone(),

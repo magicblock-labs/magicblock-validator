@@ -1,4 +1,5 @@
 use std::ops::Deref;
+
 use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
 use magicblock_magic_program_api::outbox::{ExecutionStage, TwoStageProgress};
 use serde::{Deserialize, Serialize};

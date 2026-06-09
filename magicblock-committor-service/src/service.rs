@@ -1,5 +1,4 @@
 pub mod acceptor;
-pub mod intent_client;
 pub mod outbox_intent_bundles_reader;
 
 use std::{
@@ -12,7 +11,6 @@ use std::{
 };
 
 use futures_util::future::join_all;
-use intent_client::{ERIntentClient, InternalIntentClientError};
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
@@ -34,6 +32,7 @@ use crate::{
     error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
+    outbox_client::{InternalIntentClientError, OutboxClient},
     service::outbox_intent_bundles_reader::{
         InternalOutboxIntentBundlesReaderError, OutboxIntentBundlesReader,
     },
@@ -53,7 +52,7 @@ pub enum IntentExecutionService<R> {
 
 impl<R> IntentExecutionService<R>
 where
-    R: ERIntentClient,
+    R: OutboxClient,
     // ERIntentClient errors should be convertible to Service errors
     R::Error: Into<IntentExecutionServiceError>,
     // OutboxReader errors should be convertible to Service errors
@@ -105,11 +104,11 @@ where
     }
 }
 
-pub struct ServiceInner<R> {
+pub struct ServiceInner<O> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
     /// ER client specific for Intent needs. Could be switched to RpcClient
-    intent_client: Arc<R>,
+    outbox_client: Arc<O>,
     /// Processor of accepted intents
     processor: Arc<CommittorProcessor>,
     /// Time interval to scrape MagicContext(ER slot interval)
@@ -120,25 +119,25 @@ pub struct ServiceInner<R> {
     intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
 }
 
-impl<R> ServiceInner<R>
+impl<O> ServiceInner<O>
 where
-    R: ERIntentClient,
+    O: OutboxClient,
     // ERIntentClient errors should be convertible to Service errors
-    R::Error: Into<IntentExecutionServiceError>,
+    O::Error: Into<IntentExecutionServiceError>,
     // OutboxReader errors should be convertible to Service errors
-    <R::OutboxReader as OutboxIntentBundlesReader>::Error:
+    <O::OutboxReader as OutboxIntentBundlesReader>::Error:
         Into<IntentExecutionServiceError>,
 {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
-        intent_rpc_client: R,
+        outbox_client: Arc<O>,
         processor: Arc<CommittorProcessor>,
         slot_interval: Duration,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             chainlink,
-            intent_client: Arc::new(intent_rpc_client),
+            outbox_client,
             processor,
             slot_interval,
             cancellation_token,
@@ -154,7 +153,7 @@ where
             result_subscriber,
             cancellation_token,
             self.intents_meta_map.clone(),
-            self.intent_client.clone(),
+            self.outbox_client.clone(),
         ));
 
         tokio::task::spawn(self.accept_worker())
@@ -185,7 +184,7 @@ where
                 }
                 _ = interval.tick() => {
                     let accept_result = self
-                        .intent_client
+                        .outbox_client
                         .accept_scheduled_intents()
                         .await;
                     let intent_bundles = match accept_result {
@@ -211,7 +210,7 @@ where
         const RESCHEDULE_CHUNK_SIZE: NonZeroUsize =
             NonZeroUsize::new(1000).unwrap();
 
-        let mut outbox_bundles_reader = self.intent_client.outbox_reader();
+        let mut outbox_bundles_reader = self.outbox_client.outbox_reader();
         loop {
             // Read by chunks in order not to overload `IntentExecutionEngine`
             let intent_bundles_chunk = outbox_bundles_reader

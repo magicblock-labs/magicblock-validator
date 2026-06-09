@@ -68,8 +68,7 @@ impl DeliveryPreparator {
                     metrics::observe_committor_intent_task_preparation_time(
                         &*task,
                     );
-                self.prepare_task_handling_errors(authority, task)
-                    .await
+                self.prepare_task_handling_errors(authority, task).await
             });
 
         let task_preparations = join_all(preparation_futures);

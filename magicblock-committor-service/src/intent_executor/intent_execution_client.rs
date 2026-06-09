@@ -3,12 +3,14 @@ use std::{ops::ControlFlow, time::Duration};
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     utils::{
-        decide_rpc_error_flow, map_magicblock_client_error,
+        decide_rpc_error_flow, get_with_retries, map_magicblock_client_error,
         send_transaction_with_retries, SendErrorMapper, TransactionErrorMapper,
     },
-    MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
-    MagicBlockSendTransactionOutcome, MagicblockRpcClient,
+    MagicBlockRpcClientError, MagicBlockRpcClientResult,
+    MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
+    MagicblockRpcClient,
 };
+use solana_hash::Hash;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 use solana_rpc_client_api::config::RpcTransactionConfig;
@@ -48,42 +50,6 @@ impl IntentExecutionClient {
         tasks: &[BaseTaskImpl],
     ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
     {
-        struct IntentErrorMapper<TxMap> {
-            transaction_error_mapper: TxMap,
-        }
-        impl<TxMap> SendErrorMapper<InternalError> for IntentErrorMapper<TxMap>
-        where
-            TxMap: TransactionErrorMapper<
-                ExecutionError = TransactionStrategyExecutionError,
-            >,
-        {
-            type ExecutionError = TransactionStrategyExecutionError;
-            fn map(&self, error: InternalError) -> Self::ExecutionError {
-                match error {
-                    InternalError::MagicBlockRpcClientError(err) => {
-                        map_magicblock_client_error(
-                            &self.transaction_error_mapper,
-                            *err,
-                        )
-                    }
-                    err => {
-                        TransactionStrategyExecutionError::InternalError(err)
-                    }
-                }
-            }
-
-            fn decide_flow(
-                err: &Self::ExecutionError,
-            ) -> ControlFlow<(), Duration> {
-                match err {
-                    TransactionStrategyExecutionError::InternalError(
-                        InternalError::MagicBlockRpcClientError(err),
-                    ) => decide_rpc_error_flow(err),
-                    _ => ControlFlow::Break(()),
-                }
-            }
-        }
-
         const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
         const MIN_ATTEMPTS: usize = 3;
 
@@ -100,6 +66,49 @@ impl IntentExecutionClient {
             send_error_mapper,
             |i, elapsed| !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS),
         )
+        .await
+    }
+
+    // Sends signed tx
+    // Returns success on successfully sent tx, signature can be extracted from tx itself
+    pub(in crate::intent_executor) async fn send_signed_tx_with_retries(
+        &self,
+        transaction: &VersionedTransaction,
+        tasks: &[BaseTaskImpl],
+    ) -> Result<(), TransactionStrategyExecutionError> {
+        const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
+        const MIN_ATTEMPTS: usize = 3;
+
+        // Send with retries
+        let send_error_mapper = IntentErrorMapper {
+            transaction_error_mapper: IntentTransactionErrorMapper { tasks },
+        };
+        let attempt = || async {
+            self.rpc_client
+                .send_transaction(
+                    transaction,
+                    &MagicBlockSendTransactionConfig::ensure_committed(),
+                )
+                .await
+        };
+
+        send_transaction_with_retries(
+            attempt,
+            send_error_mapper,
+            |i, elapsed| !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn get_latest_blockhash(&self) -> MagicBlockRpcClientResult<Hash> {
+        const RETRY_FOR: Duration = Duration::from_secs(60);
+        const MIN_ATTEMPTS: usize = 5;
+
+        let attempt = || async { self.rpc_client.get_latest_blockhash().await };
+        get_with_retries(attempt, DefaultGetErrorMapper, |i, elapsed| {
+            !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS)
+        })
         .await
     }
 
@@ -188,5 +197,76 @@ impl IntentExecutionClient {
             Err(err) => warn!(error = ?err, "Failed to fetch CUs for intent"),
             _ => {}
         }
+    }
+}
+
+struct IntentErrorMapper<TxMap> {
+    transaction_error_mapper: TxMap,
+}
+
+// TODO(edwin): probably could be removed
+impl<TxMap> SendErrorMapper<InternalError> for IntentErrorMapper<TxMap>
+where
+    TxMap: TransactionErrorMapper<
+        ExecutionError = TransactionStrategyExecutionError,
+    >,
+{
+    type ExecutionError = TransactionStrategyExecutionError;
+    fn map(&self, error: InternalError) -> Self::ExecutionError {
+        match error {
+            InternalError::MagicBlockRpcClientError(err) => {
+                map_magicblock_client_error(
+                    &self.transaction_error_mapper,
+                    *err,
+                )
+            }
+            err => TransactionStrategyExecutionError::InternalError(err),
+        }
+    }
+
+    fn decide_flow(err: &Self::ExecutionError) -> ControlFlow<(), Duration> {
+        match err {
+            TransactionStrategyExecutionError::InternalError(
+                InternalError::MagicBlockRpcClientError(err),
+            ) => decide_rpc_error_flow(err),
+            _ => ControlFlow::Break(()),
+        }
+    }
+}
+
+impl<TxMap> SendErrorMapper<MagicBlockRpcClientError>
+    for IntentErrorMapper<TxMap>
+where
+    TxMap: TransactionErrorMapper<
+        ExecutionError = TransactionStrategyExecutionError,
+    >,
+{
+    type ExecutionError = TransactionStrategyExecutionError;
+    fn map(&self, error: MagicBlockRpcClientError) -> Self::ExecutionError {
+        map_magicblock_client_error(&self.transaction_error_mapper, error)
+    }
+
+    fn decide_flow(err: &Self::ExecutionError) -> ControlFlow<(), Duration> {
+        match err {
+            TransactionStrategyExecutionError::InternalError(
+                InternalError::MagicBlockRpcClientError(err),
+            ) => decide_rpc_error_flow(err),
+            _ => ControlFlow::Break(()),
+        }
+    }
+}
+
+struct DefaultGetErrorMapper;
+impl SendErrorMapper<MagicBlockRpcClientError> for DefaultGetErrorMapper {
+    type ExecutionError = MagicBlockRpcClientError;
+
+    fn map(&self, error: MagicBlockRpcClientError) -> Self::ExecutionError {
+        error
+    }
+
+    fn decide_flow(
+        mapped_error: &Self::ExecutionError,
+    ) -> ControlFlow<(), Duration> {
+        decide_rpc_error_flow(mapped_error)
     }
 }

@@ -1,6 +1,7 @@
 pub mod error;
 pub mod intent_execution_client;
 pub(crate) mod intent_executor_factory;
+pub mod intent_executor_gateway;
 pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
@@ -19,8 +20,7 @@ use magicblock_core::traits::{
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox_intent_bundles::OutboxIntentBundle,
-    validator::validator_authority,
+    outbox_intent_bundles::OutboxIntentBundle, validator::validator_authority,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_keypair::Keypair;
@@ -44,6 +44,7 @@ use crate::{
             FinalizeStage, SingleStage,
         },
     },
+    outbox_client::OutboxClient,
     tasks::{
         task_builder::{TaskBuilderImpl, TasksBuilder},
         task_strategist::{
@@ -143,12 +144,13 @@ impl IntentExecutionReport {
     }
 }
 
-pub struct IntentExecutorImpl<T, F, A> {
+pub struct IntentExecutorImpl<T, F, A, O> {
     authority: Keypair,
     intent_client: IntentExecutionClient,
     transaction_preparator: T,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
     actions_callback_executor: A,
+    outbox_client: Arc<O>,
     /// Timeout for Intent's actions
     actions_timeout: Duration,
 
@@ -162,16 +164,18 @@ pub struct IntentExecutorImpl<T, F, A> {
     close_buffers: bool,
 }
 
-impl<T, F, A> IntentExecutorImpl<T, F, A>
+impl<T, F, A, O> IntentExecutorImpl<T, F, A, O>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
+    O: OutboxClient,
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
         transaction_preparator: T,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
+        outbox_client: Arc<O>,
         actions_callback_executor: A,
         actions_timeout: Duration,
     ) -> Self {
@@ -182,6 +186,7 @@ where
             intent_client,
             transaction_preparator,
             task_info_fetcher,
+            outbox_client,
             actions_callback_executor,
             actions_timeout,
 
@@ -359,6 +364,7 @@ where
             commit_strategy,
             finalize_strategy,
             self.intent_client.clone(),
+            self.outbox_client.clone(),
             self.actions_callback_executor.clone(),
             execution_report,
         );
@@ -390,15 +396,15 @@ where
             finalize_signature: finalized_stage.finalize_signature,
         })
     }
-
 }
 
 #[async_trait]
-impl<T, C, A> IntentExecutor for IntentExecutorImpl<T, C, A>
+impl<T, C, A, O> IntentExecutor for IntentExecutorImpl<T, C, A, O>
 where
     T: TransactionPreparator,
     C: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
+    O: OutboxClient,
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`

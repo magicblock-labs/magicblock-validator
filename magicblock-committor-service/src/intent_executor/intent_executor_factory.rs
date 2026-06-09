@@ -9,6 +9,7 @@ use crate::{
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
         IntentExecutor, IntentExecutorImpl,
     },
+    outbox_client::{InternalOutboxClient, OutboxClient},
     transaction_preparator::TransactionPreparatorImpl,
     ComputeBudgetConfig,
 };
@@ -25,20 +26,22 @@ pub struct ExecutorConfig {
 }
 
 /// Dummy struct to simplify signature of CommitSchedulerWorker
-pub struct IntentExecutorFactoryImpl<A> {
+pub struct IntentExecutorFactoryImpl<A, O> {
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
     pub executor_config: ExecutorConfig,
     pub task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
+    pub outbox_client: Arc<O>,
     pub actions_callback_executor: A,
 }
 
-impl<A> IntentExecutorFactory for IntentExecutorFactoryImpl<A>
+impl<A, O> IntentExecutorFactory for IntentExecutorFactoryImpl<A, O>
 where
     A: ActionsCallbackScheduler,
+    O: OutboxClient,
 {
     type Executor =
-        IntentExecutorImpl<TransactionPreparatorImpl, RpcTaskInfoFetcher, A>;
+        IntentExecutorImpl<TransactionPreparatorImpl, RpcTaskInfoFetcher, A, O>;
 
     fn create_instance(&self) -> Self::Executor {
         let transaction_preparator = TransactionPreparatorImpl::new(
@@ -50,6 +53,7 @@ where
             self.rpc_client.clone(),
             transaction_preparator,
             self.task_info_fetcher.clone(),
+            self.outbox_client.clone(),
             self.actions_callback_executor.clone(),
             self.executor_config.actions_timeout,
         )

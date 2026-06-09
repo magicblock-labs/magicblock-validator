@@ -21,30 +21,34 @@ use crate::{
         },
         IntentExecutionReport,
     },
+    outbox_client::OutboxClient,
     tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
     transaction_preparator::TransactionPreparator,
 };
 
-pub struct SingleStageExecutor<'a, F, A> {
+pub struct SingleStageExecutor<'a, F, A, O> {
     current_attempt: u8,
     execution_report: &'a mut IntentExecutionReport,
 
     authority: Keypair,
     intent_client: IntentExecutionClient,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
+    outbox_client: Arc<O>,
     callback_scheduler: A,
     transaction_strategy: TransactionStrategy,
 }
 
-impl<'a, F, A> SingleStageExecutor<'a, F, A>
+impl<'a, F, A, O> SingleStageExecutor<'a, F, A, O>
 where
     F: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
+    O: OutboxClient,
 {
     pub fn new(
         authority: Keypair,
         intent_client: IntentExecutionClient,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
+        outbox_client: Arc<O>,
         transaction_strategy: TransactionStrategy,
         callback_scheduler: A,
         execution_report: &'a mut IntentExecutionReport,
@@ -54,6 +58,7 @@ where
             authority,
             intent_client,
             task_info_fetcher,
+            outbox_client,
             transaction_strategy,
             callback_scheduler,
             execution_report,

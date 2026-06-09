@@ -21,7 +21,8 @@ use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::{
-        db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
+        db::{DumberDB, DummyDB},
+        BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
     intent_executor::{
         intent_executor_factory::ExecutorConfig,
@@ -30,12 +31,8 @@ use crate::{
             TaskInfoFetcherResult,
         },
     },
-    persist::{
-        CommitStatusRow, IntentPersister, IntentPersisterImpl,
-        MessageSignatures,
-    },
+    outbox_client::OutboxClient,
 };
-use crate::intent_execution_manager::db::DumberDB;
 
 const POISONED_MUTEX_MSG: &str =
     "CommittorProcessor pending messages mutex poisoned!";
@@ -47,23 +44,22 @@ pub struct CommittorProcessor {
     authority: Keypair,
     _table_mania: TableMania,
     magic_rpc_client: MagicblockRpcClient,
-    persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
 }
 
 impl CommittorProcessor {
-    pub fn try_new<P, A>(
+    pub fn try_new<A, O>(
         authority: Keypair,
-        persist_file: P,
         chain_config: ChainConfig,
         chain_slot: Option<Arc<AtomicU64>>,
+        outbox_client: Arc<O>,
         actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
-        P: AsRef<Path>,
         A: ActionsCallbackScheduler,
+        O: OutboxClient,
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),
@@ -96,9 +92,6 @@ impl CommittorProcessor {
             Some(gc_config),
         );
 
-        // Create commit persister
-        let persister = IntentPersisterImpl::try_new(persist_file)?;
-
         // Create commit scheduler
         let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
             RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
@@ -107,7 +100,7 @@ impl CommittorProcessor {
             magic_block_rpc_client.clone(),
             DummyDB::new(),
             task_info_fetcher.clone(),
-            Some(persister.clone()),
+            outbox_client,
             table_mania.clone(),
             ExecutorConfig {
                 compute_budget_config: chain_config
@@ -130,111 +123,16 @@ impl CommittorProcessor {
             _table_mania: table_mania,
             magic_rpc_client: magic_block_rpc_client,
             commits_scheduler,
-            persister,
             task_info_fetcher,
             pending_result_listeners,
         })
     }
 
-    pub fn get_commit_statuses(
-        &self,
-        message_id: u64,
-    ) -> CommittorServiceResult<Vec<CommitStatusRow>> {
-        let commit_statuses =
-            self.persister.get_commit_statuses_by_message(message_id)?;
-        Ok(commit_statuses)
-    }
-
-    pub fn get_commit_signature(
-        &self,
-        commit_id: u64,
-        pubkey: Pubkey,
-    ) -> CommittorServiceResult<Option<MessageSignatures>> {
-        let signatures = self
-            .persister
-            .get_signatures_by_commit(commit_id, &pubkey)?;
-        Ok(signatures)
-    }
-
-    /// Fetches pending bundles from DB
-    pub async fn pending_intent_bundles(
-        &self,
-    ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
-        // Extract pending bundles satisfying predicate
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let mut bundles = self.persister.pending_intent_bundles(
-            now.saturating_sub(RECOVERY_MAX_AGE_SECS),
-        )?;
-
-        if bundles.is_empty() {
-            return Ok(bundles);
-        }
-
-        // Log info about extracted bundles
-        {
-            let accounts_count: usize = bundles
-                .iter()
-                .map(|bundle| bundle.get_all_committed_pubkeys().len())
-                .sum();
-            info!(
-                intent_count = bundles.len(),
-                accounts_count,
-                "Loaded pending commit intents from persistence for recovery"
-            );
-        }
-
-        // Extracted bundles are out of data and missing some of the info
-        self.refresh_intent_bundles(&mut bundles).await?;
-
-        Ok(bundles)
-    }
-
-    async fn refresh_intent_bundles(
-        &self,
-        intent_bundles: &mut [ScheduledIntentBundle],
-    ) -> CommittorServiceResult<()> {
-        let payer = self.authority.pubkey();
-        let slot = self.magic_rpc_client.get_slot().await?;
-
-        macro_rules! set_remote_slot {
-            ($field:expr, $slot:expr) => {
-                if let Some(ref mut v) = $field {
-                    v.get_committed_accounts_mut()
-                        .iter_mut()
-                        .for_each(|a| a.remote_slot = slot);
-                }
-            };
-        }
-
-        intent_bundles.iter_mut().for_each(|b| {
-            b.payer = payer;
-            set_remote_slot!(b.intent_bundle.commit, slot);
-            set_remote_slot!(b.intent_bundle.commit_finalize, slot);
-            set_remote_slot!(b.intent_bundle.commit_and_undelegate, slot);
-            set_remote_slot!(
-                b.intent_bundle.commit_finalize_and_undelegate,
-                slot
-            );
-        });
-
-        Ok(())
-    }
-
     #[instrument(skip(self, intent_bundles))]
     pub async fn schedule_intent_bundles(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
+        intent_bundles: Vec<OutboxIntentBundle>,
     ) -> CommittorServiceResult<()> {
-        if let Err(err) = self.persister.start_base_intents(&intent_bundles) {
-            // We will still try to perform the commits, but the fact that we cannot
-            // persist the intent is very serious and we should probably restart the
-            // valiator
-            error!(error = ?err, "DB EXCEPTION: Failed to persist changeset");
-        };
-
         self.commits_scheduler
             .schedule(intent_bundles)
             .await
@@ -247,7 +145,7 @@ impl CommittorProcessor {
 
     pub async fn execute_intent_bundles(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
+        intent_bundles: Vec<OutboxIntentBundle>,
     ) -> CommittorServiceResult<Vec<BroadcastedIntentExecutionResult>> {
         // Critical section
         let (receivers, inserted_ids) = {
@@ -304,7 +202,7 @@ impl CommittorProcessor {
     #[instrument(skip(self, intent_bundles))]
     pub async fn schedule_recovered_intent_bundles(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
+        intent_bundles: Vec<OutboxIntentBundle>,
     ) -> CommittorServiceResult<()> {
         self.commits_scheduler
             .schedule(intent_bundles)

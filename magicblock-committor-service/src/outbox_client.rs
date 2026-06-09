@@ -8,7 +8,7 @@ use magicblock_core::{
 };
 use magicblock_program::{
     instruction_utils::InstructionUtils,
-    magic_scheduled_base_intent::ScheduledIntentBundle,
+    magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
     register_scheduled_commit_sent, MagicContext, SentCommit,
     TransactionScheduler, MAGIC_CONTEXT_PUBKEY,
 };
@@ -22,16 +22,25 @@ use crate::service::outbox_intent_bundles_reader::{
 };
 
 #[async_trait]
-pub trait ERIntentClient: Send + Sync + 'static {
+pub trait OutboxClient: Send + Sync + 'static {
+    type Error: std::error::Error + Send;
     /// Type that is able to read IntentBundles from Outbox
     /// Can be via AccountsDB, RpcClient or any other means
     type OutboxReader: OutboxIntentBundlesReader;
-    type Error: std::error::Error + Send;
 
     /// Executes `Accept` tx and returns accepted intents
     async fn accept_scheduled_intents(
         &self,
     ) -> Result<Vec<ScheduledIntentBundle>, Self::Error>;
+
+    /// Sets execution stage for outbox intent
+    /// Note: intent has to be accepted prior
+    /// Calling with invalid state transitions will lead to `TransactionError`
+    async fn set_intent_execution_stage(
+        &self,
+        intent_id: u64,
+        stage: ExecutionStage,
+    ) -> Result<(), Self::Error>;
 
     /// Processes intent results, submitting them on chain(ER)
     async fn notify_commit_sent(
@@ -42,12 +51,11 @@ pub trait ERIntentClient: Send + Sync + 'static {
 
     /// Returns reader capable of reading IntentBundles from Outbox
     fn outbox_reader(&self) -> Self::OutboxReader;
-
-    // TODO(edwin): probably more proper place to load pending intent
-    // CommittorProcessor::pending_intent_bundles could be moved here in the future
 }
 
-pub struct InternalIntentRpcClient<L: LatestBlockProvider> {
+/// Implementation of `OutboxClient` that uses ER internals
+/// Potentially could be replaced with RPC base Client
+pub struct InternalOutboxClient<L: LatestBlockProvider> {
     /// Provides access to MagicContext
     accounts_db: Arc<AccountsDb>,
     /// Internal endpoint for scheduling ER TXs
@@ -56,7 +64,7 @@ pub struct InternalIntentRpcClient<L: LatestBlockProvider> {
     latest_block_provider: L,
 }
 
-impl<L: LatestBlockProvider> InternalIntentRpcClient<L> {
+impl<L: LatestBlockProvider> InternalOutboxClient<L> {
     pub fn new(
         accounts_db: Arc<AccountsDb>,
         transaction_scheduler: TransactionSchedulerHandle,
@@ -90,7 +98,7 @@ impl<L: LatestBlockProvider> InternalIntentRpcClient<L> {
 }
 
 #[async_trait]
-impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
+impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
     type Error = InternalIntentClientError;
     type OutboxReader = InternalOutboxIntentBundlesReader;
 
@@ -117,6 +125,7 @@ impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
         sent_tx: Transaction,
         sent_commit: SentCommit,
     ) -> Result<(), Self::Error> {
+        // TODO(edwin): is using handle directly here ok? This could require Chainlink mechanics
         register_scheduled_commit_sent(sent_commit);
         let txn = with_encoded(sent_tx).inspect_err(|err| {
             // Unreachable case, all intent transactions are smaller than 64KB by construction
@@ -131,6 +140,15 @@ impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
             )?;
 
         Ok(())
+    }
+
+    fn set_intent_execution_stage(
+        &self,
+        intent_id: u64,
+        stage: ExecutionStage,
+    ) -> Result<(), Self::Error> {
+        // TODO(edwin): use rpc of scheduler
+        todo!()
     }
 
     fn outbox_reader(&self) -> Self::OutboxReader {

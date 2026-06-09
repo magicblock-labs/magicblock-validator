@@ -17,6 +17,7 @@ use crate::intent_execution_manager::{db, db::DB};
 
 const POISONED_MSG: &str = "Dummy DB mutex poisoned";
 
+/// Handle for scheduling intents in ExecutionEngine
 pub struct IntentScheduleHandle<D> {
     db: Arc<Mutex<D>>,
     sender: Sender<OutboxIntentBundle>,
@@ -60,6 +61,9 @@ impl<D: DB> IntentScheduleHandle<D> {
     }
 }
 
+/// Stream of Intents that also handles backlog
+/// If backlog is not empty we switch to reading from it until it is depleted
+/// Once it is depleted we switch to polling `ReceiverStream`
 #[pin_project]
 pub struct IntentStream<D> {
     db: Arc<Mutex<D>>,

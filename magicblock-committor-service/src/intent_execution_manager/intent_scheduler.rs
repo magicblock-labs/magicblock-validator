@@ -1,10 +1,12 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
-use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use magicblock_program::{
+    magic_scheduled_base_intent::ScheduledIntentBundle,
+    outbox_intent_bundles::OutboxIntentBundle,
+};
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tracing::error;
-use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 
 pub(crate) const POISONED_INNER_MSG: &str =
     "Mutex on CommitSchedulerInner is poisoned.";
@@ -234,9 +236,7 @@ impl IntentScheduler {
     }
 
     // Returns [`ScheduledBaseIntent`] that can be executed
-    pub fn pop_next_scheduled_intent(
-        &mut self,
-    ) -> Option<OutboxIntentBundle> {
+    pub fn pop_next_scheduled_intent(&mut self) -> Option<OutboxIntentBundle> {
         // TODO(edwin): optimize. Create counter im IntentMeta & update
         let mut execute_candidates: HashMap<IntentID, usize> = HashMap::new();
         self.blocked_keys.iter().for_each(|(_, queue)| {
@@ -704,7 +704,8 @@ mod complete_error_test {
         let mut msg1 = create_test_intent(1, &[pubkey1, pubkey2], false);
         assert!(scheduler.schedule(msg1.clone()).is_some());
 
-        msg1.inner.intent_bundle
+        msg1.inner
+            .intent_bundle
             .get_commit_intent_accounts_mut()
             .unwrap()
             .push(CommittedAccount {

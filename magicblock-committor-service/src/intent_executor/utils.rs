@@ -34,8 +34,8 @@ pub async fn prepare_and_execute_strategy<T>(
     authority: &Keypair,
     transaction_preparator: &T,
     transaction_strategy: &mut TransactionStrategy,
-) -> IntentExecutorResult<
-    IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
+) -> Result<
+    Result<Signature, TransactionStrategyExecutionError>,
     TransactionPreparatorError,
 >
 where
@@ -316,10 +316,7 @@ where
 
     async fn execute(&mut self) -> IntentExecutorResult<Signature> {
         self.inner
-            .execute(
-                self.committed_pubkeys,
-                self.transaction_preparator,
-            )
+            .execute(self.committed_pubkeys, self.transaction_preparator)
             .await
     }
 
@@ -388,9 +385,7 @@ where
     }
 
     async fn execute(&mut self) -> IntentExecutorResult<Signature> {
-        self.inner
-            .finalize(self.transaction_preparator)
-            .await
+        self.inner.finalize(self.transaction_preparator).await
     }
 
     fn execute_callbacks(
