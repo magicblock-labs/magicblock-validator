@@ -22,7 +22,6 @@ use crate::{
         },
         IntentExecutionReport,
     },
-    persist::{IntentPersister, IntentPersisterImpl},
     tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
     transaction_preparator::TransactionPreparator,
 };
@@ -93,21 +92,18 @@ where
             committed_pubkeys,
             transaction_preparator,
             task_info_fetcher,
-            persister
         ),
         fields(stage = "commit")
     )]
-    pub async fn commit<T, F, P>(
+    pub async fn commit<T, F>(
         &mut self,
         committed_pubkeys: &[Pubkey],
         transaction_preparator: &T,
         task_info_fetcher: &CacheTaskInfoFetcher<F>,
-        persister: &Option<P>,
     ) -> IntentExecutorResult<Signature>
     where
         T: TransactionPreparator,
         F: TaskInfoFetcher,
-        P: IntentPersister,
     {
         let commit_result = loop {
             self.state.current_attempt += 1;
@@ -118,7 +114,6 @@ where
                 &self.authority,
                 transaction_preparator,
                 &mut self.state.commit_strategy,
-                persister,
             )
             .await
             .map_err(IntentExecutorError::FailedCommitPreparationError)?;
@@ -286,7 +281,6 @@ where
                 lookup_tables_keys: vec![],
                 standalone_action_nonce: None,
             },
-            &None::<IntentPersisterImpl>,
         )
         .await
         .map_err(IntentExecutorError::FailedCommitPreparationError)?
@@ -366,17 +360,15 @@ where
     const RECURSION_CEILING: u8 = 10;
 
     #[instrument(
-        skip(self, transaction_preparator, persister),
+        skip(self, transaction_preparator),
         fields(stage = "finalize")
     )]
-    pub async fn finalize<T, P>(
+    pub async fn finalize<T>(
         &mut self,
         transaction_preparator: &T,
-        persister: &Option<P>,
     ) -> IntentExecutorResult<Signature>
     where
         T: TransactionPreparator,
-        P: IntentPersister,
     {
         let finalize_result = loop {
             self.state.current_attempt += 1;
@@ -387,7 +379,6 @@ where
                 &self.authority,
                 transaction_preparator,
                 &mut self.state.finalize_strategy,
-                persister,
             )
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?;

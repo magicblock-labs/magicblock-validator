@@ -3,11 +3,13 @@ pub mod intent_channerl;
 mod intent_execution_engine;
 pub mod intent_scheduler;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub use intent_execution_engine::BroadcastedIntentExecutionResult;
 use magicblock_core::traits::ActionsCallbackScheduler;
-use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use magicblock_program::{
+    outbox_intent_bundles::OutboxIntentBundle,
+};
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
@@ -15,36 +17,35 @@ use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
 use crate::{
     intent_execution_manager::{
         db::DB,
+        intent_channerl::{channel, IntentScheduleError, IntentScheduleHandle},
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
     intent_executor::{
         intent_executor_factory::{ExecutorConfig, IntentExecutorFactoryImpl},
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     },
-    persist::IntentPersister,
 };
 
+// TODO(edwin): rename
 pub struct IntentExecutionManager<D: DB> {
-    db: Arc<D>,
+    // TODO(edwin): add JoinHandle of
+    intent_schedule_handle: IntentScheduleHandle<D>,
     result_subscriber: ResultSubscriber,
-    intent_sender: mpsc::Sender<ScheduledIntentBundle>,
 }
 
 impl<D: DB> IntentExecutionManager<D> {
-    pub fn new<P, A>(
+    pub fn new<A>(
         rpc_client: MagicblockRpcClient,
         db: D,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
-        intent_persister: Option<P>,
         table_mania: TableMania,
         executor_config: ExecutorConfig,
         actions_callback_executor: A,
     ) -> Self
     where
         A: ActionsCallbackScheduler,
-        P: IntentPersister,
     {
-        let db = Arc::new(db);
+        let db = Arc::new(Mutex::new(db));
 
         let executor_factory = IntentExecutorFactoryImpl {
             rpc_client,
@@ -54,18 +55,15 @@ impl<D: DB> IntentExecutionManager<D> {
             actions_callback_executor,
         };
 
-        let (sender, receiver) = mpsc::channel(1000);
+        let (handle, intent_stream) = channel(&db, 1000);
         let worker = IntentExecutionEngine::new(
-            db.clone(),
+            intent_stream,
             executor_factory,
-            intent_persister,
-            receiver,
         );
         let result_subscriber = worker.spawn();
 
         Self {
-            db,
-            intent_sender: sender,
+            intent_schedule_handle: handle,
             result_subscriber,
         }
     }
@@ -75,33 +73,9 @@ impl<D: DB> IntentExecutionManager<D> {
     /// Intents will be extracted and handled in the [`IntentExecutionEngine`]
     pub async fn schedule(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
-    ) -> Result<(), IntentExecutionManagerError> {
-        // If db not empty push el-t there
-        // This means that at some point channel got full
-        // Worker first will clean-up channel, and then DB.
-        // Pushing into channel would break order of commits
-        if !self.db.is_empty() {
-            self.db.store_intent_bundles(intent_bundles)?;
-            return Ok(());
-        }
-
-        let mut iter = intent_bundles.into_iter();
-        // Treated as regular value not propagated lower
-        #[allow(clippy::result_large_err)]
-        let res = iter.try_for_each(|el| self.intent_sender.try_send(el));
-        match res {
-            Ok(_) => Ok(()),
-            Err(TrySendError::Closed(_)) => {
-                Err(IntentExecutionManagerError::ChannelClosed)
-            }
-            Err(TrySendError::Full(el)) => {
-                let leftovers = std::iter::once(el).chain(iter).collect();
-                self.db
-                    .store_intent_bundles(leftovers)
-                    .map_err(IntentExecutionManagerError::from)
-            }
-        }
+        intent_bundles: Vec<OutboxIntentBundle>,
+    ) -> Result<(), IntentScheduleError> {
+        self.intent_schedule_handle.schedule(intent_bundles)
     }
 
     /// Creates a subscription for results of BaseIntent execution
@@ -110,12 +84,4 @@ impl<D: DB> IntentExecutionManager<D> {
     ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
         self.result_subscriber.subscribe()
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum IntentExecutionManagerError {
-    #[error("Channel was closed")]
-    ChannelClosed,
-    #[error("DBError: {0}")]
-    DBError(#[from] db::Error),
 }

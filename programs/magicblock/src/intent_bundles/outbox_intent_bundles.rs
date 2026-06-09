@@ -1,10 +1,11 @@
+use std::ops::Deref;
 use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
 use magicblock_magic_program_api::outbox::{ExecutionStage, TwoStageProgress};
 use serde::{Deserialize, Serialize};
 
 use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutboxIntentBundle {
     pub inner: ScheduledIntentBundle,
     pub status: OutboxIntentBundleStatus,
@@ -47,7 +48,7 @@ impl OutboxIntentBundle {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OutboxIntentBundleStatus {
     Accepted,
     Executing(ExecutionStage),
@@ -82,5 +83,13 @@ impl OutboxIntentBundleStatus {
             }
         };
         Ok(())
+    }
+}
+
+impl Deref for OutboxIntentBundle {
+    type Target = ScheduledIntentBundle;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }

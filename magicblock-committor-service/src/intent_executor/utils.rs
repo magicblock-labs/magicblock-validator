@@ -19,7 +19,6 @@ use crate::{
         two_stage_executor::{Committed, Initialized, TwoStageExecutor},
         IntentExecutionReport,
     },
-    persist::IntentPersister,
     tasks::{
         task_builder::TaskBuilderError,
         task_strategist::{TaskStrategist, TransactionStrategy},
@@ -30,22 +29,20 @@ use crate::{
     },
 };
 
-pub async fn prepare_and_execute_strategy<P, T>(
+pub async fn prepare_and_execute_strategy<T>(
     client: &IntentExecutionClient,
     authority: &Keypair,
     transaction_preparator: &T,
     transaction_strategy: &mut TransactionStrategy,
-    persister: &Option<P>,
 ) -> IntentExecutorResult<
     IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
     TransactionPreparatorError,
 >
 where
     T: TransactionPreparator,
-    P: IntentPersister,
 {
     let prepared_message = transaction_preparator
-        .prepare_for_strategy(authority, transaction_strategy, persister)
+        .prepare_for_strategy(authority, transaction_strategy)
         .await?;
 
     let execution_result = client
@@ -261,16 +258,13 @@ where
     junk
 }
 
-pub(in crate::intent_executor) async fn execute_with_timeout<
-    P: IntentPersister,
->(
+pub(in crate::intent_executor) async fn execute_with_timeout(
     time_left: Option<Duration>,
     mut executor: impl StageExecutor,
-    persister: &Option<P>,
 ) -> IntentExecutorResult<Signature> {
     if executor.has_callbacks() {
         if let Some(time_left) = time_left {
-            match timeout(time_left, executor.execute(persister)).await {
+            match timeout(time_left, executor.execute()).await {
                 Ok(res) => return res,
                 Err(_) => {
                     // The race between callback and intent txn is handled
@@ -289,16 +283,13 @@ pub(in crate::intent_executor) async fn execute_with_timeout<
         }
     }
 
-    executor.execute(persister).await
+    executor.execute().await
 }
 
 #[async_trait]
 pub(in crate::intent_executor) trait StageExecutor {
     fn has_callbacks(&self) -> bool;
-    async fn execute<P: IntentPersister>(
-        &mut self,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature>;
+    async fn execute(&mut self) -> IntentExecutorResult<Signature>;
     fn execute_callbacks(
         &mut self,
         signature: Option<Signature>,
@@ -323,15 +314,11 @@ where
         self.inner.has_callbacks()
     }
 
-    async fn execute<P: IntentPersister>(
-        &mut self,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
+    async fn execute(&mut self) -> IntentExecutorResult<Signature> {
         self.inner
             .execute(
                 self.committed_pubkeys,
                 self.transaction_preparator,
-                persister,
             )
             .await
     }
@@ -365,16 +352,12 @@ where
         self.inner.has_callbacks()
     }
 
-    async fn execute<P: IntentPersister>(
-        &mut self,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
+    async fn execute(&mut self) -> IntentExecutorResult<Signature> {
         self.inner
             .commit(
                 self.committed_pubkeys,
                 self.transaction_preparator,
                 self.task_info_fetcher,
-                persister,
             )
             .await
     }
@@ -404,12 +387,9 @@ where
         self.inner.has_callbacks()
     }
 
-    async fn execute<P: IntentPersister>(
-        &mut self,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
+    async fn execute(&mut self) -> IntentExecutorResult<Signature> {
         self.inner
-            .finalize(self.transaction_preparator, persister)
+            .finalize(self.transaction_preparator)
             .await
     }
 

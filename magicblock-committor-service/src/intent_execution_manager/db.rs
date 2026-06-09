@@ -5,19 +5,15 @@ use std::{
 };
 
 /// DB for storing intents that overflow committor channel
-use async_trait::async_trait;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_metrics::metrics;
-use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox_intent_bundles::OutboxIntentBundle,
-};
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::ReadableAccount;
 
 const POISONED_MUTEX_MSG: &str = "Dummy db mutex poisoned";
 
-pub trait DB {
+pub trait DB: Send + 'static {
     fn store_intent_bundle(
         &self,
         intent_bundle: OutboxIntentBundle,
@@ -136,7 +132,7 @@ impl DB for DumberDB {
     }
 
     fn is_empty(&self) -> bool {
-        self.queue.is_empty()
+        self.queue.borrow().is_empty()
     }
 }
 

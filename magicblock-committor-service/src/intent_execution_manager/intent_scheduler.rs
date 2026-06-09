@@ -4,6 +4,7 @@ use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tracing::error;
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 
 pub(crate) const POISONED_INNER_MSG: &str =
     "Mutex on CommitSchedulerInner is poisoned.";
@@ -11,7 +12,7 @@ pub(crate) const POISONED_INNER_MSG: &str =
 type IntentID = u64;
 struct IntentMeta {
     num_keys: usize,
-    intent: ScheduledIntentBundle,
+    intent: OutboxIntentBundle,
 }
 
 /// A scheduler that ensures mutually exclusive access to pubkeys across intents
@@ -78,8 +79,8 @@ impl IntentScheduler {
     /// otherwise consumes it and enqueues
     pub fn schedule(
         &mut self,
-        intent_bundle: ScheduledIntentBundle,
-    ) -> Option<ScheduledIntentBundle> {
+        intent_bundle: OutboxIntentBundle,
+    ) -> Option<OutboxIntentBundle> {
         let intent_id = intent_bundle.id;
 
         // To check duplicate scheduling its enough to check:
@@ -148,7 +149,7 @@ impl IntentScheduler {
     /// NOTE: this shall be called on executing intents to finilize their execution.
     pub fn complete(
         &mut self,
-        intent_bundle: &ScheduledIntentBundle,
+        intent_bundle: &OutboxIntentBundle,
     ) -> IntentSchedulerResult<()> {
         // Release data for completed intent
         let intent_id = intent_bundle.id;
@@ -235,7 +236,7 @@ impl IntentScheduler {
     // Returns [`ScheduledBaseIntent`] that can be executed
     pub fn pop_next_scheduled_intent(
         &mut self,
-    ) -> Option<ScheduledIntentBundle> {
+    ) -> Option<OutboxIntentBundle> {
         // TODO(edwin): optimize. Create counter im IntentMeta & update
         let mut execute_candidates: HashMap<IntentID, usize> = HashMap::new();
         self.blocked_keys.iter().for_each(|(_, queue)| {
@@ -627,7 +628,7 @@ mod edge_cases_test {
         setup();
         let mut scheduler = IntentScheduler::new();
         let mut msg = create_test_intent(1, &[], false);
-        msg.intent_bundle = MagicIntentBundle::default();
+        msg.inner.intent_bundle = MagicIntentBundle::default();
 
         // Should execute immediately since it has no pubkeys
         assert!(scheduler.schedule(msg.clone()).is_some());
@@ -681,7 +682,7 @@ mod complete_error_test {
         let msg2 = create_test_intent(2, &[pubkey1], false);
         assert!(scheduler.schedule(msg2.clone()).is_none());
 
-        msg1.get_commit_intent_accounts_mut().unwrap().pop();
+        msg1.inner.get_commit_intent_accounts_mut().unwrap().pop();
 
         // Attempt to complete msg1 - should detect corrupted state
         let result = scheduler.complete(&msg1);
@@ -703,7 +704,7 @@ mod complete_error_test {
         let mut msg1 = create_test_intent(1, &[pubkey1, pubkey2], false);
         assert!(scheduler.schedule(msg1.clone()).is_some());
 
-        msg1.intent_bundle
+        msg1.inner.intent_bundle
             .get_commit_intent_accounts_mut()
             .unwrap()
             .push(CommittedAccount {
@@ -853,7 +854,7 @@ pub(crate) fn create_test_intent(
     id: u64,
     pubkeys: &[Pubkey],
     is_undelegate: bool,
-) -> ScheduledIntentBundle {
+) -> OutboxIntentBundle {
     use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
         CommitAndUndelegate, CommitType, MagicIntentBundle,
@@ -872,7 +873,6 @@ pub(crate) fn create_test_intent(
         intent_bundle: MagicIntentBundle::default(),
     };
 
-    // Only set pubkeys if provided
     if !pubkeys.is_empty() {
         let committed_accounts = pubkeys
             .iter()
@@ -895,7 +895,7 @@ pub(crate) fn create_test_intent(
         }
     }
 
-    intent
+    OutboxIntentBundle::accepted(intent)
 }
 
 #[cfg(test)]
@@ -903,7 +903,7 @@ pub(crate) fn create_test_intent_bundle(
     id: u64,
     commit_pubkeys: &[Pubkey],
     commit_and_undelegate_pubkeys: &[Pubkey],
-) -> ScheduledIntentBundle {
+) -> OutboxIntentBundle {
     use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
         CommitAndUndelegate, CommitType, MagicIntentBundle,
@@ -948,5 +948,5 @@ pub(crate) fn create_test_intent_bundle(
             });
     }
 
-    intent
+    OutboxIntentBundle::accepted(intent)
 }

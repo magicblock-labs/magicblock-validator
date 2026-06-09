@@ -19,6 +19,7 @@ use magicblock_core::traits::{
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
+    outbox_intent_bundles::OutboxIntentBundle,
     validator::validator_authority,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
@@ -43,7 +44,6 @@ use crate::{
             FinalizeStage, SingleStage,
         },
     },
-    persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
         task_builder::{TaskBuilderImpl, TasksBuilder},
         task_strategist::{
@@ -54,7 +54,6 @@ use crate::{
         delivery_preparator::BufferExecutionError,
         error::TransactionPreparatorError, TransactionPreparator,
     },
-    utils::persist_status_update_by_message_set,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -97,10 +96,9 @@ pub struct IntentExecutionResult {
 pub trait IntentExecutor: Send + Sync + 'static {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
-    async fn execute<P: IntentPersister>(
+    async fn execute(
         &mut self,
-        base_intent: ScheduledIntentBundle,
-        persister: Option<P>,
+        base_intent: OutboxIntentBundle,
     ) -> IntentExecutionResult;
 
     /// Cleans up after intent
@@ -193,27 +191,15 @@ where
         }
     }
 
-    async fn execute_inner<P: IntentPersister>(
+    async fn execute_inner(
         &mut self,
         intent_bundle: ScheduledIntentBundle,
         execution_report: &mut IntentExecutionReport,
-        persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         if intent_bundle.is_empty() {
             return Err(IntentExecutorError::EmptyIntentError);
         }
         let all_committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
-
-        // Update tasks status to Pending
-        {
-            let update_status = CommitStatus::Pending;
-            persist_status_update_by_message_set(
-                persister,
-                intent_bundle.id,
-                &all_committed_pubkeys,
-                update_status,
-            );
-        }
 
         if all_committed_pubkeys.is_empty() {
             // Build tasks for commit stage
@@ -222,7 +208,6 @@ where
             let commit_tasks = TaskBuilderImpl::commit_tasks(
                 &self.task_info_fetcher,
                 &intent_bundle,
-                persister,
             )
             .await?;
 
@@ -230,7 +215,6 @@ where
             let mut strategy = TaskStrategist::build_strategy(
                 commit_tasks,
                 &self.authority.pubkey(),
-                persister,
             )?;
             strategy.standalone_action_nonce = Some(intent_bundle.id);
             return self
@@ -238,7 +222,6 @@ where
                     intent_bundle,
                     strategy,
                     execution_report,
-                    persister,
                 )
                 .await;
         };
@@ -248,7 +231,6 @@ where
             let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
                 &self.task_info_fetcher,
                 &intent_bundle,
-                persister,
             );
             let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
                 &self.task_info_fetcher,
@@ -265,7 +247,6 @@ where
             commit_tasks,
             finalize_tasks,
             &self.authority.pubkey(),
-            persister,
         )? {
             StrategyExecutionMode::SingleStage(strategy) => {
                 trace!("Single stage execution");
@@ -273,7 +254,6 @@ where
                     intent_bundle,
                     strategy,
                     execution_report,
-                    persister,
                 )
                 .await
             }
@@ -287,7 +267,6 @@ where
                     commit_stage,
                     finalize_stage,
                     execution_report,
-                    persister,
                 )
                 .await
             }
@@ -299,12 +278,11 @@ where
     }
 
     /// Starting execution from single stage
-    pub async fn single_stage_execution_flow<P: IntentPersister>(
+    pub async fn single_stage_execution_flow(
         &mut self,
         base_intent: ScheduledIntentBundle,
         transaction_strategy: TransactionStrategy,
         execution_report: &mut IntentExecutionReport,
-        persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let committed_pubkeys = base_intent.get_all_committed_pubkeys();
 
@@ -323,7 +301,6 @@ where
                 transaction_preparator: &self.transaction_preparator,
                 committed_pubkeys: &committed_pubkeys,
             },
-            persister,
         )
         .await;
 
@@ -366,18 +343,16 @@ where
             commit_strategy,
             finalize_strategy,
             execution_report,
-            persister,
         )
         .await
     }
 
-    pub async fn two_stage_execution_flow<P: IntentPersister>(
+    pub async fn two_stage_execution_flow(
         &mut self,
         committed_pubkeys: &[Pubkey],
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
         execution_report: &mut IntentExecutionReport,
-        persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let mut executor = TwoStageExecutor::new(
             self.authority.insecure_clone(),
@@ -396,7 +371,6 @@ where
                 task_info_fetcher: &self.task_info_fetcher,
                 committed_pubkeys,
             },
-            persister,
         )
         .await?;
 
@@ -407,7 +381,6 @@ where
                 inner: &mut finalize_executor,
                 transaction_preparator: &self.transaction_preparator,
             },
-            persister,
         )
         .await?;
 
@@ -418,114 +391,6 @@ where
         })
     }
 
-    /// Flushes result into presistor
-    /// The result will be propagated down to callers
-    fn persist_result<P: IntentPersister>(
-        persistor: &P,
-        result: &IntentExecutorResult<ExecutionOutput>,
-        message_id: u64,
-        pubkeys: &[Pubkey],
-    ) {
-        let update_status = match result {
-            Ok(value) => {
-                let signatures = match *value {
-                    ExecutionOutput::SingleStage(signature) => {
-                        CommitStatusSignatures {
-                            commit_stage_signature: signature,
-                            finalize_stage_signature: Some(signature),
-                        }
-                    }
-                    ExecutionOutput::TwoStage {
-                        commit_signature,
-                        finalize_signature,
-                    } => CommitStatusSignatures {
-                        commit_stage_signature: commit_signature,
-                        finalize_stage_signature: Some(finalize_signature),
-                    },
-                };
-                let update_status = CommitStatus::Succeeded(signatures);
-                persist_status_update_by_message_set(
-                    persistor,
-                    message_id,
-                    pubkeys,
-                    update_status,
-                );
-
-                if let Err(err) =
-                    persistor.finalize_base_intent(message_id, *value)
-                {
-                    tracing::error!(error = ?err, "Failed to persist ExecutionOutput");
-                }
-
-                return;
-            }
-            Err(IntentExecutorError::EmptyIntentError)
-            | Err(IntentExecutorError::FailedToFitError)
-            | Err(IntentExecutorError::TaskBuilderError(_))
-            | Err(IntentExecutorError::FailedCommitPreparationError(
-                TransactionPreparatorError::SignerError(_),
-            ))
-            | Err(IntentExecutorError::FailedFinalizePreparationError(
-                TransactionPreparatorError::SignerError(_),
-            )) => Some(CommitStatus::Failed),
-            Err(IntentExecutorError::FailedCommitPreparationError(
-                TransactionPreparatorError::FailedToFitError,
-            )) => Some(CommitStatus::PartOfTooLargeBundleToProcess),
-            Err(IntentExecutorError::FailedCommitPreparationError(
-                TransactionPreparatorError::DeliveryPreparationError(_),
-            )) => {
-                // Intermediate commit preparation progress recorded by DeliveryPreparator
-                None
-            }
-            Err(IntentExecutorError::FailedToCommitError {
-                err: _,
-                signature,
-            }) => {
-                // Commit is a single TX, so if it fails, all of commited accounts marked FailedProcess
-                let status_signature =
-                    signature.map(|sig| CommitStatusSignatures {
-                        commit_stage_signature: sig,
-                        finalize_stage_signature: None,
-                    });
-                Some(CommitStatus::FailedProcess(status_signature))
-            }
-            Err(IntentExecutorError::FailedFinalizePreparationError(_)) => {
-                // Not supported in persistor
-                None
-            }
-            Err(IntentExecutorError::FailedToFinalizeError {
-                err: _,
-                commit_signature,
-                finalize_signature,
-            }) => {
-                // Finalize is a single TX, so if it fails, all of commited accounts marked FailedFinalize
-                let update_status =
-                    if let Some(commit_signature) = commit_signature {
-                        let signatures = CommitStatusSignatures {
-                            commit_stage_signature: *commit_signature,
-                            finalize_stage_signature: *finalize_signature,
-                        };
-                        CommitStatus::FailedFinalize(signatures)
-                    } else {
-                        CommitStatus::FailedProcess(None)
-                    };
-
-                Some(update_status)
-            }
-            Err(IntentExecutorError::SignerError(_)) => {
-                Some(CommitStatus::Failed)
-            }
-        };
-
-        if let Some(update_status) = update_status {
-            persist_status_update_by_message_set(
-                persistor,
-                message_id,
-                pubkeys,
-                update_status,
-            );
-        }
-    }
 }
 
 #[async_trait]
@@ -537,19 +402,17 @@ where
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
-    async fn execute<P: IntentPersister>(
+    async fn execute(
         &mut self,
-        base_intent: ScheduledIntentBundle,
-        persister: Option<P>,
+        base_intent: OutboxIntentBundle,
     ) -> IntentExecutionResult {
         self.started_at = Instant::now();
-        let message_id = base_intent.id;
         let is_undelegate = base_intent.has_undelegate_intent();
         let pubkeys = base_intent.get_all_committed_pubkeys();
 
         let mut execution_report = IntentExecutionReport::default();
         let result = self
-            .execute_inner(base_intent, &mut execution_report, &persister)
+            .execute_inner(base_intent.inner, &mut execution_report)
             .await;
         if !pubkeys.is_empty() {
             // Reset TaskInfoFetcher, as cache could become invalid
@@ -558,9 +421,6 @@ where
             if result.is_err() || is_undelegate {
                 self.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
             }
-
-            // Write result of intent into Persister
-            Self::persist_result(&persister, &result, message_id, &pubkeys);
         }
 
         // Gather metrics in separate task

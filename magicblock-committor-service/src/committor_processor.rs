@@ -7,7 +7,7 @@ use std::{
 
 use futures_util::future::join_all;
 use magicblock_core::traits::ActionsCallbackScheduler;
-use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
@@ -35,6 +35,8 @@ use crate::{
         MessageSignatures,
     },
 };
+use crate::intent_execution_manager::db::DumberDB;
+
 const POISONED_MUTEX_MSG: &str =
     "CommittorProcessor pending messages mutex poisoned!";
 pub(crate) const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;

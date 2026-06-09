@@ -21,7 +21,6 @@ use crate::{
         },
         IntentExecutionReport,
     },
-    persist::{IntentPersister, IntentPersisterImpl},
     tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
     transaction_preparator::TransactionPreparator,
 };
@@ -62,18 +61,16 @@ where
     }
 
     #[instrument(
-        skip(self, committed_pubkeys, transaction_preparator, persister),
+        skip(self, committed_pubkeys, transaction_preparator),
         fields(stage = "single_stage")
     )]
-    pub async fn execute<T, P>(
+    pub async fn execute<T>(
         &mut self,
         committed_pubkeys: &[Pubkey],
         transaction_preparator: &T,
-        persister: &Option<P>,
     ) -> IntentExecutorResult<Signature>
     where
         T: TransactionPreparator,
-        P: IntentPersister,
     {
         const RECURSION_CEILING: u8 = 10;
 
@@ -86,7 +83,6 @@ where
                 &self.authority,
                 transaction_preparator,
                 &mut self.transaction_strategy,
-                persister,
             )
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
@@ -285,7 +281,6 @@ where
                 lookup_tables_keys: vec![],
                 standalone_action_nonce: None,
             },
-            &None::<IntentPersisterImpl>,
         )
         .await
         .map_err(IntentExecutorError::FailedFinalizePreparationError)?

@@ -5,17 +5,15 @@ use std::{
 };
 
 use futures_util::ready;
-use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox_intent_bundles::OutboxIntentBundle,
-};
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use pin_project::pin_project;
-use tokio::sync::mpsc::{error::TrySendError, Receiver, Sender};
+use tokio::sync::{
+    mpsc,
+    mpsc::{error::TrySendError, Receiver, Sender},
+};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 
-use crate::intent_execution_manager::{
-    db, db::DB, IntentExecutionManagerError,
-};
+use crate::intent_execution_manager::{db, db::DB};
 
 const POISONED_MSG: &str = "Dummy DB mutex poisoned";
 
@@ -63,14 +61,13 @@ impl<D: DB> IntentScheduleHandle<D> {
 }
 
 #[pin_project]
-pub struct IntentStreamer<D> {
-    #[pin]
+pub struct IntentStream<D> {
     db: Arc<Mutex<D>>,
     #[pin]
     stream: ReceiverStream<OutboxIntentBundle>,
 }
 
-impl<D: DB> IntentStreamer<D> {
+impl<D: DB> IntentStream<D> {
     pub fn new(
         db: Arc<Mutex<D>>,
         receiver: Receiver<OutboxIntentBundle>,
@@ -82,14 +79,13 @@ impl<D: DB> IntentStreamer<D> {
     }
 }
 
-impl<D: DB> Stream for IntentStreamer<D> {
+impl<D: DB> Stream for IntentStream<D> {
     type Item = Result<OutboxIntentBundle, db::Error>;
 
     fn poll_next(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        // TODO(edwin): could be relaxed and used after receive or not?
         let this = self.project();
         let db = this.db.lock().expect(POISONED_MSG);
         // That means we have backlog
@@ -103,6 +99,18 @@ impl<D: DB> Stream for IntentStreamer<D> {
         let item = ready!(this.stream.poll_next(cx));
         Poll::Ready(item.map(Ok))
     }
+}
+
+pub(crate) fn channel<D: DB>(
+    db: &Arc<Mutex<D>>,
+    buffer: usize,
+) -> (IntentScheduleHandle<D>, IntentStream<D>) {
+    let (sender, receiver) = mpsc::channel(buffer);
+
+    let handle = IntentScheduleHandle::new(db.clone(), sender);
+    let stream = IntentStream::new(db.clone(), receiver);
+
+    (handle, stream)
 }
 
 #[derive(thiserror::Error, Debug)]

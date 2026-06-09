@@ -4,10 +4,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures_util::{stream::FuturesUnordered, StreamExt};
+use futures_util::stream::FuturesUnordered;
 use magicblock_core::traits::CallbackScheduleError;
 use magicblock_metrics::metrics;
-use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_signature::Signature;
 use tokio::{
     sync::{
@@ -16,13 +16,14 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use tokio_stream::StreamExt;
 use tracing::{error, info, instrument, trace, warn};
 
 use crate::{
     intent_execution_manager::{
         db::DB,
+        intent_channerl::{IntentScheduleError, IntentStream},
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
-        IntentExecutionManagerError,
     },
     intent_executor::{
         error::{
@@ -32,7 +33,6 @@ use crate::{
         intent_executor_factory::IntentExecutorFactory,
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
-    persist::IntentPersister,
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
@@ -88,35 +88,28 @@ impl ResultSubscriber {
     }
 }
 
-pub(crate) struct IntentExecutionEngine<D, P, F> {
-    db: Arc<D>,
+pub(crate) struct IntentExecutionEngine<D, F> {
+    intent_stream: IntentStream<D>,
     executor_factory: F,
-    intents_persister: Option<P>,
-    receiver: mpsc::Receiver<ScheduledIntentBundle>,
 
     inner: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
 }
 
-impl<D, P, F, E> IntentExecutionEngine<D, P, F>
+impl<D, F, E> IntentExecutionEngine<D, F>
 where
     D: DB,
-    P: IntentPersister,
     F: IntentExecutorFactory<Executor = E> + Send + Sync + 'static,
     E: IntentExecutor,
 {
     pub fn new(
-        db: Arc<D>,
+        intent_stream: IntentStream<D>,
         executor_factory: F,
-        intents_persister: Option<P>,
-        receiver: mpsc::Receiver<ScheduledIntentBundle>,
     ) -> Self {
         Self {
-            db,
-            intents_persister,
+            intent_stream,
             executor_factory,
-            receiver,
             running_executors: FuturesUnordered::new(),
             executors_semaphore: Arc::new(Semaphore::new(
                 MAX_EXECUTORS as usize,
@@ -145,13 +138,14 @@ where
         loop {
             let intent = match self.next_scheduled_intent().await {
                 Ok(value) => value,
-                Err(IntentExecutionManagerError::ChannelClosed) => {
+                Err(IntentScheduleError::ChannelClosed) => {
                     info!("Channel closed, exiting");
                     break;
                 }
-                Err(IntentExecutionManagerError::DBError(err)) => {
+                Err(IntentScheduleError::DBError(err)) => {
+                    // TODO(edwin): add to alert as this is critical error
                     error!(error = ?err, "Failed to fetch intent");
-                    break;
+                    continue;
                 }
             };
             let Some(intent) = intent else {
@@ -172,12 +166,10 @@ where
 
             // Spawn executor
             let executor = self.executor_factory.create_instance();
-            let persister = self.intents_persister.clone();
             let inner = self.inner.clone();
 
             let handle = tokio::spawn(Self::execute(
                 executor,
-                persister,
                 intent,
                 inner,
                 permit,
@@ -191,12 +183,11 @@ where
         }
     }
 
-    /// Returns [`ScheduledIntentBundle`] or None if all intents are blocked
+    /// Returns [`OutboxIntentBundle`] or None if all intents are blocked
     #[instrument(skip(self))]
     async fn next_scheduled_intent(
         &mut self,
-    ) -> Result<Option<ScheduledIntentBundle>, IntentExecutionManagerError>
-    {
+    ) -> Result<Option<OutboxIntentBundle>, IntentScheduleError> {
         // Limit on number of intents that can be stored in scheduler
         const SCHEDULER_CAPACITY: usize = 1000;
 
@@ -215,8 +206,7 @@ where
         };
 
         let running_executors = &mut self.running_executors;
-        let receiver = &mut self.receiver;
-        let db = &self.db;
+        let intent_stream = &mut self.intent_stream;
         let intent = tokio::select! {
             // Notify polled first to prioritize unblocked intents over new one
             biased;
@@ -227,7 +217,7 @@ where
                 trace!("Worker executed intent bundle, fetching new available one");
                 self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_intent()
             },
-            result = Self::get_new_intent(receiver, db), if can_receive() => {
+            result = Self::get_new_intent(intent_stream), if can_receive() => {
                 let intent = result?;
                 self.inner.lock().expect(POISONED_INNER_MSG).schedule(intent)
             },
@@ -246,35 +236,20 @@ where
 
     /// Returns [`ScheduledIntentBundle`] from external channel
     async fn get_new_intent(
-        receiver: &mut mpsc::Receiver<ScheduledIntentBundle>,
-        db: &Arc<D>,
-    ) -> Result<ScheduledIntentBundle, IntentExecutionManagerError> {
-        match receiver.try_recv() {
-            Ok(val) => Ok(val),
-            Err(TryRecvError::Empty) => {
-                // Worker either cleaned-up congested channel and now need to clean-up DB
-                // or we're just waiting on empty channel
-                if let Some(intent_bundle) = db.pop_intent_bundle().await? {
-                    Ok(intent_bundle)
-                } else {
-                    receiver
-                        .recv()
-                        .await
-                        .ok_or(IntentExecutionManagerError::ChannelClosed)
-                }
-            }
-            Err(TryRecvError::Disconnected) => {
-                Err(IntentExecutionManagerError::ChannelClosed)
-            }
-        }
+        intent_stream: &mut IntentStream<D>,
+    ) -> Result<OutboxIntentBundle, IntentScheduleError> {
+        intent_stream
+            .next()
+            .await
+            .ok_or(IntentScheduleError::ChannelClosed)?
+            .map_err(IntentScheduleError::DBError)
     }
 
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
-    #[instrument(skip(executor, persister, intent, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor, intent, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
         mut executor: E,
-        persister: Option<P>,
-        intent: ScheduledIntentBundle,
+        intent: OutboxIntentBundle,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
@@ -282,7 +257,7 @@ where
         let instant = Instant::now();
 
         // Execute an Intent
-        let result = executor.execute(intent.clone(), persister).await;
+        let result = executor.execute(intent.clone()).await;
         let _ = result.inner.as_ref().inspect_err(|err| {
             error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
         });
@@ -320,7 +295,7 @@ where
     /// Records metrics related to intent execution
     fn execution_metrics(
         execution_time: Duration,
-        intent: &ScheduledIntentBundle,
+        intent: &OutboxIntentBundle,
         result: &IntentExecutorResult<ExecutionOutput>,
     ) {
         const EXECUTION_TIME_THRESHOLD: f64 = 5.0;
@@ -366,57 +341,44 @@ mod tests {
     };
 
     use async_trait::async_trait;
-    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
     use solana_pubkey::{pubkey, Pubkey};
     use solana_signature::Signature;
     use solana_signer::SignerError;
     use solana_transaction_error::TransactionError;
-    use tokio::{sync::mpsc, time::sleep};
+    use tokio::time::sleep;
 
     use super::*;
     use crate::{
         intent_execution_manager::{
             db::{DummyDB, DB},
+            intent_channerl::{channel, IntentScheduleHandle},
             intent_scheduler::{create_test_intent, create_test_intent_bundle},
         },
         intent_executor::{
             error::{IntentExecutorError as ExecutorError, InternalError},
             IntentExecutionResult,
         },
-        persist::IntentPersisterImpl,
         test_utils,
         transaction_preparator::delivery_preparator::BufferExecutionError,
     };
 
-    type MockIntentExecutionEngine = IntentExecutionEngine<
-        DummyDB,
-        IntentPersisterImpl,
-        MockIntentExecutorFactory,
-    >;
+    type MockIntentExecutionEngine =
+        IntentExecutionEngine<DummyDB, MockIntentExecutorFactory>;
     fn setup_engine(
         should_fail: bool,
-    ) -> (
-        mpsc::Sender<ScheduledIntentBundle>,
-        MockIntentExecutionEngine,
-    ) {
+    ) -> (IntentScheduleHandle<DummyDB>, MockIntentExecutionEngine) {
         test_utils::init_test_logger();
 
-        let (sender, receiver) = mpsc::channel(1000);
-
-        let db = Arc::new(DummyDB::new());
+        let db = Arc::new(Mutex::new(DummyDB::new()));
+        let (handle, intent_stream) = channel(&db, 1000);
         let executor_factory = if !should_fail {
             MockIntentExecutorFactory::new()
         } else {
             MockIntentExecutorFactory::new_failing()
         };
-        let worker = IntentExecutionEngine::new(
-            db.clone(),
-            executor_factory,
-            None::<IntentPersisterImpl>,
-            receiver,
-        );
+        let worker = IntentExecutionEngine::new(intent_stream, executor_factory);
 
-        (sender, worker)
+        (handle, worker)
     }
 
     #[tokio::test]
@@ -431,7 +393,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        sender.send(msg.clone()).await.unwrap();
+        sender.schedule(vec![msg.clone()]).unwrap();
 
         // Verify the message was processed
         let result = result_receiver.recv().await.unwrap();
@@ -502,7 +464,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        sender.send(msg.clone()).await.unwrap();
+        sender.schedule(vec![msg.clone()]).unwrap();
 
         // Verify the failure was properly reported
         let result = result_receiver.recv().await.unwrap();
@@ -563,7 +525,7 @@ mod tests {
                 &[pubkey!("1111111111111111111111111111111111111111111")],
                 false,
             );
-            sender.send(msg).await.unwrap();
+            sender.schedule(vec![msg]).unwrap();
         }
 
         // Process results and verify constraints
@@ -599,7 +561,7 @@ mod tests {
                 &[pubkey!("1111111111111111111111111111111111111111111")],
                 false,
             );
-            sender.send(msg).await.unwrap();
+            sender.schedule(vec![msg]).unwrap();
         }
 
         // Verify all failures are processed and semaphore slots released
@@ -631,7 +593,7 @@ mod tests {
             let msg = create_test_intent(i, &[unique_pubkey], false);
 
             received_ids.insert(i);
-            sender.send(msg).await.unwrap();
+            sender.schedule(vec![msg]).unwrap();
         }
 
         // Process results
@@ -695,7 +657,7 @@ mod tests {
             };
 
             let msg = create_test_intent(i as u64, &pubkeys, false);
-            sender.send(msg).await.unwrap();
+            sender.schedule(vec![msg]).unwrap();
         }
 
         // Process results
@@ -800,10 +762,9 @@ mod tests {
 
     #[async_trait]
     impl IntentExecutor for MockIntentExecutor {
-        async fn execute<P: IntentPersister>(
+        async fn execute(
             &mut self,
-            _base_intent: ScheduledIntentBundle,
-            _persister: Option<P>,
+            _base_intent: OutboxIntentBundle,
         ) -> IntentExecutionResult {
             self.on_task_started();
 
