@@ -41,6 +41,29 @@ fn setup_with_account(
     map
 }
 
+fn recovery_ephemeral_owner() -> Pubkey {
+    Pubkey::from_str_const("CyurcRVPuNLbCTBFeqRd3hz2iAA6uqYaBfnDDGeEWCHx")
+}
+
+fn recovery_ephemeral_marker_action() -> Instruction {
+    Instruction {
+        program_id: crate::id(),
+        accounts: vec![],
+        data: b"MB_RECOVER_EPHEMERAL_V1".to_vec(),
+    }
+}
+
+fn recovery_ephemeral_fields(remote_slot: u64) -> AccountCloneFields {
+    AccountCloneFields {
+        lamports: 0,
+        owner: recovery_ephemeral_owner(),
+        executable: false,
+        delegated: false,
+        confined: false,
+        remote_slot,
+    }
+}
+
 fn schedule_task_action(payer: Pubkey) -> Instruction {
     InstructionUtils::schedule_task_instruction(
         &payer,
@@ -224,8 +247,67 @@ fn test_clone_account_basic() {
     assert!(account.executable());
     assert!(account.delegated());
     assert!(account.confined());
+    assert!(!account.ephemeral());
     assert_eq!(account.remote_slot(), 42);
     assert_eq!(account.data(), &[1, 2, 3]);
+}
+
+#[test]
+fn test_recovery_ephemeral_clone_sets_expected_state() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let data = vec![1, 2, 3, 4];
+    let mut accounts = HashMap::new();
+    accounts
+        .insert(pubkey, AccountSharedData::new(0, 0, &system_program::id()));
+    ensure_started_validator(&mut accounts, None);
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        data.clone(),
+        recovery_ephemeral_fields(42),
+        vec![recovery_ephemeral_marker_action()],
+    );
+
+    let mut result = process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Ok(()),
+    );
+    result.drain(0..1);
+    let account = result.drain(0..1).next().unwrap();
+
+    assert_eq!(account.lamports(), 0);
+    assert_eq!(account.owner(), &recovery_ephemeral_owner());
+    assert!(!account.executable());
+    assert!(!account.delegated());
+    assert!(!account.undelegating());
+    assert!(!account.confined());
+    assert!(account.ephemeral());
+    assert_eq!(account.remote_slot(), 42);
+    assert_eq!(account.data(), data.as_slice());
+}
+
+#[test]
+fn test_recovery_ephemeral_clone_rejects_non_empty_target() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let accounts = setup_with_account(pubkey, 100, 0);
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![1, 2, 3],
+        recovery_ephemeral_fields(42),
+        vec![recovery_ephemeral_marker_action()],
+    );
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(InstructionError::AccountAlreadyInitialized),
+    );
 }
 
 #[test]
