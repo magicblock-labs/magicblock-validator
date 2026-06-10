@@ -55,7 +55,7 @@ pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
     intent_id: u64,
     make_outbox_stage: impl Fn(Signature) -> ExecutionStage,
     map_preparation_err: fn(TransactionPreparatorError) -> IntentExecutorError,
-    mut state: ExecutionState<'a>,
+    state: ExecutionState<'a>,
 ) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>>
 where
     T: TransactionPreparator,
@@ -68,7 +68,7 @@ where
             let flow = check_pending_signature(intent_client, sig).await?;
             // Pending signature corresponds to succeeded transaction - break
             if let ControlFlow::Break(()) = flow {
-                return Ok(Ok(*sig));
+                break Ok(Ok(*sig));
             }
 
             *state.pending_signature = None;
@@ -86,7 +86,7 @@ where
         .await
         .map_err(map_preparation_err)?;
 
-        // Record in outbox
+        // Record in outbox before sending
         let signature = prepared_transaction.get_signature();
         outbox_client
             .set_intent_execution_stage(
@@ -115,7 +115,6 @@ where
             Ok(()) => return Ok(Ok(*signature)),
             Err(err) => err,
         };
-
         let flow = patcher
             .patch(
                 &execution_err,
@@ -425,6 +424,7 @@ where
     junk
 }
 
+// TODO(edwin): docs
 pub(in crate::intent_executor) async fn execute_with_timeout(
     time_left: Option<Duration>,
     mut executor: impl StageExecutor,
@@ -450,6 +450,8 @@ pub(in crate::intent_executor) async fn execute_with_timeout(
         }
     }
 
+    // Timeout concerns only callbacks
+    // We still need to drive intent to completion
     executor.execute().await
 }
 

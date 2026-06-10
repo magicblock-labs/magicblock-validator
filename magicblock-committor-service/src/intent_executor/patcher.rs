@@ -202,6 +202,45 @@ pub(in crate::intent_executor) struct CommitStagePatcher<'a, F, A, T> {
     pub transaction_preparator: &'a T,
 }
 
+
+impl<F, A, T> CommitStagePatcher<'_, F, A, T>
+where
+    T: TransactionPreparator,
+{
+    /// Handles unfinalized account error for commit stage execution.
+    /// Sends a separate tx to finalize account and then continues execution.
+    async fn handle_unfinalized_account_error(
+        &self,
+        failed_signature: &Option<Signature>,
+        delegated_account: Pubkey,
+    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
+        let finalize_task: BaseTaskImpl =
+            FinalizeTask { delegated_account }.into();
+        prepare_and_execute_strategy(
+            self.intent_client,
+            self.authority,
+            self.transaction_preparator,
+            &mut TransactionStrategy {
+                optimized_tasks: vec![finalize_task],
+                lookup_tables_keys: vec![],
+                standalone_action_nonce: None,
+            },
+        )
+            .await
+            .map_err(IntentExecutorError::FailedCommitPreparationError)?
+            .map_err(|err| IntentExecutorError::FailedToCommitError {
+                err,
+                signature: *failed_signature,
+            })?;
+
+        Ok(ControlFlow::Continue(TransactionStrategy {
+            optimized_tasks: vec![],
+            lookup_tables_keys: vec![],
+            standalone_action_nonce: None,
+        }))
+    }
+}
+
 #[async_trait]
 impl<F, A, T> Patcher for CommitStagePatcher<'_, F, A, T>
 where
@@ -297,45 +336,6 @@ where
     }
 }
 
-impl<F, A, T> CommitStagePatcher<'_, F, A, T>
-where
-    T: TransactionPreparator,
-{
-    /// Handles unfinalized account error for commit stage execution.
-    /// Sends a separate tx to finalize account and then continues execution.
-    async fn handle_unfinalized_account_error(
-        &self,
-        failed_signature: &Option<Signature>,
-        delegated_account: Pubkey,
-    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl =
-            FinalizeTask { delegated_account }.into();
-        prepare_and_execute_strategy(
-            self.intent_client,
-            self.authority,
-            self.transaction_preparator,
-            &mut TransactionStrategy {
-                optimized_tasks: vec![finalize_task],
-                lookup_tables_keys: vec![],
-                standalone_action_nonce: None,
-            },
-        )
-        .await
-        .map_err(IntentExecutorError::FailedCommitPreparationError)?
-        .map_err(|err| IntentExecutorError::FailedToCommitError {
-            err,
-            signature: *failed_signature,
-        })?;
-
-        Ok(ControlFlow::Continue(TransactionStrategy {
-            optimized_tasks: vec![],
-            lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
-        }))
-    }
-}
-
-// --- FinalizeStagePatcher ---
 
 pub(in crate::intent_executor) struct FinalizeStagePatcher<'a, A> {
     pub authority: &'a Keypair,

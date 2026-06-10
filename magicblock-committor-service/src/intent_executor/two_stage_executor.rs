@@ -156,7 +156,7 @@ where
             transaction_preparator,
         };
 
-        // Execute stage
+        // Execute commit stage
         let commit_result = stage_execution_loop(
             &self.authority,
             &self.intent_client,
@@ -294,6 +294,7 @@ where
             authority: &self.authority,
             callback_scheduler: &self.callback_scheduler,
         };
+
         // Execute finalize stage
         let finalize_result = stage_execution_loop(
             &self.authority,

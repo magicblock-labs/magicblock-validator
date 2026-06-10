@@ -125,6 +125,7 @@ impl IntentExecutionClient {
         signatures: &[Signature],
     ) -> MagicBlockRpcClientResult<Vec<Option<Result<(), TransactionError>>>>
     {
+        // TODO(edwin): add metrics/log for this one
         let response = self
             .rpc_client
             .get_inner()
