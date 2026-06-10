@@ -7,7 +7,6 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use solana_transaction::versioned::VersionedTransaction;
 use tracing::{error, info, instrument, warn};
 
 use crate::{

@@ -4,12 +4,14 @@ use async_trait::async_trait;
 use magicblock_core::traits::{
     ActionError, ActionResult, ActionsCallbackScheduler,
 };
+use magicblock_program::outbox::ExecutionStage;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
 use tokio::time::timeout;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::{
     intent_executor::{
@@ -18,11 +20,13 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         intent_execution_client::IntentExecutionClient,
+        patcher::Patcher,
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         two_stage_executor::{Committed, Initialized, TwoStageExecutor},
         IntentExecutionReport,
     },
+    outbox_client::OutboxClient,
     tasks::{
         task_builder::TaskBuilderError,
         task_strategist::{TaskStrategist, TransactionStrategy},
@@ -32,6 +36,104 @@ use crate::{
         error::TransactionPreparatorError, TransactionPreparator,
     },
 };
+
+const STAGE_LOOP_CEILING: u8 = 10;
+
+pub(in crate::intent_executor) struct ExecutionState<'a> {
+    current_attempt: &'a mut u8,
+    transaction_strategy: &'a mut TransactionStrategy,
+    pending_signature: &'a mut Option<Signature>,
+    execution_report: &'a mut IntentExecutionReport,
+}
+
+pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
+    authority: &Keypair,
+    intent_client: &IntentExecutionClient,
+    outbox_client: &O,
+    transaction_preparator: &T,
+    mut patcher: P,
+    intent_id: u64,
+    make_outbox_stage: impl Fn(Signature) -> ExecutionStage,
+    map_preparation_err: fn(TransactionPreparatorError) -> IntentExecutorError,
+    mut state: ExecutionState<'a>,
+) -> IntentExecutorResult<Signature>
+where
+    T: TransactionPreparator,
+    O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
+    P: Patcher,
+{
+    loop {
+        if let Some(ref sig) = state.pending_signature {
+            let flow = check_pending_signature(intent_client, sig).await?;
+            // Pending signature corresponds to succeeded transaction - break
+            if let ControlFlow::Break(()) = flow {
+                return Ok(*sig);
+            }
+
+            *state.pending_signature = None;
+        }
+
+        *state.current_attempt += 1;
+
+        // Prepare message
+        let prepared_transaction = prepare_transaction(
+            intent_client,
+            authority,
+            transaction_preparator,
+            state.transaction_strategy,
+        )
+        .await
+        .map_err(map_preparation_err)?;
+
+        // Record in outbox
+        let signature = prepared_transaction.get_signature();
+        outbox_client
+            .set_intent_execution_stage(
+                intent_id,
+                make_outbox_stage(*signature),
+            )
+            .await
+            .map_err(Into::into)?;
+
+        // Now record locally signature of tx we about to send
+        // Precaution for timeout in between
+        *state.pending_signature = Some(*signature);
+
+        // Send signed tx
+        let execution_result = intent_client
+            .send_signed_tx_with_retries(
+                &prepared_transaction,
+                &state.transaction_strategy.optimized_tasks,
+            )
+            .await;
+
+        // Result returned, cleanup pending signature
+        *state.pending_signature = None;
+
+        let execution_err = match execution_result {
+            Ok(()) => return Ok(*signature),
+            Err(err) => err,
+        };
+
+        let flow = patcher
+            .patch(&execution_err, state.transaction_strategy)
+            .await?;
+        let cleanup = match flow {
+            ControlFlow::Continue(value) => value,
+            ControlFlow::Break(()) => return Err(execution_err.into()),
+        };
+        intent_client.invalidate_cached_blockhash().await;
+        state.execution_report.dispose(cleanup);
+
+        if *state.current_attempt >= STAGE_LOOP_CEILING {
+            error!("CRITICAL! Recursion ceiling reached");
+            return Err(execution_err.into());
+        } else {
+            state.execution_report.add_patched_error(execution_err);
+        }
+    }
+}
 
 pub async fn prepare_transaction<T: TransactionPreparator>(
     client: &IntentExecutionClient,

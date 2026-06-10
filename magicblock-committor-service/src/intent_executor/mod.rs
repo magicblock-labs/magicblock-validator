@@ -2,6 +2,7 @@ pub mod error;
 pub mod intent_execution_client;
 pub(crate) mod intent_executor_factory;
 pub mod intent_executor_gateway;
+pub mod patcher;
 pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
