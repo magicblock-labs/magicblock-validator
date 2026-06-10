@@ -7,12 +7,16 @@ use magicblock_core::traits::{
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use solana_transaction::versioned::VersionedTransaction;
 use tokio::time::timeout;
 use tracing::info;
 
 use crate::{
     intent_executor::{
-        error::{IntentExecutorResult, TransactionStrategyExecutionError},
+        error::{
+            IntentExecutorError, IntentExecutorResult,
+            TransactionStrategyExecutionError,
+        },
         intent_execution_client::IntentExecutionClient,
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
@@ -28,6 +32,30 @@ use crate::{
         error::TransactionPreparatorError, TransactionPreparator,
     },
 };
+
+pub async fn prepare_transaction<T: TransactionPreparator>(
+    client: &IntentExecutionClient,
+    authority: &Keypair,
+    transaction_preparator: &T,
+    transaction_strategy: &mut TransactionStrategy,
+) -> Result<VersionedTransaction, TransactionPreparatorError> {
+    let mut prepared_message = transaction_preparator
+        .prepare_for_strategy(&authority, transaction_strategy)
+        .await?;
+
+    // Get latest blockhash(Part of preparation I guess)
+    let blockhash = client
+        .get_latest_blockhash()
+        .await
+        .map_err(TransactionPreparatorError::GetLatestBlockhashError)?;
+    prepared_message.set_recent_blockhash(blockhash);
+
+    // Create and sign transaction(Part of transaction preparation i guess, hence the errors)
+    let transaction =
+        VersionedTransaction::try_new(prepared_message, &[&authority])
+            .map_err(TransactionPreparatorError::SignerError)?;
+    Ok(transaction)
+}
 
 pub async fn prepare_and_execute_strategy<T>(
     client: &IntentExecutionClient,

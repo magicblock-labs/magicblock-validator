@@ -295,6 +295,7 @@ where
             self.authority.insecure_clone(),
             self.intent_client.clone(),
             self.task_info_fetcher.clone(),
+            self.outbox_client.clone(),
             transaction_strategy,
             self.actions_callback_executor.clone(),
             execution_report,

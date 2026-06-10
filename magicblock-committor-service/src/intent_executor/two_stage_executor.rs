@@ -1,10 +1,13 @@
 use std::{mem, ops::ControlFlow, sync::Arc};
 
 use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
+use magicblock_program::outbox::{ExecutionStage, TwoStageProgress};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_signer::Signer;
+use solana_transaction::versioned::VersionedTransaction;
 use tracing::{error, instrument, warn};
 
 use crate::{
@@ -19,12 +22,15 @@ use crate::{
         utils::{
             handle_actions_result, handle_commit_id_error,
             handle_undelegation_error, prepare_and_execute_strategy,
+            prepare_transaction,
         },
         IntentExecutionReport,
     },
     outbox_client::OutboxClient,
     tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
-    transaction_preparator::TransactionPreparator,
+    transaction_preparator::{
+        error::TransactionPreparatorError, TransactionPreparator,
+    },
 };
 
 pub struct Initialized {
@@ -32,8 +38,9 @@ pub struct Initialized {
     commit_strategy: TransactionStrategy,
     /// Finalize stage strategy
     finalize_strategy: TransactionStrategy,
-    // ///
-    // commit_signature: Option<Signature>,
+    /// Signature pending confirmation
+    /// Sources: Outbox with status Committing, timeout
+    pending_signature: Option<Signature>,
     current_attempt: u8,
 }
 
@@ -54,8 +61,11 @@ pub struct Finalized {
 }
 
 pub struct TwoStageExecutor<'a, A, O, S: Sealed> {
+    /// State per stage
     state: S,
+    /// Common state across the stages
     authority: Keypair,
+    intent_id: u64,
     intent_client: IntentExecutionClient,
     outbox_client: Arc<O>,
     callback_scheduler: A,
@@ -66,11 +76,13 @@ impl<'a, A, O> TwoStageExecutor<'a, A, O, Initialized>
 where
     A: ActionsCallbackScheduler,
     O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     const RECURSION_CEILING: u8 = 10;
 
     pub fn new(
         authority: Keypair,
+        intent_id: u64,
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
         intent_client: IntentExecutionClient,
@@ -80,6 +92,7 @@ where
     ) -> Self {
         Self {
             authority,
+            intent_id,
             intent_client,
             execution_report,
             callback_scheduler,
@@ -124,7 +137,38 @@ where
         F: TaskInfoFetcher,
     {
         let commit_result = loop {
+            if let Some(ref pending_signature) = self.state.pending_signature {
+                // TODO(edwin): check if tx succeeded here quering by signature
+                // self.intent_client.wait_for_processed_status / wait_for_confirmed_status?;
+            }
+
             self.state.current_attempt += 1;
+
+            // Prepare message
+            let prepared_transaction = prepare_transaction(
+                &self.intent_client,
+                &self.authority,
+                transaction_preparator,
+                &mut self.state.commit_strategy,
+            )
+            .await
+            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
+
+            // Record in outbox
+            let signature = prepared_transaction.get_signature();
+            self.outbox_client
+                .set_intent_execution_stage(
+                    self.intent_id,
+                    ExecutionStage::TwoStage(TwoStageProgress::Committing(
+                        *signature,
+                    )),
+                )
+                .await
+                .map_err(Into::into)?;
+
+            // Now record locally signature of tx we about to send
+            // Precaution for timeout in between
+            self.state.pending_signature = Some(*signature);
 
             // Prepare & execute message
             let execution_result = prepare_and_execute_strategy(
@@ -135,6 +179,10 @@ where
             )
             .await
             .map_err(IntentExecutorError::FailedCommitPreparationError)?;
+
+            // Result returned, cleanup pending signature
+            self.state.pending_signature = None;
+
             let execution_err = match execution_result {
                 Ok(value) => break Ok(value),
                 Err(err) => err,

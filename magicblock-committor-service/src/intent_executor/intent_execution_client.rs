@@ -101,7 +101,23 @@ impl IntentExecutionClient {
         Ok(())
     }
 
-    async fn get_latest_blockhash(&self) -> MagicBlockRpcClientResult<Hash> {
+    /// Checks whether a previously-sent transaction confirmed.
+    /// `Err` means the signature was not confirmed within the timeout window.
+    pub(in crate::intent_executor) async fn wait_for_confirmed_status(
+        &self,
+        signature: &Signature,
+    ) -> MagicBlockRpcClientResult<Result<(), TransactionError>> {
+        const TIMEOUT: Duration = Duration::from_secs(5);
+        const INTERVAL: Duration = Duration::from_millis(200);
+
+        self.rpc_client
+            .wait_for_confirmed_status(signature, &TIMEOUT, &Some(INTERVAL))
+            .await
+    }
+
+    pub(in crate::intent_executor) async fn get_latest_blockhash(
+        &self,
+    ) -> MagicBlockRpcClientResult<Hash> {
         const RETRY_FOR: Duration = Duration::from_secs(60);
         const MIN_ATTEMPTS: usize = 5;
 

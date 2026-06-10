@@ -14,6 +14,7 @@ use solana_transaction_error::TransactionError;
 use tracing::error;
 
 use crate::{
+    outbox_client::InternalOutboxClientError,
     tasks::{
         task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
         BaseTaskImpl,
@@ -75,6 +76,8 @@ pub enum IntentExecutorError {
     FailedToFitError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
+    #[error("OutboxClientError: {0}")]
+    OutboxClientError(#[from] InternalOutboxClientError),
     // TODO(edwin): remove once proper retries introduced
     #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),

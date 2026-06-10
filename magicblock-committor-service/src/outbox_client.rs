@@ -79,7 +79,7 @@ impl<L: LatestBlockProvider> InternalOutboxClient<L> {
 
     /// Sends transaction to move the scheduled commits from the `MagicContext`
     /// to the global ScheduledCommit store
-    async fn send_accept_tx(&self) -> Result<(), InternalIntentClientError> {
+    async fn send_accept_tx(&self) -> Result<(), InternalOutboxClientError> {
         let tx = InstructionUtils::accept_scheduled_commits(
             self.latest_block_provider.blockhash(),
         );
@@ -99,7 +99,7 @@ impl<L: LatestBlockProvider> InternalOutboxClient<L> {
 
 #[async_trait]
 impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
-    type Error = InternalIntentClientError;
+    type Error = InternalOutboxClientError;
     type OutboxReader = InternalOutboxIntentBundlesReader;
 
     async fn accept_scheduled_intents(
@@ -157,7 +157,7 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum InternalIntentClientError {
+pub enum InternalOutboxClientError {
     #[error("TransactionError: {0}")]
     TransactionError(#[from] TransactionError),
 }

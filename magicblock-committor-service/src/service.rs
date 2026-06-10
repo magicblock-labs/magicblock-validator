@@ -32,7 +32,7 @@ use crate::{
     error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
-    outbox_client::{InternalIntentClientError, OutboxClient},
+    outbox_client::{InternalOutboxClientError, OutboxClient},
     service::outbox_intent_bundles_reader::{
         InternalOutboxIntentBundlesReaderError, OutboxIntentBundlesReader,
     },
@@ -592,7 +592,7 @@ pub enum IntentExecutionServiceError {
     #[error("JoinError: {0}")]
     JoinError(#[from] JoinError),
     #[error("IntentRpcClientError: {0}")]
-    IntentRpcClientError(#[from] InternalIntentClientError),
+    IntentRpcClientError(#[from] InternalOutboxClientError),
     #[error("OutboxReaderError")]
     OutboxReaderError(#[from] InternalOutboxIntentBundlesReaderError),
 }
