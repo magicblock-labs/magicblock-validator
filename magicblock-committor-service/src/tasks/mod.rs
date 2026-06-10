@@ -81,7 +81,7 @@ impl BaseTask for BaseTaskImpl {
             Self::CommitFinalize(value) => value.compute_units(),
             Self::BaseAction(value) => value.compute_units(),
             Self::Finalize(_) => 70_000,
-            Self::Undelegate(_) => 70_000,
+            Self::Undelegate(_) => 105_000,
         }
     }
 
