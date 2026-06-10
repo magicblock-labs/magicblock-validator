@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{ops::ControlFlow, time::Duration};
 
 use async_trait::async_trait;
 use magicblock_core::traits::{
@@ -9,7 +9,7 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
 use tokio::time::timeout;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     intent_executor::{
@@ -55,6 +55,39 @@ pub async fn prepare_transaction<T: TransactionPreparator>(
         VersionedTransaction::try_new(prepared_message, &[&authority])
             .map_err(TransactionPreparatorError::SignerError)?;
     Ok(transaction)
+}
+
+/// Checks a `pending_signature` loaded from the outbox against the full
+/// transaction history. Returns `Break(sig)` if the tx succeeded — the caller
+/// can short-circuit and skip re-execution. Returns `Continue` for every other
+/// outcome (tx failed, never sent, or RPC returned no entry), letting the
+/// normal execution loop proceed.
+pub(in crate::intent_executor) async fn check_pending_signature(
+    client: &IntentExecutionClient,
+    sig: &Signature,
+) -> IntentExecutorResult<ControlFlow<()>> {
+    let statuses = client
+        .get_signature_statuses_with_history(std::slice::from_ref(sig))
+        .await
+        .map_err(IntentExecutorError::GetPendingSignatureStatusError)?;
+
+    match statuses.get(0) {
+        Some(Some(Ok(()))) => Ok(ControlFlow::Break(())),
+        // TODO(edwin): well, that is bizarre one
+        None => {
+            warn!(pending_signature = ?sig, "RPC did not return status for signature");
+            Ok(ControlFlow::Continue(()))
+        }
+        // Any case below means tx failed in execution we continue attempts
+        Some(None) => {
+            info!(pending_signature = ?sig, "Transaction corresponding to pending signature was never sent");
+            Ok(ControlFlow::Continue(()))
+        }
+        Some(Some(Err(err))) => {
+            info!(pending_signature = ?sig, error = ?err, "Transaction corresponding to pending signature failed");
+            Ok(ControlFlow::Continue(()))
+        }
+    }
 }
 
 pub async fn prepare_and_execute_strategy<T>(

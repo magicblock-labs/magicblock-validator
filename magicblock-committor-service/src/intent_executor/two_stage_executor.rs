@@ -8,7 +8,7 @@ use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
-use tracing::{error, instrument, warn};
+use tracing::{error, info, instrument, warn};
 
 use crate::{
     intent_executor::{
@@ -20,9 +20,9 @@ use crate::{
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         two_stage_executor::sealed::Sealed,
         utils::{
-            handle_actions_result, handle_commit_id_error,
-            handle_undelegation_error, prepare_and_execute_strategy,
-            prepare_transaction,
+            check_pending_signature, handle_actions_result,
+            handle_commit_id_error, handle_undelegation_error,
+            prepare_and_execute_strategy, prepare_transaction,
         },
         IntentExecutionReport,
     },
@@ -137,9 +137,15 @@ where
         F: TaskInfoFetcher,
     {
         let commit_result = loop {
-            if let Some(ref pending_signature) = self.state.pending_signature {
-                // TODO(edwin): check if tx succeeded here quering by signature
-                // self.intent_client.wait_for_processed_status / wait_for_confirmed_status?;
+            if let Some(ref sig) = self.state.pending_signature {
+                let flow =
+                    check_pending_signature(&self.intent_client, sig).await?;
+                // Pending signature corresponds to succeeded transaction - break
+                if let ControlFlow::Break(()) = flow {
+                    break Ok(*sig);
+                }
+
+                self.state.pending_signature = None;
             }
 
             self.state.current_attempt += 1;
@@ -170,21 +176,20 @@ where
             // Precaution for timeout in between
             self.state.pending_signature = Some(*signature);
 
-            // Prepare & execute message
-            let execution_result = prepare_and_execute_strategy(
-                &self.intent_client,
-                &self.authority,
-                transaction_preparator,
-                &mut self.state.commit_strategy,
-            )
-            .await
-            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
+            // Send signed tx
+            let execution_result = self
+                .intent_client
+                .send_signed_tx_with_retries(
+                    &prepared_transaction,
+                    &self.state.commit_strategy.optimized_tasks,
+                )
+                .await;
 
             // Result returned, cleanup pending signature
             self.state.pending_signature = None;
 
             let execution_err = match execution_result {
-                Ok(value) => break Ok(value),
+                Ok(()) => break Ok(*signature),
                 Err(err) => err,
             };
 

@@ -16,6 +16,7 @@ use solana_message::VersionedMessage;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
+use solana_transaction_error::TransactionError;
 use tracing::warn;
 
 use crate::{
@@ -113,6 +114,29 @@ impl IntentExecutionClient {
         self.rpc_client
             .wait_for_confirmed_status(signature, &TIMEOUT, &Some(INTERVAL))
             .await
+    }
+
+    /// Queries the full transaction history for the given signatures.
+    /// Each entry is `None` if the signature was never included in a block.
+    /// Use this for restart recovery where txs may be older than the RPC
+    /// node's recent signature cache.
+    pub(in crate::intent_executor) async fn get_signature_statuses_with_history(
+        &self,
+        signatures: &[Signature],
+    ) -> MagicBlockRpcClientResult<Vec<Option<Result<(), TransactionError>>>>
+    {
+        let response = self
+            .rpc_client
+            .get_inner()
+            .get_signature_statuses_with_history(signatures)
+            .await
+            // TODO(edwin): map to more specific error? verify
+            .map_err(MagicBlockRpcClientError::from)?;
+        Ok(response
+            .value
+            .into_iter()
+            .map(|s| s.map(|s| s.err.map_or(Ok(()), Err)))
+            .collect())
     }
 
     pub(in crate::intent_executor) async fn get_latest_blockhash(

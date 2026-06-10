@@ -15,7 +15,7 @@ pub enum TransactionPreparatorError {
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
     #[error("Failed to get latest blockhash: {0}")]
-    GetLatestBlockhashError(#[from] MagicBlockRpcClientError),
+    GetLatestBlockhashError(#[source] MagicBlockRpcClientError),
     #[error("DeliveryPreparationError: {0}")]
     DeliveryPreparationError(Box<DeliveryPreparatorError>),
 }
