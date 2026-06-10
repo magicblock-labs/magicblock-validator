@@ -39,7 +39,7 @@ use crate::{
         intent_execution_client::IntentExecutionClient,
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
-        two_stage_executor::TwoStageExecutor,
+        two_stage_executor::{Initialized, TwoStageExecutor},
         utils::{
             execute_with_timeout, handle_cpi_limit_error, CommitStage,
             FinalizeStage, SingleStage,
@@ -53,8 +53,7 @@ use crate::{
         },
     },
     transaction_preparator::{
-        delivery_preparator::BufferExecutionError,
-        error::TransactionPreparatorError, TransactionPreparator,
+        delivery_preparator::BufferExecutionError, TransactionPreparator,
     },
 };
 
@@ -171,6 +170,7 @@ where
     F: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
     O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
@@ -269,6 +269,7 @@ where
             } => {
                 trace!("Two stage execution");
                 self.two_stage_execution_flow(
+                    intent_bundle.id,
                     &all_committed_pubkeys,
                     commit_stage,
                     finalize_stage,
@@ -294,6 +295,8 @@ where
 
         let mut single_stage_executor = SingleStageExecutor::new(
             self.authority.insecure_clone(),
+            base_intent.id,
+            None,
             self.intent_client.clone(),
             self.task_info_fetcher.clone(),
             self.outbox_client.clone(),
@@ -346,6 +349,7 @@ where
         execution_report.add_patched_error(execution_err);
 
         self.two_stage_execution_flow(
+            base_intent.id,
             &committed_pubkeys,
             commit_strategy,
             finalize_strategy,
@@ -356,15 +360,17 @@ where
 
     pub async fn two_stage_execution_flow(
         &mut self,
+        intent_id: u64,
         committed_pubkeys: &[Pubkey],
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        let state = Initialized::new(commit_strategy, finalize_strategy, None);
         let mut executor = TwoStageExecutor::new(
+            state,
             self.authority.insecure_clone(),
-            commit_strategy,
-            finalize_strategy,
+            intent_id,
             self.intent_client.clone(),
             self.outbox_client.clone(),
             self.actions_callback_executor.clone(),
@@ -407,6 +413,7 @@ where
     C: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
     O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`

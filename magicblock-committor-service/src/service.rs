@@ -366,7 +366,7 @@ where
         result_subscription,
         cancellation_token,
         intents_meta_map,
-        intent_client
+        outbox_client
     ))]
     async fn result_processor(
         mut result_subscription: broadcast::Receiver<
@@ -374,7 +374,7 @@ where
         >,
         cancellation_token: CancellationToken,
         intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-        intent_client: Arc<R>,
+        outbox_client: Arc<O>,
     ) {
         loop {
             let execution_result = tokio::select! {
@@ -400,8 +400,8 @@ where
                 }
             };
 
-            if let Err(err) = ServiceInner::<R>::process_execution_result(
-                &intent_client,
+            if let Err(err) = ServiceInner::<O>::process_execution_result(
+                &outbox_client,
                 execution_result,
                 &intents_meta_map,
             )
@@ -413,10 +413,10 @@ where
     }
 
     async fn process_execution_result(
-        intent_client: &Arc<R>,
+        outbox_client: &Arc<O>,
         execution_result: BroadcastedIntentExecutionResult,
         intents_meta_map: &Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-    ) -> Result<(), R::Error> {
+    ) -> Result<(), O::Error> {
         // Create IntentMeta
         let intent_id = execution_result.id;
         // Remove intent from metas
@@ -434,12 +434,12 @@ where
 
         let sent_transaction =
             mem::take(&mut intent_meta.intent_sent_transaction);
-        let sent_commit = ServiceInner::<R>::build_sent_commit(
+        let sent_commit = ServiceInner::<O>::build_sent_commit(
             intent_id,
             intent_meta,
             execution_result,
         );
-        intent_client
+        outbox_client
             .notify_commit_sent(sent_transaction, sent_commit)
             .await?;
 

@@ -4,13 +4,9 @@ use magicblock_core::intent::BaseActionCallback;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
-use tracing::error;
 
 use crate::{
-    tasks::{
-        commit_task::CommitDelivery, utils::TransactionUtils, BaseActionTask,
-        BaseTask, BaseTaskImpl,
-    },
+    tasks::{utils::TransactionUtils, BaseActionTask, BaseTask, BaseTaskImpl},
     transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
 };
 

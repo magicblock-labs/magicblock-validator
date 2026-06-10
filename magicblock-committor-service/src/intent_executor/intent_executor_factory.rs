@@ -6,10 +6,11 @@ use magicblock_table_mania::TableMania;
 
 use crate::{
     intent_executor::{
+        error::IntentExecutorError,
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
         IntentExecutor, IntentExecutorImpl,
     },
-    outbox_client::{InternalOutboxClient, OutboxClient},
+    outbox_client::OutboxClient,
     transaction_preparator::TransactionPreparatorImpl,
     ComputeBudgetConfig,
 };
@@ -39,6 +40,7 @@ impl<A, O> IntentExecutorFactory for IntentExecutorFactoryImpl<A, O>
 where
     A: ActionsCallbackScheduler,
     O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     type Executor =
         IntentExecutorImpl<TransactionPreparatorImpl, RpcTaskInfoFetcher, A, O>;

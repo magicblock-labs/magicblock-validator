@@ -120,6 +120,15 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
         Ok(TransactionScheduler::default().take_scheduled_intent_bundles())
     }
 
+    fn set_intent_execution_stage(
+        &self,
+        intent_id: u64,
+        stage: ExecutionStage,
+    ) -> Result<(), Self::Error> {
+        // TODO(edwin): use rpc of scheduler
+        todo!()
+    }
+
     async fn notify_commit_sent(
         &self,
         sent_tx: Transaction,
@@ -140,15 +149,6 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
             )?;
 
         Ok(())
-    }
-
-    fn set_intent_execution_stage(
-        &self,
-        intent_id: u64,
-        stage: ExecutionStage,
-    ) -> Result<(), Self::Error> {
-        // TODO(edwin): use rpc of scheduler
-        todo!()
     }
 
     fn outbox_reader(&self) -> Self::OutboxReader {

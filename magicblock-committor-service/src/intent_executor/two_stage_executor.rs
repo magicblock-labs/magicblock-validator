@@ -1,35 +1,26 @@
-use std::{mem, ops::ControlFlow, sync::Arc};
+use std::{mem, sync::Arc};
 
 use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
 use magicblock_program::outbox::{ExecutionStage, TwoStageProgress};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use tracing::{error, info, instrument, warn};
+use tracing::instrument;
 
 use crate::{
     intent_executor::{
-        error::{
-            IntentExecutorError, IntentExecutorResult,
-            TransactionStrategyExecutionError,
-        },
+        error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
+        patcher::{CommitStagePatcher, FinalizeStagePatcher},
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         two_stage_executor::sealed::Sealed,
-        utils::{
-            check_pending_signature, handle_actions_result,
-            handle_commit_id_error, handle_undelegation_error,
-            prepare_and_execute_strategy, prepare_transaction,
-        },
+        utils::{handle_actions_result, stage_execution_loop, ExecutionState},
         IntentExecutionReport,
     },
     outbox_client::OutboxClient,
-    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
-    transaction_preparator::{
-        error::TransactionPreparatorError, TransactionPreparator,
-    },
+    tasks::task_strategist::TransactionStrategy,
+    transaction_preparator::TransactionPreparator,
 };
 
 pub struct Initialized {
@@ -131,18 +122,6 @@ where
         }
     }
 
-    // We need to:
-    // 1. Prepare everything for tx delivery
-    // 2. Sign Tx
-    // 3. Update outbox with Committing(signature)
-    // 4, Send Tx
-    // 5. Confirm signature
-    //   a. Success - terminate
-    //   b. jump to 1
-
-    // We can start from 5:
-    // Committing(sig) was loaded from outbox
-    // confirm signature
     #[instrument(
         skip(
             self,
@@ -162,88 +141,34 @@ where
         T: TransactionPreparator,
         F: TaskInfoFetcher,
     {
-        let commit_result = loop {
-            if let Some(ref sig) = self.state.pending_signature {
-                let flow =
-                    check_pending_signature(&self.intent_client, sig).await?;
-                // Pending signature corresponds to succeeded transaction - break
-                if let ControlFlow::Break(()) = flow {
-                    break Ok(*sig);
-                }
-
-                self.state.pending_signature = None;
-            }
-
-            self.state.current_attempt += 1;
-
-            // Prepare message
-            let prepared_transaction = prepare_transaction(
-                &self.intent_client,
-                &self.authority,
-                transaction_preparator,
-                &mut self.state.commit_strategy,
-            )
-            .await
-            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
-
-            // Record in outbox
-            let signature = prepared_transaction.get_signature();
-            self.outbox_client
-                .set_intent_execution_stage(
-                    self.intent_id,
-                    ExecutionStage::TwoStage(TwoStageProgress::Committing(
-                        *signature,
-                    )),
-                )
-                .await
-                .map_err(Into::into)?;
-
-            // Now record locally signature of tx we about to send
-            // Precaution for timeout in between
-            self.state.pending_signature = Some(*signature);
-
-            // Send signed tx
-            let execution_result = self
-                .intent_client
-                .send_signed_tx_with_retries(
-                    &prepared_transaction,
-                    &self.state.commit_strategy.optimized_tasks,
-                )
-                .await;
-
-            // Result returned, cleanup pending signature
-            self.state.pending_signature = None;
-
-            let execution_err = match execution_result {
-                Ok(()) => break Ok(*signature),
-                Err(err) => err,
-            };
-
-            let flow = self
-                .patch_commit_strategy(
-                    &execution_err,
-                    task_info_fetcher,
-                    transaction_preparator,
-                    committed_pubkeys,
-                )
-                .await?;
-            let cleanup = match flow {
-                ControlFlow::Continue(value) => value,
-                ControlFlow::Break(()) => {
-                    break Err(execution_err);
-                }
-            };
-            self.intent_client.invalidate_cached_blockhash().await;
-            self.execution_report.dispose(cleanup);
-
-            if self.state.current_attempt >= Self::RECURSION_CEILING {
-                error!("CRITICAL! Recursion ceiling reached");
-                break Err(execution_err);
-            } else {
-                self.execution_report.add_patched_error(execution_err);
-            }
+        let execution_state = ExecutionState {
+            current_attempt: &mut self.state.current_attempt,
+            transaction_strategy: &mut self.state.commit_strategy,
+            pending_signature: &mut self.state.pending_signature,
+            execution_report: self.execution_report,
+        };
+        let commit_stage_patcher = CommitStagePatcher {
+            authority: &self.authority,
+            intent_client: &self.intent_client,
+            callback_scheduler: &self.callback_scheduler,
+            task_info_fetcher,
+            committed_pubkeys,
+            transaction_preparator,
         };
 
+        // Execute stage
+        let commit_result = stage_execution_loop(
+            &self.authority,
+            &self.intent_client,
+            &*self.outbox_client,
+            transaction_preparator,
+            commit_stage_patcher,
+            self.intent_id,
+            |sig| ExecutionStage::TwoStage(TwoStageProgress::Committing(sig)),
+            IntentExecutorError::FailedCommitPreparationError,
+            execution_state,
+        )
+        .await?;
         self.execute_callbacks(
             commit_result.as_ref().ok().copied(),
             commit_result.as_ref().map(|_| ()),
@@ -257,140 +182,6 @@ where
         commit_result.map_err(|err| {
             IntentExecutorError::from_commit_execution_error(err)
         })
-    }
-
-    /// Patches Commit stage `transaction_strategy` in response to a recoverable
-    /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
-    /// to be applied after a retry.
-    ///
-    /// [`TransactionStrategyExecutionError`], returning either:
-    /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
-    /// - `Break(())` when this stage cannot be recovered.
-    pub async fn patch_commit_strategy<T, F>(
-        &mut self,
-        err: &TransactionStrategyExecutionError,
-        task_info_fetcher: &CacheTaskInfoFetcher<F>,
-        transaction_preparator: &T,
-        committed_pubkeys: &[Pubkey],
-    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>>
-    where
-        T: TransactionPreparator,
-        F: TaskInfoFetcher,
-    {
-        match err {
-            TransactionStrategyExecutionError::CommitIDError(_, _) => {
-                let to_cleanup = handle_commit_id_error(
-                    &self.authority.pubkey(),
-                    task_info_fetcher,
-                    committed_pubkeys,
-                    &mut self.state.commit_strategy
-                )
-                    .await?;
-                Ok(ControlFlow::Continue(to_cleanup))
-            }
-            err
-            @ TransactionStrategyExecutionError::UnfinalizedAccountError(
-                _,
-                signature,
-            ) => {
-                let optimized_tasks =
-                    self.state.commit_strategy.optimized_tasks.as_slice();
-                let task_index = err.task_index();
-                if let Some(delegated_account) = task_index
-                    .and_then(|index| optimized_tasks.get(index as usize))
-                    .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        BaseTaskImpl::CommitFinalize(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        _ => None,
-                    })
-                {
-                    self.handle_unfinalized_account_error(
-                        signature,
-                        delegated_account,
-                        transaction_preparator,
-                    )
-                    .await
-                } else {
-                    error!(
-                        task_index = ?task_index,
-                        optimized_tasks_len = optimized_tasks.len(),
-                        error = ?err,
-                        "RPC returned unexpected task index"
-                    );
-                    Ok(ControlFlow::Break(()))
-                }
-            }
-            TransactionStrategyExecutionError::ActionsError(err, signature) => {
-                // Intent bundles allow for actions to be in commit stage
-                let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = handle_actions_result(
-                    &self.authority.pubkey(),
-                    &self.callback_scheduler,
-                    self.execution_report,
-                    &mut self.state.commit_strategy,
-                    *signature,
-                    action_error
-                );
-                Ok(ControlFlow::Continue(to_cleanup))
-            }
-            TransactionStrategyExecutionError::UndelegationError(_, _) => {
-                // Unexpected in Two Stage commit
-                // That would mean that Two Stage executes undelegation in commit phase
-                error!(error = ?err, "Unexpected error in two stage commit flow");
-                Ok(ControlFlow::Break(()))
-            }
-            TransactionStrategyExecutionError::CpiLimitError(_, _)
-            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
-                _,
-                _,
-            ) => {
-                // Can't be handled
-                error!(error = ?err, "Commit tasks exceeded execution limit");
-                Ok(ControlFlow::Break(()))
-            }
-            TransactionStrategyExecutionError::InternalError(_) => {
-                // Can't be handled
-                Ok(ControlFlow::Break(()))
-            }
-        }
-    }
-
-    /// Handles unfinalized account error
-    /// Sends a separate tx to finalize account and then continues execution
-    async fn handle_unfinalized_account_error<T: TransactionPreparator>(
-        &self,
-        failed_signature: &Option<Signature>,
-        delegated_account: Pubkey,
-        transaction_preparator: &T,
-    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl =
-            FinalizeTask { delegated_account }.into();
-        prepare_and_execute_strategy(
-            &self.intent_client,
-            &self.authority,
-            transaction_preparator,
-            &mut TransactionStrategy {
-                optimized_tasks: vec![finalize_task],
-                lookup_tables_keys: vec![],
-                standalone_action_nonce: None,
-            },
-        )
-        .await
-        .map_err(IntentExecutorError::FailedCommitPreparationError)?
-        .map_err(|err| IntentExecutorError::FailedToCommitError {
-            err,
-            signature: *failed_signature,
-        })?;
-
-        Ok(ControlFlow::Continue(TransactionStrategy {
-            optimized_tasks: vec![],
-            lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
-        }))
     }
 
     pub fn has_callbacks(&self) -> bool {
@@ -492,82 +283,35 @@ where
     where
         T: TransactionPreparator,
     {
-        let finalize_result = loop {
-            if let Some(ref sig) = self.state.pending_signature {
-                let flow =
-                    check_pending_signature(&self.intent_client, sig).await?;
-                // Pending signature corresponds to succeeded transaction - break
-                if let ControlFlow::Break(()) = flow {
-                    break Ok(*sig);
-                }
-
-                self.state.pending_signature = None;
-            }
-
-            self.state.current_attempt += 1;
-
-            // Prepare message
-            let prepared_transaction = prepare_transaction(
-                &self.intent_client,
-                &self.authority,
-                transaction_preparator,
-                &mut self.state.finalize_strategy,
-            )
-            .await
-            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
-
-            // Record in outbox
-            let signature = prepared_transaction.get_signature();
-            self.outbox_client
-                .set_intent_execution_stage(
-                    self.intent_id,
-                    ExecutionStage::TwoStage(TwoStageProgress::Finalizing {
-                        commit: self.state.commit_signature,
-                        finalize: *signature,
-                    }),
-                )
-                .await
-                .map_err(Into::into)?;
-
-            // Now record locally signature of tx we about to send
-            // Precaution for timeout in between
-            self.state.pending_signature = Some(*signature);
-
-            // Send signed tx
-            let execution_result = self
-                .intent_client
-                .send_signed_tx_with_retries(
-                    &prepared_transaction,
-                    &self.state.finalize_strategy.optimized_tasks,
-                )
-                .await;
-
-            // Result returned, cleanup pending signature
-            self.state.pending_signature = None;
-
-            let execution_err = match execution_result {
-                Ok(()) => break Ok(*signature),
-                Err(err) => err,
-            };
-
-            let flow = self.patch_finalize_strategy(&execution_err).await?;
-            let cleanup = match flow {
-                ControlFlow::Continue(cleanup) => cleanup,
-                ControlFlow::Break(()) => {
-                    break Err(execution_err);
-                }
-            };
-            self.intent_client.invalidate_cached_blockhash().await;
-            self.execution_report.dispose(cleanup);
-
-            if self.state.current_attempt >= Self::RECURSION_CEILING {
-                error!("CRITICAL! Recursion ceiling reached");
-                break Err(execution_err);
-            } else {
-                self.execution_report.add_patched_error(execution_err);
-            }
+        let commit_signature = self.state.commit_signature;
+        let execution_state = ExecutionState {
+            current_attempt: &mut self.state.current_attempt,
+            transaction_strategy: &mut self.state.finalize_strategy,
+            pending_signature: &mut self.state.pending_signature,
+            execution_report: self.execution_report,
         };
-
+        let finalize_stage_patcher = FinalizeStagePatcher {
+            authority: &self.authority,
+            callback_scheduler: &self.callback_scheduler,
+        };
+        // Execute finalize stage
+        let finalize_result = stage_execution_loop(
+            &self.authority,
+            &self.intent_client,
+            &*self.outbox_client,
+            transaction_preparator,
+            finalize_stage_patcher,
+            self.intent_id,
+            |sig| {
+                ExecutionStage::TwoStage(TwoStageProgress::Finalizing {
+                    commit: commit_signature,
+                    finalize: sig,
+                })
+            },
+            IntentExecutorError::FailedFinalizePreparationError,
+            execution_state,
+        )
+        .await?;
         // Even if failed - dump finalize into junk
         self.execute_callbacks(
             finalize_result.as_ref().ok().copied(),
@@ -603,61 +347,6 @@ where
             result.map_err(|err| err.into()),
         );
         self.execution_report.dispose(junk_strategy);
-    }
-
-    /// Patches Finalize stage `transaction_strategy` in response to a recoverable
-    /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
-    /// to be applied after a retry.
-    ///
-    /// [`TransactionStrategyExecutionError`], returning either:
-    /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
-    /// - `Break(())` when this stage cannot be recovered.
-    pub async fn patch_finalize_strategy(
-        &mut self,
-        err: &TransactionStrategyExecutionError,
-    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        match err {
-            TransactionStrategyExecutionError::CommitIDError(_, _)
-            | TransactionStrategyExecutionError::UnfinalizedAccountError(
-                _,
-                _,
-            ) => {
-                // Unexpected error in Two Stage commit
-                error!(error = ?err, "Unexpected error in two stage finalize flow");
-                Ok(ControlFlow::Break(()))
-            }
-            TransactionStrategyExecutionError::ActionsError(err, signature) => {
-                // Here we patch strategy for it to be retried in next iteration
-                // & we also record data that has to be cleaned up after patch
-                let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = handle_actions_result(
-                    &self.authority.pubkey(),
-                    &self.callback_scheduler,
-                    self.execution_report,
-                    &mut self.state.finalize_strategy,
-                    *signature,
-                    action_error
-                );
-                Ok(ControlFlow::Continue(to_cleanup))
-            }
-            TransactionStrategyExecutionError::UndelegationError(_, _) => {
-                // Here we patch strategy for it to be retried in next iteration
-                // & we also record data that has to be cleaned up after patch
-                let to_cleanup =
-                    handle_undelegation_error(&self.authority.pubkey(), &mut self.state.finalize_strategy);
-                Ok(ControlFlow::Continue(to_cleanup))
-            }
-            TransactionStrategyExecutionError::CpiLimitError(_, _)
-            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _) => {
-                // Can't be handled
-                warn!(error = ?err, "Finalization tasks exceeded execution limit");
-                Ok(ControlFlow::Break(()))
-            }
-            TransactionStrategyExecutionError::InternalError(_) => {
-                // Can't be handled
-                Ok(ControlFlow::Break(()))
-            }
-        }
     }
 
     /// Transitions to next executor state

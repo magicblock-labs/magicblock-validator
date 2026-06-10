@@ -1,9 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
-use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox_intent_bundles::OutboxIntentBundle,
-};
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tracing::error;

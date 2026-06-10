@@ -10,10 +10,7 @@ use magicblock_metrics::metrics;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_signature::Signature;
 use tokio::{
-    sync::{
-        broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
-        Semaphore,
-    },
+    sync::{broadcast, OwnedSemaphorePermit, Semaphore},
     task::JoinHandle,
 };
 use tokio_stream::StreamExt;

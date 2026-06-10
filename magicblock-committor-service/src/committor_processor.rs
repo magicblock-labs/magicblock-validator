@@ -1,8 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    path::Path,
     sync::{atomic::AtomicU64, Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use futures_util::future::join_all;
@@ -13,7 +11,6 @@ use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_signer::Signer;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 use tracing::{error, info, instrument};
 

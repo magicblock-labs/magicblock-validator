@@ -40,10 +40,10 @@ use crate::{
 const STAGE_LOOP_CEILING: u8 = 10;
 
 pub(in crate::intent_executor) struct ExecutionState<'a> {
-    current_attempt: &'a mut u8,
-    transaction_strategy: &'a mut TransactionStrategy,
-    pending_signature: &'a mut Option<Signature>,
-    execution_report: &'a mut IntentExecutionReport,
+    pub current_attempt: &'a mut u8,
+    pub transaction_strategy: &'a mut TransactionStrategy,
+    pub pending_signature: &'a mut Option<Signature>,
+    pub execution_report: &'a mut IntentExecutionReport,
 }
 
 pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
@@ -56,7 +56,7 @@ pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
     make_outbox_stage: impl Fn(Signature) -> ExecutionStage,
     map_preparation_err: fn(TransactionPreparatorError) -> IntentExecutorError,
     mut state: ExecutionState<'a>,
-) -> IntentExecutorResult<Signature>
+) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>>
 where
     T: TransactionPreparator,
     O: OutboxClient,
@@ -68,7 +68,7 @@ where
             let flow = check_pending_signature(intent_client, sig).await?;
             // Pending signature corresponds to succeeded transaction - break
             if let ControlFlow::Break(()) = flow {
-                return Ok(*sig);
+                return Ok(Ok(*sig));
             }
 
             *state.pending_signature = None;
@@ -112,23 +112,27 @@ where
         *state.pending_signature = None;
 
         let execution_err = match execution_result {
-            Ok(()) => return Ok(*signature),
+            Ok(()) => return Ok(Ok(*signature)),
             Err(err) => err,
         };
 
         let flow = patcher
-            .patch(&execution_err, state.transaction_strategy)
+            .patch(
+                &execution_err,
+                state.transaction_strategy,
+                state.execution_report,
+            )
             .await?;
         let cleanup = match flow {
             ControlFlow::Continue(value) => value,
-            ControlFlow::Break(()) => return Err(execution_err.into()),
+            ControlFlow::Break(()) => return Ok(Err(execution_err)),
         };
         intent_client.invalidate_cached_blockhash().await;
         state.execution_report.dispose(cleanup);
 
         if *state.current_attempt >= STAGE_LOOP_CEILING {
             error!("CRITICAL! Recursion ceiling reached");
-            return Err(execution_err.into());
+            return Ok(Err(execution_err));
         } else {
             state.execution_report.add_patched_error(execution_err);
         }
@@ -460,18 +464,21 @@ pub(in crate::intent_executor) trait StageExecutor {
     );
 }
 
-pub(in crate::intent_executor) struct SingleStage<'a, 'e, A, T, F> {
-    pub(in crate::intent_executor) inner: &'a mut SingleStageExecutor<'e, F, A>,
+pub(in crate::intent_executor) struct SingleStage<'a, 'e, A, T, F, O> {
+    pub(in crate::intent_executor) inner:
+        &'a mut SingleStageExecutor<'e, F, A, O>,
     pub(in crate::intent_executor) transaction_preparator: &'a T,
     pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
 }
 
 #[async_trait]
-impl<'a, 'e, A, T, F> StageExecutor for SingleStage<'a, 'e, A, T, F>
+impl<'a, 'e, A, T, F, O> StageExecutor for SingleStage<'a, 'e, A, T, F, O>
 where
     A: ActionsCallbackScheduler,
     T: TransactionPreparator,
     F: TaskInfoFetcher,
+    O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     fn has_callbacks(&self) -> bool {
         self.inner.has_callbacks()
@@ -492,9 +499,9 @@ where
     }
 }
 
-pub(in crate::intent_executor) struct CommitStage<'a, 'e, A, T, F> {
+pub(in crate::intent_executor) struct CommitStage<'a, 'e, A, T, F, O> {
     pub(in crate::intent_executor) inner:
-        &'a mut TwoStageExecutor<'e, A, Initialized>,
+        &'a mut TwoStageExecutor<'e, A, O, Initialized>,
     pub(in crate::intent_executor) transaction_preparator: &'a T,
     pub(in crate::intent_executor) task_info_fetcher:
         &'a CacheTaskInfoFetcher<F>,
@@ -502,11 +509,13 @@ pub(in crate::intent_executor) struct CommitStage<'a, 'e, A, T, F> {
 }
 
 #[async_trait]
-impl<'a, 'e, A, T, F> StageExecutor for CommitStage<'a, 'e, A, T, F>
+impl<'a, 'e, A, T, F, O> StageExecutor for CommitStage<'a, 'e, A, T, F, O>
 where
     A: ActionsCallbackScheduler,
     T: TransactionPreparator,
     F: TaskInfoFetcher,
+    O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     fn has_callbacks(&self) -> bool {
         self.inner.has_callbacks()
@@ -531,17 +540,19 @@ where
     }
 }
 
-pub(in crate::intent_executor) struct FinalizeStage<'a, 'e, A, T> {
+pub(in crate::intent_executor) struct FinalizeStage<'a, 'e, A, T, O> {
     pub(in crate::intent_executor) inner:
-        &'a mut TwoStageExecutor<'e, A, Committed>,
+        &'a mut TwoStageExecutor<'e, A, O, Committed>,
     pub(in crate::intent_executor) transaction_preparator: &'a T,
 }
 
 #[async_trait]
-impl<'a, 'e, A, T> StageExecutor for FinalizeStage<'a, 'e, A, T>
+impl<'a, 'e, A, T, O> StageExecutor for FinalizeStage<'a, 'e, A, T, O>
 where
     A: ActionsCallbackScheduler,
     T: TransactionPreparator,
+    O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     fn has_callbacks(&self) -> bool {
         self.inner.has_callbacks()

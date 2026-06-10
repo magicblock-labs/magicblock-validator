@@ -1,31 +1,24 @@
-use std::{ops::ControlFlow, sync::Arc};
+use std::sync::Arc;
 
 use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
 use magicblock_program::outbox::ExecutionStage;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use tracing::{error, instrument};
+use tracing::instrument;
 
 use crate::{
     intent_executor::{
-        error::{
-            IntentExecutorError, IntentExecutorResult,
-            TransactionStrategyExecutionError,
-        },
+        error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
+        patcher::SingleStagePatcher,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
-        utils::{
-            check_pending_signature, handle_actions_result,
-            handle_commit_id_error, handle_undelegation_error,
-            prepare_and_execute_strategy, prepare_transaction,
-        },
+        utils::{handle_actions_result, stage_execution_loop, ExecutionState},
         IntentExecutionReport,
     },
     outbox_client::OutboxClient,
-    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
+    tasks::task_strategist::TransactionStrategy,
     transaction_preparator::TransactionPreparator,
 };
 
@@ -87,93 +80,32 @@ where
     where
         T: TransactionPreparator,
     {
-        const RECURSION_CEILING: u8 = 10;
-
-        let result = loop {
-            if let Some(ref sig) = self.pending_signature {
-                let flow =
-                    check_pending_signature(&self.intent_client, sig).await?;
-                // Pending signature corresponds to succeeded transaction - break
-                if let ControlFlow::Break(()) = flow {
-                    break Ok(*sig);
-                }
-                self.pending_signature = None;
-            }
-
-            self.current_attempt += 1;
-
-            // Prepare message
-            let prepared_transaction = prepare_transaction(
-                &self.intent_client,
-                &self.authority,
-                transaction_preparator,
-                &mut self.transaction_strategy,
-            )
-            .await
-            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
-
-            // Record in outbox
-            let signature = prepared_transaction.get_signature();
-            self.outbox_client
-                .set_intent_execution_stage(
-                    self.intent_id,
-                    ExecutionStage::SingleStage(*signature),
-                )
-                .await
-                .map_err(Into::into)?;
-
-            // Now record locally signature of tx we about to send
-            // Precaution for timeout in between
-            self.pending_signature = Some(*signature);
-
-            // Send signed tx
-            let execution_result = self
-                .intent_client
-                .send_signed_tx_with_retries(
-                    &prepared_transaction,
-                    &self.transaction_strategy.optimized_tasks,
-                )
-                .await;
-
-            // Result returned, cleanup pending signature
-            self.pending_signature = None;
-
-            // Process error: Ok - return, Err - handle further
-            let execution_err = match execution_result {
-                // break with result, strategy that was executed at this point has to be returned for cleanup
-                Ok(()) => break Ok(*signature),
-                Err(err) => err,
-            };
-
-            // Attempt patching
-            let flow = self
-                .patch_strategy(
-                    &execution_err,
-                    committed_pubkeys,
-                    transaction_preparator,
-                )
-                .await?;
-            let cleanup = match flow {
-                ControlFlow::Continue(cleanup) => cleanup,
-                ControlFlow::Break(()) => {
-                    break Err(execution_err);
-                }
-            };
-            self.intent_client.invalidate_cached_blockhash().await;
-            self.execution_report.dispose(cleanup);
-
-            if self.current_attempt >= RECURSION_CEILING {
-                error!(
-                    attempt = self.current_attempt,
-                    ceiling = RECURSION_CEILING,
-                    error = ?execution_err,
-                    "Recursion ceiling exceeded"
-                );
-                break Err(execution_err);
-            } else {
-                self.execution_report.add_patched_error(execution_err);
-            }
+        let patcher = SingleStagePatcher {
+            authority: &self.authority,
+            intent_client: &self.intent_client,
+            callback_scheduler: &self.callback_scheduler,
+            task_info_fetcher: &self.task_info_fetcher,
+            committed_pubkeys,
+            transaction_preparator,
         };
+        let execution_state = ExecutionState {
+            current_attempt: &mut self.current_attempt,
+            transaction_strategy: &mut self.transaction_strategy,
+            pending_signature: &mut self.pending_signature,
+            execution_report: self.execution_report,
+        };
+        let result = stage_execution_loop(
+            &self.authority,
+            &self.intent_client,
+            &*self.outbox_client,
+            transaction_preparator,
+            patcher,
+            self.intent_id,
+            ExecutionStage::SingleStage,
+            IntentExecutorError::FailedFinalizePreparationError,
+            execution_state,
+        )
+        .await?;
 
         result.map_err(|err| {
             IntentExecutorError::from_finalize_execution_error(
@@ -206,143 +138,5 @@ where
 
     pub fn consume_strategy(self) -> TransactionStrategy {
         self.transaction_strategy
-    }
-
-    /// Patch the current `transaction_strategy` in response to a recoverable
-    /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
-    /// to be applied after a retry.
-    ///
-    /// [`TransactionStrategyExecutionError`], returning either:
-    /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
-    /// - `Break(())` when this stage cannot be recovered here.
-    pub async fn patch_strategy<T: TransactionPreparator>(
-        &mut self,
-        err: &TransactionStrategyExecutionError,
-        committed_pubkeys: &[Pubkey],
-        transaction_preparator: &T,
-    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        if committed_pubkeys.is_empty() {
-            // No patching is applicable if intent doesn't commit accounts
-            return Ok(ControlFlow::Break(()));
-        }
-
-        match err {
-            TransactionStrategyExecutionError::ActionsError(err, signature) => {
-                // Here we patch strategy for it to be retried in next iteration
-                // & we also record data that has to be cleaned up after patch
-                let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = handle_actions_result(
-                    &self.authority.pubkey(),
-                    &self.callback_scheduler,
-                    self.execution_report,
-                    &mut self.transaction_strategy,
-                    *signature,
-                    action_error,
-                );
-                Ok(ControlFlow::Continue(to_cleanup))
-            }
-            TransactionStrategyExecutionError::CommitIDError(_, _) => {
-                // Here we patch strategy for it to be retried in next iteration
-                // & we also record data that has to be cleaned up after patch
-                let to_cleanup = handle_commit_id_error(
-                        &self.authority.pubkey(),
-                        &self.task_info_fetcher,
-                        committed_pubkeys,
-                        &mut self.transaction_strategy,
-                    )
-                    .await?;
-                Ok(ControlFlow::Continue(to_cleanup))
-            }
-            err
-            @ TransactionStrategyExecutionError::UnfinalizedAccountError(
-                _,
-                signature,
-            ) => {
-                let optimized_tasks =
-                    self.transaction_strategy.optimized_tasks.as_slice();
-                if let Some(delegated_account) = err
-                    .task_index()
-                    .and_then(|index| optimized_tasks.get(index as usize))
-                    .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        BaseTaskImpl::CommitFinalize(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        _ => None,
-                    })
-                {
-                    self.handle_unfinalized_account_error(
-                        signature,
-                        delegated_account,
-                        transaction_preparator,
-                    )
-                    .await
-                } else {
-                    error!(
-                        task_index = err.task_index(),
-                        optimized_tasks_len = optimized_tasks.len(),
-                        error = ?err,
-                        "RPC returned unexpected task index"
-                    );
-                    Ok(ControlFlow::Break(()))
-                }
-            }
-            TransactionStrategyExecutionError::UndelegationError(_, _) => {
-                // Here we patch strategy for it to be retried in next iteration
-                // & we also record data that has to be cleaned up after patch
-                let to_cleanup = handle_undelegation_error(
-                    &self.authority.pubkey(),
-                    &mut self.transaction_strategy
-                );
-                Ok(ControlFlow::Continue(to_cleanup))
-            }
-            TransactionStrategyExecutionError::CpiLimitError(_, _)
-            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _) => {
-                // Can't be handled in scope of single stage execution
-                // We signal flow break
-                Ok(ControlFlow::Break(()))
-            }
-            TransactionStrategyExecutionError::InternalError(_) => {
-                // Error that we can't handle - break with cleanup data
-                Ok(ControlFlow::Break(()))
-            }
-        }
-    }
-
-    /// Handles unfinalized account error
-    /// Sends a separate tx to finalize account and then continues execution
-    async fn handle_unfinalized_account_error<T: TransactionPreparator>(
-        &self,
-        failed_signature: &Option<Signature>,
-        delegated_account: Pubkey,
-        transaction_preparator: &T,
-    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl =
-            FinalizeTask { delegated_account }.into();
-        prepare_and_execute_strategy(
-            &self.intent_client,
-            &self.authority,
-            transaction_preparator,
-            &mut TransactionStrategy {
-                optimized_tasks: vec![finalize_task],
-                lookup_tables_keys: vec![],
-                standalone_action_nonce: None,
-            },
-        )
-        .await
-        .map_err(IntentExecutorError::FailedFinalizePreparationError)?
-        .map_err(|err| IntentExecutorError::FailedToFinalizeError {
-            err,
-            commit_signature: None,
-            finalize_signature: *failed_signature,
-        })?;
-
-        Ok(ControlFlow::Continue(TransactionStrategy {
-            optimized_tasks: vec![],
-            lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
-        }))
     }
 }
