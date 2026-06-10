@@ -22,7 +22,7 @@ flowchart TB
         adb[magicblock-accounts-db]
         ledger[magicblock-ledger]
     end
-    subgraph bridge["Base-chain bridge"]
+    subgraph delegation["Base-chain delegation"]
         chainlink[magicblock-chainlink]
         cloner[magicblock-account-cloner]
         accounts[magicblock-accounts]
@@ -40,8 +40,8 @@ flowchart TB
     end
     entry --> core
     core --> svm
-    bridge --> core
-    bridge --> programs
+    delegation --> core
+    delegation --> programs
 ```
 
 Cross-cutting crates: `magicblock-replicator` (primary/replica HA over NATS),
@@ -92,7 +92,7 @@ stack.
   `SubscriptionsDb`: lock-free `scc::HashMap`s per subscription type; unsubscription
   is RAII via a cleanup closure that runs on drop.
 - [`processor.rs`](../magicblock-aperture/src/processor.rs) — `EventProcessor`
-  workers bridge validator event channels → subscribers and Geyser plugins.
+  workers forward validator event channels → subscribers and Geyser plugins.
 
 A read request that misses locally triggers chainlink to clone the account from the
 remote first — this is how just-in-time cloning surfaces at the RPC layer.
@@ -157,7 +157,7 @@ giving wait-free reads of the chain tip.
 [`ledger_truncator.rs`](../magicblock-ledger/src/ledger_truncator.rs) purges old
 slots to bound disk usage.
 
-## 4. Base-chain bridge
+## 4. Base-chain delegation
 
 **Inbound (cloning):** [`magicblock-chainlink`](../magicblock-chainlink) is the
 brain — `ensure_accounts()` / `ensure_transaction_accounts()` check the local bank,
@@ -195,7 +195,7 @@ loader-specific paths (V1→V3 conversion, V4 buffer + deploy).
    (`Comtr…`) receives chunked changeset buffers and applies them, interacting with
    the delegation program for undelegation.
 
-**Other bridge crates:** [`magicblock-task-scheduler`](../magicblock-task-scheduler)
+**Other delegation crates:** [`magicblock-task-scheduler`](../magicblock-task-scheduler)
 (SQLite-persisted `DelayQueue` for program-scheduled cranks, exponential backoff
 retries), [`magicblock-replicator`](../magicblock-replicator) (primary/replica
 streaming of transactions/blocks over NATS JetStream with leader takeover),
