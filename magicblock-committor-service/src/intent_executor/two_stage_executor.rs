@@ -44,13 +44,45 @@ pub struct Initialized {
     current_attempt: u8,
 }
 
+impl Initialized {
+    pub fn new(
+        commit_strategy: TransactionStrategy,
+        finalize_strategy: TransactionStrategy,
+        pending_signature: Option<Signature>,
+    ) -> Self {
+        Self {
+            commit_strategy,
+            finalize_strategy,
+            pending_signature,
+            current_attempt: 0,
+        }
+    }
+}
+
 pub struct Committed {
     /// Signature of commit stage
     commit_signature: Signature,
     /// Finalize stage strategy
     finalize_strategy: TransactionStrategy,
-
+    /// Signature pending confirmation
+    /// Sources: Outbox with status Finalizing, timeout
+    pending_signature: Option<Signature>,
     current_attempt: u8,
+}
+
+impl Committed {
+    pub fn new(
+        commit_signature: Signature,
+        finalize_strategy: TransactionStrategy,
+        pending_signature: Option<Signature>,
+    ) -> Self {
+        Self {
+            commit_signature,
+            finalize_strategy,
+            pending_signature,
+            current_attempt: 0,
+        }
+    }
 }
 
 pub struct Finalized {
@@ -81,10 +113,9 @@ where
     const RECURSION_CEILING: u8 = 10;
 
     pub fn new(
+        state: Initialized,
         authority: Keypair,
         intent_id: u64,
-        commit_strategy: TransactionStrategy,
-        finalize_strategy: TransactionStrategy,
         intent_client: IntentExecutionClient,
         outbox_client: Arc<O>,
         callback_scheduler: A,
@@ -97,11 +128,7 @@ where
             execution_report,
             callback_scheduler,
             outbox_client,
-            state: Initialized {
-                commit_strategy,
-                finalize_strategy,
-                current_attempt: 0,
-            },
+            state,
         }
     }
 
@@ -412,6 +439,7 @@ where
     ) -> TwoStageExecutor<'a, A, O, Committed> {
         TwoStageExecutor {
             authority: self.authority,
+            intent_id: self.intent_id,
             intent_client: self.intent_client,
             outbox_client: self.outbox_client,
             callback_scheduler: self.callback_scheduler,
@@ -419,6 +447,7 @@ where
             state: Committed {
                 commit_signature,
                 finalize_strategy: self.state.finalize_strategy,
+                pending_signature: None,
                 current_attempt: 0,
             },
         }
@@ -429,8 +458,29 @@ impl<'a, A, O> TwoStageExecutor<'a, A, O, Committed>
 where
     A: ActionsCallbackScheduler,
     O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     const RECURSION_CEILING: u8 = 10;
+
+    pub fn committed(
+        state: Committed,
+        authority: Keypair,
+        intent_id: u64,
+        intent_client: IntentExecutionClient,
+        outbox_client: Arc<O>,
+        callback_scheduler: A,
+        execution_report: &'a mut IntentExecutionReport,
+    ) -> Self {
+        Self {
+            authority,
+            intent_id,
+            intent_client,
+            execution_report,
+            callback_scheduler,
+            outbox_client,
+            state,
+        }
+    }
 
     #[instrument(
         skip(self, transaction_preparator),
@@ -444,10 +494,21 @@ where
         T: TransactionPreparator,
     {
         let finalize_result = loop {
+            if let Some(ref sig) = self.state.pending_signature {
+                let flow =
+                    check_pending_signature(&self.intent_client, sig).await?;
+                // Pending signature corresponds to succeeded transaction - break
+                if let ControlFlow::Break(()) = flow {
+                    break Ok(*sig);
+                }
+
+                self.state.pending_signature = None;
+            }
+
             self.state.current_attempt += 1;
 
-            // Prepare & execute message
-            let execution_result = prepare_and_execute_strategy(
+            // Prepare message
+            let prepared_transaction = prepare_transaction(
                 &self.intent_client,
                 &self.authority,
                 transaction_preparator,
@@ -455,13 +516,42 @@ where
             )
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+
+            // Record in outbox
+            let signature = prepared_transaction.get_signature();
+            self.outbox_client
+                .set_intent_execution_stage(
+                    self.intent_id,
+                    ExecutionStage::TwoStage(TwoStageProgress::Finalizing {
+                        commit: self.state.commit_signature,
+                        finalize: *signature,
+                    }),
+                )
+                .await
+                .map_err(Into::into)?;
+
+            // Now record locally signature of tx we about to send
+            // Precaution for timeout in between
+            self.state.pending_signature = Some(*signature);
+
+            // Send signed tx
+            let execution_result = self
+                .intent_client
+                .send_signed_tx_with_retries(
+                    &prepared_transaction,
+                    &self.state.finalize_strategy.optimized_tasks,
+                )
+                .await;
+
+            // Result returned, cleanup pending signature
+            self.state.pending_signature = None;
+
             let execution_err = match execution_result {
-                Ok(value) => break Ok(value),
+                Ok(()) => break Ok(*signature),
                 Err(err) => err,
             };
 
             let flow = self.patch_finalize_strategy(&execution_err).await?;
-
             let cleanup = match flow {
                 ControlFlow::Continue(cleanup) => cleanup,
                 ControlFlow::Break(()) => {

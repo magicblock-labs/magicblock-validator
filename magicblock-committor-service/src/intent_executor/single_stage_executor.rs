@@ -1,8 +1,10 @@
 use std::{ops::ControlFlow, sync::Arc};
 
 use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
+use magicblock_program::outbox::ExecutionStage;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use tracing::{error, instrument};
@@ -16,9 +18,9 @@ use crate::{
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         utils::{
-            check_pending_signature, handle_actions_result, handle_commit_id_error,
-            handle_undelegation_error, prepare_and_execute_strategy,
-            prepare_transaction,
+            check_pending_signature, handle_actions_result,
+            handle_commit_id_error, handle_undelegation_error,
+            prepare_and_execute_strategy, prepare_transaction,
         },
         IntentExecutionReport,
     },
@@ -29,9 +31,11 @@ use crate::{
 
 pub struct SingleStageExecutor<'a, F, A, O> {
     current_attempt: u8,
+    pending_signature: Option<Signature>,
     execution_report: &'a mut IntentExecutionReport,
 
     authority: Keypair,
+    intent_id: u64,
     intent_client: IntentExecutionClient,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
     outbox_client: Arc<O>,
@@ -44,9 +48,12 @@ where
     F: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
     O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     pub fn new(
         authority: Keypair,
+        intent_id: u64,
+        pending_signature: Option<Signature>,
         intent_client: IntentExecutionClient,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
         outbox_client: Arc<O>,
@@ -55,14 +62,16 @@ where
         execution_report: &'a mut IntentExecutionReport,
     ) -> Self {
         Self {
-            current_attempt: 0,
             authority,
+            intent_id,
+            pending_signature,
             intent_client,
             task_info_fetcher,
             outbox_client,
             transaction_strategy,
             callback_scheduler,
             execution_report,
+            current_attempt: 0,
         }
     }
 
@@ -81,10 +90,20 @@ where
         const RECURSION_CEILING: u8 = 10;
 
         let result = loop {
+            if let Some(ref sig) = self.pending_signature {
+                let flow =
+                    check_pending_signature(&self.intent_client, sig).await?;
+                // Pending signature corresponds to succeeded transaction - break
+                if let ControlFlow::Break(()) = flow {
+                    break Ok(*sig);
+                }
+                self.pending_signature = None;
+            }
+
             self.current_attempt += 1;
 
-            // Prepare & execute message
-            let execution_result = prepare_and_execute_strategy(
+            // Prepare message
+            let prepared_transaction = prepare_transaction(
                 &self.intent_client,
                 &self.authority,
                 transaction_preparator,
@@ -93,12 +112,36 @@ where
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
 
+            // Record in outbox
+            let signature = prepared_transaction.get_signature();
+            self.outbox_client
+                .set_intent_execution_stage(
+                    self.intent_id,
+                    ExecutionStage::SingleStage(*signature),
+                )
+                .await
+                .map_err(Into::into)?;
+
+            // Now record locally signature of tx we about to send
+            // Precaution for timeout in between
+            self.pending_signature = Some(*signature);
+
+            // Send signed tx
+            let execution_result = self
+                .intent_client
+                .send_signed_tx_with_retries(
+                    &prepared_transaction,
+                    &self.transaction_strategy.optimized_tasks,
+                )
+                .await;
+
+            // Result returned, cleanup pending signature
+            self.pending_signature = None;
+
             // Process error: Ok - return, Err - handle further
             let execution_err = match execution_result {
                 // break with result, strategy that was executed at this point has to be returned for cleanup
-                Ok(value) => {
-                    break Ok(value);
-                }
+                Ok(()) => break Ok(*signature),
                 Err(err) => err,
             };
 
