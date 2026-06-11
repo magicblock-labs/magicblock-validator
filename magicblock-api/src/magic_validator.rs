@@ -390,7 +390,7 @@ impl MagicValidator {
         log_timing("startup", "aperture_init", step_start);
         let rpc_handle = thread::spawn(move || {
             let step_start = Instant::now();
-            let workers = (num_cpus::get() / 2 - 1).max(1);
+            let workers = (num_cpus::get() / 2).saturating_sub(1).max(1);
             let runtime = Builder::new_multi_thread()
                 .worker_threads(workers)
                 .enable_all()
