@@ -48,6 +48,8 @@ pub struct ReplicationContext {
     pub slot: Slot,
     /// Position of the last transaction within slot
     pub index: TransactionIndex,
+    /// Validator identity used to preserve local protected accounts on reset.
+    validator_identity: Pubkey,
 }
 
 impl ReplicationContext {
@@ -83,6 +85,7 @@ impl ReplicationContext {
             scheduler,
             slot,
             index,
+            validator_identity,
         })
     }
 
@@ -114,6 +117,14 @@ impl ReplicationContext {
             );
             Err(Error::Internal(msg))
         }
+    }
+
+    /// Resets stale bank state while replay is paused.
+    pub async fn reset_bank(&self) -> Result<()> {
+        let _guard = self.scheduler.wait_for_idle().await;
+        self.accountsdb
+            .reset_bank(&self.validator_identity)
+            .map_err(Error::from)
     }
 
     /// Creates a snapshot watcher for the database directory.

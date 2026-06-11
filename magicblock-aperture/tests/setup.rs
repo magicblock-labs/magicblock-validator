@@ -59,13 +59,8 @@ pub struct RpcTestEnv {
 }
 
 fn chainlink(accounts_db: &Arc<AccountsDb>) -> Arc<ChainlinkImpl> {
-    let real = InnerChainlinkImpl::try_new(
-        accounts_db,
-        None,
-        Pubkey::new_unique(),
-        &ChainLinkConfig::default(),
-    )
-    .expect("Failed to create Chainlink");
+    let real = InnerChainlinkImpl::try_new(accounts_db, None)
+        .expect("Failed to create Chainlink");
     Arc::new(ChainlinkImpl::enabled(real))
 }
 

@@ -56,7 +56,6 @@ jobs:
         with:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
           rust_toolchain_release: "1.94.1"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       # lld typically halves the link step on large rust workspaces.
@@ -96,7 +95,6 @@ jobs:
         with:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
           rust_toolchain_release: "1.94.1"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
@@ -149,7 +147,6 @@ jobs:
         with:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
           rust_toolchain_release: "1.94.1"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       # lld typically halves the link step on large rust workspaces.
@@ -463,7 +460,6 @@ jobs:
         with:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
           rust_toolchain_release: "1.94.1"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana

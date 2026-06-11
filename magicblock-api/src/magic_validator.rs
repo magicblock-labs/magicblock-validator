@@ -37,6 +37,7 @@ use magicblock_core::{
     coordination_mode::CoordinationMode,
     link::{
         link,
+        replication::Message,
         transactions::{SchedulerMode, TransactionSchedulerHandle},
     },
     Slot,
@@ -113,7 +114,6 @@ pub struct MagicValidator {
     committor_service: Option<Arc<CommittorService>>,
     replication_service: Option<ReplicationService>,
     scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
-    chainlink: Arc<ChainlinkImpl>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -124,6 +124,7 @@ pub struct MagicValidator {
     replication_handle:
         Option<thread::JoinHandle<magicblock_replicator::Result<()>>>,
     mode_tx: Sender<SchedulerMode>,
+    replication_tx: Sender<Message>,
     is_standalone: bool,
 }
 
@@ -337,7 +338,7 @@ impl MagicValidator {
             environment: svm_env.environment,
             feature_set: feature_set.clone(),
             tasks_tx: validator_channels.tasks_service,
-            replication_tx: validator_channels.replication_messages,
+            replication_tx: validator_channels.replication_messages.clone(),
             block_time: config.ledger.block_time,
             superblock_size: config.ledger.superblock_size,
             shutdown: token.clone(),
@@ -389,7 +390,7 @@ impl MagicValidator {
         log_timing("startup", "aperture_init", step_start);
         let rpc_handle = thread::spawn(move || {
             let step_start = Instant::now();
-            let workers = (num_cpus::get() / 2 - 1).max(1);
+            let workers = (num_cpus::get() / 2).saturating_sub(1).max(1);
             let runtime = Builder::new_multi_thread()
                 .worker_threads(workers)
                 .enable_all()
@@ -433,7 +434,6 @@ impl MagicValidator {
             committor_service,
             replication_service,
             scheduled_commits_processor,
-            chainlink,
             token,
             ledger,
             ledger_truncator,
@@ -445,6 +445,7 @@ impl MagicValidator {
             transaction_execution,
             replication_handle: None,
             mode_tx,
+            replication_tx: validator_channels.replication_messages,
             is_standalone,
         })
     }
@@ -498,12 +499,7 @@ impl MagicValidator {
         if Self::replication_mode_uses_disabled_chainlink(
             &config.validator.replication_mode,
         ) {
-            return ChainlinkImpl::disabled(
-                accountsdb,
-                config.validator.keypair.pubkey(),
-                &config.chainlink,
-            )
-            .map_err(ApiError::from);
+            return ChainlinkImpl::disabled().map_err(ApiError::from);
         }
 
         let endpoints = Endpoints::try_from(config.remotes.as_slice())
@@ -909,18 +905,44 @@ impl MagicValidator {
 
         log_timing("startup", "maybe_process_ledger", step_start);
 
-        // Ledger replay has completed, we can now clean non-delegated accounts
-        // including programs from the bank
-        if !self.config.accountsdb.reset {
+        if self.config.accountsdb.defragment_on_startup {
             let step_start = Instant::now();
-            self.chainlink.reset_accounts_bank()?;
-            log_timing("startup", "reset_accounts_bank", step_start);
+            // SAFETY: ledger replay has completed, and normal startup has not
+            // yet enabled bank cleanup, scheduler modes, replication, slot
+            // ticks, or task recovery.
+            unsafe { self.accountsdb.defragment()? };
+            log_timing("startup", "accountsdb_defragment", step_start);
         }
 
-        // Recovery of persisted pending commit intents reads the local accounts
-        // bank for delegation checks, so it must run only after replay + reset.
-        if let Some(processor) = self.scheduled_commits_processor.as_ref() {
-            processor.spawn_pending_intents_recovery();
+        // Ledger replay has completed; primary and standalone nodes can clean
+        // stale non-delegated accounts before accepting new work. Replicas wait
+        // for the primary's Reset message so they stay stream-ordered.
+        if !matches!(
+            self.config.validator.replication_mode,
+            ReplicationMode::Replica { .. }
+        ) {
+            let step_start = Instant::now();
+            self.accountsdb.reset_bank(&self.identity)?;
+            log_timing("startup", "reset_accounts_bank", step_start);
+
+            if matches!(
+                self.config.validator.replication_mode,
+                ReplicationMode::Primary(_)
+            ) {
+                self.replication_tx
+                    .send(Message::Reset(self.accountsdb.slot()))
+                    .await
+                    .map_err(|e| {
+                        ApiError::FailedToSendModeSwitch(format!(
+                            "Failed to send reset message to replication: {e}"
+                        ))
+                    })?;
+            }
+            // Recovery of persisted pending commit intents reads the local accounts
+            // bank for delegation checks, so it must run only after replay + reset.
+            if let Some(processor) = self.scheduled_commits_processor.as_ref() {
+                processor.spawn_pending_intents_recovery();
+            }
         }
 
         // Notify the scheduler that ledger replay and bank cleanup is complete.
@@ -980,31 +1002,44 @@ impl MagicValidator {
             .task_scheduler
             .take()
             .expect("task_scheduler should be initialized");
-        tokio::spawn(async move {
-            let step_start = Instant::now();
-            let join_handle = match task_scheduler.start().await {
-                Ok(join_handle) => join_handle,
-                Err(err) => {
-                    error!(error = ?err, "Failed to start task scheduler");
-                    error!("Exiting process");
-                    std::process::exit(1);
+        let is_primary_mode = {
+            let mut mode = CoordinationMode::current();
+            while mode == CoordinationMode::StartingUp {
+                tokio::select! {
+                    _ = self.token.cancelled() => break,
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {}
                 }
-            };
-            log_timing("startup", "task_scheduler_start", step_start);
-            match join_handle.await {
-                Ok(Ok(())) => {}
-                Ok(Err(err)) => {
-                    error!(error = ?err, "Task scheduler failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
-                Err(err) => {
-                    error!(error = ?err, "Task scheduler join failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
+                mode = CoordinationMode::current();
             }
-        });
+            mode == CoordinationMode::Primary
+        };
+        if is_primary_mode {
+            tokio::spawn(async move {
+                let step_start = Instant::now();
+                let join_handle = match task_scheduler.start().await {
+                    Ok(join_handle) => join_handle,
+                    Err(err) => {
+                        error!(error = ?err, "Failed to start task scheduler");
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                };
+                log_timing("startup", "task_scheduler_start", step_start);
+                match join_handle.await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        error!(error = ?err, "Task scheduler failed");
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                    Err(err) => {
+                        error!(error = ?err, "Task scheduler join failed");
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
 
         Ok(())
     }
