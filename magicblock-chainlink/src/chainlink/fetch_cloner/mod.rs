@@ -11,6 +11,7 @@ use std::{
 use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
+use futures_util::{stream::FuturesUnordered, StreamExt};
 use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
@@ -146,6 +147,16 @@ const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
         Some(n) => n,
         None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
     };
+
+/// A pending fetch+clone operation claimed by one dedup call, resolved by
+/// the batch worker spawned for that call.
+struct ClaimedOperation {
+    pubkey: Pubkey,
+    generation: u64,
+    deadline: tokio::time::Instant,
+    cancel: Arc<tokio::sync::Notify>,
+    owner: PendingOwner,
+}
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
 /// bounds that are not satisfied (`AccountsBank` and `Cloner` don't
@@ -382,49 +393,142 @@ where
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn spawn_owned_operation(
+    // Runs one shared fetch+clone for all pubkeys claimed by a single
+    // dedup call and fans the result out to each key's pending entry.
+    fn spawn_batched_owned_operation(
         &self,
-        pubkey: Pubkey,
-        generation: u64,
-        deadline: tokio::time::Instant,
-        cancel: Arc<tokio::sync::Notify>,
-        owner: PendingOwner,
-        mark_empty_if_not_found: bool,
+        claimed: Vec<ClaimedOperation>,
+        mark_empty_set: &HashSet<Pubkey>,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
     ) {
+        if claimed.is_empty() {
+            return;
+        }
         let this = self.clone();
         let pending = self.pending_requests.clone();
+        let mark_empty = claimed
+            .iter()
+            .map(|op| op.pubkey)
+            .filter(|pubkey| mark_empty_set.contains(pubkey))
+            .collect::<Vec<_>>();
         task::spawn(async move {
-            let mut owner = owner;
-            let pubkeys = vec![pubkey];
-            let mark_empty = mark_empty_if_not_found.then_some(vec![pubkey]);
-            let mark_empty_ref = mark_empty.as_deref();
+            let pubkeys =
+                claimed.iter().map(|op| op.pubkey).collect::<Vec<_>>();
+            let mark_empty_ref =
+                (!mark_empty.is_empty()).then_some(mark_empty.as_slice());
+            // All keys were claimed by the same call, so their deadlines
+            // are effectively identical; the earliest bounds the batch.
+            let deadline = claimed
+                .iter()
+                .map(|op| op.deadline)
+                .min()
+                .expect("claimed is not empty");
+
             let work = this.fetch_and_clone_accounts(
                 &pubkeys,
                 mark_empty_ref,
                 slot,
                 fetch_origin,
             );
-            let terminal = tokio::select! {
-                biased;
+            let mut work =
+                std::pin::pin!(tokio::time::timeout_at(deadline, work));
 
-                result = tokio::time::timeout_at(deadline, work) => {
-                    match result {
-                        Ok(Ok(result)) => PendingTerminal::Success(result),
-                        Ok(Err(err)) => PendingTerminal::Failed(
-                            PendingFailure::OwnerFailed(err.to_string()),
-                        ),
-                        Err(_) => PendingTerminal::Failed(PendingFailure::TimedOut),
+            // Single consumer per cancellation Notify, yielding the
+            // cancelled pubkey.
+            let mut cancels = claimed
+                .iter()
+                .map(|op| {
+                    let cancel = Arc::clone(&op.cancel);
+                    let pubkey = op.pubkey;
+                    async move {
+                        cancel.notified().await;
+                        pubkey
+                    }
+                })
+                .collect::<FuturesUnordered<_>>();
+            let mut cancelled = HashSet::new();
+
+            let outcome = loop {
+                tokio::select! {
+                    biased;
+
+                    result = &mut work => break Some(result),
+                    Some(pubkey) = cancels.next() => {
+                        if let Some(op) =
+                            claimed.iter().find(|op| op.pubkey == pubkey)
+                        {
+                            finish_pending(
+                                &pending,
+                                pubkey,
+                                op.generation,
+                                PendingTerminal::Failed(
+                                    PendingFailure::Cancelled,
+                                ),
+                            );
+                        }
+                        cancelled.insert(pubkey);
+                        if cancelled.len() == claimed.len() {
+                            // every key is cancelled: drop the shared work
+                            break None;
+                        }
                     }
                 }
-                _ = cancel.notified() => {
-                    PendingTerminal::Failed(PendingFailure::Cancelled)
-                }
             };
-            finish_pending(&pending, pubkey, generation, terminal);
-            owner.dismiss();
+            drop(cancels);
+
+            match outcome {
+                // every key already received its Cancelled terminal
+                None => {
+                    for mut op in claimed {
+                        op.owner.dismiss();
+                    }
+                }
+                Some(Ok(Ok(result))) => {
+                    for mut op in claimed {
+                        if !cancelled.contains(&op.pubkey) {
+                            // each waiter filters the shared result down
+                            // to its own pubkey's entries
+                            finish_pending(
+                                &pending,
+                                op.pubkey,
+                                op.generation,
+                                PendingTerminal::Success(result.clone()),
+                            );
+                        }
+                        op.owner.dismiss();
+                    }
+                }
+                Some(Ok(Err(err))) => {
+                    let failure = PendingFailure::OwnerFailed(err.to_string());
+                    for mut op in claimed {
+                        if !cancelled.contains(&op.pubkey) {
+                            finish_pending(
+                                &pending,
+                                op.pubkey,
+                                op.generation,
+                                PendingTerminal::Failed(failure.clone()),
+                            );
+                        }
+                        op.owner.dismiss();
+                    }
+                }
+                Some(Err(_elapsed)) => {
+                    for mut op in claimed {
+                        if !cancelled.contains(&op.pubkey) {
+                            finish_pending(
+                                &pending,
+                                op.pubkey,
+                                op.generation,
+                                PendingTerminal::Failed(
+                                    PendingFailure::TimedOut,
+                                ),
+                            );
+                        }
+                        op.owner.dismiss();
+                    }
+                }
+            }
         });
     }
 
@@ -2214,6 +2318,7 @@ where
         mark_empty_set.extend(extra_mark_empty);
 
         let mut waiters: Vec<PendingWaiter> = vec![];
+        let mut claimed_ops: Vec<ClaimedOperation> = vec![];
         for pubkey in pubkeys {
             match self.claim_or_join_owned_operation(*pubkey) {
                 PendingClaim::Created(handles) => {
@@ -2238,20 +2343,25 @@ where
                             ),
                         );
                     };
-                    self.spawn_owned_operation(
-                        waiter_pubkey,
-                        waiter.generation(),
+                    claimed_ops.push(ClaimedOperation {
+                        pubkey: waiter_pubkey,
+                        generation: waiter.generation(),
                         deadline,
                         cancel,
                         owner,
-                        mark_empty_set.contains(&waiter_pubkey),
-                        slot,
-                        fetch_origin,
-                    );
+                    });
                     waiters.push(waiter);
                 }
                 PendingClaim::Joined(handles) => waiters.push(handles.waiter),
             }
+        }
+        if !claimed_ops.is_empty() {
+            self.spawn_batched_owned_operation(
+                claimed_ops,
+                &mark_empty_set,
+                slot,
+                fetch_origin,
+            );
         }
 
         let mut final_result = FetchAndCloneResult {
