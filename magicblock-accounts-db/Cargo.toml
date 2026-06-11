@@ -26,6 +26,8 @@ parking_lot = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 magicblock-config = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
+solana-sdk-ids = { workspace = true }
 
 # misc
 twox-hash = { workspace = true }
