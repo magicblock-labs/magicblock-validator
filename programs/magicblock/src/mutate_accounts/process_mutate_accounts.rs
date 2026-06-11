@@ -26,6 +26,10 @@ pub(crate) fn process_mutate_accounts(
 
     // First account is the MagicBlock authority
     let accounts_len = instruction_context.get_number_of_instruction_accounts();
+    if accounts_len == 0 {
+        ic_msg!(invoke_context, "MutateAccounts: no accounts to modify");
+        return Err(MagicBlockProgramError::NoAccountsToModify.into());
+    }
     let accounts_to_mod_len = accounts_len - 1;
     let account_mods_len = account_mods.len() as u64;
 
