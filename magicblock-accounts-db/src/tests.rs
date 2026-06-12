@@ -544,6 +544,72 @@ fn test_reallocation_split() {
 }
 
 #[test]
+fn test_defragment_moves_accounts_left_and_clears_tail() {
+    let env = TestEnv::new();
+    const SIZE: usize = 1024;
+
+    let removed = env.create_account_with_size(SIZE);
+    let acc2 = env.create_account_with_size(SIZE * 2);
+    let acc3 = env.create_account_with_size(SIZE * 3);
+
+    let mut expected2 = env.get_account(&acc2.pubkey).unwrap();
+    let mut expected3 = env.get_account(&acc3.pubkey).unwrap();
+    expected2.ensure_owned();
+    expected3.ensure_owned();
+
+    env.remove_account(&removed.pubkey);
+    assert_eq!(env.index.get_deallocations_count(), 1);
+
+    let checksum_before = unsafe { env.checksum() };
+    let size_before = env.storage_size() as usize;
+    let file_path = env
+        .snapshot_manager
+        .database_path()
+        .join(ACCOUNTS_DB_FILENAME);
+
+    unsafe { env.defragment() }.unwrap();
+
+    assert_eq!(env.index.get_deallocations_count(), 0);
+    assert!(env.storage_size() < size_before as u64);
+    assert_eq!(unsafe { env.checksum() }, checksum_before);
+
+    let mut actual2 = env.get_account(&acc2.pubkey).unwrap();
+    let mut actual3 = env.get_account(&acc3.pubkey).unwrap();
+    actual2.ensure_owned();
+    actual3.ensure_owned();
+    assert_eq!(actual2, expected2);
+    assert_eq!(actual3, expected3);
+    assert!(env.get_account(&removed.pubkey).is_none());
+    assert!(env.account_matches_owners(&acc2.pubkey, &[OWNER]).is_some());
+    assert!(env.account_matches_owners(&acc3.pubkey, &[OWNER]).is_some());
+    assert_eq!(
+        env.get_program_accounts(&OWNER, |_| true).unwrap().count(),
+        2
+    );
+
+    let size_after = env.storage_size() as usize;
+    let file_bytes = std::fs::read(file_path).unwrap();
+    assert!(
+        file_bytes[size_after..size_before]
+            .iter()
+            .all(|byte| *byte == 0),
+        "defragmentation should zero the old active tail"
+    );
+}
+
+#[test]
+fn test_defragment_empty_database_is_noop() {
+    let env = TestEnv::new();
+    let size_before = env.storage_size();
+
+    unsafe { env.defragment() }.unwrap();
+
+    assert_eq!(env.storage_size(), size_before);
+    assert_eq!(env.index.get_deallocations_count(), 0);
+    assert_eq!(env.account_count(), 0);
+}
+
+#[test]
 fn test_database_reset() {
     let (adb, temp_dir) = TestEnv::init_raw_db();
     let pubkey = Pubkey::new_unique();

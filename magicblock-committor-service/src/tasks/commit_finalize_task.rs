@@ -235,7 +235,7 @@ impl BaseTask for CommitFinalizeTask {
     }
 
     fn compute_units(&self) -> u32 {
-        70_000
+        120_000
     }
 
     fn accounts_size_budget(&self) -> u32 {

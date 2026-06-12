@@ -140,6 +140,15 @@ impl TaskSchedulerService {
     pub async fn start(
         mut self,
     ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
+        self.load_persisted_tasks().await?;
+        Ok(tokio::spawn(self.run()))
+    }
+
+    async fn load_persisted_tasks(&mut self) -> TaskSchedulerResult<()> {
+        self.task_queue.clear();
+        self.task_queue_keys.clear();
+        self.task_execution_retries.clear();
+
         // Reschedule all tasks that are due
         let tasks = self.db.get_tasks().await?;
         let now = chrono::Utc::now().timestamp_millis();
@@ -176,7 +185,7 @@ impl TaskSchedulerService {
             self.task_queue_keys.insert(task_id, key);
         }
 
-        Ok(tokio::spawn(self.run()))
+        Ok(())
     }
 
     /// Main loop of the task scheduler.
@@ -762,12 +771,12 @@ fn is_retryable_task_execution_error(error: &TaskSchedulerError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync;
-
+    use magicblock_core::coordination_mode::switch_to_primary_mode;
     use magicblock_program::{
         args::ScheduleTaskRequest,
         validator::generate_validator_authority_if_needed,
     };
+    use serial_test::serial;
     use solana_pubkey::Pubkey;
     use tokio::{sync::mpsc, time::timeout};
 
@@ -787,7 +796,7 @@ mod tests {
             task_queue_keys: HashMap::new(),
             task_versions: HashMap::new(),
             task_execution_retries: HashMap::new(),
-            tx_counter: sync::Arc::new(AtomicU64::default()),
+            tx_counter: Arc::new(AtomicU64::default()),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
             failed_task_retention: Duration::from_secs(60),
@@ -797,11 +806,13 @@ mod tests {
         }
     }
 
+    #[serial]
     #[test]
     fn test_first_execution_anchors_cadence_at_now() {
         assert_eq!(next_execution_millis(0, 50, 1_000), 1_000);
     }
 
+    #[serial]
     #[test]
     fn test_recurring_execution_preserves_fixed_rate_cadence() {
         let executed_at = next_execution_millis(1_000, 50, 1_090);
@@ -811,14 +822,17 @@ mod tests {
         assert_eq!(delay, Duration::from_millis(10));
     }
 
+    #[serial]
     #[test]
     fn test_overdue_execution_is_rescheduled_immediately() {
         assert_eq!(delay_until_millis(1_100, 1_150), Duration::from_millis(0));
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_schedule_invalid_tasks() {
         magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
         generate_validator_authority_if_needed();
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -866,9 +880,11 @@ mod tests {
         handle.abort();
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_remove_invalid_tasks_on_startup() {
         magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
 
         let (_tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
@@ -916,9 +932,11 @@ mod tests {
         handle.abort();
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_completed_tasks_are_removed_on_startup() {
         magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
 
         let (_tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
@@ -965,46 +983,11 @@ mod tests {
         handle.abort();
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_stale_crank_completion_does_not_mutate_replaced_task() {
         magicblock_core::logger::init_for_tests();
-
-        let (_tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
-
-        db.insert_failed_scheduling(1, "schedule failed".to_string())
-            .await
-            .unwrap();
-        db.insert_failed_task(2, "task failed".to_string())
-            .await
-            .unwrap();
-        tokio::time::sleep(Duration::from_millis(2)).await;
-
-        let mut service = test_service(db.clone(), rx);
-        service.failed_task_retention = Duration::from_millis(1);
-        service.failed_task_cleanup_interval = Duration::from_millis(5);
-
-        let handle = service.start().await.unwrap();
-
-        timeout(Duration::from_secs(1), async move {
-            loop {
-                if db.get_failed_schedulings().await?.is_empty()
-                    && db.get_failed_tasks().await?.is_empty()
-                {
-                    return Ok::<_, TaskSchedulerError>(());
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .unwrap()
-        .unwrap();
-        handle.abort();
-    }
-
-    #[tokio::test]
-    async fn test_failed_records_are_cleaned_up_periodically() {
-        magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
 
         let (_tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
@@ -1051,5 +1034,44 @@ mod tests {
         let queued = service.task_queue.remove(&key).into_inner();
         assert_eq!(queued.updated_at, replacement.updated_at);
         assert_eq!(queued.executions_left, replacement.executions_left);
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn test_failed_records_are_cleaned_up_periodically() {
+        magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+
+        db.insert_failed_scheduling(1, "schedule failed".to_string())
+            .await
+            .unwrap();
+        db.insert_failed_task(2, "task failed".to_string())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(2)).await;
+
+        let mut service = test_service(db.clone(), rx);
+        service.failed_task_retention = Duration::from_millis(1);
+        service.failed_task_cleanup_interval = Duration::from_millis(5);
+
+        let handle = service.start().await.unwrap();
+
+        timeout(Duration::from_secs(1), async move {
+            loop {
+                if db.get_failed_schedulings().await?.is_empty()
+                    && db.get_failed_tasks().await?.is_empty()
+                {
+                    return Ok::<_, TaskSchedulerError>(());
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        handle.abort();
     }
 }
