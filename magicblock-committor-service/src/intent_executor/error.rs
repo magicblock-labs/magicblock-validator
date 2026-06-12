@@ -51,6 +51,7 @@ impl InternalError {
                     RpcClientErrorKind::RpcError(
                         RpcError::RpcResponseError { code: -32602, message, .. }
                     ) if message.contains("VersionedTransaction too large")
+                        || message.contains("base64 encoded too large")
                 )
         }
 
@@ -178,6 +179,8 @@ pub enum TransactionStrategyExecutionError {
     ),
     #[error("Unfinalized account error: {0}, {1:?}")]
     UnfinalizedAccountError(#[source] TransactionError, Option<Signature>),
+    #[error("Transaction too large to send over the wire: {0}")]
+    TransactionTooLargeError(#[source] InternalError),
     #[error("InternalError: {0}")]
     InternalError(#[from] InternalError),
 }
@@ -201,12 +204,9 @@ impl TransactionStrategyExecutionError {
         )
     }
 
-    pub fn is_single_stage_split_limit_error(&self) -> bool {
+    pub fn is_recoverable_by_two_stage(&self) -> bool {
         self.is_cpi_limit_error()
-            || matches!(
-                self,
-                Self::InternalError(err) if err.is_transaction_too_large()
-            )
+            || matches!(self, Self::TransactionTooLargeError(_))
     }
 
     pub fn task_index(&self) -> Option<u8> {
@@ -238,6 +238,7 @@ impl TransactionStrategyExecutionError {
     pub fn signature(&self) -> Option<Signature> {
         match self {
             Self::InternalError(err) => err.signature(),
+            Self::TransactionTooLargeError(err) => err.signature(),
             Self::CommitIDError(_, signature)
             | Self::ActionsError(_, signature)
             | Self::UndelegationError(_, signature)
@@ -365,6 +366,7 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
             Self::CommitIDError(_, _) => "commit_nonce_failed",
             Self::UndelegationError(_, _) => "undelegation_failed",
             Self::UnfinalizedAccountError(_, _) => "unfinalized_account_failed",
+            Self::TransactionTooLargeError(_) => "transaction_too_large",
             _ => "failed",
         }
     }
@@ -456,7 +458,7 @@ mod tests {
     fn send_transaction_too_large_triggers_single_stage_split() {
         let err = send_transaction_too_large_error();
 
-        assert!(err.is_single_stage_split_limit_error());
+        assert!(err.is_recoverable_by_two_stage());
     }
 
     #[test]
@@ -469,6 +471,6 @@ mod tests {
             )),
         );
 
-        assert!(!err.is_single_stage_split_limit_error());
+        assert!(!err.is_recoverable_by_two_stage());
     }
 }
