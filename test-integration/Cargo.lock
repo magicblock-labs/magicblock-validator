@@ -4336,6 +4336,7 @@ dependencies = [
  "magicblock-processor",
  "magicblock-program",
  "magicblock-replicator",
+ "magicblock-rpc-client",
  "magicblock-services",
  "magicblock-task-scheduler",
  "magicblock-validator-admin",

@@ -1,7 +1,10 @@
-use std::io;
+use std::{io, sync::Arc, thread, time::Duration};
 
 use anyhow::Context;
 use borsh::BorshDeserialize;
+use magicblock_rpc_client::{
+    MagicBlockSendTransactionConfig, MagicblockRpcClient,
+};
 use mdp::{
     consts::ER_RECORD_SEED,
     instructions::{sync::SyncInstruction, version::v0::SyncRecordV0},
@@ -15,21 +18,35 @@ use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk_ids::system_program;
+use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use tracing::info;
+use tracing::{error, info};
+
+const UNREGISTER_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(8);
+const UNREGISTER_CONFIRMATION_INTERVAL: Duration = Duration::from_millis(400);
 
 pub struct DomainRegistryManager {
-    client: RpcClient,
+    client: Arc<RpcClient>,
+    rpc_client: MagicblockRpcClient,
 }
 
 impl DomainRegistryManager {
     pub fn new(url: impl ToString) -> Self {
+        Self::new_with_commitment(url, CommitmentConfig::confirmed())
+    }
+
+    pub fn new_with_commitment(
+        url: impl ToString,
+        commitment: CommitmentConfig,
+    ) -> Self {
+        let client = Arc::new(RpcClient::new_with_commitment(
+            url.to_string(),
+            commitment,
+        ));
         Self {
-            client: RpcClient::new_with_commitment(
-                url.to_string(),
-                CommitmentConfig::confirmed(),
-            ),
+            client: client.clone(),
+            rpc_client: MagicblockRpcClient::new(client),
         }
     }
 
@@ -41,7 +58,7 @@ impl DomainRegistryManager {
             .client
             .get_account_with_commitment(
                 account_pubkey,
-                CommitmentConfig::confirmed(),
+                self.client.commitment(),
             )
             .await
             .context(format!(
@@ -130,6 +147,22 @@ impl DomainRegistryManager {
         Ok(())
     }
 
+    async fn send_unregister(
+        &self,
+        payer: &Keypair,
+    ) -> Result<Signature, Error> {
+        let (pda, _) = Self::get_pda(&payer.pubkey());
+
+        self.send_instruction_without_confirmation(
+            payer,
+            pda,
+            mdp::instructions::Instruction::Unregister(payer.pubkey()),
+        )
+        .await
+        .context("Failed to send unregister tx")
+        .map_err(Error::UnknownError)
+    }
+
     pub async fn handle_registration(
         &self,
         payer: &Keypair,
@@ -167,6 +200,37 @@ impl DomainRegistryManager {
         pda: Pubkey,
         instruction: T,
     ) -> Result<(), anyhow::Error> {
+        let transaction =
+            self.build_transaction(payer, pda, instruction).await?;
+        self.client
+            .send_and_confirm_transaction(&transaction)
+            .await
+            .context("Failed to send and confirm transaction")?;
+        Ok(())
+    }
+
+    async fn send_instruction_without_confirmation<T: borsh::BorshSerialize>(
+        &self,
+        payer: &Keypair,
+        pda: Pubkey,
+        instruction: T,
+    ) -> Result<Signature, anyhow::Error> {
+        let transaction =
+            self.build_transaction(payer, pda, instruction).await?;
+        let config = MagicBlockSendTransactionConfig::ensure_sent();
+        self.rpc_client
+            .send_transaction(&transaction, &config)
+            .await
+            .context("Failed to send transaction")
+            .map(|outcome| outcome.into_signature())
+    }
+
+    async fn build_transaction<T: borsh::BorshSerialize>(
+        &self,
+        payer: &Keypair,
+        pda: Pubkey,
+        instruction: T,
+    ) -> Result<Transaction, anyhow::Error> {
         let accounts = vec![
             AccountMeta::new(payer.pubkey(), true),
             AccountMeta::new(pda, false),
@@ -180,18 +244,12 @@ impl DomainRegistryManager {
             .get_latest_blockhash()
             .await
             .context("Failed to get latest blockhash")?;
-        let transaction = Transaction::new_signed_with_payer(
+        Ok(Transaction::new_signed_with_payer(
             &[instruction],
             Some(&payer.pubkey()),
             &[&payer],
             recent_blockhash,
-        );
-
-        self.client
-            .send_and_confirm_transaction(&transaction)
-            .await
-            .context("Failed to send and confirm transaction")?;
-        Ok(())
+        ))
     }
 
     pub async fn handle_unregistration_static(
@@ -199,8 +257,72 @@ impl DomainRegistryManager {
         payer: &Keypair,
     ) -> Result<(), Error> {
         info!("Unregistering validator from domain registry");
-        let manager = DomainRegistryManager::new(url);
+        let manager = DomainRegistryManager::new_with_commitment(
+            url,
+            CommitmentConfig::confirmed(),
+        );
         manager.unregister(payer).await
+    }
+
+    pub async fn send_unregistration_static(
+        url: impl ToString,
+        payer: &Keypair,
+    ) -> Result<Signature, Error> {
+        info!("Sending validator unregister transaction");
+        let manager = DomainRegistryManager::new_with_commitment(
+            url,
+            CommitmentConfig::confirmed(),
+        );
+        manager.send_unregister(payer).await
+    }
+
+    pub async fn send_unregistration_and_confirm_in_background_static(
+        url: impl ToString,
+        payer: &Keypair,
+    ) -> Result<(Signature, thread::JoinHandle<()>), Error> {
+        info!("Sending validator unregister transaction");
+        let manager = DomainRegistryManager::new_with_commitment(
+            url,
+            CommitmentConfig::confirmed(),
+        );
+        let signature = manager.send_unregister(payer).await?;
+        let rpc_client = manager.rpc_client.clone();
+
+        let handle = thread::spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(err) => {
+                    error!(error = ?err, %signature, "Failed to build unregister confirmation runtime");
+                    return;
+                }
+            };
+
+            runtime.block_on(async move {
+                match rpc_client
+                    .wait_for_confirmed_status(
+                        &signature,
+                        &UNREGISTER_CONFIRMATION_TIMEOUT,
+                        &Some(UNREGISTER_CONFIRMATION_INTERVAL),
+                    )
+                    .await
+                {
+                    Ok(Ok(())) => {
+                        info!(%signature, "Confirmed validator unregister transaction");
+                    }
+                    Ok(Err(err)) => {
+                        error!(error = ?err, %signature, "Unregister transaction failed");
+                    }
+                    Err(err) => {
+                        error!(error = ?err, %signature, "Failed to confirm unregister");
+                    }
+                }
+            });
+        });
+
+        Ok((signature, handle))
     }
 }
 
