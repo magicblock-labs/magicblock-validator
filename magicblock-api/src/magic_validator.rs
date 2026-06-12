@@ -73,6 +73,7 @@ use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
     runtime::Builder,
@@ -681,17 +682,75 @@ impl MagicValidator {
         })
     }
 
-    async fn unregister_validator_on_chain(&self) -> ApiResult<()> {
+    async fn send_unregister_validator_on_chain(
+        rpc_url: String,
+    ) -> ApiResult<Signature> {
         let validator_keypair = validator_authority();
-        DomainRegistryManager::handle_unregistration_static(
-            self.config.rpc_url(),
+        DomainRegistryManager::send_unregistration_static(
+            rpc_url,
             &validator_keypair,
         )
         .await
         .map_err(|err| {
             ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
         })
-        .inspect(|_| info!("Unregistered validator on chain"))
+        .inspect(|signature| {
+            info!(%signature, "Sent validator unregister transaction")
+        })
+    }
+
+    pub async fn start_unregister_validator_on_chain(
+        &self,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        if self.config.chain_operation.is_none()
+            || !matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
+            || !CoordinationMode::current().needs_onchain_interactions()
+        {
+            return None;
+        }
+
+        let rpc_url = self.config.rpc_url().to_owned();
+        let step_start = Instant::now();
+        let signature =
+            match MagicValidator::send_unregister_validator_on_chain(
+                rpc_url.clone(),
+            )
+            .await
+            {
+                Ok(signature) => signature,
+                Err(err) => {
+                    error!(error = ?err, "Failed to send unregister");
+                    log_timing(
+                        "shutdown",
+                        "send_unregister_validator_on_chain",
+                        step_start,
+                    );
+                    return None;
+                }
+            };
+        log_timing(
+            "shutdown",
+            "send_unregister_validator_on_chain",
+            step_start,
+        );
+
+        Some(tokio::spawn(async move {
+            let step_start = Instant::now();
+            if let Err(err) = DomainRegistryManager::confirm_signature_static(
+                rpc_url, signature,
+            )
+            .await
+            {
+                error!(error = ?err, %signature, "Failed to confirm unregister");
+            } else {
+                info!(%signature, "Confirmed validator unregister transaction");
+            }
+            log_timing(
+                "shutdown_background",
+                "confirm_unregister_validator_on_chain",
+                step_start,
+            );
+        }))
     }
 
     async fn ensure_validator_funded_on_chain(
@@ -1073,16 +1132,6 @@ impl MagicValidator {
         self.claim_fees_task.stop().await;
         log_timing("shutdown", "claim_fees_task_stop", step_start);
 
-        if self.config.chain_operation.is_some()
-            && matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
-            && CoordinationMode::current().needs_onchain_interactions()
-        {
-            let step_start = Instant::now();
-            if let Err(err) = self.unregister_validator_on_chain().await {
-                error!(error = ?err, "Failed to unregister");
-            }
-            log_timing("shutdown", "unregister_validator_on_chain", step_start);
-        }
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
