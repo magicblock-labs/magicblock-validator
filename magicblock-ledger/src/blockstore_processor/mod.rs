@@ -167,8 +167,21 @@ pub async fn process_ledger(
 ) -> LedgerResult<u64> {
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well
-    let blockhashes_only_starting_slot =
+    let requested_blockhash_start =
         full_process_starting_slot.saturating_sub(max_age);
+    // The ledger may not have a persisted block at slot 0 (or at any slot below
+    // its first stored block). When AccountsDb is reset to slot 0 we must start
+    // scanning at the ledger's first available block, otherwise replay breaks
+    // immediately on the missing leading slot and replays nothing.
+    let blockhashes_only_starting_slot = match ledger.get_lowest_slot()? {
+        Some(lowest_ledger_slot) => {
+            requested_blockhash_start.max(lowest_ledger_slot)
+        }
+        None => {
+            debug!("Ledger replay skipped: ledger has no blocks");
+            return Ok(full_process_starting_slot);
+        }
+    };
     debug!("Ledger replay starting");
     let slot = replay_blocks(
         IterBlocksParams {
