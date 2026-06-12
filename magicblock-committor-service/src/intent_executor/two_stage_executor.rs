@@ -255,7 +255,8 @@ where
             | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
                 _,
                 _,
-            ) => {
+            )
+            | TransactionStrategyExecutionError::TransactionTooLargeError(_) => {
                 // Can't be handled
                 error!(error = ?err, "Commit tasks exceeded execution limit");
                 Ok(ControlFlow::Break(()))
@@ -495,7 +496,8 @@ where
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _)
-            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _) => {
+            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _)
+            | TransactionStrategyExecutionError::TransactionTooLargeError(_) => {
                 // Can't be handled
                 warn!(error = ?err, "Finalization tasks exceeded execution limit");
                 Ok(ControlFlow::Break(()))

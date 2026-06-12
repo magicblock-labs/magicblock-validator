@@ -59,6 +59,9 @@ impl IntentExecutionClient {
         {
             type ExecutionError = TransactionStrategyExecutionError;
             fn map(&self, error: InternalError) -> Self::ExecutionError {
+                if error.is_transaction_too_large() {
+                    return TransactionStrategyExecutionError::TransactionTooLargeError(error);
+                }
                 match error {
                     InternalError::MagicBlockRpcClientError(err) => {
                         map_magicblock_client_error(
