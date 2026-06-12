@@ -73,7 +73,6 @@ use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
     runtime::Builder,
@@ -126,6 +125,7 @@ pub struct MagicValidator {
         Option<thread::JoinHandle<magicblock_replicator::Result<()>>>,
     mode_tx: Sender<SchedulerMode>,
     replication_tx: Sender<Message>,
+    unregister_handle: Option<thread::JoinHandle<()>>,
     is_standalone: bool,
 }
 
@@ -447,6 +447,7 @@ impl MagicValidator {
             replication_handle: None,
             mode_tx,
             replication_tx: validator_channels.replication_messages,
+            unregister_handle: None,
             is_standalone,
         })
     }
@@ -682,75 +683,46 @@ impl MagicValidator {
         })
     }
 
-    async fn send_unregister_validator_on_chain(
-        rpc_url: String,
-    ) -> ApiResult<Signature> {
-        let validator_keypair = validator_authority();
-        DomainRegistryManager::send_unregistration_static(
-            rpc_url,
-            &validator_keypair,
-        )
-        .await
-        .map_err(|err| {
-            ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
-        })
-        .inspect(|signature| {
-            info!(%signature, "Sent validator unregister transaction")
-        })
-    }
-
-    pub async fn start_unregister_validator_on_chain(
-        &self,
-    ) -> Option<tokio::task::JoinHandle<()>> {
+    pub async fn start_unregister_validator_on_chain(&mut self) {
+        if self.unregister_handle.is_some() {
+            return;
+        }
         if self.config.chain_operation.is_none()
+            || !self.is_standalone
             || !matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
             || !CoordinationMode::current().needs_onchain_interactions()
         {
-            return None;
+            return;
         }
 
         let rpc_url = self.config.rpc_url().to_owned();
         let step_start = Instant::now();
-        let signature =
-            match MagicValidator::send_unregister_validator_on_chain(
-                rpc_url.clone(),
+        let validator_keypair = validator_authority();
+        // Await send before shutdown so runtime drop can only cancel confirmation.
+        let result =
+            DomainRegistryManager::send_unregistration_and_confirm_in_background_static(
+                rpc_url,
+                &validator_keypair,
             )
             .await
-            {
-                Ok(signature) => signature,
-                Err(err) => {
-                    error!(error = ?err, "Failed to send unregister");
-                    log_timing(
-                        "shutdown",
-                        "send_unregister_validator_on_chain",
-                        step_start,
-                    );
-                    return None;
-                }
-            };
+            .map_err(|err| {
+                ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
+            });
         log_timing(
             "shutdown",
             "send_unregister_validator_on_chain",
             step_start,
         );
 
-        Some(tokio::spawn(async move {
-            let step_start = Instant::now();
-            if let Err(err) = DomainRegistryManager::confirm_signature_static(
-                rpc_url, signature,
-            )
-            .await
-            {
-                error!(error = ?err, %signature, "Failed to confirm unregister");
-            } else {
-                info!(%signature, "Confirmed validator unregister transaction");
+        match result {
+            Ok((signature, handle)) => {
+                info!(%signature, "Sent validator unregister transaction");
+                self.unregister_handle = Some(handle);
             }
-            log_timing(
-                "shutdown_background",
-                "confirm_unregister_validator_on_chain",
-                step_start,
-            );
-        }))
+            Err(err) => {
+                error!(error = ?err, "Failed to send unregister");
+            }
+        }
     }
 
     async fn ensure_validator_funded_on_chain(
@@ -1106,6 +1078,7 @@ impl MagicValidator {
     #[instrument(skip(self))]
     pub async fn stop(mut self) {
         let stop_start = Instant::now();
+        self.start_unregister_validator_on_chain().await;
         self.exit.store(true, Ordering::Relaxed);
 
         // Ordering is important here
@@ -1179,6 +1152,18 @@ impl MagicValidator {
             error!(error = ?err, "Failed to shutdown ledger");
         }
         log_timing("shutdown", "ledger_shutdown", step_start);
+
+        if let Some(handle) = self.unregister_handle {
+            if handle.is_finished() {
+                if handle.join().is_err() {
+                    error!("Unregister confirmation thread panicked");
+                }
+            } else {
+                debug!(
+                    "Unregister confirmation still running; not waiting during shutdown"
+                );
+            }
+        }
 
         log_timing("shutdown", "stop_total", stop_start);
         info!("MagicValidator shutdown");

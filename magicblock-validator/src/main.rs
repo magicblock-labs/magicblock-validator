@@ -156,21 +156,10 @@ async fn run() {
         .await;
     }
 
-    let unregister_handle = api.start_unregister_validator_on_chain().await;
+    api.start_unregister_validator_on_chain().await;
     api.prepare_ledger_for_shutdown();
     let stop_step = Instant::now();
     api.stop().await;
-    if let Some(handle) = unregister_handle {
-        if handle.is_finished() {
-            if let Err(err) = handle.await {
-                error!(error = ?err, "Unregister task failed");
-            }
-        } else {
-            debug!(
-                "Unregister confirmation still running; not waiting during shutdown"
-            );
-        }
-    }
     debug!(
         duration_ms = stop_step.elapsed().as_millis() as u64,
         "Validator stop completed"
