@@ -1,9 +1,9 @@
-use std::{fs, path::Path};
+use std::path::Path;
 
 use cleanass::assert_eq;
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
-    validator::cleanup, IntegrationTestContext,
+    validator::cleanup,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
@@ -26,8 +26,6 @@ fn test_replay_clone_with_different_local_validator_authority() {
     let expected_lamports = LAMPORTS_PER_SOL;
 
     write_clone_to_ledger(&ledger_path, &loaded_accounts, &cloned_account);
-    airdrop_more_on_chain_after_ledger_write(&cloned_pubkey);
-    clear_accountsdb_state(&ledger_path);
     restore_with_replay_authority_override(
         &ledger_path,
         original_authority,
@@ -66,22 +64,6 @@ fn write_clone_to_ledger(
 
     wait_for_ledger_persist(&ctx, &mut validator);
     test_ledger_restore::kill_validator(&mut validator);
-}
-
-fn airdrop_more_on_chain_after_ledger_write(cloned_pubkey: &Pubkey) {
-    let chain_ctx = IntegrationTestContext::try_new_chain_only()
-        .expect("chain-only context should connect to local devnet");
-    chain_ctx
-        .airdrop_chain(cloned_pubkey, LAMPORTS_PER_SOL)
-        .expect("additional chain airdrop should succeed");
-}
-
-fn clear_accountsdb_state(ledger_path: &Path) {
-    let accountsdb = ledger_path.join("accountsdb");
-    if accountsdb.exists() {
-        fs::remove_dir_all(&accountsdb)
-            .expect("accountsdb state should be removable before replay");
-    }
 }
 
 fn restore_with_replay_authority_override(
