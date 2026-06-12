@@ -435,29 +435,43 @@ mod tests {
 
     use super::{InternalError, TransactionStrategyExecutionError};
 
-    fn send_transaction_too_large_error() -> TransactionStrategyExecutionError {
+    const TX_TOO_LARGE_SOLANA: &str = "base64 encoded too large";
+    const TX_TOO_LARGE_MAGICBLOCK: &str =
+        "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
+
+    fn make_send_transaction_error(message: &str) -> InternalError {
         let rpc_error = RpcClientError {
             request: Some(RpcRequest::SendTransaction),
             kind: Box::new(RpcClientErrorKind::RpcError(
                 RpcError::RpcResponseError {
                     code: -32602,
-                    message: "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)".to_string(),
+                    message: message.to_string(),
                     data: RpcResponseErrorData::Empty,
                 },
             )),
         };
-
-        TransactionStrategyExecutionError::InternalError(
-            InternalError::MagicBlockRpcClientError(Box::new(
-                MagicBlockRpcClientError::SendTransaction(Box::new(rpc_error)),
-            )),
-        )
+        InternalError::MagicBlockRpcClientError(Box::new(
+            MagicBlockRpcClientError::SendTransaction(Box::new(rpc_error)),
+        ))
     }
 
     #[test]
-    fn send_transaction_too_large_triggers_single_stage_split() {
-        let err = send_transaction_too_large_error();
+    fn is_transaction_too_large_matches_solana_format() {
+        let err = make_send_transaction_error(TX_TOO_LARGE_SOLANA);
+        assert!(err.is_transaction_too_large());
+    }
 
+    #[test]
+    fn is_transaction_too_large_matches_magicblock_format() {
+        let err = make_send_transaction_error(TX_TOO_LARGE_MAGICBLOCK);
+        assert!(err.is_transaction_too_large());
+    }
+
+    #[test]
+    fn transaction_too_large_error_is_recoverable_by_two_stage() {
+        let inner = make_send_transaction_error(TX_TOO_LARGE_MAGICBLOCK);
+        let err =
+            TransactionStrategyExecutionError::TransactionTooLargeError(inner);
         assert!(err.is_recoverable_by_two_stage());
     }
 
@@ -470,7 +484,6 @@ mod tests {
                 ),
             )),
         );
-
         assert!(!err.is_recoverable_by_two_stage());
     }
 }
