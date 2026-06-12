@@ -254,8 +254,40 @@ pub fn setup_validator_with_local_remote_and_authority_override(
     reset_ledger: bool,
     replay_authority_override: Pubkey,
 ) -> (TempDir, Child, IntegrationTestContext) {
+    setup_validator_with_local_remote_and_authority_override_inner(
+        ledger_path,
+        programs,
+        reset_ledger,
+        reset_ledger,
+        replay_authority_override,
+    )
+}
+
+/// Like `setup_validator_with_local_remote_and_authority_override`, but keeps
+/// the ledger and resets AccountsDb so startup is forced to replay the ledger.
+pub fn setup_validator_with_local_remote_and_authority_override_reset_accountsdb(
+    ledger_path: &Path,
+    programs: Option<Vec<LoadableProgram>>,
+    replay_authority_override: Pubkey,
+) -> (TempDir, Child, IntegrationTestContext) {
+    setup_validator_with_local_remote_and_authority_override_inner(
+        ledger_path,
+        programs,
+        false,
+        true,
+        replay_authority_override,
+    )
+}
+
+fn setup_validator_with_local_remote_and_authority_override_inner(
+    ledger_path: &Path,
+    programs: Option<Vec<LoadableProgram>>,
+    reset_ledger: bool,
+    reset_accountsdb: bool,
+    replay_authority_override: Pubkey,
+) -> (TempDir, Child, IntegrationTestContext) {
     let accountsdb_config = AccountsDbConfig {
-        reset: reset_ledger,
+        reset: reset_accountsdb,
         ..Default::default()
     };
 

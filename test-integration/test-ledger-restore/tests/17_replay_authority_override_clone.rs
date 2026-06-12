@@ -3,7 +3,7 @@ use std::path::Path;
 use cleanass::assert_eq;
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
-    validator::cleanup,
+    validator::cleanup, IntegrationTestContext,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
@@ -12,7 +12,7 @@ use solana_sdk::{
 };
 use test_ledger_restore::{
     setup_validator_with_local_remote,
-    setup_validator_with_local_remote_and_authority_override,
+    setup_validator_with_local_remote_and_authority_override_reset_accountsdb,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
@@ -26,6 +26,7 @@ fn test_replay_clone_with_different_local_validator_authority() {
     let expected_lamports = LAMPORTS_PER_SOL;
 
     write_clone_to_ledger(&ledger_path, &loaded_accounts, &cloned_account);
+    airdrop_more_on_chain_after_ledger_write(&cloned_pubkey);
     restore_with_replay_authority_override(
         &ledger_path,
         original_authority,
@@ -66,6 +67,14 @@ fn write_clone_to_ledger(
     test_ledger_restore::kill_validator(&mut validator);
 }
 
+fn airdrop_more_on_chain_after_ledger_write(cloned_pubkey: &Pubkey) {
+    let chain_ctx = IntegrationTestContext::try_new_chain_only()
+        .expect("chain-only context should connect to local devnet");
+    chain_ctx
+        .airdrop_chain(cloned_pubkey, LAMPORTS_PER_SOL)
+        .expect("additional chain airdrop should succeed");
+}
+
 fn restore_with_replay_authority_override(
     ledger_path: &Path,
     original_authority: Pubkey,
@@ -73,10 +82,9 @@ fn restore_with_replay_authority_override(
     expected_lamports: u64,
 ) {
     let (_, mut validator, ctx) =
-        setup_validator_with_local_remote_and_authority_override(
+        setup_validator_with_local_remote_and_authority_override_reset_accountsdb(
             ledger_path,
             None,
-            false,
             original_authority,
         );
 
