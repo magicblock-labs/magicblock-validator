@@ -189,8 +189,16 @@ pub async fn process_ledger(
             full_process_starting_slot,
             blockhashes_only_starting_slot,
         },
-        transaction_scheduler,
+        transaction_scheduler.clone(),
     )
     .await?;
+    // Replay submits transactions fire-and-forget so non-conflicting ones run in
+    // parallel. Wait for the scheduler to drain them (all executed and committed)
+    // before returning, so callers can rely on the replayed state and safely
+    // clear any temporary replay authority override.
+    transaction_scheduler
+        .wait_for_replay_drain()
+        .await
+        .map_err(LedgerError::BlockStoreProcessor)?;
     Ok(slot)
 }
