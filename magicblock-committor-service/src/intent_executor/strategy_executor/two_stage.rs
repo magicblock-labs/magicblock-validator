@@ -12,10 +12,14 @@ use crate::{
     intent_executor::{
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
-        patcher::{CommitStagePatcher, FinalizeStagePatcher},
+        strategy_executor::{
+            patcher::{CommitStagePatcher, FinalizeStagePatcher},
+            two_stage::sealed::Sealed,
+            utils::{
+                handle_actions_result, stage_execution_loop, ExecutionState,
+            },
+        },
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
-        two_stage_executor::sealed::Sealed,
-        utils::{handle_actions_result, stage_execution_loop, ExecutionState},
         IntentExecutionReport,
     },
     outbox_client::OutboxClient,
@@ -82,7 +86,7 @@ pub struct Finalized {
     pub finalize_signature: Signature,
 }
 
-pub struct TwoStageExecutor<'a, A, O, S: Sealed> {
+pub struct TwoStageStrategyExecutor<'a, A, O, S: Sealed> {
     /// State per stage
     state: S,
     /// Common state across the stages
@@ -94,7 +98,7 @@ pub struct TwoStageExecutor<'a, A, O, S: Sealed> {
     execution_report: &'a mut IntentExecutionReport,
 }
 
-impl<'a, A, O> TwoStageExecutor<'a, A, O, Initialized>
+impl<'a, A, O> TwoStageStrategyExecutor<'a, A, O, Initialized>
 where
     A: ActionsCallbackScheduler,
     O: OutboxClient,
@@ -226,8 +230,8 @@ where
     pub fn done(
         self,
         commit_signature: Signature,
-    ) -> TwoStageExecutor<'a, A, O, Committed> {
-        TwoStageExecutor {
+    ) -> TwoStageStrategyExecutor<'a, A, O, Committed> {
+        TwoStageStrategyExecutor {
             authority: self.authority,
             intent_id: self.intent_id,
             intent_client: self.intent_client,
@@ -244,7 +248,7 @@ where
     }
 }
 
-impl<'a, A, O> TwoStageExecutor<'a, A, O, Committed>
+impl<'a, A, O> TwoStageStrategyExecutor<'a, A, O, Committed>
 where
     A: ActionsCallbackScheduler,
     O: OutboxClient,

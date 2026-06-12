@@ -9,11 +9,11 @@ use std::{
 use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
+        accepted_intent_executor::AcceptedIntentExecutor,
         task_info_fetcher::{
             CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
             TaskInfoFetcherResult,
         },
-        IntentExecutorImpl,
     },
     tasks::commit_task::{CommitDelivery, CommitTask},
     transaction_preparator::{
@@ -108,14 +108,14 @@ impl TestFixture {
     #[allow(dead_code)]
     pub fn create_intent_executor(
         &self,
-    ) -> IntentExecutorImpl<
+    ) -> AcceptedIntentExecutor<
         TransactionPreparatorImpl,
         MockTaskInfoFetcher,
         MockActionsCallbackExecutor,
     > {
         let transaction_preparator = self.create_transaction_preparator();
 
-        IntentExecutorImpl::new(
+        AcceptedIntentExecutor::new(
             self.rpc_client.clone(),
             transaction_preparator,
             self.create_task_info_fetcher(),

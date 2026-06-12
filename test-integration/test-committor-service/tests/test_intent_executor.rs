@@ -14,16 +14,19 @@ use futures::future::{join_all, try_join_all};
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
+        accepted_intent_executor::AcceptedIntentExecutor,
         error::{IntentExecutorError, TransactionStrategyExecutionError},
         intent_execution_client::IntentExecutionClient,
+        strategy_executor::{
+            two_stage::{Initialized, TwoStageStrategyExecutor},
+            utils::prepare_and_execute_strategy,
+        },
         task_info_fetcher::{
             CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
             TaskInfoFetcherError,
         },
-        two_stage_executor::{Initialized, TwoStageExecutor},
-        utils::prepare_and_execute_strategy,
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorImpl,
+        IntentExecutor,
     },
     persist::IntentPersisterImpl,
     tasks::{
@@ -86,7 +89,7 @@ const ACTOR_ESCROW_INDEX: u8 = 1;
 struct TestEnv {
     fixture: TestFixture,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
-    intent_executor: IntentExecutorImpl<
+    intent_executor: AcceptedIntentExecutor<
         TransactionPreparatorImpl,
         RpcTaskInfoFetcher,
         MockActionsCallbackExecutor,
@@ -115,7 +118,7 @@ impl TestEnv {
         }
 
         let callback_executor = MockActionsCallbackExecutor::default();
-        let intent_executor = IntentExecutorImpl::new(
+        let intent_executor = AcceptedIntentExecutor::new(
             fixture.rpc_client.clone(),
             transaction_preparator,
             task_info_fetcher.clone(),
@@ -1278,7 +1281,7 @@ async fn test_action_callback_fired_on_timeout() {
     let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
         RpcTaskInfoFetcher::new(fixture.rpc_client.clone()),
     ));
-    let mut intent_executor = IntentExecutorImpl::new(
+    let mut intent_executor = AcceptedIntentExecutor::new(
         fixture.rpc_client.clone(),
         fixture.create_transaction_preparator(),
         task_info_fetcher,
@@ -1413,7 +1416,7 @@ async fn test_callbacks_fired_in_two_stage() {
     assert!(calls[1].1.is_ok());
 }
 
-/// Builds a [`TwoStageExecutor`] directly from an intent by constructing the
+/// Builds a [`TwoStageStrategyExecutor`] directly from an intent by constructing the
 /// commit and finalize strategies independently, without going through
 /// `execute_inner` or any CPI-limit recovery path.
 async fn create_two_stage_executor<'a>(
@@ -1422,7 +1425,7 @@ async fn create_two_stage_executor<'a>(
     intent: &ScheduledIntentBundle,
     task_info_fetcher: &Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     execution_report: &'a mut IntentExecutionReport,
-) -> TwoStageExecutor<'a, MockActionsCallbackExecutor, Initialized> {
+) -> TwoStageStrategyExecutor<'a, MockActionsCallbackExecutor, Initialized> {
     let authority = &fixture.authority.pubkey();
     let commit_tasks = TaskBuilderImpl::commit_tasks(
         task_info_fetcher,
@@ -1435,17 +1438,11 @@ async fn create_two_stage_executor<'a>(
         TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
             .await
             .unwrap();
-    let commit_strategy = TaskStrategist::build_strategy(
-        commit_tasks,
-        authority,
-    )
-    .unwrap();
-    let finalize_strategy = TaskStrategist::build_strategy(
-        finalize_tasks,
-        authority,
-    )
-    .unwrap();
-    TwoStageExecutor::new(
+    let commit_strategy =
+        TaskStrategist::build_strategy(commit_tasks, authority).unwrap();
+    let finalize_strategy =
+        TaskStrategist::build_strategy(finalize_tasks, authority).unwrap();
+    TwoStageStrategyExecutor::new(
         fixture.authority.insecure_clone(),
         commit_strategy,
         finalize_strategy,
@@ -1691,23 +1688,16 @@ async fn single_flow_transaction_strategy(
     task_info_fetcher: &Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     intent: &ScheduledIntentBundle,
 ) -> TransactionStrategy {
-    let mut tasks = TaskBuilderImpl::commit_tasks(
-        task_info_fetcher,
-        intent,
-    )
-    .await
-    .unwrap();
+    let mut tasks = TaskBuilderImpl::commit_tasks(task_info_fetcher, intent)
+        .await
+        .unwrap();
     let finalize_tasks =
         TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
             .await
             .unwrap();
     tasks.extend(finalize_tasks);
 
-    TaskStrategist::build_strategy(
-        tasks,
-        authority,
-    )
-    .unwrap()
+    TaskStrategist::build_strategy(tasks, authority).unwrap()
 }
 
 async fn verify_committed_accounts_state(

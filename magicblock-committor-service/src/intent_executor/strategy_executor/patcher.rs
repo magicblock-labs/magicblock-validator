@@ -15,11 +15,11 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         intent_execution_client::IntentExecutionClient,
-        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
-        utils::{
+        strategy_executor::utils::{
             handle_actions_result, handle_commit_id_error,
             handle_undelegation_error, prepare_and_execute_strategy,
         },
+        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         IntentExecutionReport,
     },
     tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
@@ -202,7 +202,6 @@ pub(in crate::intent_executor) struct CommitStagePatcher<'a, F, A, T> {
     pub transaction_preparator: &'a T,
 }
 
-
 impl<F, A, T> CommitStagePatcher<'_, F, A, T>
 where
     T: TransactionPreparator,
@@ -226,12 +225,12 @@ where
                 standalone_action_nonce: None,
             },
         )
-            .await
-            .map_err(IntentExecutorError::FailedCommitPreparationError)?
-            .map_err(|err| IntentExecutorError::FailedToCommitError {
-                err,
-                signature: *failed_signature,
-            })?;
+        .await
+        .map_err(IntentExecutorError::FailedCommitPreparationError)?
+        .map_err(|err| IntentExecutorError::FailedToCommitError {
+            err,
+            signature: *failed_signature,
+        })?;
 
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
@@ -335,7 +334,6 @@ where
         }
     }
 }
-
 
 pub(in crate::intent_executor) struct FinalizeStagePatcher<'a, A> {
     pub authority: &'a Keypair,

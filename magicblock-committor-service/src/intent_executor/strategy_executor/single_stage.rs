@@ -12,9 +12,13 @@ use crate::{
     intent_executor::{
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
-        patcher::SingleStagePatcher,
+        strategy_executor::{
+            patcher::SingleStagePatcher,
+            utils::{
+                handle_actions_result, stage_execution_loop, ExecutionState,
+            },
+        },
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
-        utils::{handle_actions_result, stage_execution_loop, ExecutionState},
         IntentExecutionReport,
     },
     outbox_client::OutboxClient,
@@ -22,7 +26,7 @@ use crate::{
     transaction_preparator::TransactionPreparator,
 };
 
-pub struct SingleStageExecutor<'a, F, A, O> {
+pub struct SingleStageStrategyExecutor<'a, F, A, O> {
     current_attempt: u8,
     pending_signature: Option<Signature>,
     execution_report: &'a mut IntentExecutionReport,
@@ -36,7 +40,7 @@ pub struct SingleStageExecutor<'a, F, A, O> {
     transaction_strategy: TransactionStrategy,
 }
 
-impl<'a, F, A, O> SingleStageExecutor<'a, F, A, O>
+impl<'a, F, A, O> SingleStageStrategyExecutor<'a, F, A, O>
 where
     F: TaskInfoFetcher,
     A: ActionsCallbackScheduler,

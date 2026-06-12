@@ -6,9 +6,11 @@ use magicblock_table_mania::TableMania;
 
 use crate::{
     intent_executor::{
+        accepted_intent_executor::AcceptedIntentExecutor,
         error::IntentExecutorError,
+        intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
-        IntentExecutor, IntentExecutorImpl,
+        IntentExecutor, IntentExecutorCtx,
     },
     outbox_client::OutboxClient,
     transaction_preparator::TransactionPreparatorImpl,
@@ -42,8 +44,12 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    type Executor =
-        IntentExecutorImpl<TransactionPreparatorImpl, RpcTaskInfoFetcher, A, O>;
+    type Executor = AcceptedIntentExecutor<
+        TransactionPreparatorImpl,
+        RpcTaskInfoFetcher,
+        A,
+        O,
+    >;
 
     fn create_instance(&self) -> Self::Executor {
         let transaction_preparator = TransactionPreparatorImpl::new(
@@ -51,13 +57,14 @@ where
             self.table_mania.clone(),
             self.executor_config.compute_budget_config.clone(),
         );
-        Self::Executor::new(
-            self.rpc_client.clone(),
+        let ctx = IntentExecutorCtx {
+            intent_client: IntentExecutionClient::new(self.rpc_client.clone()),
             transaction_preparator,
-            self.task_info_fetcher.clone(),
-            self.outbox_client.clone(),
-            self.actions_callback_executor.clone(),
-            self.executor_config.actions_timeout,
-        )
+            task_info_fetcher: self.task_info_fetcher.clone(),
+            outbox_client: self.outbox_client.clone(),
+            actions_callback_executor: self.actions_callback_executor.clone(),
+            actions_timeout: self.executor_config.actions_timeout,
+        };
+        Self::Executor::new(ctx)
     }
 }
