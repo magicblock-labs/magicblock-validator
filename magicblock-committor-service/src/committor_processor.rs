@@ -225,7 +225,8 @@ impl CommittorProcessor {
                 format!("Failed to persist changeset: {err}"),
                 self.shutdown.as_ref(),
             );
-        };
+            return Err(err.into());
+        }
 
         self.commits_scheduler
             .schedule(intent_bundles)

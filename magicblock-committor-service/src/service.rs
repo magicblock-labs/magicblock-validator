@@ -6,7 +6,7 @@ use std::{
 };
 
 use magicblock_core::{
-    shutdown::{spawn_critical, ShutdownHandle},
+    shutdown::{ShutdownHandle, ShutdownReason},
     traits::ActionsCallbackScheduler,
 };
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
@@ -379,8 +379,15 @@ impl CommittorService {
                 shutdown.clone(),
             )?;
             if let Some(shutdown) = shutdown {
-                spawn_critical("committor.actor", shutdown, async move {
-                    actor.run(cancel_token).await;
+                tokio::spawn(async move {
+                    actor.run(cancel_token.clone()).await;
+                    if cancel_token.is_cancelled() || shutdown.is_triggered() {
+                        return;
+                    }
+                    shutdown.trigger(ShutdownReason::Fatal {
+                        source: "committor.actor",
+                        message: "Committor actor stopped unexpectedly".into(),
+                    });
                 });
             } else {
                 tokio::spawn(async move {

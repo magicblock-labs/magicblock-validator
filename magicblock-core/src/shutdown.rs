@@ -36,11 +36,18 @@ impl ShutdownHandle {
 
     /// Requests graceful shutdown. Only the first reason is retained.
     pub fn trigger(&self, reason: ShutdownReason) {
-        if self.token.is_cancelled() {
+        if self
+            .reason
+            .compare_and_swap(
+                &None::<Arc<ShutdownReason>>,
+                Some(Arc::new(reason.clone())),
+            )
+            .is_some()
+        {
+            self.token.cancel();
             return;
         }
         error!(?reason, "Shutdown requested");
-        self.reason.store(Some(std::sync::Arc::new(reason)));
         self.token.cancel();
     }
 
