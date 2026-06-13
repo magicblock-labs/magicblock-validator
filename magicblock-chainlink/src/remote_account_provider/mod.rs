@@ -2126,9 +2126,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 };
             };
 
-            // TODO: should we retry if not or respond with an error?
             let (response_slot, response_value) = response;
-            assert!(response_slot >= min_context_slot);
+            if response_slot < min_context_slot {
+                let err_msg = format!(
+                    "Response slot {response_slot} < {min_context_slot} fetching accounts {}",
+                    pubkeys_str(&pubkeys)
+                );
+                notify_error(&err_msg);
+                return;
+            }
 
             if response_value.len() != pubkeys.len() {
                 let err_msg = format!(
