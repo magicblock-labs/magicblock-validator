@@ -5,7 +5,10 @@ use std::{
 };
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
-use magicblock_core::traits::CallbackScheduleError;
+use magicblock_core::{
+    shutdown::{request_fatal_shutdown, ShutdownHandle},
+    traits::CallbackScheduleError,
+};
 use magicblock_metrics::metrics;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_signature::Signature;
@@ -93,6 +96,7 @@ pub(crate) struct IntentExecutionEngine<D, P, F> {
     executor_factory: F,
     intents_persister: Option<P>,
     receiver: mpsc::Receiver<ScheduledIntentBundle>,
+    shutdown: Option<ShutdownHandle>,
 
     inner: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
@@ -111,12 +115,14 @@ where
         executor_factory: F,
         intents_persister: Option<P>,
         receiver: mpsc::Receiver<ScheduledIntentBundle>,
+        shutdown: Option<ShutdownHandle>,
     ) -> Self {
         Self {
             db,
             intents_persister,
             executor_factory,
             receiver,
+            shutdown,
             running_executors: FuturesUnordered::new(),
             executors_semaphore: Arc::new(Semaphore::new(
                 MAX_EXECUTORS as usize,
@@ -125,12 +131,36 @@ where
         }
     }
 
+    fn lock_scheduler(&self) -> Result<std::sync::MutexGuard<'_, IntentScheduler>, IntentExecutionManagerError> {
+        self.inner.lock().map_err(|_| {
+            request_fatal_shutdown(
+                "committor.intent_scheduler",
+                POISONED_INNER_MSG,
+                self.shutdown.as_ref(),
+            );
+            IntentExecutionManagerError::Fatal
+        })
+    }
+
     /// Spawns `main_loop` and return `Receiver` listening to results
     pub fn spawn(self) -> ResultSubscriber {
         let (result_sender, _) = broadcast::channel(100);
-        tokio::spawn(self.main_loop(result_sender.clone()));
+        let shutdown = self.shutdown.clone();
+        let subscriber_sender = result_sender.clone();
+        tokio::spawn(async move {
+            self.main_loop(result_sender).await;
+            if let Some(shutdown) = shutdown {
+                if !shutdown.is_triggered() {
+                    request_fatal_shutdown(
+                        "committor.intent_engine",
+                        "Intent execution engine stopped unexpectedly",
+                        Some(&shutdown),
+                    );
+                }
+            }
+        });
 
-        ResultSubscriber(result_sender)
+        ResultSubscriber(subscriber_sender)
     }
 
     /// Main loop that:
@@ -151,8 +181,14 @@ where
                 }
                 Err(IntentExecutionManagerError::DBError(err)) => {
                     error!(error = ?err, "Failed to fetch intent");
+                    request_fatal_shutdown(
+                        "committor.intent_engine",
+                        format!("Failed to fetch intent: {err}"),
+                        self.shutdown.as_ref(),
+                    );
                     break;
                 }
+                Err(IntentExecutionManagerError::Fatal) => break,
             };
             let Some(intent) = intent else {
                 // We couldn't pick up intent for execution due to:
@@ -163,23 +199,41 @@ where
             };
 
             // Waiting until there's available executor
-            let permit = self
+            let permit = match self
                 .executors_semaphore
                 .clone()
                 .acquire_owned()
                 .await
-                .expect(SEMAPHORE_CLOSED_MSG);
+            {
+                Ok(permit) => permit,
+                Err(_) => {
+                    if !self
+                        .shutdown
+                        .as_ref()
+                        .is_some_and(ShutdownHandle::is_triggered)
+                    {
+                        request_fatal_shutdown(
+                            "committor.intent_engine",
+                            SEMAPHORE_CLOSED_MSG,
+                            self.shutdown.as_ref(),
+                        );
+                    }
+                    break;
+                }
+            };
 
             // Spawn executor
             let executor = self.executor_factory.create_instance();
             let persister = self.intents_persister.clone();
             let inner = self.inner.clone();
+            let shutdown = self.shutdown.clone();
 
             let handle = tokio::spawn(Self::execute(
                 executor,
                 persister,
                 intent,
                 inner,
+                shutdown,
                 permit,
                 result_sender.clone(),
             ));
@@ -200,18 +254,17 @@ where
         // Limit on number of intents that can be stored in scheduler
         const SCHEDULER_CAPACITY: usize = 1000;
 
-        let can_receive = || {
-            let num_blocked_intents = self
-                .inner
-                .lock()
-                .expect(POISONED_INNER_MSG)
-                .intents_blocked();
-            if num_blocked_intents < SCHEDULER_CAPACITY {
-                true
-            } else {
-                warn!(blocked_count = num_blocked_intents, "Capacity exceeded");
-                false
+        let can_receive = match self.lock_scheduler() {
+            Ok(scheduler) => {
+                let num_blocked_intents = scheduler.intents_blocked();
+                if num_blocked_intents < SCHEDULER_CAPACITY {
+                    true
+                } else {
+                    warn!(blocked_count = num_blocked_intents, "Capacity exceeded");
+                    false
+                }
             }
+            Err(err) => return Err(err),
         };
 
         let running_executors = &mut self.running_executors;
@@ -221,23 +274,31 @@ where
             // Notify polled first to prioritize unblocked intents over new one
             biased;
             Some(result) = running_executors.next() => {
-                if let Err(err) = result {
+                if let Err(err) = &result {
                     error!(error = ?err, "Executor failed");
+                    if err.is_panic() {
+                        request_fatal_shutdown(
+                            "committor.intent_engine.executor",
+                            format!("Intent executor task panicked: {err}"),
+                            self.shutdown.as_ref(),
+                        );
+                        return Err(IntentExecutionManagerError::Fatal);
+                    }
                 };
                 trace!("Worker executed intent bundle, fetching new available one");
-                self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_intent()
+                self.lock_scheduler()?.pop_next_scheduled_intent()
             },
-            result = Self::get_new_intent(receiver, db), if can_receive() => {
+            result = Self::get_new_intent(receiver, db), if can_receive => {
                 let intent = result?;
-                self.inner.lock().expect(POISONED_INNER_MSG).schedule(intent)
+                self.lock_scheduler()?.schedule(intent)
             },
             else => {
-                // Shouldn't be possible:
-                // 1. If no executors spawned -> we can receive
-                // 2. If can't receive ->  there are MAX_EXECUTORS running executors
-                // We can't receive new message as there's no available Executor
-                // that could pick up the task.
-                unreachable!("next_scheduled_intent")
+                request_fatal_shutdown(
+                    "committor.intent_engine",
+                    "next_scheduled_intent entered unreachable state",
+                    self.shutdown.as_ref(),
+                );
+                return Err(IntentExecutionManagerError::Fatal);
             }
         };
 
@@ -270,12 +331,13 @@ where
     }
 
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
-    #[instrument(skip(executor, persister, intent, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor, persister, intent, inner_scheduler, shutdown, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
         mut executor: E,
         persister: Option<P>,
         intent: ScheduledIntentBundle,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,
+        shutdown: Option<ShutdownHandle>,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
@@ -302,11 +364,28 @@ where
         // SAFETY: Self::execute is called ONLY after IntentScheduler
         // successfully is able to schedule execution of some Intent
         // that means that the same Intent is SAFE to complete
-        inner_scheduler
-            .lock()
-            .expect(POISONED_INNER_MSG)
-            .complete(&intent)
-            .expect("Valid completion of previously scheduled message");
+        match inner_scheduler.lock() {
+            Ok(mut scheduler) => {
+                if let Err(err) = scheduler.complete(&intent) {
+                    error!(intent_id = intent.id, error = ?err, "Failed to complete scheduled intent");
+                    request_fatal_shutdown(
+                        "committor.intent_engine.executor",
+                        format!(
+                            "Failed to complete previously scheduled intent {}: {err}",
+                            intent.id
+                        ),
+                        shutdown.as_ref(),
+                    );
+                }
+            }
+            Err(_) => {
+                request_fatal_shutdown(
+                    "committor.intent_scheduler",
+                    POISONED_INNER_MSG,
+                    shutdown.as_ref(),
+                );
+            }
+        }
 
         // Cleaning buffers on failure isn't safe due to potential race condition:
         // Assume pubkey set A being committed
@@ -428,6 +507,7 @@ mod tests {
             executor_factory,
             None::<IntentPersisterImpl>,
             receiver,
+            None,
         );
 
         (sender, worker)
@@ -726,6 +806,112 @@ mod tests {
             max_observed >= 1 && max_observed <= MAX_EXECUTORS as usize,
             "Concurrency {} outside expected range",
             max_observed
+        );
+    }
+
+    struct FailingPopDB;
+
+    #[async_trait::async_trait]
+    impl DB for FailingPopDB {
+        async fn store_intent_bundle(
+            &self,
+            _intent_bundle: ScheduledIntentBundle,
+        ) -> crate::intent_execution_manager::db::DBResult<()> {
+            Ok(())
+        }
+
+        async fn store_intent_bundles(
+            &self,
+            _intent_bundles: Vec<ScheduledIntentBundle>,
+        ) -> crate::intent_execution_manager::db::DBResult<()> {
+            Ok(())
+        }
+
+        async fn pop_intent_bundle(
+            &self,
+        ) -> crate::intent_execution_manager::db::DBResult<
+            Option<ScheduledIntentBundle>,
+        > {
+            Err(crate::intent_execution_manager::db::Error::FetchError)
+        }
+
+        fn is_empty(&self) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn db_fetch_error_triggers_shutdown() {
+        use magicblock_core::shutdown::{ShutdownHandle, ShutdownReason};
+
+        test_utils::init_test_logger();
+        let shutdown = ShutdownHandle::new();
+        let (_sender, receiver) = mpsc::channel(1);
+        let worker = IntentExecutionEngine::new(
+            Arc::new(FailingPopDB),
+            MockIntentExecutorFactory::new(),
+            None::<IntentPersisterImpl>,
+            receiver,
+            Some(shutdown.clone()),
+        );
+        worker.spawn();
+        shutdown.requested().await;
+        assert_eq!(
+            shutdown.reason(),
+            Some(ShutdownReason::Fatal {
+                source: "committor.intent_engine",
+                message: "Failed to fetch intent: FetchError".into(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn unexpected_engine_stop_triggers_shutdown() {
+        use magicblock_core::shutdown::{ShutdownHandle, ShutdownReason};
+
+        test_utils::init_test_logger();
+        let shutdown = ShutdownHandle::new();
+        let (sender, receiver) = mpsc::channel(1);
+        let worker = IntentExecutionEngine::new(
+            Arc::new(DummyDB::new()),
+            MockIntentExecutorFactory::new(),
+            None::<IntentPersisterImpl>,
+            receiver,
+            Some(shutdown.clone()),
+        );
+        worker.spawn();
+        drop(sender);
+        shutdown.requested().await;
+        assert_eq!(
+            shutdown.reason(),
+            Some(ShutdownReason::Fatal {
+                source: "committor.intent_engine",
+                message: "Intent execution engine stopped unexpectedly".into(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn engine_stop_after_shutdown_is_not_fatal() {
+        use magicblock_core::shutdown::{ShutdownHandle, ShutdownReason};
+
+        test_utils::init_test_logger();
+        let shutdown = ShutdownHandle::new();
+        let (sender, receiver) = mpsc::channel(1);
+        let worker = IntentExecutionEngine::new(
+            Arc::new(DummyDB::new()),
+            MockIntentExecutorFactory::new(),
+            None::<IntentPersisterImpl>,
+            receiver,
+            Some(shutdown.clone()),
+        );
+        worker.spawn();
+        shutdown.trigger(ShutdownReason::Signal("SIGTERM"));
+        drop(sender);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            shutdown.reason(),
+            Some(ShutdownReason::Signal("SIGTERM"))
         );
     }
 

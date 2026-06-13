@@ -4,15 +4,16 @@ use std::time::Instant;
 
 use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
+use magicblock_core::shutdown::ShutdownHandle;
 #[cfg(feature = "tui")]
 use magicblock_tui_client::{
     enrich_config_from_rpc, init_embedded_logger, run_tui, TuiConfig,
 };
 use solana_signer::Signer;
 use tokio::runtime::Builder;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, info, instrument};
 
-use crate::shutdown::Shutdown;
+use crate::shutdown::wait_for_shutdown;
 
 fn init_logger() {
     use magicblock_core::logger::{init_with_config, LogStyle, LoggingConfig};
@@ -101,6 +102,8 @@ async fn run() {
         "Validator start completed"
     );
 
+    let shutdown = api.shutdown().clone();
+
     #[cfg(feature = "tui")]
     {
         if !no_tui {
@@ -128,7 +131,7 @@ async fn run() {
             enrich_config_from_rpc(&mut tui_config).await;
 
             if let Err(err) = run_tui(tui_config, validator_log_rx).await {
-                error!(error = ?err, "TUI error");
+                tracing::error!(error = ?err, "TUI error");
             }
         } else {
             run_no_tui(
@@ -137,6 +140,7 @@ async fn run() {
                 &remote_rpc_url,
                 &validator_identity.to_string(),
                 &api,
+                &shutdown,
                 overall_start,
             )
             .await;
@@ -151,6 +155,7 @@ async fn run() {
             &remote_rpc_url,
             &validator_identity.to_string(),
             &api,
+            &shutdown,
             overall_start,
         )
         .await;
@@ -172,6 +177,7 @@ pub async fn run_no_tui(
     remote_rpc_url: &str,
     validator_identity: &str,
     api: &MagicValidator,
+    shutdown: &ShutdownHandle,
     overall_start: Instant,
 ) {
     let version = magicblock_version::Version::default();
@@ -198,9 +204,7 @@ pub async fn run_no_tui(
         "Validator ready"
     );
     let shutdown_wait = Instant::now();
-    if let Err(err) = Shutdown::wait().await {
-        error!(error = ?err, "Failed to gracefully shutdown");
-    }
+    wait_for_shutdown(shutdown).await;
     debug!(
         duration_ms = shutdown_wait.elapsed().as_millis() as u64,
         "Shutdown signal received"

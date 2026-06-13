@@ -6,7 +6,9 @@ use std::{
 };
 
 use magicblock_core::{
-    intent::CommittedAccount, traits::ActionsCallbackScheduler,
+    intent::CommittedAccount,
+    shutdown::{request_fatal_shutdown, ShutdownHandle},
+    traits::ActionsCallbackScheduler,
 };
 use magicblock_program::magic_scheduled_base_intent::{
     CommitAndUndelegate, CommitType, MagicIntentBundle, ScheduledIntentBundle,
@@ -51,6 +53,7 @@ pub(crate) struct CommittorProcessor {
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
+    shutdown: Option<ShutdownHandle>,
 }
 
 impl CommittorProcessor {
@@ -60,6 +63,7 @@ impl CommittorProcessor {
         chain_config: ChainConfig,
         chain_slot: Option<Arc<AtomicU64>>,
         actions_callback_executor: A,
+        shutdown: Option<ShutdownHandle>,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -116,6 +120,7 @@ impl CommittorProcessor {
                 actions_timeout: chain_config.actions_timeout,
             },
             actions_callback_executor,
+            shutdown.clone(),
         );
 
         Ok(Self {
@@ -125,6 +130,7 @@ impl CommittorProcessor {
             commits_scheduler,
             persister,
             task_info_fetcher,
+            shutdown,
         })
     }
 
@@ -213,10 +219,12 @@ impl CommittorProcessor {
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
         if let Err(err) = self.persister.start_base_intents(&intent_bundles) {
-            // We will still try to perform the commits, but the fact that we cannot
-            // persist the intent is very serious and we should probably restart the
-            // valiator
             error!(error = ?err, "DB EXCEPTION: Failed to persist changeset");
+            request_fatal_shutdown(
+                "committor.persist",
+                format!("Failed to persist changeset: {err}"),
+                self.shutdown.as_ref(),
+            );
         };
 
         self.commits_scheduler

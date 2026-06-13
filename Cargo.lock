@@ -3975,6 +3975,7 @@ dependencies = [
 name = "magicblock-core"
 version = "0.12.3"
 dependencies = [
+ "arc-swap",
  "bincode",
  "bytes",
  "console-subscriber",
@@ -3996,6 +3997,7 @@ dependencies = [
  "spl-token-2022-interface",
  "spl-token-interface",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-log",
  "tracing-subscriber",

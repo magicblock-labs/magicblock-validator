@@ -5,7 +5,10 @@ pub mod intent_scheduler;
 use std::sync::Arc;
 
 pub use intent_execution_engine::BroadcastedIntentExecutionResult;
-use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_core::{
+    shutdown::ShutdownHandle,
+    traits::ActionsCallbackScheduler,
+};
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
@@ -38,6 +41,7 @@ impl<D: DB> IntentExecutionManager<D> {
         table_mania: TableMania,
         executor_config: ExecutorConfig,
         actions_callback_executor: A,
+        shutdown: Option<ShutdownHandle>,
     ) -> Self
     where
         A: ActionsCallbackScheduler,
@@ -59,6 +63,7 @@ impl<D: DB> IntentExecutionManager<D> {
             executor_factory,
             intent_persister,
             receiver,
+            shutdown,
         );
         let result_subscriber = worker.spawn();
 
@@ -118,4 +123,6 @@ pub enum IntentExecutionManagerError {
     ChannelClosed,
     #[error("DBError: {0}")]
     DBError(#[from] db::Error),
+    #[error("Unrecoverable committor engine failure")]
+    Fatal,
 }

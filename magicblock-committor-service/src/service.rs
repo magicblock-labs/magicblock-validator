@@ -5,7 +5,10 @@ use std::{
     time::Instant,
 };
 
-use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_core::{
+    shutdown::{spawn_critical, ShutdownHandle},
+    traits::ActionsCallbackScheduler,
+};
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -129,6 +132,7 @@ impl CommittorActor {
         chain_config: ChainConfig,
         chain_slot: Option<Arc<AtomicU64>>,
         actions_callback_executor: A,
+        shutdown: Option<ShutdownHandle>,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -140,6 +144,7 @@ impl CommittorActor {
             chain_config,
             chain_slot,
             actions_callback_executor,
+            shutdown,
         )?);
 
         Ok(Self {
@@ -353,6 +358,7 @@ impl CommittorService {
         chain_config: ChainConfig,
         chain_slot: Option<Arc<AtomicU64>>,
         actions_callback_executor: A,
+        shutdown: Option<ShutdownHandle>,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -370,10 +376,17 @@ impl CommittorService {
                 chain_config,
                 chain_slot,
                 actions_callback_executor,
+                shutdown.clone(),
             )?;
-            tokio::spawn(async move {
-                actor.run(cancel_token).await;
-            });
+            if let Some(shutdown) = shutdown {
+                spawn_critical("committor.actor", shutdown, async move {
+                    actor.run(cancel_token).await;
+                });
+            } else {
+                tokio::spawn(async move {
+                    actor.run(cancel_token).await;
+                });
+            }
         }
         Ok(Self {
             sender,

@@ -40,6 +40,7 @@ use magicblock_core::{
         replication::Message,
         transactions::{SchedulerMode, TransactionSchedulerHandle},
     },
+    shutdown::{init_global, ShutdownHandle},
     Slot,
 };
 use magicblock_ledger::{
@@ -106,6 +107,7 @@ type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 pub struct MagicValidator {
     config: ValidatorParams,
     exit: Arc<AtomicBool>,
+    shutdown: ShutdownHandle,
     token: CancellationToken,
     accountsdb: Arc<AccountsDb>,
     ledger: Arc<Ledger>,
@@ -138,7 +140,9 @@ impl MagicValidator {
         mut config: ValidatorParams,
     ) -> ApiResult<Self> {
         // TODO(thlorenz): this will need to be recreated on each start
-        let token = CancellationToken::new();
+        let shutdown = ShutdownHandle::new();
+        init_global(shutdown.clone());
+        let token = shutdown.token();
         let identity_keypair = config.validator.keypair.insecure_clone();
 
         let validator_pubkey = identity_keypair.pubkey();
@@ -224,6 +228,7 @@ impl MagicValidator {
             &config,
             ledger.latest_block(),
             shared_chain_slot.clone(),
+            shutdown.clone(),
         )
         .await?;
         log_timing("startup", "committor_service_init", step_start);
@@ -429,6 +434,7 @@ impl MagicValidator {
             accountsdb,
             config,
             exit,
+            shutdown,
             _metrics: (metrics_service, system_metrics_ticker),
             // NOTE: set during [Self::start]
             slot_ticker: None,
@@ -452,11 +458,12 @@ impl MagicValidator {
         })
     }
 
-    #[instrument(skip(config, latest_block))]
+    #[instrument(skip(config, latest_block, shutdown))]
     async fn init_committor_service(
         config: &ValidatorParams,
         latest_block: &LatestBlock,
         chain_slot: Option<Arc<AtomicU64>>,
+        shutdown: ShutdownHandle,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
@@ -484,6 +491,7 @@ impl MagicValidator {
             },
             chain_slot,
             actions_callback_executor,
+            Some(shutdown),
         )?));
 
         Ok(committor_service)
@@ -1171,6 +1179,10 @@ impl MagicValidator {
 
     pub fn ledger(&self) -> &Ledger {
         &self.ledger
+    }
+
+    pub fn shutdown(&self) -> &ShutdownHandle {
+        &self.shutdown
     }
 
     /// Prepares RocksDB for shutdown by cancelling all Manual compactions
