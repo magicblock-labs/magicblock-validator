@@ -7,6 +7,8 @@ Start here before working on any feature, bug fix, refactor, or behavioral chang
 1. `agents/00-overview.md` — high-level validator purpose and runtime model.
 2. `agents/01-validator-goals.md` — system goals and correctness constraints.
 3. `agents/02-specification.md` — delegation, cloning, execution, commit, undelegation, Magic Actions, ephemeral accounts, RPC/router, and recovery behavior.
+4. `agents/03-architecture.md` — high-level repository architecture and crate interaction model.
+5. `agents/04-crate-map.md` — workspace crate purposes, dependencies, consumers, and where to start for common change areas.
 
 Before changing code, consult the relevant `./agents` material to ensure the change does not violate the validator's goals, invariants, or specification.
 
