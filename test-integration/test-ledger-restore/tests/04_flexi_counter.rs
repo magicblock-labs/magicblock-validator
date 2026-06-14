@@ -200,13 +200,8 @@ fn write(
 }
 
 fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
-    let (_, mut validator, ctx) = setup_offline_validator(
-        ledger_path,
-        None,
-        Some(SLOT_MS),
-        false,
-        true,
-    );
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, Some(SLOT_MS), false, true);
 
     let counter1_decoded = fetch_counter_ephem(&ctx, payer1, &mut validator);
     assert_eq!(

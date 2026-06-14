@@ -9,7 +9,9 @@ use program_flexi_counter::{
     instruction::{create_add_counter_ix, create_add_ix, create_init_ix},
     state::FlexiCounter,
 };
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
+use solana_sdk::{
+    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+};
 use test_kit::init_logger;
 use test_ledger_restore::{
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
