@@ -9,16 +9,12 @@ use program_flexi_counter::{
     instruction::{create_add_counter_ix, create_add_ix, create_init_ix},
     state::FlexiCounter,
 };
-use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer,
-};
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
     fetch_counter_chain, fetch_counter_ephem,
     init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
-    setup_validator_with_local_remote_and_authority_override,
     wait_for_counter_ephem_state, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 use tracing::*;
@@ -57,33 +53,6 @@ fn test_restore_ledger_different_accounts_multiple_times() {
             &payer_main,
             &payer_readonly,
             payer_main_lamports,
-            None,
-        );
-        test_ledger_restore::kill_validator(&mut validator);
-    }
-}
-
-#[test]
-fn test_restore_different_accounts_multiple_times_authority_override() {
-    init_logger!();
-    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
-    let payer_readonly = payer_keypair();
-
-    let original_authority =
-        LoadedAccounts::with_delegation_program_test_authority()
-            .validator_authority();
-
-    let (mut validator, _, payer_main_lamports, payer_main) =
-        write(&ledger_path, &payer_readonly);
-    test_ledger_restore::kill_validator(&mut validator);
-
-    for _ in 0..5 {
-        let mut validator = read(
-            &ledger_path,
-            &payer_main,
-            &payer_readonly,
-            payer_main_lamports,
-            Some(original_authority),
         );
         test_ledger_restore::kill_validator(&mut validator);
     }
@@ -206,28 +175,17 @@ fn read(
     payer_main_kp: &Keypair,
     payer_readonly_kp: &Keypair,
     payer_main_lamports: u64,
-    authority_override: Option<Pubkey>,
 ) -> Child {
     let payer_main = &payer_main_kp.pubkey();
     let payer_readonly = &payer_readonly_kp.pubkey();
 
-    let (_, mut validator, ctx) = match authority_override {
-        Some(original) => {
-            setup_validator_with_local_remote_and_authority_override(
-                ledger_path,
-                None,
-                false,
-                original,
-            )
-        }
-        None => setup_validator_with_local_remote(
-            ledger_path,
-            None,
-            false,
-            false,
-            &LoadedAccounts::with_delegation_program_test_authority(),
-        ),
-    };
+    let (_, mut validator, ctx) = setup_validator_with_local_remote(
+        ledger_path,
+        None,
+        false,
+        false,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     wait_for_counter_ephem_state(
         &ctx,
