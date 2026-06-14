@@ -29,10 +29,10 @@ In practical terms, the validator:
 
 ## Which agent doc to read
 
-- `agents/01-validator-goals.md` — read when deciding whether a change is aligned with product/system goals.
-- `agents/02-specification.md` — read before changing protocol behavior: delegation, cloning, execution rules, commits, undelegation, Magic Actions, ephemeral accounts, RPC/router behavior, or recovery.
-- `agents/03-architecture.md` — read before changing service wiring or interactions between crates.
-- `agents/04-crate-map.md` — read to find which crate owns an area and which other crates may be affected.
+- `agents/01_validator-goals.md` — read when deciding whether a change is aligned with product/system goals.
+- `agents/02_specification.md` — read before changing protocol behavior: delegation, cloning, execution rules, commits, undelegation, Magic Actions, ephemeral accounts, RPC/router behavior, or recovery.
+- `agents/03_architecture.md` — read before changing service wiring or interactions between crates.
+- `agents/04_crate-map.md` — read to find which crate owns an area and which other crates may be affected.
 
 ## Non-negotiable agent rules
 

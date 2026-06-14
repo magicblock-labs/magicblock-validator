@@ -1,6 +1,6 @@
 # High-Level Architecture
 
-This file explains the repository-level architecture and how major crate groups interact. It intentionally stays high level. Detailed/lower-level architecture belongs in crate-specific docs under `agents/crates/` as those files are added. For crate-by-crate ownership, use `agents/04-crate-map.md`.
+This file explains the repository-level architecture and how major crate groups interact. It intentionally stays high level. Detailed/lower-level architecture belongs in crate-specific docs under `agents/crates/` as those files are added. For crate-by-crate ownership, use `agents/04_crate-map.md`.
 
 ## System shape
 

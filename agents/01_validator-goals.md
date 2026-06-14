@@ -1,6 +1,6 @@
 # MagicBlock Validator Goals
 
-This file states the goals that should guide implementation decisions. It intentionally avoids protocol details; use `agents/02-specification.md` for exact behavior and `agents/03-architecture.md` for crate/service interactions.
+This file states the goals that should guide implementation decisions. It intentionally avoids protocol details; use `agents/02_specification.md` for exact behavior and `agents/03_architecture.md` for crate/service interactions.
 
 ## Primary goal
 
@@ -71,7 +71,7 @@ Prefer changes that:
 
 ### Account access
 
-The central correctness goal is that ordinary ER execution must not mutate arbitrary Solana state. Writable accounts must satisfy the MagicBlock access model described in `agents/02-specification.md`.
+The central correctness goal is that ordinary ER execution must not mutate arbitrary Solana state. Writable accounts must satisfy the MagicBlock access model described in `agents/02_specification.md`.
 
 ### Lifecycle transitions
 
