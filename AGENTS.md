@@ -22,6 +22,7 @@ Before working on any feature, bug fix, refactor, or behavioral change, read the
 4. `agents/03_architecture.md` — high-level repository architecture and crate interaction model.
 5. `agents/04_crate-map.md` — workspace crate purposes, dependencies, consumers, and where to start for common change areas.
 6. `agents/05_testing-and-validation.md` — required validation workflow, rs-check guidance, and integration test commands.
+7. Relevant crate-specific guide under `agents/crates/` when one exists, such as `agents/crates/magicblock-chainlink.md` for the `magicblock-chainlink` crate.
 
 Before changing code, consult the relevant `./agents` material to ensure the change does not violate the validator's goals, invariants, or specification. This acknowledgement is required; do not proceed silently after reading the files.
 
