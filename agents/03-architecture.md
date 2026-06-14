@@ -1,287 +1,195 @@
 # High-Level Architecture
 
-This document describes the repository-level architecture of the MagicBlock validator and how the major crates interact. It intentionally stays high level. Lower-level architecture, module walkthroughs, important types, and crate-specific invariants should live in the dedicated crate docs under `agents/crates/` as those files are added.
+This file explains the repository-level architecture and how major crate groups interact. It intentionally stays high level. Detailed/lower-level architecture belongs in crate-specific docs under `agents/crates/` as those files are added. For crate-by-crate ownership, use `agents/04-crate-map.md`.
 
-## Architectural purpose
+## System shape
 
-The validator is a specialized SVM runtime for Ephemeral Rollups. It coordinates local transaction execution for delegated and ephemeral state, local persistence, RPC access, base-layer account synchronization, commit/undelegation settlement, scheduled tasks, and optional primary/replica replication.
-
-The system is organized around a few large responsibilities:
-
-1. **Process orchestration** — start, stop, configure, and wire services.
-2. **Client/API ingress** — accept RPC, websocket, and transaction requests.
-3. **Account availability** — ensure base-layer accounts/programs are cloned locally when needed.
-4. **Transaction execution** — schedule, lock, execute, validate, persist, and emit results.
-5. **Base-layer settlement** — commit ER state, undelegate accounts, and run post-commit actions.
-6. **Persistence and recovery** — maintain local account state, ledger history, task state, and pending commit state.
-7. **Replication and observability** — stream state/events to replicas and expose metrics/status.
-
-## Layered view
+The validator is a service graph around one core loop: make the right accounts available locally, execute valid ER transactions, persist the result, and settle scheduled state changes back to Solana.
 
 ```text
-Operator / Client
+Client / Operator
       |
       v
-magicblock-validator
+RPC / TUI / Admin ingress
       |
       v
-magicblock-api  -----------------------------+
-      |                                      |
-      | wires services                       | lifecycle / shutdown / recovery
-      v                                      |
-+----------------------+---------------------+----------------------+
-| RPC/API              | Execution           | Base-chain sync      |
-| magicblock-aperture  | magicblock-processor| magicblock-chainlink |
-|                      | magicblock-core     | magicblock-account-  |
-|                      |                     | cloner               |
-+----------------------+---------------------+----------------------+
-      |                         |                    |
-      v                         v                    v
-Subscriptions/events      AccountsDb + Ledger    Remote Solana RPC/WS
-                           |                    Delegation records
-                           v
-                    magicblock-accounts-db
-                    magicblock-ledger
-                           |
-                           v
-                    Commit / tasks / replication
-                    magicblock-accounts
-                    magicblock-committor-service
-                    magicblock-task-scheduler
-                    magicblock-replicator
+Validator orchestration
+      |
+      +--> account synchronization <----> Solana RPC/WS + delegation metadata
+      |
+      +--> transaction execution -----> local AccountsDb + Ledger -----> events
+      |
+      +--> commit/undelegation -------> base-layer transactions
+      |
+      +--> task scheduling -----------> submitted transactions
+      |
+      +--> replication/metrics -------> replicas + observability
 ```
 
-## Entry and orchestration
+## Main layers
 
-### `magicblock-validator`
+### 1. Process and service orchestration
 
-`magicblock-validator` is the main binary. It should remain a thin process entrypoint:
+Owned primarily by `magicblock-validator`, `magicblock-api`, and `magicblock-config`.
 
-- load CLI/config inputs,
-- initialize the Tokio runtime,
-- construct the validator through `magicblock-api`,
-- run headless or with the TUI,
-- handle process signals and shutdown.
+Responsibilities:
 
-It should not accumulate core protocol logic.
+- parse/load configuration,
+- construct the validator service graph,
+- open persistent stores,
+- initialize account sync, RPC, scheduler, committor, task scheduler, replication, metrics, and admin support,
+- recover persisted work,
+- coordinate startup mode versus primary/replica mode,
+- stop services and flush state in the correct order.
 
-### `magicblock-api`
+Architecture rule: process entrypoints should stay thin; cross-service wiring belongs in the orchestration layer, not in leaf crates.
 
-`magicblock-api` is the top-level orchestrator. It owns the `MagicValidator` service graph and wires together:
+### 2. Client/API ingress
 
-- configuration,
-- ledger,
-- AccountsDb,
-- RPC server,
-- transaction scheduler,
-- account cloning/chainlink,
-- committor service,
-- task scheduler,
-- replication,
-- metrics,
-- admin utilities,
-- startup recovery and shutdown ordering.
+Owned primarily by `magicblock-aperture` plus admin/TUI support crates.
 
-When a change affects cross-service lifecycle behavior, startup/shutdown ordering, or how services are connected, start here.
+Responsibilities:
 
-### `magicblock-config`
+- expose Solana-compatible JSON-RPC and websocket/pubsub behavior,
+- accept transactions and simulations,
+- serve account/ledger/status reads,
+- trigger just-in-time account availability work for local misses,
+- forward validator events to clients/subscribers.
 
-`magicblock-config` defines the validator configuration surface. New runtime behavior that needs operator control should generally add configuration here rather than using ad-hoc environment reads elsewhere.
+Architecture rule: the RPC layer should route work to account sync and execution services; it should not duplicate execution, delegation, or commit protocol logic.
 
-## Client ingress and RPC layer
+### 3. Account synchronization
 
-### `magicblock-aperture`
+Owned primarily by `magicblock-chainlink`, `magicblock-account-cloner`, and `magicblock-accounts`.
 
-`magicblock-aperture` provides the validator's Solana-compatible JSON-RPC and websocket/pubsub surface. It handles:
+Responsibilities:
 
-- standard Solana RPC-style requests,
-- MagicBlock-specific request behavior,
-- transaction submission,
-- account/program/signature/log/slot subscriptions,
-- forwarding validator events to subscribers,
-- local read misses that may trigger account cloning.
+- determine whether required accounts are delegated, undelegated/read-only, fee-payers, programs, or missing/stale,
+- fetch base-layer account data and delegation metadata,
+- subscribe to remote changes where needed,
+- materialize local account/program state,
+- provide account availability to RPC and transaction execution,
+- hand scheduled commit work toward settlement.
 
-A typical client transaction enters through aperture, which asks the account synchronization layer to ensure required accounts are present, then forwards the transaction into the processor scheduler.
+Architecture rule: this layer prepares local state for execution. It should not decide post-execution account access rules; those belong to the execution/SVM path.
 
-## Account synchronization layer
+### 4. Transaction execution
 
-### `magicblock-chainlink`
+Owned primarily by `magicblock-processor`, `magicblock-core`, the local storage crates, and the forked SVM dependency.
 
-`magicblock-chainlink` coordinates base-layer knowledge. It decides whether accounts are delegated, undelegated, missing, or stale and coordinates remote fetch/subscription behavior.
+Responsibilities:
 
-Its job is not to execute transactions. Its job is to ensure the execution layer sees the right local account representation before execution.
+- receive processable transactions,
+- acquire account locks,
+- schedule work onto executors,
+- run SVM execution,
+- enforce MagicBlock access validation,
+- commit local account changes,
+- write ledger/status records,
+- emit account, transaction, slot, and replication events.
 
-### `magicblock-account-cloner`
+Architecture rule: execution must preserve the writable-account invariant and avoid mixing scheduler/account-lock concerns with RPC or commit-delivery concerns.
 
-`magicblock-account-cloner` materializes remote accounts and programs into local validator state. It distinguishes key account flavors:
+### 5. Local persistence
 
-- fee-payer accounts,
-- read-only undelegated accounts,
-- writable delegated accounts,
-- program accounts,
-- large accounts requiring chunked clone paths.
+Owned primarily by `magicblock-accounts-db` and `magicblock-ledger`.
 
-The cloner interacts with the Magic Program and local scheduler to inject cloned state into the validator.
+Responsibilities:
 
-### `magicblock-accounts`
+- store local account state,
+- index accounts for execution/RPC,
+- support snapshots/maintenance,
+- store transaction, status, block, address-signature, and blockhash history,
+- support recovery and user-visible RPC history.
 
-`magicblock-accounts` sits at the boundary between account availability and commit processing. It ensures accounts required for execution are available and feeds scheduled commit work into the committor pipeline.
+Architecture rule: maintenance operations that can race execution must be coordinated with scheduler pausing.
 
-## Execution layer
+### 6. Base-layer settlement
 
-### `magicblock-core`
+Owned primarily by `magicblock-program`, `magicblock-magic-program-api`, `magicblock-committor-service`, `magicblock-committor-program`, `magicblock-table-mania`, and `magicblock-rpc-client`.
 
-`magicblock-core` is the shared wiring layer. It contains common channel endpoints, traits, event types, and shared structures used across RPC, scheduler, ledger, services, and replication.
+Responsibilities:
 
-Changes here tend to ripple through many crates, so keep abstractions stable and narrowly scoped.
+- let programs schedule commits, commit-and-undelegate operations, intent bundles, and Magic Actions,
+- persist and recover pending settlement work,
+- build valid base-layer transactions,
+- handle address lookup tables and large changesets,
+- send/confirm base-layer transactions,
+- keep local lifecycle state consistent with scheduled undelegation.
 
-### `magicblock-processor`
+Architecture rule: Magic Program instructions schedule intent; validator services realize that intent on the base layer.
 
-`magicblock-processor` is the local transaction execution engine. It owns:
+### 7. Background services
 
-- transaction scheduling,
-- account locking,
-- executor worker coordination,
-- SVM execution,
-- local account commit,
-- ledger/status writes,
-- transaction/account events,
-- slot/blockhash transitions from the execution perspective.
+Owned by task scheduler, replicator, metrics, admin, and shared service crates.
 
-It depends on the forked SVM behavior and must preserve the MagicBlock access invariant: ordinary ER execution must only write accounts that are delegated, ephemeral, confined, or explicitly allowed by protocol rules.
+Responsibilities:
 
-### Forked SVM dependencies
-
-The validator relies on a forked SVM with MagicBlock-specific account representation and access validation. Most code in this repository should treat the fork as the execution primitive and avoid duplicating access-control rules outside the intended boundaries.
-
-## Storage layer
-
-### `magicblock-accounts-db`
-
-`magicblock-accounts-db` stores local account state. It is a custom account database, not Agave's accounts-db. It supports account indexing, snapshots, defragmentation, and checksum-style maintenance.
-
-Execution, cloning, replication, tests, and RPC reads all depend on this crate. Maintenance operations must be coordinated with scheduler pausing so account state is not mutated concurrently.
-
-### `magicblock-ledger`
-
-`magicblock-ledger` stores local transaction, status, block, blockhash, performance, and address-signature history. It also provides latest block information used by RPC and execution.
-
-The ledger is part of validator recovery and user-visible RPC behavior, so changes to recording or truncation affect both correctness and observability.
-
-## Base-layer settlement layer
-
-### `magicblock-program`
-
-`magicblock-program` is the Magic Program implementation used inside the ER. It provides protocol instructions for:
-
-- commit scheduling,
-- commit-and-undelegate scheduling,
-- intent bundles,
-- scheduled tasks,
-- ephemeral account create/resize/close,
-- clone support,
-- validator-only operations.
-
-Program instructions stage intent; they do not by themselves perform all base-layer settlement.
-
-### `magicblock-magic-program-api`
-
-`magicblock-magic-program-api` contains shared wire types, instruction args, PDA helpers, and compatibility types for the Magic Program. Other crates should use this crate instead of re-declaring Magic Program instruction formats.
-
-### `magicblock-committor-service`
-
-`magicblock-committor-service` realizes scheduled base-layer intents. It turns commit, undelegation, finalize, and action intents into valid Solana transactions, handles confirmation, and persists in-flight state for recovery.
-
-It coordinates with:
-
-- `magicblock-rpc-client` for sending and confirming base-layer transactions,
-- `magicblock-table-mania` for address lookup tables,
-- `magicblock-committor-program` for base-layer commit program behavior,
-- local commit intent sources through `magicblock-accounts` / `magicblock-api`.
-
-### `magicblock-committor-program`
-
-`magicblock-committor-program` is the on-chain base-layer program side used by the committor flow, especially for buffered changesets and commit application.
-
-### `magicblock-table-mania`
-
-`magicblock-table-mania` manages address lookup tables required by larger or more complex base-layer transactions.
-
-## Scheduled tasks
-
-### `magicblock-task-scheduler`
-
-`magicblock-task-scheduler` executes program-scheduled cranks/tasks. It persists scheduled tasks, retries failures with backoff, and submits transactions when tasks become due.
-
-This is separate from the transaction scheduler in `magicblock-processor`. The processor scheduler decides when local transactions run; the task scheduler decides when program-defined future work should be submitted.
-
-## Replication and high availability
-
-### `magicblock-replicator`
-
-`magicblock-replicator` streams validator events/state between a primary and replicas over NATS JetStream. The primary publishes; replicas consume and replay.
-
-Primary and replica execution modes intentionally differ. Primary execution can exploit parallel scheduling; replica replay must preserve the ordering needed to match primary output and detect divergence.
-
-## Metrics, services, admin, and support crates
-
-- `magicblock-metrics` provides shared instrumentation.
-- `magicblock-services` contains reusable service helpers/adapters.
-- `magicblock-validator-admin` supports admin/operator interactions.
-- `magicblock-rpc-client` is shared by components that talk to base-layer RPC.
-- `test-kit`, `guinea`, and tools crates support tests and development workflows.
-
-## Common end-to-end interactions
-
-### Transaction submission
-
-1. Client submits a transaction through RPC/router-facing infrastructure.
-2. RPC layer checks local state and asks account synchronization to clone/fetch as needed.
-3. Transaction is sent to the processor scheduler.
-4. Scheduler locks accounts and dispatches to an executor.
-5. Executor runs SVM, validates access, commits account changes locally, records ledger/status, and emits events.
-6. RPC subscriptions and other consumers receive emitted events.
-
-### Delegated account first use
-
-1. Account is delegated on the base layer.
-2. No local ER account may exist yet.
-3. First ER read or transaction triggers chainlink/cloner.
-4. Cloner fetches account data and delegation metadata.
-5. Account is installed locally with the representation expected by ER execution.
-6. Processor can execute valid transactions against it.
-
-### Commit / commit-and-undelegate
-
-1. User program invokes Magic Program commit or intent-bundle instruction inside ER execution.
-2. Magic Program records scheduled intent information in MagicContext.
-3. Validator-side commit processing picks up scheduled intents.
-4. Committor service builds and sends base-layer transactions.
-5. For commit, the account remains delegated.
-6. For commit-and-undelegate, local state transitions to undelegating/immutable and base-layer ownership is eventually restored to the original program.
-
-### Startup and recovery
-
-1. Validator opens persistent stores.
-2. Services are constructed and connected.
-3. Programs and local state are initialized/recovered.
-4. Pending commit intents and persisted service state are recovered.
-5. Scheduler transitions from startup mode into primary or replica mode.
-
-### Shutdown
-
-1. Cancellation begins.
-2. Services stop in an order that protects in-flight work.
-3. Threads and runtimes join.
-4. Persistent stores flush.
-
-## Guidance for future crate docs
-
-This file should remain a high-level map. Do not add detailed module-by-module descriptions here. Put lower-level architecture into crate-specific files under `agents/crates/`, including:
-
-- important modules,
-- main public types,
-- runtime interactions,
-- invariants,
-- common change areas,
-- crate-local tests and validation commands.
+- execute scheduled program tasks,
+- replicate primary output to replicas,
+- expose metrics/admin/operator hooks,
+- provide reusable service infrastructure.
+
+Architecture rule: background services should integrate through shared channels/service APIs rather than reaching through unrelated crate internals.
+
+## Important interaction patterns
+
+### Transaction submission path
+
+```text
+RPC/router ingress
+  -> account synchronization ensures required accounts exist locally
+  -> processor scheduler locks accounts
+  -> executor runs SVM
+  -> AccountsDb and Ledger persist results
+  -> events notify RPC subscriptions, metrics, replication, and other consumers
+```
+
+### First use of delegated state
+
+```text
+base-layer delegation exists
+  -> ER read/transaction needs account
+  -> account sync fetches account + delegation metadata
+  -> cloner installs local representation
+  -> processor can execute valid transactions against it
+```
+
+### Commit / undelegation path
+
+```text
+program invokes Magic Program in ER
+  -> MagicContext records scheduled intent
+  -> validator-side processing picks up intent
+  -> committor builds/sends base-layer transaction(s)
+  -> commit keeps delegation active OR undelegation returns ownership after settlement
+```
+
+### Startup path
+
+```text
+load config
+  -> open ledger/accounts storage
+  -> initialize services
+  -> recover persisted work
+  -> replay/repair local state where configured
+  -> enter primary or replica execution mode
+```
+
+### Shutdown path
+
+```text
+cancel services
+  -> protect/finish in-flight work where required
+  -> join threads/runtimes
+  -> flush persistent stores
+```
+
+## Boundaries agents should preserve
+
+- **RPC ingress is not the protocol source of truth.** It should call into account sync, execution, and storage layers.
+- **Account synchronization is not transaction execution.** It prepares accounts; execution validates and commits changes.
+- **Magic Program scheduling is not base-layer settlement.** It records intent; committor services deliver it.
+- **Local persistence is shared infrastructure.** Coordinate maintenance with execution.
+- **Replication observes/replays validator output.** Do not make primary and replica modes accidentally diverge.
+- **Crate-specific details belong in crate docs.** Keep this file focused on cross-crate architecture.
