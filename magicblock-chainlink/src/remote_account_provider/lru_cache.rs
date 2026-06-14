@@ -377,6 +377,30 @@ mod tests {
         assert!(!cache.contains(&pubkey3));
     }
 
+    #[tokio::test]
+    async fn test_lru_cache_skips_ephemeral_protected_candidate_and_evicts_next(
+    ) {
+        let capacity = NonZeroUsize::new(3).unwrap();
+        let cache = AccountsLruCache::new(capacity);
+
+        let ephemeral_pubkey = Pubkey::new_unique();
+        let pubkey2 = Pubkey::new_unique();
+        let pubkey3 = Pubkey::new_unique();
+        let pubkey4 = Pubkey::new_unique();
+
+        cache.add(ephemeral_pubkey);
+        cache.add(pubkey2);
+        cache.add(pubkey3);
+
+        let outcome =
+            cache.add_with_evict_filter(pubkey4, |pk| *pk != ephemeral_pubkey);
+
+        assert_eq!(outcome, AddAccountOutcome::Evicted(pubkey2));
+        assert!(cache.contains(&ephemeral_pubkey));
+        assert!(cache.contains(&pubkey4));
+        assert!(!cache.contains(&pubkey2));
+    }
+
     #[test]
     fn test_never_evicted_accounts() {
         let capacity = NonZeroUsize::new(3).unwrap();

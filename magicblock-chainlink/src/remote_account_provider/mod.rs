@@ -342,11 +342,12 @@ pub(crate) enum SubscriptionReleaseMode {
 pub(crate) struct CapacityEvictionProtection {
     pub delegated: bool,
     pub undelegating: bool,
+    pub ephemeral: bool,
 }
 
 impl CapacityEvictionProtection {
     pub fn is_protected(self) -> bool {
-        self.delegated || self.undelegating
+        self.delegated || self.undelegating || self.ephemeral
     }
 }
 
@@ -861,6 +862,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             CapacityEvictionProtection {
                 delegated: false,
                 undelegating: false,
+                ephemeral: false,
             },
         )
     }
@@ -1466,6 +1468,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
         // 1. First realize subscription
+        if self.capacity_eviction_protection_for(pubkey).ephemeral {
+            trace!(pubkey = %pubkey, "Skipping subscription for ephemeral account");
+            return Ok(());
+        }
         self.pubsub_client.subscribe(*pubkey, None).await?;
 
         // 2. Add to LRU cache

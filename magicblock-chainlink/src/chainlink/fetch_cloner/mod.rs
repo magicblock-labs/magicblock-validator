@@ -64,7 +64,10 @@ use self::{
         RefreshDecision, ResolvedDelegatedAccounts, ResolvedPrograms,
     },
 };
-use super::errors::{ChainlinkError, ChainlinkResult};
+use super::{
+    errors::{ChainlinkError, ChainlinkResult},
+    should_schedule_bank_eviction,
+};
 use crate::{
     chainlink::{
         account_still_undelegating_on_chain::account_still_undelegating_on_chain,
@@ -235,10 +238,15 @@ where
                     .map(|account| CapacityEvictionProtection {
                         delegated: account.delegated(),
                         undelegating: account.undelegating(),
+                        // Cloned base accounts are not ephemeral until after a successful evict
+                        // so this won’t block legitimate cloned-account eviction
+                        ephemeral: account.ephemeral()
+                            && account.owner() != &Pubkey::default(),
                     })
                     .unwrap_or(CapacityEvictionProtection {
                         delegated: false,
                         undelegating: false,
+                        ephemeral: false,
                     })
             },
         );
@@ -679,7 +687,11 @@ where
                 update_slot,
                 "Dropping subscription update for account that is no longer watched"
             );
-            if self.accounts_bank.get_account(&pubkey).is_some() {
+            if self
+                .accounts_bank
+                .get_account(&pubkey)
+                .is_some_and(|account| should_schedule_bank_eviction(&account))
+            {
                 if let Err(err) = self
                     .remote_account_provider
                     .send_removal_update(pubkey)

@@ -1592,6 +1592,218 @@ async fn test_undelegation_tracking_window_is_protected_from_capacity_eviction()
 }
 
 #[tokio::test]
+async fn test_ephemeral_account_is_protected_from_capacity_eviction() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let protected_pubkey = random_pubkey();
+    let evictable_pubkey = random_pubkey();
+    let new_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+
+    let remote_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        ..
+    } = setup_with_capacity(
+        [
+            (protected_pubkey, remote_account.clone()),
+            (evictable_pubkey, remote_account.clone()),
+            (new_pubkey, remote_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+        2,
+    )
+    .await;
+    let mut removed_rx = remote_account_provider
+        .try_get_removed_account_rx()
+        .expect("removed account receiver should be available");
+
+    remote_account_provider
+        .acquire_subscription(
+            &protected_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .expect("failed to subscribe protected candidate");
+    remote_account_provider
+        .acquire_subscription(
+            &evictable_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .expect("failed to subscribe evictable candidate");
+
+    let mut ephemeral_account =
+        AccountSharedData::new(1_000_000, 4, &account_owner);
+    ephemeral_account.set_ephemeral(true);
+    accounts_bank.insert(protected_pubkey, ephemeral_account);
+
+    remote_account_provider
+        .acquire_subscription(&new_pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .expect("should evict the non-protected LRU candidate");
+
+    assert!(remote_account_provider.is_watching(&protected_pubkey));
+    assert!(remote_account_provider.is_watching(&new_pubkey));
+    assert!(!remote_account_provider.is_watching(&evictable_pubkey));
+    assert!(remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&protected_pubkey));
+    assert!(!remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&evictable_pubkey));
+    assert_eq!(removed_rx.try_recv().unwrap(), evictable_pubkey);
+}
+
+#[tokio::test]
+async fn test_acquire_subscription_skips_ephemeral_account() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let ephemeral_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    let remote_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        ..
+    } = setup(
+        [(ephemeral_pubkey, remote_account)],
+        CURRENT_SLOT,
+        validator_keypair,
+    )
+    .await;
+
+    let mut ephemeral_account =
+        AccountSharedData::new(1_000_000, 4, &account_owner);
+    ephemeral_account.set_ephemeral(true);
+    accounts_bank.insert(ephemeral_pubkey, ephemeral_account);
+
+    remote_account_provider
+        .acquire_subscription(
+            &ephemeral_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .expect("ephemeral subscription should no-op successfully");
+
+    assert!(!remote_account_provider.is_watching(&ephemeral_pubkey));
+    assert!(!remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&ephemeral_pubkey));
+}
+
+#[tokio::test]
+async fn test_stale_subscription_update_does_not_notify_removal_for_ephemeral()
+{
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let ephemeral_pubkey = random_pubkey();
+    let normal_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        accounts_bank,
+        subscription_tx,
+        ..
+    } = setup([], CURRENT_SLOT, validator_keypair).await;
+
+    let mut ephemeral_account =
+        AccountSharedData::new(1_000_000, 4, &account_owner);
+    ephemeral_account.set_ephemeral(true);
+    accounts_bank.insert(ephemeral_pubkey, ephemeral_account);
+
+    let normal_account = AccountSharedData::new(1_000_000, 4, &account_owner);
+    accounts_bank.insert(normal_pubkey, normal_account);
+
+    let mut removed_rx = fetch_cloner
+        .try_get_removed_account_rx()
+        .expect("removed account receiver should be available");
+    while removed_rx.try_recv().is_ok() {}
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    let chain_update = Account {
+        lamports: 900_000,
+        data: vec![9, 9, 9, 9],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: ephemeral_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                chain_update.clone(),
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Account,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(matches!(
+        removed_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: normal_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                chain_update,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Account,
+        })
+        .await
+        .unwrap();
+
+    let removed_pubkey = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let Ok(pubkey) = removed_rx.try_recv() {
+                return pubkey;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("normal account should enqueue removal notification");
+    assert_eq!(removed_pubkey, normal_pubkey);
+}
+
+#[tokio::test]
 async fn test_delegated_cleanup_keeps_undelegation_tracking_subscription() {
     init_logger();
     let validator_keypair = Keypair::new();

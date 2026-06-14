@@ -188,6 +188,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     }
 }
 
+pub fn should_schedule_bank_eviction(account: &AccountSharedData) -> bool {
+    !account.ephemeral() && !account.delegated() && !account.undelegating()
+}
+
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     InnerChainlink<T, U, V, C>
 {
@@ -293,14 +297,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 // the overhead of building and submitting a doomed tx)
                 let should_evict = match accounts_bank.get_account(&pubkey) {
                     Some(account) => {
-                        let undelegating = account.undelegating();
-                        let delegated = account.delegated();
-                        let evict = !undelegating && !delegated;
+                        let evict = should_schedule_bank_eviction(&account);
                         if !evict {
                             trace!(
                                 pubkey = %pubkey,
-                                undelegating,
-                                delegated,
+                                ephemeral = account.ephemeral(),
+                                undelegating = account.undelegating(),
+                                delegated = account.delegated(),
                                 owner = %account.owner(),
                                 "Ignoring removal notification because bank \
                                  state is protected; no EvictAccount \
@@ -311,9 +314,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                     }
                     None => false,
                 };
-                // Skipping a delegated/undelegating LRU candidate is not a
-                // removal event; protected bank state must not be translated
-                // into a downstream bank eviction.
+                // Skipping protected bank state is not a removal event; it
+                // must not be translated into a downstream bank eviction.
                 if !should_evict {
                     continue;
                 }
@@ -606,7 +608,8 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::{
-        errors::ChainlinkError, InnerChainlink, ReplicationModeAwareChainlink,
+        errors::ChainlinkError, should_schedule_bank_eviction, InnerChainlink,
+        ReplicationModeAwareChainlink,
     };
     use crate::{
         accounts_bank::mock::AccountsBankStub,
@@ -782,6 +785,79 @@ mod tests {
 
         assert!(accounts_bank.get_account(&delegated_pubkey).is_some());
         assert!(accounts_bank.get_account(&undelegating_pubkey).is_some());
+        assert!(accounts_bank.get_account(&normal_pubkey).is_none());
+
+        drop(removed_tx);
+        handle.await.unwrap();
+    }
+
+    #[test]
+    fn test_should_schedule_bank_eviction() {
+        let owner = Pubkey::new_unique();
+        let mut account = AccountSharedData::new(1, 0, &owner);
+        assert!(should_schedule_bank_eviction(&account));
+
+        account.set_delegated(true);
+        assert!(!should_schedule_bank_eviction(&account));
+
+        account.set_delegated(false);
+        account.set_undelegating(true);
+        assert!(!should_schedule_bank_eviction(&account));
+
+        account.set_undelegating(false);
+        account.set_ephemeral(true);
+        assert!(!should_schedule_bank_eviction(&account));
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_account_removals_skips_ephemeral_and_evicts_normal()
+    {
+        init_logger();
+
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+        let (removed_tx, removed_rx) = mpsc::channel(8);
+        let remote_account_provider = test_remote_account_provider().await;
+
+        let ephemeral_pubkey = Pubkey::new_unique();
+        let normal_pubkey = Pubkey::new_unique();
+        let owner = Pubkey::new_unique();
+
+        let mut ephemeral_account =
+            AccountSharedData::new(1_000_000, 0, &owner);
+        ephemeral_account.set_ephemeral(true);
+        accounts_bank.insert(ephemeral_pubkey, ephemeral_account);
+
+        let normal_account = AccountSharedData::new(1_000_000, 0, &owner);
+        accounts_bank.insert(normal_pubkey, normal_account);
+
+        let handle = InnerChainlink::<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            AccountsBankStub,
+            ClonerStub,
+        >::subscribe_account_removals(
+            &accounts_bank,
+            &cloner,
+            &remote_account_provider,
+            removed_rx,
+        );
+
+        removed_tx.send(ephemeral_pubkey).await.unwrap();
+        removed_tx.send(normal_pubkey).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if accounts_bank.get_account(&normal_pubkey).is_none() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("normal removal notification should submit eviction");
+
+        assert!(accounts_bank.get_account(&ephemeral_pubkey).is_some());
         assert!(accounts_bank.get_account(&normal_pubkey).is_none());
 
         drop(removed_tx);
