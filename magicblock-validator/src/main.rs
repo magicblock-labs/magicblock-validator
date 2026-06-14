@@ -156,6 +156,7 @@ async fn run() {
         .await;
     }
 
+    api.start_unregister_validator_on_chain().await;
     api.prepare_ledger_for_shutdown();
     let stop_step = Instant::now();
     api.stop().await;
