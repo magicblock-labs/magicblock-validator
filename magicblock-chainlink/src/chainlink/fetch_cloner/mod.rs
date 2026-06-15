@@ -654,6 +654,19 @@ where
             return;
         }
 
+        if matches!(update.source, SubscriptionSource::Program)
+            && update.account.is_owned_by_delegation_program()
+            && update.account.fresh_account().is_some_and(|account| {
+                is_internal_dlp_account_data(account.data())
+            })
+        {
+            trace!(
+                pubkey = %pubkey,
+                "Dropping internal DLP program subscription update after discovery miss"
+            );
+            return;
+        }
+
         // A late forwarded update can arrive after an account was removed from
         // the provider watch set. If a new subscription already won the race,
         // is_watching is true and this update can be processed normally. If this
