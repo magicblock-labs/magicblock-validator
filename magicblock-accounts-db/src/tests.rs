@@ -1,6 +1,6 @@
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 
-use magicblock_config::config::AccountsDbConfig;
+use magicblock_config::config::{AccountsDbConfig, BlockSize};
 use magicblock_magic_program_api as magic_program;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
@@ -541,6 +541,112 @@ fn test_reallocation_split() {
     // Verify they reused the space (ptr2 should be exactly at ptr1)
     assert_eq!(ptr2, ptr1, "First small account should take start of hole");
     assert!(ptr3 > ptr2, "Second small account should follow first");
+}
+
+#[test]
+fn test_defragment_moves_accounts_left_and_clears_tail() {
+    let env = TestEnv::new();
+    const SIZE: usize = 1024;
+
+    let removed = env.create_account_with_size(SIZE);
+    let acc2 = env.create_account_with_size(SIZE * 2);
+    let acc3 = env.create_account_with_size(SIZE * 3);
+
+    let mut expected2 = env.get_account(&acc2.pubkey).unwrap();
+    let mut expected3 = env.get_account(&acc3.pubkey).unwrap();
+    expected2.ensure_owned();
+    expected3.ensure_owned();
+
+    env.remove_account(&removed.pubkey);
+    assert_eq!(env.index.get_deallocations_count(), 1);
+
+    let checksum_before = unsafe { env.checksum() };
+    let size_before = env.storage_size() as usize;
+    let file_path = env
+        .snapshot_manager
+        .database_path()
+        .join(ACCOUNTS_DB_FILENAME);
+
+    unsafe { env.defragment() }.unwrap();
+
+    assert_eq!(env.index.get_deallocations_count(), 0);
+    assert!(env.storage_size() < size_before as u64);
+    assert_eq!(unsafe { env.checksum() }, checksum_before);
+
+    let mut actual2 = env.get_account(&acc2.pubkey).unwrap();
+    let mut actual3 = env.get_account(&acc3.pubkey).unwrap();
+    actual2.ensure_owned();
+    actual3.ensure_owned();
+    assert_eq!(actual2, expected2);
+    assert_eq!(actual3, expected3);
+    assert!(env.get_account(&removed.pubkey).is_none());
+    assert!(env.account_matches_owners(&acc2.pubkey, &[OWNER]).is_some());
+    assert!(env.account_matches_owners(&acc3.pubkey, &[OWNER]).is_some());
+    assert_eq!(
+        env.get_program_accounts(&OWNER, |_| true).unwrap().count(),
+        2
+    );
+
+    let size_after = env.storage_size() as usize;
+    let file_bytes = std::fs::read(file_path).unwrap();
+    assert!(
+        file_bytes[size_after..size_before]
+            .iter()
+            .all(|byte| *byte == 0),
+        "defragmentation should zero the old active tail"
+    );
+}
+
+#[test]
+fn test_defragment_empty_database_is_noop() {
+    let env = TestEnv::new();
+    let size_before = env.storage_size();
+
+    unsafe { env.defragment() }.unwrap();
+
+    assert_eq!(env.storage_size(), size_before);
+    assert_eq!(env.index.get_deallocations_count(), 0);
+    assert_eq!(env.account_count(), 0);
+}
+
+#[test]
+fn test_reopen_shrinks_storage_when_cursor_fits_config_size() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config = AccountsDbConfig::default();
+    let adb = AccountsDb::new(&config, temp_dir.path(), 0).unwrap();
+    let pubkey = Pubkey::new_unique();
+    let account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
+    let storage_path = temp_dir
+        .path()
+        .join("accountsdb")
+        .join("main")
+        .join(ACCOUNTS_DB_FILENAME);
+
+    adb.insert_account(&pubkey, &account).unwrap();
+    let initial_size = std::fs::metadata(&storage_path).unwrap().len();
+    drop(adb);
+
+    let database_size = 16 * 1024 * 1024;
+    let smaller_config = AccountsDbConfig {
+        database_size,
+        ..Default::default()
+    };
+    let reopened = AccountsDb::new(&smaller_config, temp_dir.path(), 0)
+        .expect("reopen with smaller storage config");
+
+    let block_size = BlockSize::Block256 as usize;
+    let expected_size = database_size.div_ceil(block_size) * block_size + 256;
+    assert!(expected_size as u64 > reopened.storage_size());
+    assert_eq!(
+        std::fs::metadata(storage_path).unwrap().len(),
+        expected_size as u64
+    );
+    assert!((expected_size as u64) < initial_size);
+
+    let restored = reopened.get_account(&pubkey).unwrap();
+    assert_eq!(restored.lamports(), account.lamports());
+    assert_eq!(restored.owner(), account.owner());
+    assert_eq!(restored.data(), account.data());
 }
 
 #[test]

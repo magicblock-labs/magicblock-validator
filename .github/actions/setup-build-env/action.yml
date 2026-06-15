@@ -2,9 +2,6 @@ name: 'MagicBlock - Setup Build Env'
 description: 'Checkout repositories and install dependencies'
 
 inputs:
-  github_access_token:
-    description: "Token used to clone magicblock depositories"
-    required: true
   github_token:
     description: "Token used to install protoc, i.e. the secrets.GITHUB_TOKEN"
     required: true

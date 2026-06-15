@@ -18,6 +18,9 @@ pub struct AccountsDbConfig {
     /// Maximum number of historical snapshots to retain.
     pub max_snapshots: u16,
 
+    /// If true, compacts accounts storage on startup.
+    pub defragment_on_startup: bool,
+
     /// If true, wipes the accounts database on startup.
     pub reset: bool,
 }
@@ -29,6 +32,7 @@ impl Default for AccountsDbConfig {
             database_size: consts::DEFAULT_ACCOUNTS_DB_SIZE,
             index_size: consts::DEFAULT_ACCOUNTS_INDEX_SIZE,
             max_snapshots: consts::DEFAULT_ACCOUNTS_MAX_SNAPSHOTS,
+            defragment_on_startup: false,
             reset: false,
         }
     }

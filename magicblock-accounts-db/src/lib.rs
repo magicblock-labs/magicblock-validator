@@ -2,7 +2,8 @@ use std::{fs, hash::Hasher, path::Path, sync::Arc, thread};
 
 use error::{AccountsDbError, LogErr};
 use index::{
-    iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
+    iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountMove,
+    AccountsDbIndex,
 };
 use lmdb::{RwTransaction, Transaction};
 use magicblock_config::config::AccountsDbConfig;
@@ -310,7 +311,7 @@ impl AccountsDb {
         target_slot: u64,
     ) -> AccountsDbResult<u64> {
         // Allow slot-1 because we might be in the middle of processing the current slot
-        if target_slot >= self.slot().saturating_sub(1) {
+        if target_slot >= self.slot().saturating_sub(1) || target_slot == 0 {
             return Ok(self.slot());
         }
 
@@ -399,6 +400,69 @@ impl AccountsDb {
         self.storage.size_bytes()
     }
 
+    /// Moves live account records left in storage and removes all tracked holes.
+    ///
+    /// This is a best-effort maintenance operation, not a crash-recoverable
+    /// migration. The index is updated before bytes are moved, so an interrupted
+    /// defragmentation can leave the database inconsistent. A successful return
+    /// means storage and index changes were flushed.
+    ///
+    /// # Safety
+    /// The caller must stop all concurrent database reads and writes and ensure
+    /// there are no live borrowed account references into the mmap.
+    pub unsafe fn defragment(&self) -> AccountsDbResult<()> {
+        let allocations = self.index.accounts_by_offset()?;
+        let mut next_offset = 0;
+        let mut moves = Vec::with_capacity(allocations.len());
+
+        for allocation in allocations {
+            self.storage
+                .validate_allocation(allocation.offset, allocation.blocks)?;
+            self.storage
+                .validate_allocation(next_offset, allocation.blocks)?;
+
+            moves.push(AccountMove {
+                pubkey: allocation.pubkey,
+                owner: allocation.owner,
+                old_offset: allocation.offset,
+                new_offset: next_offset,
+                blocks: allocation.blocks,
+            });
+
+            next_offset = next_offset
+                .checked_add(allocation.blocks)
+                .ok_or_else(|| {
+                    AccountsDbError::Internal(
+                        "accountsdb compacted cursor overflow".into(),
+                    )
+                })?;
+        }
+
+        self.storage.validate_cursor(next_offset)?;
+        self.index.apply_account_moves(&moves)?;
+
+        let mut scratch = Vec::new();
+        for account_move in &moves {
+            // SAFETY: all source and destination ranges were validated above,
+            // and the caller guarantees no account references are live.
+            unsafe {
+                self.storage.move_allocation(
+                    account_move.old_offset,
+                    account_move.new_offset,
+                    account_move.blocks,
+                    &mut scratch,
+                )
+            };
+        }
+
+        // SAFETY: every live allocation has been moved into the prefix ending at
+        // `next_offset`, and the caller guarantees exclusive database access.
+        unsafe { self.storage.finish_defragment(next_offset) };
+        self.storage.flush()?;
+        self.index.flush()?;
+        Ok(())
+    }
+
     pub fn iter_all(
         &self,
     ) -> impl Iterator<Item = (Pubkey, AccountSharedData)> + '_ {
@@ -408,8 +472,8 @@ impl AccountsDb {
     }
 
     pub fn flush(&self) {
-        self.storage.flush();
-        self.index.flush();
+        let _ = self.storage.flush();
+        let _ = self.index.flush();
     }
 
     /// Inserts an external snapshot archive received over the network.
