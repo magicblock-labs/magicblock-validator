@@ -33,7 +33,6 @@ use crate::{
 
 const POISONED_MUTEX_MSG: &str =
     "CommittorProcessor pending messages mutex poisoned!";
-pub(crate) const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;
 
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 

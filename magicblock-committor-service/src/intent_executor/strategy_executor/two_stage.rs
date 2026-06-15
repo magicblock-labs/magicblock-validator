@@ -104,8 +104,6 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    const RECURSION_CEILING: u8 = 10;
-
     pub fn new(
         state: Initialized,
         authority: Keypair,
@@ -254,8 +252,6 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    const RECURSION_CEILING: u8 = 10;
-
     pub fn committed(
         state: Committed,
         authority: Keypair,

@@ -10,10 +10,9 @@ use std::{
     time::Duration,
 };
 
-use futures_util::future::join_all;
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
-use magicblock_metrics::metrics::{self, AccountFetchOrigin};
+use magicblock_metrics::metrics::{self};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox_intent_bundles::OutboxIntentBundle, Pubkey, SentCommit,

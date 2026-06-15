@@ -102,20 +102,6 @@ impl IntentExecutionClient {
         Ok(())
     }
 
-    /// Checks whether a previously-sent transaction confirmed.
-    /// `Err` means the signature was not confirmed within the timeout window.
-    pub(in crate::intent_executor) async fn wait_for_confirmed_status(
-        &self,
-        signature: &Signature,
-    ) -> MagicBlockRpcClientResult<Result<(), TransactionError>> {
-        const TIMEOUT: Duration = Duration::from_secs(5);
-        const INTERVAL: Duration = Duration::from_millis(200);
-
-        self.rpc_client
-            .wait_for_confirmed_status(signature, &TIMEOUT, &Some(INTERVAL))
-            .await
-    }
-
     /// Queries the full transaction history for the given signatures.
     /// Each entry is `None` if the signature was never included in a block.
     /// Use this for restart recovery where txs may be older than the RPC
