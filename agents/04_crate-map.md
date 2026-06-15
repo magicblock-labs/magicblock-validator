@@ -9,7 +9,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
 | `magicblock-validator` | Main validator binary and process entrypoint. | `magicblock-api`, `magicblock-config`, `magicblock-core`, `magicblock-tui-client`, `magicblock-version` | End users/operators | Parses config, builds runtime, starts headless/TUI validator. |
-| `magicblock-api` | Top-level service orchestration and `MagicValidator` implementation. | accounts, aperture, chainlink, committor, config, core, ledger, processor, replicator, task scheduler, admin/services | `magicblock-validator` | Owns startup/shutdown wiring for most services. |
+| `magicblock-api` | Top-level service orchestration and `MagicValidator` implementation. | accounts, aperture, chainlink, committor, config, core, ledger, processor, replicator, task scheduler, admin/services | `magicblock-validator` | Owns startup/shutdown wiring for most services; see `agents/crates/magicblock-api.md` before changing this crate. |
 | `magicblock-config` | Validator configuration model and layered config loading. | none | Most service crates | CLI/env/TOML/default config source; update when adding configurable behavior. |
 | `magicblock-core` | Shared channels, traits, account locks/helpers, intent/core types. | `magicblock-magic-program-api` | Most runtime crates | Central wiring layer; changes can affect scheduler, RPC, ledger, services, replication. |
 | `magicblock-version` | Build/version metadata. | none | `magicblock-validator`, `magicblock-aperture` | Keep version reporting stable for RPC/operator tooling. |
