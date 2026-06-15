@@ -1119,6 +1119,9 @@ impl MagicValidator {
         }
         log_timing("shutdown", "ledger_truncator_join", step_start);
         let step_start = Instant::now();
+        let _ = self.transaction_execution.join();
+        log_timing("shutdown", "transaction_execution_join", step_start);
+        let step_start = Instant::now();
         if let Some(handle) = self.replication_handle {
             match handle.join() {
                 Ok(Ok(())) => {}
@@ -1131,9 +1134,6 @@ impl MagicValidator {
             }
         }
         log_timing("shutdown", "replication_service_join", step_start);
-        let step_start = Instant::now();
-        let _ = self.transaction_execution.join();
-        log_timing("shutdown", "transaction_execution_join", step_start);
 
         // Flush durable state only after every worker that can still admit,
         // commit, or truncate state has stopped.
