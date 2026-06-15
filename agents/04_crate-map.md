@@ -18,7 +18,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `magicblock-aperture` | Solana-compatible JSON-RPC and websocket/pubsub server. | account cloner, accounts-db, chainlink, config, core, ledger, metrics, version | `magicblock-api` | Handles RPC methods, subscriptions, transaction submission, local read misses/cloning. |
+| `magicblock-aperture` | Solana-compatible JSON-RPC and websocket/pubsub server. | account cloner, accounts-db, chainlink, config, core, ledger, metrics, version | `magicblock-api` | Handles RPC methods, subscriptions, transaction submission, local read misses/cloning. See `agents/crates/magicblock-aperture.md` before changing this crate. |
 | `magicblock-rpc-client` | RPC client utilities for sending/confirming base-layer transactions. | `magicblock-metrics` | committor, table-mania, account-cloner, API/admin | Critical for base-layer commit delivery. |
 | `magicblock-validator-admin` | Admin/client helpers for validator management operations. | `magicblock-program`, `magicblock-rpc-client` | `magicblock-api` | Keep compatible with operator/admin workflows. |
 | `magicblock-tui-client` | TUI client/binary support. | none | `magicblock-validator` | UI-facing; should not own core validator logic. |
