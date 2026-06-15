@@ -106,8 +106,8 @@ impl StrategyExecutionMode {
 }
 
 pub struct TwoStageExecutionMode {
-    commit_stage: TransactionStrategy,
-    finalize_stage: TransactionStrategy,
+    pub commit_stage: TransactionStrategy,
+    pub finalize_stage: TransactionStrategy,
 }
 
 impl TwoStageExecutionMode {

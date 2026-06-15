@@ -15,7 +15,8 @@ use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle, Pubkey, SentCommit,
+    magic_scheduled_base_intent::ScheduledIntentBundle,
+    outbox_intent_bundles::OutboxIntentBundle, Pubkey, SentCommit,
 };
 use solana_hash::Hash;
 use solana_transaction::Transaction;
@@ -31,7 +32,7 @@ use crate::{
     committor_processor::CommittorProcessor,
     error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
-    intent_executor::ExecutionOutput,
+    intent_executor::{error::IntentExecutorError, ExecutionOutput},
     outbox_client::{InternalOutboxClientError, OutboxClient},
     service::outbox_intent_bundles_reader::{
         InternalOutboxIntentBundlesReaderError, OutboxIntentBundlesReader,
@@ -43,25 +44,27 @@ const POISONED_MUTEX_MSG: &str = "ServiceInner intents_meta_map mutex poisoned";
 pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
-pub enum IntentExecutionService<R> {
-    Created(ServiceInner<R>),
+pub enum IntentExecutionService<O> {
+    Created(ServiceInner<O>),
     Started(JoinHandle<()>),
     Stopped,
     Error,
 }
 
-impl<R> IntentExecutionService<R>
+impl<O> IntentExecutionService<O>
 where
-    R: OutboxClient,
-    // ERIntentClient errors should be convertible to Service errors
-    R::Error: Into<IntentExecutionServiceError>,
+    O: OutboxClient,
+    // OutboxClient errors should be convertible to Service errors
+    O::Error: Into<IntentExecutionServiceError>,
+    // OutboxClient errors should be convertible to IntentExecutor error
+    O::Error: Into<IntentExecutorError>,
     // OutboxReader errors should be convertible to Service errors
-    <R::OutboxReader as OutboxIntentBundlesReader>::Error:
+    <O::OutboxReader as OutboxIntentBundlesReader>::Error:
         Into<IntentExecutionServiceError>,
 {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
-        intent_client: R,
+        intent_client: Arc<O>,
         processor: Arc<CommittorProcessor>,
         slot_interval: Duration,
         cancellation_token: CancellationToken,
@@ -122,8 +125,10 @@ pub struct ServiceInner<O> {
 impl<O> ServiceInner<O>
 where
     O: OutboxClient,
-    // ERIntentClient errors should be convertible to Service errors
+    // OutboxClient errors should be convertible to Service errors
     O::Error: Into<IntentExecutionServiceError>,
+    // OutboxClient errors should be convertible into IntentExecutor errors
+    O::Error: Into<IntentExecutorError>,
     // OutboxReader errors should be convertible to Service errors
     <O::OutboxReader as OutboxIntentBundlesReader>::Error:
         Into<IntentExecutionServiceError>,
@@ -195,6 +200,7 @@ where
                         }
                     };
 
+                    let intent_bundles= intent_bundles.into_iter().map(OutboxIntentBundle::accepted).collect();
                     if let Err(err) = self.schedule_intent_execution(intent_bundles).await {
                         error!("Failed to schedule intent execution: {}", err);
                     }
@@ -223,15 +229,10 @@ where
 
             // TODO(edwin): use status
             let read_len = intent_bundles_chunk.len();
-            let intent_bundles = intent_bundles_chunk
-                .into_iter()
-                .map(|el| el.inner)
-                .collect();
-
             // Schedule  without initial persistence as bundle already exists in db
             let result = self
-                .process_intent_bundles(intent_bundles, |bundles| {
-                    self.processor.schedule_recovered_intent_bundles(bundles)
+                .process_intent_bundles(intent_bundles_chunk, |bundles| {
+                    self.processor.schedule_intent_bundles(bundles)
                 })
                 .await;
             if let Err(err) = result {
@@ -245,29 +246,9 @@ where
         }
     }
 
-    async fn reschedule_pending_bundles(&self) -> CommittorServiceResult<()> {
-        // Fetch pending bundles from DB
-        let mut bundles =
-            self.processor.pending_intent_bundles().await.inspect_err(|err| {
-                error!(error = ?err, "Failed to load pending intent bundles for recovery");
-            })?;
-        if bundles.is_empty() {
-            return Ok(());
-        }
-
-        // Retain only recoverable bundles
-        self.retain_recoverable_intent_bundles(&mut bundles).await;
-
-        // Schedule  without initial persisitance as bundle already exists in db
-        self.process_intent_bundles(bundles, |bundles| {
-            self.processor.schedule_recovered_intent_bundles(bundles)
-        })
-        .await
-    }
-
     async fn schedule_intent_execution(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
+        intent_bundles: Vec<OutboxIntentBundle>,
     ) -> CommittorServiceResult<()> {
         if intent_bundles.is_empty() {
             return Ok(());
@@ -283,11 +264,11 @@ where
 
     async fn process_intent_bundles<F, Fut>(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
+        intent_bundles: Vec<OutboxIntentBundle>,
         schedule: F,
     ) -> CommittorServiceResult<()>
     where
-        F: FnOnce(Vec<ScheduledIntentBundle>) -> Fut,
+        F: FnOnce(Vec<OutboxIntentBundle>) -> Fut,
         Fut: Future<Output = CommittorServiceResult<()>>,
     {
         if intent_bundles.is_empty() {
@@ -466,7 +447,7 @@ where
                     "Failed to commit intent: {}, slot: {}, blockhash: {}. {:?}",
                     intent_id, intent_meta.slot, intent_meta.blockhash, err
                 );
-                err.signatures()
+                err.base_signatures()
                     .map(|(commit, finalize)| {
                         finalize
                             .map(|finalize| vec![commit, finalize])
@@ -515,52 +496,6 @@ where
             callbacks_scheduling_results: callbacks_report,
         }
     }
-
-    /// Retains bundles whose accounts are still delegated
-    async fn retain_recoverable_intent_bundles(
-        &self,
-        bundles: &mut Vec<ScheduledIntentBundle>,
-    ) {
-        let results = join_all(
-            bundles.iter().map(|b| b.get_all_committed_pubkeys()).map(
-                |pubkeys| async move {
-                    self.chainlink
-                        .accounts_delegated_on_base_and_er(
-                            &pubkeys,
-                            AccountFetchOrigin::GetAccount,
-                        )
-                        .await
-                },
-            ),
-        )
-        .await;
-
-        let mut results_iter = results.into_iter();
-        bundles.retain(|bundle| {
-            let Some(result) = results_iter.next() else {
-                error!("Results and bundles must have equal length");
-                return false;
-            };
-            match result {
-                Ok(delegated) if delegated.iter().all(|d| *d) => true,
-                Ok(_) => {
-                    warn!(
-                        intent_id = bundle.id,
-                        "Skipping recovered commit intent because not all accounts are delegated on base and ER"
-                    );
-                    false
-                }
-                Err(err) => {
-                    error!(
-                        intent_id = bundle.id,
-                        error = ?err,
-                        "Failed to verify recovered commit intent accounts"
-                    );
-                    false
-                }
-            }
-        });
-    }
 }
 
 struct ScheduledBaseIntentMeta {
@@ -595,4 +530,6 @@ pub enum IntentExecutionServiceError {
     IntentRpcClientError(#[from] InternalOutboxClientError),
     #[error("OutboxReaderError")]
     OutboxReaderError(#[from] InternalOutboxIntentBundlesReaderError),
+    #[error("asd")]
+    ASdError(#[from] IntentExecutorError),
 }

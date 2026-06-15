@@ -1,7 +1,4 @@
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
@@ -9,27 +6,21 @@ use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     validator::validator_authority,
 };
-use magicblock_rpc_client::MagicblockRpcClient;
 use solana_keypair::Keypair;
 use solana_signature::Signature;
 use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
-        accepted_intent_executor::AcceptedIntentExecutor,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
-        intent_execution_client::IntentExecutionClient,
-        task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
-        utils::build_commit_finalize_tasks,
+        task_info_fetcher::{ResetType, TaskInfoFetcher},
+        utils::{build_commit_finalize_tasks, execute_single_stage_flow},
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
     outbox_client::OutboxClient,
-    tasks::{
-        task_strategist::{TaskStrategist, TransactionStrategy},
-        TaskBuilderImpl,
-    },
+    tasks::task_strategist::{TaskStrategist, TransactionStrategy},
     transaction_preparator::TransactionPreparator,
 };
 
@@ -74,12 +65,18 @@ where
         }
     }
 
+    fn time_left(&self) -> Option<Duration> {
+        self.ctx
+            .actions_timeout
+            .checked_sub(self.started_at.elapsed())
+    }
+
     pub async fn execute_inner(
         &mut self,
         intent_bundle: ScheduledIntentBundle,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        // It we're here so previous run determined this should
+        // It we're here so previous run determined this should be single stage
         let (commit_tasks, finalize_tasks) = build_commit_finalize_tasks(
             &intent_bundle,
             &self.ctx.task_info_fetcher,
@@ -92,7 +89,16 @@ where
             &self.authority.pubkey(),
         )?;
 
-        todo!()
+        execute_single_stage_flow(
+            &self.ctx,
+            &self.authority,
+            intent_bundle,
+            Some(self.pending_signature),
+            transaction_strategy,
+            execution_report,
+            || self.time_left(),
+        )
+        .await
     }
 }
 

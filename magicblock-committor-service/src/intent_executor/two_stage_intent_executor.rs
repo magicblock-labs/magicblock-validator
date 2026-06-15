@@ -106,7 +106,6 @@ where
             &self.authority.pubkey(),
         )?;
 
-        let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
         let state = Initialized::new(
             commit_stage,
             finalize_stage,
@@ -116,8 +115,7 @@ where
             &self.ctx,
             state,
             &self.authority,
-            intent_bundle.id,
-            &committed_pubkeys,
+            intent_bundle,
             execution_report,
             || self.time_left(),
         )

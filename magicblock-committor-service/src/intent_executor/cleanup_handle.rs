@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-pub(crate) struct CleanupHandle<T> {
+pub struct CleanupHandle<T> {
     authority: Keypair,
     junk: Vec<TransactionStrategy>,
     /// When false (execution failed), only releases ALT reservations without

@@ -120,7 +120,7 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
         Ok(TransactionScheduler::default().take_scheduled_intent_bundles())
     }
 
-    fn set_intent_execution_stage(
+    async fn set_intent_execution_stage(
         &self,
         intent_id: u64,
         stage: ExecutionStage,

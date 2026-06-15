@@ -3,7 +3,6 @@ pub mod cleanup_handle;
 pub mod error;
 pub mod intent_execution_client;
 pub(crate) mod intent_executor_factory;
-pub mod intent_executor_gateway;
 pub mod single_stage_intent_executor;
 pub mod strategy_executor;
 pub mod task_info_fetcher;
@@ -22,7 +21,6 @@ use magicblock_program::{
     outbox_intent_bundles::OutboxIntentBundleStatus,
 };
 use solana_signature::Signature;
-use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
@@ -38,7 +36,7 @@ use crate::{
         two_stage_intent_executor::TwoStageIntentExecutor,
     },
     outbox_client::OutboxClient,
-    tasks::{task_builder::TasksBuilder, task_strategist::TransactionStrategy},
+    tasks::task_strategist::TransactionStrategy,
     transaction_preparator::TransactionPreparator,
 };
 
@@ -67,16 +65,16 @@ where
     match status {
         OutboxIntentBundleStatus::Accepted => {
             Box::new(AcceptedIntentExecutor::new(ctx))
-                as Box<(dyn IntentExecutor<T> + 'static)>
+                as Box<dyn IntentExecutor<T> + 'static>
         }
         OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
             sig,
         )) => Box::new(SingleStageIntentExecutor::new(ctx, sig))
-            as Box<(dyn IntentExecutor<T> + 'static)>,
+            as Box<dyn IntentExecutor<T> + 'static>,
         OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
             value,
         )) => Box::new(TwoStageIntentExecutor::new(ctx, value))
-            as Box<(dyn IntentExecutor<T> + 'static)>,
+            as Box<dyn IntentExecutor<T> + 'static>,
     }
 }
 

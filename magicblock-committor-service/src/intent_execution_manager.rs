@@ -19,7 +19,8 @@ use crate::{
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
     intent_executor::{
-        intent_executor_factory::{ExecutorConfig, IntentExecutorFactoryImpl},
+        error::IntentExecutorError,
+        intent_executor_factory::{ExecutorConfig, IntentExecutorBuilderImpl},
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     },
     outbox_client::OutboxClient,
@@ -45,10 +46,11 @@ impl<D: DB> IntentExecutionManager<D> {
     where
         A: ActionsCallbackScheduler,
         O: OutboxClient,
+        O::Error: Into<IntentExecutorError>,
     {
         let db = Arc::new(Mutex::new(db));
 
-        let executor_factory = IntentExecutorFactoryImpl {
+        let executor_factory = IntentExecutorBuilderImpl {
             rpc_client,
             table_mania,
             executor_config,

@@ -178,7 +178,8 @@ where
             | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
                 _,
                 _,
-            ) => {
+            )
+            | TransactionStrategyExecutionError::TransactionTooLargeError(_) => {
                 // Can't be handled in scope of single stage execution
                 // We signal flow break
                 Ok(ControlFlow::Break(()))
@@ -327,6 +328,10 @@ where
                 error!(error = ?err, "Commit tasks exceeded execution limit");
                 Ok(ControlFlow::Break(()))
             }
+            TransactionStrategyExecutionError::TransactionTooLargeError(err) => {
+                error!(error = ?err, "Failed to execute intent: transaction too large!");
+                Ok(ControlFlow::Break(()))
+            }
             TransactionStrategyExecutionError::InternalError(_) => {
                 // Can't be handled
                 Ok(ControlFlow::Break(()))
@@ -393,6 +398,10 @@ where
             ) => {
                 // Can't be handled
                 warn!(error = ?err, "Finalization tasks exceeded execution limit");
+                Ok(ControlFlow::Break(()))
+            }
+            TransactionStrategyExecutionError::TransactionTooLargeError(err) => {
+                error!(error = ?err, "Failed to execute intent: transaction too large!");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::InternalError(_) => {

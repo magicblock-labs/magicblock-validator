@@ -478,7 +478,6 @@ impl MagicValidator {
         );
         Ok(CommittorProcessor::try_new(
             authority,
-            committor_persist_path,
             base_chain_config,
             shared_chain_slot.clone(),
             actions_callback_executor,
@@ -502,7 +501,7 @@ impl MagicValidator {
 
         IntentExecutionServiceImpl::new(
             chainlink.clone(),
-            intent_client,
+            Arc::new(intent_client),
             committor_processor.clone(),
             slot_interval,
             cancellation_token.clone(),

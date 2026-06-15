@@ -1,4 +1,5 @@
 use std::{
+    marker::PhantomData,
     ops::Deref,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -27,9 +28,10 @@ use crate::{
             IntentExecutorError, IntentExecutorResult,
             TransactionStrategyExecutionError,
         },
-        intent_executor_factory::IntentExecutorFactory,
+        intent_executor_factory::IntentExecutorBuilder,
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
+    transaction_preparator::TransactionPreparator,
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
@@ -85,30 +87,32 @@ impl ResultSubscriber {
     }
 }
 
-pub(crate) struct IntentExecutionEngine<D, F> {
+pub(crate) struct IntentExecutionEngine<D, F, T> {
     intent_stream: IntentStream<D>,
-    executor_factory: F,
+    executor_builder: F,
 
     inner: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
+    _phantom_data: PhantomData<T>,
 }
 
-impl<D, F, E> IntentExecutionEngine<D, F>
+impl<D, F, T> IntentExecutionEngine<D, F, T>
 where
     D: DB,
-    F: IntentExecutorFactory<Executor = E> + Send + Sync + 'static,
-    E: IntentExecutor,
+    T: TransactionPreparator,
+    F: IntentExecutorBuilder<T> + Send + Sync + 'static,
 {
     pub fn new(intent_stream: IntentStream<D>, executor_factory: F) -> Self {
         Self {
             intent_stream,
-            executor_factory,
+            executor_builder: executor_factory,
             running_executors: FuturesUnordered::new(),
             executors_semaphore: Arc::new(Semaphore::new(
                 MAX_EXECUTORS as usize,
             )),
             inner: Arc::new(Mutex::new(IntentScheduler::new())),
+            _phantom_data: PhantomData::default(),
         }
     }
 
@@ -159,7 +163,8 @@ where
                 .expect(SEMAPHORE_CLOSED_MSG);
 
             // Spawn executor
-            let executor = self.executor_factory.create_instance();
+            let executor =
+                self.executor_builder.create_instance(intent.status.clone());
             let inner = self.inner.clone();
 
             let handle = tokio::spawn(Self::execute(
@@ -242,7 +247,7 @@ where
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
     #[instrument(skip(executor, intent, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
-        mut executor: E,
+        executor: Box<dyn IntentExecutor<T>>,
         intent: OutboxIntentBundle,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,
         execution_permit: OwnedSemaphorePermit,
@@ -251,7 +256,8 @@ where
         let instant = Instant::now();
 
         // Execute an Intent
-        let result = executor.execute(intent.clone()).await;
+        let (result, cleanup_handle) =
+            executor.execute(intent.inner.clone()).await;
         let _ = result.inner.as_ref().inspect_err(|err| {
             error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
         });
@@ -279,7 +285,7 @@ where
             .expect("Valid completion of previously scheduled message");
 
         tokio::spawn(async move {
-            if let Err(err) = executor.cleanup().await {
+            if let Err(err) = cleanup_handle.clean().await {
                 error!(error = ?err, "Failed to cleanup after intent");
             }
         });
@@ -509,7 +515,7 @@ mod tests {
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
         worker
-            .executor_factory
+            .executor_builder
             .with_concurrency_tracking(&active_tasks, &max_concurrent);
 
         let result_subscriber = worker.spawn();
@@ -577,7 +583,7 @@ mod tests {
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
         worker
-            .executor_factory
+            .executor_builder
             .with_concurrency_tracking(&active_tasks, &max_concurrent);
 
         let result_subscriber = worker.spawn();
@@ -635,7 +641,7 @@ mod tests {
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
         worker
-            .executor_factory
+            .executor_builder
             .with_concurrency_tracking(&active_tasks, &max_concurrent);
 
         let result_subscriber = worker.spawn();
@@ -708,7 +714,7 @@ mod tests {
         }
     }
 
-    impl IntentExecutorFactory for MockIntentExecutorFactory {
+    impl IntentExecutorBuilder for MockIntentExecutorFactory {
         type Executor = MockIntentExecutor;
 
         fn create_instance(&self) -> Self::Executor {

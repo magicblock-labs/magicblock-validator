@@ -18,10 +18,10 @@ use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::{
-        db::{DumberDB, DummyDB},
-        BroadcastedIntentExecutionResult, IntentExecutionManager,
+        db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
     intent_executor::{
+        error::IntentExecutorError,
         intent_executor_factory::ExecutorConfig,
         task_info_fetcher::{
             CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
@@ -57,6 +57,7 @@ impl CommittorProcessor {
     where
         A: ActionsCallbackScheduler,
         O: OutboxClient,
+        O::Error: Into<IntentExecutorError>,
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),
@@ -194,21 +195,6 @@ impl CommittorProcessor {
             .collect::<Result<Vec<_>, RecvError>>()?;
 
         Ok(results)
-    }
-
-    #[instrument(skip(self, intent_bundles))]
-    pub async fn schedule_recovered_intent_bundles(
-        &self,
-        intent_bundles: Vec<OutboxIntentBundle>,
-    ) -> CommittorServiceResult<()> {
-        self.commits_scheduler
-            .schedule(intent_bundles)
-            .await
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to schedule recovered intent");
-            })?;
-
-        Ok(())
     }
 
     /// Creates a subscription for results of BaseIntent execution

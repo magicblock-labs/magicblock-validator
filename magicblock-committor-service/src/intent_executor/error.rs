@@ -4,10 +4,6 @@ use magicblock_rpc_client::{
     utils::TransactionErrorMapper, MagicBlockRpcClientError,
 };
 use solana_instruction::error::InstructionError;
-use solana_rpc_client_api::{
-    client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
-    request::{RpcError, RpcRequest},
-};
 use solana_signature::Signature;
 use solana_signer::SignerError;
 use solana_transaction_error::TransactionError;
@@ -111,7 +107,8 @@ impl IntentExecutorError {
         }
     }
 
-    pub fn signatures(&self) -> Option<(Signature, Option<Signature>)> {
+    /// Returns signatures of transaction sent to Base layer
+    pub fn base_signatures(&self) -> Option<(Signature, Option<Signature>)> {
         match self {
             IntentExecutorError::FailedToCommitError { signature, err: _ } => {
                 signature.map(|el| (el, None))
@@ -130,7 +127,9 @@ impl IntentExecutorError {
             } => commit_signature.map(|el| (el, *finalize_signature)),
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
-            | IntentExecutorError::SignerError(_) => None,
+            | IntentExecutorError::SignerError(_)
+            | IntentExecutorError::OutboxClientError(_)
+            | IntentExecutorError::GetPendingSignatureStatusError(_) => None,
         }
     }
 }

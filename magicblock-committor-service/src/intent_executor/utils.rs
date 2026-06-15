@@ -4,7 +4,6 @@ use futures_util::future::join;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
-use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
 

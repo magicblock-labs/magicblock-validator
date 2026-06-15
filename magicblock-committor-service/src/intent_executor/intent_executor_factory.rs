@@ -1,12 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
 use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundleStatus;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 
 use crate::{
     intent_executor::{
-        accepted_intent_executor::AcceptedIntentExecutor,
+        build_stage_intent_executor,
         error::IntentExecutorError,
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
@@ -17,10 +18,12 @@ use crate::{
     ComputeBudgetConfig,
 };
 
-pub trait IntentExecutorFactory {
-    type Executor: IntentExecutor;
-
-    fn create_instance(&self) -> Self::Executor;
+// TODO(edwin): T could be removed if cleanuphandle is a trait
+pub trait IntentExecutorBuilder<T> {
+    fn create_instance(
+        &self,
+        status: OutboxIntentBundleStatus,
+    ) -> Box<dyn IntentExecutor<T>>;
 }
 
 pub struct ExecutorConfig {
@@ -29,7 +32,7 @@ pub struct ExecutorConfig {
 }
 
 /// Dummy struct to simplify signature of CommitSchedulerWorker
-pub struct IntentExecutorFactoryImpl<A, O> {
+pub struct IntentExecutorBuilderImpl<A, O> {
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
     pub executor_config: ExecutorConfig,
@@ -38,20 +41,17 @@ pub struct IntentExecutorFactoryImpl<A, O> {
     pub actions_callback_executor: A,
 }
 
-impl<A, O> IntentExecutorFactory for IntentExecutorFactoryImpl<A, O>
+impl<A, O> IntentExecutorBuilder<TransactionPreparatorImpl>
+    for IntentExecutorBuilderImpl<A, O>
 where
     A: ActionsCallbackScheduler,
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    type Executor = AcceptedIntentExecutor<
-        TransactionPreparatorImpl,
-        RpcTaskInfoFetcher,
-        A,
-        O,
-    >;
-
-    fn create_instance(&self) -> Self::Executor {
+    fn create_instance(
+        &self,
+        status: OutboxIntentBundleStatus,
+    ) -> Box<dyn IntentExecutor<TransactionPreparatorImpl>> {
         let transaction_preparator = TransactionPreparatorImpl::new(
             self.rpc_client.clone(),
             self.table_mania.clone(),
@@ -65,6 +65,6 @@ where
             actions_callback_executor: self.actions_callback_executor.clone(),
             actions_timeout: self.executor_config.actions_timeout,
         };
-        Self::Executor::new(ctx)
+        build_stage_intent_executor(ctx, status)
     }
 }
