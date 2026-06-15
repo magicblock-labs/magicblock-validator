@@ -39,7 +39,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 | `magicblock-chainlink` | Base-chain account/delegation coordination. | accounts-db, AML, config, core, magic-program API, metrics | account-cloner, accounts, aperture, API, magic program | Checks/clones remote accounts, tracks delegation state, coordinates base-layer reads. See `agents/crates/magicblock-chainlink.md` before changing this crate. |
 | `magicblock-account-cloner` | Fetches and injects base-layer accounts/programs into local validator state. | accounts-db, chainlink, committor-service, config, core, ledger, magic-program API, magic program, rpc-client | accounts, aperture, API | Distinguishes fee payer, delegated, and undelegated accounts; handles large/program clone paths. See `agents/crates/magicblock-account-cloner.md` before changing this crate. |
 | `magicblock-accounts` | Account manager and scheduled commit processing glue. | account-cloner, accounts-db, chainlink, committor-service, core, metrics, magic program | `magicblock-api` | Current active role is scheduled commit processing and pending intent recovery; see `agents/crates/magicblock-accounts.md` before changing this crate. |
-| `magicblock-aml` | External/cached risk-scoring integration. | `magicblock-config`, `magicblock-core` | `magicblock-chainlink` | Cross-cutting policy/risk support for account flows. |
+| `magicblock-aml` | External/cached risk-scoring integration. | `magicblock-config` (dev: `magicblock-core`) | `magicblock-chainlink` | Optional Range risk checks for post-delegation action signers; see `agents/crates/magicblock-aml.md` before changing this crate. |
 
 ## Commit and base-layer settlement crates
 
