@@ -20,6 +20,8 @@ For small or targeted changes, run the smallest relevant test first, then run th
 
 For documentation-only changes, at minimum verify the changed files are in the right location and that links/filenames mentioned in `AGENTS.md` and `agents/` stay in sync.
 
+When you discover a new reliable way to test, debug, benchmark, or validate the codebase, update this file or the relevant crate-specific guide before finishing. If the approach is specific to one crate, prefer `agents/crates/<crate>.md` and link from broader docs only when needed.
+
 ## Choosing what to run
 
 Use the crate map and touched files to pick tests:
@@ -213,4 +215,5 @@ When finishing a task, include:
 - pass/fail result,
 - if skipped, why it was skipped,
 - any remaining risk, especially for integration tests that require validators or long-running suites,
-- any performance-sensitive paths touched and whether performance regression risk was measured, reasoned about, or left unmeasured.
+- any performance-sensitive paths touched and whether performance regression risk was measured, reasoned about, or left unmeasured,
+- whether agent documentation was updated for any durable discovery, or why no update was needed.

@@ -33,6 +33,8 @@ In practical terms, the validator:
 - `agents/02_specification.md` — read before changing protocol behavior: delegation, cloning, execution rules, commits, undelegation, Magic Actions, ephemeral accounts, RPC/router behavior, or recovery.
 - `agents/03_architecture.md` — read before changing service wiring or interactions between crates.
 - `agents/04_crate-map.md` — read to find which crate owns an area and which other crates may be affected.
+- `agents/05_testing-and-validation.md` — read before deciding how to validate a change.
+- `agents/06_agent-memory-and-docs.md` — read when a task may discover or change durable repository knowledge that future agents should remember.
 
 ## Non-negotiable agent rules
 
@@ -41,6 +43,8 @@ Before changing behavior, check the relevant agent docs and preserve the validat
 The validator is performance-sensitive infrastructure. Do not degrade critical RPC, account sync, scheduling, execution, persistence, or settlement paths unless there is no viable alternative; if such a tradeoff is unavoidable, state it explicitly with expected impact and mitigation.
 
 When behavior changes, update the relevant `agents/` file in the same change. These docs must remain synchronized with the real implementation; stale guidance is worse than no guidance.
+
+When you discover durable knowledge that is missing or wrong in `./agents/`—for example a feature behavior, protocol invariant, crate responsibility, validation workflow, recurring pitfall, or performance constraint—update the most relevant existing document, or create a focused new one if no suitable document exists. If you cannot make the documentation update, report the exact follow-up before handing off.
 
 ## Things to be especially careful with
 

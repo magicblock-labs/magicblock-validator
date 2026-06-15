@@ -117,3 +117,4 @@ Before finishing a feature, bug fix, or refactor, ask:
 6. Did I avoid degrading critical-path latency, throughput, memory use, lock contention, and I/O behavior?
 7. If a performance tradeoff was unavoidable, did I explicitly call out why, the expected impact, and mitigation?
 8. Did I update the relevant file in `agents/` if behavior changed?
+9. Did I update or create agent documentation for any newly discovered durable behavior, workflow, pitfall, invariant, crate responsibility, validation approach, or stale/missing guidance?

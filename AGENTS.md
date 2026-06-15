@@ -1,6 +1,6 @@
 # Agent Guide
 
-This repository contains AI-agent guidance in `./agents/`. These files describe the validator's intended behavior, goals, protocol-level expectations, architecture, crate ownership, and validation workflow.
+This repository contains AI-agent guidance in `./agents/`. These files describe the validator's intended behavior, goals, protocol-level expectations, architecture, crate ownership, validation workflow, and documentation-memory rules.
 
 ## Required acknowledgement
 
@@ -22,12 +22,15 @@ Before working on any feature, bug fix, refactor, or behavioral change, read the
 4. `agents/03_architecture.md` — high-level repository architecture and crate interaction model.
 5. `agents/04_crate-map.md` — workspace crate purposes, dependencies, consumers, and where to start for common change areas.
 6. `agents/05_testing-and-validation.md` — required validation workflow, rs-check guidance, and integration test commands.
-7. Relevant crate-specific guide under `agents/crates/` when one exists, such as `agents/crates/magicblock-chainlink.md` for the `magicblock-chainlink` crate.
+7. `agents/06_agent-memory-and-docs.md` — required rules for capturing newly discovered durable behavior, workflows, pitfalls, and documentation corrections.
+8. Relevant crate-specific guide under `agents/crates/` when one exists, such as `agents/crates/magicblock-chainlink.md` for the `magicblock-chainlink` crate.
 
 Before changing code, consult the relevant `./agents` material to ensure the change does not violate the validator's goals, invariants, performance requirements, or specification. This acknowledgement is required; do not proceed silently after reading the files.
 
 The validator is performance-sensitive infrastructure. Changes must not degrade critical-path performance unless there is no viable alternative; if a tradeoff is unavoidable, call it out explicitly with the reason, expected impact, and any mitigation.
 
 When a feature is added, removed, or changed, the relevant file in `./agents/` **MUST be updated** to match the current implementation. These files cannot go out of sync with reality; if they do, they lose their usefulness for future agents and maintainers.
+
+When an agent discovers durable repository knowledge that is missing, incomplete, inaccurate, or stale in `./agents/`—including feature behavior, protocol details, crate responsibilities, validation/debugging workflows, pitfalls, or performance constraints—the agent **MUST** update the most relevant existing document or create a focused new document if none exists. If documentation cannot be updated, the agent must report the blocked follow-up explicitly.
 
 If anything is added to, removed from, renamed, or reorganized inside `./agents/`, update this `AGENTS.md` file in the same change so this entrypoint remains accurate.
