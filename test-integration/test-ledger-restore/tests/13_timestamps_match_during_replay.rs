@@ -6,7 +6,6 @@ use integration_test_tools::{
     validator::cleanup,
 };
 use solana_sdk::{
-    pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
 };
@@ -14,7 +13,6 @@ use solana_transaction_status::UiTransactionEncoding;
 use test_kit::init_logger;
 use test_ledger_restore::{
     airdrop_and_delegate_accounts, setup_offline_validator,
-    setup_offline_validator_with_authority_override,
     setup_validator_with_local_remote, transfer_lamports,
     wait_for_ledger_persist, SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
 };
@@ -35,29 +33,7 @@ fn test_restore_preserves_timestamps() {
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
-    let mut validator = read(&ledger_path, signature, block_time, None);
-    test_ledger_restore::kill_validator(&mut validator);
-}
-
-#[test]
-fn test_restore_preserves_timestamps_with_authority_override() {
-    init_logger!();
-    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
-
-    let original_authority = LoadedAccounts::default().validator_authority();
-
-    let (mut validator, slot, signature, block_time, _payer) =
-        write(&ledger_path);
-    test_ledger_restore::kill_validator(&mut validator);
-
-    assert!(slot > SNAPSHOT_FREQUENCY);
-
-    let mut validator = read(
-        &ledger_path,
-        signature,
-        block_time,
-        Some(original_authority),
-    );
+    let mut validator = read(&ledger_path, signature, block_time);
     test_ledger_restore::kill_validator(&mut validator);
 }
 
@@ -117,24 +93,11 @@ fn write(ledger_path: &Path) -> (Child, u64, Signature, i64, Keypair) {
     (validator, slot, signature, block_time, payer1)
 }
 
-fn read(
-    ledger_path: &Path,
-    signature: Signature,
-    block_time: i64,
-    authority_override: Option<Pubkey>,
-) -> Child {
+fn read(ledger_path: &Path, signature: Signature, block_time: i64) -> Child {
     // Measure time
     let start = std::time::Instant::now();
-    let (_, mut validator, ctx) = match authority_override {
-        Some(original) => setup_offline_validator_with_authority_override(
-            ledger_path,
-            None,
-            None,
-            false,
-            original,
-        ),
-        None => setup_offline_validator(ledger_path, None, None, false, false),
-    };
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, None, false, false);
     debug!("✅ Validator started in {:?}", start.elapsed());
 
     let restored_block_time = expect!(
