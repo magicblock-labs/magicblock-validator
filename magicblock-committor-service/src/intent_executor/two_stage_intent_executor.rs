@@ -81,6 +81,7 @@ where
             .checked_sub(self.started_at.elapsed())
     }
 
+    /// Picks up execution from commit stage signature
     async fn execute_committing_intent(
         &mut self,
         intent_bundle: ScheduledIntentBundle,
@@ -123,6 +124,7 @@ where
         .await
     }
 
+    /// Picks up execution from pending finalize signature
     async fn execute_finalizing_intent(
         &mut self,
         intent: ScheduledIntentBundle,

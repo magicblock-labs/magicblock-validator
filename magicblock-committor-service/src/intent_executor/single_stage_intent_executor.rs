@@ -92,8 +92,6 @@ where
             &self.authority.pubkey(),
         )?;
 
-
-
         todo!()
     }
 }

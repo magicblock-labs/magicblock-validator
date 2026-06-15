@@ -45,25 +45,10 @@ impl InternalError {
     }
 
     pub fn is_transaction_too_large(&self) -> bool {
-        fn is_send_transaction_too_large(err: &RpcClientError) -> bool {
-            matches!(err.request, Some(RpcRequest::SendTransaction))
-                && matches!(
-                    &*err.kind,
-                    RpcClientErrorKind::RpcError(
-                        RpcError::RpcResponseError { code: -32602, message, .. }
-                    ) if message.contains("VersionedTransaction too large")
-                        || message.contains("base64 encoded too large")
-                )
-        }
-
         match self {
-            Self::MagicBlockRpcClientError(err) => match err.as_ref() {
-                MagicBlockRpcClientError::RpcClientError(err)
-                | MagicBlockRpcClientError::SendTransaction(err) => {
-                    is_send_transaction_too_large(err)
-                }
-                _ => false,
-            },
+            Self::MagicBlockRpcClientError(err) => {
+                err.is_transaction_too_large()
+            }
             Self::SignerError(_) => false,
         }
     }
