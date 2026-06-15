@@ -3664,6 +3664,7 @@ dependencies = [
  "magicblock-program",
  "solana-hash 3.1.0",
  "solana-pubkey 3.0.0",
+ "solana-signature 3.4.0",
  "solana-transaction",
  "solana-transaction-error 3.2.0",
  "thiserror 2.0.18",

@@ -13,7 +13,7 @@ use solana_signature::Signature;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 use tokio_util::sync::WaitForCancellationFutureOwned;
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 use crate::{
     error::{CommittorServiceError, CommittorServiceResult},
@@ -72,12 +72,14 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
         let mut results_subscription = results_subscription.await.unwrap();
 
         tokio::pin!(committor_stopped);
+        let mut draining = false;
         loop {
             let execution_result = tokio::select! {
                 biased;
-                _ = &mut committor_stopped => {
-                    info!("Shutting down extension");
-                    return;
+                _ = &mut committor_stopped, if !draining => {
+                    draining = true;
+                    info!("CommittorServiceExt draining in-flight results");
+                    continue;
                 }
                 execution_result = results_subscription.recv() => {
                     match execution_result {
@@ -112,6 +114,18 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
                     "Failed to send execution result"
                 );
             }
+        }
+
+        let pending_count = pending_message
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .drain()
+            .count();
+        if pending_count > 0 {
+            warn!(
+                pending_count,
+                "Dropped pending intent result waiters during CommittorServiceExt shutdown"
+            );
         }
     }
 }
@@ -251,3 +265,163 @@ impl From<CommittorServiceError> for CommittorServiceExtError {
 
 pub type BaseIntentCommitorExtResult<T, E = CommittorServiceExtError> =
     Result<T, E>;
+
+#[cfg(test)]
+mod shutdown_tests {
+    use std::{
+        collections::HashMap,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+    use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
+    use tokio::sync::{broadcast, oneshot};
+    use tokio_util::sync::CancellationToken;
+
+    use super::*;
+    use crate::{
+        intent_execution_manager::intent_scheduler::create_test_intent,
+        intent_executor::ExecutionOutput,
+        test_utils,
+    };
+
+    struct MockCommittor {
+        actor_done_token: CancellationToken,
+        results_tx: broadcast::Sender<BroadcastedIntentExecutionResult>,
+    }
+
+    impl MockCommittor {
+        fn new() -> Arc<Self> {
+            let (results_tx, _) = broadcast::channel(16);
+            Arc::new(Self {
+                actor_done_token: CancellationToken::new(),
+                results_tx,
+            })
+        }
+
+        fn signal_stopped(&self) {
+            self.actor_done_token.cancel();
+        }
+
+        fn broadcast_result(&self, result: BroadcastedIntentExecutionResult) {
+            self.results_tx.send(result).expect("broadcast result");
+        }
+    }
+
+    fn test_result(id: u64) -> BroadcastedIntentExecutionResult {
+        BroadcastedIntentExecutionResult {
+            id,
+            inner: Ok(ExecutionOutput::SingleStage(Signature::new_unique())),
+            patched_errors: Arc::new(vec![]),
+            callbacks_report: vec![],
+        }
+    }
+
+    fn empty_oneshot<T>() -> oneshot::Receiver<T> {
+        let (_, rx) = oneshot::channel();
+        rx
+    }
+
+    impl BaseIntentCommittor for MockCommittor {
+        fn reserve_pubkeys_for_committee(
+            &self,
+            _: Pubkey,
+            _: Pubkey,
+        ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
+            empty_oneshot()
+        }
+
+        fn schedule_intent_bundles(
+            &self,
+            _: Vec<ScheduledIntentBundle>,
+        ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+            let (tx, rx) = oneshot::channel();
+            tx.send(Ok(())).expect("schedule response");
+            rx
+        }
+
+        fn subscribe_for_results(
+            &self,
+        ) -> oneshot::Receiver<
+            broadcast::Receiver<BroadcastedIntentExecutionResult>,
+        > {
+            let (tx, rx) = oneshot::channel();
+            tx.send(self.results_tx.subscribe())
+                .expect("results subscription");
+            rx
+        }
+
+        fn get_commit_statuses(
+            &self,
+            _: u64,
+        ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
+            empty_oneshot()
+        }
+
+        fn get_commit_signatures(
+            &self,
+            _: u64,
+            _: Pubkey,
+        ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
+        {
+            empty_oneshot()
+        }
+
+        fn get_transaction(
+            &self,
+            _: &Signature,
+        ) -> oneshot::Receiver<
+            CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
+        > {
+            empty_oneshot()
+        }
+
+        fn fetch_current_commit_nonces(
+            &self,
+            _: &[Pubkey],
+            _: u64,
+        ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>>
+        {
+            empty_oneshot()
+        }
+
+        fn stop(&self) {}
+
+        fn stopped(&self) -> WaitForCancellationFutureOwned {
+            self.actor_done_token.clone().cancelled_owned()
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatcher_delivers_result_after_stopped_signal() {
+        test_utils::init_test_logger();
+
+        let mock = MockCommittor::new();
+        let ext = CommittorServiceExt::new(mock.clone());
+
+        let intent = create_test_intent(
+            1,
+            &[Pubkey::new_unique()],
+            false,
+        );
+        let waiting = tokio::spawn(async move {
+            ext.schedule_intent_bundles_waiting(vec![intent]).await
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        mock.signal_stopped();
+        mock.broadcast_result(test_result(1));
+
+        let results = tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("timed out waiting for result delivery")
+            .expect("waiting task panicked")
+            .expect("schedule_intent_bundles_waiting failed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, 1);
+        assert!(results[0].inner.is_ok());
+    }
+}

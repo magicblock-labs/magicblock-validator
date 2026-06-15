@@ -9,10 +9,7 @@ use std::{
 };
 
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_accounts::{
-    scheduled_commits_processor::ScheduledCommitsProcessorImpl,
-    ScheduledCommitsProcessor,
-};
+use magicblock_accounts::scheduled_commits_processor::ScheduledCommitsProcessorImpl;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
     initialize_aperture,
@@ -1081,25 +1078,32 @@ impl MagicValidator {
         self.start_unregister_validator_on_chain().await;
         self.exit.store(true, Ordering::Relaxed);
 
-        // Ordering is important here
-        // Commitor service shall be stopped last
-        self.token.cancel();
+        if let Some(handle) = self.slot_ticker.take() {
+            let step_start = Instant::now();
+            let _ = handle.await;
+            log_timing("shutdown", "slot_ticker_join", step_start);
+        }
+
+        if let Some(ref committor_service) = self.committor_service {
+            let step_start = Instant::now();
+            committor_service.stop();
+            committor_service.stopped().await;
+            log_timing("shutdown", "committor_service_stop", step_start);
+        }
+
         if let Some(ref scheduled_commits_processor) =
             self.scheduled_commits_processor
         {
             let step_start = Instant::now();
-            scheduled_commits_processor.stop();
+            scheduled_commits_processor.shutdown().await;
             log_timing(
                 "shutdown",
-                "scheduled_commits_processor_stop",
+                "scheduled_commits_processor_shutdown",
                 step_start,
             );
         }
-        if let Some(ref committor_service) = self.committor_service {
-            let step_start = Instant::now();
-            committor_service.stop();
-            log_timing("shutdown", "committor_service_stop", step_start);
-        }
+
+        self.token.cancel();
 
         let step_start = Instant::now();
         self.claim_fees_task.stop().await;
@@ -1108,11 +1112,6 @@ impl MagicValidator {
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
-        if let Some(handle) = self.slot_ticker {
-            let step_start = Instant::now();
-            let _ = handle.await;
-            log_timing("shutdown", "slot_ticker_join", step_start);
-        }
         let step_start = Instant::now();
         if let Err(err) = self.ledger_truncator.join() {
             error!(error = ?err, "Ledger truncator did not gracefully exit");

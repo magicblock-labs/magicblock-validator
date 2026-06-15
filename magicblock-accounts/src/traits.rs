@@ -13,6 +13,9 @@ pub trait ScheduledCommitsProcessor: Send + Sync + 'static {
     /// Clears all scheduled commits
     fn clear_scheduled_commits(&self);
 
-    /// Stop processor
+    /// Signals the processor to stop accepting new work
     fn stop(&self);
+
+    /// Waits until in-flight commit results have been processed
+    async fn shutdown(&self);
 }
