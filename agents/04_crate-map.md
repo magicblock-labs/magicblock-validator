@@ -54,7 +54,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
 | `magicblock-program` | Magic Program implementation (`programs/magicblock`). | chainlink, core, magic-program API, test-kit | account-cloner, accounts, API, committor, processor, task scheduler, admin | Implements scheduling, cloning, ephemeral accounts, validator-only operations. |
-| `magicblock-magic-program-api` | Shared Magic Program instruction, PDA, args, and compatibility types. | none | core, accounts-db, chainlink, processor, magic program, services, cloner, API, test programs | Use this instead of duplicating Magic Program wire types. |
+| `magicblock-magic-program-api` | Shared Magic Program instruction, PDA, args, and compatibility types. | none | core, accounts-db, chainlink, processor, magic program, services, cloner, API, test programs | Use this instead of duplicating Magic Program wire types; see `agents/crates/magicblock-magic-program-api.md` before changing this crate. |
 | `guinea` | Test-only program for validator behavior. | `magicblock-magic-program-api` | processor tests, test-kit | Used to exercise ephemeral/delegated behavior in tests. |
 
 ## Scheduling, replication, services, and observability
