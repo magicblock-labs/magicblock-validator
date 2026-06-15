@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
@@ -8,20 +8,30 @@ use magicblock_program::{
 };
 use solana_keypair::Keypair;
 use solana_signature::Signature;
+use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
-        task_info_fetcher::TaskInfoFetcher,
+        strategy_executor::{
+            two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
+            utils::{execute_with_timeout, FinalizeStage},
+        },
+        task_info_fetcher::{ResetType, TaskInfoFetcher},
+        utils::{build_commit_finalize_tasks, execute_two_stage_flow},
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
     outbox_client::OutboxClient,
-    tasks::task_strategist::TransactionStrategy,
+    tasks::{
+        task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_strategist::{
+            TaskStrategist, TransactionStrategy, TwoStageExecutionMode,
+        },
+    },
     transaction_preparator::TransactionPreparator,
 };
-use crate::intent_executor::task_info_fetcher::ResetType;
 
 pub struct TwoStageIntentExecutor<T, F, A, O> {
     authority: Keypair,
@@ -58,19 +68,59 @@ where
             stage,
             ctx,
 
+            // TODO(edwin): deduce started_at properly
             started_at: Instant::now(),
             junk: vec![],
             close_buffers: true,
         }
     }
 
+    fn time_left(&self) -> Option<Duration> {
+        self.ctx
+            .actions_timeout
+            .checked_sub(self.started_at.elapsed())
+    }
+
     async fn execute_committing_intent(
         &mut self,
-        intent: ScheduledIntentBundle,
+        intent_bundle: ScheduledIntentBundle,
         pending_signature: Signature,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        todo!()
+        // This stage was chosen prior so we build tasks for it
+        // Build tasks for commit & finalize stages
+        let (commit_tasks, finalize_tasks) = build_commit_finalize_tasks(
+            &intent_bundle,
+            &self.ctx.task_info_fetcher,
+        )
+        .await?;
+
+        // As strategy was chosen build two stage
+        let TwoStageExecutionMode {
+            commit_stage,
+            finalize_stage,
+        } = TaskStrategist::build_two_stage(
+            commit_tasks,
+            finalize_tasks,
+            &self.authority.pubkey(),
+        )?;
+
+        let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
+        let state = Initialized::new(
+            commit_stage,
+            finalize_stage,
+            Some(pending_signature),
+        );
+        execute_two_stage_flow(
+            &self.ctx,
+            state,
+            &self.authority,
+            intent_bundle.id,
+            &committed_pubkeys,
+            execution_report,
+            || self.time_left(),
+        )
+        .await
     }
 
     async fn execute_finalizing_intent(
@@ -80,8 +130,50 @@ where
         pending_finalize_signature: Signature,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        // Commit succeeded so we skip those tasks all together
+        let finalize_tasks = TaskBuilderImpl::finalize_tasks(
+            &self.ctx.task_info_fetcher,
+            &intent,
+        )
+        .await?;
 
-        todo!()
+        // Build strategy for finalize tasks
+        let finalize_strategy = TaskStrategist::build_strategy(
+            finalize_tasks,
+            &self.authority.pubkey(),
+        )?;
+
+        let committed_state = Committed::new(
+            commit_signature,
+            finalize_strategy,
+            Some(pending_finalize_signature),
+        );
+        let mut finalize_strategy_executor =
+            TwoStageStrategyExecutor::committed(
+                committed_state,
+                self.authority.insecure_clone(),
+                intent.id,
+                self.ctx.intent_client.clone(),
+                self.ctx.outbox_client.clone(),
+                self.ctx.actions_callback_executor.clone(),
+                execution_report,
+            );
+
+        let finalize_signature = execute_with_timeout(
+            self.time_left(),
+            FinalizeStage {
+                inner: &mut finalize_strategy_executor,
+                transaction_preparator: &self.ctx.transaction_preparator,
+            },
+        )
+        .await?;
+
+        let finalized_stage =
+            finalize_strategy_executor.done(finalize_signature);
+        Ok(ExecutionOutput::TwoStage {
+            commit_signature: finalized_stage.commit_signature,
+            finalize_signature: finalized_stage.finalize_signature,
+        })
     }
 }
 
@@ -98,6 +190,8 @@ where
         mut self: Box<Self>,
         intent: ScheduledIntentBundle,
     ) -> (IntentExecutionResult, CleanupHandle<T>) {
+        // TODO(edwin): see if can be extracted into single utils
+        // Duplicates AcceptedIntentExecutor::execute
         let is_undelegate = intent.has_undelegate_intent();
         // TODO(edwin): should validate non emptiness of pubkeys? Shouldn't be possible tho
         let pubkeys = intent.get_all_committed_pubkeys();
@@ -105,16 +199,23 @@ where
         let mut execution_report = IntentExecutionReport::default();
         let result = match &self.stage {
             TwoStageProgress::Committing(signature) => {
-                self.execute_committing_intent(intent, *signature, &mut execution_report).await
+                self.execute_committing_intent(
+                    intent,
+                    *signature,
+                    &mut execution_report,
+                )
+                .await
             }
-            TwoStageProgress::Finalizing {
-                commit,
-                finalize
-            } => {
-                self.execute_finalizing_intent(intent, *commit, *finalize, &mut execution_report).await
+            TwoStageProgress::Finalizing { commit, finalize } => {
+                self.execute_finalizing_intent(
+                    intent,
+                    *commit,
+                    *finalize,
+                    &mut execution_report,
+                )
+                .await
             }
         };
-
 
         if is_undelegate {
             self.ctx
@@ -122,6 +223,20 @@ where
                 .reset(ResetType::Specific(&pubkeys));
         }
 
-        todo!()
+        self.close_buffers = result.is_ok();
+        self.junk = execution_report.junk;
+        let result = IntentExecutionResult {
+            inner: result,
+            patched_errors: execution_report.patched_errors,
+            callbacks_report: execution_report.callbacks_report,
+        };
+        let cleanup_handle = CleanupHandle::new(
+            self.authority,
+            self.junk,
+            self.close_buffers,
+            self.ctx.transaction_preparator,
+        );
+
+        (result, cleanup_handle)
     }
 }

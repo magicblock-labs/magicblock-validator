@@ -18,13 +18,18 @@ use crate::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
         cleanup_handle::CleanupHandle,
-        error::IntentExecutorError,
+        error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
-        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
-        IntentExecutionResult, IntentExecutor, IntentExecutorCtx,
+        task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
+        utils::build_commit_finalize_tasks,
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
+        IntentExecutor, IntentExecutorCtx,
     },
     outbox_client::OutboxClient,
-    tasks::task_strategist::TransactionStrategy,
+    tasks::{
+        task_strategist::{TaskStrategist, TransactionStrategy},
+        TaskBuilderImpl,
+    },
     transaction_preparator::TransactionPreparator,
 };
 
@@ -68,6 +73,29 @@ where
             close_buffers: true,
         }
     }
+
+    pub async fn execute_inner(
+        &mut self,
+        intent_bundle: ScheduledIntentBundle,
+        execution_report: &mut IntentExecutionReport,
+    ) -> IntentExecutorResult<ExecutionOutput> {
+        // It we're here so previous run determined this should
+        let (commit_tasks, finalize_tasks) = build_commit_finalize_tasks(
+            &intent_bundle,
+            &self.ctx.task_info_fetcher,
+        )
+        .await?;
+
+        let single_stage_tasks = [commit_tasks, finalize_tasks].concat();
+        let transaction_strategy = TaskStrategist::build_strategy(
+            single_stage_tasks,
+            &self.authority.pubkey(),
+        )?;
+
+
+
+        todo!()
+    }
 }
 
 #[async_trait]
@@ -83,6 +111,47 @@ where
         mut self: Box<Self>,
         base_intent: ScheduledIntentBundle,
     ) -> (IntentExecutionResult, CleanupHandle<T>) {
-        todo!()
+        self.started_at = Instant::now();
+        let is_undelegate = base_intent.has_undelegate_intent();
+        let pubkeys = base_intent.get_all_committed_pubkeys();
+
+        let mut execution_report = IntentExecutionReport::default();
+        let result =
+            self.execute_inner(base_intent, &mut execution_report).await;
+        if !pubkeys.is_empty() {
+            // Reset TaskInfoFetcher, as cache could become invalid
+            // NOTE: if undelegation was removed - we still reset
+            // We assume its safe since all consecutive commits will fail
+            if result.is_err() || is_undelegate {
+                self.ctx
+                    .task_info_fetcher
+                    .reset(ResetType::Specific(&pubkeys));
+            }
+        }
+
+        // Gather metrics in separate task
+        let intent_client = self.ctx.intent_client.clone();
+        let result = result.inspect(|output| {
+            let output_copy = *output;
+            tokio::spawn(async move {
+                intent_client.intent_metrics(output_copy).await
+            });
+        });
+
+        self.close_buffers = result.is_ok();
+        self.junk = execution_report.junk;
+        let result = IntentExecutionResult {
+            inner: result,
+            patched_errors: execution_report.patched_errors,
+            callbacks_report: execution_report.callbacks_report,
+        };
+        let cleanup_handle = CleanupHandle::new(
+            self.authority,
+            self.junk,
+            self.close_buffers,
+            self.ctx.transaction_preparator,
+        );
+
+        (result, cleanup_handle)
     }
 }

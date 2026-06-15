@@ -93,21 +93,32 @@ impl TransactionStrategy {
 
 pub enum StrategyExecutionMode {
     SingleStage(TransactionStrategy),
-    TwoStage {
-        commit_stage: TransactionStrategy,
-        finalize_stage: TransactionStrategy,
-    },
+    TwoStage(TwoStageExecutionMode),
 }
 
 impl StrategyExecutionMode {
     pub fn uses_alts(&self) -> bool {
         match self {
             Self::SingleStage(value) => value.uses_alts(),
-            Self::TwoStage {
-                commit_stage,
-                finalize_stage,
-            } => commit_stage.uses_alts() || finalize_stage.uses_alts(),
+            Self::TwoStage(value) => value.uses_alts(),
         }
+    }
+}
+
+pub struct TwoStageExecutionMode {
+    commit_stage: TransactionStrategy,
+    finalize_stage: TransactionStrategy,
+}
+
+impl TwoStageExecutionMode {
+    pub fn uses_alts(&self) -> bool {
+        self.commit_stage.uses_alts() || self.finalize_stage.uses_alts()
+    }
+}
+
+impl From<TwoStageExecutionMode> for StrategyExecutionMode {
+    fn from(value: TwoStageExecutionMode) -> Self {
+        Self::TwoStage(value)
     }
 }
 
@@ -136,7 +147,8 @@ impl TaskStrategist {
                 commit_tasks,
                 finalize_tasks,
                 authority,
-            );
+            )
+            .map(Into::into);
         }
 
         // Clone tasks since strategies applied to united case maybe suboptimal for regular one
@@ -153,7 +165,8 @@ impl TaskStrategist {
                         commit_tasks,
                         finalize_tasks,
                         authority,
-                    );
+                    )
+                    .map(Into::into);
                 }
                 Err(TaskStrategistError::SignerError(err)) => {
                     return Err(err.into())
@@ -173,7 +186,7 @@ impl TaskStrategist {
         if two_stage.uses_alts() {
             Ok(single_stage_strategy)
         } else {
-            Ok(two_stage)
+            Ok(two_stage.into())
         }
     }
 
@@ -181,7 +194,7 @@ impl TaskStrategist {
         commit_tasks: Vec<BaseTaskImpl>,
         finalize_tasks: Vec<BaseTaskImpl>,
         authority: &Pubkey,
-    ) -> TaskStrategistResult<StrategyExecutionMode> {
+    ) -> TaskStrategistResult<TwoStageExecutionMode> {
         // Build strategy for Commit stage
         let commit_strategy =
             TaskStrategist::build_strategy(commit_tasks, authority)?;
@@ -190,7 +203,7 @@ impl TaskStrategist {
         let finalize_strategy =
             TaskStrategist::build_strategy(finalize_tasks, authority)?;
 
-        Ok(StrategyExecutionMode::TwoStage {
+        Ok(TwoStageExecutionMode {
             commit_stage: commit_strategy,
             finalize_stage: finalize_strategy,
         })

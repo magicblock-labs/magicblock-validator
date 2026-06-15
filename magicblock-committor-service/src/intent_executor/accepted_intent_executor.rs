@@ -22,13 +22,13 @@ use crate::{
         intent_execution_client::IntentExecutionClient,
         strategy_executor::{
             single_stage::SingleStageStrategyExecutor,
-            two_stage::{Initialized, TwoStageStrategyExecutor},
+            two_stage::Initialized,
             utils::{
-                execute_with_timeout, handle_cpi_limit_error, CommitStage,
-                FinalizeStage, SingleStage,
+                execute_with_timeout, handle_cpi_limit_error, SingleStage,
             },
         },
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
+        utils::{build_commit_finalize_tasks, execute_two_stage_flow},
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
@@ -37,6 +37,7 @@ use crate::{
         task_builder::TasksBuilder,
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
+            TwoStageExecutionMode,
         },
         TaskBuilderImpl,
     },
@@ -113,20 +114,11 @@ where
         };
 
         // Build tasks for commit & finalize stages
-        let (commit_tasks, finalize_tasks) = {
-            let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
-                &self.ctx.task_info_fetcher,
-                &intent_bundle,
-            );
-            let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
-                &self.ctx.task_info_fetcher,
-                &intent_bundle,
-            );
-            let (commit_tasks, finalize_tasks) =
-                join(commit_tasks_fut, finalize_tasks_fut).await;
-
-            (commit_tasks?, finalize_tasks?)
-        };
+        let (commit_tasks, finalize_tasks) = build_commit_finalize_tasks(
+            &intent_bundle,
+            &self.ctx.task_info_fetcher,
+        )
+        .await?;
 
         // Build execution strategy
         match TaskStrategist::build_execution_strategy(
@@ -143,10 +135,10 @@ where
                 )
                 .await
             }
-            StrategyExecutionMode::TwoStage {
+            StrategyExecutionMode::TwoStage(TwoStageExecutionMode {
                 commit_stage,
                 finalize_stage,
-            } => {
+            }) => {
                 trace!("Two stage execution");
                 self.two_stage_execution_flow(
                     intent_bundle.id,
@@ -249,42 +241,16 @@ where
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let state = Initialized::new(commit_strategy, finalize_strategy, None);
-        let mut executor = TwoStageStrategyExecutor::new(
+        execute_two_stage_flow(
+            &self.ctx,
             state,
-            self.authority.insecure_clone(),
+            &self.authority,
             intent_id,
-            self.ctx.intent_client.clone(),
-            self.ctx.outbox_client.clone(),
-            self.ctx.actions_callback_executor.clone(),
+            committed_pubkeys,
             execution_report,
-        );
-
-        let commit_signature = execute_with_timeout(
-            self.time_left(),
-            CommitStage {
-                inner: &mut executor,
-                transaction_preparator: &self.ctx.transaction_preparator,
-                task_info_fetcher: &self.ctx.task_info_fetcher,
-                committed_pubkeys,
-            },
+            || self.time_left(),
         )
-        .await?;
-
-        let mut finalize_executor = executor.done(commit_signature);
-        let finalize_signature = execute_with_timeout(
-            self.time_left(),
-            FinalizeStage {
-                inner: &mut finalize_executor,
-                transaction_preparator: &self.ctx.transaction_preparator,
-            },
-        )
-        .await?;
-
-        let finalized_stage = finalize_executor.done(finalize_signature);
-        Ok(ExecutionOutput::TwoStage {
-            commit_signature: finalized_stage.commit_signature,
-            finalize_signature: finalized_stage.finalize_signature,
-        })
+        .await
     }
 }
 
