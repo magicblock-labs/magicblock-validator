@@ -870,6 +870,11 @@ mod tests {
                 assert_eq!(executor_pubkey, pubkey);
                 assert_eq!(executor_actions, actions);
             }
+            PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                ..
+            } => {
+                panic!("expected schedule undelegation instruction")
+            }
         }
     }
 
@@ -915,6 +920,11 @@ mod tests {
             } => {
                 assert_eq!(executor_pubkey, pubkey);
                 assert_eq!(executor_actions, actions);
+            }
+            PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                ..
+            } => {
+                panic!("expected schedule undelegation instruction")
             }
         }
     }
