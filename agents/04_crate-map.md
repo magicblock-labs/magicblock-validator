@@ -70,7 +70,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `test-kit` | Shared integration/unit test helpers. | guinea, accounts-db, core, ledger, processor | aperture, committor, ledger, processor, magic program tests | Put reusable test harness logic here. |
+| `test-kit` | Shared integration/unit test helpers. | guinea, accounts-db, core, ledger, processor | aperture, committor, ledger, processor, magic program tests | Put reusable test harness logic here; see `agents/crates/test-kit.md` before changing this crate. |
 | `genx` | Developer/tooling binary. | `magicblock-accounts-db` | manual/tooling use | Keep outside runtime-critical paths. |
 | `ledger-stats` | Ledger/accounts statistics tool. | accounts-db, core, ledger | manual/tooling use | Useful for inspecting local persisted state. |
 | `keypair-base58` | Keypair conversion/helper binary. | none | manual/tooling use | Small standalone operator/dev helper. |
