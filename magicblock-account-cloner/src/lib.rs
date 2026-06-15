@@ -215,9 +215,8 @@ impl ChainlinkCloner {
     }
 
     fn schedule_undelegation_ix(pubkey: Pubkey) -> Instruction {
-        InstructionUtils::schedule_commit_and_undelegate_instruction(
-            &validator_authority_id(),
-            vec![pubkey],
+        InstructionUtils::schedule_cloned_account_undelegation_instruction(
+            pubkey,
         )
     }
 
@@ -247,11 +246,16 @@ impl ChainlinkCloner {
         let fields = Self::clone_fields(request);
         let actions: Vec<Instruction> =
             request.delegation_actions.clone().into();
+        let clone_actions = if request.needs_undelegation {
+            Vec::new()
+        } else {
+            actions.clone()
+        };
         let clone_ix = Self::clone_ix(
             request.pubkey,
             request.account.data().to_vec(),
             fields,
-            actions.clone(),
+            clone_actions,
         );
 
         // TODO(#625): Re-enable frequency commits when proper limits are in place:
@@ -323,6 +327,11 @@ impl ChainlinkCloner {
 
         let actions: Vec<Instruction> =
             request.delegation_actions.clone().into();
+        let clone_actions = if request.needs_undelegation {
+            Vec::new()
+        } else {
+            actions.clone()
+        };
 
         // Continue txs for remaining chunks
         let mut offset = MAX_INLINE_DATA_SIZE;
@@ -350,7 +359,7 @@ impl ChainlinkCloner {
                 data.len() as u32,
                 Vec::new(),
                 true,
-                actions.clone(),
+                clone_actions,
             );
             let ix = if request.needs_undelegation {
                 Self::schedule_undelegation_ix(request.pubkey)

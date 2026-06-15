@@ -34,6 +34,10 @@ pub fn main() {
         return;
     };
 
+    let Ok(aml_output) = run_aml_tests(&manifest_dir, &config) else {
+        return;
+    };
+
     let Ok(cloning_output) = run_cloning_tests(&manifest_dir, &config) else {
         return;
     };
@@ -82,6 +86,7 @@ pub fn main() {
     assert_cargo_tests_passed(security_output, "security");
     assert_cargo_tests_passed(scenarios_output, "scenarios");
     assert_cargo_tests_passed(chainlink_output, "chainlink");
+    assert_cargo_tests_passed(aml_output, "aml");
     assert_cargo_tests_passed(cloning_output, "cloning");
     assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
     assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
@@ -211,6 +216,54 @@ fn run_chainlink_tests(
                 return Err(err.into());
             }
         };
+        cleanup_devnet_only(&mut devnet_validator);
+        Ok(output)
+    } else {
+        let devnet_validator =
+            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        wait_for_ctrlc(devnet_validator, None, success_output())
+    }
+}
+
+fn run_aml_tests(
+    manifest_dir: &str,
+    config: &TestConfigViaEnvVars,
+) -> Result<Output, Box<dyn Error>> {
+    const TEST_NAME: &str = "aml";
+    if config.skip_entirely(TEST_NAME) {
+        return Ok(success_output());
+    }
+
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
+    let start_devnet_validator = || match start_validator(
+        "aml.devnet.toml",
+        ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+
+    if config.run_test(TEST_NAME) {
+        eprintln!("======== Starting DEVNET Validator for AML ========");
+        let mut devnet_validator = start_devnet_validator();
+
+        eprintln!("======== RUNNING AML TESTS ========");
+        let test_aml_dir = format!("{}/../{}", manifest_dir, "test-aml");
+        eprintln!("Running AML tests in {}", test_aml_dir);
+        let output = match run_test(test_aml_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run AML tests: {:?}", err);
+                cleanup_devnet_only(&mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+
         cleanup_devnet_only(&mut devnet_validator);
         Ok(output)
     } else {

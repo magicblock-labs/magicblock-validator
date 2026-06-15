@@ -10,6 +10,7 @@ members = [
     "schedulecommit/test-security",
     "test-chainlink",
     "test-cloning",
+    "test-aml",
     "test-committor-service",
     "test-config",
     "test-ledger-restore",
@@ -36,8 +37,7 @@ chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "ccfc9f924dc40", default-features = false, features = [
-    "disable-realloc",
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "cd3be977f402f3438ee920c959f7f7a5e02101f8", default-features = false, features = [
     "modular-sdk",
 ] }
 futures = "0.3.31"

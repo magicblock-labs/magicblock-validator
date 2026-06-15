@@ -14,3 +14,4 @@ path = "bin/run_tests.rs"
 ctrlc = { workspace = true }
 integration-test-tools = { workspace = true }
 teepee = { workspace = true }
+tempfile = { workspace = true }

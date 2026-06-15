@@ -490,6 +490,26 @@ impl InstructionUtils {
         )
     }
 
+    pub fn schedule_cloned_account_undelegation_instruction(
+        cloned_account_pubkey: Pubkey,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
+            &PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                cloned_account_pubkey,
+            },
+            vec![
+                AccountMeta::new_readonly(validator_authority_id(), true),
+                AccountMeta::new_readonly(cloned_account_pubkey, false),
+                AccountMeta::new_readonly(
+                    solana_sdk_ids::sysvar::instructions::id(),
+                    false,
+                ),
+                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            ],
+        )
+    }
+
     pub fn cleanup_partial_clone_instruction(pubkey: Pubkey) -> Instruction {
         Instruction::new_with_bincode(
             crate::id(),
