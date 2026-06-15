@@ -12,7 +12,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 | `magicblock-api` | Top-level service orchestration and `MagicValidator` implementation. | accounts, aperture, chainlink, committor, config, core, ledger, processor, replicator, task scheduler, admin/services | `magicblock-validator` | Owns startup/shutdown wiring for most services; see `agents/crates/magicblock-api.md` before changing this crate. |
 | `magicblock-config` | Validator configuration model and layered config loading. | none | Most service crates | CLI/env/TOML/default config source; see `agents/crates/magicblock-config.md` before changing configurable behavior. |
 | `magicblock-core` | Shared channels, traits, account locks/helpers, intent/core types. | `magicblock-magic-program-api` | Most runtime crates | Central wiring layer; changes can affect scheduler, RPC, ledger, services, replication. See `agents/crates/magicblock-core.md` before changing this crate. |
-| `magicblock-version` | Build/version metadata. | none | `magicblock-validator`, `magicblock-aperture` | Keep version reporting stable for RPC/operator tooling. |
+| `magicblock-version` | Build/version metadata. | none | `magicblock-validator`, `magicblock-aperture` | Keep version reporting stable for RPC/operator tooling; see `agents/crates/magicblock-version.md` before changing this crate. |
 
 ## RPC, API, and operator-facing crates
 
