@@ -36,7 +36,8 @@ use crate::remote_account_provider::{
     chain_slot::ChainSlot,
     pubsub_common::{
         is_internal_dlp_account_data, ChainPubsubActorMessage,
-        MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        SubscriptionSource, MESSAGE_CHANNEL_SIZE,
+        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     RemoteAccountProviderError, RemoteAccountProviderResult,
     SubscriptionUpdate,
@@ -737,10 +738,15 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             executable: account.executable,
             rent_epoch: account.rent_epoch,
         };
+        let subscription_source = match source {
+            AccountUpdateSource::Account => SubscriptionSource::Account,
+            AccountUpdateSource::Program => SubscriptionSource::Program,
+        };
         let subscription_update = SubscriptionUpdate {
             pubkey,
             slot,
             account: Some(account),
+            source: subscription_source,
         };
 
         if pubkey != clock::ID {
