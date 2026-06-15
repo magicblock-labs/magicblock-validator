@@ -61,7 +61,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `magicblock-task-scheduler` | Program-scheduled task/crank service. | config, core, ledger, magic program | `magicblock-api` | SQLite-backed delay queue, retries/backoff, scheduled transaction submission. |
+| `magicblock-task-scheduler` | Program-scheduled task/crank service. | config, core, ledger, magic program | `magicblock-api` | SQLite-backed delay queue, retries/backoff, scheduled transaction submission. See `agents/crates/magicblock-task-scheduler.md` before changing this crate. |
 | `magicblock-replicator` | Primary/replica event replication over NATS JetStream. | accounts-db, config, core, ledger | `magicblock-api` | Preserves HA/replica replay behavior; primary and replica modes differ intentionally. |
 | `magicblock-services` | Shared service utilities/adapters. | core, magic-program API | `magicblock-api` | Common service abstractions; keep generic. See `agents/crates/magicblock-services.md` before changing this crate. |
 | `magicblock-metrics` | Metrics helpers and instrumentation. | none | RPC, ledger, processor, chainlink, committor, table-mania, API | Prefer adding observability here rather than ad-hoc metrics code. See `agents/crates/magicblock-metrics.md` before changing this crate. |
