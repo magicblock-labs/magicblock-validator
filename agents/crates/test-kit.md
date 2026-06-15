@@ -277,16 +277,16 @@ For changes to this crate:
 
 ```bash
 cargo fmt
-cargo test -p test-kit
+cargo nextest run -p test-kit
 ```
 
 Because `test-kit` has no meaningful standalone tests today, also run the smallest consumer suite affected by the change. Common targeted choices:
 
 ```bash
-cargo test -p magicblock-processor
-cargo test -p magicblock-ledger
-cargo test -p magicblock-aperture
-cargo test -p magicblock-committor-service
+cargo nextest run -p magicblock-processor
+cargo nextest run -p magicblock-ledger
+cargo nextest run -p magicblock-aperture
+cargo nextest run -p magicblock-committor-service
 ```
 
 For integration-test helper or logging changes, run the relevant integration suite from `test-integration/`, for example:

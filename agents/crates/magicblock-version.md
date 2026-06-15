@@ -224,14 +224,14 @@ For changes to `magicblock-version` itself, run:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-version
+cargo nextest run -p magicblock-version
 ```
 
 For RPC-visible changes, also run the relevant Aperture tests:
 
 ```bash
-cargo test -p magicblock-aperture --test node test_get_version
-cargo test -p magicblock-aperture --test batches test_batch_requests
+cargo nextest run -p magicblock-aperture --test node test_get_version
+cargo nextest run -p magicblock-aperture --test batches test_batch_requests
 ```
 
 Before handing off Rust behavior changes, follow the broader baseline from `agents/05_testing-and-validation.md` when time allows:

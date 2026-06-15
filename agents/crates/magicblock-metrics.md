@@ -515,14 +515,14 @@ Minimum targeted commands for Rust changes in `magicblock-metrics`:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-metrics
+cargo nextest run -p magicblock-metrics
 ```
 
 For configuration/startup changes involving the metrics config or service startup, also run targeted config/API tests where practical:
 
 ```bash
-cargo test -p magicblock-config metrics
-cargo test -p magicblock-api
+cargo nextest run -p magicblock-config metrics
+cargo nextest run -p magicblock-api
 ```
 
 For broader validation, use the repository baseline from `agents/05_testing-and-validation.md`:

@@ -317,7 +317,6 @@ For Rust/source changes in `magicblock-config`, run targeted checks first:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-config
 cargo clippy -p magicblock-config --all-targets -- -D warnings
 cargo nextest run -p magicblock-config
 ```

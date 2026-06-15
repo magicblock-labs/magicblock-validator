@@ -337,7 +337,6 @@ For Rust changes in this crate, run at minimum:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-account-cloner
 cargo clippy -p magicblock-account-cloner --all-targets -- -D warnings
 cargo nextest run -p magicblock-account-cloner
 ```
@@ -345,7 +344,6 @@ cargo nextest run -p magicblock-account-cloner
 For changes affecting Chainlink request construction or account availability, also run focused Chainlink checks:
 
 ```bash
-cargo test -p magicblock-chainlink
 cargo nextest run -p magicblock-chainlink
 ```
 

@@ -354,7 +354,6 @@ For Rust changes in this crate, run targeted checks first:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-accounts
 cargo clippy -p magicblock-accounts --all-targets -- -D warnings
 cargo nextest run -p magicblock-accounts
 ```
@@ -362,8 +361,8 @@ cargo nextest run -p magicblock-accounts
 For changes that affect scheduled commits, pending recovery, or undelegation, also run relevant adjacent checks when practical:
 
 ```bash
-cargo test -p magicblock-api
-cargo test -p magicblock-program process_schedule_commit
+cargo nextest run -p magicblock-api
+cargo nextest run -p magicblock-program process_schedule_commit
 cargo nextest run -p magicblock-committor-service
 ```
 

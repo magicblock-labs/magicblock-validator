@@ -419,7 +419,6 @@ Minimum targeted checks for `magicblock-aperture` Rust changes:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-aperture
 cargo clippy -p magicblock-aperture --all-targets -- -D warnings
 cargo nextest run -p magicblock-aperture
 ```
@@ -427,11 +426,11 @@ cargo nextest run -p magicblock-aperture
 Useful targeted tests by area:
 
 ```bash
-cargo test -p magicblock-aperture --test accounts
-cargo test -p magicblock-aperture --test transactions
-cargo test -p magicblock-aperture --test transaction_primary_mode
-cargo test -p magicblock-aperture --test websocket
-cargo test -p magicblock-aperture transaction_validation
+cargo nextest run -p magicblock-aperture --test accounts
+cargo nextest run -p magicblock-aperture --test transactions
+cargo nextest run -p magicblock-aperture --test transaction_primary_mode
+cargo nextest run -p magicblock-aperture --test websocket
+cargo nextest run -p magicblock-aperture transaction_validation
 ```
 
 Integration checks for validator-level behavior:

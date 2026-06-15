@@ -454,7 +454,7 @@ Minimum targeted commands:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-chainlink
+cargo nextest run -p magicblock-chainlink
 ```
 
 For broader validation, use the repository baseline:

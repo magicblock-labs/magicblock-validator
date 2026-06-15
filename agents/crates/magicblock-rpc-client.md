@@ -314,7 +314,7 @@ For code changes in this crate, run targeted checks first:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-rpc-client
+cargo nextest run -p magicblock-rpc-client
 ```
 
 For confirmation, committor, or lookup-table behavior changes, also run the relevant integration suites when practical:

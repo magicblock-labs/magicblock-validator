@@ -205,14 +205,14 @@ For Rust changes in this crate, run at least:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-validator-admin
+cargo nextest run -p magicblock-validator-admin
 ```
 
 For lifecycle or config integration changes, also run relevant API/config tests:
 
 ```bash
-cargo test -p magicblock-api
-cargo test -p magicblock-config claim_fees
+cargo nextest run -p magicblock-api
+cargo nextest run -p magicblock-config claim_fees
 ```
 
 For end-to-end fee-claim behavior, use the MagicBlock API integration suite or the specific test when the devnet validator harness is available:

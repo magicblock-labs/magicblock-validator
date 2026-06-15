@@ -252,13 +252,13 @@ For code changes in this crate, run targeted unit tests first:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-task-scheduler
+cargo nextest run -p magicblock-task-scheduler
 ```
 
 For config changes, also run:
 
 ```bash
-cargo test -p magicblock-config task_scheduler
+cargo nextest run -p magicblock-config task_scheduler
 ```
 
 For runtime behavior changes, run the integration suite that starts validators:
@@ -273,7 +273,7 @@ For isolated debugging, use the workflow in `agents/05_testing-and-validation.md
 ```bash
 cd test-integration
 make setup-task-scheduler-devnet
-# in another terminal, run a focused cargo test in test-task-scheduler
+# in another terminal, run a focused cargo nextest command in test-task-scheduler
 ```
 
 Before handing off Rust changes, run the broader baseline when practical:

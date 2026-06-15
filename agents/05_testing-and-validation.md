@@ -16,6 +16,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo nextest run --workspace
 ```
 
+Run tests with `cargo nextest`. If `nextest` is not available in the environment, fall back to `cargo test` for the same scope (for example `cargo test --workspace`). This is the single source of truth for that choice; other sections assume it.
+
 For small or targeted changes, run the smallest relevant test first, then run the broader checks before handing off if time allows.
 
 For documentation-only changes, at minimum verify the changed files are in the right location and that links/filenames mentioned in `AGENTS.md` and `agents/` stay in sync.
@@ -49,13 +51,11 @@ cargo nextest run --workspace
 Useful targeted forms:
 
 ```bash
-cargo test -p <crate-name>
 cargo nextest run -p <crate-name>
-cargo test -p <crate-name> <test_name> -- --nocapture
 cargo nextest run -p <crate-name> <test_name> --no-capture
 ```
 
-Use `cargo test` when you need libtest flags such as `--exact`, `--test-threads=1`, or when matching the integration runner's behavior exactly.
+`cargo test` and `cargo nextest` both run tests; use one of them rather than both for the same scope. Prefer `cargo nextest` when available. Use `cargo test` when `nextest` is unavailable, when you need libtest flags such as `--exact` or `--test-threads=1`, or when matching the integration runner's behavior exactly.
 
 ## Integration test structure
 
@@ -136,28 +136,7 @@ make list
 
 From terminal B, run the test in the relevant integration crate.
 
-With `cargo test`:
-
-```bash
-cd test-integration
-RUST_LOG=info cargo test -p <test-crate> --test <test_file> <test_name> -- --test-threads=1 --nocapture
-```
-
-Example:
-
-```bash
-cd test-integration
-RUST_LOG=info cargo test -p test-cloning --test 03_get_multiple_accounts <test_name> -- --test-threads=1 --nocapture
-```
-
-Use `--exact` if the filter accidentally matches multiple tests:
-
-```bash
-cd test-integration
-RUST_LOG=info cargo test -p <test-crate> --test <test_file> <exact_test_name> -- --exact --test-threads=1 --nocapture
-```
-
-With `cargo nextest`:
+Prefer `cargo nextest` when available:
 
 ```bash
 cd test-integration
@@ -169,6 +148,13 @@ Or with an exact nextest expression:
 ```bash
 cd test-integration
 RUST_LOG=info cargo nextest run -p <test-crate> --test <test_file> -E 'test(<exact_test_name>)' --no-capture
+```
+
+Use `cargo test` instead when you need libtest-only flags such as `--test-threads=1` or `--exact`:
+
+```bash
+cd test-integration
+RUST_LOG=info cargo test -p <test-crate> --test <test_file> <test_name> -- --test-threads=1 --nocapture
 ```
 
 ### 3. Stop validators

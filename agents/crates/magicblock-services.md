@@ -216,13 +216,13 @@ For Rust changes in `magicblock-services`, run at minimum:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-services
+cargo nextest run -p magicblock-services
 ```
 
 Because this crate has no crate-local tests, callback behavior changes should also run the relevant committor tests, especially suites that exercise action callbacks and timeouts:
 
 ```bash
-cargo test -p magicblock-committor-service
+cargo nextest run -p magicblock-committor-service
 cd test-integration && make test-committor
 ```
 

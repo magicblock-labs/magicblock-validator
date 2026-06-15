@@ -311,7 +311,6 @@ For `magicblock-aml` Rust/source changes, run focused crate checks:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-aml
 cargo clippy -p magicblock-aml --all-targets -- -D warnings
 cargo nextest run -p magicblock-aml
 ```
@@ -319,14 +318,12 @@ cargo nextest run -p magicblock-aml
 When changing `RiskConfig` or config defaults, also run:
 
 ```bash
-cargo test -p magicblock-config
 cargo nextest run -p magicblock-config
 ```
 
 When changing Chainlink call sites or which post-delegation action accounts are checked, also run targeted Chainlink tests, for example:
 
 ```bash
-cargo test -p magicblock-chainlink
 cargo nextest run -p magicblock-chainlink
 ```
 

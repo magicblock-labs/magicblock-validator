@@ -303,7 +303,6 @@ For Rust changes in this crate, run focused checks first:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-api
 cargo clippy -p magicblock-api --all-targets -- -D warnings
 cargo nextest run -p magicblock-api
 ```

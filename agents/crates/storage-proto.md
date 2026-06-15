@@ -217,20 +217,20 @@ For changes to this crate:
 
 ```bash
 cargo fmt
-cargo test -p solana-storage-proto
+cargo nextest run -p solana-storage-proto
 ```
 
 For codegen/schema changes, prefer a clean targeted build/test:
 
 ```bash
 cargo clean -p solana-storage-proto
-cargo test -p solana-storage-proto
+cargo nextest run -p solana-storage-proto
 ```
 
 For ledger persistence or consumer changes, also run:
 
 ```bash
-cargo test -p magicblock-ledger
+cargo nextest run -p magicblock-ledger
 ```
 
 Broader baseline before handing off Rust behavior changes, time permitting:

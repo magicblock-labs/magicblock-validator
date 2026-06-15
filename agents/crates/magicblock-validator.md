@@ -260,7 +260,7 @@ For code changes in this crate, run at minimum:
 cargo fmt
 cargo check -p magicblock-validator --no-default-features
 cargo check -p magicblock-validator --features tui
-cargo test -p magicblock-validator
+cargo nextest run -p magicblock-validator
 ```
 
 If logging or `tokio-console` behavior changes, also check:

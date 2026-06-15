@@ -381,26 +381,26 @@ For code changes in `magicblock-core`, run at minimum:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-core
+cargo nextest run -p magicblock-core
 ```
 
 Because `magicblock-core` has no dedicated crate-local test suite at the time of writing, also run targeted consumer tests for the subsystem touched:
 
 ```bash
 # Transaction scheduling, replay, pause semantics
-cargo test -p magicblock-processor scheduling replay simulation
+cargo nextest run -p magicblock-processor scheduling replay simulation
 
 # RPC transaction mode/LockedAccount consumers
-cargo test -p magicblock-aperture
+cargo nextest run -p magicblock-aperture
 
 # Replication message/order or checksum/reset behavior
-cargo test -p magicblock-replicator
+cargo nextest run -p magicblock-replicator
 
 # Magic Program TLS, commits, callbacks, or token/eATA helpers
-cargo test -p magicblock-program
-cargo test -p magicblock-chainlink
-cargo test -p magicblock-committor-service
-cargo test -p magicblock-task-scheduler
+cargo nextest run -p magicblock-program
+cargo nextest run -p magicblock-chainlink
+cargo nextest run -p magicblock-committor-service
+cargo nextest run -p magicblock-task-scheduler
 ```
 
 Then use the workspace baseline from `agents/05_testing-and-validation.md` when time allows:

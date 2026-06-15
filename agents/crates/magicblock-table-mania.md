@@ -223,7 +223,7 @@ For crate code changes, run targeted unit tests first:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-table-mania
+cargo nextest run -p magicblock-table-mania
 ```
 
 For behavior touching ALTs on a validator, run the integration suite:

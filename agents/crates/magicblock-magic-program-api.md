@@ -227,7 +227,7 @@ Base actions and callbacks carry compact account metas without `is_signer`. User
 
 ### No crate-local tests
 
-This crate currently has no local unit tests. Behavior is validated through consumers (`programs/magicblock`, `magicblock-processor`, services, and integration tests). API changes should therefore include targeted consumer tests, not only `cargo test -p magicblock-magic-program-api`.
+This crate currently has no local unit tests. Behavior is validated through consumers (`programs/magicblock`, `magicblock-processor`, services, and integration tests). API changes should therefore include targeted consumer tests, not only `cargo nextest run -p magicblock-magic-program-api`.
 
 ## Important invariants
 
@@ -341,16 +341,16 @@ For crate changes, minimum targeted checks:
 
 ```bash
 cargo fmt
-cargo test -p magicblock-magic-program-api
-cargo test -p magicblock-magic-program-api --features backward-compat
+cargo nextest run -p magicblock-magic-program-api
+cargo nextest run -p magicblock-magic-program-api --features backward-compat
 ```
 
 Because this crate has no local tests, also run targeted consumer tests for the changed API area:
 
 ```bash
-cargo test -p magicblock-program
-cargo test -p magicblock-processor ephemeral_accounts
-cargo test -p magicblock-processor post_delegation_actions
+cargo nextest run -p magicblock-program
+cargo nextest run -p magicblock-processor ephemeral_accounts
+cargo nextest run -p magicblock-processor post_delegation_actions
 ```
 
 For commit/action/intent changes, prefer integration coverage:
