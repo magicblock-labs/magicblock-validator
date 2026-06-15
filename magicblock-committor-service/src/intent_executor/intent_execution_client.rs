@@ -254,6 +254,9 @@ where
 {
     type ExecutionError = TransactionStrategyExecutionError;
     fn map(&self, error: InternalError) -> Self::ExecutionError {
+        if error.is_transaction_too_large() {
+            return TransactionStrategyExecutionError::TransactionTooLargeError(error);
+        }
         match error {
             InternalError::MagicBlockRpcClientError(err) => {
                 map_magicblock_client_error(
@@ -284,6 +287,9 @@ where
 {
     type ExecutionError = TransactionStrategyExecutionError;
     fn map(&self, error: MagicBlockRpcClientError) -> Self::ExecutionError {
+		if error.is_transaction_too_large() {
+            return TransactionStrategyExecutionError::TransactionTooLargeError(error);
+        }
         map_magicblock_client_error(&self.transaction_error_mapper, error)
     }
 
