@@ -1,6 +1,6 @@
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 
-use magicblock_config::config::AccountsDbConfig;
+use magicblock_config::config::{AccountsDbConfig, BlockSize};
 use magicblock_magic_program_api as magic_program;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
@@ -607,6 +607,46 @@ fn test_defragment_empty_database_is_noop() {
     assert_eq!(env.storage_size(), size_before);
     assert_eq!(env.index.get_deallocations_count(), 0);
     assert_eq!(env.account_count(), 0);
+}
+
+#[test]
+fn test_reopen_shrinks_storage_when_cursor_fits_config_size() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config = AccountsDbConfig::default();
+    let adb = AccountsDb::new(&config, temp_dir.path(), 0).unwrap();
+    let pubkey = Pubkey::new_unique();
+    let account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
+    let storage_path = temp_dir
+        .path()
+        .join("accountsdb")
+        .join("main")
+        .join(ACCOUNTS_DB_FILENAME);
+
+    adb.insert_account(&pubkey, &account).unwrap();
+    let initial_size = std::fs::metadata(&storage_path).unwrap().len();
+    drop(adb);
+
+    let database_size = 16 * 1024 * 1024;
+    let smaller_config = AccountsDbConfig {
+        database_size,
+        ..Default::default()
+    };
+    let reopened = AccountsDb::new(&smaller_config, temp_dir.path(), 0)
+        .expect("reopen with smaller storage config");
+
+    let block_size = BlockSize::Block256 as usize;
+    let expected_size = database_size.div_ceil(block_size) * block_size + 256;
+    assert!(expected_size as u64 > reopened.storage_size());
+    assert_eq!(
+        std::fs::metadata(storage_path).unwrap().len(),
+        expected_size as u64
+    );
+    assert!((expected_size as u64) < initial_size);
+
+    let restored = reopened.get_account(&pubkey).unwrap();
+    assert_eq!(restored.lamports(), account.lamports());
+    assert_eq!(restored.owner(), account.owner());
+    assert_eq!(restored.data(), account.data());
 }
 
 #[test]
