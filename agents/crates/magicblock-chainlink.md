@@ -360,6 +360,12 @@ The remote provider is constructed only when `lifecycle_mode().needs_remote_acco
 
 ## Important invariants
 
+This crate is security-critical: it is the validator's only source of truth about base-layer (Solana) account state, and that truth ultimately governs which funds can move and settle. Keeping local state in sync with the base layer is a security requirement, not just a correctness/performance one (see `agents/01_validator-goals.md` and `agents/02_specification.md`). Under no circumstances may a change make synchronization weaker, less stable, or more permissive than it is today:
+
+- Subscriptions (websocket/gRPC), fetching, delegation-record resolution, slot/`min_context_slot`/commitment handling, and clone-freshness checks must stay at least as strong and stable as now.
+- The validator must never serve or execute against stale, forged, or out-of-sync state, never mark an account delegated without the authority checks below, and never miss base-layer updates that change delegation/undelegation truth.
+- Because subscription/fetch updates are driven by external base-layer events and untrusted submissions, treat the dedup, slot-matching, ordering, LRU-protection, and bounded-capacity logic as security controls against races, stale-overwrite, and resource exhaustion. Do not relax them for performance.
+
 Preserve these invariants when editing this crate:
 
 1. **Never clone DLP-owned state as writable delegated state without a valid delegation record**, except explicitly recognized internal DLP accounts.

@@ -2,6 +2,16 @@
 
 This document captures specification-level behavior that AI agents should understand before modifying the validator. Treat it as a working spec for fixes, not as a complete formal protocol document.
 
+## Security invariants (highest priority)
+
+These invariants override all other behavior described in this document. The validator handles real funds; violating any of them can cause the validator or its customers to lose money. Under no circumstances may a change weaken them.
+
+1. **Signers stay required.** Every signature/authority check that exists today must remain. This includes (non-exhaustively): the MagicContext payer signer on `ScheduleIntentBundle`, the validator-signed `AcceptScheduleCommits`, ephemeral-account create signer (required on create to prevent pubkey squatting), delegation/commit/undelegation authorities, Magic Action escrow authority, and admin/operator entrypoints. Never add an unsigned or weaker-authority path to an operation that is authenticated today.
+2. **Local state stays in sync with the base layer.** Account fetching, websocket/gRPC subscriptions, delegation-record resolution, slot/`min_context_slot` and commitment handling, and clone-freshness checks must remain at least as strong and stable as the current implementation. The validator must not serve or execute against stale, forged, or out-of-sync state, and must not miss base-layer updates that change delegation/undelegation truth.
+3. **No attacker-triggerable conditions.** All RPC and transaction inputs are untrusted and potentially adversarial. Do not introduce race conditions, time-of-check/time-of-use gaps, ordering/timing attacks, validator stalls/deadlocks/hangs, unbounded resource consumption, or any path where one user's input can corrupt state, bypass validation, or affect another user's funds. Existing atomic lock acquisition, deduplication, slot-matching, and bounded capacity are security controls — preserve them.
+
+If a change cannot satisfy all three, do not make it; surface the conflict explicitly. The sections below describe specific mechanisms; read them through the lens of these invariants.
+
 ## Terminology
 
 | Term | Meaning |
@@ -109,6 +119,8 @@ Inside this repository, RPC/router-equivalent paths must preserve the same effec
 
 The transaction scheduler runs on a dedicated OS thread and uses a pool of executor workers. This is a critical performance path: preserve low-latency scheduling, bounded lock contention, and parallel execution for unrelated accounts. Do not add blocking I/O, unbounded work, excessive logging, or avoidable allocation/serialization to scheduler or executor hot paths unless there is no viable alternative, and explicitly document any unavoidable tradeoff.
 
+This path is also security-critical. Atomic, all-or-nothing account lock acquisition (step 3 below) is what prevents concurrent transactions from racing on the same accounts; it must never be relaxed into partial or non-atomic locking. Because untrusted clients drive this loop, also guard against attacker-triggerable stalls and resource exhaustion: keep work bounded, never let one transaction block the scheduler indefinitely, and never let lock release/queueing leave the scheduler deadlocked.
+
 Required behavior:
 
 1. Receive a processable transaction.
@@ -131,7 +143,7 @@ The forked SVM includes MagicBlock-specific access validation after execution:
 
 > Writable accounts must be delegated, ephemeral, or confined, except for explicitly allowed cases such as fee payers, Magic Program instruction allowlists, and special post-delegation action executor patterns.
 
-Any change touching account flags, account loading, SVM commit/rollback, or transaction sanitization must preserve this invariant.
+Any change touching account flags, account loading, SVM commit/rollback, or transaction sanitization must preserve this invariant. This is a security boundary: weakening it would let ordinary (untrusted) ER transactions mutate state they must not touch, which can lose funds. Do not relax it for performance or convenience.
 
 ### Sysvars
 

@@ -8,6 +8,14 @@ Every code change must be validated. Use the `rs-check` skill for Rust changes o
 
 The validator is performance-sensitive. When a change touches critical RPC, account synchronization, scheduler/executor, AccountsDb/ledger, replication, or committor paths, validation should include the smallest available test or measurement that can reveal latency, throughput, contention, allocation, or I/O regressions. If no practical performance validation is run, say so and explain the residual risk.
 
+The validator is also security-critical, and security outranks performance (see `agents/01_validator-goals.md` and `agents/02_specification.md`). Before handing off any change, explicitly verify it does not:
+
+- relax a signer/authority requirement that exists today,
+- weaken base-layer synchronization (account fetching, subscriptions, delegation-record resolution, slot/commitment/freshness handling),
+- introduce an attacker-triggerable condition (race, time-of-check/time-of-use gap, ordering/timing attack, validator stall/deadlock/hang, or unbounded resource consumption).
+
+When a change touches signer/authority checks, account-sync correctness, lock acquisition/ordering, or any path driven by untrusted RPC/transaction input, add or run the test that exercises the security-relevant behavior (for example concurrency/race tests, delegation/sync ordering tests, or auth-rejection tests). If you cannot validate a security-relevant path, say so and call out the residual risk explicitly — do not treat it as low priority.
+
 Until or unless the skill provides a more specific command set, treat the required baseline as:
 
 ```bash
@@ -202,4 +210,5 @@ When finishing a task, include:
 - if skipped, why it was skipped,
 - any remaining risk, especially for integration tests that require validators or long-running suites,
 - any performance-sensitive paths touched and whether performance regression risk was measured, reasoned about, or left unmeasured,
+- any security-relevant paths touched (signer/authority enforcement, base-layer sync, locking/concurrency, untrusted-input handling), confirmation that no security property was weakened, and how that was checked or what residual risk remains,
 - whether agent documentation was updated for any durable discovery, or why no update was needed.
