@@ -11,6 +11,7 @@ A good change preserves:
 1. **Compatibility** — clients and programs should work like normal Solana where the ER model allows it.
 2. **ER correctness** — only accounts that are allowed to change in the ER may change in the ER.
 3. **Settlement safety** — commits, undelegations, and base-layer actions must be explicit, durable, and recoverable.
+4. **Performance** — critical RPC, account synchronization, scheduling, execution, persistence, and settlement paths must remain low-latency and high-throughput.
 
 ## Product goals
 
@@ -23,7 +24,10 @@ Prefer changes that:
 - keep RPC, scheduling, and execution paths lean,
 - avoid blocking critical loops,
 - preserve parallel execution for unrelated accounts,
+- avoid unnecessary allocations, lock contention, I/O, polling, cloning, serialization, and logging in hot paths,
 - maintain clear separation between async service work and CPU-bound transaction execution.
+
+Do not accept performance regressions unless there is no viable alternative. If correctness or safety requires a slower path, document the tradeoff, expected impact, and mitigation in the change handoff.
 
 ### Low-cost user experience
 
@@ -110,4 +114,6 @@ Before finishing a feature, bug fix, or refactor, ask:
 3. Did I preserve commit and undelegation lifecycle behavior?
 4. Did I preserve restart recovery for any pending or persisted work?
 5. Did I avoid blocking critical scheduler/RPC/executor paths?
-6. Did I update the relevant file in `agents/` if behavior changed?
+6. Did I avoid degrading critical-path latency, throughput, memory use, lock contention, and I/O behavior?
+7. If a performance tradeoff was unavoidable, did I explicitly call out why, the expected impact, and mitigation?
+8. Did I update the relevant file in `agents/` if behavior changed?

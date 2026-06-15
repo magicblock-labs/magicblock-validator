@@ -24,7 +24,9 @@ Before working on any feature, bug fix, refactor, or behavioral change, read the
 6. `agents/05_testing-and-validation.md` — required validation workflow, rs-check guidance, and integration test commands.
 7. Relevant crate-specific guide under `agents/crates/` when one exists, such as `agents/crates/magicblock-chainlink.md` for the `magicblock-chainlink` crate.
 
-Before changing code, consult the relevant `./agents` material to ensure the change does not violate the validator's goals, invariants, or specification. This acknowledgement is required; do not proceed silently after reading the files.
+Before changing code, consult the relevant `./agents` material to ensure the change does not violate the validator's goals, invariants, performance requirements, or specification. This acknowledgement is required; do not proceed silently after reading the files.
+
+The validator is performance-sensitive infrastructure. Changes must not degrade critical-path performance unless there is no viable alternative; if a tradeoff is unavoidable, call it out explicitly with the reason, expected impact, and any mitigation.
 
 When a feature is added, removed, or changed, the relevant file in `./agents/` **MUST be updated** to match the current implementation. These files cannot go out of sync with reality; if they do, they lose their usefulness for future agents and maintainers.
 

@@ -15,6 +15,8 @@ At a high level it:
 
 This crate prepares local state for execution. It does **not** decide final post-execution write validity; the processor/SVM path still enforces MagicBlock writable-account invariants.
 
+Chainlink is on the account-availability hot path for RPC reads and transaction submission. Changes must preserve low-latency fetch/clone behavior, bounded subscription overhead, deduplication, and low contention. Do not introduce avoidable duplicate remote fetches/clones, subscription churn, blocking work, excessive logging, or heavy per-account allocations/serialization; call out any unavoidable performance tradeoff explicitly.
+
 ## Update requirement
 
 Whenever an agent changes behavior in `magicblock-chainlink`, or changes another crate in a way that changes Chainlink flows, this document must be updated in the same change. This file is useful only if it reflects the current implementation. Update it for changes to:
@@ -27,7 +29,8 @@ Whenever an agent changes behavior in `magicblock-chainlink`, or changes another
 - post-delegation action dependency handling,
 - lifecycle-mode behavior,
 - public APIs used by `magicblock-api`, `magicblock-aperture`, `magicblock-accounts`, `magicblock-account-cloner`, or `programs/magicblock`,
-- tests or validation commands relevant to this crate.
+- tests or validation commands relevant to this crate,
+- performance characteristics of fetch/clone, deduplication, subscription, LRU/eviction, or update-ordering paths.
 
 ## Where it sits in the repository
 
@@ -123,7 +126,7 @@ Before fetching remotely:
 3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed.
 4. Remaining pubkeys enter `pending_requests` ownership coordination.
 
-Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Pending owners have:
+Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. Pending owners have:
 
 - generation IDs to avoid stale cleanup,
 - cancellation hooks,
@@ -371,6 +374,7 @@ Preserve these invariants when editing this crate:
 10. **Post-delegation action dependencies must be available before clone-time action handling.**
 11. **Disabled/non-primary mode must not perform remote fetches or transaction account ensures.**
 12. **This crate must not weaken processor/SVM access validation.** It only prepares local account state.
+13. **Fetch/clone and subscription paths must remain performance-conscious.** Preserve deduplication, bounded waiting, LRU protections, low subscription churn, and non-blocking behavior unless a documented correctness requirement forces a tradeoff.
 
 ## Common change areas and what to inspect
 
@@ -444,7 +448,9 @@ Start with:
 
 For documentation-only changes to this file, verify the file exists and links/paths are accurate.
 
-For Rust changes in `magicblock-chainlink`, run at least targeted formatting/checks and the Chainlink crate tests:
+For Rust changes in `magicblock-chainlink`, run at least targeted formatting/checks and the Chainlink crate tests. If the change touches fetch/clone, subscription, LRU, or update-ordering hot paths, also include the smallest practical test or measurement that can expose duplicate fetches/clones, increased latency, contention, or subscription churn; if skipped, report the residual performance risk.
+
+Minimum targeted commands:
 
 ```bash
 cargo fmt

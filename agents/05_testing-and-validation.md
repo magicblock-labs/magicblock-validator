@@ -6,6 +6,8 @@ This file tells agents how to validate changes. Keep it focused on commands and 
 
 Every code change must be validated. Use the `rs-check` skill for Rust changes once it is available in the agent environment. The intent of that skill is to run the standard Rust quality gate and help fix any failures.
 
+The validator is performance-sensitive. When a change touches critical RPC, account synchronization, scheduler/executor, AccountsDb/ledger, replication, or committor paths, validation should include the smallest available test or measurement that can reveal latency, throughput, contention, allocation, or I/O regressions. If no practical performance validation is run, say so and explain the residual risk.
+
 Until or unless the skill provides a more specific command set, treat the required baseline as:
 
 ```bash
@@ -30,7 +32,7 @@ Use the crate map and touched files to pick tests:
 - Task scheduler changes: run task scheduler tests.
 - Ledger/recovery changes: run ledger restore tests.
 
-Always report exactly which commands were run and whether they passed.
+Always report exactly which commands were run and whether they passed. Also report any performance-sensitive paths touched, what performance validation was performed, and any unavoidable performance tradeoff or unmeasured risk.
 
 ## Workspace checks
 
@@ -210,4 +212,5 @@ When finishing a task, include:
 - commands run,
 - pass/fail result,
 - if skipped, why it was skipped,
-- any remaining risk, especially for integration tests that require validators or long-running suites.
+- any remaining risk, especially for integration tests that require validators or long-running suites,
+- any performance-sensitive paths touched and whether performance regression risk was measured, reasoned about, or left unmeasured.

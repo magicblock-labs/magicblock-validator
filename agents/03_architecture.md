@@ -4,7 +4,7 @@ This file explains the repository-level architecture and how major crate groups 
 
 ## System shape
 
-The validator is a service graph around one core loop: make the right accounts available locally, execute valid ER transactions, persist the result, and settle scheduled state changes back to Solana.
+The validator is a service graph around one core loop: make the right accounts available locally, execute valid ER transactions, persist the result, and settle scheduled state changes back to Solana. This graph is performance-sensitive: architectural changes must preserve low-latency, high-throughput behavior on critical paths unless there is no viable alternative, and any unavoidable tradeoff must be called out explicitly.
 
 ```text
 Client / Operator
@@ -56,7 +56,7 @@ Responsibilities:
 - trigger just-in-time account availability work for local misses,
 - forward validator events to clients/subscribers.
 
-Architecture rule: the RPC layer should route work to account sync and execution services; it should not duplicate execution, delegation, or commit protocol logic.
+Architecture rule: the RPC layer should route work to account sync and execution services; it should not duplicate execution, delegation, or commit protocol logic. Keep per-request work lean and avoid blocking critical request paths.
 
 ### 3. Account synchronization
 
@@ -71,7 +71,7 @@ Responsibilities:
 - provide account availability to RPC and transaction execution,
 - hand scheduled commit work toward settlement.
 
-Architecture rule: this layer prepares local state for execution. It should not decide post-execution account access rules; those belong to the execution/SVM path.
+Architecture rule: this layer prepares local state for execution. It should not decide post-execution account access rules; those belong to the execution/SVM path. Avoid fetch amplification, duplicate clone work, subscription churn, and unnecessary serialization in account availability paths.
 
 ### 4. Transaction execution
 
@@ -88,7 +88,7 @@ Responsibilities:
 - write ledger/status records,
 - emit account, transaction, slot, and replication events.
 
-Architecture rule: execution must preserve the writable-account invariant and avoid mixing scheduler/account-lock concerns with RPC or commit-delivery concerns.
+Architecture rule: execution must preserve the writable-account invariant and avoid mixing scheduler/account-lock concerns with RPC or commit-delivery concerns. It must also preserve scheduler/executor parallelism and avoid avoidable latency, contention, allocation, or I/O regressions in the hot path.
 
 ### 5. Local persistence
 
@@ -193,3 +193,4 @@ cancel services
 - **Local persistence is shared infrastructure.** Coordinate maintenance with execution.
 - **Replication observes/replays validator output.** Do not make primary and replica modes accidentally diverge.
 - **Crate-specific details belong in crate docs.** Keep this file focused on cross-crate architecture.
+- **Performance is part of the architecture contract.** Do not move heavy work into RPC, account sync, scheduler/executor, persistence, or settlement hot paths without an explicit justification and mitigation plan.

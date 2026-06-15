@@ -2,6 +2,8 @@
 
 This map helps agents find the right crate before making changes. The dependency lists focus on workspace crates and are intentionally concise; external Solana/SVM dependencies are omitted.
 
+The validator is performance-sensitive. When changing any crate on RPC, account synchronization, scheduling/execution, persistence, replication, or settlement paths, preserve low-latency and high-throughput behavior. Avoid unnecessary blocking, allocation, lock contention, I/O, serialization, logging, and duplicate work; explicitly call out any unavoidable performance tradeoff.
+
 ## Core validator crates
 
 | Crate | Purpose | Depends on | Used by | Notes |
@@ -81,3 +83,4 @@ This map helps agents find the right crate before making changes. The dependency
 - For RPC behavior, start with `magicblock-aperture`; check `magicblock-chainlink` if reads trigger cloning.
 - For validator lifecycle/startup/shutdown, start with `magicblock-api` and `magicblock-validator`.
 - When adding, removing, renaming, or repurposing a crate, update this file and `AGENTS.md` in the same change.
+- When changing crate responsibilities, note whether performance-sensitive work moved onto or off of a hot path and document any expected regression or mitigation.

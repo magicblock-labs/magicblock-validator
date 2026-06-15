@@ -107,7 +107,7 @@ Inside this repository, RPC/router-equivalent paths must preserve the same effec
 
 ### Scheduler and locking
 
-The transaction scheduler runs on a dedicated OS thread and uses a pool of executor workers.
+The transaction scheduler runs on a dedicated OS thread and uses a pool of executor workers. This is a critical performance path: preserve low-latency scheduling, bounded lock contention, and parallel execution for unrelated accounts. Do not add blocking I/O, unbounded work, excessive logging, or avoidable allocation/serialization to scheduler or executor hot paths unless there is no viable alternative, and explicitly document any unavoidable tradeoff.
 
 Required behavior:
 
@@ -274,7 +274,7 @@ The strategist may convert args tasks into buffer tasks when needed to fit trans
 
 ### Parallelism and blocking
 
-The committor service uses scheduling because intents can block one another. It can run multiple intent executors in parallel, but scheduling must respect conflicts/dependencies between intents.
+The committor service uses scheduling because intents can block one another. It can run multiple intent executors in parallel, but scheduling must respect conflicts/dependencies between intents. Preserve this parallelism and avoid avoidable throughput regressions in commit preparation, task packing, buffer upload, ALT handling, send/confirm loops, and persistence; call out any unavoidable performance tradeoff explicitly.
 
 ## Magic Actions specification
 
@@ -317,7 +317,7 @@ Important ER/router methods include:
 - `getRoutes`
 - router-aware `getAccountInfo` and signature status methods
 
-The validator RPC layer should remain aligned with Solana JSON-RPC expectations where it implements standard methods, while supporting MagicBlock-specific delegation and local-clone behavior.
+The validator RPC layer should remain aligned with Solana JSON-RPC expectations where it implements standard methods, while supporting MagicBlock-specific delegation and local-clone behavior. RPC changes must preserve low-latency request handling and avoid unnecessary blocking, clone/fetch amplification, or heavy per-request work on hot paths.
 
 ## Startup, shutdown, and recovery specification
 

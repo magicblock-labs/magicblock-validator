@@ -36,7 +36,9 @@ In practical terms, the validator:
 
 ## Non-negotiable agent rules
 
-Before changing behavior, check the relevant agent docs and preserve the validator's goals and invariants.
+Before changing behavior, check the relevant agent docs and preserve the validator's goals, invariants, and performance expectations.
+
+The validator is performance-sensitive infrastructure. Do not degrade critical RPC, account sync, scheduling, execution, persistence, or settlement paths unless there is no viable alternative; if such a tradeoff is unavoidable, state it explicitly with expected impact and mitigation.
 
 When behavior changes, update the relevant `agents/` file in the same change. These docs must remain synchronized with the real implementation; stale guidance is worse than no guidance.
 
@@ -47,4 +49,5 @@ When behavior changes, update the relevant `agents/` file in the same change. Th
 - Commit intent durability and restart recovery.
 - Account cloning distinctions between delegated, undelegated/read-only, fee-payer, program, and large accounts.
 - Scheduler/account-lock correctness and executor parallelism.
+- Avoiding avoidable latency, throughput, allocation, lock-contention, or I/O regressions in hot paths.
 - Startup/shutdown ordering and persistent store flushing.
