@@ -254,7 +254,8 @@ where
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _)
-            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _) => {
+            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _)
+            | TransactionStrategyExecutionError::TransactionTooLargeError(_) => {
                 // Can't be handled in scope of single stage execution
                 // We signal flow break
                 Ok(ControlFlow::Break(()))
