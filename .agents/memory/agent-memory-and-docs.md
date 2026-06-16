@@ -8,6 +8,8 @@ Whenever you discover that the current `./.agents/` guidance is missing, incompl
 
 This applies even when the discovery is incidental to another task. Do not leave known gaps for a future agent unless you are blocked from editing documentation; if blocked, report the exact missing update and where it should go.
 
+**This rule applies to read-only and question-answering tasks too, not only code changes.** If you investigate the code to answer a question and learn a durable fact — especially a divergence from agave/Solana upstream behavior (e.g. a missing limit, different default, or relaxed validation) — capture it before finishing, then report it per the Final response requirement below.
+
 ## What must be captured
 
 Update or create agent documentation when you discover durable information such as:
