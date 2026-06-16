@@ -1,4 +1,3 @@
-pub mod acceptor;
 pub mod outbox_intent_bundles_reader;
 
 use std::{
@@ -34,7 +33,7 @@ use crate::{
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
     outbox_client::{InternalOutboxClientError, OutboxClient},
     service::outbox_intent_bundles_reader::{
-        InternalOutboxIntentBundlesReaderError, OutboxIntentBundlesReader,
+        OutboxIntentBundlesReader, OutboxIntentBundlesReaderError,
     },
 };
 
@@ -528,7 +527,7 @@ pub enum IntentExecutionServiceError {
     #[error("IntentRpcClientError: {0}")]
     IntentRpcClientError(#[from] InternalOutboxClientError),
     #[error("OutboxReaderError")]
-    OutboxReaderError(#[from] InternalOutboxIntentBundlesReaderError),
+    OutboxReaderError(#[from] OutboxIntentBundlesReaderError),
     #[error("asd")]
     ASdError(#[from] IntentExecutorError),
 }
