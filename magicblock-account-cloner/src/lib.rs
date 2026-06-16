@@ -873,7 +873,7 @@ mod tests {
             PostDelegationActionExecutorInstruction::ScheduleUndelegation {
                 ..
             } => {
-                panic!("expected schedule undelegation instruction")
+                panic!("expected execute instruction")
             }
         }
     }
@@ -924,7 +924,7 @@ mod tests {
             PostDelegationActionExecutorInstruction::ScheduleUndelegation {
                 ..
             } => {
-                panic!("expected schedule undelegation instruction")
+                panic!("expected execute instruction")
             }
         }
     }
