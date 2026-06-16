@@ -179,6 +179,7 @@ Important details:
 2. `getAccountInfo` and `getMultipleAccounts` pass `mark_empty_if_not_found` so missing accounts can be represented locally, then render synthetic empty placeholder system accounts as JSON-RPC `null`.
 3. Ensure failures for account reads are logged and the handler returns whatever is currently in `AccountsDb`; transaction account ensure failures are stricter.
 4. Encoding uses `LockedAccount` to avoid races while reading account data.
+5. `getMultipleAccounts` does **not** enforce agave's 100-pubkey-per-request limit. The handler in `requests/http/get_multiple_accounts.rs` processes every pubkey in the input array with no count cap; the only bound is the global 1 MiB request-body limit (see HTTP flow detail 3). Clients relying on agave's rejection of >100 keys will not get that error here.
 
 ### Transaction submission flow
 
