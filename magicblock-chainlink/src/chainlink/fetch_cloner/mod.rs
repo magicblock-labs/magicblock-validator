@@ -28,7 +28,7 @@ use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Semaphore},
     task,
     task::JoinSet,
 };
@@ -563,77 +563,45 @@ where
             .is_some_and(|account| account.delegated())
     }
 
-    /// Start listening to subscription updates.
-    /// Uses a JoinSet-based loop with try_recv/select! for backpressure
-    /// and task lifecycle management instead of unbounded tokio::spawn.
     pub fn start_subscription_listener(
         self: Arc<Self>,
         mut subscription_updates: mpsc::Receiver<ForwardedSubscriptionUpdate>,
     ) {
         tokio::spawn(async move {
+            let semaphore =
+                Arc::new(Semaphore::new(super::SUBSCRIPTION_UPDATE_LIMIT));
             let mut pending_tasks: JoinSet<()> = JoinSet::new();
 
             loop {
-                match subscription_updates.try_recv() {
-                    Ok(update) => {
+                while let Some(result) = pending_tasks.try_join_next() {
+                    if let Err(err) = result {
+                        warn!(error = ?err, "Subscription update task panicked");
+                    }
+                }
+
+                let permit = Arc::clone(&semaphore)
+                    .acquire_owned()
+                    .await
+                    .expect("subscription update semaphore never closed");
+
+                match subscription_updates.recv().await {
+                    Some(update) => {
                         let pubkey = update.pubkey;
                         trace!(
                             pubkey = %pubkey,
                             "FetchCloner received subscription update"
                         );
-
                         let this = Arc::clone(&self);
                         pending_tasks.spawn(async move {
                             Self::process_subscription_update(
                                 &this, pubkey, update,
                             )
                             .await;
+                            drop(permit);
                         });
-
-                        while let Some(result) = pending_tasks.try_join_next() {
-                            if let Err(err) = result {
-                                warn!(
-                                    error = ?err,
-                                    "Subscription update task panicked"
-                                );
-                            }
-                        }
                     }
-                    Err(mpsc::error::TryRecvError::Empty) => {
-                        tokio::select! {
-                            maybe_update =
-                                subscription_updates.recv() =>
-                            {
-                                let Some(update) = maybe_update else {
-                                    while pending_tasks
-                                        .join_next()
-                                        .await
-                                        .is_some()
-                                    {}
-                                    break;
-                                };
-                                let pubkey = update.pubkey;
-                                let this = Arc::clone(&self);
-                                pending_tasks.spawn(async move {
-                                    Self::process_subscription_update(
-                                        &this, pubkey, update,
-                                    )
-                                    .await;
-                                });
-                            }
-                            Some(result) = pending_tasks.join_next(),
-                                if !pending_tasks.is_empty() =>
-                            {
-                                if let Err(err) = result {
-                                    error!(
-                                        error = ?err,
-                                        "Subscription update task panicked"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Err(mpsc::error::TryRecvError::Disconnected) => {
+                    None => {
+                        drop(permit);
                         while pending_tasks.join_next().await.is_some() {}
                         break;
                     }
