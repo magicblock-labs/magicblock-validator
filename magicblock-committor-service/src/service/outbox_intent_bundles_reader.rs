@@ -177,3 +177,131 @@ pub enum OutboxIntentBundlesReaderError {
 
 pub type OutboxIntentBundlesReaderResult<T> =
     Result<T, OutboxIntentBundlesReaderError>;
+
+#[cfg(test)]
+mod tests {
+    use std::{num::NonZeroUsize, sync::Arc};
+
+    use magicblock_accounts_db::{AccountsDb, AccountsDbConfig};
+    use magicblock_core::intent::outbox::outbox_intent_pda;
+    use magicblock_program::{
+        intent_bundles::{
+            magic_scheduled_base_intent::{
+                MagicIntentBundle, ScheduledIntentBundle,
+            },
+            outbox_intent_bundles::OutboxIntentBundle,
+        },
+    };
+    use solana_account::{AccountSharedData, WritableAccount};
+    use solana_hash::Hash;
+    use solana_pubkey::Pubkey;
+    use solana_transaction::Transaction;
+
+    use super::{InternalOutboxIntentBundlesReader, OutboxIntentBundlesReader};
+
+    fn make_db() -> (Arc<AccountsDb>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let db = AccountsDb::new(&AccountsDbConfig::default(), dir.path(), 0)
+            .expect("db init")
+            .into();
+        (db, dir)
+    }
+
+    fn make_bundle(id: u64) -> OutboxIntentBundle {
+        let inner = ScheduledIntentBundle {
+            id,
+            slot: 0,
+            blockhash: Hash::default(),
+            sent_transaction: Transaction::default(),
+            payer: Pubkey::default(),
+            intent_bundle: MagicIntentBundle::default(),
+        };
+        OutboxIntentBundle::accepted(inner)
+    }
+
+    fn insert_bundle(db: &AccountsDb, bundle: &OutboxIntentBundle) {
+        let bytes = bundle.try_to_bytes().expect("serialize");
+        let pubkey = outbox_intent_pda(bundle.inner.id);
+        let mut account =
+            AccountSharedData::new(1, bytes.len(), &magicblock_program::ID);
+        account.data_as_mut_slice().copy_from_slice(&bytes);
+        db.insert_account(&pubkey, &account).expect("insert");
+    }
+
+    #[tokio::test]
+    async fn read_returns_ascending_order() {
+        let (db, _dir) = make_db();
+        insert_bundle(&db, &make_bundle(9));
+        insert_bundle(&db, &make_bundle(1));
+        insert_bundle(&db, &make_bundle(4));
+
+        let mut reader = InternalOutboxIntentBundlesReader::new(
+            db,
+            NonZeroUsize::new(10).unwrap(),
+        );
+        let result = reader.read(3).await.unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].inner.id, 1);
+        assert_eq!(result[1].inner.id, 4);
+        assert_eq!(result[2].inner.id, 9);
+    }
+
+    #[tokio::test]
+    async fn read_fewer_than_n_when_db_has_less() {
+        let (db, _dir) = make_db();
+        insert_bundle(&db, &make_bundle(3));
+
+        let mut reader = InternalOutboxIntentBundlesReader::new(
+            db,
+            NonZeroUsize::new(10).unwrap(),
+        );
+        let result = reader.read(5).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].inner.id, 3);
+    }
+
+    #[tokio::test]
+    async fn read_respects_capacity_smallest() {
+        let (db, _dir) = make_db();
+        for id in [10, 5, 1, 8, 3] {
+            insert_bundle(&db, &make_bundle(id));
+        }
+
+        let mut reader = InternalOutboxIntentBundlesReader::new(
+            db,
+            NonZeroUsize::new(3).unwrap(),
+        );
+        let result = reader.read(3).await.unwrap();
+        assert_eq!(result.iter().map(|b| b.inner.id).collect::<Vec<_>>(), vec![1, 3, 5]);
+    }
+
+    #[tokio::test]
+    async fn read_exceeds_capacity_errors() {
+        let (db, _dir) = make_db();
+        let mut reader = InternalOutboxIntentBundlesReader::new(
+            db,
+            NonZeroUsize::new(3).unwrap(),
+        );
+        assert!(reader.read(4).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn sequential_reads_dont_repeat() {
+        let (db, _dir) = make_db();
+        for id in 1..=6 {
+            insert_bundle(&db, &make_bundle(id));
+        }
+
+        let mut reader = InternalOutboxIntentBundlesReader::new(
+            db,
+            NonZeroUsize::new(5).unwrap(),
+        );
+        let first = reader.read(3).await.unwrap();
+        let second = reader.read(3).await.unwrap();
+
+        let first_ids: Vec<_> = first.iter().map(|b| b.inner.id).collect();
+        let second_ids: Vec<_> = second.iter().map(|b| b.inner.id).collect();
+        assert_eq!(first_ids, vec![1, 2, 3]);
+        assert_eq!(second_ids, vec![4, 5, 6]);
+    }
+}
