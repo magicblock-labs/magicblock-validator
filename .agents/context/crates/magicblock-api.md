@@ -297,7 +297,7 @@ git status --short
 ls .agents/context/crates/magicblock-api.md
 ```
 
-Also verify `AGENTS.md` and `.agents/context/crate-map.md` mention the new guide when appropriate. Do not run `rs-check` for markdown-only crate-guide updates unless source files were changed.
+Also verify `AGENTS.md` and `.agents/context/crate-map.md` mention the new guide when appropriate. Do not run `mbv-check` for markdown-only crate-guide updates unless source files were changed.
 
 For Rust changes in this crate, run focused checks first:
 

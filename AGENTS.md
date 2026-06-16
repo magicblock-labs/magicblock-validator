@@ -30,7 +30,7 @@ Before working on any feature, bug fix, refactor, or behavioral change, read the
 3. `.agents/specs/validator-specification.md` — delegation, cloning, execution, commit, undelegation, Magic Actions, ephemeral accounts, RPC/router, and recovery behavior.
 4. `.agents/context/architecture.md` — high-level repository architecture and crate interaction model.
 5. `.agents/context/crate-map.md` — workspace crate purposes, dependencies, consumers, and where to start for common change areas.
-6. `.agents/rules/testing-and-validation.md` — required validation workflow, rs-check guidance, and integration test commands.
+6. `.agents/rules/testing-and-validation.md` — required validation workflow, mbv-check guidance, and integration test commands.
 7. `.agents/memory/agent-memory-and-docs.md` — required rules for capturing newly discovered durable behavior, workflows, pitfalls, and documentation corrections.
 8. Relevant crate-specific guide under `.agents/context/crates/` when one exists.
 

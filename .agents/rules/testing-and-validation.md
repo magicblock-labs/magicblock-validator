@@ -4,7 +4,7 @@ This file tells agents how to validate changes. Keep it focused on commands and 
 
 ## Baseline rule
 
-Every code change must be validated. Use the `rs-check` skill for Rust changes once it is available in the agent environment. The intent of that skill is to run the standard Rust quality gate and help fix any failures.
+Every code change must be validated. Use the repository-local `mbv-check` skill for Rust changes once it is available in the agent environment. The intent of that skill is to run this validator's standard Rust quality gate and help fix any failures.
 
 The validator is performance-sensitive. When a change touches critical RPC, account synchronization, scheduler/executor, AccountsDb/ledger, replication, or committor paths, validation should include the smallest available test or measurement that can reveal latency, throughput, contention, allocation, or I/O regressions. If no practical performance validation is run, say so and explain the residual risk.
 
@@ -19,7 +19,7 @@ When a change touches signer/authority checks, account-sync correctness, lock ac
 Until or unless the skill provides a more specific command set, treat the required baseline as:
 
 ```bash
-cargo fmt
+make fmt
 cargo clippy --workspace --all-targets -- -D warnings
 cargo nextest run --workspace
 ```
@@ -51,7 +51,7 @@ Always report exactly which commands were run and whether they passed. Also repo
 Common root-level commands:
 
 ```bash
-cargo fmt
+make fmt
 cargo clippy --workspace --all-targets -- -D warnings
 cargo nextest run --workspace
 ```
