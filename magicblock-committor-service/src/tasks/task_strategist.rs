@@ -744,7 +744,6 @@ mod tests {
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
-            &None::<IntentPersisterImpl>,
         )
         .await
         .unwrap();
@@ -757,7 +756,6 @@ mod tests {
             commit_task,
             finalize_task,
             &Pubkey::new_unique(),
-            &None::<IntentPersisterImpl>,
         )
         .expect("Execution mode created");
 
@@ -776,7 +774,6 @@ mod tests {
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
-            &None::<IntentPersisterImpl>,
         )
         .await
         .unwrap();
@@ -789,19 +786,14 @@ mod tests {
             commit_task,
             finalize_task,
             &Pubkey::new_unique(),
-            &None::<IntentPersisterImpl>,
         )
         .expect("Execution mode created");
 
-        let StrategyExecutionMode::TwoStage {
-            commit_stage,
-            finalize_stage,
-        } = execution_mode
-        else {
+        let StrategyExecutionMode::TwoStage(two_stage) = execution_mode else {
             panic!("Unexpected execution mode");
         };
-        assert!(!commit_stage.uses_alts());
-        assert!(!finalize_stage.uses_alts());
+        assert!(!two_stage.commit_stage.uses_alts());
+        assert!(!two_stage.finalize_stage.uses_alts());
     }
 
     #[tokio::test]
@@ -813,7 +805,6 @@ mod tests {
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
-            &None::<IntentPersisterImpl>,
         )
         .await
         .unwrap();
@@ -826,7 +817,6 @@ mod tests {
             commit_task,
             finalize_task,
             &Pubkey::new_unique(),
-            &None::<IntentPersisterImpl>,
         )
         .expect("Execution mode created");
 
