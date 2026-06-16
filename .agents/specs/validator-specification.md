@@ -145,6 +145,17 @@ The forked SVM includes MagicBlock-specific access validation after execution:
 
 Any change touching account flags, account loading, SVM commit/rollback, or transaction sanitization must preserve this invariant. This is a security boundary: weakening it would let ordinary (untrusted) ER transactions mutate state they must not touch, which can lose funds. Do not relax it for performance or convenience.
 
+#### Privileged accounts
+
+Accounts carry a `privileged` flag (defined in the forked `solana-account`, accessed via `privileged()` / `set_privileged()`). The validator marks exactly one account privileged: the **validator identity (authority) account**, set in `init_validator_identity` (`magicblock-api/src/fund_account.rs`), called once during startup in `magic_validator.rs`. No other account is ever flagged privileged in this repo.
+
+In the executor's commit-to-local-state path (`magicblock-processor/src/executor/processing.rs`) the flag grants two bypasses:
+
+- **Persistence bypass** — privileged accounts are always written back to AccountsDb, even when not dirty (normal accounts persist only if dirty).
+- **Integrity-check bypass** — when the fee payer is privileged, `verify_account_states` returns early, skipping the confined-account integrity checks that otherwise apply.
+
+This is why the validator identity must remain privileged: validator-internal/system transactions (e.g. funding, identity operations) bypass the access-validation checks that constrain untrusted ER transactions. Do not flag additional accounts privileged, and do not remove the validator identity's privilege. (Distinct from the "privileged instruction" concept in `programs/magicblock/src/schedule_task/mod.rs`, which is about instructions disallowed inside cranks, not the account flag.)
+
 ### Sysvars
 
 The validator supports a subset of Solana sysvars. Current documented support includes:
