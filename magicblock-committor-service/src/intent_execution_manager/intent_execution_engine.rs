@@ -343,6 +343,8 @@ mod tests {
     };
 
     use async_trait::async_trait;
+    use solana_keypair::Keypair;
+    use solana_message::VersionedMessage;
     use solana_pubkey::{pubkey, Pubkey};
     use solana_signature::Signature;
     use solana_signer::SignerError;
@@ -357,18 +359,57 @@ mod tests {
             intent_scheduler::{create_test_intent, create_test_intent_bundle},
         },
         intent_executor::{
+            cleanup_handle::CleanupHandle,
             error::{IntentExecutorError as ExecutorError, InternalError},
+            intent_executor_factory::IntentExecutorBuilder,
             IntentExecutionResult,
         },
+        tasks::task_strategist::TransactionStrategy,
         test_utils,
-        transaction_preparator::delivery_preparator::BufferExecutionError,
+        transaction_preparator::{
+            delivery_preparator::{
+                BufferExecutionError, DeliveryPreparatorResult,
+            },
+            error::PreparatorResult,
+            TransactionPreparator,
+        },
     };
 
-    type MockIntentExecutionEngine =
-        IntentExecutionEngine<DummyDB, MockIntentExecutorFactory>;
+    struct MockTransactionPreparator;
+
+    #[async_trait]
+    impl TransactionPreparator for MockTransactionPreparator {
+        async fn prepare_for_strategy(
+            &self,
+            _authority: &Keypair,
+            _transaction_strategy: &mut TransactionStrategy,
+        ) -> PreparatorResult<VersionedMessage> {
+            unimplemented!()
+        }
+
+        async fn cleanup_for_strategy(
+            &self,
+            _authority: &Keypair,
+            _tasks: &[crate::tasks::BaseTaskImpl],
+            _lookup_table_keys: &[Pubkey],
+            _close_buffers: bool,
+        ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
+            Ok(())
+        }
+    }
+
+    type MockIntentExecutionEngine = IntentExecutionEngine<
+        DummyDB,
+        MockIntentExecutorFactory,
+        MockTransactionPreparator,
+    >;
     fn setup_engine(
         should_fail: bool,
-    ) -> (IntentScheduleHandle<DummyDB>, MockIntentExecutionEngine) {
+    ) -> (
+        IntentScheduleHandle<DummyDB>,
+        MockIntentExecutionEngine,
+        Arc<Mutex<DummyDB>>,
+    ) {
         test_utils::init_test_logger();
 
         let db = Arc::new(Mutex::new(DummyDB::new()));
@@ -381,12 +422,12 @@ mod tests {
         let worker =
             IntentExecutionEngine::new(intent_stream, executor_factory);
 
-        (handle, worker)
+        (handle, worker, db)
     }
 
     #[tokio::test]
     async fn test_worker_processes_messages() {
-        let (sender, worker) = setup_engine(false);
+        let (sender, worker, _db) = setup_engine(false);
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
@@ -406,7 +447,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_handles_conflicting_messages() {
-        let (sender, worker) = setup_engine(false);
+        let (sender, worker, _db) = setup_engine(false);
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
@@ -415,8 +456,8 @@ mod tests {
         let msg1 = create_test_intent(1, &[pubkey], false);
         let msg2 = create_test_intent(2, &[pubkey], false);
 
-        sender.send(msg1.clone()).await.unwrap();
-        sender.send(msg2.clone()).await.unwrap();
+        sender.schedule(vec![msg1.clone()]).unwrap();
+        sender.schedule(vec![msg2.clone()]).unwrap();
 
         // First message should be processed immediately
         let result1 = result_receiver.recv().await.unwrap();
@@ -431,7 +472,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_handles_conflicting_bundles() {
-        let (sender, worker) = setup_engine(false);
+        let (sender, worker, _db) = setup_engine(false);
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
@@ -441,8 +482,8 @@ mod tests {
         let msg1 = create_test_intent_bundle(1, &[a], &[b]);
         let msg2 = create_test_intent(2, &[a], false);
 
-        sender.send(msg1.clone()).await.unwrap();
-        sender.send(msg2.clone()).await.unwrap();
+        sender.schedule(vec![msg1.clone()]).unwrap();
+        sender.schedule(vec![msg2.clone()]).unwrap();
 
         // First message should be processed immediately
         let result1 = result_receiver.recv().await.unwrap();
@@ -457,7 +498,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_handles_executor_failure() {
-        let (sender, worker) = setup_engine(true);
+        let (sender, worker, _db) = setup_engine(true);
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
@@ -485,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_falls_back_to_db_when_channel_empty() {
-        let (_sender, worker) = setup_engine(false);
+        let (_sender, worker, db) = setup_engine(false);
 
         // Add a message to the DB
         let msg = create_test_intent(
@@ -493,7 +534,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        worker.db.store_intent_bundle(msg.clone()).await.unwrap();
+        db.lock().unwrap().store_intent_bundle(msg.clone()).unwrap();
 
         // Start worker
         let result_subscriber = worker.spawn();
@@ -510,7 +551,7 @@ mod tests {
     async fn test_high_throughput_message_processing() {
         const NUM_MESSAGES: usize = 20;
 
-        let (sender, mut worker) = setup_engine(false);
+        let (sender, mut worker, _db) = setup_engine(false);
 
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
@@ -552,7 +593,7 @@ mod tests {
     /// Tests that errors from executor propagated gracefully
     #[tokio::test]
     async fn test_multiple_failures() {
-        let (sender, worker) = setup_engine(true); // Worker that always fails
+        let (sender, worker, _db) = setup_engine(true); // Worker that always fails
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
@@ -578,7 +619,7 @@ mod tests {
     async fn test_non_blocking_messages() {
         const NUM_MESSAGES: u64 = 200;
 
-        let (sender, mut worker) = setup_engine(false);
+        let (sender, mut worker, _db) = setup_engine(false);
 
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
@@ -636,7 +677,7 @@ mod tests {
         // 30% blocking messages
         const BLOCKING_RATIO: f32 = 0.3;
 
-        let (sender, mut worker) = setup_engine(false);
+        let (sender, mut worker, _db) = setup_engine(false);
 
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
@@ -714,15 +755,18 @@ mod tests {
         }
     }
 
-    impl IntentExecutorBuilder for MockIntentExecutorFactory {
-        type Executor = MockIntentExecutor;
-
-        fn create_instance(&self) -> Self::Executor {
-            MockIntentExecutor {
+    impl IntentExecutorBuilder<MockTransactionPreparator>
+        for MockIntentExecutorFactory
+    {
+        fn create_instance(
+            &self,
+            _status: magicblock_program::outbox_intent_bundles::OutboxIntentBundleStatus,
+        ) -> Box<dyn IntentExecutor<MockTransactionPreparator>> {
+            Box::new(MockIntentExecutor {
                 should_fail: self.should_fail,
                 active_tasks: self.active_tasks.clone(),
                 max_concurrent: self.max_concurrent.clone(),
-            }
+            })
         }
     }
 
@@ -764,11 +808,14 @@ mod tests {
     }
 
     #[async_trait]
-    impl IntentExecutor for MockIntentExecutor {
+    impl IntentExecutor<MockTransactionPreparator> for MockIntentExecutor {
         async fn execute(
-            &mut self,
-            _base_intent: OutboxIntentBundle,
-        ) -> IntentExecutionResult {
+            self: Box<Self>,
+            _base_intent: magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle,
+        ) -> (
+            IntentExecutionResult,
+            CleanupHandle<MockTransactionPreparator>,
+        ) {
             self.on_task_started();
 
             // Simulate some work
@@ -805,11 +852,13 @@ mod tests {
 
             self.on_task_finished();
 
-            result
-        }
-
-        async fn cleanup(self) -> Result<(), BufferExecutionError> {
-            Ok(())
+            let cleanup = CleanupHandle::new(
+                Keypair::new(),
+                vec![],
+                false,
+                MockTransactionPreparator,
+            );
+            (result, cleanup)
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use async_trait::async_trait;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
@@ -152,7 +152,11 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
     }
 
     fn outbox_reader(&self) -> Self::OutboxReader {
-        InternalOutboxIntentBundlesReader::new(self.accounts_db.clone())
+        const CAPACITY: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
+        InternalOutboxIntentBundlesReader::new(
+            self.accounts_db.clone(),
+            CAPACITY,
+        )
     }
 }
 

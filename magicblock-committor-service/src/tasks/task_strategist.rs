@@ -399,7 +399,6 @@ mod tests {
         intent_executor::task_info_fetcher::{
             TaskInfoFetcher, TaskInfoFetcherResult,
         },
-        persist::IntentPersisterImpl,
         tasks::{
             commit_task::CommitTask,
             task_builder::{

@@ -152,7 +152,8 @@ impl OutboxIntentBundlesReader for InternalOutboxIntentBundlesReader {
         if n == 0 {
             return Ok(vec![]);
         }
-        if n > self.capacity.get() {
+        let capacity = self.capacity.get();
+        if n > capacity {
             return Err(Self::Error::ReadExceedsCapacityError(n, capacity));
         }
 
@@ -182,15 +183,13 @@ pub type OutboxIntentBundlesReaderResult<T> =
 mod tests {
     use std::{num::NonZeroUsize, sync::Arc};
 
-    use magicblock_accounts_db::{AccountsDb, AccountsDbConfig};
+    use magicblock_accounts_db::AccountsDb;
     use magicblock_core::intent::outbox::outbox_intent_pda;
     use magicblock_program::{
-        intent_bundles::{
-            magic_scheduled_base_intent::{
-                MagicIntentBundle, ScheduledIntentBundle,
-            },
-            outbox_intent_bundles::OutboxIntentBundle,
+        magic_scheduled_base_intent::{
+            MagicIntentBundle, ScheduledIntentBundle,
         },
+        outbox_intent_bundles::OutboxIntentBundle,
     };
     use solana_account::{AccountSharedData, WritableAccount};
     use solana_hash::Hash;
@@ -201,9 +200,7 @@ mod tests {
 
     fn make_db() -> (Arc<AccountsDb>, tempfile::TempDir) {
         let dir = tempfile::tempdir().expect("temp dir");
-        let db = AccountsDb::new(&AccountsDbConfig::default(), dir.path(), 0)
-            .expect("db init")
-            .into();
+        let db = AccountsDb::open(dir.path()).expect("db init").into();
         (db, dir)
     }
 
@@ -272,7 +269,10 @@ mod tests {
             NonZeroUsize::new(3).unwrap(),
         );
         let result = reader.read(3).await.unwrap();
-        assert_eq!(result.iter().map(|b| b.inner.id).collect::<Vec<_>>(), vec![1, 3, 5]);
+        assert_eq!(
+            result.iter().map(|b| b.inner.id).collect::<Vec<_>>(),
+            vec![1, 3, 5]
+        );
     }
 
     #[tokio::test]

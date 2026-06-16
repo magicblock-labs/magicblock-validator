@@ -218,7 +218,7 @@ where
         loop {
             // Read by chunks in order not to overload `IntentExecutionEngine`
             let intent_bundles_chunk = outbox_bundles_reader
-                .read(RESCHEDULE_CHUNK_SIZE)
+                .read(RESCHEDULE_CHUNK_SIZE.get())
                 .await
                 .map_err(Into::into)?;
             if intent_bundles_chunk.is_empty() {
