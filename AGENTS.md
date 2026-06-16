@@ -4,11 +4,11 @@ This repository contains AI-agent guidance in `./.agents/`. These files describe
 
 ## Required acknowledgement
 
-At the start of any task that may change code, behavior, tests, documentation, configuration, or architecture, the agent **must first read the relevant files in `./.agents/` and explicitly say so** before proceeding.
+At the start of any task that may change code, behavior, tests, documentation, configuration, or architecture, the agent **must first read the index at `./.agents/README.md` and explicitly say so** before proceeding. Do not pre-read every document — the index is a routing map that tells you which document to open for a given concern.
 
 Use wording like:
 
-> I found and read the relevant agent guidance in `./.agents/` and will use it as the source of truth for this change.
+> I read the agent index in `./.agents/README.md` and will open the relevant detailed docs as needed.
 
 If the task is only a trivial file operation and no `./.agents/` file is relevant, say that explicitly.
 
@@ -23,18 +23,18 @@ If the task is only a trivial file operation and no `./.agents/` file is relevan
 
 ## Start here
 
-Before working on any feature, bug fix, refactor, or behavioral change, read the relevant files:
+Read `.agents/README.md` first. It is a compact index whose routing table maps each concern (goals, protocol, architecture, crate ownership, validation, memory, per-crate guides) to the single document that covers it. **Open a detailed document only when your task touches that concern** — this keeps the context window small.
 
-1. `.agents/context/overview.md` — high-level validator purpose and runtime model.
-2. `.agents/rules/validator-goals.md` — system goals and correctness constraints.
-3. `.agents/specs/validator-specification.md` — delegation, cloning, execution, commit, undelegation, Magic Actions, ephemeral accounts, RPC/router, and recovery behavior.
-4. `.agents/context/architecture.md` — high-level repository architecture and crate interaction model.
-5. `.agents/context/crate-map.md` — workspace crate purposes, dependencies, consumers, and where to start for common change areas.
-6. `.agents/rules/testing-and-validation.md` — required validation workflow, mbv-check guidance, and integration test commands.
-7. `.agents/memory/agent-memory-and-docs.md` — required rules for capturing newly discovered durable behavior, workflows, pitfalls, and documentation corrections.
-8. Relevant crate-specific guide under `.agents/context/crates/` when one exists.
+Common routes (see the index for the full table):
 
-Before changing code, consult the relevant `./.agents` material to ensure the change does not violate the validator's goals, invariants, performance requirements, or specification. This acknowledgement is required; do not proceed silently after reading the files.
+- behavior/protocol change → `.agents/specs/validator-specification.md`
+- is this change aligned? → `.agents/rules/validator-goals.md`
+- service wiring/interactions → `.agents/context/architecture.md`
+- which crate owns this? → `.agents/context/crate-map.md`, then `.agents/context/crates/<crate>.md`
+- how to validate → `.agents/rules/testing-and-validation.md`
+- captured durable knowledge → `.agents/memory/agent-memory-and-docs.md`
+
+Before changing code, consult the matching `./.agents` material so the change does not violate the validator's goals, invariants, performance requirements, or specification. This acknowledgement is required; do not proceed silently.
 
 The validator is performance-sensitive infrastructure. Changes must not degrade critical-path performance unless there is no viable alternative; if a tradeoff is unavoidable, call it out explicitly with the reason, expected impact, and any mitigation.
 
