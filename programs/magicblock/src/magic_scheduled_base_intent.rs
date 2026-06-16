@@ -298,32 +298,38 @@ impl MagicIntentBundle {
 
         let commit = args
             .commit
-            .map(|value| CommitType::try_from_args(value, context))
+            .map(|value| CommitType::try_from_args(value, context, false))
             .transpose()?;
 
         let commit_and_undelegate = args
             .commit_and_undelegate
-            .map(|value| CommitAndUndelegate::try_from_args(value, context))
+            .map(|value| {
+                CommitAndUndelegate::try_from_args(value, context, false)
+            })
             .transpose()?;
 
         let commit_finalize = args
             .commit_finalize
-            .map(|value| CommitType::try_from_args(value, context))
+            .map(|value| CommitType::try_from_args(value, context, false))
             .transpose()?;
 
         let commit_finalize_and_undelegate = args
             .commit_finalize_and_undelegate
-            .map(|value| CommitAndUndelegate::try_from_args(value, context))
+            .map(|value| {
+                CommitAndUndelegate::try_from_args(value, context, false)
+            })
             .transpose()?;
 
         let commit_finalize_compressed = args
             .commit_finalize_compressed
-            .map(|value| CommitType::try_from_args(value, context))
+            .map(|value| CommitType::try_from_args(value, context, true))
             .transpose()?;
 
         let commit_finalize_compressed_and_undelegate = args
             .commit_finalize_compressed_and_undelegate
-            .map(|value| CommitAndUndelegate::try_from_args(value, context))
+            .map(|value| {
+                CommitAndUndelegate::try_from_args(value, context, true)
+            })
             .transpose()?;
 
         let actions = args
@@ -801,34 +807,34 @@ impl MagicBaseIntent {
                 Ok(MagicBaseIntent::BaseActions(base_actions))
             }
             MagicBaseIntentArgs::Commit(type_) => {
-                let commit = CommitType::try_from_args(type_, context)?;
+                let commit = CommitType::try_from_args(type_, context, false)?;
                 Ok(MagicBaseIntent::Commit(commit))
             }
             MagicBaseIntentArgs::CommitAndUndelegate(type_) => {
                 let commit_and_undelegate =
-                    CommitAndUndelegate::try_from_args(type_, context)?;
+                    CommitAndUndelegate::try_from_args(type_, context, false)?;
                 Ok(MagicBaseIntent::CommitAndUndelegate(commit_and_undelegate))
             }
             MagicBaseIntentArgs::CommitFinalize(type_) => {
-                let commit = CommitType::try_from_args(type_, context)?;
+                let commit = CommitType::try_from_args(type_, context, false)?;
                 Ok(MagicBaseIntent::CommitFinalize(commit))
             }
             MagicBaseIntentArgs::CommitFinalizeAndUndelegate(type_) => {
                 let commit_and_undelegate =
-                    CommitAndUndelegate::try_from_args(type_, context)?;
+                    CommitAndUndelegate::try_from_args(type_, context, false)?;
                 Ok(MagicBaseIntent::CommitFinalizeAndUndelegate(
                     commit_and_undelegate,
                 ))
             }
             MagicBaseIntentArgs::CommitFinalizeCompressed(type_) => {
-                let commit = CommitType::try_from_args(type_, context)?;
+                let commit = CommitType::try_from_args(type_, context, true)?;
                 Ok(MagicBaseIntent::CommitFinalizeCompressed(commit))
             }
             MagicBaseIntentArgs::CommitFinalizeAndUndelegateCompressed(
                 type_,
             ) => {
                 let commit_and_undelegate =
-                    CommitAndUndelegate::try_from_args(type_, context)?;
+                    CommitAndUndelegate::try_from_args(type_, context, true)?;
                 Ok(MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(
                     commit_and_undelegate,
                 ))
@@ -937,12 +943,13 @@ impl CommitAndUndelegate {
     pub fn try_from_args(
         args: CommitAndUndelegateArgs,
         context: &ConstructionContext<'_, '_, '_>,
+        compressed: bool,
     ) -> Result<CommitAndUndelegate, InstructionError> {
         let account_indices = args.commit_type.committed_accounts_indices();
         Self::validate(account_indices.as_slice(), context)?;
 
         let commit_action =
-            CommitType::try_from_args(args.commit_type, context)?;
+            CommitType::try_from_args(args.commit_type, context, compressed)?;
         let undelegate_action =
             UndelegateType::try_from_args(args.undelegate_type, context)?;
 
@@ -1138,6 +1145,7 @@ impl CommitType {
     fn validate_accounts(
         accounts: &[CommitAccountRef<'_, '_>],
         context: &ConstructionContext<'_, '_, '_>,
+        compressed: bool,
     ) -> Result<(), InstructionError> {
         accounts.iter().try_for_each(|(pubkey, account)| {
             if account.to_account_shared_data()?.confined() {
@@ -1154,6 +1162,15 @@ impl CommitType {
                 ic_msg!(
                     context.invoke_context,
                     "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
+                    pubkey
+                );
+                return Err(InstructionError::InvalidAccountData);
+            }
+
+            if account.to_account_shared_data()?.compressed() ^ compressed {
+                ic_msg!(
+                    context.invoke_context,
+                    "ScheduleCommit ERR: for account {}, compressed commits need compressed accounts",
                     pubkey
                 );
                 return Err(InstructionError::InvalidAccountData);
@@ -1212,6 +1229,7 @@ impl CommitType {
     pub fn try_from_args(
         args: CommitTypeArgs,
         context: &ConstructionContext<'_, '_, '_>,
+        compressed: bool,
     ) -> Result<CommitType, InstructionError> {
         match args {
             CommitTypeArgs::Standalone(accounts) => {
@@ -1219,7 +1237,11 @@ impl CommitType {
                     &accounts,
                     context.transaction_context(),
                 )?;
-                Self::validate_accounts(&committed_accounts_ref, context)?;
+                Self::validate_accounts(
+                    &committed_accounts_ref,
+                    context,
+                    compressed,
+                )?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
@@ -1242,7 +1264,11 @@ impl CommitType {
                     &committed_accounts,
                     context.transaction_context(),
                 )?;
-                Self::validate_accounts(&committed_accounts_ref, context)?;
+                Self::validate_accounts(
+                    &committed_accounts_ref,
+                    context,
+                    compressed,
+                )?;
 
                 let base_actions = base_actions
                     .into_iter()
