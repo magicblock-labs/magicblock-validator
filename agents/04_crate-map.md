@@ -29,7 +29,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 |---|---|---|---|---|
 | `magicblock-processor` | Transaction scheduler, executor pool, SVM execution, commit-to-local-state path. | `magicblock-accounts-db`, `magicblock-core`, `magicblock-ledger`, `magicblock-magic-program-api`, `magicblock-metrics`, `magicblock-program` | `magicblock-api`, tests | Core execution path; preserve account locking and writable-account access invariants. |
 | `magicblock-accounts-db` | Custom local account database. | `magicblock-config`, `magicblock-magic-program-api` | account cloner, accounts, aperture, API, chainlink, processor, replicator, tests/tools | Append-only mmap storage plus indexes/snapshots; maintenance requires scheduler pause. See `agents/crates/magicblock-accounts-db.md` before changing this crate. |
-| `magicblock-ledger` | Local ledger/history and latest block state. | `magicblock-core`, `magicblock-metrics`, `solana-storage-proto`, `test-kit` | aperture, API, processor, replicator, task scheduler, tools/tests | Stores tx/status/block history and latest blockhash/slot. |
+| `magicblock-ledger` | Local ledger/history and latest block state. | `magicblock-core`, `magicblock-metrics`, `solana-storage-proto`, `test-kit` | aperture, API, processor, replicator, task scheduler, tools/tests | Stores tx/status/block history and latest blockhash/slot; see `agents/crates/magicblock-ledger.md` before changing this crate. |
 | `solana-storage-proto` | Generated/protobuf storage support. | none | `magicblock-ledger` | Low-level ledger serialization support; see `agents/crates/storage-proto.md` before changing this crate. |
 
 ## Delegation, cloning, and account lifecycle crates
