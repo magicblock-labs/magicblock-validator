@@ -32,7 +32,7 @@ use magicblock_chainlink::{
     testing::cloner_stub::ClonerStub,
     InnerChainlink, ReplicationModeAwareChainlink,
 };
-use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
+use magicblock_config::config::LifecycleMode;
 use magicblock_core::compression::{
     derive_cda_from_pda, ADDRESS_TREE, OUTPUT_QUEUE,
 };
@@ -172,14 +172,9 @@ impl IxtestContext {
                 _ => (None, None),
             }
         };
-        let chainlink = InnerChainlink::try_new(
-            &bank,
-            fetch_cloner,
-            validator_kp.pubkey(),
-            &ChainLinkConfig::default(),
-        )
-        .map(ReplicationModeAwareChainlink::enabled)
-        .unwrap();
+        let chainlink = InnerChainlink::try_new(&bank, fetch_cloner)
+            .map(ReplicationModeAwareChainlink::enabled)
+            .unwrap();
 
         let rpc_client = IxtestContext::get_rpc_client(commitment);
         let photon_client =

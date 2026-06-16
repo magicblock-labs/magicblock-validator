@@ -124,14 +124,9 @@ impl TestContext {
                 _ => (None, None),
             }
         };
-        let chainlink = InnerChainlink::try_new(
-            &bank,
-            fetch_cloner,
-            validator_pubkey,
-            &ChainLinkConfig::default(),
-        )
-        .map(ReplicationModeAwareChainlink::enabled)
-        .unwrap();
+        let chainlink = InnerChainlink::try_new(&bank, fetch_cloner)
+            .map(ReplicationModeAwareChainlink::enabled)
+            .unwrap();
         Self {
             rpc_client,
             pubsub_client,

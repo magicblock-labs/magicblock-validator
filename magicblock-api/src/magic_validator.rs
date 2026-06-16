@@ -38,6 +38,7 @@ use magicblock_core::{
     coordination_mode::CoordinationMode,
     link::{
         link,
+        replication::Message,
         transactions::{SchedulerMode, TransactionSchedulerHandle},
     },
     Slot,
@@ -114,7 +115,6 @@ pub struct MagicValidator {
     committor_service: Option<Arc<CommittorService>>,
     replication_service: Option<ReplicationService>,
     scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
-    chainlink: Arc<ChainlinkImpl>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -125,6 +125,8 @@ pub struct MagicValidator {
     replication_handle:
         Option<thread::JoinHandle<magicblock_replicator::Result<()>>>,
     mode_tx: Sender<SchedulerMode>,
+    replication_tx: Sender<Message>,
+    unregister_handle: Option<thread::JoinHandle<()>>,
     is_standalone: bool,
 }
 
@@ -343,7 +345,7 @@ impl MagicValidator {
             environment: svm_env.environment,
             feature_set: feature_set.clone(),
             tasks_tx: validator_channels.tasks_service,
-            replication_tx: validator_channels.replication_messages,
+            replication_tx: validator_channels.replication_messages.clone(),
             block_time: config.ledger.block_time,
             superblock_size: config.ledger.superblock_size,
             shutdown: token.clone(),
@@ -395,7 +397,7 @@ impl MagicValidator {
         log_timing("startup", "aperture_init", step_start);
         let rpc_handle = thread::spawn(move || {
             let step_start = Instant::now();
-            let workers = (num_cpus::get() / 2 - 1).max(1);
+            let workers = (num_cpus::get() / 2).saturating_sub(1).max(1);
             let runtime = Builder::new_multi_thread()
                 .worker_threads(workers)
                 .enable_all()
@@ -439,7 +441,6 @@ impl MagicValidator {
             committor_service,
             replication_service,
             scheduled_commits_processor,
-            chainlink,
             token,
             ledger,
             ledger_truncator,
@@ -451,6 +452,8 @@ impl MagicValidator {
             transaction_execution,
             replication_handle: None,
             mode_tx,
+            replication_tx: validator_channels.replication_messages,
+            unregister_handle: None,
             is_standalone,
         })
     }
@@ -508,12 +511,7 @@ impl MagicValidator {
         if Self::replication_mode_uses_disabled_chainlink(
             &config.validator.replication_mode,
         ) {
-            return ChainlinkImpl::disabled(
-                accountsdb,
-                config.validator.keypair.pubkey(),
-                &config.chainlink,
-            )
-            .map_err(ApiError::from);
+            return ChainlinkImpl::disabled().map_err(ApiError::from);
         }
 
         let mut endpoints = Endpoints::try_from(config.remotes.as_slice())
@@ -706,17 +704,46 @@ impl MagicValidator {
         })
     }
 
-    async fn unregister_validator_on_chain(&self) -> ApiResult<()> {
+    pub async fn start_unregister_validator_on_chain(&mut self) {
+        if self.unregister_handle.is_some() {
+            return;
+        }
+        if self.config.chain_operation.is_none()
+            || !self.is_standalone
+            || !matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
+            || !CoordinationMode::current().needs_onchain_interactions()
+        {
+            return;
+        }
+
+        let rpc_url = self.config.rpc_url().to_owned();
+        let step_start = Instant::now();
         let validator_keypair = validator_authority();
-        DomainRegistryManager::handle_unregistration_static(
-            self.config.rpc_url(),
-            &validator_keypair,
-        )
-        .await
-        .map_err(|err| {
-            ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
-        })
-        .inspect(|_| info!("Unregistered validator on chain"))
+        // Await send before shutdown so runtime drop can only cancel confirmation.
+        let result =
+            DomainRegistryManager::send_unregistration_and_confirm_in_background_static(
+                rpc_url,
+                &validator_keypair,
+            )
+            .await
+            .map_err(|err| {
+                ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
+            });
+        log_timing(
+            "shutdown",
+            "send_unregister_validator_on_chain",
+            step_start,
+        );
+
+        match result {
+            Ok((signature, handle)) => {
+                info!(%signature, "Sent validator unregister transaction");
+                self.unregister_handle = Some(handle);
+            }
+            Err(err) => {
+                error!(error = ?err, "Failed to send unregister");
+            }
+        }
     }
 
     async fn ensure_validator_funded_on_chain(
@@ -930,18 +957,44 @@ impl MagicValidator {
 
         log_timing("startup", "maybe_process_ledger", step_start);
 
-        // Ledger replay has completed, we can now clean non-delegated accounts
-        // including programs from the bank
-        if !self.config.accountsdb.reset {
+        if self.config.accountsdb.defragment_on_startup {
             let step_start = Instant::now();
-            self.chainlink.reset_accounts_bank()?;
-            log_timing("startup", "reset_accounts_bank", step_start);
+            // SAFETY: ledger replay has completed, and normal startup has not
+            // yet enabled bank cleanup, scheduler modes, replication, slot
+            // ticks, or task recovery.
+            unsafe { self.accountsdb.defragment()? };
+            log_timing("startup", "accountsdb_defragment", step_start);
         }
 
-        // Recovery of persisted pending commit intents reads the local accounts
-        // bank for delegation checks, so it must run only after replay + reset.
-        if let Some(processor) = self.scheduled_commits_processor.as_ref() {
-            processor.spawn_pending_intents_recovery();
+        // Ledger replay has completed; primary and standalone nodes can clean
+        // stale non-delegated accounts before accepting new work. Replicas wait
+        // for the primary's Reset message so they stay stream-ordered.
+        if !matches!(
+            self.config.validator.replication_mode,
+            ReplicationMode::Replica { .. }
+        ) {
+            let step_start = Instant::now();
+            self.accountsdb.reset_bank(&self.identity)?;
+            log_timing("startup", "reset_accounts_bank", step_start);
+
+            if matches!(
+                self.config.validator.replication_mode,
+                ReplicationMode::Primary(_)
+            ) {
+                self.replication_tx
+                    .send(Message::Reset(self.accountsdb.slot()))
+                    .await
+                    .map_err(|e| {
+                        ApiError::FailedToSendModeSwitch(format!(
+                            "Failed to send reset message to replication: {e}"
+                        ))
+                    })?;
+            }
+            // Recovery of persisted pending commit intents reads the local accounts
+            // bank for delegation checks, so it must run only after replay + reset.
+            if let Some(processor) = self.scheduled_commits_processor.as_ref() {
+                processor.spawn_pending_intents_recovery();
+            }
         }
 
         // Notify the scheduler that ledger replay and bank cleanup is complete.
@@ -1001,31 +1054,44 @@ impl MagicValidator {
             .task_scheduler
             .take()
             .expect("task_scheduler should be initialized");
-        tokio::spawn(async move {
-            let step_start = Instant::now();
-            let join_handle = match task_scheduler.start().await {
-                Ok(join_handle) => join_handle,
-                Err(err) => {
-                    error!(error = ?err, "Failed to start task scheduler");
-                    error!("Exiting process");
-                    std::process::exit(1);
+        let is_primary_mode = {
+            let mut mode = CoordinationMode::current();
+            while mode == CoordinationMode::StartingUp {
+                tokio::select! {
+                    _ = self.token.cancelled() => break,
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {}
                 }
-            };
-            log_timing("startup", "task_scheduler_start", step_start);
-            match join_handle.await {
-                Ok(Ok(())) => {}
-                Ok(Err(err)) => {
-                    error!(error = ?err, "Task scheduler failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
-                Err(err) => {
-                    error!(error = ?err, "Task scheduler join failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
+                mode = CoordinationMode::current();
             }
-        });
+            mode == CoordinationMode::Primary
+        };
+        if is_primary_mode {
+            tokio::spawn(async move {
+                let step_start = Instant::now();
+                let join_handle = match task_scheduler.start().await {
+                    Ok(join_handle) => join_handle,
+                    Err(err) => {
+                        error!(error = ?err, "Failed to start task scheduler");
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                };
+                log_timing("startup", "task_scheduler_start", step_start);
+                match join_handle.await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        error!(error = ?err, "Task scheduler failed");
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                    Err(err) => {
+                        error!(error = ?err, "Task scheduler join failed");
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
 
         Ok(())
     }
@@ -1033,6 +1099,7 @@ impl MagicValidator {
     #[instrument(skip(self))]
     pub async fn stop(mut self) {
         let stop_start = Instant::now();
+        self.start_unregister_validator_on_chain().await;
         self.exit.store(true, Ordering::Relaxed);
 
         // Ordering is important here
@@ -1059,16 +1126,6 @@ impl MagicValidator {
         self.claim_fees_task.stop().await;
         log_timing("shutdown", "claim_fees_task_stop", step_start);
 
-        if self.config.chain_operation.is_some()
-            && matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
-            && CoordinationMode::current().needs_onchain_interactions()
-        {
-            let step_start = Instant::now();
-            if let Err(err) = self.unregister_validator_on_chain().await {
-                error!(error = ?err, "Failed to unregister");
-            }
-            log_timing("shutdown", "unregister_validator_on_chain", step_start);
-        }
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
@@ -1083,6 +1140,9 @@ impl MagicValidator {
         }
         log_timing("shutdown", "ledger_truncator_join", step_start);
         let step_start = Instant::now();
+        let _ = self.transaction_execution.join();
+        log_timing("shutdown", "transaction_execution_join", step_start);
+        let step_start = Instant::now();
         if let Some(handle) = self.replication_handle {
             match handle.join() {
                 Ok(Ok(())) => {}
@@ -1095,9 +1155,6 @@ impl MagicValidator {
             }
         }
         log_timing("shutdown", "replication_service_join", step_start);
-        let step_start = Instant::now();
-        let _ = self.transaction_execution.join();
-        log_timing("shutdown", "transaction_execution_join", step_start);
 
         // Flush durable state only after every worker that can still admit,
         // commit, or truncate state has stopped.
@@ -1116,6 +1173,18 @@ impl MagicValidator {
             error!(error = ?err, "Failed to shutdown ledger");
         }
         log_timing("shutdown", "ledger_shutdown", step_start);
+
+        if let Some(handle) = self.unregister_handle {
+            if handle.is_finished() {
+                if handle.join().is_err() {
+                    error!("Unregister confirmation thread panicked");
+                }
+            } else {
+                debug!(
+                    "Unregister confirmation still running; not waiting during shutdown"
+                );
+            }
+        }
 
         log_timing("shutdown", "stop_total", stop_start);
         info!("MagicValidator shutdown");

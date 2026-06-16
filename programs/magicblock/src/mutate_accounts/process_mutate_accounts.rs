@@ -26,6 +26,10 @@ pub(crate) fn process_mutate_accounts(
 
     // First account is the MagicBlock authority
     let accounts_len = instruction_context.get_number_of_instruction_accounts();
+    if accounts_len == 0 {
+        ic_msg!(invoke_context, "MutateAccounts: no accounts to modify");
+        return Err(MagicBlockProgramError::NoAccountsToModify.into());
+    }
     let accounts_to_mod_len = accounts_len - 1;
     let account_mods_len = account_mods.len() as u64;
 
@@ -187,7 +191,9 @@ mod tests {
     use std::collections::HashMap;
 
     use assert_matches::assert_matches;
-    use magicblock_magic_program_api::instruction::AccountModification;
+    use magicblock_magic_program_api::instruction::{
+        AccountModification, MagicBlockInstruction,
+    };
     use solana_account::{Account, AccountSharedData};
     use test_kit::init_logger;
 
@@ -202,6 +208,53 @@ mod tests {
     // -----------------
     // ModifyAccounts
     // -----------------
+    #[test]
+    fn test_mutate_fails_without_instruction_accounts() {
+        init_logger!();
+
+        let mut account_data = HashMap::new();
+        ensure_started_validator(&mut account_data, None);
+
+        let data = bincode::serialize(&MagicBlockInstruction::ModifyAccounts {
+            accounts: HashMap::new(),
+            message: None,
+        })
+        .unwrap();
+
+        let _accounts = process_instruction(
+            data.as_slice(),
+            Vec::new(),
+            Vec::new(),
+            Err(MagicBlockProgramError::NoAccountsToModify.into()),
+        );
+    }
+
+    #[test]
+    fn test_mutate_fails_with_authority_only_account() {
+        init_logger!();
+
+        let mut account_data = HashMap::new();
+        ensure_started_validator(&mut account_data, None);
+
+        let ix = InstructionUtils::modify_accounts_instruction(vec![], None);
+        let transaction_accounts = ix
+            .accounts
+            .iter()
+            .flat_map(|acc| {
+                account_data
+                    .remove(&acc.pubkey)
+                    .map(|shared_data| (acc.pubkey, shared_data))
+            })
+            .collect();
+
+        let _accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(MagicBlockProgramError::NoAccountsToModify.into()),
+        );
+    }
+
     #[test]
     fn test_mod_supported_fields_of_one_account() {
         init_logger!();

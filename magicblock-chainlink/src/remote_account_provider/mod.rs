@@ -85,7 +85,7 @@ use crate::{
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient,
         photon_client::{PhotonClient, PhotonClientImpl},
-        pubsub_common::SubscriptionUpdate,
+        pubsub_common::{SubscriptionSource, SubscriptionUpdate},
         remote_account::FetchedRemoteAccounts,
     },
     submux::SubMuxClient,
@@ -369,6 +369,11 @@ type SharedCapacityEvictionProtectionPredicate =
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
     pub account: RemoteAccount,
+    /// The upstream subscription stream that produced this update. Consumers
+    /// must distinguish account-sub vs program-sub updates because a pubkey
+    /// can be tracked solely via a program subscription (e.g. delegated
+    /// accounts whose direct subscription was released after cloning).
+    pub source: SubscriptionSource,
 }
 
 unsafe impl Send for ForwardedSubscriptionUpdate {}
@@ -1012,6 +1017,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                             Some(ForwardedSubscriptionUpdate {
                                 pubkey: update.pubkey,
                                 account: remote_account,
+                                source: update.source,
                             })
                         }
                     };
@@ -1376,6 +1382,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             ));
         }
 
+        let response_value_len = response.value.len();
+        if response_value_len != pubkeys.len() {
+            return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                format!(
+                    "RPC returned {response_value_len} account results for {} requested accounts: {}",
+                    pubkeys.len(),
+                    pubkeys_str(pubkeys)
+                ),
+            ));
+        }
+
         let mut found_count = 0u64;
         let mut not_found_count = 0u64;
         let remote_accounts = response
@@ -1608,7 +1625,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         Ok(())
     }
 
-    async fn send_removal_update(
+    pub(crate) async fn send_removal_update(
         &self,
         evicted: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
@@ -1623,6 +1640,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     /// part of the provider's internal logic.
     pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
         self.lrucache_subscribed_accounts.contains(pubkey)
+    }
+
+    pub(crate) async fn evict_unwatched_with_subscription_lock<F, Fut>(
+        &self,
+        pubkey: &Pubkey,
+        evict: F,
+    ) -> bool
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+
+        if self.is_watching(pubkey) {
+            return false;
+        }
+
+        evict().await;
+        true
     }
 
     /// Check if an account is currently pending (being fetched)
@@ -2312,6 +2349,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         // TODO: should we retry if not or respond with an error?
         let (response_slot, response_value) = response;
         assert!(response_slot >= min_context_slot);
+
+        if response_value.len() != pubkeys.len() {
+            let err_msg = format!(
+                "RPC returned {} account results for {} requested accounts: {}",
+                response_value.len(),
+                pubkeys.len(),
+                pubkeys_str(&pubkeys)
+            );
+            return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                err_msg,
+            )
+            .into());
+        }
 
         let mut found_count = 0u64;
         let mut not_found_count = 0u64;

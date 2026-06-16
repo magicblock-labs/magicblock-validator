@@ -25,7 +25,7 @@ use magicblock_chainlink::{
     },
     AccountFetchOrigin, InnerChainlink,
 };
-use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
+use magicblock_config::config::LifecycleMode;
 use solana_account::{Account, AccountSharedData};
 use solana_keypair::Keypair;
 use solana_program::{clock::Slot, sysvar::clock};
@@ -125,13 +125,7 @@ impl TestContext {
                 _ => (None, None),
             }
         };
-        let chainlink = InnerChainlink::try_new(
-            &bank,
-            fetch_cloner,
-            validator_pubkey,
-            &ChainLinkConfig::default(),
-        )
-        .unwrap();
+        let chainlink = InnerChainlink::try_new(&bank, fetch_cloner).unwrap();
         Self {
             rpc_client,
             pubsub_client,

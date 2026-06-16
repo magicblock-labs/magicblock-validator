@@ -41,6 +41,18 @@ impl PubsubClientConfig {
     }
 }
 
+/// Identifies the upstream subscription stream that produced a
+/// [SubscriptionUpdate]. Account-subscription updates can be safely dropped
+/// once their direct subscription is released, while program-subscription
+/// updates must still be processed even for pubkeys that are no longer in the
+/// account-subscription LRU (e.g. delegated accounts tracked only via their
+/// owner program).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptionSource {
+    Account,
+    Program,
+}
+
 #[derive(Debug, Clone)]
 pub struct SubscriptionUpdate {
     /// The pubkey of the account that was updated
@@ -50,15 +62,22 @@ pub struct SubscriptionUpdate {
     /// The updated account.
     /// It is `None` if the [UiAccount] of an [RpcResponse] could not be decoded
     pub account: Option<Account>,
+    /// The upstream subscription stream that produced this update.
+    pub source: SubscriptionSource,
 }
 
-impl From<(Pubkey, RpcResponse<UiAccount>)> for SubscriptionUpdate {
-    fn from((pubkey, rpc_response): (Pubkey, RpcResponse<UiAccount>)) -> Self {
+impl SubscriptionUpdate {
+    pub fn from_rpc_response(
+        pubkey: Pubkey,
+        rpc_response: RpcResponse<UiAccount>,
+        source: SubscriptionSource,
+    ) -> Self {
         let account: Option<Account> = rpc_response.value.decode::<Account>();
         Self {
             pubkey,
             slot: rpc_response.context.slot,
             account,
+            source,
         }
     }
 }
@@ -133,6 +152,7 @@ impl fmt::Display for SubscriptionUpdate {
 
 pub struct AccountSubscription {
     pub cancellation_token: CancellationToken,
+    pub completion_token: CancellationToken,
 }
 
 #[derive(Debug)]

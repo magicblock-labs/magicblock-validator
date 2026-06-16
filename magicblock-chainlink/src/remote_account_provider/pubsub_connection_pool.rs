@@ -163,9 +163,13 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         }
     }
 
-    /// Reconnects the pool: clears state and tries to reconnect the
-    /// first connection to ensure that the provider is working
-    /// NOTE: assumes that all existing subscriptions have been dropped.
+    /// Reconnects the pool by dropping pooled connections and creating a fresh one.
+    ///
+    /// Caller precondition: every account/program listener task that may hold a
+    /// stream created from an existing pooled client must have completed before
+    /// this method is called. Reconnect callers must enforce this by draining
+    /// subscription maps and waiting for listener completion; explicit unsubscribe
+    /// alone is not proof that the listener has finished.
     pub async fn reconnect(&self) -> PubsubClientResult<()> {
         while self.connections.pop().is_some() {}
         // We cannot reconnect an existing connection due to the lockless queue

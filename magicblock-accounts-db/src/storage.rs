@@ -1,9 +1,9 @@
 use std::{
     fs::File,
-    io::{self, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     mem::size_of,
     path::Path,
-    ptr::NonNull,
+    ptr::{self, NonNull},
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
@@ -335,6 +335,106 @@ impl AccountsStorage {
             .fetch_sub(val, Ordering::Relaxed);
     }
 
+    pub(crate) fn validate_allocation(
+        &self,
+        offset: Offset,
+        blocks: Blocks,
+    ) -> AccountsDbResult<()> {
+        if blocks == 0 {
+            return Err(AccountsDbError::Internal(
+                "accountsdb allocation has zero blocks".into(),
+            ));
+        }
+
+        let end = offset.checked_add(blocks).ok_or_else(|| {
+            AccountsDbError::Internal(
+                "accountsdb allocation offset overflow".into(),
+            )
+        })? as u64;
+        let cursor = self.header().write_cursor.load(Ordering::Relaxed);
+        let capacity = self.header().capacity_blocks as u64;
+
+        if end > cursor || end > capacity {
+            return Err(AccountsDbError::Internal(format!(
+                "accountsdb allocation out of bounds: offset={offset}, blocks={blocks}, cursor={cursor}, capacity={capacity}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn validate_cursor(
+        &self,
+        cursor: Offset,
+    ) -> AccountsDbResult<()> {
+        let current = self.header().write_cursor.load(Ordering::Relaxed);
+        let capacity = self.header().capacity_blocks as u64;
+        let cursor = cursor as u64;
+
+        if cursor > current || cursor > capacity {
+            return Err(AccountsDbError::Internal(format!(
+                "accountsdb compacted cursor out of bounds: cursor={cursor}, current={current}, capacity={capacity}"
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Moves an allocated block range inside the mmap.
+    ///
+    /// # Safety
+    /// The caller must ensure no account references into the storage are live and
+    /// that `old_offset..old_offset + blocks` and
+    /// `new_offset..new_offset + blocks` are valid mapped block ranges.
+    pub(crate) unsafe fn move_allocation(
+        &self,
+        old_offset: Offset,
+        new_offset: Offset,
+        blocks: Blocks,
+        scratch: &mut Vec<u8>,
+    ) {
+        if old_offset == new_offset {
+            return;
+        }
+
+        let len = blocks as usize * self.block_size;
+        let src = self.resolve_ptr(old_offset).as_ptr();
+        let dst = self.resolve_ptr(new_offset).as_ptr();
+        scratch.resize(len, 0);
+        // SAFETY: The caller validated both block ranges. The temporary buffer
+        // prevents an earlier move from overwriting a later move's source.
+        unsafe {
+            ptr::copy_nonoverlapping(src, scratch.as_mut_ptr(), len);
+            ptr::copy_nonoverlapping(scratch.as_ptr(), dst, len);
+        };
+    }
+
+    /// Finalizes compaction metadata and clears bytes after the new cursor.
+    ///
+    /// # Safety
+    /// The caller must ensure all live allocations have already been moved below
+    /// `new_cursor` and no account references into the old tail are live.
+    pub(crate) unsafe fn finish_defragment(&self, new_cursor: Offset) {
+        let header = self.header();
+        let old_cursor = header
+            .write_cursor
+            .swap(new_cursor as u64, Ordering::Relaxed);
+        header.recycled_count.store(0, Ordering::Relaxed);
+
+        let new_cursor = new_cursor as u64;
+        if old_cursor <= new_cursor {
+            return;
+        }
+
+        let tail_blocks = old_cursor - new_cursor;
+        let tail_offset = new_cursor as usize * self.block_size;
+        let tail_len = tail_blocks as usize * self.block_size;
+        let tail_ptr = unsafe { self.data_region.as_ptr().add(tail_offset) };
+        // SAFETY: `old_cursor` was the previous active cursor, so the tail lies
+        // within the mapped data region.
+        unsafe { tail_ptr.write_bytes(0, tail_len) };
+    }
+
     /// Calculates how many blocks are needed to store `size_bytes`.
     pub(crate) fn blocks_required(&self, size_bytes: usize) -> Blocks {
         size_bytes.div_ceil(self.block_size) as Blocks
@@ -351,11 +451,11 @@ impl AccountsStorage {
     }
 
     /// Flushes changes to disk.
-    pub(crate) fn flush(&self) {
-        let _ = self
-            .mmap
+    pub(crate) fn flush(&self) -> AccountsDbResult<()> {
+        self.mmap
             .flush()
-            .log_err(|| "failed to sync flush the mmap");
+            .log_err(|| "failed to sync flush the mmap")?;
+        Ok(())
     }
 
     /// Reloads the database from a different path (used for snapshots).
@@ -428,12 +528,78 @@ fn initialize_db_file(
     Ok(file.flush()?)
 }
 
-/// Grows the file to `size` if it is currently smaller.
+struct StorageHeaderSnapshot {
+    write_cursor: u64,
+    block_size: u64,
+}
+
+/// Resizes the file toward `size` without truncating live storage bytes.
 fn ensure_file_size(file: &mut File, size: u64) -> io::Result<()> {
-    if file.metadata()?.len() < size {
+    let current_size = file.metadata()?.len();
+    if current_size < size {
         file.set_len(size)?;
+        return Ok(());
     }
+
+    if current_size == size {
+        return Ok(());
+    }
+
+    let Some(header) = read_storage_header(file)? else {
+        return Ok(());
+    };
+    let min_size = METADATA_STORAGE_SIZE as u64 + header.block_size;
+    let target_size = size.max(min_size);
+    let Some(live_size) = header
+        .write_cursor
+        .checked_mul(header.block_size)
+        .and_then(|size| size.checked_add(METADATA_STORAGE_SIZE as u64))
+    else {
+        return Ok(());
+    };
+
+    if target_size >= live_size {
+        file.set_len(target_size)?;
+    }
+
     Ok(())
+}
+
+fn read_storage_header(
+    file: &mut File,
+) -> io::Result<Option<StorageHeaderSnapshot>> {
+    if file.metadata()?.len() < METADATA_STORAGE_SIZE as u64 {
+        return Ok(None);
+    }
+
+    let mut header = std::mem::MaybeUninit::<StorageHeader>::uninit();
+    let bytes = unsafe {
+        std::slice::from_raw_parts_mut(
+            header.as_mut_ptr() as *mut u8,
+            size_of::<StorageHeader>(),
+        )
+    };
+
+    file.seek(SeekFrom::Start(0))?;
+    file.read_exact(bytes)?;
+
+    let header = unsafe { header.assume_init() };
+    let block_size_valid = [
+        BlockSize::Block128,
+        BlockSize::Block256,
+        BlockSize::Block512,
+    ]
+    .iter()
+    .any(|&bs| bs as u32 == header.block_size);
+
+    if header.capacity_blocks == 0 || !block_size_valid {
+        return Ok(None);
+    }
+
+    Ok(Some(StorageHeaderSnapshot {
+        write_cursor: header.write_cursor.load(Ordering::Relaxed),
+        block_size: header.block_size as u64,
+    }))
 }
 
 /// Calculates the target file size, ensuring alignment with block size.
