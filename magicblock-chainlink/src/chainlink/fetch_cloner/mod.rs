@@ -425,12 +425,12 @@ where
                 (!mark_empty.is_empty()).then_some(mark_empty.as_slice());
             // All keys were claimed by the same call, so their deadlines
             // are effectively identical; the earliest bounds the batch.
+            // SAFETY: early return above guarantees claimed is non-empty
             let deadline = claimed
                 .iter()
                 .map(|op| op.deadline)
                 .min()
-                .expect("claimed is not empty");
-
+                .unwrap_or_else(|| unreachable!("claimed verified non-empty at entry"));
             let work = this.fetch_and_clone_accounts(
                 &pubkeys,
                 mark_empty_ref,
