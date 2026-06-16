@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{self, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     mem::size_of,
     path::Path,
     ptr::{self, NonNull},
@@ -528,12 +528,78 @@ fn initialize_db_file(
     Ok(file.flush()?)
 }
 
-/// Grows the file to `size` if it is currently smaller.
+struct StorageHeaderSnapshot {
+    write_cursor: u64,
+    block_size: u64,
+}
+
+/// Resizes the file toward `size` without truncating live storage bytes.
 fn ensure_file_size(file: &mut File, size: u64) -> io::Result<()> {
-    if file.metadata()?.len() < size {
+    let current_size = file.metadata()?.len();
+    if current_size < size {
         file.set_len(size)?;
+        return Ok(());
     }
+
+    if current_size == size {
+        return Ok(());
+    }
+
+    let Some(header) = read_storage_header(file)? else {
+        return Ok(());
+    };
+    let min_size = METADATA_STORAGE_SIZE as u64 + header.block_size;
+    let target_size = size.max(min_size);
+    let Some(live_size) = header
+        .write_cursor
+        .checked_mul(header.block_size)
+        .and_then(|size| size.checked_add(METADATA_STORAGE_SIZE as u64))
+    else {
+        return Ok(());
+    };
+
+    if target_size >= live_size {
+        file.set_len(target_size)?;
+    }
+
     Ok(())
+}
+
+fn read_storage_header(
+    file: &mut File,
+) -> io::Result<Option<StorageHeaderSnapshot>> {
+    if file.metadata()?.len() < METADATA_STORAGE_SIZE as u64 {
+        return Ok(None);
+    }
+
+    let mut header = std::mem::MaybeUninit::<StorageHeader>::uninit();
+    let bytes = unsafe {
+        std::slice::from_raw_parts_mut(
+            header.as_mut_ptr() as *mut u8,
+            size_of::<StorageHeader>(),
+        )
+    };
+
+    file.seek(SeekFrom::Start(0))?;
+    file.read_exact(bytes)?;
+
+    let header = unsafe { header.assume_init() };
+    let block_size_valid = [
+        BlockSize::Block128,
+        BlockSize::Block256,
+        BlockSize::Block512,
+    ]
+    .iter()
+    .any(|&bs| bs as u32 == header.block_size);
+
+    if header.capacity_blocks == 0 || !block_size_valid {
+        return Ok(None);
+    }
+
+    Ok(Some(StorageHeaderSnapshot {
+        write_cursor: header.write_cursor.load(Ordering::Relaxed),
+        block_size: header.block_size as u64,
+    }))
 }
 
 /// Calculates the target file size, ensuring alignment with block size.
