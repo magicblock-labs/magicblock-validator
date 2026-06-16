@@ -12,6 +12,16 @@ Use wording like:
 
 If the task is only a trivial file operation and no `./.agents/` file is relevant, say that explicitly.
 
+## Announce available `mbv-*` skills
+
+At startup, before doing task work, the agent **must make the user aware of every `mbv-*` skill** — these are the skills customized for the magicblock-validator. List each by name with its one-line description; do **not** read the skill bodies. Discover them from the skill set available in the environment and/or by listing `.agents/skills/mbv-*/SKILL.md`.
+
+Currently available:
+
+- `mbv-check` — formats, lints, and tests the magicblock-validator Rust workspace (nightly rustfmt, workspace clippy, nextest) with optional error fixing.
+
+Only load a skill (read its `SKILL.md`) when the task actually calls for it.
+
 ## Directory layout
 
 - `.agents/rules/` — invariant behavioral and decision-making rules agents must follow.
