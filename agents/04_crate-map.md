@@ -46,7 +46,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
 | `magicblock-committor-service` | Executes scheduled base-layer intents: commit, undelegate, finalize, action. | committor program, core, metrics, magic program, rpc-client, table-mania | account-cloner, accounts, API | Durable commit pipeline; handles scheduling, transaction prep, buffers, ALTs, confirmations. |
-| `magicblock-committor-program` | On-chain committor program. | none | `magicblock-committor-service` | Base-layer program side for changeset buffers/commit application. |
+| `magicblock-committor-program` | On-chain committor program. | none | `magicblock-committor-service` | Base-layer program side for changeset buffers/commit application; see `agents/crates/magicblock-committor-program.md` before changing this crate. |
 | `magicblock-table-mania` | Address lookup table management. | metrics, rpc-client | `magicblock-committor-service` | Creates/extends/deactivates/closes ALTs needed by commit transactions. See `agents/crates/magicblock-table-mania.md` before changing this crate. |
 
 ## Magic Program and shared protocol crates
