@@ -592,11 +592,13 @@ where
                             "FetchCloner received subscription update"
                         );
                         let this = Arc::clone(&self);
+                        metrics::inc_inflight_subscription_updates();
                         pending_tasks.spawn(async move {
                             Self::process_subscription_update(
                                 &this, pubkey, update,
                             )
                             .await;
+                            metrics::dec_inflight_subscription_updates();
                             drop(permit);
                         });
                     }
