@@ -8,6 +8,10 @@ Whenever you discover that the current `./.agents/` guidance is missing, incompl
 
 This applies even when the discovery is incidental to another task. Do not leave known gaps for a future agent unless you are blocked from editing documentation; if blocked, report the exact missing update and where it should go.
 
+**Documented elsewhere is not an excuse to skip the update.** A durable fact being present in the source code, a code comment, an unrelated `.agents/` file, an external repo, or any other location does *not* satisfy this rule. The test is not "does this fact exist somewhere?" — it is "would an agent who opens the single most relevant `.agents/` document for this concern find it there?" If the answer is no, you must capture it in that document, even if a related or partial mention already lives in a different file. Each `.agents/` document must be self-sufficient for an agent working in the area it covers; never rely on the reader having read another file. When the same fact is genuinely relevant in two places, put the full explanation in the most specific canonical file and add a short pointer (not a silent omission) from the other.
+
+Concretely: if you investigate code to answer a question and find that the mechanism, behavior, or invariant you relied on is *not* spelled out in the crate/spec/rules document an agent would consult for that area, document it there now — regardless of whether a higher-level or differently-scoped file happens to mention it.
+
 **This rule applies to read-only and question-answering tasks too, not only code changes.** If you investigate the code to answer a question and learn a durable fact — especially a divergence from agave/Solana upstream behavior (e.g. a missing limit, different default, or relaxed validation) — capture it before finishing, then report it per the Final response requirement below.
 
 ## What must be captured

@@ -55,4 +55,6 @@ When an agent discovers durable repository knowledge that is missing, incomplete
 
 **This obligation is not limited to code-changing tasks.** It applies equally to read-only and question-answering tasks: if you investigate the code to answer a question and learn a durable fact the docs lack or get wrong—especially a divergence from agave/Solana upstream behavior (a missing limit, different default, relaxed validation)—capture it before finishing. In every task's final reply, state whether agent docs were updated, or why no update was needed.
 
+**A fact being documented elsewhere does not excuse skipping the update.** The fact already existing in the source code, a code comment, an external repo, or even a *different* `./.agents/` file does not satisfy this obligation. The bar is: would an agent who opens only the single most relevant `./.agents/` document for that concern find the fact there? If not, add it to that document—even if a related or partial mention already lives somewhere else. Each `./.agents/` document must stand on its own for the area it covers.
+
 If anything is added to, removed from, renamed, or reorganized inside `./.agents/`, update this `AGENTS.md` file in the same change so this entrypoint remains accurate.

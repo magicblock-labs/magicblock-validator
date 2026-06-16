@@ -19,7 +19,11 @@ window small.
    get wrong — especially a divergence from agave/Solana upstream behavior (a
    missing limit, different default, relaxed validation) — record it in the
    relevant doc before finishing, and say whether you updated docs in your final
-   reply. See `memory/agent-memory-and-docs.md`.
+   reply. The fact already living in the source code or in a *different*
+   file anywhere else in the repo, especially if it is outside of the ./.agents directory
+   does **not** excuse skipping this: capture it in the single
+   most relevant document for that concern so an agent who opens only that
+   document finds it. See `memory/agent-memory-and-docs.md`.
 
 ## Non-negotiable (always applies)
 
