@@ -19,6 +19,7 @@ At startup, before doing task work, the agent **must make the user aware of ever
 Currently available:
 
 - `mbv-check` — formats, lints, and tests the magicblock-validator Rust workspace (nightly rustfmt, workspace clippy, nextest) with optional error fixing.
+- `mbv-run-single-integration-test` — runs a single integration test with the correct validator setup (brings up only the devnet and/or ephem validators the suite needs, then runs one targeted test).
 
 Only load a skill (read its `SKILL.md`) when the task actually calls for it.
 
