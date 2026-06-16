@@ -59,6 +59,7 @@ use magicblock_program::{
     TransactionScheduler as ActionTransactionScheduler,
 };
 use magicblock_replicator::{nats::Broker, ReplicationService};
+use magicblock_rpc_client::BaseLayerBlockhash;
 use magicblock_services::actions_callback_service::ActionsCallbackService;
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_validator_admin::claim_fees::{claim_fees, ClaimFeesTask};
@@ -127,6 +128,7 @@ pub struct MagicValidator {
     replication_tx: Sender<Message>,
     unregister_handle: Option<thread::JoinHandle<()>>,
     is_standalone: bool,
+    blockhash_registry: BaseLayerBlockhash,
 }
 
 impl MagicValidator {
@@ -220,10 +222,22 @@ impl MagicValidator {
             .then(Arc::<AtomicU64>::default);
 
         let step_start = Instant::now();
+        let base_blockhash = BaseLayerBlockhash::default();
+        base_blockhash
+            .spawn_blockhash_refresher(
+                Arc::new(RpcClient::new_with_commitment(
+                    config.rpc_url().to_owned(),
+                    CommitmentConfig::confirmed(),
+                )),
+                token.clone(),
+            )
+            .await;
+
         let committor_service = Self::init_committor_service(
             &config,
             ledger.latest_block(),
             shared_chain_slot.clone(),
+            base_blockhash.clone(),
         )
         .await?;
         log_timing("startup", "committor_service_init", step_start);
@@ -449,6 +463,7 @@ impl MagicValidator {
             replication_tx: validator_channels.replication_messages,
             unregister_handle: None,
             is_standalone,
+            blockhash_registry: base_blockhash,
         })
     }
 
@@ -457,6 +472,7 @@ impl MagicValidator {
         config: &ValidatorParams,
         latest_block: &LatestBlock,
         chain_slot: Option<Arc<AtomicU64>>,
+        blockhash_registry: BaseLayerBlockhash,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
@@ -481,6 +497,7 @@ impl MagicValidator {
                     config.commit.compute_unit_price,
                 ),
                 actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
+                blockhash_registry: Some(blockhash_registry),
             },
             chain_slot,
             actions_callback_executor,
@@ -658,6 +675,7 @@ impl MagicValidator {
         config: &ChainOperationConfig,
         block_time_ms: u64,
         base_fee: u64,
+        blockhash_registry: Option<BaseLayerBlockhash>,
     ) -> ApiResult<()> {
         let country_code = CountryCode::from(config.country_code.alpha3());
         let validator_keypair = validator_authority();
@@ -676,6 +694,7 @@ impl MagicValidator {
             rpc_url,
             &validator_keypair,
             validator_info,
+            blockhash_registry,
         )
         .await
         .map_err(|err| {
@@ -703,7 +722,7 @@ impl MagicValidator {
             DomainRegistryManager::send_unregistration_and_confirm_in_background_static(
                 rpc_url,
                 &validator_keypair,
-            )
+            Some(self.blockhash_registry.clone()))
             .await
             .map_err(|err| {
                 ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
@@ -851,6 +870,7 @@ impl MagicValidator {
         let chain_operation_config = self.config.chain_operation.clone();
         let block_time_ms = self.config.ledger.block_time_ms();
         let base_fee = self.config.validator.basefee;
+        let bh_registry = self.blockhash_registry.clone();
 
         // Ephemeral mode does a non-blocking startup balance check.
         // Intentionally fire-and-forget: the task itself exits the process on failure.
@@ -893,7 +913,9 @@ impl MagicValidator {
             if let Some(ref config) = chain_operation_config {
                 if !config.claim_fees_frequency.is_zero() {
                     let step_start = Instant::now();
-                    if let Err(err) = claim_fees(rpc_url.clone()).await {
+                    if let Err(err) =
+                        claim_fees(rpc_url.clone(), bh_registry.clone()).await
+                    {
                         error!(
                             error = ?err,
                             "Failed to claim validator fees on startup"
@@ -913,6 +935,7 @@ impl MagicValidator {
                     config,
                     block_time_ms,
                     base_fee,
+                    Some(bh_registry.clone()),
                 )
                 .await
                 {
@@ -1003,8 +1026,11 @@ impl MagicValidator {
             .map(|co| co.claim_fees_frequency)
         {
             let step_start = Instant::now();
-            self.claim_fees_task
-                .start(frequency, self.config.rpc_url().to_owned());
+            self.claim_fees_task.start(
+                frequency,
+                self.config.rpc_url().to_owned(),
+                self.blockhash_registry.clone(),
+            );
             log_timing("startup", "claim_fees_task_start", step_start);
         }
 

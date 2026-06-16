@@ -71,22 +71,12 @@ impl CommittorProcessor {
         );
         let rpc_client = Arc::new(rpc_client);
         let websocket_uri = chain_config.websocket_uri.clone();
-        let magic_block_rpc_client = match (chain_slot, websocket_uri) {
-            (Some(chain_slot), websocket_uri) => {
-                MagicblockRpcClient::new_with_chain_slot_and_websocket(
-                    rpc_client,
-                    chain_slot,
-                    websocket_uri,
-                )
-            }
-            (None, Some(websocket_uri)) => {
-                MagicblockRpcClient::new_with_websocket(
-                    rpc_client,
-                    Some(websocket_uri),
-                )
-            }
-            (None, None) => MagicblockRpcClient::new(rpc_client),
-        };
+        let magic_block_rpc_client = MagicblockRpcClient::new_with_registry(
+            rpc_client,
+            chain_slot,
+            chain_config.websocket_uri.clone(),
+            chain_config.blockhash_registry.clone(),
+        );
 
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();

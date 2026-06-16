@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use dlp_api::instruction_builder::validator_claim_fees;
 use magicblock_program::validator::validator_authority;
-use magicblock_rpc_client::MagicBlockRpcClientError;
+use magicblock_rpc_client::{BaseLayerBlockhash, MagicBlockRpcClientError};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
@@ -26,14 +26,24 @@ impl ClaimFeesTask {
         }
     }
 
-    pub fn start(&mut self, tick_period: Duration, url: String) {
+    pub fn start(
+        &mut self,
+        tick_period: Duration,
+        url: String,
+        blockhash_registry: BaseLayerBlockhash,
+    ) {
         if self.handle.is_some() {
             error!("Claim fees task already started");
             return;
         }
 
         let token = self.token.clone();
-        let handle = tokio::spawn(run_claim_fees_loop(token, tick_period, url));
+        let handle = tokio::spawn(run_claim_fees_loop(
+            token,
+            tick_period,
+            url,
+            blockhash_registry,
+        ));
         self.handle = Some(handle);
     }
 
@@ -63,6 +73,7 @@ async fn run_claim_fees_loop(
     token: CancellationToken,
     tick_period: Duration,
     url: String,
+    blockhash_registry: BaseLayerBlockhash,
 ) {
     info!("Starting claim fees task");
     let start_time = Instant::now() + tick_period;
@@ -70,7 +81,7 @@ async fn run_claim_fees_loop(
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                if let Err(err) = claim_fees(url.clone()).await {
+                if let Err(err) = claim_fees(url.clone(), blockhash_registry.clone()).await {
                     error!(error = ?err, "Failed to claim fees");
                 }
             },
@@ -81,7 +92,10 @@ async fn run_claim_fees_loop(
 }
 
 #[instrument(fields(validator = %validator_authority().pubkey()))]
-pub async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
+pub async fn claim_fees(
+    url: String,
+    blockhash_registry: BaseLayerBlockhash,
+) -> Result<(), MagicBlockRpcClientError> {
     info!("Claiming validator fees");
 
     let rpc_client =
@@ -108,10 +122,12 @@ pub async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
 
     let ix = validator_claim_fees(validator, None);
 
-    let latest_blockhash =
-        rpc_client.get_latest_blockhash().await.map_err(|e| {
+    let latest_blockhash = match blockhash_registry.latest_blockhash() {
+        Some(cached_bh) => cached_bh,
+        None => rpc_client.get_latest_blockhash().await.map_err(|e| {
             MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e))
-        })?;
+        })?,
+    };
 
     let tx = Transaction::new_signed_with_payer(
         &[ix],
