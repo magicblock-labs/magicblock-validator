@@ -579,6 +579,8 @@ where
                     }
                 }
 
+                // INVARIANT: The semaphore is created locally and never closed,
+                // so acquire_owned() cannot fail with AcquireError.
                 let permit = Arc::clone(&semaphore)
                     .acquire_owned()
                     .await
