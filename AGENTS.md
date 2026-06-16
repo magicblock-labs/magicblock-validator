@@ -52,4 +52,6 @@ When a feature is added, removed, or changed, the relevant file in `./.agents/` 
 
 When an agent discovers durable repository knowledge that is missing, incomplete, inaccurate, or stale in `./.agents/`—including feature behavior, protocol details, crate responsibilities, validation/debugging workflows, pitfalls, or performance constraints—the agent **MUST** update the most relevant existing document or create a focused new document if none exists. If documentation cannot be updated, the agent must report the blocked follow-up explicitly.
 
+**This obligation is not limited to code-changing tasks.** It applies equally to read-only and question-answering tasks: if you investigate the code to answer a question and learn a durable fact the docs lack or get wrong—especially a divergence from agave/Solana upstream behavior (a missing limit, different default, relaxed validation)—capture it before finishing. In every task's final reply, state whether agent docs were updated, or why no update was needed.
+
 If anything is added to, removed from, renamed, or reorganized inside `./.agents/`, update this `AGENTS.md` file in the same change so this entrypoint remains accurate.

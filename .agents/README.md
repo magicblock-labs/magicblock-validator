@@ -14,6 +14,12 @@ window small.
 3. Open only the matching document(s) from the tables below.
 4. If a change adds/removes/renames knowledge, update the relevant doc and, if
    the layout changes, update this index and `../AGENTS.md`.
+5. **This applies to read-only and question-answering tasks too.** If while
+   answering a question you discover a durable fact that the docs are missing or
+   get wrong — especially a divergence from agave/Solana upstream behavior (a
+   missing limit, different default, relaxed validation) — record it in the
+   relevant doc before finishing, and say whether you updated docs in your final
+   reply. See `memory/agent-memory-and-docs.md`.
 
 ## Non-negotiable (always applies)
 
