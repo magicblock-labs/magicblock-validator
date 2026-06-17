@@ -13,9 +13,9 @@ use solana_feature_gate_interface::state::Feature;
 use solana_feature_set::{
     curve25519_restrict_msm_length, curve25519_syscall_enabled,
     disable_rent_fees_collection, ed25519_program_enabled,
-    enable_poseidon_syscall, enable_secp256r1_precompile,
-    enable_transaction_loading_failure_fees, get_sysvar_syscall_enabled,
-    secp256k1_program_enabled, FeatureSet,
+    enable_poseidon_syscall, enable_sbpf_v3_deployment_and_execution,
+    enable_secp256r1_precompile, enable_transaction_loading_failure_fees,
+    get_sysvar_syscall_enabled, secp256k1_program_enabled, FeatureSet,
 };
 use solana_program::{pubkey::Pubkey, rent::Rent};
 use solana_program_runtime::{
@@ -48,11 +48,13 @@ pub fn build_svm_env(
     // - Curve25519 syscalls.
     // - Poseidon syscall.
     // - Fees for failed transaction loading (DoS mitigation).
+    // - sBPF v3 deployment/execution for cloned Devnet programs.
     for id in [
         disable_rent_fees_collection::ID,
         curve25519_syscall_enabled::ID,
         curve25519_restrict_msm_length::ID,
         enable_poseidon_syscall::ID,
+        enable_sbpf_v3_deployment_and_execution::ID,
         enable_transaction_loading_failure_fees::ID,
         get_sysvar_syscall_enabled::ID,
         ed25519_program_enabled::ID,
