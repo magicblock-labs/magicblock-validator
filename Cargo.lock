@@ -4822,11 +4822,8 @@ version = "0.12.3"
 dependencies = [
  "bincode",
  "bytes",
- "compressed-delegation-client",
  "console-subscriber",
  "flume",
- "light-client",
- "light-sdk",
  "magicblock-magic-program-api",
  "serde",
  "solana-account 3.4.0",
