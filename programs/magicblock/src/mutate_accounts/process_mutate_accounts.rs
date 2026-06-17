@@ -165,6 +165,14 @@ pub(crate) fn process_mutate_accounts(
             );
             account.set_delegated(delegated);
         }
+        if let Some(compressed) = modification.compressed {
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting compressed to {}",
+                compressed
+            );
+            account.set_compressed(compressed);
+        }
         if let Some(confined) = modification.confined {
             ic_msg!(
                 invoke_context,
@@ -266,6 +274,7 @@ mod tests {
                 owner: Some(owner_key),
                 delegated: Some(true),
                 confined: Some(true),
+                compressed: Some(true),
             }],
             None,
         );
@@ -291,6 +300,7 @@ mod tests {
         let account_authority: AccountSharedData =
             accounts.drain(0..1).next().unwrap();
         assert!(!account_authority.delegated());
+        assert!(!account_authority.compressed());
         assert!(!account_authority.confined());
         assert_matches!(
             account_authority.into(),
@@ -309,6 +319,7 @@ mod tests {
         let modified_account: AccountSharedData =
             accounts.drain(0..1).next().unwrap();
         assert!(modified_account.delegated());
+        assert!(modified_account.compressed());
         assert!(modified_account.confined());
         assert_matches!(
             modified_account.into(),

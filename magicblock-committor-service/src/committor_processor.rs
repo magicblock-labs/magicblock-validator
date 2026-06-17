@@ -5,12 +5,16 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_core::{
     intent::CommittedAccount, traits::ActionsCallbackScheduler,
 };
-use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType, MagicIntentBundle, ScheduledIntentBundle,
-    UndelegateType,
+use magicblock_program::{
+    magic_scheduled_base_intent::{
+        CommitAndUndelegate, CommitType, MagicIntentBundle,
+        ScheduledIntentBundle, UndelegateType,
+    },
+    magic_sys::is_compression_enabled,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -25,7 +29,7 @@ use tracing::{error, info, instrument, warn};
 
 use crate::{
     config::ChainConfig,
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
@@ -87,6 +91,10 @@ impl CommittorProcessor {
             }
             (None, None) => MagicblockRpcClient::new(rpc_client),
         };
+        let photon_client = chain_config
+            .photon_uri
+            .as_ref()
+            .map(|uri| Arc::new(PhotonIndexer::new(uri.to_string())));
 
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -100,9 +108,11 @@ impl CommittorProcessor {
         let persister = IntentPersisterImpl::try_new(persist_file)?;
 
         // Create commit scheduler
-        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
-            RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
-        ));
+        let task_info_fetcher =
+            Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(
+                magic_block_rpc_client.clone(),
+                photon_client,
+            )));
         let commits_scheduler = IntentExecutionManager::new(
             magic_block_rpc_client.clone(),
             DummyDB::new(),
@@ -212,7 +222,22 @@ impl CommittorProcessor {
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
-        if let Err(err) = self.persister.start_base_intents(&intent_bundles) {
+        let is_compression_enabled = is_compression_enabled()
+            .map_err(|_| CommittorServiceError::CompressionNotConfigured)?;
+        let (invalid_bundles, valid_bundles): (Vec<_>, Vec<_>) =
+            intent_bundles.into_iter().partition(|bundle| {
+                !is_compression_enabled && bundle.has_compressed_intent()
+            });
+        if !invalid_bundles.is_empty() {
+            for bundle in invalid_bundles {
+                error!(
+                    bundle_id = bundle.id,
+                    "Intent bundle contains compressed intent but compression is not enabled"
+                );
+            }
+        }
+
+        if let Err(err) = self.persister.start_base_intents(&valid_bundles) {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
             // valiator
@@ -220,7 +245,7 @@ impl CommittorProcessor {
         };
 
         self.commits_scheduler
-            .schedule(intent_bundles)
+            .schedule(valid_bundles)
             .await
             .inspect_err(|err| {
                 error!(error = ?err, "Failed to schedule intent");
@@ -255,10 +280,11 @@ impl CommittorProcessor {
     pub async fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         self.task_info_fetcher
-            .fetch_current_commit_nonces(pubkeys, min_context_slot)
+            .fetch_current_commit_nonces(pubkeys, compressed, min_context_slot)
             .await
     }
 }
@@ -391,10 +417,19 @@ fn committed_account_from_pending_row(
 
 #[cfg(test)]
 mod tests {
+    use magicblock_core::{
+        intent::BaseActionCallback,
+        traits::{ActionResult, CallbackScheduleError},
+    };
     use solana_hash::Hash;
+    use solana_keypair::Signature;
+    use tempfile::NamedTempFile;
 
     use super::*;
-    use crate::persist::CommitStatus;
+    use crate::{
+        intent_execution_manager::intent_scheduler::create_test_compressed_intent,
+        persist::CommitStatus, ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
+    };
 
     fn pending_row(
         message_id: u64,
@@ -446,6 +481,56 @@ mod tests {
         row.created_at = created_at;
         row.last_retried_at = last_retried_at;
         row
+    }
+
+    #[derive(Clone, Default)]
+    struct NoopActionsCallbackScheduler;
+
+    impl ActionsCallbackScheduler for NoopActionsCallbackScheduler {
+        fn schedule(
+            &self,
+            callbacks: Vec<BaseActionCallback>,
+            _signature: Option<Signature>,
+            _result: ActionResult,
+        ) -> Vec<Result<Signature, CallbackScheduleError>> {
+            callbacks
+                .iter()
+                .map(|_| Ok(Signature::new_unique()))
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn compressed_intents_fail_without_photon_indexer() {
+        let persist_file = NamedTempFile::new().unwrap();
+        let processor = CommittorProcessor::try_new(
+            Keypair::new(),
+            persist_file.path(),
+            ChainConfig {
+                websocket_uri: None,
+                rpc_uri: "http://localhost:7799".to_string(),
+                photon_uri: None,
+                commitment:
+                    solana_commitment_config::CommitmentConfig::processed(),
+                compute_budget_config: ComputeBudgetConfig::new(1_000_000),
+                actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
+            },
+            None,
+            NoopActionsCallbackScheduler,
+        )
+        .unwrap();
+
+        let mut intent =
+            create_test_compressed_intent(1, &[Pubkey::new_unique()], false);
+        intent.blockhash = Hash::new_unique();
+        intent.sent_transaction = Transaction::default();
+
+        let result = processor.schedule_intent_bundle(vec![intent]).await;
+
+        assert!(matches!(
+            result,
+            Err(CommittorServiceError::CompressionNotConfigured)
+        ));
     }
 
     #[test]

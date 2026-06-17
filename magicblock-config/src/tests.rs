@@ -327,6 +327,33 @@ fn test_chainlink_config() {
     assert_eq!(config.chainlink.risk.risk_score_threshold, 8);
 }
 
+#[test]
+#[parallel]
+fn test_compression_config() {
+    // Verify compression config is loaded correctly
+    let (_dir, config_path) = create_temp_config(
+        r#"
+        [compression]
+        photon-url = "http://localhost:8784"
+        "#,
+    );
+
+    let config = run_cli(vec![config_path.to_str().unwrap()]);
+
+    assert_eq!(
+        config.compression.as_ref().unwrap().photon_url,
+        Some("http://localhost:8784".to_string())
+    );
+}
+
+#[test]
+#[parallel]
+fn test_compression_config_is_optional() {
+    let config = run_cli(vec![]);
+
+    assert!(config.compression.is_none());
+}
+
 // ============================================================================
 // 6. Type Parsing & Validation
 // ============================================================================
@@ -516,6 +543,12 @@ fn test_example_config_full_coverage() {
     assert_eq!(
         config.task_scheduler.failed_task_cleanup_interval,
         Duration::from_secs(60 * 60)
+    );
+
+    // Compression config is present
+    assert_eq!(
+        config.compression.as_ref().unwrap().photon_url,
+        Some("http://localhost:8784".to_string())
     );
 
     // The example file has the programs section with 2 entries

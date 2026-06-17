@@ -11,7 +11,9 @@ use crate::{
     magic_scheduled_base_intent::{
         CommitType, ConstructionContext, ScheduledIntentBundle,
     },
-    magic_sys::fetch_current_commit_nonces,
+    magic_sys::{
+        fetch_current_commit_nonces, is_compression_enabled, COMMIT_LIMIT_ERR,
+    },
     schedule_transactions::{
         check_commit_limits, check_magic_context_id, get_clock,
         get_parent_program_id, try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
@@ -33,6 +35,16 @@ pub(crate) fn process_schedule_intent_bundle(
     args: MagicIntentBundleArgs,
     secure: bool,
 ) -> Result<(), InstructionError> {
+    let contains_compressed_commits = args.commit_finalize_compressed.is_some()
+        || args.commit_finalize_compressed_and_undelegate.is_some();
+    if !is_compression_enabled()? && contains_compressed_commits {
+        ic_msg!(
+            invoke_context,
+            "ScheduleIntentBundle: compression is not enabled"
+        );
+        return Err(InstructionError::InvalidInstructionData);
+    }
+
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let parent_program_id = get_parent_program_id(invoke_context)?;
@@ -94,6 +106,7 @@ pub(crate) fn process_schedule_intent_bundle(
         let undelegated_accounts_ref = [
             args.commit_and_undelegate.as_ref(),
             args.commit_finalize_and_undelegate.as_ref(),
+            args.commit_finalize_compressed_and_undelegate.as_ref(),
         ]
         .into_iter()
         .flatten()
@@ -143,14 +156,33 @@ pub(crate) fn process_schedule_intent_bundle(
         MAGIC_CONTEXT_IDX + 1,
     )?;
     if let Some(magic_fee_vault) = magic_fee_vault {
-        let chargable_accounts = scheduled_intent.get_all_committed_accounts();
-        let nonces = fetch_current_commit_nonces(&chargable_accounts)?;
-        let fee = scheduled_intent.calculate_fee(&nonces)?;
+        let regular_chargable_accounts =
+            scheduled_intent.get_all_regular_committed_accounts();
+        let regular_nonces =
+            fetch_current_commit_nonces(&regular_chargable_accounts, false)?;
+        let compressed_chargable_accounts =
+            scheduled_intent.get_all_compressed_committed_accounts();
+        let compressed_nonces =
+            fetch_current_commit_nonces(&compressed_chargable_accounts, true)?;
+        let mut commit_nonces = regular_nonces;
+        commit_nonces.extend(compressed_nonces);
+        let fee = scheduled_intent.calculate_fee(&commit_nonces)?;
         charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
     } else if let Some(commit_accounts) =
         scheduled_intent.get_commit_intent_accounts()
     {
-        check_commit_limits(commit_accounts, invoke_context)?;
+        check_commit_limits(commit_accounts, false, invoke_context)?;
+    } else if scheduled_intent
+        .get_commit_finalize_compressed_intent_accounts()
+        .is_some()
+    {
+        // Compressed accounts are free to delegate and don't have rents.
+        // Committing them must be paid for.
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit ERR: compressed accounts need to be paid for",
+        );
+        return Err(InstructionError::Custom(COMMIT_LIMIT_ERR));
     }
 
     let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];
