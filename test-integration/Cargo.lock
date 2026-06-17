@@ -203,8 +203,7 @@ dependencies = [
 [[package]]
 name = "agave-syscalls"
 version = "3.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5212f0b24fc37d4c844ae25b563d0cf5587d092912820c40f88d4b9b301148f8"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "bincode",
  "libsecp256k1",
@@ -225,9 +224,9 @@ dependencies = [
  "solana-program-entrypoint",
  "solana-program-runtime",
  "solana-pubkey 3.0.0",
- "solana-sbpf",
- "solana-sdk-ids",
- "solana-secp256k1-recover",
+ "solana-sbpf 0.14.4",
+ "solana-sdk-ids 3.1.0",
+ "solana-secp256k1-recover 3.1.1",
  "solana-sha256-hasher 3.1.0",
  "solana-stable-layout",
  "solana-stake-interface",
@@ -1066,7 +1065,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "proc-macro2",
@@ -1086,7 +1085,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -5972,7 +5971,7 @@ checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "log",
  "multimap",
  "once_cell",
@@ -6013,7 +6012,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -7477,7 +7476,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "3.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b501cdd#b501cdd58c187a167fcb19cc08f8f8e2688ecf1d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -7862,8 +7861,7 @@ dependencies = [
 [[package]]
 name = "solana-bpf-loader-program"
 version = "3.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "044a6c5327755992853454ea5ec495edd987dab53a6f9029e695bf0d43ab55dc"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "agave-syscalls",
  "bincode",
@@ -7878,9 +7876,9 @@ dependencies = [
  "solana-program-entrypoint",
  "solana-program-runtime",
  "solana-pubkey 3.0.0",
- "solana-sbpf",
- "solana-sdk-ids",
- "solana-svm-feature-set",
+ "solana-sbpf 0.14.4",
+ "solana-sdk-ids 3.1.0",
+ "solana-svm-feature-set 3.1.12",
  "solana-svm-log-collector",
  "solana-svm-measure",
  "solana-svm-type-overrides",
@@ -8638,8 +8636,7 @@ dependencies = [
 [[package]]
 name = "solana-loader-v4-program"
 version = "3.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e88b98ba6b408fe6fcf180784fc378d07ae63100c7dd413ff97474b6de30c5d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "log",
  "solana-account",
@@ -8651,8 +8648,8 @@ dependencies = [
  "solana-packet",
  "solana-program-runtime",
  "solana-pubkey 3.0.0",
- "solana-sbpf",
- "solana-sdk-ids",
+ "solana-sbpf 0.14.4",
+ "solana-sdk-ids 3.1.0",
  "solana-svm-log-collector",
  "solana-svm-measure",
  "solana-svm-type-overrides",
@@ -9016,7 +9013,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b501cdd#b501cdd58c187a167fcb19cc08f8f8e2688ecf1d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -9038,11 +9035,11 @@ dependencies = [
  "solana-program-entrypoint",
  "solana-pubkey 3.0.0",
  "solana-rent 3.1.0",
- "solana-sbpf",
- "solana-sdk-ids",
- "solana-slot-hashes",
- "solana-stable-layout",
- "solana-stake-interface",
+ "solana-sbpf 0.14.4",
+ "solana-sdk-ids 3.1.0",
+ "solana-slot-hashes 3.0.2",
+ "solana-stable-layout 3.0.1",
+ "solana-stake-interface 2.0.2",
  "solana-svm-callback",
  "solana-svm-feature-set",
  "solana-svm-log-collector",
@@ -9102,11 +9099,11 @@ dependencies = [
  "solana-pubkey 3.0.0",
  "solana-rent 3.1.0",
  "solana-runtime",
- "solana-sbpf",
- "solana-sdk-ids",
- "solana-signer",
- "solana-stable-layout",
- "solana-stake-interface",
+ "solana-sbpf 0.13.1",
+ "solana-sdk-ids 3.1.0",
+ "solana-signer 3.0.0",
+ "solana-stable-layout 3.0.1",
+ "solana-stake-interface 2.0.2",
  "solana-svm",
  "solana-svm-log-collector",
  "solana-svm-timings",
@@ -9533,6 +9530,20 @@ dependencies = [
  "byteorder",
  "combine 3.8.1",
  "hash32",
+ "log",
+ "rustc-demangle",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "solana-sbpf"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "733b3657a0fab205102b799dbe17f85d3972cf984232c1b0b108fa6ba438e382"
+dependencies = [
+ "byteorder",
+ "combine 3.8.1",
+ "hash32",
  "libc",
  "log",
  "rand 0.8.5",
@@ -9910,7 +9921,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b501cdd#b501cdd58c187a167fcb19cc08f8f8e2688ecf1d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -10243,7 +10254,7 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b501cdd#b501cdd58c187a167fcb19cc08f8f8e2688ecf1d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -10253,8 +10264,8 @@ dependencies = [
  "solana-instructions-sysvar",
  "solana-pubkey 3.0.0",
  "solana-rent 3.1.0",
- "solana-sbpf",
- "solana-sdk-ids",
+ "solana-sbpf 0.14.4",
+ "solana-sdk-ids 3.1.0",
 ]
 
 [[package]]

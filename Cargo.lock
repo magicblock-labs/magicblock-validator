@@ -125,8 +125,7 @@ dependencies = [
 [[package]]
 name = "agave-syscalls"
 version = "3.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5212f0b24fc37d4c844ae25b563d0cf5587d092912820c40f88d4b9b301148f8"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "bincode",
  "libsecp256k1",
@@ -6572,7 +6571,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "3.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b501cdd#b501cdd58c187a167fcb19cc08f8f8e2688ecf1d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -6860,8 +6859,7 @@ dependencies = [
 [[package]]
 name = "solana-bpf-loader-program"
 version = "3.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "044a6c5327755992853454ea5ec495edd987dab53a6f9029e695bf0d43ab55dc"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "agave-syscalls",
  "bincode",
@@ -7668,8 +7666,7 @@ dependencies = [
 [[package]]
 name = "solana-loader-v4-program"
 version = "3.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e88b98ba6b408fe6fcf180784fc378d07ae63100c7dd413ff97474b6de30c5d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "log",
  "solana-account 3.4.0",
@@ -8117,7 +8114,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b501cdd#b501cdd58c187a167fcb19cc08f8f8e2688ecf1d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -8374,9 +8371,9 @@ checksum = "dcf09694a0fc14e5ffb18f9b7b7c0f15ecb6eac5b5610bf76a1853459d19daf9"
 
 [[package]]
 name = "solana-sbpf"
-version = "0.13.1"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b15b079e08471a9dbfe1e48b2c7439c85aa2a055cbd54eddd8bd257b0a7dbb29"
+checksum = "733b3657a0fab205102b799dbe17f85d3972cf984232c1b0b108fa6ba438e382"
 dependencies = [
  "byteorder",
  "combine",
@@ -8812,7 +8809,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b501cdd#b501cdd58c187a167fcb19cc08f8f8e2688ecf1d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -9134,7 +9131,7 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b501cdd#b501cdd58c187a167fcb19cc08f8f8e2688ecf1d"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=05b75b685936f10ac482a16545a30b696f603350#05b75b685936f10ac482a16545a30b696f603350"
 dependencies = [
  "bincode",
  "qualifier_attr",
