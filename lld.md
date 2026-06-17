@@ -581,6 +581,64 @@ Effects depend on the result:
 
 ## Primary Call Sequence
 
+### Call Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant V as Validator
+    participant C as Challenger / replica
+    participant DP as Delegation program
+    participant R as Security council / resolver
+    participant K as Any caller / keeper
+
+    Note over V,DP: Prerequisite: validator has an active slashable ValidatorBond.
+
+    V->>DP: SubmitValidatorCommitment<br/>validator, account_pubkey, commit_id,<br/>validator_state_hash, optional slot metadata
+    DP->>DP: Create ValidatorCommitment<br/>status = pending<br/>challenge window starts
+
+    C->>C: Observe validator output and commitment<br/>Compute expected AccountState<br/>Choose salt<br/>Compute challenge_hash
+    C->>DP: RaiseChallenge<br/>validator, account_pubkey, commit_id,<br/>challenge_hash, challenger stake
+    DP->>DP: Verify commitment exists and challenge window is open<br/>Lock ChallengeStakeEscrow<br/>Create ChallengeRecord<br/>mark commitment disputed
+
+    Note over DP: Disputed commitment cannot finalize while challenge is active.
+
+    alt validator responds before timeout
+        V->>DP: SubmitValidatorResponse<br/>challenge_id, full validator AccountState<br/>or finalized StateBuffer reference
+        DP->>DP: Recompute validator_state_hash from response<br/>Require hash == original ValidatorCommitment hash
+
+        alt validator response opens original commitment
+            DP->>DP: Store validator response state hash<br/>start challenger reveal timeout
+            C->>DP: RevealChallengerState<br/>challenge_id, full challenger AccountState, salt
+            DP->>DP: Recompute challenge_hash<br/>Require hash == original challenge_hash
+
+            alt challenger reveal invalid
+                DP->>DP: Slash challenger stake<br/>close challenge as challenger fault
+            else challenger reveal valid and states match
+                DP->>DP: Charge partial challenger penalty<br/>return remaining challenger stake<br/>clear dispute
+            else challenger reveal valid and states mismatch
+                DP->>DP: Create ResolutionRecord<br/>keep commitment disputed
+                R->>DP: SubmitResolutionVote<br/>selected outcome + optional evidence
+                DP->>DP: Accumulate stake-weighted votes
+                K->>DP: FinalizeResolution
+                DP->>DP: Apply resolved outcome<br/>slash / payout / finalize allowed state
+            end
+        else validator response does not open original commitment
+            DP->>DP: Reject or record invalid opening<br/>move to validator-fault handling or resolver
+        end
+    else validator response timeout
+        K->>DP: ClaimValidatorResponseTimeout
+        DP->>DP: Record validator non-response<br/>move to resolver or direct validator-fault path
+    end
+
+    alt challenger reveal timeout after valid validator response
+        K->>DP: ClaimChallengerRevealTimeout
+        DP->>DP: Slash or heavily penalize challenger<br/>release commitment back to finalization rules
+    end
+```
+
+### Detailed Sequence
+
 ```text
 1. Validator registers slashable bond
    Validator -> DelegationProgram:
@@ -797,4 +855,3 @@ For the first implementation, keep the mechanism narrow:
 7. Add direct challenger slashing for invalid reveal and reveal timeout.
 8. Do not support pre-commit challenges until there is a signed pre-commit
    object that can be challenged objectively.
-
