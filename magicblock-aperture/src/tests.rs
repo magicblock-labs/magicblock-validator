@@ -188,6 +188,38 @@ mod event_processor {
         assert_receives_update(&mut rx, "logs mentions subscription").await;
     }
 
+    /// Verifies that duplicate pending signature subscriptions are notified independently.
+    #[tokio::test]
+    async fn test_duplicate_signature_subscribers_receive_update() {
+        let (state, env) = setup();
+        let acc = env
+            .create_account_with_config(LAMPORTS_PER_SOL, 42, guinea::ID)
+            .pubkey();
+        let ix = Instruction::new_with_bincode(
+            guinea::ID,
+            &GuineaInstruction::PrintSizes,
+            vec![AccountMeta::new_readonly(acc, false)],
+        );
+        let txn = env.build_transaction(&[ix]);
+        let signature = txn.signatures[0];
+        let (tx1, mut rx1) = ws_channel();
+        let (tx2, mut rx2) = ws_channel();
+
+        let (_sig_sub1, _) = state
+            .subscriptions
+            .subscribe_to_signature(signature, tx1)
+            .await;
+        let (_sig_sub2, _) = state
+            .subscriptions
+            .subscribe_to_signature(signature, tx2)
+            .await;
+
+        env.execute_transaction(txn).await.unwrap();
+
+        assert_receives_update(&mut rx1, "first signature subscriber").await;
+        assert_receives_update(&mut rx2, "second signature subscriber").await;
+    }
+
     /// Verifies that multiple `slotSubscribe` clients receive updates for every new slot.
     #[tokio::test]
     async fn test_block_update() {

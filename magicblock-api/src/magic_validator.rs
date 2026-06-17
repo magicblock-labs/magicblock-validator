@@ -1009,17 +1009,6 @@ impl MagicValidator {
         }
 
         let step_start = Instant::now();
-        self.slot_ticker = Some(init_slot_ticker(
-            self.accountsdb.clone(),
-            &self.scheduled_commits_processor,
-            self.ledger.latest_block().clone(),
-            self.config.ledger.block_time,
-            self.transaction_scheduler.clone(),
-            self.exit.clone(),
-        ));
-        log_timing("startup", "slot_ticker_start", step_start);
-
-        let step_start = Instant::now();
         self.ledger_truncator.start();
         log_timing("startup", "ledger_truncator_start", step_start);
 
@@ -1070,6 +1059,16 @@ impl MagicValidator {
                     }
                 }
             });
+            let step_start = Instant::now();
+            self.slot_ticker = Some(init_slot_ticker(
+                self.accountsdb.clone(),
+                &self.scheduled_commits_processor,
+                self.ledger.latest_block().clone(),
+                self.config.ledger.block_time,
+                self.transaction_scheduler.clone(),
+                self.exit.clone(),
+            ));
+            log_timing("startup", "slot_ticker_start", step_start);
         }
 
         Ok(())

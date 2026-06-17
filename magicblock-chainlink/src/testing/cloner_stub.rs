@@ -3,7 +3,7 @@ use std::{
     collections::HashMap,
     fmt,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -35,6 +35,15 @@ pub struct ClonerStub {
     cloned_programs: Arc<Mutex<HashMap<Pubkey, LoadedProgram>>>,
     clone_requests: Arc<Mutex<Vec<AccountCloneRequest>>>,
     clone_delay: Arc<Mutex<Option<Duration>>>,
+    account_clone_count: Arc<AtomicU64>,
+    active_account_clones: Arc<AtomicU64>,
+    max_active_account_clones: Arc<AtomicU64>,
+    account_clone_notify: Arc<Notify>,
+    program_clone_delay: Arc<Mutex<Option<Duration>>>,
+    program_clone_count: Arc<AtomicU64>,
+    active_program_clones: Arc<AtomicU64>,
+    max_active_program_clones: Arc<AtomicU64>,
+    program_clone_notify: Arc<Notify>,
     fail_next_clone: Arc<Mutex<bool>>,
     block_clone_completion: Arc<AtomicBool>,
     clone_completion_notify: Arc<Notify>,
@@ -49,6 +58,15 @@ impl ClonerStub {
                 Arc::<Mutex<HashMap<Pubkey, LoadedProgram>>>::default(),
             clone_requests: Arc::new(Mutex::new(Vec::new())),
             clone_delay: Arc::new(Mutex::new(None)),
+            account_clone_count: Arc::new(AtomicU64::new(0)),
+            active_account_clones: Arc::new(AtomicU64::new(0)),
+            max_active_account_clones: Arc::new(AtomicU64::new(0)),
+            account_clone_notify: Arc::new(Notify::new()),
+            program_clone_delay: Arc::new(Mutex::new(None)),
+            program_clone_count: Arc::new(AtomicU64::new(0)),
+            active_program_clones: Arc::new(AtomicU64::new(0)),
+            max_active_program_clones: Arc::new(AtomicU64::new(0)),
+            program_clone_notify: Arc::new(Notify::new()),
             fail_next_clone: Arc::new(Mutex::new(false)),
             block_clone_completion: Arc::new(AtomicBool::new(false)),
             clone_completion_notify: Arc::new(Notify::new()),
@@ -61,6 +79,10 @@ impl ClonerStub {
 
     pub fn set_clone_delay(&self, delay: Duration) {
         *self.clone_delay.lock().unwrap() = Some(delay);
+    }
+
+    pub fn set_program_clone_delay(&self, delay: Duration) {
+        *self.program_clone_delay.lock().unwrap() = Some(delay);
     }
 
     pub fn block_clone_completion(&self) {
@@ -94,6 +116,42 @@ impl ClonerStub {
         self.cloned_programs.lock().unwrap().len()
     }
 
+    pub fn account_clone_count(&self) -> u64 {
+        self.account_clone_count.load(Ordering::SeqCst)
+    }
+
+    pub fn max_active_account_clones(&self) -> u64 {
+        self.max_active_account_clones.load(Ordering::SeqCst)
+    }
+
+    pub async fn wait_for_account_clone_count(&self, expected: u64) {
+        loop {
+            let notified = self.account_clone_notify.notified();
+            if self.account_clone_count() >= expected {
+                break;
+            }
+            notified.await;
+        }
+    }
+
+    pub fn program_clone_count(&self) -> u64 {
+        self.program_clone_count.load(Ordering::SeqCst)
+    }
+
+    pub fn max_active_program_clones(&self) -> u64 {
+        self.max_active_program_clones.load(Ordering::SeqCst)
+    }
+
+    pub async fn wait_for_program_clone_count(&self, expected: u64) {
+        loop {
+            let notified = self.program_clone_notify.notified();
+            if self.program_clone_count() >= expected {
+                break;
+            }
+            notified.await;
+        }
+    }
+
     #[allow(dead_code)]
     pub fn dump_account_keys(&self, include_blacklisted: bool) -> String {
         self.accounts_bank.dump_account_keys(include_blacklisted)
@@ -118,6 +176,13 @@ impl Cloner for ClonerStub {
         &self,
         request: AccountCloneRequest,
     ) -> ClonerResult<Signature> {
+        let active =
+            self.active_account_clones.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_active_account_clones
+            .fetch_max(active, Ordering::SeqCst);
+        self.account_clone_count.fetch_add(1, Ordering::SeqCst);
+        self.account_clone_notify.notify_waiters();
+
         self.clone_requests.lock().unwrap().push(request.clone());
         let delay = *self.clone_delay.lock().unwrap();
         if let Some(delay) = delay {
@@ -127,6 +192,7 @@ impl Cloner for ClonerStub {
             let mut should_fail = self.fail_next_clone.lock().unwrap();
             if *should_fail {
                 *should_fail = false;
+                self.active_account_clones.fetch_sub(1, Ordering::SeqCst);
                 return Err(
                     crate::cloner::errors::ClonerError::CommittorServiceError(
                         "Injected test failure".to_string(),
@@ -142,6 +208,7 @@ impl Cloner for ClonerStub {
             notified.await;
         }
         self.accounts_bank.insert(request.pubkey, request.account);
+        self.active_account_clones.fetch_sub(1, Ordering::SeqCst);
         Ok(Signature::default())
     }
 
@@ -160,6 +227,18 @@ impl Cloner for ClonerStub {
         use solana_program::rent::Rent;
 
         use crate::remote_account_provider::program_account::LOADER_V4;
+
+        let active =
+            self.active_program_clones.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_active_program_clones
+            .fetch_max(active, Ordering::SeqCst);
+        self.program_clone_count.fetch_add(1, Ordering::SeqCst);
+        self.program_clone_notify.notify_waiters();
+
+        let delay = *self.program_clone_delay.lock().unwrap();
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
 
         // 1. Add the program account to the bank
         {
@@ -202,6 +281,7 @@ impl Cloner for ClonerStub {
                 .unwrap()
                 .insert(program.program_id, program);
         }
+        self.active_program_clones.fetch_sub(1, Ordering::SeqCst);
         Ok(Signature::default())
     }
 }
