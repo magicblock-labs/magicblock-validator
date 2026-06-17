@@ -29,6 +29,36 @@ pub const EATA_PROGRAM_ID: Pubkey =
 pub const EPHEMERAL_ATA_LEN: usize = 80;
 const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
 
+/// Private WSOL is represented locally by the token amount that maps to eATA,
+/// not by claimable lamports on the projected ATA.
+pub fn normalize_native_token_account_for_local_clone(
+    account: &mut AccountSharedData,
+) {
+    if account.owner() != &TOKEN_PROGRAM_ID {
+        return;
+    }
+
+    let Ok(token_account) = SplAccount::unpack(account.data()) else {
+        return;
+    };
+    if token_account.mint != spl_token::native_mint::id() {
+        return;
+    }
+
+    let COption::Some(rent_exempt_reserve) = token_account.is_native else {
+        return;
+    };
+
+    let mut token_account = token_account;
+    token_account.is_native = COption::None;
+    token_account.close_authority = COption::Some(Pubkey::default());
+    if SplAccount::pack(token_account, account.data_as_mut_slice()).is_err() {
+        return;
+    }
+
+    account.set_lamports(rent_exempt_reserve);
+}
+
 /// Derives the standard Associated Token Account (ATA) address for the given wallet owner and token mint.
 ///
 /// # Arguments
@@ -327,6 +357,7 @@ impl EphemeralAta {
         let mut projected = ata_account.clone();
         projected.data_as_mut_slice()[64..72]
             .copy_from_slice(&self.amount.to_le_bytes());
+        normalize_native_token_account_for_local_clone(&mut projected);
         Some(projected)
     }
 }
@@ -393,5 +424,60 @@ impl MaybeIntoAta<AccountSharedData> for AccountSharedData {
 
         let eata = EphemeralAta::try_from_account_data(self.data())?;
         eata.try_into().ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_native_ata_uses_data_only_local_amount() {
+        let wallet_owner = Pubkey::new_unique();
+        let mint = spl_token::native_mint::id();
+        let amount = 100_000_000;
+        let rent_exempt_reserve =
+            Rent::default().minimum_balance(SplAccount::LEN);
+        let token_account = SplAccount {
+            mint,
+            owner: wallet_owner,
+            amount: 0,
+            delegate: COption::None,
+            state: AccountState::Initialized,
+            is_native: COption::Some(rent_exempt_reserve),
+            delegated_amount: 0,
+            close_authority: COption::None,
+        };
+
+        let mut data = vec![0u8; SplAccount::LEN];
+        SplAccount::pack(token_account, &mut data).unwrap();
+        let base_ata = AccountSharedData::from(Account {
+            owner: TOKEN_PROGRAM_ID,
+            data,
+            lamports: rent_exempt_reserve,
+            executable: false,
+            ..Default::default()
+        });
+
+        let eata = EphemeralAta {
+            owner: wallet_owner,
+            mint,
+            amount,
+            bump: 0,
+        };
+
+        let projected = eata
+            .project_into_ata_account(&base_ata)
+            .expect("native ATA should project");
+        assert_eq!(projected.lamports(), rent_exempt_reserve);
+
+        let projected_token =
+            SplAccount::unpack(projected.data()).expect("unpack projected");
+        assert_eq!(projected_token.amount, amount);
+        assert_eq!(projected_token.is_native, COption::None);
+        assert_eq!(
+            projected_token.close_authority,
+            COption::Some(Pubkey::default())
+        );
     }
 }

@@ -6,8 +6,11 @@ use solana_account::{
 };
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
+use solana_program::{program_option::COption, program_pack::Pack};
+use solana_rent::Rent;
 use solana_sdk_ids::system_program;
 use solana_signer::Signer;
+use spl_token::state::{Account as SplAccount, AccountState};
 use spl_token_2022::{
     extension::{
         immutable_owner::ImmutableOwner, BaseStateWithExtensions,
@@ -230,6 +233,38 @@ fn loaded_test_program(
         loader_status: solana_loader_v4_interface::state::LoaderV4Status::Deployed,
         remote_slot,
     }
+}
+
+fn create_native_ata_account(
+    wallet_owner: &Pubkey,
+    amount: u64,
+) -> (Account, u64) {
+    let rent_exempt_reserve = Rent::default().minimum_balance(SplAccount::LEN);
+    let token_account = SplAccount {
+        mint: spl_token::native_mint::id(),
+        owner: *wallet_owner,
+        amount,
+        delegate: COption::None,
+        state: AccountState::Initialized,
+        is_native: COption::Some(rent_exempt_reserve),
+        delegated_amount: 0,
+        close_authority: COption::None,
+    };
+
+    let mut data = vec![0u8; SplAccount::LEN];
+    SplAccount::pack(token_account, &mut data)
+        .expect("pack native token account");
+
+    (
+        Account {
+            lamports: rent_exempt_reserve + amount,
+            data,
+            owner: spl_token::id(),
+            executable: false,
+            ..Default::default()
+        },
+        rent_exempt_reserve,
+    )
 }
 
 fn create_non_raw_eata_owned_account(
@@ -5741,6 +5776,110 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
     assert_eq!(cloned_account.owner(), &dlp_api::id());
     assert!(cloned_account.delegated());
     assert!(!cloned_account.confined());
+}
+
+#[tokio::test]
+async fn test_delegated_native_token_clone_uses_data_only_amount() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 100_000_000;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let wallet_owner = random_pubkey();
+    let ata_pubkey = derive_ata(&wallet_owner, &spl_token::native_mint::id());
+    let (native_ata, rent_exempt_reserve) =
+        create_native_ata_account(&wallet_owner, AMOUNT);
+    let mut account = AccountSharedData::from(native_ata);
+    account.set_remote_slot(CURRENT_SLOT);
+    account.set_delegated(true);
+
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: ata_pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect("native token clone should be normalized");
+
+    let clone_requests = cloner.clone_requests();
+    assert_eq!(clone_requests.len(), 1);
+    let cloned_account = &clone_requests[0].account;
+    assert_eq!(cloned_account.lamports(), rent_exempt_reserve);
+
+    let token_account =
+        SplAccount::unpack(cloned_account.data()).expect("unpack native ATA");
+    assert_eq!(token_account.amount, AMOUNT);
+    assert_eq!(token_account.is_native, COption::None);
+    assert_eq!(
+        token_account.close_authority,
+        COption::Some(Pubkey::default())
+    );
+}
+
+#[tokio::test]
+async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 100_000_000;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let wallet_owner = random_pubkey();
+    let ata_pubkey = derive_ata(&wallet_owner, &spl_token::native_mint::id());
+    let (native_ata, rent_exempt_reserve) =
+        create_native_ata_account(&wallet_owner, AMOUNT);
+    let mut account = AccountSharedData::from(native_ata);
+    account.set_remote_slot(CURRENT_SLOT);
+
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: ata_pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+            },
+        )
+        .await
+        .expect("plain native token clone should be preserved");
+
+    let clone_requests = cloner.clone_requests();
+    assert_eq!(clone_requests.len(), 1);
+    let cloned_account = &clone_requests[0].account;
+    assert_eq!(cloned_account.lamports(), rent_exempt_reserve + AMOUNT);
+
+    let token_account =
+        SplAccount::unpack(cloned_account.data()).expect("unpack native ATA");
+    assert_eq!(token_account.amount, AMOUNT);
+    assert_eq!(token_account.is_native, COption::Some(rent_exempt_reserve));
+    assert_eq!(token_account.close_authority, COption::None);
 }
 
 #[tokio::test]
