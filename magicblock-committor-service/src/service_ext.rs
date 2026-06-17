@@ -210,10 +210,14 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
     fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>> {
-        self.inner
-            .fetch_current_commit_nonces(pubkeys, min_context_slot)
+        self.inner.fetch_current_commit_nonces(
+            pubkeys,
+            compressed,
+            min_context_slot,
+        )
     }
 
     fn stop(&self) {

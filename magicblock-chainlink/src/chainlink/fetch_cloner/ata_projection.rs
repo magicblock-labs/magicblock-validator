@@ -22,8 +22,9 @@ use super::{
 use crate::{
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
-        ResolvedAccountSharedData, SubscriptionReason,
+        photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
+        MatchSlotsConfig, RemoteAccount, ResolvedAccountSharedData,
+        SubscriptionReason,
     },
 };
 
@@ -69,8 +70,8 @@ fn ata_info_from_layout(
     None
 }
 
-pub(crate) fn is_known_empty_eata<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn is_known_empty_eata<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     eata_pubkey: &Pubkey,
 ) -> bool
 where
@@ -78,18 +79,20 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     this.known_empty_eatas.lock().get(eata_pubkey).is_some()
 }
 
-pub(crate) fn mark_eata_empty<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn mark_eata_empty<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     eata_pubkey: Pubkey,
 ) where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     this.known_empty_eatas.lock().put(eata_pubkey, ());
 }
@@ -99,8 +102,9 @@ pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_up
     U,
     V,
     C,
+    P,
 >(
-    this: &FetchCloner<T, U, V, C>,
+    this: &FetchCloner<T, U, V, C, P>,
     eata_pubkey: Pubkey,
     eata_account: &AccountSharedData,
     deleg_record: Option<&DelegationRecord>,
@@ -111,6 +115,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     if let Some(deleg_record) = deleg_record {
         return maybe_build_projected_ata_clone_request_from_eata(
@@ -149,8 +154,8 @@ where
     .await
 }
 
-async fn maybe_build_projected_ata_clone_request_from_eata<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+async fn maybe_build_projected_ata_clone_request_from_eata<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     eata_pubkey: Pubkey,
     eata_account: &AccountSharedData,
     deleg_record: &DelegationRecord,
@@ -161,6 +166,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     if deleg_record.authority != this.validator_pubkey {
         return None;
@@ -221,8 +227,8 @@ where
     })
 }
 
-async fn fetch_remote_base_ata<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+async fn fetch_remote_base_ata<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     ata_pubkeys: &[Pubkey],
     min_context_slot: u64,
 ) -> Option<(Pubkey, AccountSharedData)>
@@ -231,6 +237,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     let remote_accounts = match this
         .remote_account_provider
@@ -264,8 +271,8 @@ where
     )
 }
 
-pub(crate) async fn maybe_project_ata_from_subscription_update<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn maybe_project_ata_from_subscription_update<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     ata_pubkey: Pubkey,
     ata_account: AccountSharedData,
 ) -> (
@@ -277,6 +284,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     let Some(ata_info) = is_ata(&ata_pubkey, &ata_account) else {
         return (ata_account, None);
@@ -373,8 +381,8 @@ where
     (ata_account, Some((deleg_record, delegation_actions)))
 }
 
-pub(crate) fn maybe_project_delegated_ata_from_eata<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn maybe_project_delegated_ata_from_eata<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     ata_account: &AccountSharedData,
     eata_account: &AccountSharedData,
     deleg_record: &DelegationRecord,
@@ -384,6 +392,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     if deleg_record.authority != this.validator_pubkey {
         return None;
@@ -419,8 +428,8 @@ where
 /// and, if the ATA is delegated to us and the eATA exists, we clone the eATA data
 /// into the ATA in the bank.
 #[instrument(skip(this, atas))]
-pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     atas: Vec<(
         Pubkey,
         AccountSharedData,
@@ -435,6 +444,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     if atas.is_empty() {
         return vec![];

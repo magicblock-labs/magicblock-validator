@@ -379,6 +379,7 @@ jobs:
     runs-on: ${{ matrix.runner || 'blacksmith-8vcpu-ubuntu-2404' }}
     env:
       SOLANA_VERSION: v3.1.5
+      NEEDS_COMPRESSION_TOOLS: ${{ contains(fromJSON('["schedulecommit","chainlink","table_mania"]'), matrix.batch_tests) || startsWith(matrix.batch_tests, 'committor') }}
     strategy:
       matrix:
         include:
@@ -524,6 +525,25 @@ jobs:
           chmod +x magicblock-validator/target/debug/magicblock-validator
           chmod +x magicblock-validator/_integration_test_runner/run-tests
           chmod +x magicblock-validator/_integration_test_bins/*
+        shell: bash
+
+      - name: Install Photon indexer
+        if: env.NEEDS_COMPRESSION_TOOLS == 'true'
+        shell: bash
+        env:
+          RUSTFLAGS: "-A dead-code"
+        run: cargo install --git https://github.com/lightprotocol/photon.git --rev 3f82b926be6717a07bd41aedb84b4d9e6b0ab0d3 --locked --force
+
+      - name: Setup Node.js
+        if: env.NEEDS_COMPRESSION_TOOLS == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install zk-compression CLI
+        if: env.NEEDS_COMPRESSION_TOOLS == 'true'
+        run: |
+          npm i -g @lightprotocol/zk-compression-cli@0.28.4
         shell: bash
 
       - name: Run integration tests - ${{ matrix.batch_tests }}

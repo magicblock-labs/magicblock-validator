@@ -3,9 +3,14 @@ use std::process::{self, Child};
 pub fn cleanup_validators(
     ephem_validator: &mut Child,
     devnet_validator: &mut Child,
+    uses_light_validator: bool,
 ) {
     cleanup_validator(ephem_validator, "ephemeral");
-    cleanup_validator(devnet_validator, "devnet");
+    if uses_light_validator {
+        cleanup_light_validator(devnet_validator);
+    } else {
+        cleanup_validator(devnet_validator, "devnet");
+    }
     kill_validators();
 }
 
@@ -21,6 +26,20 @@ pub fn cleanup_validator(validator: &mut Child, label: &str) {
     validator.wait().unwrap_or_else(|err| {
         panic!("Failed to reap {} validator ({:?})", label, err)
     });
+}
+
+pub fn cleanup_light_validator(validator: &mut Child) {
+    validator.kill().unwrap_or_else(|err| {
+        panic!("Failed to kill light validator ({:?})", err)
+    });
+    let command = process::Command::new("light")
+        .arg("test-validator")
+        .arg("--stop")
+        .output()
+        .unwrap();
+    if !command.status.success() {
+        panic!("Failed to stop light validator: {:?}", command);
+    }
 }
 
 fn kill_process(name: &str) {

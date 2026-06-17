@@ -186,6 +186,7 @@ impl InstructionUtils {
                 AccountModificationForInstruction {
                     owner: account_modification.owner,
                     delegated: account_modification.delegated,
+                    compressed: account_modification.compressed,
                     confined: account_modification.confined,
                 };
             account_mods.insert(

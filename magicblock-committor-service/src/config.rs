@@ -9,6 +9,7 @@ pub const DEFAULT_ACTIONS_TIMEOUT: Duration = Duration::from_secs(60);
 #[derive(Debug, Clone)]
 pub struct ChainConfig {
     pub rpc_uri: String,
+    pub photon_uri: Option<String>,
     pub websocket_uri: Option<String>,
     pub commitment: CommitmentConfig,
     pub compute_budget_config: ComputeBudgetConfig,
@@ -16,39 +17,14 @@ pub struct ChainConfig {
 }
 
 impl ChainConfig {
-    pub fn devnet(compute_budget_config: ComputeBudgetConfig) -> Self {
-        Self {
-            rpc_uri: "https://api.devnet.solana.com".to_string(),
-            websocket_uri: None,
-            commitment: CommitmentConfig::confirmed(),
-            compute_budget_config,
-            actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
-        }
-    }
-
-    pub fn mainnet(compute_budget_config: ComputeBudgetConfig) -> Self {
-        Self {
-            rpc_uri: "https://api.mainnet-beta.solana.com".to_string(),
-            websocket_uri: None,
-            commitment: CommitmentConfig::confirmed(),
-            compute_budget_config,
-            actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
-        }
-    }
-
     pub fn local(compute_budget_config: ComputeBudgetConfig) -> Self {
         Self {
-            rpc_uri: "http://localhost:7799".to_string(),
             websocket_uri: None,
+            rpc_uri: "http://localhost:7799".to_string(),
+            photon_uri: Some("http://localhost:8784".to_string()),
             commitment: CommitmentConfig::processed(),
             compute_budget_config,
             actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
         }
-    }
-}
-
-impl Default for ChainConfig {
-    fn default() -> Self {
-        Self::local(ComputeBudgetConfig::new(1_000_000))
     }
 }
