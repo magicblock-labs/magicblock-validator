@@ -367,14 +367,7 @@ impl TaskStrategist {
                         &commit_finalize_task.delivery,
                     ),
                 ),
-                BaseTaskImpl::CommitFinalizeCompressed(task) => (
-                    task.commit_id,
-                    task.committed_account.pubkey,
-                    CommitStrategy::StateArgs,
-                ),
-                BaseTaskImpl::Undelegate(_)
-                | BaseTaskImpl::Finalize(_)
-                | BaseTaskImpl::BaseAction(_) => continue,
+                _ => continue,
             };
             if let Err(err) = persistor.set_commit_strategy(
                 commit_id,
@@ -489,7 +482,7 @@ mod tests {
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,
         intent_executor::task_info_fetcher::{
-            CompressedData, TaskInfoFetcher, TaskInfoFetcherResult,
+            TaskInfoFetcher, TaskInfoFetcherResult,
         },
         persist::IntentPersisterImpl,
         tasks::{
@@ -510,7 +503,6 @@ mod tests {
         async fn fetch_next_commit_nonces(
             &self,
             pubkeys: &[Pubkey],
-            _: bool,
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
@@ -519,7 +511,6 @@ mod tests {
         async fn fetch_current_commit_nonces(
             &self,
             pubkeys: &[Pubkey],
-            _: bool,
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
@@ -538,14 +529,6 @@ mod tests {
             _pubkeys: &[Pubkey],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
-            Ok(Default::default())
-        }
-
-        async fn get_compressed_data(
-            &self,
-            _: &Pubkey,
-            _: Option<u64>,
-        ) -> TaskInfoFetcherResult<CompressedData> {
             Ok(Default::default())
         }
     }

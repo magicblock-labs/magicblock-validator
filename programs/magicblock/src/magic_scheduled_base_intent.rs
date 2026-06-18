@@ -38,9 +38,6 @@ pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
 /// Fixed fee per commit.
 /// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
 pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
-/// Fixed fee per compressed commit.
-/// Cost = 2 * (tx cost(5k) + light protocol fee(5k)) = 20k
-pub const COMPRESSED_COMMIT_FEE_LAMPORTS: u64 = 20_000;
 /// Price per compute unit for a BaseAction executed on Solana base chain,
 /// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
 pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
@@ -132,20 +129,6 @@ impl ScheduledIntentBundle {
         self.intent_bundle.get_all_committed_accounts()
     }
 
-    /// Returns all regular accounts that will be committed on Base layer,
-    /// including the one scheduled for undelegation
-    pub fn get_all_regular_committed_accounts(&self) -> Vec<CommittedAccount> {
-        self.intent_bundle.get_all_regular_committed_accounts()
-    }
-
-    /// Returns all compressed accounts that will be committed on Base layer,
-    /// including the one scheduled for undelegation
-    pub fn get_all_compressed_committed_accounts(
-        &self,
-    ) -> Vec<CommittedAccount> {
-        self.intent_bundle.get_all_compressed_committed_accounts()
-    }
-
     /// Returns pubkeys of all accounts that will be committed on Base layer,
     /// including the one scheduled for undelegation
     pub fn get_all_committed_pubkeys(&self) -> Vec<Pubkey> {
@@ -184,21 +167,6 @@ impl ScheduledIntentBundle {
         self.intent_bundle.get_commit_finalize_intent_accounts()
     }
 
-    /// Returns `CommitFinalizeCompressed` intent's accounts
-    pub fn get_commit_finalize_compressed_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        self.intent_bundle
-            .get_commit_finalize_compressed_intent_accounts()
-    }
-
-    pub fn get_commit_finalize_compressed_and_undelegate_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        self.intent_bundle
-            .get_commit_finalize_compressed_and_undelegate_intent_accounts()
-    }
-
     /// Returns `Commit` intent's accounts
     pub fn get_commit_intent_accounts_mut(
         &mut self,
@@ -222,10 +190,6 @@ impl ScheduledIntentBundle {
         self.intent_bundle.has_callbacks()
     }
 
-    pub fn has_compressed_intent(&self) -> bool {
-        self.intent_bundle.has_compressed_intent()
-    }
-
     pub fn is_empty(&self) -> bool {
         self.intent_bundle.is_empty()
     }
@@ -244,8 +208,6 @@ pub enum MagicBaseIntent {
     CommitAndUndelegate(CommitAndUndelegate),
     CommitFinalize(CommitType),
     CommitFinalizeAndUndelegate(CommitAndUndelegate),
-    CommitFinalizeCompressed(CommitType),
-    CommitFinalizeAndUndelegateCompressed(CommitAndUndelegate),
 }
 
 // Bundle of BaseIntents
@@ -255,8 +217,6 @@ pub struct MagicIntentBundle {
     pub commit_and_undelegate: Option<CommitAndUndelegate>,
     pub commit_finalize: Option<CommitType>,
     pub commit_finalize_and_undelegate: Option<CommitAndUndelegate>,
-    pub commit_finalize_compressed: Option<CommitType>,
-    pub commit_finalize_compressed_and_undelegate: Option<CommitAndUndelegate>,
     pub standalone_actions: Vec<BaseAction>,
 }
 
@@ -277,12 +237,6 @@ impl From<MagicBaseIntent> for MagicIntentBundle {
             MagicBaseIntent::CommitFinalizeAndUndelegate(value) => {
                 this.commit_finalize_and_undelegate = Some(value)
             }
-            MagicBaseIntent::CommitFinalizeCompressed(value) => {
-                this.commit_finalize_compressed = Some(value)
-            }
-            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(value) => {
-                this.commit_finalize_compressed_and_undelegate = Some(value)
-            }
         }
 
         this
@@ -298,38 +252,22 @@ impl MagicIntentBundle {
 
         let commit = args
             .commit
-            .map(|value| CommitType::try_from_args(value, context, false))
+            .map(|value| CommitType::try_from_args(value, context))
             .transpose()?;
 
         let commit_and_undelegate = args
             .commit_and_undelegate
-            .map(|value| {
-                CommitAndUndelegate::try_from_args(value, context, false)
-            })
+            .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
 
         let commit_finalize = args
             .commit_finalize
-            .map(|value| CommitType::try_from_args(value, context, false))
+            .map(|value| CommitType::try_from_args(value, context))
             .transpose()?;
 
         let commit_finalize_and_undelegate = args
             .commit_finalize_and_undelegate
-            .map(|value| {
-                CommitAndUndelegate::try_from_args(value, context, false)
-            })
-            .transpose()?;
-
-        let commit_finalize_compressed = args
-            .commit_finalize_compressed
-            .map(|value| CommitType::try_from_args(value, context, true))
-            .transpose()?;
-
-        let commit_finalize_compressed_and_undelegate = args
-            .commit_finalize_compressed_and_undelegate
-            .map(|value| {
-                CommitAndUndelegate::try_from_args(value, context, true)
-            })
+            .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
 
         let actions = args
@@ -343,8 +281,6 @@ impl MagicIntentBundle {
             commit_and_undelegate,
             commit_finalize,
             commit_finalize_and_undelegate,
-            commit_finalize_compressed,
-            commit_finalize_compressed_and_undelegate,
             standalone_actions: actions,
         };
         this.post_validation(context)?;
@@ -433,19 +369,6 @@ impl MagicIntentBundle {
         {
             check(commit_finalize_and_undelegate.get_committed_accounts())?;
         }
-        if let Some(commit_finalize_compressed) =
-            &self.commit_finalize_compressed
-        {
-            check(commit_finalize_compressed.get_committed_accounts())?;
-        }
-        if let Some(commit_finalize_compressed_and_undelegate) =
-            &self.commit_finalize_compressed_and_undelegate
-        {
-            check(
-                commit_finalize_compressed_and_undelegate
-                    .get_committed_accounts(),
-            )?;
-        }
 
         Ok(())
     }
@@ -456,16 +379,10 @@ impl MagicIntentBundle {
     ) -> Result<u64, InstructionError> {
         let mut fee = 0;
         if let Some(ref commit) = self.commit {
-            fee += commit.calculate_fee(commit_nonces, false)?;
+            fee += commit.calculate_fee(commit_nonces)?;
         }
         if let Some(ref cau) = self.commit_and_undelegate {
-            fee += cau.calculate_fee(commit_nonces, false)?;
-        }
-        if let Some(ref commit) = self.commit_finalize_compressed {
-            fee += commit.calculate_fee(commit_nonces, true)?;
-        }
-        if let Some(ref cau) = self.commit_finalize_compressed_and_undelegate {
-            fee += cau.calculate_fee(commit_nonces, true)?;
+            fee += cau.calculate_fee(commit_nonces)?;
         }
         fee += calculate_actions_fee(&self.standalone_actions);
         Ok(fee)
@@ -474,7 +391,6 @@ impl MagicIntentBundle {
     pub fn has_undelegate_intent(&self) -> bool {
         self.commit_and_undelegate.is_some()
             || self.commit_finalize_and_undelegate.is_some()
-            || self.commit_finalize_compressed_and_undelegate.is_some()
     }
 
     pub fn has_committed_accounts(&self) -> bool {
@@ -494,22 +410,11 @@ impl MagicIntentBundle {
             .get_commit_finalize_and_undelegate_intent_accounts()
             .map(|el| !el.is_empty())
             .unwrap_or(false);
-        let has_commit_finalize_compressed_intent_accounts = self
-            .get_commit_finalize_compressed_intent_accounts()
-            .map(|el| !el.is_empty())
-            .unwrap_or(false);
-        let has_commit_finalize_compressed_and_undelegate_intent_accounts =
-            self.get_commit_finalize_compressed_and_undelegate_intent_accounts(
-            )
-            .map(|el| !el.is_empty())
-            .unwrap_or(false);
 
         has_commit_intent_accounts
             || has_undelegate_intent_accounts
             || has_commit_finalize_intent_accounts
             || has_commit_finalize_and_undelegate_intent_accounts
-            || has_commit_finalize_compressed_intent_accounts
-            || has_commit_finalize_compressed_and_undelegate_intent_accounts
     }
 
     /// Returns `[CommitAndUndelegate]` intent's accounts
@@ -539,27 +444,6 @@ impl MagicIntentBundle {
         )
     }
 
-    /// Returns `[CommitType]` intent's accounts
-    pub fn get_commit_finalize_compressed_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        Some(
-            self.commit_finalize_compressed
-                .as_ref()?
-                .get_committed_accounts(),
-        )
-    }
-
-    pub fn get_commit_finalize_compressed_and_undelegate_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        Some(
-            self.commit_finalize_compressed_and_undelegate
-                .as_ref()?
-                .get_committed_accounts(),
-        )
-    }
-
     /// Returns `Commit` intent's accounts
     pub fn get_commit_finalize_intent_accounts(
         &self,
@@ -582,61 +466,12 @@ impl MagicIntentBundle {
         let commit_finalize = self.get_commit_finalize_intent_accounts();
         let commit_finalize_and_undelegate =
             self.get_commit_finalize_and_undelegate_intent_accounts();
-        let commit_finalize_compressed =
-            self.get_commit_finalize_compressed_intent_accounts();
-        let commit_finalize_compressed_and_unde = self
-            .get_commit_finalize_compressed_and_undelegate_intent_accounts();
 
         [
             committed,
             undelegated,
             commit_finalize,
             commit_finalize_and_undelegate,
-            commit_finalize_compressed,
-            commit_finalize_compressed_and_unde,
-        ]
-        .into_iter()
-        .flatten()
-        .flatten()
-        .cloned()
-        .collect()
-    }
-
-    /// Returns all the compressed accounts that will be committed,
-    /// including the ones that will be undelegated as well
-    pub fn get_all_regular_committed_accounts(&self) -> Vec<CommittedAccount> {
-        let committed = self.get_commit_intent_accounts();
-        let undelegated = self.get_undelegate_intent_accounts();
-        let commit_finalize = self.get_commit_finalize_intent_accounts();
-        let commit_finalize_and_undelegate =
-            self.get_commit_finalize_and_undelegate_intent_accounts();
-
-        [
-            committed,
-            undelegated,
-            commit_finalize,
-            commit_finalize_and_undelegate,
-        ]
-        .into_iter()
-        .flatten()
-        .flatten()
-        .cloned()
-        .collect()
-    }
-
-    /// Returns all the compressed accounts that will be committed,
-    /// including the ones that will be undelegated as well
-    pub fn get_all_compressed_committed_accounts(
-        &self,
-    ) -> Vec<CommittedAccount> {
-        let commit_finalize_compressed =
-            self.get_commit_finalize_compressed_intent_accounts();
-        let commit_finalize_compressed_and_unde = self
-            .get_commit_finalize_compressed_and_undelegate_intent_accounts();
-
-        [
-            commit_finalize_compressed,
-            commit_finalize_compressed_and_unde,
         ]
         .into_iter()
         .flatten()
@@ -651,8 +486,6 @@ impl MagicIntentBundle {
             self.get_undelegate_intent_pubkeys(),
             self.get_commit_finalize_intent_pubkeys(),
             self.get_commit_finalize_and_undelegate_intent_pubkeys(),
-            self.get_commit_finalize_compressed_intent_pubkeys(),
-            self.get_commit_finalize_compressed_and_undelegate_intent_pubkeys(),
         ]
         .into_iter()
         .flatten()
@@ -686,22 +519,6 @@ impl MagicIntentBundle {
             .map(|value| value.get_committed_pubkeys())
     }
 
-    pub fn get_commit_finalize_compressed_intent_pubkeys(
-        &self,
-    ) -> Option<Vec<Pubkey>> {
-        self.commit_finalize_compressed
-            .as_ref()
-            .map(|value| value.get_committed_pubkeys())
-    }
-
-    pub fn get_commit_finalize_compressed_and_undelegate_intent_pubkeys(
-        &self,
-    ) -> Option<Vec<Pubkey>> {
-        self.commit_finalize_compressed_and_undelegate
-            .as_ref()
-            .map(|value| value.get_committed_pubkeys())
-    }
-
     pub fn is_empty(&self) -> bool {
         let no_committed =
             self.commit.as_ref().map(|el| el.is_empty()).unwrap_or(true);
@@ -723,17 +540,6 @@ impl MagicIntentBundle {
             .as_ref()
             .map(|el| el.is_empty())
             .unwrap_or(true);
-        let no_commit_finalize_compressed = self
-            .commit_finalize_compressed
-            .as_ref()
-            .map(|el| el.is_empty())
-            .unwrap_or(true);
-
-        let no_commit_finalize_compressed_and_undelegate = self
-            .commit_finalize_compressed_and_undelegate
-            .as_ref()
-            .map(|el| el.is_empty())
-            .unwrap_or(true);
 
         let no_actions = self.standalone_actions.is_empty();
 
@@ -741,8 +547,6 @@ impl MagicIntentBundle {
             && no_committed_and_undelegated
             && no_commit_finalize
             && no_commit_finalize_and_undelegate
-            && no_commit_finalize_compressed
-            && no_commit_finalize_compressed_and_undelegate
             && no_actions
     }
 
@@ -763,11 +567,6 @@ impl MagicIntentBundle {
             .any(|el| el.callback.is_some());
 
         x || y || z
-    }
-
-    pub fn has_compressed_intent(&self) -> bool {
-        self.commit_finalize_compressed.is_some()
-            || self.commit_finalize_compressed_and_undelegate.is_some()
     }
 
     pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
@@ -807,35 +606,22 @@ impl MagicBaseIntent {
                 Ok(MagicBaseIntent::BaseActions(base_actions))
             }
             MagicBaseIntentArgs::Commit(type_) => {
-                let commit = CommitType::try_from_args(type_, context, false)?;
+                let commit = CommitType::try_from_args(type_, context)?;
                 Ok(MagicBaseIntent::Commit(commit))
             }
             MagicBaseIntentArgs::CommitAndUndelegate(type_) => {
                 let commit_and_undelegate =
-                    CommitAndUndelegate::try_from_args(type_, context, false)?;
+                    CommitAndUndelegate::try_from_args(type_, context)?;
                 Ok(MagicBaseIntent::CommitAndUndelegate(commit_and_undelegate))
             }
             MagicBaseIntentArgs::CommitFinalize(type_) => {
-                let commit = CommitType::try_from_args(type_, context, false)?;
+                let commit = CommitType::try_from_args(type_, context)?;
                 Ok(MagicBaseIntent::CommitFinalize(commit))
             }
             MagicBaseIntentArgs::CommitFinalizeAndUndelegate(type_) => {
                 let commit_and_undelegate =
-                    CommitAndUndelegate::try_from_args(type_, context, false)?;
+                    CommitAndUndelegate::try_from_args(type_, context)?;
                 Ok(MagicBaseIntent::CommitFinalizeAndUndelegate(
-                    commit_and_undelegate,
-                ))
-            }
-            MagicBaseIntentArgs::CommitFinalizeCompressed(type_) => {
-                let commit = CommitType::try_from_args(type_, context, true)?;
-                Ok(MagicBaseIntent::CommitFinalizeCompressed(commit))
-            }
-            MagicBaseIntentArgs::CommitFinalizeAndUndelegateCompressed(
-                type_,
-            ) => {
-                let commit_and_undelegate =
-                    CommitAndUndelegate::try_from_args(type_, context, true)?;
-                Ok(MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(
                     commit_and_undelegate,
                 ))
             }
@@ -849,8 +635,6 @@ impl MagicBaseIntent {
             MagicBaseIntent::CommitAndUndelegate(_) => true,
             MagicBaseIntent::CommitFinalize(_) => false,
             MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
-            MagicBaseIntent::CommitFinalizeCompressed(_) => false,
-            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(_) => true,
         }
     }
 
@@ -861,8 +645,6 @@ impl MagicBaseIntent {
             MagicBaseIntent::CommitAndUndelegate(_) => false,
             MagicBaseIntent::CommitFinalize(_) => true,
             MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
-            MagicBaseIntent::CommitFinalizeCompressed(_) => true,
-            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(_) => true,
         }
     }
 
@@ -877,12 +659,6 @@ impl MagicBaseIntent {
                 Some(t.get_committed_accounts())
             }
             MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
-                Some(t.get_committed_accounts())
-            }
-            MagicBaseIntent::CommitFinalizeCompressed(t) => {
-                Some(t.get_committed_accounts())
-            }
-            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(t) => {
                 Some(t.get_committed_accounts())
             }
         }
@@ -903,12 +679,6 @@ impl MagicBaseIntent {
             MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
                 Some(t.get_committed_accounts_mut())
             }
-            MagicBaseIntent::CommitFinalizeCompressed(t) => {
-                Some(t.get_committed_accounts_mut())
-            }
-            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(t) => {
-                Some(t.get_committed_accounts_mut())
-            }
         }
     }
 
@@ -925,10 +695,6 @@ impl MagicBaseIntent {
             MagicBaseIntent::CommitAndUndelegate(t) => t.is_empty(),
             MagicBaseIntent::CommitFinalize(t) => t.is_empty(),
             MagicBaseIntent::CommitFinalizeAndUndelegate(t) => t.is_empty(),
-            MagicBaseIntent::CommitFinalizeCompressed(t) => t.is_empty(),
-            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(t) => {
-                t.is_empty()
-            }
         }
     }
 }
@@ -943,13 +709,12 @@ impl CommitAndUndelegate {
     pub fn try_from_args(
         args: CommitAndUndelegateArgs,
         context: &ConstructionContext<'_, '_, '_>,
-        compressed: bool,
     ) -> Result<CommitAndUndelegate, InstructionError> {
         let account_indices = args.commit_type.committed_accounts_indices();
         Self::validate(account_indices.as_slice(), context)?;
 
         let commit_action =
-            CommitType::try_from_args(args.commit_type, context, compressed)?;
+            CommitType::try_from_args(args.commit_type, context)?;
         let undelegate_action =
             UndelegateType::try_from_args(args.undelegate_type, context)?;
 
@@ -990,12 +755,9 @@ impl CommitAndUndelegate {
     pub fn calculate_fee(
         &self,
         commit_nonces: &HashMap<Pubkey, u64>,
-        compressed: bool,
     ) -> Result<u64, InstructionError> {
         let mut fee = 0;
-        fee += self
-            .commit_action
-            .calculate_fee(commit_nonces, compressed)?;
+        fee += self.commit_action.calculate_fee(commit_nonces)?;
         fee += self.undelegate_action.calculate_fee(commit_nonces)?;
         Ok(fee)
     }
@@ -1145,7 +907,6 @@ impl CommitType {
     fn validate_accounts(
         accounts: &[CommitAccountRef<'_, '_>],
         context: &ConstructionContext<'_, '_, '_>,
-        compressed: bool,
     ) -> Result<(), InstructionError> {
         accounts.iter().try_for_each(|(pubkey, account)| {
             if account.to_account_shared_data()?.confined() {
@@ -1162,15 +923,6 @@ impl CommitType {
                 ic_msg!(
                     context.invoke_context,
                     "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
-                    pubkey
-                );
-                return Err(InstructionError::InvalidAccountData);
-            }
-
-            if account.to_account_shared_data()?.compressed() ^ compressed {
-                ic_msg!(
-                    context.invoke_context,
-                    "ScheduleCommit ERR: for account {}, compressed commits need compressed accounts",
                     pubkey
                 );
                 return Err(InstructionError::InvalidAccountData);
@@ -1229,7 +981,6 @@ impl CommitType {
     pub fn try_from_args(
         args: CommitTypeArgs,
         context: &ConstructionContext<'_, '_, '_>,
-        compressed: bool,
     ) -> Result<CommitType, InstructionError> {
         match args {
             CommitTypeArgs::Standalone(accounts) => {
@@ -1237,11 +988,7 @@ impl CommitType {
                     &accounts,
                     context.transaction_context(),
                 )?;
-                Self::validate_accounts(
-                    &committed_accounts_ref,
-                    context,
-                    compressed,
-                )?;
+                Self::validate_accounts(&committed_accounts_ref, context)?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
@@ -1264,11 +1011,7 @@ impl CommitType {
                     &committed_accounts,
                     context.transaction_context(),
                 )?;
-                Self::validate_accounts(
-                    &committed_accounts_ref,
-                    context,
-                    compressed,
-                )?;
+                Self::validate_accounts(&committed_accounts_ref, context)?;
 
                 let base_actions = base_actions
                     .into_iter()
@@ -1298,26 +1041,17 @@ impl CommitType {
     pub fn calculate_fee(
         &self,
         commit_nonces: &HashMap<Pubkey, u64>,
-        compressed: bool,
     ) -> Result<u64, InstructionError> {
         let mut fee = 0;
         match self {
             CommitType::Standalone(ref committed_accounts) => {
-                fee += calculate_commit_fee(
-                    committed_accounts,
-                    commit_nonces,
-                    compressed,
-                )?;
+                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
             }
             CommitType::WithBaseActions {
                 committed_accounts,
                 base_actions,
             } => {
-                fee += calculate_commit_fee(
-                    committed_accounts,
-                    commit_nonces,
-                    compressed,
-                )?;
+                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
                 fee += calculate_actions_fee(base_actions);
             }
         }
@@ -1495,13 +1229,10 @@ pub(crate) fn validate_commit_schedule_permissions(
 pub(crate) fn calculate_commit_fee(
     accounts: &[CommittedAccount],
     commit_nonces: &HashMap<Pubkey, u64>,
-    compressed: bool,
 ) -> Result<u64, InstructionError> {
     accounts.iter().try_fold(0u64, |fee, account| {
         if let Some(nonce) = commit_nonces.get(&account.pubkey) {
-            if compressed {
-                Ok(fee + COMPRESSED_COMMIT_FEE_LAMPORTS)
-            } else if nonce >= &ACTUAL_COMMIT_LIMIT {
+            if nonce >= &ACTUAL_COMMIT_LIMIT {
                 Ok(fee + COMMIT_FEE_LAMPORTS)
             } else {
                 Ok(fee)
@@ -1565,9 +1296,8 @@ mod tests {
         // nonce is commits done so far; nonce+1 is the next commit number.
         // ACTUAL_COMMIT_LIMIT - 1 means the next commit is exactly at the limit → free.
         let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT - 1)]);
-        let fee =
-            calculate_commit_fee(&[make_committed_account(pk)], &nonces, false)
-                .unwrap();
+        let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces)
+            .unwrap();
         assert_eq!(fee, 0);
     }
 
@@ -1582,7 +1312,6 @@ mod tests {
         let fee = calculate_commit_fee(
             &[make_committed_account(pk1), make_committed_account(pk2)],
             &nonces,
-            false,
         )
         .unwrap();
         assert_eq!(fee, COMMIT_FEE_LAMPORTS * 2);
@@ -1602,7 +1331,6 @@ mod tests {
                 make_committed_account(pk_above),
             ],
             &nonces,
-            false,
         )
         .unwrap();
         assert_eq!(fee, COMMIT_FEE_LAMPORTS);
@@ -1614,7 +1342,6 @@ mod tests {
         let err = calculate_commit_fee(
             &[make_committed_account(pk)],
             &HashMap::new(),
-            false,
         )
         .unwrap_err();
         assert_eq!(err, InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
@@ -1669,8 +1396,6 @@ mod tests {
                 }),
                 commit_finalize: None,
                 commit_finalize_and_undelegate: None,
-                commit_finalize_compressed: None,
-                commit_finalize_compressed_and_undelegate: None,
                 standalone_actions: vec![make_base_action(50_000)],
             },
         };

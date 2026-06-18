@@ -1,6 +1,5 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
-use magicblock_core::compression::OUTPUT_QUEUE;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
@@ -13,23 +12,6 @@ type IntentID = u64;
 struct IntentMeta {
     num_keys: usize,
     intent: ScheduledIntentBundle,
-}
-
-fn scheduling_pubkeys(intent_bundle: &ScheduledIntentBundle) -> Vec<Pubkey> {
-    let mut pubkeys = intent_bundle.get_all_committed_pubkeys();
-    if intent_bundle
-        .get_commit_finalize_compressed_intent_accounts()
-        .is_some()
-        || intent_bundle
-            .get_commit_finalize_compressed_and_undelegate_intent_accounts()
-            .is_some()
-    {
-        // Compressed finalize updates flow through Light's shared output queue.
-        // Without this lock, disjoint account intents can race inside the
-        // compression program even though their committed account keys differ.
-        pubkeys.push(OUTPUT_QUEUE);
-    }
-    pubkeys
 }
 
 /// A scheduler that ensures mutually exclusive access to pubkeys across intents
@@ -129,7 +111,7 @@ impl IntentScheduler {
             return None;
         }
 
-        let pubkeys = scheduling_pubkeys(&intent_bundle);
+        let pubkeys = intent_bundle.get_all_committed_pubkeys();
         if pubkeys.is_empty() {
             return Some(intent_bundle);
         };
@@ -170,7 +152,7 @@ impl IntentScheduler {
     ) -> IntentSchedulerResult<()> {
         // Release data for completed intent
         let intent_id = intent_bundle.id;
-        let pubkeys = scheduling_pubkeys(intent_bundle);
+        let pubkeys = intent_bundle.get_all_committed_pubkeys();
         if pubkeys.is_empty() {
             // This means BaseAction, it doesn't have to be scheduled
             return Ok(());
@@ -356,54 +338,6 @@ mod simple_test {
         // Second intent should also execute immediately
         assert!(scheduler.schedule(msg2.clone()).is_some());
         // No intents are blocked
-        assert_eq!(scheduler.intents_blocked(), 0);
-    }
-
-    #[test]
-    fn test_compressed_finalize_intents_share_queue_lock() {
-        setup();
-        let mut scheduler = IntentScheduler::new();
-        let msg1 = create_test_compressed_intent(
-            1,
-            &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
-        );
-        let msg2 = create_test_compressed_intent(
-            2,
-            &[pubkey!("22222222222222222222222222222222222222222222")],
-            false,
-        );
-
-        assert!(scheduler.schedule(msg1.clone()).is_some());
-        assert!(scheduler.schedule(msg2.clone()).is_none());
-        assert_eq!(scheduler.intents_blocked(), 1);
-
-        assert!(scheduler.complete(&msg1).is_ok());
-        assert_eq!(scheduler.pop_next_scheduled_intent(), Some(msg2));
-        assert_eq!(scheduler.intents_blocked(), 0);
-    }
-
-    #[test]
-    fn test_compressed_undelegate_finalize_intents_share_queue_lock() {
-        setup();
-        let mut scheduler = IntentScheduler::new();
-        let msg1 = create_test_compressed_intent(
-            1,
-            &[pubkey!("1111111111111111111111111111111111111111111")],
-            true,
-        );
-        let msg2 = create_test_compressed_intent(
-            2,
-            &[pubkey!("22222222222222222222222222222222222222222222")],
-            true,
-        );
-
-        assert!(scheduler.schedule(msg1.clone()).is_some());
-        assert!(scheduler.schedule(msg2.clone()).is_none());
-        assert_eq!(scheduler.intents_blocked(), 1);
-
-        assert!(scheduler.complete(&msg1).is_ok());
-        assert_eq!(scheduler.pop_next_scheduled_intent(), Some(msg2));
         assert_eq!(scheduler.intents_blocked(), 0);
     }
 
@@ -959,56 +893,6 @@ pub(crate) fn create_test_intent(
         } else {
             intent.intent_bundle.commit = Some(commit_type);
         }
-    }
-
-    intent
-}
-
-#[cfg(test)]
-pub(crate) fn create_test_compressed_intent(
-    id: u64,
-    pubkeys: &[Pubkey],
-    is_undelegate: bool,
-) -> ScheduledIntentBundle {
-    use magicblock_core::intent::CommittedAccount;
-    use magicblock_program::magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, MagicIntentBundle,
-        ScheduledIntentBundle, UndelegateType,
-    };
-    use solana_account::Account;
-    use solana_hash::Hash;
-    use solana_transaction::Transaction;
-
-    let committed_accounts = pubkeys
-        .iter()
-        .copied()
-        .map(|pubkey| CommittedAccount {
-            pubkey,
-            account: Account::default(),
-            remote_slot: Default::default(),
-        })
-        .collect();
-
-    let commit_type = CommitType::Standalone(committed_accounts);
-    let mut intent = ScheduledIntentBundle {
-        id,
-        slot: 0,
-        blockhash: Hash::default(),
-        sent_transaction: Transaction::default(),
-        payer: Pubkey::default(),
-        intent_bundle: MagicIntentBundle::default(),
-    };
-
-    if is_undelegate {
-        intent
-            .intent_bundle
-            .commit_finalize_compressed_and_undelegate =
-            Some(CommitAndUndelegate {
-                commit_action: commit_type,
-                undelegate_action: UndelegateType::Standalone,
-            });
-    } else {
-        intent.intent_bundle.commit_finalize_compressed = Some(commit_type);
     }
 
     intent

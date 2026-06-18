@@ -45,7 +45,6 @@ use crate::{
             TOKEN_2022_PROGRAM_ID,
         },
         init_logger,
-        photon_client_mock::PhotonClientMock,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
         utils::{create_test_lru_cache, random_pubkey},
     },
@@ -61,7 +60,6 @@ type TestFetchClonerResult = (
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
-            PhotonClientMock,
         >,
     >,
     mpsc::Sender<ForwardedSubscriptionUpdate>,
@@ -116,13 +114,8 @@ macro_rules! assert_cloned_undelegated_account {
 }
 
 struct FetcherTestCtx {
-    remote_account_provider: Arc<
-        RemoteAccountProvider<
-            ChainRpcClientMock,
-            ChainPubsubClientMock,
-            PhotonClientMock,
-        >,
-    >,
+    remote_account_provider:
+        Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
     accounts_bank: Arc<AccountsBankStub>,
     rpc_client: crate::testing::rpc_client_mock::ChainRpcClientMock,
     #[allow(unused)]
@@ -133,7 +126,6 @@ struct FetcherTestCtx {
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
-            PhotonClientMock,
         >,
     >,
     #[allow(unused)]
@@ -176,7 +168,6 @@ where
     let (updates_sender, updates_receiver) = mpsc::channel(1_000);
     let pubsub_client =
         ChainPubsubClientMock::new(updates_sender, updates_receiver);
-    let photon_client = PhotonClientMock::default();
     let accounts_bank = Arc::new(AccountsBankStub::default());
     let rpc_client_clone = rpc_client.clone();
 
@@ -188,7 +179,6 @@ where
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
-            Some(photon_client),
             forward_tx,
             &config,
             subscribed_accounts,
@@ -288,11 +278,7 @@ fn add_delegation_record_with_slot_for(
 /// Returns (FetchCloner, subscription_sender, cloner) for simulating subscription updates in tests.
 fn init_fetch_cloner(
     remote_account_provider: Arc<
-        RemoteAccountProvider<
-            ChainRpcClientMock,
-            ChainPubsubClientMock,
-            PhotonClientMock,
-        >,
+        RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
     >,
     bank: &Arc<AccountsBankStub>,
     validator_keypair: Keypair,
@@ -313,11 +299,7 @@ fn init_fetch_cloner(
 
 async fn acquire_direct_subscription_for_update(
     remote_account_provider: &Arc<
-        RemoteAccountProvider<
-            ChainRpcClientMock,
-            ChainPubsubClientMock,
-            PhotonClientMock,
-        >,
+        RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
     >,
     pubkey: &Pubkey,
 ) {
@@ -334,7 +316,6 @@ async fn wait_for_pending_request(
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
-            PhotonClientMock,
         >,
     >,
     pubkey: Pubkey,
@@ -359,7 +340,6 @@ async fn wait_for_pending_waiter_count(
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
-            PhotonClientMock,
         >,
     >,
     pubkey: Pubkey,
@@ -608,12 +588,7 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
         .await
         .unwrap();
 
-    let (
-        resolved_account,
-        delegation_record,
-        _actions,
-        _compressed_delegation_slot,
-    ) = fetch_cloner
+    let (resolved_account, delegation_record, _actions) = fetch_cloner
         .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
             ForwardedSubscriptionUpdate {
                 pubkey: account_pubkey,
@@ -1215,7 +1190,7 @@ async fn test_delegation_record_unsub_race_condition_prevention() {
 
     // Use a shared FetchCloner to test deduplication
     // Helper function to spawn a fetch_and_clone task with shared FetchCloner
-    let spawn_fetch_task = |fetch_cloner: &Arc<FetchCloner<_, _, _, _, _>>| {
+    let spawn_fetch_task = |fetch_cloner: &Arc<FetchCloner<_, _, _, _>>| {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
             fetch_cloner
@@ -1393,141 +1368,6 @@ async fn test_undelegation_requested_subscription_behavior() {
         .expect("Failed to subscribe to account for undelegation");
 
     assert_subscribed!(remote_account_provider, &[&account_pubkey]);
-}
-
-#[tokio::test]
-async fn test_post_undelegation_plain_refresh_clears_photon_merge_marker() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let account_owner = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let account_pubkey = random_pubkey();
-    let account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: account_owner,
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        remote_account_provider,
-        accounts_bank,
-        fetch_cloner,
-        ..
-    } = setup(
-        [(account_pubkey, account.clone())],
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    accounts_bank
-        .insert(account_pubkey, AccountSharedData::from(account.clone()));
-    fetch_cloner
-        .subscribe_to_account_to_track_undelegation(&account_pubkey)
-        .await
-        .expect("failed to subscribe to account");
-    assert_subscribed!(remote_account_provider, &[&account_pubkey]);
-
-    fetch_cloner.mark_post_undelegation_photon_merge_pending(account_pubkey);
-
-    let result = fetch_cloner
-        .fetch_and_clone_accounts_with_dedup(
-            &[account_pubkey],
-            None,
-            None,
-            AccountFetchOrigin::GetAccount,
-        )
-        .await;
-    assert!(result.is_ok());
-
-    let marker_still_pending = fetch_cloner
-        .post_undelegation_photon_merge_pending
-        .lock()
-        .expect("post_undelegation_photon_merge_pending lock poisoned")
-        .contains(&account_pubkey);
-    assert!(
-        !marker_still_pending,
-        "plain refresh should clear post-undelegation Photon merge marker"
-    );
-
-    let fetch_count_after_plain_refresh = fetch_cloner.fetch_count();
-    let result = fetch_cloner
-        .fetch_and_clone_accounts_with_dedup(
-            &[account_pubkey],
-            None,
-            None,
-            AccountFetchOrigin::GetAccount,
-        )
-        .await;
-    assert!(result.is_ok());
-    assert_eq!(fetch_cloner.fetch_count(), fetch_count_after_plain_refresh);
-}
-
-#[tokio::test]
-async fn test_empty_compressed_subscription_update_skips_when_refetch_cannot_decompress(
-) {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let account_owner = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let account_pubkey = random_pubkey();
-    let bank_account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: account_owner,
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        accounts_bank,
-        fetch_cloner,
-        ..
-    } = setup(
-        [(account_pubkey, bank_account.clone())],
-        CURRENT_SLOT + 1,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    let mut expected_bank_account = AccountSharedData::from(bank_account);
-    expected_bank_account.set_remote_slot(CURRENT_SLOT);
-    accounts_bank.insert(account_pubkey, expected_bank_account.clone());
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-    let empty_compressed_shell = Account {
-        lamports: 0,
-        data: vec![],
-        owner: compressed_delegation_client::ID,
-        executable: false,
-        rent_epoch: 0,
-    };
-    fetch_cloner
-        .process_subscription_update(
-            account_pubkey,
-            ForwardedSubscriptionUpdate {
-                pubkey: account_pubkey,
-                source: SubscriptionSource::Account,
-                account: RemoteAccount::from_fresh_account(
-                    empty_compressed_shell,
-                    CURRENT_SLOT + 1,
-                    RemoteAccountUpdateSource::Compressed,
-                ),
-            },
-        )
-        .await;
-
-    assert_eq!(
-        accounts_bank.get_account(&account_pubkey),
-        Some(expected_bank_account),
-        "empty compressed shell should be skipped when refetch cannot decompress"
-    );
 }
 
 #[tokio::test]
@@ -3008,11 +2848,7 @@ async fn test_no_program_subscription_for_undelegated_account() {
 #[allow(clippy::too_many_arguments)]
 async fn send_subscription_update_and_get_subscribed_programs(
     remote_account_provider: &Arc<
-        RemoteAccountProvider<
-            ChainRpcClientMock,
-            ChainPubsubClientMock,
-            PhotonClientMock,
-        >,
+        RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
     >,
     accounts_bank: &Arc<AccountsBankStub>,
     subscription_tx: &mpsc::Sender<ForwardedSubscriptionUpdate>,
@@ -3372,7 +3208,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
     dlp_owned_account_shared.set_delegated(true);
     dlp_owned_account_shared.set_confined(true);
 
-    let (resolved_account, delegation_record, delegation_actions, _) =
+    let (resolved_account, delegation_record, delegation_actions) =
         fetch_cloner
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 ForwardedSubscriptionUpdate {

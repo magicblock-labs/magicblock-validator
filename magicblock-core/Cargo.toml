@@ -8,8 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-light-sdk = { workspace = true, features = ["v2"] }
-compressed-delegation-client = { workspace = true }
+
 console-subscriber = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync"] }
 flume = { workspace = true }
