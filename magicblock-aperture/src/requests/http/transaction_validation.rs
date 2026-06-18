@@ -2,9 +2,7 @@ use std::mem::size_of;
 
 use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
-use solana_transaction::{
-    sanitized::MAX_TX_ACCOUNT_LOCKS, versioned::VersionedTransaction,
-};
+use solana_transaction::versioned::VersionedTransaction;
 
 use crate::{error::RpcError, RpcResult};
 
@@ -12,6 +10,7 @@ use crate::{error::RpcError, RpcResult};
 // indices fit within a packet-bounded pubkey table (1232 / 32 = 38).
 const MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE: usize =
     1232 / size_of::<Pubkey>();
+const MAX_TX_ACCOUNT_LOCKS: usize = 1024;
 
 pub(super) fn validate_supported_transaction_shape(
     transaction: &VersionedTransaction,
