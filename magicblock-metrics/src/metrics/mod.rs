@@ -164,7 +164,9 @@ lazy_static::lazy_static! {
 
     static ref INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE: IntGauge = IntGauge::new(
         "inflight_subscription_updates_gauge", "Number of subscription-update tasks currently being processed",
-    ).unwrap();
+    ).unwrap_or_else(|err| {
+        panic!("failed to create inflight_subscription_updates_gauge: {err}")
+    });
 
     static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
