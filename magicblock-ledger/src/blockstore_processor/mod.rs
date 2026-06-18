@@ -169,10 +169,10 @@ pub async fn process_ledger(
     // ran initially we ensure that they are present during replay as well
     let requested_blockhash_start =
         full_process_starting_slot.saturating_sub(max_age);
-    // The ledger may not have a persisted block at slot 0 (or at any slot below
-    // its first stored block). When AccountsDb is reset to slot 0 we must start
-    // scanning at the ledger's first available block, otherwise replay breaks
-    // immediately on the missing leading slot and replays nothing.
+    // If accountsdb.reset wipes the database while the ledger is retained, the
+    // fresh AccountsDb starts at slot 0. The retained ledger may not contain
+    // slot 0 (the first produced block is usually slot 1, and older slots may
+    // have been pruned), so start scanning at the ledger's first available block.
     let blockhashes_only_starting_slot = match ledger.get_lowest_slot()? {
         Some(lowest_ledger_slot) => {
             requested_blockhash_start.max(lowest_ledger_slot)
