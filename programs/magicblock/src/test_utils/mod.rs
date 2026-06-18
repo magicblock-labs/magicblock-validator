@@ -143,7 +143,6 @@ impl MagicSys for MagicSysStub {
     fn fetch_current_commit_nonces(
         &self,
         commits: &[CommittedAccount],
-        _compressed: bool,
     ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
         match &self.nonces {
             StubNonces::Global(nonce) => {
@@ -160,9 +159,5 @@ impl MagicSys for MagicSysStub {
                 })
                 .collect(),
         }
-    }
-
-    fn is_compression_enabled(&self) -> bool {
-        true
     }
 }

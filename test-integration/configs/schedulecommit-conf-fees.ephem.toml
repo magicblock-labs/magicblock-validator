@@ -36,8 +36,5 @@ path = "test-integration/target/deploy/program_schedulecommit.so"
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
 path = "test-integration/target/deploy/program_schedulecommit_security.so"
 
-[compression]
-photon-url = "http://localhost:8784"
-
 [metrics]
 address = "0.0.0.0:9000"

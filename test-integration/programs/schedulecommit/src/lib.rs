@@ -6,15 +6,13 @@ use ephemeral_rollups_sdk::{
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{commit_accounts, commit_and_undelegate_accounts},
-};
-use magicblock_magic_program_api::{
-    args::{
-        ActionArgs, BaseActionArgs, CommitTypeArgs, MagicIntentBundleArgs,
-        ShortAccountMeta,
+    ephem::{
+        commit_accounts, commit_and_undelegate_accounts, CallHandler,
+        FoldableIntentBuilder, MagicIntentBundleBuilder,
     },
-    instruction::MagicBlockInstruction,
+    ActionArgs, ShortAccountMeta,
 };
+use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
@@ -808,16 +806,16 @@ pub fn process_schedulecommit_with_vault_and_order_book_cpi(
         return Err(ProgramError::InvalidArgument);
     }
 
-    let committed_accounts = (0..committees.len())
-        .map(|idx| {
-            // Magic program CPI account layout:
-            // payer, magic_context, magic_fee_vault, then committed accounts.
-            u8::try_from(idx + 3)
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| ProgramError::InvalidInstructionData)?;
+    let mut builder = MagicIntentBundleBuilder::new(
+        payer.clone(),
+        magic_context.clone(),
+        magic_program.clone(),
+    )
+    .magic_fee_vault(magic_fee_vault.clone())
+    .commit(&committees);
 
-    let commit = if args.with_actions {
+    if args.with_actions {
+        // Build the UpdateOrderBook instruction data with one hardcoded bid
         let update_ix_data =
             to_vec(&ScheduleCommitInstruction::UpdateOrderBook(BookUpdate {
                 bids: vec![OrderLevel {
@@ -828,63 +826,24 @@ pub fn process_schedulecommit_with_vault_and_order_book_cpi(
             }))
             .map_err(|_| ProgramError::InvalidInstructionData)?;
 
-        CommitTypeArgs::WithBaseActions {
-            committed_accounts,
-            base_actions: vec![BaseActionArgs {
-                args: ActionArgs {
-                    data: update_ix_data,
-                    escrow_index: 1,
-                },
-                compute_units: 50_000,
-                escrow_authority: 0,
-                destination_program: id(),
-                accounts: vec![ShortAccountMeta {
-                    pubkey: *order_book.key,
-                    is_writable: true,
-                }],
+        // Post-commit action: call UpdateOrderBook on the order book account
+        let call_handler = CallHandler {
+            args: ActionArgs {
+                data: update_ix_data,
+                escrow_index: 1, // payer/escrow_authority inserted at index 1
+            },
+            compute_units: 50_000,
+            escrow_authority: payer.clone(),
+            destination_program: id(),
+            accounts: vec![ShortAccountMeta {
+                pubkey: *order_book.key,
+                is_writable: true,
             }],
-        }
-    } else {
-        CommitTypeArgs::Standalone(committed_accounts)
-    };
+        };
+        builder = builder.add_post_commit_actions([call_handler]);
+    }
 
-    let ix = Instruction::new_with_bincode(
-        *magic_program.key,
-        &MagicBlockInstruction::ScheduleIntentBundle(MagicIntentBundleArgs {
-            commit: Some(commit),
-            commit_and_undelegate: None,
-            commit_finalize: None,
-            commit_finalize_and_undelegate: None,
-            commit_finalize_compressed: None,
-            commit_finalize_compressed_and_undelegate: None,
-            standalone_actions: vec![],
-        }),
-        [
-            vec![
-                AccountMeta::new(*payer.key, true),
-                AccountMeta::new(*magic_context.key, false),
-                AccountMeta::new(*magic_fee_vault.key, false),
-            ],
-            committees
-                .iter()
-                .map(|account| AccountMeta {
-                    pubkey: *account.key,
-                    is_signer: account.is_signer,
-                    is_writable: account.is_writable,
-                })
-                .collect(),
-        ]
-        .concat(),
-    );
-
-    let mut cpi_accounts = vec![
-        payer.clone(),
-        magic_context.clone(),
-        magic_fee_vault.clone(),
-    ];
-    cpi_accounts.extend(committees);
-
-    invoke(&ix, &cpi_accounts)
+    builder.build_and_invoke()
 }
 
 fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {

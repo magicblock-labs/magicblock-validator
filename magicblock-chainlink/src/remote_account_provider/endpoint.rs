@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
 use magicblock_config::types::network::Remote;
 use url::Url;
@@ -20,10 +20,6 @@ pub enum Endpoint {
         label: String,
         api_key: String,
     },
-    Compression {
-        label: String,
-        url: String,
-    },
 }
 
 impl Endpoint {
@@ -31,8 +27,7 @@ impl Endpoint {
         match self {
             Endpoint::Rpc { label, .. }
             | Endpoint::WebSocket { label, .. }
-            | Endpoint::Grpc { label, .. }
-            | Endpoint::Compression { label, .. } => label,
+            | Endpoint::Grpc { label, .. } => label,
         }
     }
 }
@@ -56,16 +51,6 @@ impl Endpoints {
                 matches!(ep, Endpoint::WebSocket { .. } | Endpoint::Grpc { .. })
             })
             .collect()
-    }
-
-    pub fn photon_url(&self) -> Option<String> {
-        self.iter().find_map(|ep| {
-            if let Endpoint::Compression { url, .. } = ep {
-                Some(url.clone())
-            } else {
-                None
-            }
-        })
     }
 }
 
@@ -133,12 +118,6 @@ impl Deref for Endpoints {
     type Target = Vec<Endpoint>;
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl DerefMut for Endpoints {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 

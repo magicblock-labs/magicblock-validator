@@ -225,7 +225,6 @@ impl ChainlinkCloner {
             executable: request.account.executable(),
             delegated: request.account.delegated(),
             confined: request.account.confined(),
-            compressed: request.account.compressed(),
             remote_slot: request.account.remote_slot(),
         }
     }
