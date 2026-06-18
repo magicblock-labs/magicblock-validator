@@ -841,6 +841,34 @@ fn test_bind_address_toml_deserialize_port_out_of_range_errors() {
 
 #[test]
 #[parallel]
+fn test_aperture_listen_port_zero_is_accepted() {
+    let config = run_cli(vec!["--listen", "127.0.0.1:0"]);
+    assert_eq!(config.aperture.listen.0.port(), 0);
+}
+
+#[test]
+#[parallel]
+fn test_aperture_listen_port_below_max_is_accepted() {
+    // 65534 is the highest working listen port (WebSocket derives to 65535).
+    let config = run_cli(vec!["--listen", "127.0.0.1:65534"]);
+    assert_eq!(config.aperture.listen.0.port(), 65534);
+}
+
+#[test]
+#[parallel]
+fn test_aperture_listen_port_max_is_rejected() {
+    // u16::MAX leaves no room for the derived WebSocket port (listen + 1).
+    let itr = ["validator", "--listen", "127.0.0.1:65535"]
+        .into_iter()
+        .map(OsString::from);
+    let msg = ValidatorParams::try_new(itr)
+        .expect_err("listen port u16::MAX must be rejected")
+        .to_string();
+    assert!(msg.contains("65535"), "unexpected error: {msg}");
+}
+
+#[test]
+#[parallel]
 fn test_replication_config_debug_redacts_secret() {
     let cfg = ReplicationConfig {
         url: "nats://0.0.0.0:4222".parse().unwrap(),
