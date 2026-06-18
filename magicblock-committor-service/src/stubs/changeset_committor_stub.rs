@@ -181,6 +181,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
                     version: None,
                 },
                 block_time: None,
+                transaction_index: None,
             }))
         {
             tracing::error!(

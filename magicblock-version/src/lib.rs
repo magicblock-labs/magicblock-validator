@@ -5,8 +5,6 @@ use std::{convert::TryInto, fmt};
 
 use serde::{Deserialize, Serialize};
 use solana_sanitize::Sanitize;
-#[macro_use]
-extern crate solana_frozen_abi_macro;
 
 #[derive(Debug, Eq, PartialEq)]
 enum ClientId {
@@ -18,7 +16,7 @@ enum ClientId {
     Unknown(u16),
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, AbiExample)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Version {
     pub major: u16,
     pub minor: u16,

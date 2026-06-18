@@ -27,7 +27,7 @@ use solana_svm::{
         ProcessedTransaction, TransactionProcessingResult,
     },
 };
-use solana_svm_transaction::svm_message::SVMMessage;
+use solana_svm_transaction::svm_message::SVMStaticMessage;
 use solana_transaction::sanitized::SanitizedTransaction;
 use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status::{
@@ -499,6 +499,6 @@ fn signature_fee(
     lamports_per_signature: u64,
 ) -> u64 {
     txn.message()
-        .num_transaction_signatures()
+        .num_total_signatures()
         .saturating_mul(lamports_per_signature)
 }

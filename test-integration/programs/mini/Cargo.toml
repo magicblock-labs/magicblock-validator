@@ -12,11 +12,6 @@ solana-program = { workspace = true }
 solana-sdk-ids = { workspace = true }
 solana-system-interface = { workspace = true, features = ["bincode"] }
 
-[dev-dependencies]
-solana-program-test = { workspace = true }
-solana-sdk = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
-
 [features]
 no-entrypoint = []
 custom-heap = []
