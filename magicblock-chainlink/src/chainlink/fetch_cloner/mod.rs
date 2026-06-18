@@ -516,9 +516,6 @@ where
         });
     }
 
-    // Clones a single already-fetched account into the bank, resolving its own
-    // delegation/program/ATA/action dependencies. Cancellation drops the clone
-    // future at its await point, so a cancelled key never mutates the bank.
     fn spawn_owned_operation(
         &self,
         op: ClaimedOperation,
