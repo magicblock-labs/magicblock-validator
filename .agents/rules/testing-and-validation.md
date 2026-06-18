@@ -6,15 +6,11 @@ This file tells agents how to validate changes. Keep it focused on commands and 
 
 Every code change must be validated. Use the repository-local `mbv-check` skill for Rust changes once it is available in the agent environment. The intent of that skill is to run this validator's standard Rust quality gate and help fix any failures.
 
+Crate guides should name relevant packages/suites and validation intent, but exact command syntax belongs here or in executable skills.
+
 The validator is performance-sensitive. When a change touches critical RPC, account synchronization, scheduler/executor, AccountsDb/ledger, replication, or committor paths, validation should include the smallest available test or measurement that can reveal latency, throughput, contention, allocation, or I/O regressions. If no practical performance validation is run, say so and explain the residual risk.
 
-The validator is also security-critical, and security outranks performance (see `.agents/rules/validator-goals.md` and `.agents/specs/validator-specification.md`). Before handing off any change, explicitly verify it does not:
-
-- relax a signer/authority requirement that exists today,
-- weaken base-layer synchronization (account fetching, subscriptions, delegation-record resolution, slot/commitment/freshness handling),
-- introduce an attacker-triggerable condition (race, time-of-check/time-of-use gap, ordering/timing attack, validator stall/deadlock/hang, or unbounded resource consumption).
-
-When a change touches signer/authority checks, account-sync correctness, lock acquisition/ordering, or any path driven by untrusted RPC/transaction input, add or run the test that exercises the security-relevant behavior (for example concurrency/race tests, delegation/sync ordering tests, or auth-rejection tests). If you cannot validate a security-relevant path, say so and call out the residual risk explicitly — do not treat it as low priority.
+For security and protocol invariants, read `.agents/rules/validator-goals.md` and `.agents/specs/validator-specification.md`; this file only defines how to validate changes against those invariants. When a change touches signer/authority checks, account-sync correctness, lock acquisition/ordering, or any path driven by untrusted RPC/transaction input, add or run the test that exercises the security-relevant behavior (for example concurrency/race tests, delegation/sync ordering tests, or auth-rejection tests). If you cannot validate a security-relevant path, say so and call out the residual risk explicitly — do not treat it as low priority.
 
 Until or unless the skill provides a more specific command set, treat the required baseline as:
 
