@@ -74,7 +74,7 @@ fn test_defaults_are_sane() {
     assert!(!config.accountsdb.defragment_on_startup);
 
     // gRPC defaults
-    assert_eq!(config.grpc.max_subs_in_old_optimized, 5000);
+    assert_eq!(config.grpc.max_subs_in_old_optimized.get(), 5000);
     assert_eq!(config.grpc.max_old_unoptimized, 5);
     assert_eq!(config.grpc.max_subs_in_new, 400);
     assert_eq!(config.grpc.max_time_without_optimization_secs, 60);
@@ -567,10 +567,21 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // 12. gRPC
     // ========================================================================
-    assert_eq!(config.grpc.max_subs_in_old_optimized, 5000);
+    assert_eq!(config.grpc.max_subs_in_old_optimized.get(), 5000);
     assert_eq!(config.grpc.max_old_unoptimized, 5);
     assert_eq!(config.grpc.max_subs_in_new, 400);
     assert_eq!(config.grpc.max_time_without_optimization_secs, 60);
+}
+
+#[test]
+#[serial]
+fn test_grpc_max_subs_in_old_optimized_zero_is_rejected() {
+    let _guard = EnvVarGuard::new("MBV_GRPC__MAX_SUBS_IN_OLD_OPTIMIZED", "0");
+    let itr = std::iter::once("validator").map(OsString::from);
+    assert!(
+        ValidatorParams::try_new(itr).is_err(),
+        "config with max_subs_in_old_optimized = 0 must be rejected at load"
+    );
 }
 
 #[test]
@@ -653,7 +664,7 @@ fn test_env_vars_full_coverage() {
     assert_eq!(config.aperture.event_processors, 9);
 
     // gRPC
-    assert_eq!(config.grpc.max_subs_in_old_optimized, 1337);
+    assert_eq!(config.grpc.max_subs_in_old_optimized.get(), 1337);
     assert_eq!(config.grpc.max_old_unoptimized, 7);
     assert_eq!(config.grpc.max_subs_in_new, 33);
     assert_eq!(config.grpc.max_time_without_optimization_secs, 42);
@@ -837,6 +848,34 @@ fn test_bind_address_toml_deserialize_port_out_of_range_errors() {
         "unexpected error: {}",
         msg
     );
+}
+
+#[test]
+#[parallel]
+fn test_aperture_listen_port_zero_is_accepted() {
+    let config = run_cli(vec!["--listen", "127.0.0.1:0"]);
+    assert_eq!(config.aperture.listen.0.port(), 0);
+}
+
+#[test]
+#[parallel]
+fn test_aperture_listen_port_below_max_is_accepted() {
+    // 65534 is the highest working listen port (WebSocket derives to 65535).
+    let config = run_cli(vec!["--listen", "127.0.0.1:65534"]);
+    assert_eq!(config.aperture.listen.0.port(), 65534);
+}
+
+#[test]
+#[parallel]
+fn test_aperture_listen_port_max_is_rejected() {
+    // u16::MAX leaves no room for the derived WebSocket port (listen + 1).
+    let itr = ["validator", "--listen", "127.0.0.1:65535"]
+        .into_iter()
+        .map(OsString::from);
+    let msg = ValidatorParams::try_new(itr)
+        .expect_err("listen port u16::MAX must be rejected")
+        .to_string();
+    assert!(msg.contains("65535"), "unexpected error: {msg}");
 }
 
 #[test]

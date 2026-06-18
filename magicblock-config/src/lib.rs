@@ -111,7 +111,24 @@ impl ValidatorParams {
         let mut params: Self = figment.extract().map_err(Box::new)?;
         params.ensure_http();
         params.ensure_websocket();
+        params.ensure_valid_aperture_listen()?;
         Ok(params)
+    }
+
+    fn ensure_valid_aperture_listen(
+        &self,
+    ) -> Result<(), Box<figment::error::Error>> {
+        let port = self.aperture.listen.0.port();
+        if port == u16::MAX {
+            return Err(Box::new(figment::error::Error::from(format!(
+                "aperture.listen port {port} is invalid: the WebSocket server \
+                 binds to port + 1, which has no valid value at {}. Use a \
+                 listen port <= {}.",
+                u16::MAX,
+                u16::MAX - 1,
+            ))));
+        }
+        Ok(())
     }
 
     /// Ensures at least one HTTP endpoint is configured.
