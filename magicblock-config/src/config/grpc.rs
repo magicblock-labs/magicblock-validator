@@ -20,7 +20,8 @@ pub struct GrpcConfig {
 impl Default for GrpcConfig {
     fn default() -> Self {
         Self {
-            max_subs_in_old_optimized: NonZeroUsize::new(5000).unwrap(),
+            max_subs_in_old_optimized: NonZeroUsize::new(5000)
+                .unwrap_or_else(|| unreachable!("Cannot create NonZero value")),
             max_old_unoptimized: 5,
             max_subs_in_new: 400,
             max_time_without_optimization_secs: 60,
