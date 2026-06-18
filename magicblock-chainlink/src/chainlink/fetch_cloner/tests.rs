@@ -2648,7 +2648,6 @@ async fn test_cancel_single_key_keeps_other_keys_in_same_ensure_alive() {
     let FetcherTestCtx {
         accounts_bank,
         fetch_cloner,
-        rpc_client,
         ..
     } = setup(
         accounts.clone(),
@@ -2657,7 +2656,21 @@ async fn test_cancel_single_key_keeps_other_keys_in_same_ensure_alive() {
     )
     .await;
 
-    rpc_client.block_fetches();
+    // Block the clone phase so all three keys are fetched in one batched wire
+    // call and reach their per-key clone, parked just before the bank write,
+    // when we cancel one of them.
+    let blocking_cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    blocking_cloner.block_clone_completion();
+    let (_subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &fetch_cloner.remote_account_provider.clone(),
+        &accounts_bank,
+        &blocking_cloner,
+        validator_keypair.insecure_clone(),
+        subscription_rx,
+        None,
+        None,
+    );
 
     let ensure_task = {
         let fetch_cloner = fetch_cloner.clone();
@@ -2674,12 +2687,27 @@ async fn test_cancel_single_key_keeps_other_keys_in_same_ensure_alive() {
         })
     };
 
-    for pubkey in &pubkeys {
-        wait_for_pending_request(&fetch_cloner, *pubkey).await;
+    // All three keys reach the (blocked) clone phase via the shared fetch.
+    let start = tokio::time::Instant::now();
+    while blocking_cloner.clone_request_count() < pubkeys.len()
+        && start.elapsed() < Duration::from_secs(5)
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    assert_eq!(blocking_cloner.clone_request_count(), pubkeys.len());
 
+    // Cancel one key and wait until its clone has actually been dropped (its
+    // pending entry is gone) before unblocking, so there is no race with the
+    // sibling clone writes.
     fetch_cloner.cancel_pending(&cancelled_pubkey);
-    rpc_client.allow_fetches();
+    let start = tokio::time::Instant::now();
+    while fetch_cloner.has_pending_request(&cancelled_pubkey)
+        && start.elapsed() < Duration::from_secs(5)
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(!fetch_cloner.has_pending_request(&cancelled_pubkey));
+    blocking_cloner.allow_clone_completion();
 
     let result = tokio::time::timeout(Duration::from_secs(5), ensure_task)
         .await
@@ -2695,13 +2723,13 @@ async fn test_cancel_single_key_keeps_other_keys_in_same_ensure_alive() {
          got {result:?}"
     );
 
-    // The sibling keys must not be affected by the cancellation: their
-    // operations complete and clone them into the bank.
+    // The sibling keys share the batched fetch but clone on their own, so the
+    // cancellation does not affect them. The dedup call can return on the
+    // cancelled key before the last sibling's clone lands, so wait for them.
     let start = tokio::time::Instant::now();
-    let timeout = Duration::from_secs(2);
     while (accounts_bank.get_account(&pubkeys[0]).is_none()
         || accounts_bank.get_account(&pubkeys[2]).is_none())
-        && start.elapsed() < timeout
+        && start.elapsed() < Duration::from_secs(2)
     {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -2719,10 +2747,11 @@ async fn test_cancel_single_key_keeps_other_keys_in_same_ensure_alive() {
         CURRENT_SLOT,
         account_owner
     );
-    // NOTE: the cancelled key's bank state is deliberately not asserted:
-    // with per-key wire calls its fetch is aborted, while a batched wire
-    // call may still clone it as a side effect. The contract is only that
-    // the caller observes the cancellation and the siblings survive.
+
+    assert!(
+        accounts_bank.get_account(&cancelled_pubkey).is_none(),
+        "cancelled key must not be cloned into the bank"
+    );
 }
 
 #[tokio::test]

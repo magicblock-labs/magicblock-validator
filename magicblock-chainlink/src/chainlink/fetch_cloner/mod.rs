@@ -11,7 +11,6 @@ use std::{
 use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
-use futures_util::{stream::FuturesUnordered, StreamExt};
 use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
@@ -455,8 +454,8 @@ where
         )
     }
 
-    // Runs one shared fetch+clone for all pubkeys claimed by a single
-    // dedup call and fans the result out to each key's pending entry.
+    // Fetches every pubkey claimed by one dedup call in a single batched wire
+    // call, then spawns a per-key clone for each.
     fn spawn_batched_owned_operation(
         &self,
         claimed: Vec<ClaimedOperation>,
@@ -473,124 +472,99 @@ where
             .iter()
             .map(|op| op.pubkey)
             .filter(|pubkey| mark_empty_set.contains(pubkey))
-            .collect::<Vec<_>>();
+            .collect::<HashSet<_>>();
         task::spawn(async move {
             let pubkeys =
                 claimed.iter().map(|op| op.pubkey).collect::<Vec<_>>();
-            let mark_empty_ref =
-                (!mark_empty.is_empty()).then_some(mark_empty.as_slice());
-            // All keys were claimed by the same call, so their deadlines
-            // are effectively identical; the earliest bounds the batch.
-            // SAFETY: early return above guarantees claimed is non-empty
-            let deadline = claimed
-                .iter()
-                .map(|op| op.deadline)
-                .min()
-                .unwrap_or_else(|| unreachable!("claimed verified non-empty at entry"));
-            let work = this.fetch_and_clone_accounts(
+            let mark_empty_list =
+                mark_empty.iter().copied().collect::<Vec<_>>();
+            let mark_empty_ref = (!mark_empty_list.is_empty())
+                .then_some(mark_empty_list.as_slice());
+
+            // One shared wire call for the whole claim set.
+            let accs = match this
+                .fetch_accounts(&pubkeys, mark_empty_ref, slot, fetch_origin)
+                .await
+            {
+                Ok(accs) => accs,
+                Err(err) => {
+                    let failure = PendingFailure::OwnerFailed(err.to_string());
+                    for mut op in claimed {
+                        finish_pending(
+                            &pending,
+                            op.pubkey,
+                            op.generation,
+                            PendingTerminal::Failed(failure.clone()),
+                        );
+                        op.owner.dismiss();
+                    }
+                    return;
+                }
+            };
+            // Clone each key on its own so a cancel drops only that key's
+            // clone; the fetched account is handed over, never re-fetched.
+            for (op, account) in claimed.into_iter().zip(accs) {
+                let mark_empty_if_not_found = mark_empty.contains(&op.pubkey);
+                this.spawn_owned_operation(
+                    op,
+                    account,
+                    mark_empty_if_not_found,
+                    slot,
+                    fetch_origin,
+                );
+            }
+        });
+    }
+
+    // Clones a single already-fetched account into the bank, resolving its own
+    // delegation/program/ATA/action dependencies. Cancellation drops the clone
+    // future at its await point, so a cancelled key never mutates the bank.
+    fn spawn_owned_operation(
+        &self,
+        op: ClaimedOperation,
+        account: RemoteAccount,
+        mark_empty_if_not_found: bool,
+        slot: Option<u64>,
+        fetch_origin: AccountFetchOrigin,
+    ) {
+        let this = self.clone();
+        let pending = self.pending_requests.clone();
+        task::spawn(async move {
+            let ClaimedOperation {
+                pubkey,
+                generation,
+                deadline,
+                cancel,
+                mut owner,
+            } = op;
+            let pubkeys = [pubkey];
+            let mark_empty = mark_empty_if_not_found.then_some(vec![pubkey]);
+            let mark_empty_ref = mark_empty.as_deref();
+            let work = this.clone_accounts(
                 &pubkeys,
+                vec![account],
                 mark_empty_ref,
                 slot,
                 fetch_origin,
             );
-            let mut work =
-                std::pin::pin!(tokio::time::timeout_at(deadline, work));
+            let terminal = tokio::select! {
+                biased;
 
-            // Single consumer per cancellation Notify, yielding the
-            // cancelled pubkey.
-            let mut cancels = claimed
-                .iter()
-                .map(|op| {
-                    let cancel = Arc::clone(&op.cancel);
-                    let pubkey = op.pubkey;
-                    async move {
-                        cancel.notified().await;
-                        pubkey
+                result = tokio::time::timeout_at(deadline, work) => {
+                    match result {
+                        Ok(Ok(result)) => PendingTerminal::Success(result),
+                        Ok(Err(err)) => PendingTerminal::Failed(
+                            PendingFailure::OwnerFailed(err.to_string()),
+                        ),
+                        Err(_) => PendingTerminal::Failed(PendingFailure::TimedOut),
                     }
-                })
-                .collect::<FuturesUnordered<_>>();
-            let mut cancelled = HashSet::new();
-
-            let outcome = loop {
-                tokio::select! {
-                    biased;
-
-                    result = &mut work => break Some(result),
-                    Some(pubkey) = cancels.next() => {
-                        if let Some(op) =
-                            claimed.iter().find(|op| op.pubkey == pubkey)
-                        {
-                            finish_pending(
-                                &pending,
-                                pubkey,
-                                op.generation,
-                                PendingTerminal::Failed(
-                                    PendingFailure::Cancelled,
-                                ),
-                            );
-                        }
-                        cancelled.insert(pubkey);
-                        if cancelled.len() == claimed.len() {
-                            // every key is cancelled: drop the shared work
-                            break None;
-                        }
-                    }
+                }
+                _ = cancel.notified() => {
+                    PendingTerminal::Failed(PendingFailure::Cancelled)
                 }
             };
-            drop(cancels);
-
-            match outcome {
-                // every key already received its Cancelled terminal
-                None => {
-                    for mut op in claimed {
-                        op.owner.dismiss();
-                    }
-                }
-                Some(Ok(Ok(result))) => {
-                    for mut op in claimed {
-                        if !cancelled.contains(&op.pubkey) {
-                            // each waiter filters the shared result down
-                            // to its own pubkey's entries
-                            finish_pending(
-                                &pending,
-                                op.pubkey,
-                                op.generation,
-                                PendingTerminal::Success(result.clone()),
-                            );
-                        }
-                        op.owner.dismiss();
-                    }
-                }
-                Some(Ok(Err(err))) => {
-                    let failure = PendingFailure::OwnerFailed(err.to_string());
-                    for mut op in claimed {
-                        if !cancelled.contains(&op.pubkey) {
-                            finish_pending(
-                                &pending,
-                                op.pubkey,
-                                op.generation,
-                                PendingTerminal::Failed(failure.clone()),
-                            );
-                        }
-                        op.owner.dismiss();
-                    }
-                }
-                Some(Err(_elapsed)) => {
-                    for mut op in claimed {
-                        if !cancelled.contains(&op.pubkey) {
-                            finish_pending(
-                                &pending,
-                                op.pubkey,
-                                op.generation,
-                                PendingTerminal::Failed(
-                                    PendingFailure::TimedOut,
-                                ),
-                            );
-                        }
-                        op.owner.dismiss();
-                    }
-                }
-            }
+            finish_pending(&pending, pubkey, generation, terminal);
+            owner.dismiss();
         });
     }
 
@@ -1921,7 +1895,6 @@ where
     /// - **slot**: optional slot to use as minimum context slot for the accounts being cloned
     ///
     /// NOTE: accounts fetched here have not been found in the bank
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found), fields(tx_sig = tracing::field::Empty))]
     async fn fetch_and_clone_accounts(
         &self,
         pubkeys: &[Pubkey],
@@ -1929,12 +1902,38 @@ where
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<FetchAndCloneResult> {
+        let accs = self
+            .fetch_accounts(
+                pubkeys,
+                mark_empty_if_not_found,
+                slot,
+                fetch_origin,
+            )
+            .await?;
+        self.clone_accounts(
+            pubkeys,
+            accs,
+            mark_empty_if_not_found,
+            slot,
+            fetch_origin,
+        )
+        .await
+    }
+
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found), fields(tx_sig = tracing::field::Empty))]
+    async fn fetch_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
+        slot: Option<u64>,
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<RemoteAccount>> {
         if let Some(sig) = fetch_origin.signature() {
             tracing::Span::current().record("tx_sig", sig.to_string());
         }
         if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys_count = pubkeys.len();
-            trace!(count = pubkeys_count, "Fetching and cloning accounts");
+            trace!(count = pubkeys_count, "Fetching accounts");
         }
 
         // Increment fetch counter for testing deduplication (count per account being fetched)
@@ -1960,6 +1959,26 @@ where
             let accs_count = accs.len();
             trace!(count = accs_count, "Fetched accounts");
         }
+        Ok(accs)
+    }
+
+    #[instrument(skip(self, pubkeys, accs, mark_empty_if_not_found), fields(tx_sig = tracing::field::Empty))]
+    async fn clone_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        accs: Vec<RemoteAccount>,
+        mark_empty_if_not_found: Option<&[Pubkey]>,
+        slot: Option<u64>,
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
+        if let Some(sig) = fetch_origin.signature() {
+            tracing::Span::current().record("tx_sig", sig.to_string());
+        }
+
+        // Keep resolution fetches aligned with the freshest observed slot.
+        let min_context_slot = slot.map(|subscription_slot| {
+            subscription_slot.max(self.remote_account_provider.chain_slot())
+        });
 
         let ClassifiedAccounts {
             not_found,
