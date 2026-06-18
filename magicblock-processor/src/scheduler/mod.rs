@@ -260,6 +260,13 @@ impl TransactionScheduler {
                         pending_command =
                             Some(SchedulerCommand::Block { block, ack });
                     }
+                    SchedulerCommand::Drain { ack } => {
+                        if self.coordinator.is_idle() {
+                            let _ = ack.send(Ok(()));
+                            continue;
+                        }
+                        pending_command = Some(SchedulerCommand::Drain { ack });
+                    }
                 }
             }
             tokio::select! {

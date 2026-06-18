@@ -51,10 +51,18 @@ impl JsonRpcServer {
         let http_addr = http.local_addr().map_err(RpcError::internal)?;
 
         let mut ws_addr = http_addr;
-        if config.listen.0.port() == 0 {
+        let listen_port = config.listen.0.port();
+        if listen_port == 0 {
+            // Let OS assign random port for WS
             ws_addr.set_port(0);
         } else {
-            ws_addr.set_port(config.listen.0.port() + 1);
+            let ws_port = listen_port.checked_add(1).ok_or_else(|| {
+                RpcError::internal(format!(
+                    "RPC listen port {listen_port} leaves no room for the \
+                     derived WebSocket port (listen + 1)."
+                ))
+            })?;
+            ws_addr.set_port(ws_port);
         }
         let ws = TcpListener::bind(ws_addr)
             .await

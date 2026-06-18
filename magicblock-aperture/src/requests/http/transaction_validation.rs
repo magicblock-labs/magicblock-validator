@@ -2,9 +2,7 @@ use std::mem::size_of;
 
 use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
-use solana_transaction::{
-    sanitized::MAX_TX_ACCOUNT_LOCKS, versioned::VersionedTransaction,
-};
+use solana_transaction::versioned::VersionedTransaction;
 
 use crate::{error::RpcError, RpcResult};
 
@@ -12,22 +10,11 @@ use crate::{error::RpcError, RpcResult};
 // indices fit within a packet-bounded pubkey table (1232 / 32 = 38).
 const MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE: usize =
     1232 / size_of::<Pubkey>();
+const MAX_TX_ACCOUNT_LOCKS: usize = 1024;
 
 pub(super) fn validate_supported_transaction_shape(
     transaction: &VersionedTransaction,
 ) -> RpcResult<()> {
-    // Reject transactions that would lock more accounts than the runtime
-    // permits BEFORE any expensive work (signature verification, sanitization,
-    // account ensure/clone, scheduler locking). The HTTP body is not bounded to
-    // a 1232-byte packet, so without this an attacker can submit a transaction
-    // with thousands of account keys and amplify per-account work.
-    let num_account_keys = transaction.message.static_account_keys().len();
-    if num_account_keys > MAX_TX_ACCOUNT_LOCKS {
-        return Err(RpcError::transaction_verification(format!(
-            "transaction locks too many accounts: {num_account_keys}; max is {MAX_TX_ACCOUNT_LOCKS}"
-        )));
-    }
-
     if let VersionedMessage::V0(message) = &transaction.message {
         if !message.address_table_lookups.is_empty() {
             return Err(RpcError::transaction_verification(
