@@ -74,7 +74,7 @@ fn test_defaults_are_sane() {
     assert!(!config.accountsdb.defragment_on_startup);
 
     // gRPC defaults
-    assert_eq!(config.grpc.max_subs_in_old_optimized, 5000);
+    assert_eq!(config.grpc.max_subs_in_old_optimized.get(), 5000);
     assert_eq!(config.grpc.max_old_unoptimized, 5);
     assert_eq!(config.grpc.max_subs_in_new, 400);
     assert_eq!(config.grpc.max_time_without_optimization_secs, 60);
@@ -567,10 +567,21 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // 12. gRPC
     // ========================================================================
-    assert_eq!(config.grpc.max_subs_in_old_optimized, 5000);
+    assert_eq!(config.grpc.max_subs_in_old_optimized.get(), 5000);
     assert_eq!(config.grpc.max_old_unoptimized, 5);
     assert_eq!(config.grpc.max_subs_in_new, 400);
     assert_eq!(config.grpc.max_time_without_optimization_secs, 60);
+}
+
+#[test]
+#[serial]
+fn test_grpc_max_subs_in_old_optimized_zero_is_rejected() {
+    let _guard = EnvVarGuard::new("MBV_GRPC__MAX_SUBS_IN_OLD_OPTIMIZED", "0");
+    let itr = std::iter::once("validator").map(OsString::from);
+    assert!(
+        ValidatorParams::try_new(itr).is_err(),
+        "config with max_subs_in_old_optimized = 0 must be rejected at load"
+    );
 }
 
 #[test]
@@ -653,7 +664,7 @@ fn test_env_vars_full_coverage() {
     assert_eq!(config.aperture.event_processors, 9);
 
     // gRPC
-    assert_eq!(config.grpc.max_subs_in_old_optimized, 1337);
+    assert_eq!(config.grpc.max_subs_in_old_optimized.get(), 1337);
     assert_eq!(config.grpc.max_old_unoptimized, 7);
     assert_eq!(config.grpc.max_subs_in_new, 33);
     assert_eq!(config.grpc.max_time_without_optimization_secs, 42);
