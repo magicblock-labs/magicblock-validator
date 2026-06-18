@@ -6,8 +6,8 @@ use tracing::*;
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, RemoteAccountProvider,
-        SubscriptionReason,
+        photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
+        RemoteAccountProvider, SubscriptionReason,
     },
 };
 
@@ -18,8 +18,12 @@ pub(crate) enum SubscriptionRelease {
     },
 }
 
-pub(crate) async fn acquire_subs<T: ChainRpcClient, U: ChainPubsubClient>(
-    provider: &Arc<RemoteAccountProvider<T, U>>,
+pub(crate) async fn acquire_subs<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    P: PhotonClient,
+>(
+    provider: &Arc<RemoteAccountProvider<T, U, P>>,
     pubkeys: impl IntoIterator<Item = Pubkey>,
     reason: SubscriptionReason,
 ) -> ChainlinkResult<()> {
@@ -45,8 +49,12 @@ pub(crate) async fn acquire_subs<T: ChainRpcClient, U: ChainPubsubClient>(
 }
 
 #[instrument(skip(provider, releases))]
-pub(crate) async fn release_subs<T: ChainRpcClient, U: ChainPubsubClient>(
-    provider: &Arc<RemoteAccountProvider<T, U>>,
+pub(crate) async fn release_subs<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    P: PhotonClient,
+>(
+    provider: &Arc<RemoteAccountProvider<T, U, P>>,
     releases: impl IntoIterator<Item = SubscriptionRelease>,
 ) {
     for release in releases {
@@ -62,8 +70,9 @@ pub(crate) async fn release_subs<T: ChainRpcClient, U: ChainPubsubClient>(
 pub(crate) async fn release_program_data_subs<
     T: ChainRpcClient,
     U: ChainPubsubClient,
+    P: PhotonClient,
 >(
-    provider: &Arc<RemoteAccountProvider<T, U>>,
+    provider: &Arc<RemoteAccountProvider<T, U, P>>,
     program_data_pubkey: Pubkey,
 ) {
     release_subs(

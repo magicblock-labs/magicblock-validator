@@ -102,6 +102,7 @@ pub enum CommittorMessage {
         respond_to:
             oneshot::Sender<CommittorServiceResult<HashMap<Pubkey, u64>>>,
         pubkeys: Vec<Pubkey>,
+        compressed: bool,
         min_context_slot: u64,
     },
     FetchCurrentCommitNoncesSync {
@@ -109,6 +110,7 @@ pub enum CommittorMessage {
             CommittorServiceResult<HashMap<Pubkey, u64>>,
         >,
         pubkeys: Vec<Pubkey>,
+        compressed: bool,
         min_context_slot: u64,
     },
 }
@@ -283,12 +285,17 @@ impl CommittorActor {
             FetchCurrentCommitNonces {
                 respond_to,
                 pubkeys,
+                compressed,
                 min_context_slot,
             } => {
                 let processor = self.processor.clone();
                 tokio::spawn(async move {
                     let result = processor
-                        .fetch_current_commit_nonces(&pubkeys, min_context_slot)
+                        .fetch_current_commit_nonces(
+                            &pubkeys,
+                            compressed,
+                            min_context_slot,
+                        )
                         .await;
                     if let Err(err) = respond_to
                         .send(result.map_err(CommittorServiceError::from))
@@ -300,12 +307,17 @@ impl CommittorActor {
             FetchCurrentCommitNoncesSync {
                 respond_to,
                 pubkeys,
+                compressed,
                 min_context_slot,
             } => {
                 let processor = self.processor.clone();
                 tokio::spawn(async move {
                     let result = processor
-                        .fetch_current_commit_nonces(&pubkeys, min_context_slot)
+                        .fetch_current_commit_nonces(
+                            &pubkeys,
+                            compressed,
+                            min_context_slot,
+                        )
                         .await;
                     if let Err(err) = respond_to
                         .send(result.map_err(CommittorServiceError::from))
@@ -446,6 +458,7 @@ impl CommittorService {
     pub fn fetch_current_commit_nonces_sync(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> std::sync::mpsc::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>>
     {
@@ -453,6 +466,7 @@ impl CommittorService {
         self.try_send(CommittorMessage::FetchCurrentCommitNoncesSync {
             respond_to: tx,
             pubkeys: pubkeys.to_vec(),
+            compressed,
             min_context_slot,
         });
         rx
@@ -556,12 +570,14 @@ impl BaseIntentCommittor for CommittorService {
     fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::FetchCurrentCommitNonces {
             respond_to: tx,
             pubkeys: pubkeys.to_vec(),
+            compressed,
             min_context_slot,
         });
 
@@ -619,6 +635,7 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>>;
 

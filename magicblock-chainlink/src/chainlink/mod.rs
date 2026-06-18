@@ -24,8 +24,10 @@ use crate::{
     fetch_cloner::FetchAndCloneResult,
     filters::is_noop_system_transfer,
     remote_account_provider::{
-        chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
-        ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
+        chain_updates_client::ChainUpdatesClient,
+        photon_client::{PhotonClient, PhotonClientImpl},
+        ChainPubsubClient, ChainRpcClient, ChainRpcClientImpl, Endpoints,
+        RemoteAccountProvider,
     },
     submux::SubMuxClient,
 };
@@ -44,6 +46,7 @@ pub type ProdInnerChainlink<C> = InnerChainlink<
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
     C,
+    PhotonClientImpl,
 >;
 
 /// Production `ProdChainlink` stack with configurable cloner implementation.
@@ -52,7 +55,14 @@ pub type ProdChainlink<C> = ReplicationModeAwareChainlink<
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
     C,
+    PhotonClientImpl,
 >;
+
+pub type OptionalFetchCloner<T, U, V, C, P> =
+    Option<Arc<FetchCloner<T, U, V, C, P>>>;
+
+pub type OptionalFetchClonerRef<'a, T, U, V, C, P> =
+    Option<&'a Arc<FetchCloner<T, U, V, C, P>>>;
 
 // -----------------
 // Chainlink
@@ -62,9 +72,10 @@ pub struct InnerChainlink<
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 > {
     accounts_bank: Arc<V>,
-    fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+    fetch_cloner: OptionalFetchCloner<T, U, V, C, P>,
     /// The subscription to events for each account that is removed from
     /// the accounts tracked by the provider.
     /// In that case we also remove it from the bank since it is no longer
@@ -78,15 +89,21 @@ pub enum ReplicationModeAwareChainlink<
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 > {
-    Enabled(InnerChainlink<T, U, V, C>),
+    Enabled(InnerChainlink<T, U, V, C, P>),
     Disabled,
 }
 
-impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    ReplicationModeAwareChainlink<T, U, V, C>
+impl<
+        T: ChainRpcClient,
+        U: ChainPubsubClient,
+        V: AccountsBank,
+        C: Cloner,
+        P: PhotonClient,
+    > ReplicationModeAwareChainlink<T, U, V, C, P>
 {
-    pub fn enabled(chainlink: InnerChainlink<T, U, V, C>) -> Self {
+    pub fn enabled(chainlink: InnerChainlink<T, U, V, C, P>) -> Self {
         Self::Enabled(chainlink)
     }
 
@@ -173,7 +190,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
-    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
+    pub fn fetch_cloner(&self) -> OptionalFetchClonerRef<'_, T, U, V, C, P> {
         match self {
             Self::Enabled(chainlink) => chainlink.fetch_cloner(),
             Self::Disabled => None,
@@ -188,12 +205,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     }
 }
 
-impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    InnerChainlink<T, U, V, C>
+impl<
+        T: ChainRpcClient,
+        U: ChainPubsubClient,
+        V: AccountsBank,
+        C: Cloner,
+        P: PhotonClient,
+    > InnerChainlink<T, U, V, C, P>
 {
     pub fn try_new(
         accounts_bank: &Arc<V>,
-        fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+        fetch_cloner: OptionalFetchCloner<T, U, V, C, P>,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -239,6 +261,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             SubMuxClient<ChainUpdatesClient>,
             V,
             C,
+            PhotonClientImpl,
         >,
     > {
         // Extract accounts provider and create fetch cloner while connecting
@@ -279,7 +302,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     fn subscribe_account_removals(
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
         mut removed_accounts_rx: mpsc::Receiver<Pubkey>,
     ) -> task::JoinHandle<()> {
         let accounts_bank = accounts_bank.clone();
@@ -360,7 +383,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// does nothing as only existing accounts are affected.
     /// See [lru::LruCache::promote]
     fn promote_accounts(
-        fetch_cloner: &FetchCloner<T, U, V, C>,
+        fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[&Pubkey],
     ) {
         fetch_cloner.promote_accounts(pubkeys);
@@ -518,7 +541,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     #[instrument(skip(self, fetch_cloner, pubkeys, mark_empty_if_not_found))]
     async fn fetch_accounts_common(
         &self,
-        fetch_cloner: &FetchCloner<T, U, V, C>,
+        fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
@@ -574,7 +597,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(())
     }
 
-    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
+    pub fn fetch_cloner<'a>(
+        &'a self,
+    ) -> OptionalFetchClonerRef<'a, T, U, V, C, P> {
         self.fetch_cloner.as_ref()
     }
 
@@ -616,6 +641,7 @@ mod tests {
         },
         testing::{
             cloner_stub::ClonerStub, init_logger,
+            photon_client_mock::PhotonClientMock,
             rpc_client_mock::ChainRpcClientMock,
         },
     };
@@ -625,12 +651,14 @@ mod tests {
         ChainPubsubClientMock,
         AccountsBankStub,
         ClonerStub,
+        PhotonClientMock,
     >;
 
     async fn test_remote_account_provider() -> Arc<
         crate::remote_account_provider::RemoteAccountProvider<
             ChainRpcClientMock,
             ChainPubsubClientMock,
+            PhotonClientMock,
         >,
     > {
         use std::sync::atomic::AtomicU64;
@@ -652,6 +680,7 @@ mod tests {
         let (updates_sender, updates_receiver) = mpsc::channel(1_000);
         let pubsub_client =
             ChainPubsubClientMock::new(updates_sender, updates_receiver);
+        let photon_client = Some(PhotonClientMock::default());
         let (forward_tx, _forward_rx) = mpsc::channel(1_000);
         let (subscribed_accounts, config) = create_test_lru_cache(1000);
         let chain_slot = Arc::<AtomicU64>::default();
@@ -660,6 +689,7 @@ mod tests {
             RemoteAccountProvider::new(
                 rpc_client,
                 pubsub_client,
+                photon_client,
                 forward_tx,
                 &config,
                 subscribed_accounts,
@@ -758,6 +788,7 @@ mod tests {
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >::subscribe_account_removals(
             &accounts_bank,
             &cloner,
@@ -808,6 +839,7 @@ mod tests {
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >::subscribe_account_removals(
             &accounts_bank,
             &cloner,

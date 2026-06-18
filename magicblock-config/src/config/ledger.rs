@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{consts, types::SerdePubkey};
+use crate::consts;
 
 /// Configuration for the ledger database and block production.
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -29,12 +29,6 @@ pub struct LedgerConfig {
     /// ledger truncation logic kicks in, when the disk space
     /// used by the ledger approaches this number.
     pub size: u64,
-
-    /// If set, overrides the validator authority pubkey during ledger
-    /// replay (StartingUp mode) so that replayed transactions are
-    /// verified against this key instead of the validator's own
-    /// identity. The override is unset once replay completes.
-    pub replay_authority_override: Option<SerdePubkey>,
 }
 
 impl Default for LedgerConfig {
@@ -48,7 +42,6 @@ impl Default for LedgerConfig {
             reset: false,
             verify_keypair: true,
             size: consts::DEFAULT_LEDGER_SIZE,
-            replay_authority_override: None,
         }
     }
 }
