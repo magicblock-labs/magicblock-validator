@@ -84,7 +84,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     name: Build SBF Artifacts
     env:
-      SOLANA_VERSION: v3.1.5
+      SOLANA_VERSION: v4.0.0
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -114,7 +114,7 @@ jobs:
           # source dirs alone don't capture. Also include rustc + solana
           # versions in the key so a toolchain bump invalidates stale .so
           # artifacts produced by the previous compiler.
-          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solana${{ env.SOLANA_VERSION }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
+          key: sbf-v3-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solana${{ env.SOLANA_VERSION }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
 
       - name: Build SBF programs
         run: make -C test-integration programs
@@ -378,7 +378,7 @@ jobs:
     needs: [build_validator, build_sbf, build_integration_tests]
     runs-on: ${{ matrix.runner || 'blacksmith-8vcpu-ubuntu-2404' }}
     env:
-      SOLANA_VERSION: v3.1.5
+      SOLANA_VERSION: v4.0.0
     strategy:
       matrix:
         include:

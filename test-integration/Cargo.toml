@@ -70,8 +70,9 @@ rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "05b75b685936f10ac482a16545a30b696f603350" }
-solana-address-lookup-table-interface = "3.1"
+shlex = "1.3.0"
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "7912594f63db106db83c8460f2fb6e13803b5b8a" }
+solana-address-lookup-table-interface = "3.0"
 solana-commitment-config = "3.1.1"
 solana-compute-budget-interface = "3.0"
 solana-loader-v2-interface = "3.0"
@@ -85,7 +86,7 @@ solana-rpc-client = "3.1.12"
 solana-rpc-client-api = "3.1.12"
 solana-sdk = "3.0"
 solana-sdk-ids = { version = "3.0" }
-solana-system-interface = "3.1"
+solana-system-interface = { version = "3.1", features = ["bincode"] }
 solana-transaction-status = "3.1.12"
 spl-associated-token-account-interface = "2.0"
 spl-memo-interface = "2.0"
@@ -110,12 +111,7 @@ url = "2.5.0"
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
-agave-syscalls = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "05b75b685936f10ac482a16545a30b696f603350" }
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "05b75b685936f10ac482a16545a30b696f603350" }
-solana-bpf-loader-program = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "05b75b685936f10ac482a16545a30b696f603350" }
-solana-loader-v4-program = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "05b75b685936f10ac482a16545a30b696f603350" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "05b75b685936f10ac482a16545a30b696f603350" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "05b75b685936f10ac482a16545a30b696f603350" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "05b75b685936f10ac482a16545a30b696f603350" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "7912594f63db106db83c8460f2fb6e13803b5b8a" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "7912594f63db106db83c8460f2fb6e13803b5b8a" }
 # Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }

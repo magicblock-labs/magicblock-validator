@@ -36,6 +36,7 @@ solana-transaction = { workspace = true, features = ["blake3", "verify"] }
 solana-transaction-error = { workspace = true }
 solana-message = { workspace = true }
 solana-transaction-context = { workspace = true }
+solana-transaction-context-status = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

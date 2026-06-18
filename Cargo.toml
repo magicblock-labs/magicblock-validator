@@ -146,7 +146,7 @@ serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "12729e969b685ed0069b7922a012c5311a8bbfd1" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "7912594f63db106db83c8460f2fb6e13803b5b8a" }
 solana-account-decoder = { version = "3.1" }
 solana-account-decoder-client-types = { version = "3.1" }
 solana-account-info = { version = "3.1" }
@@ -207,7 +207,7 @@ solana-system-transaction = { version = "3.0" }
 solana-sysvar = { version = "3.0" }
 solana-timings = { package = "solana-svm-timings", version = "4.0" }
 solana-transaction = { version = "3.0" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "12729e969b685ed0069b7922a012c5311a8bbfd1", features = [
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "7912594f63db106db83c8460f2fb6e13803b5b8a", features = [
     "dev-context-only-utils"
 ] }
 solana-transaction-context-status = { package = "solana-transaction-context", version = "=3.1.12" }
@@ -240,7 +240,7 @@ spl-token-2022 = { package = "spl-token-2022-interface", version = "2.1" }
 [workspace.dependencies.solana-svm]
 features = ["dev-context-only-utils"]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "12729e969b685ed0069b7922a012c5311a8bbfd1"
+rev = "7912594f63db106db83c8460f2fb6e13803b5b8a"
 
 [workspace.dependencies.rocksdb]
 # Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
@@ -251,10 +251,10 @@ version = "0.22.0"
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "12729e969b685ed0069b7922a012c5311a8bbfd1" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "7912594f63db106db83c8460f2fb6e13803b5b8a" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "12729e969b685ed0069b7922a012c5311a8bbfd1" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "12729e969b685ed0069b7922a012c5311a8bbfd1" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "7912594f63db106db83c8460f2fb6e13803b5b8a" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "7912594f63db106db83c8460f2fb6e13803b5b8a" }
 # Fork is used to enable `disable_manual_compaction` usage
 # Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
 # without patching update isn't possible due to conflict with solana deps

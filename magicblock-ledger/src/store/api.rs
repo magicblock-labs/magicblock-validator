@@ -1439,7 +1439,7 @@ mod tests {
     use solana_signature::Signature;
     use solana_signer::Signer;
     use solana_transaction::sanitized::SanitizedTransaction;
-    use solana_transaction_context::TransactionReturnData;
+    use solana_transaction_context_status::TransactionReturnData;
     use solana_transaction_error::{TransactionError, TransactionResult};
     use solana_transaction_status::{
         ConfirmedTransactionWithStatusMeta, InnerInstruction,

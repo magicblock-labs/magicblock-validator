@@ -235,16 +235,16 @@ setup-task-scheduler-devnet:
 	$(MAKE) test
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
-	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml \
+	cargo build-sbf --arch v3 --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml \
 		--sbf-out-dir $(DEPLOY_DIR) --quiet
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
-	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml \
+	cargo build-sbf --arch v3 --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml \
 		--sbf-out-dir $(DEPLOY_DIR) --quiet
 $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
-	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml \
+	cargo build-sbf --arch v3 --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml \
 		--sbf-out-dir $(DEPLOY_DIR) --quiet
 $(COMMITTOR_PROGRAM_SO): $(COMMITTOR_PROGRAM_SRC)
-	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml \
+	cargo build-sbf --arch v3 --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml \
 	--sbf-out-dir $(ROOT_DEPLOY_DIR)/ --quiet
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)

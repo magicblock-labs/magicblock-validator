@@ -113,11 +113,12 @@ pub fn build_svm_env(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use solana_program_runtime::{
         invoke_context::InvokeContext,
         solana_sbpf::{ebpf, elf::Executable, program::SBPFVersion},
     };
+
+    use super::*;
 
     #[test]
     fn loads_stripped_sbpf_v3_elf() {
