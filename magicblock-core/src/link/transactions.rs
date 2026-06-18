@@ -13,7 +13,7 @@ use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
     Transaction,
 };
-use solana_transaction_context::TransactionReturnData;
+use solana_transaction_context::transaction::TransactionReturnData;
 use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tokio::sync::{

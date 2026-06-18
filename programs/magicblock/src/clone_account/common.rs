@@ -21,7 +21,7 @@ use solana_transaction_context::{
 
 use crate::{
     errors::MagicBlockProgramError,
-    utils::instruction_sysvar,
+    utils::{instruction_sysvar, native_invoke::NativeInvoke},
     validator::{effective_validator_authority_id, validator_authority_id},
 };
 

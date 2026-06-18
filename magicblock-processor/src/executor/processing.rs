@@ -27,7 +27,7 @@ use solana_svm::{
         ProcessedTransaction, TransactionProcessingResult,
     },
 };
-use solana_svm_transaction::svm_message::SVMMessage;
+use solana_svm_transaction::svm_message::SVMStaticMessage;
 use solana_transaction::sanitized::SanitizedTransaction;
 use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status::{
@@ -250,7 +250,10 @@ impl super::TransactionExecutor {
                 post_balances,
                 log_messages: executed.execution_details.log_messages,
                 loaded_addresses: txn.get_loaded_addresses(),
-                return_data: executed.execution_details.return_data,
+                return_data: executed
+                    .execution_details
+                    .return_data
+                    .map(transaction_status_return_data),
                 inner_instructions: executed
                     .execution_details
                     .inner_instructions
@@ -358,6 +361,7 @@ impl super::TransactionExecutor {
                 if succeeded && !executed.programs_modified_by_tx.is_empty() {
                     self.processor.global_program_cache.write().unwrap().merge(
                         &self.processor.environments,
+                        self.accountsdb.slot(),
                         &executed.programs_modified_by_tx,
                     );
                 }
@@ -501,4 +505,13 @@ fn signature_fee(
     txn.message()
         .num_transaction_signatures()
         .saturating_mul(lamports_per_signature)
+}
+
+fn transaction_status_return_data(
+    return_data: solana_transaction_context::transaction::TransactionReturnData,
+) -> solana_transaction_context_status::TransactionReturnData {
+    solana_transaction_context_status::TransactionReturnData {
+        program_id: return_data.program_id,
+        data: return_data.data,
+    }
 }

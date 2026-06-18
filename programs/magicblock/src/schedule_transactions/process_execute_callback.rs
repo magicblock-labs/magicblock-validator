@@ -7,8 +7,11 @@ use solana_program_runtime::invoke_context::InvokeContext;
 
 use crate::{
     schedule_transactions::validate_callback_accounts,
-    utils::accounts::get_instruction_pubkey_with_idx,
-    validator::validator_authority_id, Pubkey,
+    utils::{
+        accounts::get_instruction_pubkey_with_idx, native_invoke::NativeInvoke,
+    },
+    validator::validator_authority_id,
+    Pubkey,
 };
 
 const VALIDATOR_IDX: u16 = 0;

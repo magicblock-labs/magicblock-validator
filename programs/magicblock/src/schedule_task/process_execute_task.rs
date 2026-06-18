@@ -8,7 +8,9 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     schedule_task::validate_cranks_instructions,
-    utils::accounts::get_instruction_pubkey_with_idx,
+    utils::{
+        accounts::get_instruction_pubkey_with_idx, native_invoke::NativeInvoke,
+    },
     validator::validator_authority_id,
 };
 

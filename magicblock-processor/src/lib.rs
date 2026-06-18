@@ -140,9 +140,11 @@ mod tests {
         const PF_X: u32 = 1;
         const PF_R: u32 = 4;
 
-        let text_offset = ELF_HEADER_LEN + PROGRAM_HEADER_LEN * 2;
+        let rodata_offset = ELF_HEADER_LEN + PROGRAM_HEADER_LEN * 3;
+        let rodata_len = ebpf::INSN_SIZE as u64;
+        let text_offset = rodata_offset + rodata_len as usize;
         let text_len = ebpf::INSN_SIZE as u64;
-        let mut bytes = Vec::with_capacity(text_offset + ebpf::INSN_SIZE);
+        let mut bytes = Vec::with_capacity(text_offset + text_len as usize);
 
         bytes.extend_from_slice(&[
             0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -156,7 +158,7 @@ mod tests {
         push_u32(&mut bytes, 3);
         push_u16(&mut bytes, ELF_HEADER_LEN as u16);
         push_u16(&mut bytes, PROGRAM_HEADER_LEN as u16);
-        push_u16(&mut bytes, 2);
+        push_u16(&mut bytes, 3);
         push_u16(&mut bytes, 0);
         push_u16(&mut bytes, 0);
         push_u16(&mut bytes, 0);
@@ -166,9 +168,9 @@ mod tests {
             &mut bytes,
             PT_LOAD,
             PF_R,
-            text_offset as u64,
+            rodata_offset as u64,
             ebpf::MM_RODATA_START,
-            0,
+            rodata_len,
         );
         push_program_header(
             &mut bytes,
@@ -178,8 +180,11 @@ mod tests {
             ebpf::MM_BYTECODE_START,
             text_len,
         );
-        assert_eq!(bytes.len(), text_offset);
+        push_program_header(&mut bytes, 0, 0, 0, 0, 0);
+        assert_eq!(bytes.len(), rodata_offset);
 
+        bytes.extend_from_slice(b"fake-ro\0");
+        assert_eq!(bytes.len(), text_offset);
         bytes.extend_from_slice(&[ebpf::EXIT, 0, 0, 0, 0, 0, 0, 0]);
         bytes
     }

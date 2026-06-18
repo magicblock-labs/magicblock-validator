@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use magicblock_core::link::transactions::TransactionSimulationResult;
 use solana_message::inner_instruction::InnerInstructions;
 use solana_rpc_client_api::{
@@ -8,7 +9,7 @@ use solana_rpc_client_api::{
 };
 use solana_transaction_status::{
     InnerInstruction, InnerInstructions as StatusInnerInstructions,
-    UiTransactionEncoding,
+    UiReturnDataEncoding, UiTransactionEncoding, UiTransactionReturnData,
 };
 use tracing::*;
 
@@ -157,7 +158,15 @@ impl HttpDispatcher {
             logs,
             accounts,
             units_consumed: Some(units_consumed),
-            return_data: return_data.map(Into::into),
+            return_data: return_data.map(|return_data| {
+                UiTransactionReturnData {
+                    program_id: return_data.program_id.to_string(),
+                    data: (
+                        BASE64_STANDARD.encode(return_data.data),
+                        UiReturnDataEncoding::Base64,
+                    ),
+                }
+            }),
             err: result.err().map(Into::into),
             loaded_accounts_data_size: None,
             inner_instructions,
