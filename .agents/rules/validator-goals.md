@@ -4,7 +4,7 @@ This file states the goals that should guide implementation decisions. It intent
 
 ## Overriding goal: security
 
-Security is the highest-priority goal and overrides every other goal in this document, including performance. The validator custodies and settles real funds; a single security regression can make the validator or its customers lose money. When any other goal conflicts with security, security wins.
+Security is the highest-priority goal and overrides every other goal in this document, including performance. The validator custodies and settles real funds; a single security regression can make the validator or its customers lose money. When any other goal conflicts with security, security wins. Other docs should link here instead of restating this section.
 
 No change may, under any circumstances:
 

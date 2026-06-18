@@ -36,25 +36,12 @@ Only load a skill (read its `SKILL.md`) when the task actually calls for it.
 
 Read `.agents/README.md` first. It is a compact index whose routing table maps each concern (goals, protocol, architecture, crate ownership, validation, memory, per-crate guides) to the single document that covers it. **Open a detailed document only when your task touches that concern** — this keeps the context window small.
 
-Common routes (see the index for the full table):
-
-- behavior/protocol change → `.agents/specs/validator-specification.md`
-- is this change aligned? → `.agents/rules/validator-goals.md`
-- service wiring/interactions → `.agents/context/architecture.md`
-- which crate owns this? → `.agents/context/crate-map.md`, then `.agents/context/crates/<crate>.md`
-- how to validate → `.agents/rules/testing-and-validation.md`
-- captured durable knowledge → `.agents/memory/agent-memory-and-docs.md`
+For document routing, read ./.agents/README.md; it is the single routing map for this knowledge base.
 
 Before changing code, consult the matching `./.agents` material so the change does not violate the validator's goals, invariants, performance requirements, or specification. This acknowledgement is required; do not proceed silently.
 
 The validator is performance-sensitive infrastructure. Changes must not degrade critical-path performance unless there is no viable alternative; if a tradeoff is unavoidable, call it out explicitly with the reason, expected impact, and any mitigation.
 
-When a feature is added, removed, or changed, the relevant file in `./.agents/` **MUST be updated** to match the current implementation. These files cannot go out of sync with reality; if they do, they lose their usefulness for future agents and maintainers.
-
-When an agent discovers durable repository knowledge that is missing, incomplete, inaccurate, or stale in `./.agents/`—including feature behavior, protocol details, crate responsibilities, validation/debugging workflows, pitfalls, or performance constraints—the agent **MUST** update the most relevant existing document or create a focused new document if none exists. If documentation cannot be updated, the agent must report the blocked follow-up explicitly.
-
-**This obligation is not limited to code-changing tasks.** It applies equally to read-only and question-answering tasks: if you investigate the code to answer a question and learn a durable fact the docs lack or get wrong—especially a divergence from agave/Solana upstream behavior (a missing limit, different default, relaxed validation)—capture it before finishing. In every task's final reply, state whether agent docs were updated, or why no update was needed.
-
-**A fact being documented elsewhere does not excuse skipping the update.** The fact already existing in the source code, a code comment, an external repo, or even a *different* `./.agents/` file does not satisfy this obligation. The bar is: would an agent who opens only the single most relevant `./.agents/` document for that concern find the fact there? If not, add it to that document—even if a related or partial mention already lives somewhere else. Each `./.agents/` document must stand on its own for the area it covers.
+For durable-knowledge and documentation-stewardship requirements, follow `.agents/memory/agent-memory-and-docs.md`. In every task's final reply, state whether agent docs were updated, or why no update was needed.
 
 If anything is added to, removed from, renamed, or reorganized inside `./.agents/`, update this `AGENTS.md` file in the same change so this entrypoint remains accurate.

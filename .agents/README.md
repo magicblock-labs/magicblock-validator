@@ -14,25 +14,13 @@ window small.
 3. Open only the matching document(s) from the tables below.
 4. If a change adds/removes/renames knowledge, update the relevant doc and, if
    the layout changes, update this index and `../AGENTS.md`.
-5. **This applies to read-only and question-answering tasks too.** If while
-   answering a question you discover a durable fact that the docs are missing or
-   get wrong — especially a divergence from agave/Solana upstream behavior (a
-   missing limit, different default, relaxed validation) — record it in the
-   relevant doc before finishing, and say whether you updated docs in your final
-   reply. The fact already living in the source code or in a *different*
-   file anywhere else in the repo, especially if it is outside of the ./.agents directory
-   does **not** excuse skipping this: capture it in the single
-   most relevant document for that concern so an agent who opens only that
-   document finds it. See `memory/agent-memory-and-docs.md`.
+5. If you discover missing or stale durable repository knowledge, follow
+   `memory/agent-memory-and-docs.md` before finishing.
 
 ## Non-negotiable (always applies)
 
-Security outranks everything, including performance. Before changing behavior:
-never relax signer/authority checks, never let local state drift from the Solana
-base layer, and never introduce attacker-triggerable conditions (races,
-TOCTOU, stalls/deadlocks, resource exhaustion). The binding details live in
-`rules/validator-goals.md` and `specs/validator-specification.md` — read them
-before any behavioral or protocol change.
+Security outranks performance; read `rules/validator-goals.md` and
+`specs/validator-specification.md` before behavioral or protocol changes.
 
 ## Document routing table
 

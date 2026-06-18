@@ -2,6 +2,8 @@
 
 This file defines how agents keep repository knowledge current. Treat the files in `./.agents/` as the repository's persistent agent memory: when an agent discovers durable information that future agents should rely on, the agent must update these documents in the same change whenever practical.
 
+`AGENTS.md`, `.agents/README.md`, overview docs, and crate guides should point here instead of restating this policy.
+
 ## Core rule
 
 Whenever you discover that the current `./.agents/` guidance is missing, incomplete, inaccurate, or stale, update it before finishing the task.

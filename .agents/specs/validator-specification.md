@@ -4,7 +4,7 @@ This document captures specification-level behavior that AI .agents should under
 
 ## Security invariants (highest priority)
 
-These invariants override all other behavior described in this document. The validator handles real funds; violating any of them can cause the validator or its customers to lose money. Under no circumstances may a change weaken them.
+These invariants override all other behavior described in this document. The validator handles real funds; violating any of them can cause the validator or its customers to lose money. Under no circumstances may a change weaken them. Other docs should link here for protocol-binding invariants instead of restating them.
 
 1. **Signers stay required.** Every signature/authority check that exists today must remain. This includes (non-exhaustively): the MagicContext payer signer on `ScheduleIntentBundle`, the validator-signed `AcceptScheduleCommits`, ephemeral-account create signer (required on create to prevent pubkey squatting), delegation/commit/undelegation authorities, Magic Action escrow authority, and admin/operator entrypoints. Never add an unsigned or weaker-authority path to an operation that is authenticated today.
 2. **Local state stays in sync with the base layer.** Account fetching, websocket/gRPC subscriptions, delegation-record resolution, slot/`min_context_slot` and commitment handling, and clone-freshness checks must remain at least as strong and stable as the current implementation. The validator must not serve or execute against stale, forged, or out-of-sync state, and must not miss base-layer updates that change delegation/undelegation truth.

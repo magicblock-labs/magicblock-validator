@@ -27,36 +27,14 @@ In practical terms, the validator:
 | Magic Program | ER program used for commit scheduling, intent bundles, tasks, ephemeral accounts, and validator operations. |
 | Committor | Validator-side service that realizes scheduled base-layer intents. |
 
-## Which agent doc to read
+## Document routing and policy
 
-- `.agents/rules/validator-goals.md` — read when deciding whether a change is aligned with product/system goals.
-- `.agents/specs/validator-specification.md` — read before changing protocol behavior: delegation, cloning, execution rules, commits, undelegation, Magic Actions, ephemeral accounts, RPC/router behavior, or recovery.
-- `.agents/context/architecture.md` — read before changing service wiring or interactions between crates.
-- `.agents/context/crate-map.md` — read to find which crate owns an area and which other crates may be affected.
-- `.agents/rules/testing-and-validation.md` — read before deciding how to validate a change.
-- `.agents/memory/agent-memory-and-docs.md` — read when a task may discover or change durable repository knowledge that future agents should remember.
+Use `.agents/README.md` for document routing; this file only orients on validator concepts.
 
-## Non-negotiable agent rules
-
-Before changing behavior, check the relevant agent docs and preserve the validator's goals, invariants, and performance expectations.
-
-**Security comes before everything else, including performance.** This validator handles real funds: a security regression can cause the validator or its customers to lose money. Under no circumstances may a change weaken security. Concretely:
-
-- **Signer requirements must never be relaxed.** Anything that currently requires a signer must keep requiring it. Never remove, weaken, or bypass signer/authority checks for convenience or performance.
-- **State must stay in sync with the Solana base layer.** Subscriptions, fetching, delegation-record resolution, and account synchronization must remain at least as correct and stable as they are now. Never allow local state to silently diverge from base-layer truth.
-- **Attacker-triggerable conditions are forbidden.** Do not introduce or expose conditions an attacker could trigger, including race conditions, timing/ordering attacks, validator stalls/deadlocks/hangs, resource exhaustion, or any path that lets untrusted input corrupt state or settlement.
-
-If you cannot make a change without weakening any of the above, stop and surface the conflict explicitly rather than proceeding. A performance win never justifies a security loss.
-
-The validator is performance-sensitive infrastructure. Do not degrade critical RPC, account sync, scheduling, execution, persistence, or settlement paths unless there is no viable alternative; if such a tradeoff is unavoidable, state it explicitly with expected impact and mitigation.
-
-When behavior changes, update the relevant `.agents/` file in the same change. These docs must remain synchronized with the real implementation; stale guidance is worse than no guidance.
-
-When you discover durable knowledge that is missing or wrong in `./.agents/`—for example a feature behavior, protocol invariant, crate responsibility, validation workflow, recurring pitfall, or performance constraint—update the most relevant existing document, or create a focused new one if no suitable document exists. If you cannot make the documentation update, report the exact follow-up before handing off.
+For goal and security policy, read `.agents/rules/validator-goals.md`. For protocol invariants, read `.agents/specs/validator-specification.md`. For durable-memory and documentation-stewardship rules, read `.agents/memory/agent-memory-and-docs.md`.
 
 ## Things to be especially careful with
 
-- **Security-critical paths above all** (see non-negotiable rules): signer/authority enforcement, base-layer sync correctness, and any attacker-triggerable race, timing, stall, or exhaustion condition.
 - Writable account access rules for delegated, ephemeral, confined, and explicitly allowed accounts.
 - Delegation and undelegation lifecycle transitions.
 - Commit intent durability and restart recovery.

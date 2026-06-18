@@ -4,9 +4,7 @@ This file explains the repository-level architecture and how major crate groups 
 
 ## System shape
 
-The validator is a service graph around one core loop: make the right accounts available locally, execute valid ER transactions, persist the result, and settle scheduled state changes back to Solana. This graph is performance-sensitive: architectural changes must preserve low-latency, high-throughput behavior on critical paths unless there is no viable alternative, and any unavoidable tradeoff must be called out explicitly.
-
-It is also security-critical and the security contract outranks performance. Architectural changes must not weaken signer/authority enforcement, must keep account synchronization with the Solana base layer at least as correct and stable as today, and must not introduce attacker-triggerable conditions (races, timing/ordering attacks, stalls/deadlocks, resource exhaustion). The validator settles real funds; a security regression can lose money for the operator or customers. See `.agents/rules/validator-goals.md` and `.agents/specs/validator-specification.md` for the binding security invariants.
+The validator is a service graph around one core loop: make the right accounts available locally, execute valid ER transactions, persist the result, and settle scheduled state changes back to Solana. This graph is performance-sensitive: architectural changes must preserve low-latency, high-throughput behavior on critical paths unless there is no viable alternative, and any unavoidable tradeoff must be called out explicitly. See `.agents/rules/validator-goals.md` and `.agents/specs/validator-specification.md` for binding security details.
 
 ```text
 Client / Operator
@@ -196,4 +194,4 @@ cancel services
 - **Replication observes/replays validator output.** Do not make primary and replica modes accidentally diverge.
 - **Crate-specific details belong in crate docs.** Keep this file focused on cross-crate architecture.
 - **Performance is part of the architecture contract.** Do not move heavy work into RPC, account sync, scheduler/executor, persistence, or settlement hot paths without an explicit justification and mitigation plan.
-- **Security is the top architecture constraint and outranks performance.** Do not let any layer weaken signer/authority enforcement, drift local state out of sync with the base layer, or open attacker-triggerable race/timing/stall/exhaustion conditions. RPC ingress in particular handles untrusted input and must not become a path that bypasses execution/SVM validation or account-sync correctness.
+- **Security boundaries must remain explicit between layers.** RPC ingress handles untrusted input and must not become a path that bypasses execution/SVM validation or account-sync correctness.
