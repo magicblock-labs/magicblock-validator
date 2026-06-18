@@ -19,9 +19,7 @@ This crate sits directly on startup and shutdown paths and coordinates hot-path 
 
 ## Update requirement
 
-Update this document in the same change whenever `magicblock-api` behavior or contracts change. This file is useful only if it reflects the current implementation.
-
-Update it for changes to:
+Update this document in the same change whenever `magicblock-api` behavior or contracts change. Update it for changes to:
 
 - `MagicValidator::try_from_config`, `start`, `stop`, `prepare_ledger_for_shutdown`, or validator registration/unregistration behavior;
 - startup/shutdown ordering, service ownership, cancellation semantics, or thread/runtime spawning;
@@ -31,6 +29,8 @@ Update it for changes to:
 - MagicSys/commit nonce lookup behavior;
 - domain registry, fee vault, claim-fees, or other base-layer operator flows;
 - public APIs, exported modules, error types, validation commands, or integration-test expectations.
+
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
@@ -290,54 +290,13 @@ Risks:
 
 ## Tests and validation
 
-For documentation-only changes:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-api`.
+- Relevant integration suites: `test-magicblock-api`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Related validation intent: startup/shutdown changes should report timing-sensitive effects and preserve `log_timing` coverage where useful; changes that move work into RPC, account sync, scheduler/executor, ledger, replication, or committor paths need focused performance reasoning or measurement.
 
-```bash
-git status --short
-ls .agents/context/crates/magicblock-api.md
-```
+## Adjacent implementation references
 
-Also verify `AGENTS.md` and `.agents/context/crate-map.md` mention the new guide when appropriate. Do not run `mbv-check` for markdown-only crate-guide updates unless source files were changed.
-
-For Rust changes in this crate, run focused checks first:
-
-```bash
-cargo fmt
-cargo clippy -p magicblock-api --all-targets -- -D warnings
-cargo nextest run -p magicblock-api
-```
-
-Relevant integration checks:
-
-```bash
-cd test-integration
-make test-magicblock-api
-```
-
-When isolating integration tests, use the setup targets from `.agents/rules/testing-and-validation.md`, especially `make setup-magicblock-api-both` or the narrower devnet/ephem setup that matches the changed flow.
-
-Broader baseline validation remains:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance validation expectations:
-
-- Documentation-only changes have no runtime performance impact.
-- Startup/shutdown changes should report timing-sensitive effects and preserve `log_timing` coverage where useful.
-- Changes that move work into RPC, account sync, scheduler/executor, ledger, replication, or committor paths need focused performance reasoning or measurement, because this crate controls when those hot-path services run.
-
-## Related docs
-
-- `AGENTS.md` — required agent workflow and crate-guide discovery list.
-- `.agents/context/overview.md` — validator purpose and core lifecycle concepts.
-- `.agents/specs/validator-specification.md` — protocol lifecycle, commit/undelegation, RPC/router, startup/shutdown, and recovery behavior.
-- `.agents/context/architecture.md` — cross-crate service graph and startup/shutdown boundaries.
-- `.agents/context/crate-map.md` — crate ownership map and pointer back to this guide.
-- `.agents/rules/testing-and-validation.md` — validation command selection and integration-test setup.
 - `.agents/context/crates/magicblock-aperture.md` — RPC/pubsub service details wired by this crate.
 - `.agents/context/crates/magicblock-account-cloner.md`, `.agents/context/crates/magicblock-accounts.md`, and `.agents/context/crates/magicblock-chainlink.md` — account sync and scheduled-commit dependencies wired by this crate.
 - `magicblock-api/README.md` — short usage example for `MagicValidator`.

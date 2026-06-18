@@ -17,9 +17,7 @@ This crate sits on the `magicblock-chainlink` account synchronization path for a
 
 ## Update requirement
 
-Update this document in the same change whenever `magicblock-aml` behavior, public APIs, configuration contract, persistence layout, error semantics, or Chainlink integration changes. This guide is useful only if it reflects the current implementation.
-
-Update it for changes to:
+Update this document in the same change whenever `magicblock-aml` behavior, public APIs, configuration contract, persistence layout, error semantics, or Chainlink integration changes. Update it for changes to:
 
 - `RiskService`, `RiskError`, `RiskResult`, cache aliases, or other exported API shape;
 - Range endpoint path, query parameters, auth scheme, response parsing, or expected JSON fields;
@@ -28,6 +26,8 @@ Update it for changes to:
 - in-flight request deduplication, cache-writer lifecycle, or error cleanup;
 - which post-delegation action accounts Chainlink risk-checks;
 - validation commands, tests, or performance expectations for risk checks.
+
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
@@ -299,55 +299,14 @@ Risks:
 
 ## Tests and validation
 
-For documentation-only changes:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-aml`.
+- Related package checks by change area: `magicblock-config` for `RiskConfig` or default changes, and `magicblock-chainlink` when AML call sites or checked post-delegation action accounts change.
+- Relevant integration suites: post-delegation action coverage in `test-cloning` when signer-risk behavior affects clone flows; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance validation intent: changes that increase cache misses, HTTP calls, retries, checked address cardinality, SQLite contention, or Chainlink wait time must report account-sync hot-path impact.
 
-```bash
-git status --short
-ls .agents/context/crates/magicblock-aml.md
-grep -n "magicblock-aml" AGENTS.md .agents/context/crate-map.md .agents/context/crates/magicblock-aml.md
-```
+## Adjacent implementation references
 
-For `magicblock-aml` Rust/source changes, run focused crate checks:
-
-```bash
-cargo fmt
-cargo clippy -p magicblock-aml --all-targets -- -D warnings
-cargo nextest run -p magicblock-aml
-```
-
-When changing `RiskConfig` or config defaults, also run:
-
-```bash
-cargo nextest run -p magicblock-config
-```
-
-When changing Chainlink call sites or which post-delegation action accounts are checked, also run targeted Chainlink tests, for example:
-
-```bash
-cargo nextest run -p magicblock-chainlink
-```
-
-Broader baseline validation remains the repository standard from `.agents/rules/testing-and-validation.md` for Rust behavior changes:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance validation expectations:
-
-- Documentation-only changes have no runtime performance impact.
-- Any change that increases cache misses, HTTP calls, retries, checked address cardinality, SQLite contention, or Chainlink wait time must report the account-sync hot-path impact and, when practical, validate with representative post-delegation action clone workloads.
-
-## Related docs
-
-- `AGENTS.md` — required agent workflow and documentation-memory rules.
-- `.agents/context/overview.md` — validator runtime model and important concepts.
-- `.agents/context/architecture.md` — account synchronization layer and cross-crate boundaries.
-- `.agents/context/crate-map.md` — workspace crate ownership map and pointer back to this guide.
-- `.agents/rules/testing-and-validation.md` — repository validation commands and reporting expectations.
-- `.agents/memory/agent-memory-and-docs.md` — rules for keeping agent documentation current.
 - `.agents/context/crates/magicblock-chainlink.md` — Chainlink account/delegation coordination guide; read it before changing AML call sites.
 - `config.example.toml` — operator-facing `[chainlink.risk]` configuration example.
 - `magicblock-config/src/config/chain.rs` — `RiskConfig` source of truth.

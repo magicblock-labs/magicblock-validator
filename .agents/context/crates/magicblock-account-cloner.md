@@ -19,9 +19,7 @@ This crate is on the account-availability path for transaction submission, RPC r
 
 ## Update requirement
 
-Update this document in the same change whenever behavior in `magicblock-account-cloner` changes, or whenever another crate changes the clone requests or Magic Program instructions this crate consumes. This file is useful only if it reflects the current implementation.
-
-Update it for changes to:
+Update this document in the same change whenever behavior in `magicblock-account-cloner` changes, or whenever another crate changes the clone requests or Magic Program instructions this crate consumes. Update it for changes to:
 
 - the `ChainlinkCloner` public constructor or its `Cloner` trait implementation,
 - account clone sizing, chunking, cleanup, post-delegation action handling, or transaction-size limits,
@@ -31,6 +29,8 @@ Update it for changes to:
 - error mapping or transaction diagnostics in `account_cloner.rs` / `util.rs`,
 - tests or integration validation for account/program cloning,
 - performance characteristics of clone transaction construction or scheduler submission.
+
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
@@ -326,62 +326,14 @@ Risks:
 
 ## Tests and validation
 
-For documentation-only changes involving this guide:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-account-cloner` and, when request construction or account availability changes, `magicblock-chainlink`.
+- Relevant integration suites: `test-cloning`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Useful focused integration areas: `test-integration/test-cloning/tests/05_parallel-cloning.rs` for concurrent clone pressure, `test-integration/test-cloning/tests/08_multi_program_cloning.rs` for program cloning, and `test-integration/test-cloning/tests/10_post_delegation_token_transfer.rs` for post-delegation actions.
+- Performance validation intent: account/program clone changes should report whether they add transactions, serialization, allocations, logging, scheduler waits, cleanup work, or remote diagnostics to clone hot paths.
 
-```bash
-ls .agents/context/crates/magicblock-account-cloner.md
-rg "magicblock-account-cloner.md" AGENTS.md .agents/context/crate-map.md
-```
+## Adjacent implementation references
 
-For Rust changes in this crate, run at minimum:
-
-```bash
-cargo fmt
-cargo clippy -p magicblock-account-cloner --all-targets -- -D warnings
-cargo nextest run -p magicblock-account-cloner
-```
-
-For changes affecting Chainlink request construction or account availability, also run focused Chainlink checks:
-
-```bash
-cargo nextest run -p magicblock-chainlink
-```
-
-For integration behavior, especially account/program clone flows or post-delegation actions, use the cloning suite:
-
-```bash
-cd test-integration
-make test-cloning
-```
-
-Useful focused integration areas include:
-
-- `test-integration/test-cloning/tests/05_parallel-cloning.rs` for concurrent clone pressure,
-- `test-integration/test-cloning/tests/08_multi_program_cloning.rs` for program cloning,
-- `test-integration/test-cloning/tests/10_post_delegation_token_transfer.rs` for post-delegation actions.
-
-Broader baseline validation remains the repository standard from `.agents/rules/testing-and-validation.md`:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance validation expectations:
-
-- Documentation-only changes have no runtime performance impact.
-- Account/program clone changes should report whether they add transactions, serialization, allocations, logging, scheduler waits, cleanup work, or remote diagnostics to clone hot paths.
-- Changes to parallel clone behavior, chunk sizing, or program loading should include a focused cloning integration check or a reason why it was not run.
-
-## Related docs
-
-- `AGENTS.md` — required agent workflow and documentation-memory rules.
-- `.agents/context/overview.md` — validator runtime model and core concepts.
-- `.agents/specs/validator-specification.md` — account cloning, delegated account representation, program cloning, and Magic Program clone instruction notes.
-- `.agents/context/architecture.md` — account synchronization layer and service boundaries.
-- `.agents/context/crate-map.md` — crate ownership map and pointer back to this guide.
-- `.agents/rules/testing-and-validation.md` — repository validation commands and integration-test workflow.
 - `.agents/context/crates/magicblock-chainlink.md` — Chainlink-side account synchronization, request construction, delegation, subscription, and fetch/clone pipeline guidance.
 - `magicblock-account-cloner/README.md` — high-level cloning overview; verify historical statements against current source.
 - `magicblock-chainlink/src/cloner/mod.rs` — trait and request boundary implemented by this crate.

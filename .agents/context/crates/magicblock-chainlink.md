@@ -19,7 +19,7 @@ Chainlink is on the account-availability hot path for RPC reads and transaction 
 
 ## Update requirement
 
-Whenever an agent changes behavior in `magicblock-chainlink`, or changes another crate in a way that changes Chainlink flows, this document must be updated in the same change. This file is useful only if it reflects the current implementation. Update it for changes to:
+Whenever behavior in `magicblock-chainlink` changes, or another crate changes Chainlink flows, update this document in the same change for changes to:
 
 - account fetch/clone classification,
 - delegation-record resolution or local delegated/confined/undelegating flags,
@@ -31,6 +31,8 @@ Whenever an agent changes behavior in `magicblock-chainlink`, or changes another
 - public APIs used by `magicblock-api`, `magicblock-aperture`, `magicblock-accounts`, `magicblock-account-cloner`, or `programs/magicblock`,
 - tests or validation commands relevant to this crate,
 - performance characteristics of fetch/clone, deduplication, subscription, LRU/eviction, or update-ordering paths.
+
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
@@ -452,41 +454,19 @@ Start with:
 
 ## Tests and validation
 
-For documentation-only changes to this file, verify the file exists and links/paths are accurate.
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-chainlink`.
+- Relevant integration suites: `test-chainlink`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Useful Chainlink test files: `magicblock-chainlink/tests/basics.rs`, `01_ensure-accounts.rs`, `03_deleg_after_sub.rs`, redelegation tests `04` through `07`, `08_subupdate-ordering.rs`, and `09_waiter_reconciliation_race.rs`.
+- Performance validation intent: fetch/clone, subscription, LRU, or update-ordering hot-path changes should include the smallest practical test or measurement that can expose duplicate fetches/clones, increased latency, contention, or subscription churn; if skipped, report the residual performance risk.
 
-For Rust changes in `magicblock-chainlink`, run at least targeted formatting/checks and the Chainlink crate tests. If the change touches fetch/clone, subscription, LRU, or update-ordering hot paths, also include the smallest practical test or measurement that can expose duplicate fetches/clones, increased latency, contention, or subscription churn; if skipped, report the residual performance risk.
+## Adjacent implementation references
 
-Minimum targeted commands:
-
-```bash
-cargo fmt
-cargo nextest run -p magicblock-chainlink
-```
-
-For broader validation, use the repository baseline:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Relevant integration test command from `.agents/rules/testing-and-validation.md`:
-
-```bash
-cd test-integration
-make test-chainlink
-```
-
-Useful Chainlink test files:
-
-- `magicblock-chainlink/tests/basics.rs` — basic fetch/read behavior.
-- `magicblock-chainlink/tests/01_ensure-accounts.rs` — account ensure behavior.
-- `magicblock-chainlink/tests/03_deleg_after_sub.rs` — delegation after subscription.
-- `magicblock-chainlink/tests/04_redeleg_other_separate_slots.rs` — redelegated to another validator, separate slots.
-- `magicblock-chainlink/tests/05_redeleg_other_same_slot.rs` — redelegated to another validator, same slot.
-- `magicblock-chainlink/tests/06_redeleg_us_separate_slots.rs` — redelegated to this validator, separate slots.
-- `magicblock-chainlink/tests/07_redeleg_us_same_slot.rs` — redelegated to this validator, same slot.
-- `magicblock-chainlink/tests/08_subupdate-ordering.rs` — subscription update ordering.
-- `magicblock-chainlink/tests/09_waiter_reconciliation_race.rs` — concurrent waiter/reconciliation race recovery.
-
-When changing subscription or race behavior, prefer adding deterministic tests that wait for observable state (`pending_request_waiter_count`, bank state, subscription ownership) instead of relying on fixed sleeps.
+- `.agents/context/crates/magicblock-account-cloner.md` — clone request materialization boundary implemented by the production cloner.
+- `.agents/context/crates/magicblock-accounts.md` — scheduled commit integration and undelegation notification consumer.
+- `.agents/context/crates/magicblock-aperture.md` — RPC read and transaction submission account-ensure caller.
+- `.agents/context/crates/magicblock-aml.md` — signer risk-check integration for post-delegation actions.
+- `magicblock-chainlink/src/cloner/mod.rs` — `Cloner`, `AccountCloneRequest`, and `DelegationActions` boundary.
+- `magicblock-chainlink/src/chainlink/fetch_cloner/` — fetch/clone pipeline, delegation handling, ATA/eATA projection, and pending operation deduplication.
+- `magicblock-chainlink/src/remote_account_provider/` — RPC/pubsub provider, subscription ownership, LRU capacity, and program-account resolution.
+- `magicblock-chainlink/tests/` — Chainlink account ensure, delegation, ordering, and race-recovery tests.

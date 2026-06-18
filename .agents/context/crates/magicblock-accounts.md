@@ -17,9 +17,7 @@ This crate sits on the commit/undelegation settlement path and interacts with th
 
 ## Update requirement
 
-Update this document in the same change whenever behavior in `magicblock-accounts` changes, or when another crate changes the flows/contracts consumed here. This file is useful only if it reflects the current implementation.
-
-Update it for changes to:
+Update this document in the same change whenever behavior in `magicblock-accounts` changes, or when another crate changes the flows/contracts consumed here. Update it for changes to:
 
 - `ScheduledCommitsProcessor` trait methods or `ScheduledCommitsProcessorImpl::new` wiring;
 - scheduled intent draining, metadata tracking, result processing, or `SentCommit` construction;
@@ -30,6 +28,8 @@ Update it for changes to:
 - startup/shutdown ordering in `magicblock-api` that affects this processor;
 - validation commands or integration suites relevant to schedule intents, commits, or undelegation;
 - performance characteristics of scheduled commit processing, result handling, or recovery.
+
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
@@ -337,69 +337,14 @@ Risks:
 
 ## Tests and validation
 
-For documentation-only changes:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-accounts`.
+- Related package checks by change area: `magicblock-api`, `magicblock-program`, and `magicblock-committor-service` for scheduled commits, pending recovery, or undelegation behavior.
+- Relevant integration suites: `test-schedule-intents`, `test-committor`, and `test-task-scheduler`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance validation intent: changes to slot-ticker commit processing, intent metadata handling, Chainlink undelegation notification, or result handling should report whether they add work to periodic slot processing, committor scheduling, or transaction-scheduler submission.
 
-```bash
-git diff --check -- .agents/context/crates/magicblock-accounts.md .agents/context/crate-map.md AGENTS.md
-```
+## Adjacent implementation references
 
-Also verify:
-
-- `.agents/context/crates/magicblock-accounts.md` exists;
-- `.agents/context/crate-map.md` points future agents to this guide;
-- `AGENTS.md` mentions the new crate guide if the example crate-guide list is kept current;
-- no files under `prompts/**` are staged or committed.
-
-For Rust changes in this crate, run targeted checks first:
-
-```bash
-cargo fmt
-cargo clippy -p magicblock-accounts --all-targets -- -D warnings
-cargo nextest run -p magicblock-accounts
-```
-
-For changes that affect scheduled commits, pending recovery, or undelegation, also run relevant adjacent checks when practical:
-
-```bash
-cargo nextest run -p magicblock-api
-cargo nextest run -p magicblock-program process_schedule_commit
-cargo nextest run -p magicblock-committor-service
-```
-
-Integration suites for end-to-end behavior:
-
-```bash
-cd test-integration
-make test-schedule-intents
-make test-committor
-make test-task-scheduler
-```
-
-Use narrower committor targets from `.agents/rules/testing-and-validation.md` when full committor coverage is too slow but the change is localized.
-
-Broader baseline validation remains the repository standard from `.agents/rules/testing-and-validation.md`:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance validation expectations:
-
-- Documentation-only changes have no runtime performance impact.
-- Changes to slot-ticker commit processing, intent metadata handling, Chainlink undelegation notification, or result handling should report whether they add work to periodic slot processing, committor scheduling, or transaction-scheduler submission.
-- If a change can increase commit latency or result-processing lag, validate with schedule-intent/committor tests or a targeted measurement and report any unmeasured risk.
-
-## Related docs
-
-- `AGENTS.md` — required agent workflow and documentation-memory rules.
-- `.agents/context/overview.md` — validator runtime model and core concepts.
-- `.agents/specs/validator-specification.md` — commit, undelegation, committor service, and recovery behavior.
-- `.agents/context/architecture.md` — account synchronization and base-layer settlement boundaries.
-- `.agents/context/crate-map.md` — crate ownership map and pointer back to this guide.
-- `.agents/rules/testing-and-validation.md` — repository validation commands and integration suite names.
-- `.agents/memory/agent-memory-and-docs.md` — rules for keeping agent documentation current.
 - `.agents/context/crates/magicblock-account-cloner.md` — current account-cloner guide; useful because this crate aliases the production cloner stack through Chainlink.
 - `.agents/context/crates/magicblock-chainlink.md` — Chainlink lifecycle/delegation guide, especially `undelegation_requested` and delegation checks.
 - `magicblock-accounts/README.md` — historical summary; verify against source before using.
@@ -407,3 +352,4 @@ Performance validation expectations:
 - `magicblock-api/src/magic_validator.rs` — startup/shutdown and recovery wiring.
 - `programs/magicblock/src/schedule_transactions/` — Magic Program scheduling and acceptance processors.
 - `magicblock-committor-service/` — base-layer intent execution, persistence, and recovery source.
+- `test-integration/test-schedule-intent/` and `test-integration/schedulecommit/` — integration coverage for schedule intent, commit, and commit-and-undelegate behavior.

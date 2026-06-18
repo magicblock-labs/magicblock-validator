@@ -19,9 +19,7 @@ Aperture sits directly on performance-sensitive RPC, PubSub, event-processing, a
 
 ## Update requirement
 
-Update this document in the same change whenever `magicblock-aperture` behavior, public APIs, request/response compatibility, configuration contract, event flow, cache behavior, Geyser integration, metrics, tests, or performance characteristics change. This guide is useful only if it reflects the current implementation.
-
-Update it for changes to:
+Update this document in the same change whenever `magicblock-aperture` behavior, public APIs, request/response compatibility, configuration contract, event flow, cache behavior, Geyser integration, metrics, tests, or performance characteristics change. Update it for changes to:
 
 - `initialize_aperture`, `JsonRpcServer`, `SharedState`, `NodeContext`, exported modules, or startup/shutdown ordering;
 - HTTP or WebSocket method inventories in `JsonRpcHttpMethod` / `JsonRpcWsMethod`;
@@ -32,6 +30,8 @@ Update it for changes to:
 - `[aperture]` config keys in `magicblock-config`, `config.example.toml`, or CLI/env support;
 - metrics names/labels from `magicblock-metrics` used by this crate;
 - unit, integration, or manual validation commands for RPC, PubSub, Geyser, or performance-sensitive paths.
+
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
@@ -414,68 +414,15 @@ Risks:
 
 ## Tests and validation
 
-For documentation-only changes to this guide, verify paths and cross-references only; no Rust checks are required by the batch plan.
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-aperture`.
+- Relevant focused test areas: crate tests for accounts, transactions, transaction primary-mode gating, WebSocket behavior, and transaction validation.
+- Relevant integration suites: `test-magicblock-api` and `test-pubsub`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance validation intent: RPC/account-read changes should report added account fetches, blocking work, serialization, or scans; transaction changes should report scheduler/account-ensure latency and replay-protection impact; PubSub/Geyser/event changes should report notification throughput, queue growth, plugin callback latency, and cache-update ordering.
 
-Minimum targeted checks for `magicblock-aperture` Rust changes:
+## Adjacent implementation references
 
-```bash
-cargo fmt
-cargo clippy -p magicblock-aperture --all-targets -- -D warnings
-cargo nextest run -p magicblock-aperture
-```
-
-Useful targeted tests by area:
-
-```bash
-cargo nextest run -p magicblock-aperture --test accounts
-cargo nextest run -p magicblock-aperture --test transactions
-cargo nextest run -p magicblock-aperture --test transaction_primary_mode
-cargo nextest run -p magicblock-aperture --test websocket
-cargo nextest run -p magicblock-aperture transaction_validation
-```
-
-Integration checks for validator-level behavior:
-
-```bash
-cd test-integration
-make test-magicblock-api
-make test-pubsub
-```
-
-If isolating PubSub tests, use the workflow in `.agents/rules/testing-and-validation.md`, for example:
-
-```bash
-cd test-integration
-make setup-pubsub-both
-# in another terminal:
-RUST_LOG=info cargo test -p test-pubsub -- --test-threads=1 --nocapture
-```
-
-Broader baseline validation remains the repository standard from `.agents/rules/testing-and-validation.md`:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance validation expectations:
-
-- RPC/account-read changes should report whether they add account fetches, blocking work, extra serialization, or heavy scans.
-- Transaction submission/simulation changes should report scheduler/account-ensure latency risk and replay-protection impact.
-- PubSub/Geyser/event changes should consider notification throughput, queue growth, plugin callback latency, and cache-update ordering.
-- If no practical performance test is run for a hot-path change, explicitly state the residual risk.
-
-## Related docs
-
-- `AGENTS.md` — required agent workflow and documentation-memory rules.
-- `.agents/context/overview.md` — validator runtime model and core concepts.
-- `.agents/specs/validator-specification.md` — RPC/router, account cloning, transaction execution, and lifecycle invariants.
-- `.agents/context/architecture.md` — cross-crate service boundaries and ingress/event-processing role.
-- `.agents/context/crate-map.md` — workspace crate ownership map and pointer back to this guide.
-- `.agents/rules/testing-and-validation.md` — repository validation workflow and integration-test commands.
-- `.agents/memory/agent-memory-and-docs.md` — rules for keeping crate guides current.
-- `.agents/context/crates/magicblock-account-cloner.md` — account/program clone behavior used by Aperture through Chainlink.
+- `.agents/context/crates/magicblock-account-cloner.md` — account/program clone behavior reached indirectly through Chainlink.
 - `.agents/context/crates/magicblock-chainlink.md` — account synchronization and ensure behavior used by RPC reads/transactions.
 - `magicblock-aperture/README.md` — human-facing crate overview.
 - `magicblock-config/src/config/aperture.rs` and `config.example.toml` — operator-facing Aperture configuration.

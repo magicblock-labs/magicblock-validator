@@ -17,7 +17,7 @@ This crate is on multiple performance-sensitive paths: transaction execution acc
 
 ## Update requirement
 
-Whenever an agent changes behavior in `magicblock-accounts-db`, or changes another crate in a way that changes AccountsDb flows/contracts, this document must be updated in the same change. Update it for changes to:
+Whenever behavior in `magicblock-accounts-db` changes, or another crate changes AccountsDb flows/contracts, update this document in the same change for changes to:
 
 - storage layout, mmap header fields, block sizing, allocation/recycling, or serialized account representation,
 - LMDB tables, key/value encodings, owner/program indexes, or cursor/iterator lifetime handling,
@@ -28,6 +28,8 @@ Whenever an agent changes behavior in `magicblock-accounts-db`, or changes anoth
 - safety requirements for borrowed mmap account data, snapshots, checksums, and defragmentation,
 - tests or validation commands relevant to this crate,
 - performance characteristics of execution/RPC/account-sync/storage hot paths.
+
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
@@ -254,62 +256,15 @@ Start with `src/storage.rs`, `src/index/iterator.rs`, `src/index/utils.rs`, `Acc
 
 ## Tests and validation
 
-For documentation-only changes, verify paths and cross-references are correct. For this guide, useful checks are:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-accounts-db`.
+- Related package checks by change area: `magicblock-config` for config parsing, and `magicblock-processor` for execution commits, snapshots, reset, or replication lifecycle.
+- Relevant integration suites: `test-restore-ledger`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance validation intent: for read/write/index changes, reason about allocations, LMDB transaction count, lock/transaction lifetime, and mmap deserialization; for snapshot/defragment changes, report I/O, memory, and startup/shutdown impact.
 
-```bash
-test -f .agents/context/crates/magicblock-accounts-db.md
-grep -n "magicblock-accounts-db.md" AGENTS.md .agents/context/crate-map.md
-```
+## Adjacent implementation references
 
-For code changes in this crate, run targeted checks first:
-
-```bash
-cargo fmt
-cargo nextest run -p magicblock-accounts-db
-```
-
-If `cargo nextest` is unavailable, use:
-
-```bash
-cargo test -p magicblock-accounts-db
-```
-
-For changes touching config parsing, also run:
-
-```bash
-cargo nextest run -p magicblock-config accountsdb
-```
-
-For changes touching execution commits, snapshots, reset, or replication lifecycle, add focused consumer checks such as:
-
-```bash
-cargo nextest run -p magicblock-processor
-cd test-integration && make test-restore-ledger
-```
-
-Before handing off any Rust change, follow the workspace baseline in `.agents/rules/testing-and-validation.md` when practical:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance-sensitive expectations:
-
-- For read/write/index changes, reason about allocations, LMDB transaction count, lock/transaction lifetime, and mmap deserialization. Run a focused benchmark or representative test if available; otherwise report that performance was not measured.
-- For snapshot/defragment changes, report I/O, memory, and startup/shutdown impact, especially on non-reflink filesystems.
-- For security/correctness, explicitly confirm signer/authority behavior is untouched, base-layer sync semantics are not weakened, and no new attacker-triggerable stall/resource-exhaustion path was introduced through untrusted RPC/transaction-triggered account operations.
-
-## Related docs
-
-- `AGENTS.md` for required agent guidance and documentation update rules.
-- `.agents/context/overview.md` for validator runtime context.
-- `.agents/rules/validator-goals.md` for security, correctness, performance, and persistence goals.
-- `.agents/specs/validator-specification.md` for account cloning, execution, snapshots/recovery, and writable-account invariants.
-- `.agents/context/architecture.md` for local persistence and execution/account-sync boundaries.
-- `.agents/context/crate-map.md` for crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for repository validation workflow.
-- `magicblock-accounts-db/README.md` for the crate's existing overview and mmap borrowed-state warning.
-- `magicblock-config/src/config/accounts.rs` for accountsdb config fields.
-- `magicblock-api/src/magic_validator.rs` and `magicblock-processor/src/scheduler/mod.rs` for startup, reset, defragmentation, and snapshot call sites.
+- `magicblock-accounts-db/README.md` — crate overview and mmap borrowed-state warning.
+- `magicblock-config/src/config/accounts.rs` — accountsdb config fields.
+- `magicblock-api/src/magic_validator.rs` — startup, reset, defragmentation, and snapshot call sites.
+- `magicblock-processor/src/scheduler/mod.rs` — scheduler snapshot call site.
