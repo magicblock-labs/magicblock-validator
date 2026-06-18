@@ -32,7 +32,7 @@ Security outranks performance; read `rules/validator-goals.md` and
 | `context/architecture.md` | Change service wiring or interactions between crate groups. |
 | `context/crate-map.md` | Find which crate owns an area and which crates are affected. |
 | `rules/testing-and-validation.md` | Decide how to validate a change (commands, test selection, mbv-check). |
-| `memory/agent-memory-and-docs.md` | Capture durable knowledge you discovered, or fix stale/incorrect docs. |
+| `memory/agent-memory-and-docs.md` | Capture missing repository facts you discovered, or fix stale/incorrect docs. |
 | `context/crates/<crate>.md` | Work inside a specific crate (see crate-map for which file). |
 | `skills/<name>/SKILL.md` | Run an executable agent skill (e.g. `mbv-check`). |
 

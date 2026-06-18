@@ -251,7 +251,7 @@ Inspect `src/database/options.rs`, `src/database/rocksdb_options.rs`, `src/datab
 - Add focused tests for touched behavior such as address-signature pagination, block assembly, replay ordering, truncation, or serialization compatibility.
 - Relevant integration suites: restore-ledger for replay/recovery, `test-pubsub` and `test-magicblock-api` for RPC-visible block/status behavior; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance validation is important for execution writes, RPC history reads, startup replay, and truncation/compaction. If no benchmark or load-oriented check is run, report the residual disk-growth, compaction-latency, or resource-use risk.
-- Security validation for this crate is persistence correctness and attacker-triggerable resource use; signer/authority checks remain owned by execution/Magic Program layers.
+- Security validation for this crate is persistence correctness and adversarial resource-use behavior; signer/authority checks remain owned by execution/Magic Program layers, with global security policy in `.agents/rules/validator-goals.md` and `.agents/specs/validator-specification.md`.
 
 ## Adjacent implementation references
 
