@@ -599,11 +599,13 @@ where
                             struct InflightSubscriptionUpdateGuard;
                             impl Drop for InflightSubscriptionUpdateGuard {
                                 fn drop(&mut self) {
-                                    metrics::dec_inflight_subscription_updates();
+                                    metrics::dec_inflight_subscription_updates(
+                                    );
                                 }
                             }
-                            let _inflight_guard = InflightSubscriptionUpdateGuard;
-                            
+                            let _inflight_guard =
+                                InflightSubscriptionUpdateGuard;
+
                             Self::process_subscription_update(
                                 &this, pubkey, update,
                             )
