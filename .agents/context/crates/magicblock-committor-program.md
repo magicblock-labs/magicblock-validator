@@ -14,6 +14,8 @@ High-level responsibilities:
 
 This crate is on the base-layer settlement path. Its on-chain processor is compute- and transaction-size-sensitive, and its exported wire formats/PDA seeds are compatibility-sensitive. Changes can affect commit delivery, retry/recovery behavior, and whether large state commits fit in Solana transactions.
 
+End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns the on-chain buffer/chunk PDA program and client instruction builders used by committor buffer delivery.
+
 ## Update requirement
 
 Update this guide in the same change whenever behavior or contracts in `magicblock-committor-program` change. In particular, update it for changes to:
@@ -26,7 +28,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - instruction-builder APIs consumed by `magicblock-committor-service`;
 - committor-service buffer preparation, retry, cleanup, or recovery flows that rely on this crate.
 
-Because this crate defines on-chain wire/API contracts, also update downstream docs if another crate changes how committor buffers are prepared, consumed, retried, or cleaned up.
+
+For the general documentation-update rule, see .agents/memory/agent-memory-and-docs.md.
 
 ## Where it sits in the repository
 
@@ -219,55 +222,16 @@ Inspect `src/utils/account.rs`, `processor::process_close`, and `DeliveryPrepara
 
 ## Tests and validation
 
-For documentation-only changes to this guide, at minimum verify file paths and cross-references are correct:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-committor-program` and, when public APIs or buffer preparation change, `magicblock-committor-service`.
+- Relevant integration suites: `test-committor`, especially preparator, commit-finalize, and intent-executor targets; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance/security validation intent: report changes to buffer transaction count, chunk count, compute units, RPC sends, or retry rounds; confirm signer/PDA checks, transaction-size fit, retry, and cleanup behavior remain intact.
 
-```bash
-git diff --check
-```
 
-For source changes in `magicblock-committor-program`, run targeted checks first:
+## Adjacent implementation references
 
-```bash
-cargo fmt
-cargo test -p magicblock-committor-program
-cargo clippy -p magicblock-committor-program --all-targets -- -D warnings
-```
-
-For changes that affect buffer preparation or public APIs consumed by the service, also run service tests:
-
-```bash
-cargo test -p magicblock-committor-service
-cargo clippy -p magicblock-committor-service --all-targets -- -D warnings
-```
-
-For behavior changes in actual base-layer commit delivery, prefer integration coverage through the committor suite:
-
-```bash
-cd test-integration
-make test-committor
-```
-
-or a narrower committor target such as `make test-committor-preparators`, `make test-committor-commitfinalize`, or `make test-committor-intent-executor` when appropriate.
-
-Before handing off any code change, also run the broader baseline from `.agents/rules/testing-and-validation.md` when practical:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance/security validation expectations:
-
-- Report any change that increases buffer transaction count, chunk count, compute units, RPC sends, or retry rounds.
-- Confirm signer/PDA checks are not relaxed.
-- Confirm base-layer transaction size still fits after instruction-format changes.
-- Confirm retry and cleanup paths still recover from partially initialized buffers.
-
-## Related docs
-
-- `.agents/specs/validator-specification.md` — commit, undelegation, committor service, and buffer-task behavior.
-- `.agents/context/architecture.md` — base-layer settlement layer and service boundaries.
-- `.agents/context/crate-map.md` — crate ownership and dependency map.
-- `magicblock-committor-service/README.md` — current high-level intent-execution architecture notes for the main runtime consumer.
-- `test-integration/test-committor-service/` — integration tests for committor delivery and intent execution.
+- `magicblock-committor-service/README.md` — high-level intent-execution architecture notes for the main runtime consumer.
+- `.agents/context/crates/magicblock-committor-service.md` — service-side buffer preparation, retry, cleanup, and recovery integration.
+- `magicblock-committor-service/src/tasks/commit_task.rs` and `commit_finalize_task.rs` — buffer-task construction and Delegation Program commit/finalize-from-buffer call sites.
+- `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` — runtime buffer initialization, write retry, and cleanup call site.
+- `test-integration/test-committor-service/` — integration coverage for committor delivery and intent execution.

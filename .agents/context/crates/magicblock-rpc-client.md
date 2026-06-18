@@ -16,6 +16,8 @@ High-level responsibilities:
 
 This crate is performance-sensitive because it is used while preparing and delivering base-layer commit, undelegation, action, and lookup-table transactions. Changes must avoid increasing confirmation latency, duplicate RPC calls, unbounded task spawning, lock contention in the shared confirmation state, or RPC-provider amplification.
 
+End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns base-layer RPC reads, transaction send/confirmation, batching, caching, and retry/error mapping for settlement callers.
+
 ## Update requirement
 
 Update this guide in the same change whenever behavior or contracts in `magicblock-rpc-client` change. In particular, update it for changes to:
@@ -28,7 +30,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - metrics emitted through `magicblock-metrics` for RPC-client confirmation paths;
 - validation commands or integration suites relevant to base-layer send/confirm behavior.
 
-Because this crate is a shared settlement dependency, also update this file when another crate changes how `MagicblockRpcClient` is constructed or how its send/confirm outcomes are interpreted.
+
+For the general documentation-update rule, see .agents/memory/agent-memory-and-docs.md.
 
 ## Where it sits in the repository
 
@@ -164,11 +167,7 @@ When a websocket URL is configured:
 5. A `ProcessedSignature` notification is converted into `TransactionResult<()>`, unsubscribe is called, and the status is returned.
 6. Connection/subscription timeout, connection failure, subscription failure, stream end, or fallback delay causes batched polling for the remaining timeout.
 
-Metrics incremented in this path:
-
-- `mbv_rpc_client_signature_ws_subscribe_count`;
-- `mbv_rpc_client_signature_ws_notification_count`;
-- `mbv_rpc_client_signature_ws_fallback_count`.
+Local instrumentation records websocket subscription, notification, and fallback activity for this path.
 
 Do not make websocket confirmation the only path. Polling fallback is required for robustness across RPC providers and transient websocket failures.
 
@@ -191,10 +190,7 @@ Defaults are currently:
 - websocket fallback delay: `2s`;
 - poll coalesce delay: `25ms`.
 
-Metrics incremented in this path:
-
-- `mbv_rpc_client_signature_status_batch_count`;
-- `mbv_rpc_client_signature_status_batch_signatures_count`.
+Local instrumentation records signature-status batch activity for this path.
 
 ### Blockhash and slot caching
 
@@ -230,7 +226,7 @@ Avoid holding the `PollState` mutex across RPC calls. The current implementation
 
 ### Observability contract
 
-The RPC-client metrics live in `magicblock-metrics` and are exported with the `mbv_` namespace. Metric names and meanings are operator-facing; changing them requires updating `.agents/context/crates/magicblock-metrics.md` and handoff notes.
+This crate owns local confirmation and signature-status instrumentation call sites. Metric naming, labels, and registry details are documented in `.agents/context/crates/magicblock-metrics.md`.
 
 ## Important invariants
 
@@ -293,53 +289,21 @@ Do not lengthen cache lifetimes without considering Solana blockhash expiration 
 
 ### Changing metrics
 
-Start with:
-
-- `magicblock-rpc-client/src/signature_confirmer.rs` metric calls;
-- `magicblock-metrics/src/metrics/mod.rs` collector declarations, registration, and wrappers;
-- `.agents/context/crates/magicblock-metrics.md` for metric documentation expectations.
-
-Keep labels bounded; current RPC-client metrics are counters without labels.
+Start with `magicblock-rpc-client/src/signature_confirmer.rs` metric calls and `.agents/context/crates/magicblock-metrics.md` for metric documentation expectations. Keep this guide focused on local instrumentation intent; metric naming, labels, and registry details belong in the metrics guide.
 
 ## Tests and validation
 
-For documentation-only changes:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-rpc-client`.
+- Relevant integration suites: committor and TableMania suites for confirmation, settlement, or lookup-table behavior; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance/security validation intent: report effects on RPC call counts, confirmation latency, waiter batching, websocket fallback rates, and task spawning; preserve explicit send/confirm semantics and transaction-error visibility.
 
-```bash
-git diff --check
-rg "magicblock-rpc-client.md|magicblock-rpc-client" AGENTS.md .agents/context/crate-map.md .agents/context/crates/magicblock-rpc-client.md
-```
 
-For code changes in this crate, run targeted checks first:
+## Adjacent implementation references
 
-```bash
-cargo fmt
-cargo nextest run -p magicblock-rpc-client
-```
-
-For confirmation, committor, or lookup-table behavior changes, also run the relevant integration suites when practical:
-
-```bash
-cd test-integration
-make test-committor
-make test-table-mania
-```
-
-For broader Rust validation, follow `.agents/rules/testing-and-validation.md`:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance-sensitive changes should include targeted reasoning or measurement around RPC call counts, confirmation latency, waiter batching, websocket fallback rates, and task spawning. If no performance measurement is practical, report the residual risk explicitly.
-
-## Related docs
-
-- `.agents/context/overview.md` for validator runtime context.
-- `.agents/specs/validator-specification.md` for base-layer commit/undelegation and RPC/router expectations.
-- `.agents/context/architecture.md` for the base-layer settlement layer and service boundaries.
-- `.agents/context/crate-map.md` for crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for required validation workflow.
-- `.agents/context/crates/magicblock-metrics.md` for the metrics emitted by `SignatureConfirmer`.
-- `.agents/context/crates/magicblock-account-cloner.md`, `.agents/context/crates/magicblock-api.md`, and future committor/table-mania guides for major consumer flows.
+- `.agents/context/crates/magicblock-metrics.md` — documentation expectations for RPC-client metrics.
+- `.agents/context/crates/magicblock-committor-service.md` — primary send/confirm, task-info, and delivery-preparation consumer.
+- `.agents/context/crates/magicblock-table-mania.md` — ALT transaction and finalized remote-read consumer.
+- `.agents/context/crates/magicblock-account-cloner.md` — transaction diagnostic helper consumer.
+- `.agents/context/crates/magicblock-api.md` — domain-registry and validator wiring consumers.
+- `test-integration/test-committor-service/` and `test-integration/test-table-mania/` — integration coverage for settlement and ALT behavior.

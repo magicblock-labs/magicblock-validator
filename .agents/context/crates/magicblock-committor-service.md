@@ -16,6 +16,8 @@ High-level responsibilities:
 
 This crate is on the base-layer settlement hot path. Changes can affect fund safety, undelegation liveness, commit ordering/nonces, restart recovery, RPC load, transaction count, and latency. Security and correctness take priority over throughput: do not weaken signer usage, base-layer freshness/min-context-slot handling, commit nonce sequencing, scheduler conflict blocking, or buffer/ALT cleanup safety.
 
+End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns validator-side intent scheduling, task strategy, delivery preparation, persistence, and settlement execution.
+
 ## Update requirement
 
 Update this guide in the same change whenever behavior or contracts in `magicblock-committor-service` change. In particular, update it for changes to:
@@ -30,7 +32,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - SQLite schema, persisted statuses/strategies/signatures, pending-intent recovery windows, or recovery reconstruction;
 - integration test commands, performance characteristics, or operator-facing diagnostics.
 
-Because this crate coordinates settlement across several crates, also update related crate guides when changing contracts with `magicblock-committor-program`, `magicblock-rpc-client`, `magicblock-table-mania`, `magicblock-accounts`, or `magicblock-magic-program-api`.
+
+For the general documentation-update rule, see .agents/memory/agent-memory-and-docs.md.
 
 ## Where it sits in the repository
 
@@ -287,74 +290,22 @@ Start with `src/persist/db.rs`, `src/persist/commit_persister.rs`, `src/persist/
 
 ### Changing metrics or observability
 
-Start with metric calls in `intent_execution_engine.rs`, `delivery_preparator.rs`, and `intent_execution_client.rs`, plus definitions in `magicblock-metrics/src/metrics/mod.rs`. Keep labels low-cardinality (`intent_kind`, `error_kind`, task labels) and update `.agents/context/crates/magicblock-metrics.md` if names/labels change.
+Start with metric calls in `intent_execution_engine.rs`, `delivery_preparator.rs`, and `intent_execution_client.rs`. Keep this guide focused on local instrumentation intent; metric naming, labels, and registry details belong in `.agents/context/crates/magicblock-metrics.md`.
 
 ## Tests and validation
 
-For documentation-only changes, verify paths and links:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-committor-service`.
+- Relevant integration suites: `test-committor`, including preparators, ix-order, ix-multi, commit-finalize, intent-executor, and recovery targets; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Related suite intent: when TableMania or RPC-client behavior is touched, include the TableMania suite or focused committor preparation/delivery coverage.
+- Performance/security validation intent: report effects on executor parallelism, RPC calls, transaction count, ALT waits, buffer writes/chunks, SQLite writes, and cleanup latency; confirm signer/authority requirements, `min_context_slot` freshness, nonce sequencing, scheduler conflict blocking, and recovery durability remain intact.
 
-```bash
-git diff --check
-rg "magicblock-committor-service.md|magicblock-committor-service" AGENTS.md .agents/context/crate-map.md .agents/context/crates/magicblock-committor-service.md
-```
 
-For code changes in this crate, run targeted unit tests first:
+## Adjacent implementation references
 
-```bash
-cargo fmt
-cargo nextest run -p magicblock-committor-service
-cargo clippy -p magicblock-committor-service --all-targets -- -D warnings
-```
-
-For changes involving commit delivery, buffers, ALTs, action execution, or base-layer confirmations, run relevant integration suites when practical:
-
-```bash
-cd test-integration
-make test-committor
-```
-
-Useful narrower committor targets include:
-
-```bash
-cd test-integration
-make test-committor-preparators
-make test-committor-ix-order
-make test-committor-ix-multi
-make test-committor-commitfinalize
-make test-committor-intent-executor
-make test-committor-intent-executor-recovery
-```
-
-For changes touching TableMania or RPC-client behavior, also run the corresponding integration suite when practical:
-
-```bash
-cd test-integration
-make test-table-mania
-```
-
-Before handing off Rust behavior changes, run the broader baseline from `.agents/rules/testing-and-validation.md` when time allows:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance-sensitive changes should report expected effects on executor parallelism, RPC calls, transaction count, ALT waits, buffer writes/chunks, SQLite writes, and cleanup latency. If no measurement is practical, state the residual risk explicitly.
-
-Security/correctness validation should explicitly confirm that signer/authority requirements, base-layer `min_context_slot` freshness, commit nonce sequencing, scheduler conflict blocking, and recovery durability were preserved.
-
-## Related docs
-
-- `.agents/context/overview.md` for validator runtime context.
-- `.agents/rules/validator-goals.md` for security, settlement, recovery, and performance goals.
-- `.agents/specs/validator-specification.md` for commit, undelegation, Magic Actions, committor pipeline, and recovery behavior.
-- `.agents/context/architecture.md` for the base-layer settlement layer and service boundaries.
-- `.agents/context/crate-map.md` for crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for workspace and integration validation expectations.
-- `.agents/context/crates/magicblock-committor-program.md` for buffer/chunks on-chain helper contracts.
-- `.agents/context/crates/magicblock-rpc-client.md` for base-layer send/confirm and RPC helper behavior.
-- `.agents/context/crates/magicblock-table-mania.md` for ALT lifecycle and finalized-read semantics.
-- `.agents/context/crates/magicblock-accounts.md` for scheduled commit processing and pending-intent recovery call sites.
-- `magicblock-committor-service/README.md` for current high-level implementation notes.
-- `test-integration/test-committor-service/` for integration coverage of delivery and intent execution.
+- `.agents/context/crates/magicblock-committor-program.md` — buffer/chunks on-chain helper contracts.
+- `.agents/context/crates/magicblock-rpc-client.md` — base-layer send/confirm and RPC helper behavior.
+- `.agents/context/crates/magicblock-table-mania.md` — ALT lifecycle and finalized-read semantics.
+- `.agents/context/crates/magicblock-accounts.md` — scheduled commit processing and pending-intent recovery call sites.
+- `magicblock-committor-service/README.md` — high-level implementation notes.
+- `test-integration/test-committor-service/` — integration coverage of delivery and intent execution.

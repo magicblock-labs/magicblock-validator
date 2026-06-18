@@ -15,6 +15,8 @@ High-level responsibilities:
 
 This crate is on the base-layer settlement preparation path and is performance-sensitive. Changes must avoid unnecessary RPC amplification, long-held async locks, duplicate table creation, or extra finalization waits that slow commit delivery.
 
+End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns ALT reservation, finalized lookup-table readiness, release, and garbage-collection support for settlement transactions.
+
 ## Update requirement
 
 Update this guide in the same change whenever behavior or contracts in `magicblock-table-mania` change. In particular, update it for changes to:
@@ -28,7 +30,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - metrics emitted through `magicblock-metrics`;
 - committor call-site expectations or integration-test workflows for table preparation.
 
-Because this crate is a shared settlement dependency, also update this file when another crate changes how ALTs are reserved, fetched, released, or cleaned up.
+
+For the general documentation-update rule, see .agents/memory/agent-memory-and-docs.md.
 
 ## Where it sits in the repository
 
@@ -45,7 +48,7 @@ Because this crate is a shared settlement dependency, also update this file when
 | `magicblock-committor-service/src/committor_processor.rs` | Constructs one `TableMania` with `GarbageCollectorConfig::default()` for the committor processor. |
 | `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` | Main runtime consumer. Reserves lookup-table pubkeys, fetches finalized ALT accounts, and releases pubkeys during cleanup. |
 | `test-integration/test-table-mania/` | Integration tests for create/extend/deactivate/close, reserve, release, ensure, and table-discovery behavior. |
-| `magicblock-metrics/src/metrics/mod.rs` | Defines `table_mania_a_count` and `table_mania_closed_a_count`. |
+| `magicblock-metrics/src/metrics/mod.rs` | Defines metrics emitted by TableMania local instrumentation. |
 
 Main consumers:
 
@@ -164,12 +167,7 @@ A table create/extend can be locally recorded immediately after `send_transactio
 
 ### Metrics
 
-The crate currently increments:
-
-- `table_mania_a_count` before finalized `getMultipleAccounts` polling in remote table readiness;
-- `table_mania_closed_a_count` before `get_account` checks used to verify table closure.
-
-Metric names and cardinality are operator-facing. Prefer adding new metrics in `magicblock-metrics` rather than ad-hoc instrumentation.
+This crate increments local instrumentation around finalized remote-read readiness and close verification. Keep this guide focused on local instrumentation intent; metric naming, labels, and registry details belong in `.agents/context/crates/magicblock-metrics.md`.
 
 ## Important invariants
 
@@ -212,56 +210,16 @@ Inspect `src/derive_keypair.rs`, `LookupTableRc::derive_keypair`, `create_new_ta
 
 ## Tests and validation
 
-For documentation-only changes, verify the guide path and cross-references are correct:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-table-mania`.
+- Relevant integration suites: TableMania lifecycle/reservation tests, the long close/deactivation path when close behavior changes, and committor preparator tests for settlement-path changes; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance validation intent: report whether settlement-preparation behavior was measured or only reasoned about, especially for reservation, remote readiness, compute budgets, RPC behavior, and lock contention.
 
-```bash
-test -f .agents/context/crates/magicblock-table-mania.md
-rg "magicblock-table-mania.md" AGENTS.md .agents/context/crate-map.md
-```
 
-For crate code changes, run targeted unit tests first:
+## Adjacent implementation references
 
-```bash
-cargo fmt
-cargo nextest run -p magicblock-table-mania
-```
-
-For behavior touching ALTs on a validator, run the integration suite:
-
-```bash
-cd test-integration
-make test-table-mania
-```
-
-For close/deactivation changes, also consider the long feature-gated close path:
-
-```bash
-cd test-integration
-cargo test -p test-table-mania --features test_table_close -- --test-threads=1 --nocapture
-```
-
-Because this crate is on the committor settlement path, changes that affect reservation, remote readiness, compute budgets, or RPC behavior should also run relevant committor preparation/delivery tests, for example:
-
-```bash
-cd test-integration
-make test-committor-preparators
-```
-
-Before handing off Rust behavior changes, run the broader baseline from `.agents/rules/testing-and-validation.md` when time allows:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Always report whether performance-sensitive settlement preparation behavior was measured or only reasoned about.
-
-## Related docs
-
-- `.agents/specs/validator-specification.md` for base-layer settlement, committor, and address lookup table context.
-- `.agents/context/architecture.md` for the base-layer settlement crate boundary.
-- `.agents/context/crate-map.md` for crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for workspace and integration validation expectations.
-- `.agents/context/crates/magicblock-rpc-client.md` for the RPC wrapper used by all table transactions and remote reads.
-- `test-integration/test-table-mania/` for integration coverage of table lifecycle and reservation behavior.
-- `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` for the main runtime call site.
+- `.agents/context/crates/magicblock-rpc-client.md` — RPC wrapper used by all table transactions and remote reads.
+- `.agents/context/crates/magicblock-committor-service.md` — main runtime ALT preparation and cleanup consumer.
+- `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` — main runtime call site.
+- `magicblock-metrics/src/metrics/mod.rs` — local metric definitions emitted by this crate.
+- `test-integration/test-table-mania/` — integration coverage of table lifecycle and reservation behavior.

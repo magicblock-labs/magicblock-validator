@@ -13,6 +13,8 @@ High-level responsibilities:
 
 This crate is settlement-adjacent and can affect Magic Action user experience. It is not the committor itself, does not own intent execution or persistence, and must stay generic enough to be used as a service adapter rather than a protocol owner.
 
+End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns fire-and-forget local Magic Action callback transaction construction and scheduling.
+
 ## Update requirement
 
 Update this guide in the same change whenever behavior or contracts in `magicblock-services` change. In particular, update it for changes to:
@@ -25,6 +27,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - validation commands or integration suites relevant to action callbacks.
 
 Because callbacks are a cross-crate contract between Magic Program scheduling, committor execution, and user callback programs, also update this file when another crate changes `BaseActionCallback`, `MagicResponse`, `CallbackInstruction`, or `ActionsCallbackScheduler` semantics.
+
+For the general documentation-update rule, see .agents/memory/agent-memory-and-docs.md.
 
 ## Where it sits in the repository
 
@@ -206,43 +210,18 @@ Start with `magicblock-services/src/lib.rs` and ask whether the new adapter belo
 
 ## Tests and validation
 
-For documentation-only changes touching this guide:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-services`.
+- Consumer validation intent: because this crate has no crate-local tests, include relevant `magicblock-committor-service` checks for callback behavior changes.
+- Relevant integration suites: committor suites that exercise action callbacks and timeouts; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance-risk validation intent: report any added synchronous RPC work, retries, confirmation, persistence, extra serialization, or unbounded spawning/logging and its effect on committor throughput and callback latency.
 
-```bash
-git diff -- .agents/context/crates/magicblock-services.md .agents/context/crate-map.md AGENTS.md
-```
 
-For Rust changes in `magicblock-services`, run at minimum:
+## Adjacent implementation references
 
-```bash
-cargo fmt
-cargo nextest run -p magicblock-services
-```
-
-Because this crate has no crate-local tests, callback behavior changes should also run the relevant committor tests, especially suites that exercise action callbacks and timeouts:
-
-```bash
-cargo nextest run -p magicblock-committor-service
-cd test-integration && make test-committor
-```
-
-Before handoff, run or justify skipping the broader baseline from `.agents/rules/testing-and-validation.md`:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance-risk reporting: callback scheduling is settlement-adjacent and currently fire-and-forget. If a change adds synchronous RPC work, retries, confirmation, persistence, extra serialization, or unbounded spawning/logging, report the expected impact on committor throughput and callback latency.
-
-## Related docs
-
-- `AGENTS.md` for required agent guidance and documentation stewardship rules.
-- `.agents/specs/validator-specification.md` for Magic Actions, commit/undelegation, committor, and callback-related protocol context.
-- `.agents/context/architecture.md` for service boundaries and base-layer settlement architecture.
-- `.agents/context/crate-map.md` for workspace crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for baseline validation commands.
-- `.agents/context/crates/magicblock-core.md` for `ActionsCallbackScheduler`, `BaseActionCallback`, and related shared trait/type contracts.
-- `.agents/context/crates/magicblock-api.md` for validator startup and service wiring.
-- `.agents/context/crates/magicblock-magic-program-api.md` for callback instruction and response wire types.
-- `.agents/context/crates/magicblock-rpc-client.md` if callback delivery begins using shared send/confirm helpers.
+- `.agents/context/crates/magicblock-core.md` — `ActionsCallbackScheduler`, `BaseActionCallback`, and related shared trait/type contracts.
+- `.agents/context/crates/magicblock-api.md` — validator startup and service wiring.
+- `.agents/context/crates/magicblock-magic-program-api.md` — callback instruction and response wire types.
+- `.agents/context/crates/magicblock-rpc-client.md` — relevant if callback delivery begins using shared send/confirm helpers.
+- `magicblock-committor-service/src/intent_executor/utils.rs` — committor callback scheduling call site.
+- `programs/magicblock/src/schedule_transactions/process_add_action_callback.rs` — Magic Program callback attachment path.

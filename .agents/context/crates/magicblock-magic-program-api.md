@@ -6,6 +6,8 @@
 
 This crate is small, but it is protocol- and compatibility-sensitive. Its types are serialized with `bincode` into transactions, persisted scheduled intents, executor TLS payloads, and callback instructions. Changes can affect Magic Program CPI callers, account cloning, task scheduling, callback delivery, committor intent construction, account reset/blacklist behavior, and integration tests. Treat enum variant order, field order, constants, and feature-gated public type aliases as wire/API contracts.
 
+End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns shared Magic Program wire types, intent/callback payloads, program IDs, and PDA helpers consumed by settlement and callback code.
+
 High-level responsibilities:
 
 - expose the Magic Program ID (`Magic111...`) plus fixed companion IDs/accounts such as `MAGIC_CONTEXT_PUBKEY`, `EPHEMERAL_VAULT_PUBKEY`, `CRANK_PROGRAM_ID`, `CALLBACK_PROGRAM_ID`, and `POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID`;
@@ -29,7 +31,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - account metas expected by Magic Program processors or helper builders in `programs/magicblock/src/utils/instruction_utils.rs`;
 - validation commands or integration suites that should be run after API changes.
 
-Because this crate defines shared wire formats, also update this document when another crate changes how these API types are interpreted.
+
+For the general documentation-update rule, see .agents/memory/agent-memory-and-docs.md.
 
 ## Where it sits in the repository
 
@@ -227,7 +230,7 @@ Base actions and callbacks carry compact account metas without `is_signer`. User
 
 ### No crate-local tests
 
-This crate currently has no local unit tests. Behavior is validated through consumers (`programs/magicblock`, `magicblock-processor`, services, and integration tests). API changes should therefore include targeted consumer tests, not only `cargo nextest run -p magicblock-magic-program-api`.
+This crate currently has no local unit tests. Behavior is validated through consumers (`programs/magicblock`, `magicblock-processor`, services, and integration tests). API changes should therefore include targeted consumer tests, not only this crate's package checks.
 
 ## Important invariants
 
@@ -330,60 +333,17 @@ Run builds/tests with and without `--features backward-compat` when public type 
 
 ## Tests and validation
 
-For documentation-only changes to this guide:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-magic-program-api`, including the `backward-compat` feature when public type aliases change.
+- Consumer validation intent: because this crate has no local tests, include affected consumer packages such as `magicblock-program` and focused `magicblock-processor` tests for ephemeral accounts or post-delegation actions.
+- Relevant integration suites: schedule-intent, schedulecommit, committor intent-bundle, and cloning suites as appropriate; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance/security validation intent: report API changes that increase serialized instruction size or account requirements, and validate the smallest relevant hot path.
 
-```bash
-test -f .agents/context/crates/magicblock-magic-program-api.md
-rg "magicblock-magic-program-api.md" .agents/context/crate-map.md
-```
 
-For crate changes, minimum targeted checks:
+## Adjacent implementation references
 
-```bash
-cargo fmt
-cargo nextest run -p magicblock-magic-program-api
-cargo nextest run -p magicblock-magic-program-api --features backward-compat
-```
-
-Because this crate has no local tests, also run targeted consumer tests for the changed API area:
-
-```bash
-cargo nextest run -p magicblock-program
-cargo nextest run -p magicblock-processor ephemeral_accounts
-cargo nextest run -p magicblock-processor post_delegation_actions
-```
-
-For commit/action/intent changes, prefer integration coverage:
-
-```bash
-cd test-integration
-make test-schedule-intents
-make test-committor-intent-bundles
-```
-
-For clone/program-clone API changes:
-
-```bash
-cd test-integration
-make test-cloning
-```
-
-For broad validation, follow `.agents/rules/testing-and-validation.md`:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance expectations: this crate has no runtime loops, but its payload shape affects transaction size, serialization cost, account-meta count, scheduler pressure, clone chunking, and callback/base-action delivery. Report any API change that increases serialized instruction size or account requirements, and run the smallest relevant integration test that exercises the affected hot path.
-
-## Related docs
-
-- `.agents/specs/validator-specification.md` for Magic Program, commit, undelegation, Magic Actions, cloning, task, and ephemeral account behavior.
-- `.agents/context/architecture.md` for the Magic Program scheduling versus validator-side settlement boundary.
-- `.agents/context/crate-map.md` for crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for validation workflow and integration-test commands.
-- `.agents/context/crates/magicblock-core.md` for `TaskRequest`, `BaseActionCallback`, and TLS/action callback contracts.
-- `.agents/context/crates/magicblock-account-cloner.md` for clone/program-clone flows that emit this crate's instruction payloads.
-- `programs/magicblock/src/magicblock_processor.rs` and `programs/magicblock/src/utils/instruction_utils.rs` for current instruction interpretation and helper builders.
+- `.agents/context/crates/magicblock-core.md` — `TaskRequest`, `BaseActionCallback`, and TLS/action callback contracts.
+- `.agents/context/crates/magicblock-account-cloner.md` — clone/program-clone flows that emit this crate's instruction payloads.
+- `.agents/context/crates/magicblock-services.md` — callback instruction and response delivery.
+- `programs/magicblock/src/magicblock_processor.rs` and `programs/magicblock/src/utils/instruction_utils.rs` — current instruction interpretation and helper builders.
+- `test-integration/schedulecommit/` and `test-integration/test-schedule-intent/` — intent scheduling and callback integration coverage.
