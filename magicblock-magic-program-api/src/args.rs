@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     compat::{AccountInfo, AccountMeta, Instruction},
@@ -90,16 +90,61 @@ pub enum MagicBaseIntentArgs {
     CommitFinalizeAndUndelegateCompressed(CommitAndUndelegateArgs),
 }
 
-#[derive(Clone, Default, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Default, Serialize, Debug, PartialEq, Eq)]
 pub struct MagicIntentBundleArgs {
     pub commit: Option<CommitTypeArgs>,
     pub commit_and_undelegate: Option<CommitAndUndelegateArgs>,
     pub commit_finalize: Option<CommitTypeArgs>,
     pub commit_finalize_and_undelegate: Option<CommitAndUndelegateArgs>,
+    pub standalone_actions: Vec<BaseActionArgs>,
+    /// Appended after `standalone_actions` to preserve bincode positional layout.
     pub commit_finalize_compressed: Option<CommitTypeArgs>,
     pub commit_finalize_compressed_and_undelegate:
         Option<CommitAndUndelegateArgs>,
-    pub standalone_actions: Vec<BaseActionArgs>,
+}
+
+fn deserialize_trailing_option<'de, D, T>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).or(Ok(None))
+}
+
+impl<'de> Deserialize<'de> for MagicIntentBundleArgs {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Workaround to handle deserializing older intent bundle args.
+        #[derive(Deserialize)]
+        struct MagicIntentBundleArgsWire {
+            commit: Option<CommitTypeArgs>,
+            commit_and_undelegate: Option<CommitAndUndelegateArgs>,
+            commit_finalize: Option<CommitTypeArgs>,
+            commit_finalize_and_undelegate: Option<CommitAndUndelegateArgs>,
+            standalone_actions: Vec<BaseActionArgs>,
+            #[serde(default, deserialize_with = "deserialize_trailing_option")]
+            commit_finalize_compressed: Option<CommitTypeArgs>,
+            #[serde(default, deserialize_with = "deserialize_trailing_option")]
+            commit_finalize_compressed_and_undelegate:
+                Option<CommitAndUndelegateArgs>,
+        }
+
+        let wire = MagicIntentBundleArgsWire::deserialize(deserializer)?;
+        Ok(MagicIntentBundleArgs {
+            commit: wire.commit,
+            commit_and_undelegate: wire.commit_and_undelegate,
+            commit_finalize: wire.commit_finalize,
+            commit_finalize_and_undelegate: wire.commit_finalize_and_undelegate,
+            standalone_actions: wire.standalone_actions,
+            commit_finalize_compressed: wire.commit_finalize_compressed,
+            commit_finalize_compressed_and_undelegate: wire
+                .commit_finalize_compressed_and_undelegate,
+        })
+    }
 }
 
 impl From<MagicBaseIntentArgs> for MagicIntentBundleArgs {
@@ -222,5 +267,176 @@ impl TaskRequest {
             Self::Schedule(request) => request.id,
             Self::Cancel(request) => request.task_id,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use legacy_magicblock_magic_program_api::args::{
+        ActionArgs as LegacyActionArgs, BaseActionArgs as LegacyBaseActionArgs,
+        CommitAndUndelegateArgs as LegacyCommitAndUndelegateArgs,
+        CommitTypeArgs as LegacyCommitTypeArgs,
+        MagicIntentBundleArgs as LegacyMagicIntentBundleArgs,
+        ShortAccountMeta as LegacyShortAccountMeta,
+        UndelegateTypeArgs as LegacyUndelegateTypeArgs,
+    };
+
+    use super::*;
+
+    fn to_legacy_base_action_args(
+        args: BaseActionArgs,
+    ) -> LegacyBaseActionArgs {
+        LegacyBaseActionArgs {
+            args: LegacyActionArgs {
+                escrow_index: args.args.escrow_index,
+                data: args.args.data,
+            },
+            compute_units: args.compute_units,
+            escrow_authority: args.escrow_authority,
+            destination_program: args.destination_program,
+            accounts: args
+                .accounts
+                .into_iter()
+                .map(|meta| LegacyShortAccountMeta {
+                    pubkey: meta.pubkey,
+                    is_writable: meta.is_writable,
+                })
+                .collect(),
+        }
+    }
+
+    fn from_legacy_base_action_args(
+        args: LegacyBaseActionArgs,
+    ) -> BaseActionArgs {
+        BaseActionArgs {
+            args: ActionArgs {
+                escrow_index: args.args.escrow_index,
+                data: args.args.data,
+            },
+            compute_units: args.compute_units,
+            escrow_authority: args.escrow_authority,
+            destination_program: args.destination_program,
+            accounts: args
+                .accounts
+                .into_iter()
+                .map(|meta| ShortAccountMeta {
+                    pubkey: meta.pubkey,
+                    is_writable: meta.is_writable,
+                })
+                .collect(),
+        }
+    }
+
+    fn from_legacy_commit_type_args(
+        args: LegacyCommitTypeArgs,
+    ) -> CommitTypeArgs {
+        match args {
+            LegacyCommitTypeArgs::Standalone(accounts) => {
+                CommitTypeArgs::Standalone(accounts.clone())
+            }
+            LegacyCommitTypeArgs::WithBaseActions {
+                committed_accounts,
+                base_actions,
+            } => CommitTypeArgs::WithBaseActions {
+                committed_accounts: committed_accounts.clone(),
+                base_actions: base_actions
+                    .into_iter()
+                    .map(from_legacy_base_action_args)
+                    .collect(),
+            },
+        }
+    }
+
+    fn from_legacy_undelegate_type_args(
+        args: LegacyUndelegateTypeArgs,
+    ) -> UndelegateTypeArgs {
+        match args {
+            LegacyUndelegateTypeArgs::Standalone => {
+                UndelegateTypeArgs::Standalone
+            }
+            LegacyUndelegateTypeArgs::WithBaseActions { base_actions } => {
+                UndelegateTypeArgs::WithBaseActions {
+                    base_actions: base_actions
+                        .into_iter()
+                        .map(from_legacy_base_action_args)
+                        .collect(),
+                }
+            }
+        }
+    }
+
+    fn from_legacy_commit_and_undelegate_args(
+        args: LegacyCommitAndUndelegateArgs,
+    ) -> CommitAndUndelegateArgs {
+        CommitAndUndelegateArgs {
+            commit_type: from_legacy_commit_type_args(args.commit_type),
+            undelegate_type: from_legacy_undelegate_type_args(
+                args.undelegate_type,
+            ),
+        }
+    }
+
+    #[test]
+    fn magic_intent_bundle_args_appends_compressed_fields_after_standalone_actions(
+    ) {
+        let standalone = vec![BaseActionArgs {
+            args: ActionArgs {
+                escrow_index: 0,
+                data: vec![0xFF, 0xFE],
+            },
+            compute_units: 300_000,
+            escrow_authority: 7,
+            destination_program: Pubkey::new_from_array([0x99; 32]),
+            accounts: vec![ShortAccountMeta {
+                pubkey: Pubkey::new_from_array([0x88; 32]),
+                is_writable: true,
+            }],
+        }];
+
+        let legacy = LegacyMagicIntentBundleArgs {
+            commit: Some(LegacyCommitTypeArgs::Standalone(vec![2, 3])),
+            commit_and_undelegate: None,
+            commit_finalize: None,
+            commit_finalize_and_undelegate: None,
+            standalone_actions: standalone
+                .clone()
+                .into_iter()
+                .map(to_legacy_base_action_args)
+                .collect(),
+        };
+        let legacy_bytes = bincode::serialize(&legacy).unwrap();
+
+        let current = MagicIntentBundleArgs {
+            commit: legacy.commit.clone().map(from_legacy_commit_type_args),
+            commit_and_undelegate: legacy
+                .commit_and_undelegate
+                .clone()
+                .map(from_legacy_commit_and_undelegate_args),
+            commit_finalize: legacy
+                .commit_finalize
+                .clone()
+                .map(from_legacy_commit_type_args),
+            commit_finalize_and_undelegate: legacy
+                .commit_finalize_and_undelegate
+                .clone()
+                .map(from_legacy_commit_and_undelegate_args),
+            standalone_actions: legacy
+                .standalone_actions
+                .clone()
+                .into_iter()
+                .map(from_legacy_base_action_args)
+                .collect(),
+            commit_finalize_compressed: None,
+            commit_finalize_compressed_and_undelegate: None,
+        };
+        let current_bytes = bincode::serialize(&current).unwrap();
+
+        assert_eq!(current_bytes.len(), legacy_bytes.len() + 2);
+        assert_eq!(&current_bytes[..legacy_bytes.len()], &legacy_bytes[..]);
+        assert_eq!(&current_bytes[legacy_bytes.len()..], &[0, 0]);
+
+        let decoded: MagicIntentBundleArgs =
+            bincode::deserialize(&legacy_bytes).unwrap();
+        assert_eq!(decoded, current);
     }
 }

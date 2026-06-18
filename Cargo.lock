@@ -862,7 +862,7 @@ dependencies = [
  "bitflags 2.11.1",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "proc-macro2",
@@ -882,7 +882,7 @@ dependencies = [
  "bitflags 2.11.1",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -2198,7 +2198,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2630,7 +2630,7 @@ name = "guinea"
 version = "0.12.3"
 dependencies = [
  "bincode",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.12.3",
  "serde",
  "solana-program 3.0.0",
 ]
@@ -4467,7 +4467,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.12.3",
  "magicblock-program",
  "magicblock-rpc-client",
  "rand 0.9.4",
@@ -4517,7 +4517,7 @@ dependencies = [
  "flate2",
  "lmdb-rkv",
  "magicblock-config",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.12.3",
  "memmap2 0.9.10",
  "parking_lot",
  "reflink-copy",
@@ -4621,7 +4621,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program-api",
  "magicblock-ledger",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.12.3",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -4686,7 +4686,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program-api",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.12.3",
  "magicblock-metrics",
  "parking_lot",
  "rustls 0.23.40",
@@ -4826,7 +4826,7 @@ dependencies = [
  "console-subscriber",
  "flume",
  "light-sdk",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.12.3",
  "serde",
  "solana-account 3.4.0",
  "solana-account-decoder",
@@ -4922,10 +4922,24 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dc8fba0307c90b91b70c9ed06d4242d6c4159f331b2f05bf8f875c2a94e0e98"
+dependencies = [
+ "bincode",
+ "const-crypto",
+ "serde",
+ "solana-program 3.0.0",
+ "solana-signature 3.4.0",
+]
+
+[[package]]
+name = "magicblock-magic-program-api"
 version = "0.12.3"
 dependencies = [
  "bincode",
  "const-crypto",
+ "magicblock-magic-program-api 0.10.1",
  "serde",
  "solana-program 2.3.0",
  "solana-program 3.0.0",
@@ -4961,7 +4975,7 @@ dependencies = [
  "magicblock-accounts-db",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.12.3",
  "magicblock-metrics",
  "magicblock-program",
  "parking_lot",
@@ -5011,7 +5025,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-core",
  "magicblock-delegation-program-api",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.12.3",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -5102,7 +5116,7 @@ dependencies = [
  "bincode",
  "futures-util",
  "magicblock-core",
- "magicblock-magic-program-api",
+ "magicblock-magic-program-api 0.12.3",
  "solana-instruction 3.4.0",
  "solana-keypair 3.1.0",
  "solana-message 3.1.0",
@@ -6096,7 +6110,7 @@ checksum = "22505a5c94da8e3b7c2996394d1c933236c4d743e81a410bcca4e6989fc066a4"
 dependencies = [
  "bytes",
  "heck",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "log",
  "multimap",
  "once_cell",
@@ -6137,7 +6151,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -6322,7 +6336,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.3",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6883,7 +6897,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
