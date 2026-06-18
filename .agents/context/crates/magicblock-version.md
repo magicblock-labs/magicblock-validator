@@ -27,6 +27,8 @@ Update this guide in the same change whenever `magicblock-version` behavior or c
 
 Also update this file if another crate changes a contract that consumes this crate, such as the `getVersion` JSON shape in `magicblock-aperture` or startup/TUI version display in `magicblock-validator`.
 
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
+
 ## Where it sits in the repository
 
 | Path | Role |
@@ -214,40 +216,15 @@ Validate with the repository-supported toolchain. If you alter emitted cfgs, ens
 
 ## Tests and validation
 
-For documentation-only changes touching this guide, at minimum verify changed paths and cross-references:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-version`.
+- RPC-visible changes should also include focused Aperture `getVersion` and batch-request coverage.
+- Performance risk is normally low because this crate only builds small metadata values. Report any new dependency, I/O, process spawning, locking, or allocation-heavy behavior added to `Version::default()`.
 
-```bash
-git diff --check
-```
+## Adjacent implementation references
 
-For changes to `magicblock-version` itself, run:
-
-```bash
-cargo fmt
-cargo nextest run -p magicblock-version
-```
-
-For RPC-visible changes, also run the relevant Aperture tests:
-
-```bash
-cargo nextest run -p magicblock-aperture --test node test_get_version
-cargo nextest run -p magicblock-aperture --test batches test_batch_requests
-```
-
-Before handing off Rust behavior changes, follow the broader baseline from `.agents/rules/testing-and-validation.md` when time allows:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance risk is normally low because this crate only builds small metadata values. Still report any new dependency, I/O, process spawning, locking, or allocation-heavy behavior added to `Version::default()` because `getVersion` and startup display call it synchronously.
-
-## Related docs
-
-- `.agents/context/overview.md` for the validator's high-level runtime model.
-- `.agents/context/architecture.md` for process/API ingress boundaries.
-- `.agents/context/crate-map.md` for workspace crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for repository validation workflow.
-- `.agents/context/crates/magicblock-aperture.md` for the RPC layer that exposes `getVersion`.
-- `.agents/context/crates/magicblock-validator.md` for startup/headless/TUI version display.
+- `.agents/context/crates/magicblock-aperture.md` — RPC layer that exposes `getVersion`.
+- `.agents/context/crates/magicblock-validator.md` — startup/headless/TUI version display.
+- `magicblock-aperture/src/requests/http/get_version.rs` — JSON-RPC field mapping.
+- `magicblock-aperture/tests/node.rs` and `magicblock-aperture/tests/batches.rs` — version RPC tests.
+- `tools/magicblock-tui-client/src/app.rs` and `tools/magicblock-tui-client/src/state.rs` — TUI consumers.

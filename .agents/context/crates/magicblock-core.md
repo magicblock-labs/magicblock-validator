@@ -28,6 +28,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - logging initialization style or feature-gated `tokio-console` behavior;
 - validation commands or tests future agents should run for this crate.
 
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
+
 ## Where it sits in the repository
 
 | Path | Role |
@@ -371,63 +373,18 @@ Avoid adding high-cardinality or noisy logs to hot loops. Keep test logging idem
 
 ## Tests and validation
 
-For documentation-only changes to this guide:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-core` plus the smallest affected consumer package because much of this crate is exercised through downstream crates.
+- Relevant consumer packages/suites by area: `magicblock-processor` for scheduling/replay/pause semantics, `magicblock-aperture` for RPC/LockedAccount consumers, `magicblock-replicator` for replication ordering, `magicblock-program`, `magicblock-chainlink`, `magicblock-committor-service`, and `magicblock-task-scheduler` for TLS/commits/callbacks/token helpers.
+- Relevant integration suites: `test-magicblock-api`, restore-ledger/replicator suites, `test-cloning`, `test-schedule-intents`, committor suites, and `test-task-scheduler` depending on the touched flow; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- For transaction dispatch, account-update, replication, or scheduler-pause changes, report whether performance risk was measured or only reasoned about, especially queue backpressure, allocations/serialization, and lock contention.
 
-```bash
-git diff --check -- .agents/context/crates/magicblock-core.md .agents/context/crate-map.md AGENTS.md
-```
+## Adjacent implementation references
 
-For code changes in `magicblock-core`, run at minimum:
-
-```bash
-cargo fmt
-cargo nextest run -p magicblock-core
-```
-
-Because `magicblock-core` has no dedicated crate-local test suite at the time of writing, also run targeted consumer tests for the subsystem touched:
-
-```bash
-# Transaction scheduling, replay, pause semantics
-cargo nextest run -p magicblock-processor scheduling replay simulation
-
-# RPC transaction mode/LockedAccount consumers
-cargo nextest run -p magicblock-aperture
-
-# Replication message/order or checksum/reset behavior
-cargo nextest run -p magicblock-replicator
-
-# Magic Program TLS, commits, callbacks, or token/eATA helpers
-cargo nextest run -p magicblock-program
-cargo nextest run -p magicblock-chainlink
-cargo nextest run -p magicblock-committor-service
-cargo nextest run -p magicblock-task-scheduler
-```
-
-Then use the workspace baseline from `.agents/rules/testing-and-validation.md` when time allows:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Integration/manual validation depends on the touched flow:
-
-- transaction/RPC behavior: `cd test-integration && make test-magicblock-api`;
-- replication/replay behavior: run the relevant replicator/restore-ledger suites or targeted processor replay tests;
-- cloning/token/eATA behavior: `cd test-integration && make test-cloning`;
-- scheduled intents/commits/actions: `cd test-integration && make test-schedule-intents` and relevant committor suites;
-- task scheduling: `cd test-integration && make test-task-scheduler`.
-
-If a change touches transaction dispatch, account updates, replication, or scheduler pause behavior, report whether performance risk was measured. At minimum, reason about queue backpressure, extra allocations/serialization, lock contention, and whether the change adds work to RPC/scheduler/executor hot paths.
-
-## Related docs
-
-- `AGENTS.md` for required agent workflow and documentation stewardship rules.
-- `.agents/context/overview.md` for validator concepts and runtime model.
-- `.agents/specs/validator-specification.md` for execution, scheduler, commit, undelegation, Magic Actions, ephemeral accounts, RPC/router, and recovery behavior.
-- `.agents/context/architecture.md` for cross-crate boundaries and hot-path architecture.
-- `.agents/context/crate-map.md` for workspace crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for baseline validation commands and integration suites.
 - `docs/architecture.md` section `magicblock-core — the wiring loom` for additional architecture context.
-- Consumer-specific guides such as `.agents/context/crates/magicblock-api.md`, `.agents/context/crates/magicblock-aperture.md`, `.agents/context/crates/magicblock-account-cloner.md`, `.agents/context/crates/magicblock-accounts.md`, `.agents/context/crates/magicblock-chainlink.md`, and `.agents/context/crates/magicblock-config.md`.
+- `.agents/context/crates/magicblock-api.md` — service wiring consumer of core endpoints.
+- `.agents/context/crates/magicblock-aperture.md` — RPC/account/status event consumer.
+- `.agents/context/crates/magicblock-account-cloner.md` — internal transaction submission consumer.
+- `.agents/context/crates/magicblock-accounts.md` — scheduled commit consumer of core payloads.
+- `.agents/context/crates/magicblock-chainlink.md` — token/eATA helper and logging consumer.
+- `.agents/context/crates/magicblock-config.md` — config types that drive startup mode and service wiring.

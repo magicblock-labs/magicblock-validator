@@ -28,6 +28,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 
 Because this crate sends operator/admin transactions to the base layer, also update this file when another crate changes validator authority initialization, Delegation Program fee-vault semantics, or how `MagicValidator` starts/stops admin background work.
 
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
+
 ## Where it sits in the repository
 
 | Path | Role |
@@ -194,52 +196,16 @@ Keep this crate focused on validator/operator management helpers. New helpers sh
 
 ## Tests and validation
 
-For documentation-only changes, verify the new guide path and cross-references:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-validator-admin`.
+- Lifecycle or config integration changes should also include focused `magicblock-api` and `magicblock-config` coverage where practical.
+- Relevant integration suite: `test-magicblock-api`, especially `test_claim_fees`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance-sensitive risk to report: base-layer RPC load and startup/shutdown latency when fee-claim frequency, retry behavior, confirmation behavior, or task cancellation changes.
 
-```bash
-ls .agents/context/crates/magicblock-validator-admin.md
-rg "magicblock-validator-admin.md" AGENTS.md .agents/context/crate-map.md
-```
+## Adjacent implementation references
 
-For Rust changes in this crate, run at least:
-
-```bash
-cargo fmt
-cargo nextest run -p magicblock-validator-admin
-```
-
-For lifecycle or config integration changes, also run relevant API/config tests:
-
-```bash
-cargo nextest run -p magicblock-api
-cargo nextest run -p magicblock-config claim_fees
-```
-
-For end-to-end fee-claim behavior, use the MagicBlock API integration suite or the specific test when the devnet validator harness is available:
-
-```bash
-cd test-integration
-make test-magicblock-api
-# or, with the required validators already started:
-RUST_LOG=info cargo test -p test-magicblock-api --test test_claim_fees -- --test-threads=1 --nocapture
-```
-
-Broader baseline before handing off code changes remains:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance-sensitive risk to report: this crate can add base-layer RPC load and startup/shutdown latency. If fee-claim frequency, retry behavior, confirmation behavior, or task cancellation changes, state whether RPC-load and shutdown-latency risk was measured or only reasoned about.
-
-## Related docs
-
-- `.agents/context/overview.md` — validator runtime model and operator/admin flows.
-- `.agents/context/architecture.md` — process/service orchestration and startup/shutdown boundaries.
-- `.agents/context/crate-map.md` — repository crate ownership map.
-- `.agents/rules/testing-and-validation.md` — repository validation workflow.
 - `.agents/context/crates/magicblock-api.md` — `MagicValidator` startup/shutdown owner for this crate's task.
 - `.agents/context/crates/magicblock-config.md` — `[chain-operation]` config model and env/TOML behavior.
-- `.agents/context/crates/magicblock-rpc-client.md` — shared base-layer RPC wrapper and error type used by related admin/settlement helpers.
+- `.agents/context/crates/magicblock-rpc-client.md` — shared base-layer RPC error type used by related admin/settlement helpers.
 - `config.example.toml` — operator-facing `claim-fees-frequency` example.
+- `test-integration/test-magicblock-api/tests/test_claim_fees.rs` — integration coverage for fee-claim behavior.

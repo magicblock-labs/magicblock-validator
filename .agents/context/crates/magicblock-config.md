@@ -16,7 +16,7 @@ This crate sits on the startup/configuration path rather than a per-transaction 
 
 ## Update requirement
 
-Update this document in the same change whenever `magicblock-config` behavior or contracts change. This file is useful only if it reflects the current implementation.
+Update this document in the same change whenever `magicblock-config` behavior or contracts change.
 
 Update it for changes to:
 
@@ -27,6 +27,8 @@ Update it for changes to:
 - remote endpoint defaults or HTTP-to-websocket derivation behavior;
 - config fields consumed by startup/shutdown, persistence, replication, Chainlink, Aperture, metrics, committor, or task scheduler flows;
 - validation commands, integration test coverage, or known pitfalls for config changes.
+
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
@@ -186,9 +188,9 @@ Defaults are not merely test conveniences. They set devnet remotes, local storag
 
 `magicblock-config/src/tests.rs::test_example_config_full_coverage` parses the root `config.example.toml` and asserts many values. When adding or changing fields, update the example and this test together where appropriate.
 
-### Lifecycle mode is cross-cutting
+### Lifecycle mode keys and consumers
 
-`LifecycleMode` is parsed by config but changes how account sync and execution are wired elsewhere. `Offline` is the only mode whose `needs_remote_account_provider()` returns false. Replica replication mode also disables Chainlink in `magicblock-api`; do not assume lifecycle alone fully determines remote-provider usage.
+`LifecycleMode` is parsed by config and exposes `needs_remote_account_provider()` for runtime consumers. `Offline` is the only mode whose helper returns false. Keep this section limited to config values, defaults, and consumers; runtime side effects belong in the consuming crate guides and protocol specification.
 
 ## Important invariants
 
@@ -300,56 +302,14 @@ Risks:
 
 ## Tests and validation
 
-For documentation-only changes to this guide:
-
-```bash
-git diff --check -- .agents/context/crates/magicblock-config.md .agents/context/crate-map.md AGENTS.md
-```
-
-Also verify:
-
-- `.agents/context/crates/magicblock-config.md` exists;
-- `.agents/context/crate-map.md` points future agents to this guide;
-- `AGENTS.md` lists the new crate guide in the crate-specific examples;
-- no files under `prompts/**` are staged or committed.
-
-For Rust/source changes in `magicblock-config`, run targeted checks first:
-
-```bash
-cargo fmt
-cargo clippy -p magicblock-config --all-targets -- -D warnings
-cargo nextest run -p magicblock-config
-```
-
-For config changes that affect validator startup or operator config, also run the integration config suite when practical:
-
-```bash
-cd test-integration
-make test-config
-```
-
-Broader baseline validation remains the repository standard from `.agents/rules/testing-and-validation.md`:
-
-```bash
-cargo fmt
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance validation expectations:
-
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-config`.
+- Relevant integration suites: `test-config` for config-driven validator behavior; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Config changes that affect validator startup or operator config should include startup/recovery validation and call out runtime impact when timing, sizing, endpoint, reset, metrics, or scheduler defaults change.
 - Documentation-only changes have no runtime performance impact.
-- Changes to event processor counts, Chainlink monitoring capacity, gRPC stream limits, resubscription delay, ledger block time, AccountsDb sizing, metrics cadence, or task scheduler intervals should report expected runtime impact and include the smallest practical test or measurement for the affected service.
-- Changes to reset, replay, identity, remotes, or replication config should include startup/recovery validation, not just crate unit tests.
 
-## Related docs
+## Adjacent implementation references
 
-- `AGENTS.md` — required agent workflow and documentation-memory rules.
-- `.agents/context/overview.md` — validator runtime model and important concepts.
-- `.agents/context/architecture.md` — startup/service orchestration and configuration ownership.
-- `.agents/context/crate-map.md` — crate ownership map and pointer back to this guide.
-- `.agents/rules/testing-and-validation.md` — repository validation commands and reporting expectations.
-- `.agents/memory/agent-memory-and-docs.md` — rules for keeping agent documentation current.
 - `magicblock-config/README.md` — human-facing config crate overview.
 - `config.example.toml` — operator-facing example and tested config reference.
 - `magicblock-api/src/magic_validator.rs` — primary runtime consumer of `ValidatorParams`.

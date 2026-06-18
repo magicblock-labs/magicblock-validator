@@ -18,7 +18,7 @@ This crate is intentionally dependency-light and has no dependency on other work
 
 ## Update requirement
 
-Whenever an agent changes behavior in `magicblock-metrics`, or changes another crate in a way that changes metrics exposed by this crate, this document must be updated in the same change. This file is useful only if it reflects the current implementation.
+Whenever an agent changes behavior in `magicblock-metrics`, or changes another crate in a way that changes metrics exposed by this crate, this document must be updated in the same change.
 
 Update this file for changes to:
 
@@ -32,6 +32,8 @@ Update this file for changes to:
 - performance characteristics of metrics used in hot paths.
 
 If a change adds, removes, or renames a metric that operators may scrape or alert on, call that out explicitly in the handoff/PR notes. Metric names are an external observability contract.
+
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
@@ -509,49 +511,15 @@ Before adding metrics to scheduler, executor, RPC, Chainlink fetch/clone, commit
 
 ## Tests and validation
 
-For documentation-only changes to this file, verify the file exists and links/paths are accurate.
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-metrics`.
+- Configuration/startup changes should also include focused checks for `magicblock-config` metrics coverage and `magicblock-api` startup behavior where practical.
+- Manual scrape validation is appropriate when changing `service.rs` or startup wiring: start a validator with a known metrics address and verify `/metrics` returns Prometheus text containing `mbv_` metric names while unknown routes return `404`.
+- When changing metrics on performance-sensitive paths, include at least a reasoned assessment of label cardinality, allocation/formatting overhead, and scrape/runtime cost.
 
-Minimum targeted commands for Rust changes in `magicblock-metrics`:
+## Adjacent implementation references
 
-```bash
-cargo fmt
-cargo nextest run -p magicblock-metrics
-```
-
-For configuration/startup changes involving the metrics config or service startup, also run targeted config/API tests where practical:
-
-```bash
-cargo nextest run -p magicblock-config metrics
-cargo nextest run -p magicblock-api
-```
-
-For broader validation, use the repository baseline from `.agents/rules/testing-and-validation.md`:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Manual scrape validation when changing `service.rs` or startup wiring:
-
-```bash
-# Start the validator with a known metrics address, then:
-curl -s http://127.0.0.1:9000/metrics | head
-curl -i http://127.0.0.1:9000/not-metrics
-```
-
-Expected behavior:
-
-- `/metrics` returns Prometheus text including `mbv_` metric names,
-- unknown routes return `404`,
-- shutdown cancellation stops the service without hanging validator shutdown.
-
-When changing metrics on performance-sensitive paths, include at least a reasoned performance assessment. If no benchmark or load test is run, report the residual risk explicitly.
-
-## Related docs
-
-- `.agents/context/overview.md` — high-level validator purpose and hot-path caution.
-- `.agents/context/architecture.md` — observability as a background/service concern and cross-crate boundaries.
-- `.agents/context/crate-map.md` — crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` — baseline Rust validation workflow.
 - `magicblock-metrics/README.md` — local Prometheus/Grafana setup.
+- `magicblock-config/src/config/metrics.rs` — metrics address and collection-frequency config.
+- `magicblock-api/src/magic_validator.rs` — metrics service startup and transaction-count seeding.
+- `magicblock-api/src/tickers.rs` — periodic system/storage gauge sampling.

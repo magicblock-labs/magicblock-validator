@@ -27,6 +27,8 @@ Update this guide in the same change whenever `test-kit` behavior or contracts c
 
 Also update this file if another crate changes an API that alters how this harness wires runtime services, such as processor scheduler handles, ledger block APIs, account flags, or core channel endpoints.
 
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
+
 ## Where it sits in the repository
 
 | Path | Role |
@@ -267,54 +269,16 @@ Validate from the same working directory used by CI/test commands so the relativ
 
 ## Tests and validation
 
-For documentation-only changes:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `test-kit` plus the smallest affected consumer suite because `test-kit` has little standalone coverage.
+- Common consumer packages: `magicblock-processor`, `magicblock-ledger`, `magicblock-aperture`, and `magicblock-committor-service`.
+- Relevant integration suites for helper/logging changes include `test-cloning`, `test-magicblock-api`, `test-restore-ledger`, and `test-schedule-intents`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance/concurrency risk to report for harness changes: scheduler configuration, executor count, payer rotation, block timing, channel wiring, and direct storage setup.
 
-```bash
-git diff --check -- .agents/context/crates/test-kit.md .agents/context/crate-map.md AGENTS.md prompts/ai/agents/03_batch-crates-plan.md
-```
+## Adjacent implementation references
 
-For changes to this crate:
-
-```bash
-cargo fmt
-cargo nextest run -p test-kit
-```
-
-Because `test-kit` has no meaningful standalone tests today, also run the smallest consumer suite affected by the change. Common targeted choices:
-
-```bash
-cargo nextest run -p magicblock-processor
-cargo nextest run -p magicblock-ledger
-cargo nextest run -p magicblock-aperture
-cargo nextest run -p magicblock-committor-service
-```
-
-For integration-test helper or logging changes, run the relevant integration suite from `test-integration/`, for example:
-
-```bash
-cd test-integration
-make test-cloning
-make test-magicblock-api
-make test-restore-ledger
-make test-schedule-intents
-```
-
-Broader baseline before handing off Rust behavior changes, time permitting:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance-sensitive paths touched: the harness exercises scheduler/execution/ledger paths but is not production code. If a change alters scheduler configuration, executor count, payer rotation, block timing, channel wiring, or direct storage setup, report whether processor scheduling/execution tests were run and whether any remaining performance/concurrency risk is unmeasured.
-
-## Related docs
-
-- `AGENTS.md` for required agent-documentation workflow.
-- `.agents/specs/validator-specification.md` for delegated/ephemeral access rules and scheduler behavior that tests often exercise.
-- `.agents/context/architecture.md` for execution and local persistence layer boundaries.
-- `.agents/context/crate-map.md` for crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for repository validation expectations.
-- `.agents/context/crates/magicblock-core.md` for channel and shared-type boundaries used by the harness.
-- `.agents/context/crates/magicblock-magic-program-api.md` and `.agents/context/crates/magicblock-task-scheduler.md` for protocol/task tests that commonly consume `test-kit` helpers.
-- `magicblock-processor/tests/` and `magicblock-aperture/tests/setup.rs` for representative full-harness call sites.
+- `.agents/context/crates/magicblock-core.md` — channel and shared-type boundaries used by the harness.
+- `.agents/context/crates/magicblock-magic-program-api.md` and `.agents/context/crates/magicblock-task-scheduler.md` — protocol/task tests that commonly consume `test-kit` helpers.
+- `magicblock-processor/tests/` and `magicblock-aperture/tests/setup.rs` — representative full-harness call sites.
+- `programs/guinea/` and `programs/elfs/guinea.so` — test program source and loaded ELF.
+- `test-integration/**` — integration crates that use logging macros and Solana re-exports.

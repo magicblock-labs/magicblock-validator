@@ -31,6 +31,8 @@ Update this guide in the same change whenever `magicblock-validator` behavior or
 
 Also update this file if another crate changes a contract consumed directly here, such as `MagicValidator` lifecycle methods, `ValidatorParams` fields, ledger lock helpers, or `TuiConfig`.
 
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
+
 ## Where it sits in the repository
 
 | Path | Role |
@@ -248,44 +250,14 @@ Avoid blocking calls in the main async runtime unless they are already isolated 
 
 ## Tests and validation
 
-For documentation-only changes touching this guide:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused checks for `magicblock-validator` across headless, `tui`, and `tokio-console` feature combinations when those paths are touched.
+- Lifecycle or startup/shutdown changes should include a manual smoke run with disposable storage or the relevant integration harness: verify startup output, endpoint/identity/ledger reporting, Ctrl-C/SIGTERM handling, and clean shutdown.
+- Broader validation and exact command syntax belong in `.agents/rules/testing-and-validation.md` and executable skills.
+- Performance-sensitive risk to report: runtime sizing, blocking work in `run`, and lifecycle ordering can indirectly affect RPC/execution throughput or shutdown latency.
 
-```bash
-git diff --check -- .agents/context/crates/magicblock-validator.md .agents/context/crate-map.md AGENTS.md
-```
+## Adjacent implementation references
 
-For code changes in this crate, run at minimum:
-
-```bash
-cargo fmt
-cargo check -p magicblock-validator --no-default-features
-cargo check -p magicblock-validator --features tui
-cargo nextest run -p magicblock-validator
-```
-
-If logging or `tokio-console` behavior changes, also check:
-
-```bash
-cargo check -p magicblock-validator --features tokio-console
-```
-
-For broader validation before handoff, follow `.agents/rules/testing-and-validation.md`:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-For lifecycle or startup/shutdown changes, perform a manual smoke run with a disposable storage directory or the relevant integration harness. At minimum verify the process starts, prints expected endpoints/identity/ledger path, accepts Ctrl-C/SIGTERM, and exits after flushing without leaving a second process able to use the same ledger concurrently.
-
-Performance-sensitive risk to report: runtime sizing, blocking work in `run`, and lifecycle ordering can indirectly affect RPC/execution throughput or shutdown latency. If those areas change, state whether any performance or smoke validation was run.
-
-## Related docs
-
-- `.agents/context/overview.md` — validator runtime model and non-negotiable agent rules.
-- `.agents/context/architecture.md` — process/service orchestration and startup/shutdown boundaries.
-- `.agents/context/crate-map.md` — repository crate ownership map.
-- `.agents/rules/testing-and-validation.md` — repository validation workflow.
 - `.agents/context/crates/magicblock-api.md` — downstream `MagicValidator` lifecycle and service graph.
 - `.agents/context/crates/magicblock-config.md` — config layering and CLI/env/TOML behavior.
 - `.agents/context/crates/magicblock-core.md` — logging and shared runtime infrastructure.

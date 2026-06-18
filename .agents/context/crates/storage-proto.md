@@ -28,6 +28,8 @@ Update this guide in the same change whenever `storage-proto` behavior or contra
 
 Also update this file if another crate changes a type or persistence contract consumed here, such as Solana transaction-status APIs used by the conversion impls.
 
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
+
 ## Where it sits in the repository
 
 | Path | Role |
@@ -207,46 +209,16 @@ This can affect persistence compatibility and RPC history. Run both storage-prot
 
 ## Tests and validation
 
-For documentation-only changes:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `solana-storage-proto`.
+- Codegen/schema changes should include a clean targeted build/test for `solana-storage-proto` when practical.
+- Ledger persistence or consumer changes should also include focused `magicblock-ledger` coverage.
+- Performance-sensitive paths touched: ledger status writes and history reads. If conversion logic, allocation patterns, or ledger encode/decode behavior changes, report whether targeted ledger tests were run and whether performance validation was skipped.
 
-```bash
-git diff --check -- .agents/context/crates/storage-proto.md .agents/context/crate-map.md AGENTS.md
-```
+## Adjacent implementation references
 
-For changes to this crate:
-
-```bash
-cargo fmt
-cargo nextest run -p solana-storage-proto
-```
-
-For codegen/schema changes, prefer a clean targeted build/test:
-
-```bash
-cargo clean -p solana-storage-proto
-cargo nextest run -p solana-storage-proto
-```
-
-For ledger persistence or consumer changes, also run:
-
-```bash
-cargo nextest run -p magicblock-ledger
-```
-
-Broader baseline before handing off Rust behavior changes, time permitting:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance-sensitive paths touched: ledger status writes and history reads. If conversion logic, allocation patterns, or ledger encode/decode behavior changes, report whether targeted ledger tests were run and whether any performance validation was skipped.
-
-## Related docs
-
-- `AGENTS.md` for required agent-documentation workflow.
-- `.agents/context/architecture.md` for the local persistence layer and ledger role.
-- `.agents/context/crate-map.md` for crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for repository validation expectations.
-- `storage-proto/README.md` for the short protobuf generation note.
-- `magicblock-ledger/src/database/columns.rs`, `magicblock-ledger/src/database/ledger_column.rs`, and `magicblock-ledger/src/store/api.rs` for direct consumers.
+- `storage-proto/README.md` — short protobuf generation note.
+- `storage-proto/proto/*.proto` — editable protobuf schemas.
+- `storage-proto/build.rs` — protobuf code-generation setup.
+- `magicblock-ledger/src/database/columns.rs`, `magicblock-ledger/src/database/ledger_column.rs`, and `magicblock-ledger/src/store/api.rs` — direct ledger consumers.
+- `Cargo.toml` and `test-integration/Cargo.toml` — workspace patch points for the local `solana-storage-proto` crate.

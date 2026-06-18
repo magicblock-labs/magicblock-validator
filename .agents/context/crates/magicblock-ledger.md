@@ -27,6 +27,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - metrics names/labels, RocksDB perf sampling, validation commands, or performance characteristics;
 - consumers in RPC, processor, API startup, replication, task scheduling, or test tooling that alter this crate's assumptions.
 
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
+
 ## Where it sits in the repository
 
 | Path | Role |
@@ -244,48 +246,17 @@ Inspect `src/database/options.rs`, `src/database/rocksdb_options.rs`, `src/datab
 
 ## Tests and validation
 
-For documentation-only changes, verify the new guide path and cross-references in `AGENTS.md` and `.agents/context/crate-map.md`.
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-ledger`.
+- Add focused tests for touched behavior such as address-signature pagination, block assembly, replay ordering, truncation, or serialization compatibility.
+- Relevant integration suites: restore-ledger for replay/recovery, `test-pubsub` and `test-magicblock-api` for RPC-visible block/status behavior; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Performance validation is important for execution writes, RPC history reads, startup replay, and truncation/compaction. If no benchmark or load-oriented check is run, report the residual disk-growth, compaction-latency, or resource-use risk.
+- Security validation for this crate is persistence correctness and attacker-triggerable resource use; signer/authority checks remain owned by execution/Magic Program layers.
 
-For code changes in this crate, start with targeted checks:
+## Adjacent implementation references
 
-```bash
-cargo fmt
-cargo test -p magicblock-ledger
-```
-
-Prefer `cargo nextest run -p magicblock-ledger` when available for crate tests. Add focused tests for the touched behavior, especially address-signature pagination, block assembly, replay ordering, truncation, or serialization compatibility.
-
-Broader validation from `.agents/rules/testing-and-validation.md` before handoff when practical:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Relevant integration/manual checks:
-
-```bash
-cd test-integration
-make test-restore-ledger
-make test-pubsub
-make test-magicblock-api
-```
-
-Use the restore-ledger suite for replay/recovery changes, pubsub/API suites for RPC-visible block/status behavior, and manual/operator tooling checks for format/path changes. If changes touch truncation or RocksDB options, include storage-size/truncator tests and report any unmeasured disk-growth or compaction-latency risk.
-
-Performance validation is important for execution writes, RPC history reads, startup replay, and truncation/compaction. If no benchmark or load-oriented check is run, explicitly report the residual risk and reason.
-
-Security validation for this crate is mostly about persistence correctness and attacker-triggerable resource use: untrusted RPC history queries and submitted transactions must not cause unbounded scans, unbounded memory growth, hangs, or stale/inconsistent status responses. Confirm that signer/authority checks remain owned by execution/Magic Program layers; this crate must not invent an alternate acceptance path for transactions.
-
-## Related docs
-
-- `.agents/context/overview.md` for validator runtime context.
-- `.agents/rules/validator-goals.md` for security, persistence, recovery, and performance goals.
-- `.agents/specs/validator-specification.md` for scheduler/replay, RPC, startup, shutdown, and recovery expectations.
-- `.agents/context/architecture.md` for local persistence and transaction execution interactions.
-- `.agents/context/crate-map.md` for crate ownership and consumers.
-- `.agents/rules/testing-and-validation.md` for required validation workflow and integration commands.
-- `magicblock-ledger/README.md` for a short crate overview.
-- `magicblock-api/src/ledger.rs` and `magicblock-api/src/magic_validator.rs` for startup/reset/replay/truncator integration.
-- `magicblock-processor/src/executor/processing.rs` for the main write-side call site.
-- `magicblock-aperture/src/requests/http/` for RPC-history consumers.
+- `magicblock-ledger/README.md` — short crate overview.
+- `magicblock-api/src/ledger.rs` and `magicblock-api/src/magic_validator.rs` — startup/reset/replay/truncator integration.
+- `magicblock-processor/src/executor/processing.rs` — main write-side call site.
+- `magicblock-aperture/src/requests/http/` — RPC-history consumers.
+- `test-kit/src/lib.rs` and `tools/ledger-stats/` — test harness and operator inspection consumers.

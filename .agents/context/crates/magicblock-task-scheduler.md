@@ -30,6 +30,8 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 
 Because this crate consumes task requests emitted by Magic Program execution, also update this file when `magicblock-program`, `magicblock-magic-program-api`, `magicblock-core`, or `magicblock-processor` changes `ScheduleTask`, `CancelTask`, `ExecuteTask`, `TaskRequest`, `ExecutionTlsStash`, or the scheduled-task channel semantics.
 
+For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
+
 ## Where it sits in the repository
 
 | Path | Role |
@@ -191,7 +193,7 @@ Crank transactions are built with `validator_authority()` and include Magic Prog
 
 ### Primary-only execution
 
-`magicblock-api` starts the task scheduler only in primary mode. Replica behavior must remain intentional: replicas should not independently crank scheduled tasks unless the validator lifecycle/coordination model is explicitly changed.
+`magicblock-api` starts the task scheduler only in primary mode. This crate gates local crank execution based on that startup decision; the broader coordination-mode model lives in `magicblock-core` and `.agents/specs/validator-specification.md`. Replica behavior must remain intentional: replicas should not independently crank scheduled tasks unless the validator lifecycle/coordination model is explicitly changed.
 
 ## Important invariants
 
@@ -241,60 +243,17 @@ Inspect `TaskSchedulerService::start`, `run`, and `magicblock-api/src/magic_vali
 
 ## Tests and validation
 
-For documentation-only changes, verify paths and cross-references:
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-task-scheduler`.
+- Config changes should also include focused `magicblock-config` task-scheduler coverage.
+- Relevant integration suite: `test-task-scheduler`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands and single-test workflows.
+- Performance-sensitive changes should report whether concurrency, SQLite transaction count, lock hold time, RPC send volume, or scheduler startup/recovery latency was measured or only reasoned about.
 
-```bash
-test -f .agents/context/crates/magicblock-task-scheduler.md
-grep -n "magicblock-task-scheduler.md" .agents/context/crate-map.md AGENTS.md
-```
+## Adjacent implementation references
 
-For code changes in this crate, run targeted unit tests first:
-
-```bash
-cargo fmt
-cargo nextest run -p magicblock-task-scheduler
-```
-
-For config changes, also run:
-
-```bash
-cargo nextest run -p magicblock-config task_scheduler
-```
-
-For runtime behavior changes, run the integration suite that starts validators:
-
-```bash
-cd test-integration
-make test-task-scheduler
-```
-
-For isolated debugging, use the workflow in `.agents/rules/testing-and-validation.md`:
-
-```bash
-cd test-integration
-make setup-task-scheduler-devnet
-# in another terminal, run a focused cargo nextest command in test-task-scheduler
-```
-
-Before handing off Rust changes, run the broader baseline when practical:
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
-cargo nextest run --workspace
-```
-
-Performance-sensitive changes should report whether concurrency, SQLite transaction count, lock hold time, RPC send volume, or scheduler startup/recovery latency was measured or only reasoned about.
-
-## Related docs
-
-- `AGENTS.md` for repository-wide agent rules and the requirement to keep `.agents/` current.
-- `.agents/specs/validator-specification.md` for Magic Program scheduled tasks in the broader validator model and startup/shutdown expectations.
-- `.agents/context/architecture.md` for background service boundaries and validator startup flow.
-- `.agents/context/crate-map.md` for crate ownership and dependency discovery.
-- `.agents/rules/testing-and-validation.md` for task scheduler integration commands and validation reporting.
-- `.agents/context/crates/magicblock-api.md` for validator orchestration/startup responsibilities.
-- `.agents/context/crates/magicblock-config.md` for config loading and env/TOML behavior.
-- `.agents/context/crates/magicblock-core.md` for shared channels and `ExecutionTlsStash`/link responsibilities.
-- `.agents/context/crates/magicblock-magic-program-api.md` for task request and Magic Program instruction wire types.
-- `magicblock-task-scheduler/README.md` for operator-facing scheduler configuration and performance notes.
-- `test-integration/test-task-scheduler/` for end-to-end scheduled-task behavior.
+- `.agents/context/crates/magicblock-api.md` — validator orchestration/startup owner for the scheduler service.
+- `.agents/context/crates/magicblock-config.md` — config loading and env/TOML behavior for scheduler settings.
+- `.agents/context/crates/magicblock-core.md` — shared channels, coordination mode, and `ExecutionTlsStash` boundaries.
+- `.agents/context/crates/magicblock-magic-program-api.md` — task request and Magic Program instruction wire types.
+- `magicblock-task-scheduler/README.md` — operator-facing scheduler configuration and performance notes.
+- `test-integration/test-task-scheduler/` — end-to-end scheduled-task behavior.
