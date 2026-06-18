@@ -53,10 +53,10 @@ Environment variables are mapped using the `figment` provider.
 
 ### Examples
 
-| Struct Field | Config Section | Environment Variable |
-| :--- | :--- | :--- |
-| `validator.basefee` | `[validator]` | `MBV_VALIDATOR__BASEFEE` |
-| `ledger.block_time` | `[ledger]` | `MBV_LEDGER__BLOCK_TIME` |
+| Struct Field                   | Config Section      | Environment Variable                |
+| :----------------------------- | :------------------ | :---------------------------------- |
+| `validator.basefee`            | `[validator]`       | `MBV_VALIDATOR__BASEFEE`            |
+| `ledger.block_time`            | `[ledger]`          | `MBV_LEDGER__BLOCK_TIME`            |
 | `chain_operation.country_code` | `[chain-operation]` | `MBV_CHAIN_OPERATION__COUNTRY_CODE` |
 
 ## Configuration File
@@ -93,6 +93,7 @@ The configuration is split into domain-specific structs available in `src/config
   * **`ChainLinkConfig`**: Account cloning settings.
   * **`CommitStrategy`**: Compute unit pricing for base chain commits.
   * **`TaskSchedulerConfig`**: Task scheduling settings.
+  * **`CompressionConfig`**: Compression settings.
 
 ## Testing
 

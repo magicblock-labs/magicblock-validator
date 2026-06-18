@@ -14,8 +14,12 @@ doctest = false
 async-trait = { workspace = true }
 bincode = { workspace = true }
 borsh = { workspace = true }
+compressed-delegation-api = { workspace = true }
+compressed-delegation-client = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
+light-client = { workspace = true }
+light-sdk = { workspace = true, features = ["v2"] }
 lru = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",

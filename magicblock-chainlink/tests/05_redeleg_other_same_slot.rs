@@ -7,7 +7,11 @@ use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_subscribed, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
-    testing::{deleg::add_delegation_record_for, init_logger},
+    testing::{
+        accounts::compressed_account_shared_with_owner_and_slot,
+        deleg::add_delegation_record_for, init_logger,
+    },
+    AccountFetchOrigin,
 };
 use solana_account::Account;
 use solana_program::clock::Slot;
@@ -92,6 +96,94 @@ async fn test_undelegate_redelegate_to_other_in_same_slot() {
         )
         .await
         .unwrap();
+
+        // Account should be cloned as delegated to other (flagged as undelegated)
+        info!("2.4. Would refuse write (delegated to other)");
+        assert_cloned_as_undelegated!(cloner, &[pubkey], slot, program_pubkey);
+        assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
+    }
+}
+
+#[tokio::test]
+async fn test_undelegate_redelegate_to_other_in_same_slot_compressed() {
+    let mut slot: u64 = 11;
+
+    let ctx = setup(slot).await;
+    let TestContext {
+        chainlink,
+        cloner,
+        rpc_client,
+        photon_client,
+        ..
+    } = ctx.clone();
+
+    let pubkey = Pubkey::new_unique();
+    let program_pubkey = Pubkey::new_unique();
+    let other_authority = Pubkey::new_unique();
+    let acc = Account::new(0, 0, &program_pubkey);
+
+    // 1. Account delegated to us
+    // Initial state: Account is delegated to us and we can read/write to it
+    {
+        info!("1. Account delegated to us");
+
+        slot = rpc_client.set_slot(slot + 11);
+        let compressed_account = compressed_account_shared_with_owner_and_slot(
+            pubkey,
+            ctx.validator_pubkey,
+            slot,
+            acc.clone(),
+        );
+        photon_client.add_account(
+            pubkey,
+            compressed_account.clone().into(),
+            slot,
+        );
+
+        // Transaction to read/write would be ok
+        // Fetch account - see it's owned by DP, fetch delegation record, clone account as delegated
+        ctx.ensure_account(&pubkey).await.unwrap();
+        assert_cloned_as_delegated!(cloner, &[pubkey], slot, program_pubkey);
+        assert_not_subscribed!(&chainlink, &[&pubkey]);
+    };
+
+    // 2. Account is undelegated and redelegated to another authority (same slot)
+    // Undelegation requested, setup subscription, writes refused
+    {
+        info!("2.1. Account is undelegated - Undelegation requested (account owner set to DP in Ephem)");
+
+        ctx.force_undelegation(&pubkey);
+
+        info!("2.2. Would refuse write (account still owned by DP in Ephem)");
+        assert_remain_undelegating!(cloner, &[pubkey], slot);
+
+        slot = rpc_client.set_slot(slot + 1);
+
+        info!("2.3. Account is undelegated and redelegated to other authority in same slot");
+
+        // Compressed accounts don't send notifications when they are undelegated.
+
+        // Then immediately delegate to other authority (simulating same slot operation)
+        let compressed_account = compressed_account_shared_with_owner_and_slot(
+            pubkey,
+            other_authority,
+            slot,
+            acc.clone(),
+        );
+        photon_client.add_account(
+            pubkey,
+            compressed_account.clone().into(),
+            slot,
+        );
+
+        ctx.chainlink
+            .ensure_accounts(
+                &[pubkey],
+                None,
+                AccountFetchOrigin::GetMultipleAccounts,
+            )
+            .await
+            .unwrap();
 
         // Account should be cloned as delegated to other (flagged as undelegated)
         info!("2.4. Would refuse write (delegated to other)");

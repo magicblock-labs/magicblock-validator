@@ -18,6 +18,8 @@ use tracing::*;
 ///   of the account in our bank
 /// - `delegation_record`: the delegation record associated with the account in our bank, if found
 /// - `validator_auth`: the validator authority pubkey
+/// - `compressed_delegation_slot`: for compressed (no DLP) accounts, the slot from the
+///   borsh record; `None` when the classic DLP is used
 /// - returns `true` if the account is still undelegating, `false` otherwise.
 pub(crate) fn account_still_undelegating_on_chain(
     pubkey: &Pubkey,
@@ -25,6 +27,7 @@ pub(crate) fn account_still_undelegating_on_chain(
     remote_slot_in_bank: u64,
     deleg_record: Option<DelegationRecord>,
     validator_auth: &Pubkey,
+    compressed_delegation_slot: Option<u64>,
 ) -> bool {
     // In the case of a subscription update for an account that was undelegating
     // we know that the undelegation or associated commit or possibly a previous
@@ -54,6 +57,7 @@ pub(crate) fn account_still_undelegating_on_chain(
         let delegation_slot = deleg_record
             .as_ref()
             .map(|d| d.delegation_slot)
+            .or(compressed_delegation_slot)
             .unwrap_or_default();
         if delegation_slot <= remote_slot_in_bank {
             // The last update of the account was after the last delegation
@@ -117,6 +121,7 @@ mod tests {
             remote_slot,
             deleg_record,
             &Pubkey::default(),
+            None,
         ));
     }
 
@@ -144,6 +149,7 @@ mod tests {
             remote_slot,
             deleg_record,
             &Pubkey::default(),
+            None,
         ));
         */
 
@@ -156,6 +162,7 @@ mod tests {
             remote_slot,
             deleg_record,
             &Pubkey::default(),
+            None,
         ));
     }
 
@@ -180,6 +187,7 @@ mod tests {
             remote_slot,
             deleg_record,
             &Pubkey::default(),
+            None,
         ));
     }
 
@@ -203,6 +211,33 @@ mod tests {
             remote_slot,
             deleg_record,
             &Pubkey::default(),
+            None,
+        ));
+    }
+
+    #[test]
+    fn test_compressed_redelegation_slot_when_no_dlp() {
+        let pubkey = Pubkey::default();
+        let is_delegated = true;
+        let remote_slot = 100;
+        // No classic delegation record: without `compressed_delegation_slot`, `delegation_slot`
+        // defaults to 0 and is treated as case D (commit still behind bank).
+        assert!(account_still_undelegating_on_chain(
+            &pubkey,
+            is_delegated,
+            remote_slot,
+            None,
+            &Pubkey::default(),
+            None,
+        ));
+        // Borsh `delegation_slot` for compressed accounts disambiguates redelegation to us.
+        assert!(!account_still_undelegating_on_chain(
+            &pubkey,
+            is_delegated,
+            remote_slot,
+            None,
+            &Pubkey::default(),
+            Some(101),
         ));
     }
 }

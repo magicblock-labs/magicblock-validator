@@ -47,5 +47,12 @@ id = "MiniV31111111111111111111111111111111111111"
 path = "../target/deploy/miniv3/program_mini.so"
 auth = "MiniV3AUTH111111111111111111111111111111111"
 
+[[programs]]
+id = "DEL2rPzhFaS5qzo8XY9ZNxSzuunWueySq3p2dxJfwPbT"
+path = "../programs/compressed_delegation/compressed_delegation.so"
+
+[compression]
+photon-url = "http://localhost:8784"
+
 [metrics]
 address = "0.0.0.0:9000" # Default if not specified, was disabled before but struct requires address

@@ -1,0 +1,15 @@
+[package]
+name = "compressed-delegation-api"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+borsh = { workspace = true, features = ["derive"] }
+light-compressed-account = { workspace = true }
+light-hasher = { workspace = true, features = ["solana"] }
+light-sdk = { workspace = true, features = ["v2"] }
+solana-pubkey = { workspace = true, features = ["borsh"] }

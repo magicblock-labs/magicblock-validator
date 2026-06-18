@@ -7,14 +7,29 @@ use std::{
 };
 
 use async_trait::async_trait;
+use borsh::BorshDeserialize;
+use compressed_delegation_api::{
+    instruction::{CdpCompressedAccountMeta, CdpValidityProof},
+    CompressedDelegationRecord,
+};
 use dlp_api::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
+use futures_util::{future::try_join_all, TryFutureExt};
+use light_client::indexer::{
+    photon_indexer::PhotonIndexer, Indexer, IndexerRpcConfig, RetryConfig,
+};
+use light_sdk::instruction::{
+    account_meta::CompressedAccountMeta, PackedAccounts,
+    SystemAccountMetaConfig,
+};
 use lru::LruCache;
+use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_account::Account;
 use solana_account_decoder::UiAccountEncoding;
+use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig,
@@ -28,6 +43,15 @@ use tracing::{error, info, warn};
 const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CompressedData {
+    pub hash: [u8; 32],
+    pub compressed_delegation_record_bytes: Vec<u8>,
+    pub remaining_accounts: Vec<AccountMeta>,
+    pub account_meta: CdpCompressedAccountMeta,
+    pub proof: CdpValidityProof,
+}
+
 #[async_trait]
 pub trait TaskInfoFetcher: Send + Sync + 'static {
     /// Fetches correct commit nonces for pubkeys
@@ -35,6 +59,7 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
     async fn fetch_next_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
@@ -43,6 +68,7 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
     async fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
@@ -58,6 +84,23 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>>;
+
+    async fn get_compressed_data(
+        &self,
+        pubkey: &Pubkey,
+        min_context_slot: Option<u64>,
+    ) -> TaskInfoFetcherResult<CompressedData>;
+
+    async fn get_compressed_data_for_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: Option<u64>,
+    ) -> TaskInfoFetcherResult<Vec<TaskInfoFetcherResult<CompressedData>>> {
+        try_join_all(pubkeys.iter().map(|pubkey| async move {
+            Ok(self.get_compressed_data(pubkey, min_context_slot).await)
+        }))
+        .await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -67,11 +110,24 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
 /// Pure RPC implementation of [`TaskInfoFetcher`] — no caching.
 pub struct RpcTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
+    photon_client: Option<Arc<PhotonIndexer>>,
 }
 
 impl RpcTaskInfoFetcher {
-    pub fn new(rpc_client: MagicblockRpcClient) -> Self {
-        Self { rpc_client }
+    pub fn new(
+        rpc_client: MagicblockRpcClient,
+        photon_client: Option<Arc<PhotonIndexer>>,
+    ) -> Self {
+        Self {
+            rpc_client,
+            photon_client,
+        }
+    }
+
+    fn photon_client(&self) -> TaskInfoFetcherResult<&PhotonIndexer> {
+        self.photon_client
+            .as_deref()
+            .ok_or(PhotonFetcherError::CompressionNotConfigured.into())
     }
 
     /// Fetches [`DelegationMetadata`]s with some num of retries
@@ -162,6 +218,9 @@ impl RpcTaskInfoFetcher {
                 TaskInfoFetcherError::MagicBlockRpcClientError(ref err) => {
                     warn!(error = ?err, attempt = i, "Fetch account error");
                 }
+                TaskInfoFetcherError::PhotonFetcherError(_) => {
+                    break Err(err);
+                }
             }
 
             if i >= max_retries.get() {
@@ -228,41 +287,129 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
     async fn fetch_next_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         if pubkeys.is_empty() {
             return Ok(HashMap::new());
         }
-        let nonces = Self::fetch_metadata_with_retries(
-            &self.rpc_client,
-            pubkeys,
-            min_context_slot,
-            NUM_FETCH_RETRIES,
-        )
-        .await?
-        .into_iter()
-        .map(|m| m.last_update_nonce + 1);
-        Ok(pubkeys.iter().copied().zip(nonces).collect())
+        if !compressed {
+            let nonces = Self::fetch_metadata_with_retries(
+                &self.rpc_client,
+                pubkeys,
+                min_context_slot,
+                NUM_FETCH_RETRIES,
+            )
+            .await?
+            .into_iter()
+            .map(|m| m.last_update_nonce + 1);
+            Ok(pubkeys.iter().copied().zip(nonces).collect())
+        } else {
+            let cdas = pubkeys
+                .iter()
+                .map(|pubkey| derive_cda_from_pda(pubkey).to_bytes())
+                .collect::<Vec<_>>();
+
+            let items = self
+                .photon_client()?
+                .get_multiple_compressed_accounts(
+                    Some(cdas),
+                    None,
+                    Some(IndexerRpcConfig::new(min_context_slot)),
+                )
+                .map_err(PhotonFetcherError::from)
+                .await?
+                .value
+                .items;
+
+            if items.len() != pubkeys.len() {
+                return Err(PhotonFetcherError::PhotonItemsMismatch(
+                    items.len(),
+                    pubkeys.len(),
+                )
+                .into());
+            }
+
+            let mut result = HashMap::with_capacity(pubkeys.len());
+            for (pubkey, compressed_account) in pubkeys.iter().zip(items) {
+                let nonce = compressed_account
+                    .and_then(|acc| acc.data)
+                    .and_then(|data| {
+                        CompressedDelegationRecord::try_from_slice(&data.data)
+                            .ok()
+                    })
+                    .map(|record| record.last_update_nonce + 1)
+                    .ok_or(PhotonFetcherError::CompressedAccountNotFound(
+                        *pubkey,
+                    ))?;
+                result.insert(*pubkey, nonce);
+            }
+            Ok(result)
+        }
     }
 
     async fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         if pubkeys.is_empty() {
             return Ok(HashMap::new());
         }
-        let nonces = Self::fetch_metadata_with_retries(
-            &self.rpc_client,
-            pubkeys,
-            min_context_slot,
-            NUM_FETCH_RETRIES,
-        )
-        .await?
-        .into_iter()
-        .map(|m| m.last_update_nonce);
-        Ok(pubkeys.iter().copied().zip(nonces).collect())
+        if !compressed {
+            let nonces = Self::fetch_metadata_with_retries(
+                &self.rpc_client,
+                pubkeys,
+                min_context_slot,
+                NUM_FETCH_RETRIES,
+            )
+            .await?
+            .into_iter()
+            .map(|m| m.last_update_nonce);
+            Ok(pubkeys.iter().copied().zip(nonces).collect())
+        } else {
+            let cdas = pubkeys
+                .iter()
+                .map(|pubkey| derive_cda_from_pda(pubkey).to_bytes())
+                .collect::<Vec<_>>();
+
+            let items = self
+                .photon_client()?
+                .get_multiple_compressed_accounts(
+                    Some(cdas),
+                    None,
+                    Some(IndexerRpcConfig::new(min_context_slot)),
+                )
+                .map_err(PhotonFetcherError::from)
+                .await?
+                .value
+                .items;
+
+            if items.len() != pubkeys.len() {
+                return Err(PhotonFetcherError::PhotonItemsMismatch(
+                    items.len(),
+                    pubkeys.len(),
+                )
+                .into());
+            }
+
+            let mut result = HashMap::with_capacity(pubkeys.len());
+            for (pubkey, compressed_account) in pubkeys.iter().zip(items) {
+                let nonce = compressed_account
+                    .and_then(|acc| acc.data)
+                    .and_then(|data| {
+                        CompressedDelegationRecord::try_from_slice(&data.data)
+                            .ok()
+                    })
+                    .map(|record| record.last_update_nonce)
+                    .ok_or(PhotonFetcherError::CompressedAccountNotFound(
+                        *pubkey,
+                    ))?;
+                result.insert(*pubkey, nonce);
+            }
+            Ok(result)
+        }
     }
 
     async fn fetch_rent_reimbursements(
@@ -295,6 +442,93 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         )
         .await?;
         Ok(pubkeys.iter().copied().zip(accounts).collect())
+    }
+
+    async fn get_compressed_data(
+        &self,
+        pubkey: &Pubkey,
+        min_context_slot: Option<u64>,
+    ) -> TaskInfoFetcherResult<CompressedData> {
+        let cda = derive_cda_from_pda(pubkey);
+        let compressed_delegation_record = self
+            .photon_client()?
+            .get_compressed_account(
+                cda.to_bytes(),
+                min_context_slot.map(|slot| IndexerRpcConfig {
+                    slot,
+                    retry_config: RetryConfig::default(),
+                }),
+            )
+            .map_err(PhotonFetcherError::from)
+            .await?
+            .value
+            .ok_or(PhotonFetcherError::EmptyCompressedAccount)?;
+        let proof_result = self
+            .photon_client()?
+            .get_validity_proof(
+                vec![compressed_delegation_record.hash],
+                vec![],
+                min_context_slot.map(|slot| IndexerRpcConfig {
+                    slot,
+                    retry_config: RetryConfig::default(),
+                }),
+            )
+            .map_err(PhotonFetcherError::from)
+            .await?
+            .value;
+
+        let system_account_meta_config = SystemAccountMetaConfig::new(
+            compressed_delegation_client::ID.to_bytes().into(),
+        );
+        let mut remaining_accounts = PackedAccounts::default();
+        remaining_accounts
+            .add_system_accounts_v2(system_account_meta_config)
+            .map_err(|err| PhotonFetcherError::LightSdkError(Box::new(err)))?;
+        let packed_tree_accounts = proof_result
+            .pack_tree_infos(&mut remaining_accounts)
+            .state_trees
+            .ok_or(PhotonFetcherError::MissingStateTrees)?;
+
+        let tree_info = packed_tree_accounts
+            .packed_tree_infos
+            .first()
+            .copied()
+            .ok_or(PhotonFetcherError::MissingStateTrees)?;
+
+        let account_meta = CompressedAccountMeta {
+            tree_info,
+            address: compressed_delegation_record
+                .address
+                .ok_or(PhotonFetcherError::MissingAddress)?,
+            output_state_tree_index: packed_tree_accounts.output_tree_index,
+        }
+        .into();
+
+        let compressed_delegation_record_bytes = compressed_delegation_record
+            .data
+            .ok_or(PhotonFetcherError::MissingCompressedData)?
+            .data;
+        CompressedDelegationRecord::try_from_slice(
+            &compressed_delegation_record_bytes,
+        )
+        .map_err(|_| TaskInfoFetcherError::InvalidAccountDataError(*pubkey))?;
+
+        Ok(CompressedData {
+            hash: compressed_delegation_record.hash,
+            compressed_delegation_record_bytes,
+            remaining_accounts: remaining_accounts
+                .to_account_metas()
+                .0
+                .iter()
+                .map(|meta| AccountMeta {
+                    pubkey: meta.pubkey.to_bytes().into(),
+                    is_signer: meta.is_signer,
+                    is_writable: meta.is_writable,
+                })
+                .collect(),
+            account_meta,
+            proof: proof_result.proof.into(),
+        })
     }
 }
 
@@ -500,6 +734,7 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
     async fn fetch_next_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         if pubkeys.is_empty() {
@@ -537,7 +772,11 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
             let missing_pubkeys: Vec<_> =
                 missing.iter().map(|(pubkey, _)| **pubkey).collect();
             self.inner
-                .fetch_current_commit_nonces(&missing_pubkeys, min_context_slot)
+                .fetch_current_commit_nonces(
+                    &missing_pubkeys,
+                    compressed,
+                    min_context_slot,
+                )
                 .await?
         };
 
@@ -563,6 +802,7 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
     async fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         if pubkeys.is_empty() {
@@ -593,7 +833,11 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
             let missing_pubkeys: Vec<_> =
                 missing.iter().map(|(pubkey, _)| **pubkey).collect();
             self.inner
-                .fetch_current_commit_nonces(&missing_pubkeys, min_context_slot)
+                .fetch_current_commit_nonces(
+                    &missing_pubkeys,
+                    compressed,
+                    min_context_slot,
+                )
                 .await?
         };
 
@@ -632,6 +876,16 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
             .get_base_accounts(pubkeys, min_context_slot)
             .await
     }
+
+    async fn get_compressed_data(
+        &self,
+        pubkey: &Pubkey,
+        min_context_slot: Option<u64>,
+    ) -> TaskInfoFetcherResult<CompressedData> {
+        self.inner
+            .get_compressed_data(pubkey, min_context_slot)
+            .await
+    }
 }
 
 pub enum ResetType<'a> {
@@ -649,6 +903,30 @@ pub enum TaskInfoFetcherError {
     MinContextSlotNotReachedError(u64, Box<MagicBlockRpcClientError>),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+    #[error("Photon fetcher error: {0}")]
+    PhotonFetcherError(#[from] PhotonFetcherError),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum PhotonFetcherError {
+    #[error("Indexer error: {0}")]
+    IndexerError(#[from] light_client::indexer::IndexerError),
+    #[error("Compression is not configured")]
+    CompressionNotConfigured,
+    #[error("Compressed account not found for: {0}")]
+    CompressedAccountNotFound(Pubkey),
+    #[error("Empty compressed account")]
+    EmptyCompressedAccount,
+    #[error("Missing state trees")]
+    MissingStateTrees,
+    #[error("Missing address")]
+    MissingAddress,
+    #[error("Missing compressed data")]
+    MissingCompressedData,
+    #[error("LightSdkError: {0}")]
+    LightSdkError(Box<light_sdk::error::LightSdkError>),
+    #[error("Photon returned {0} items for {1} pubkeys")]
+    PhotonItemsMismatch(usize, usize),
 }
 
 impl TaskInfoFetcherError {
@@ -699,6 +977,7 @@ impl TaskInfoFetcherError {
             Self::InvalidAccountDataError(_) => None,
             Self::MinContextSlotNotReachedError(_, err) => err.signature(),
             Self::MagicBlockRpcClientError(err) => err.signature(),
+            Self::PhotonFetcherError(_) => None,
         }
     }
 }
@@ -720,11 +999,17 @@ mod tests {
         let pk = Pubkey::new_unique();
         let fetcher = FetcherBuilder::new(vec![10]).build();
 
-        let r1 = fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap();
+        let r1 = fetcher
+            .fetch_next_commit_nonces(&[pk], false, 0)
+            .await
+            .unwrap();
         assert_eq!(r1[&pk], 11);
 
         // Cache hit: no RPC (only 1 response queued), increments
-        let r2 = fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap();
+        let r2 = fetcher
+            .fetch_next_commit_nonces(&[pk], false, 0)
+            .await
+            .unwrap();
         assert_eq!(r2[&pk], 12);
     }
 
@@ -735,9 +1020,12 @@ mod tests {
         // prime pk1 (nonce 5), then mixed call fetches only cold pk2 (nonce 20)
         let fetcher = FetcherBuilder::new(vec![5, 20]).build();
 
-        fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap(); // pk1 = 6
+        fetcher
+            .fetch_next_commit_nonces(&[pk1], false, 0)
+            .await
+            .unwrap(); // pk1 = 6
         let r = fetcher
-            .fetch_next_commit_nonces(&[pk1, pk2], 0)
+            .fetch_next_commit_nonces(&[pk1, pk2], false, 0)
             .await
             .unwrap();
         assert_eq!(r[&pk1], 7); // cached, incremented
@@ -751,12 +1039,21 @@ mod tests {
         // pk1 initial, pk2 evicts pk1, pk1 re-fetch after eviction
         let fetcher = FetcherBuilder::new(vec![1, 2, 10]).capacity(1).build();
 
-        fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap(); // pk1 cached = 2
-        fetcher.fetch_next_commit_nonces(&[pk2], 0).await.unwrap(); // pk2 cached = 3, pk1 evicted
+        fetcher
+            .fetch_next_commit_nonces(&[pk1], false, 0)
+            .await
+            .unwrap(); // pk1 cached = 2
+        fetcher
+            .fetch_next_commit_nonces(&[pk2], false, 0)
+            .await
+            .unwrap(); // pk2 cached = 3, pk1 evicted
 
         assert!(fetcher.peek_commit_nonce(&pk1).await.is_none()); // evicted
 
-        let r = fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap();
+        let r = fetcher
+            .fetch_next_commit_nonces(&[pk1], false, 0)
+            .await
+            .unwrap();
         assert_eq!(r[&pk1], 11); // re-fetched (10 + 1)
 
         // Sequential eviction: pk1's guard was dropped before pk2 evicted it,
@@ -776,17 +1073,26 @@ mod tests {
         iters: usize,
     ) {
         for pk in &phase1_keys {
-            fetcher.fetch_next_commit_nonces(&[*pk], 0).await.unwrap();
+            fetcher
+                .fetch_next_commit_nonces(&[*pk], false, 0)
+                .await
+                .unwrap();
         }
         barrier.wait().await; // signal phase 1 done
         barrier.wait().await; // wait for outer verification
         for _ in 0..iters {
             for pk in &phase2_keys {
-                fetcher.fetch_next_commit_nonces(&[*pk], 0).await.unwrap();
+                fetcher
+                    .fetch_next_commit_nonces(&[*pk], false, 0)
+                    .await
+                    .unwrap();
             }
         }
         for chunk in shared_b.chunks(2) {
-            fetcher.fetch_next_commit_nonces(chunk, 0).await.unwrap();
+            fetcher
+                .fetch_next_commit_nonces(chunk, false, 0)
+                .await
+                .unwrap();
         }
     }
 
@@ -885,11 +1191,17 @@ mod tests {
         let pk = Pubkey::new_unique();
         let fetcher = FetcherBuilder::new(vec![10]).build();
 
-        let r1 = fetcher.fetch_current_commit_nonces(&[pk], 0).await.unwrap();
+        let r1 = fetcher
+            .fetch_current_commit_nonces(&[pk], false, 0)
+            .await
+            .unwrap();
         assert_eq!(r1[&pk], 10); // stored as-is
 
         // Cache hit: still 10, fetch_current never increments
-        let r2 = fetcher.fetch_current_commit_nonces(&[pk], 0).await.unwrap();
+        let r2 = fetcher
+            .fetch_current_commit_nonces(&[pk], false, 0)
+            .await
+            .unwrap();
         assert_eq!(r2[&pk], 10);
     }
 
@@ -900,14 +1212,23 @@ mod tests {
         // pk1 initial, pk2 initial, pk1 after reset
         let fetcher = FetcherBuilder::new(vec![1, 2, 50]).build();
 
-        fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap(); // pk1 cached = 2
-        fetcher.fetch_next_commit_nonces(&[pk2], 0).await.unwrap(); // pk2 cached = 3
+        fetcher
+            .fetch_next_commit_nonces(&[pk1], false, 0)
+            .await
+            .unwrap(); // pk1 cached = 2
+        fetcher
+            .fetch_next_commit_nonces(&[pk2], false, 0)
+            .await
+            .unwrap(); // pk2 cached = 3
         fetcher.reset(ResetType::Specific(&[pk1]));
 
         assert!(fetcher.peek_commit_nonce(&pk1).await.is_none()); // cleared
         assert_eq!(fetcher.peek_commit_nonce(&pk2).await, Some(3)); // still cached
 
-        let r1 = fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap();
+        let r1 = fetcher
+            .fetch_next_commit_nonces(&[pk1], false, 0)
+            .await
+            .unwrap();
         assert_eq!(r1[&pk1], 51); // re-fetched (50 + 1)
     }
 
@@ -927,7 +1248,10 @@ mod tests {
         // Spawn Task A: slow fetch for pk1 acquires its nonce lock and sleeps.
         let fetcher2 = fetcher.clone();
         let task_a = tokio::spawn(async move {
-            fetcher2.fetch_next_commit_nonces(&[pk1], 0).await.unwrap();
+            fetcher2
+                .fetch_next_commit_nonces(&[pk1], false, 0)
+                .await
+                .unwrap();
         });
 
         // Let Task A acquire pk1's nonce lock and start the slow fetch.
@@ -937,7 +1261,10 @@ mod tests {
         // because Task A's guard still holds a clone of pk1's Arc.
         let fetcher3 = fetcher.clone();
         let task_b = tokio::spawn(async move {
-            fetcher3.fetch_next_commit_nonces(&[pk2], 0).await.unwrap();
+            fetcher3
+                .fetch_next_commit_nonces(&[pk2], false, 0)
+                .await
+                .unwrap();
         });
 
         // Let Task B run through acquire_nonce_locks (eviction happens here).
@@ -982,15 +1309,21 @@ mod tests {
         async fn fetch_next_commit_nonces(
             &self,
             pubkeys: &[Pubkey],
+            compressed: bool,
             min_context_slot: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            self.fetch_current_commit_nonces(pubkeys, min_context_slot)
-                .await
+            self.fetch_current_commit_nonces(
+                pubkeys,
+                compressed,
+                min_context_slot,
+            )
+            .await
         }
 
         async fn fetch_current_commit_nonces(
             &self,
             pubkeys: &[Pubkey],
+            _: bool,
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             if let Some(delay) = self.delay {
@@ -1020,6 +1353,14 @@ mod tests {
             _: &[Pubkey],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+            unimplemented!()
+        }
+
+        async fn get_compressed_data(
+            &self,
+            _: &Pubkey,
+            _: Option<u64>,
+        ) -> TaskInfoFetcherResult<CompressedData> {
             unimplemented!()
         }
     }

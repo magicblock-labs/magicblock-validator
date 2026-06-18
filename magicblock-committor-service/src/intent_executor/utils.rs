@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
 use magicblock_core::traits::{
@@ -80,18 +80,61 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
             BaseTaskImpl::CommitFinalize(task) => {
                 Some(task.committed_account.remote_slot)
             }
+            BaseTaskImpl::CommitFinalizeCompressed(task) => {
+                Some(task.committed_account.remote_slot)
+            }
             _ => None,
         })
         .max()
         .unwrap_or_default();
+    let regular_pubkeys = strategy
+        .optimized_tasks
+        .iter()
+        .filter_map(|task| match task {
+            BaseTaskImpl::Commit(task) => Some(task.committed_account.pubkey),
+            BaseTaskImpl::CommitFinalize(task) => {
+                Some(task.committed_account.pubkey)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let compressed_pubkeys = strategy
+        .optimized_tasks
+        .iter()
+        .filter_map(|task| match task {
+            BaseTaskImpl::CommitFinalizeCompressed(task) => {
+                Some(task.committed_account.pubkey)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
 
     // We reset TaskInfoFetcher for all committed accounts
     // We re-fetch them to fix out of sync tasks
     task_info_fetcher.reset(ResetType::Specific(committed_pubkeys));
-    let commit_ids = task_info_fetcher
-        .fetch_next_commit_nonces(committed_pubkeys, min_context_slot)
-        .await
-        .map_err(TaskBuilderError::CommitTasksBuildError)?;
+    let commit_ids = {
+        let (regular_nonces, compressed_nonces) = tokio::join!(
+            task_info_fetcher.fetch_next_commit_nonces(
+                &regular_pubkeys,
+                false,
+                min_context_slot
+            ),
+            task_info_fetcher.fetch_next_commit_nonces(
+                &compressed_pubkeys,
+                true,
+                min_context_slot,
+            )
+        );
+        regular_nonces
+            .map_err(TaskBuilderError::CommitTasksBuildError)?
+            .into_iter()
+            .chain(
+                compressed_nonces
+                    .map_err(TaskBuilderError::CommitFinalizeCompressedTasksBuildError)?
+                    .into_iter(),
+            )
+            .collect::<HashMap<Pubkey, u64>>()
+    };
 
     // Here we find the broken tasks and reset them
     // Broken tasks are prepared incorrectly so they have to be cleaned up
@@ -126,7 +169,24 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
                 to_cleanup.push(BaseTaskImpl::CommitFinalize(task.clone()));
                 task.reset_commit_id(*commit_id);
             }
-            _ => {}
+            BaseTaskImpl::CommitFinalizeCompressed(task) => {
+                let Some(commit_id) =
+                    commit_ids.get(&task.committed_account.pubkey)
+                else {
+                    continue;
+                };
+                if commit_id == &task.commit_id {
+                    continue;
+                }
+
+                // Handle invalid tasks
+                to_cleanup
+                    .push(BaseTaskImpl::CommitFinalizeCompressed(task.clone()));
+                task.reset_commit_id(*commit_id);
+            }
+            BaseTaskImpl::BaseAction(_)
+            | BaseTaskImpl::Finalize(_)
+            | BaseTaskImpl::Undelegate(_) => {}
         }
     }
 
@@ -154,7 +214,9 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     let last_commit_ind = strategy.optimized_tasks.iter().rposition(|el| {
         matches!(
             el,
-            BaseTaskImpl::Commit(_) | BaseTaskImpl::CommitFinalize(_)
+            BaseTaskImpl::Commit(_)
+                | BaseTaskImpl::CommitFinalize(_)
+                | BaseTaskImpl::CommitFinalizeCompressed(_)
         )
     });
     let (mut commit_stage_tasks, mut finalize_stage_tasks) = (vec![], vec![]);
