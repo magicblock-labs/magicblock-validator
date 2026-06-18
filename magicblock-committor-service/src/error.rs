@@ -64,11 +64,6 @@ pub enum CommittorServiceError {
     #[error("Could not find commit strategy for bundle {0}")]
     CouldNotFindCommitStrategyForBundle(u64),
 
-    #[error(
-        "Compression is not configured; cannot schedule compressed commits"
-    )]
-    CompressionNotConfigured,
-
     #[error("Failed to fetch metadata account for {0}")]
     FailedToFetchDelegationMetadata(Pubkey),
 

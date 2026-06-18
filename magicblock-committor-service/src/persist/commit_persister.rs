@@ -145,15 +145,6 @@ impl IntentPersisterImpl {
                 intent_bundle
                     .get_commit_finalize_and_undelegate_intent_accounts(),
             ),
-            (
-                false,
-                intent_bundle.get_commit_finalize_compressed_intent_accounts(),
-            ),
-            (
-                true,
-                intent_bundle
-                    .get_commit_finalize_compressed_and_undelegate_intent_accounts(),
-            ),
         ]
         .into_iter()
         .filter_map(|(undelegate, accounts)| {
@@ -536,8 +527,6 @@ mod tests {
             commit_and_undelegate: None,
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
-            commit_finalize_compressed: None,
-            commit_finalize_compressed_and_undelegate: None,
             standalone_actions: vec![],
         }
     }
@@ -551,8 +540,6 @@ mod tests {
             }),
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
-            commit_finalize_compressed: None,
-            commit_finalize_compressed_and_undelegate: None,
             standalone_actions: vec![],
         }
     }
@@ -566,8 +553,6 @@ mod tests {
             }),
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
-            commit_finalize_compressed: None,
-            commit_finalize_compressed_and_undelegate: None,
             standalone_actions: vec![],
         }
     }
@@ -578,8 +563,6 @@ mod tests {
             commit_and_undelegate: None,
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
-            commit_finalize_compressed: None,
-            commit_finalize_compressed_and_undelegate: None,
             standalone_actions: vec![],
         }
     }

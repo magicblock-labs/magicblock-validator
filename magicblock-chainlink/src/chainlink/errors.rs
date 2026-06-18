@@ -49,12 +49,6 @@ pub enum ChainlinkError {
     #[error("Missing accounts required by delegation actions: {0:?}")]
     MissingDelegationActionAccounts(Vec<Pubkey>),
 
-    #[error("Photon client error: {0}")]
-    PhotonClientError(
-        #[from]
-        crate::remote_account_provider::photon_client::PhotonClientError,
-    ),
-
     #[error("timeout waiting for pending request for {0}")]
     PendingRequestTimeout(Pubkey),
 

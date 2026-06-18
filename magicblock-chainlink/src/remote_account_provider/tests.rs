@@ -15,7 +15,6 @@ use crate::{
     },
     testing::{
         init_logger,
-        photon_client_mock::PhotonClientMock,
         rpc_client_mock::{
             AccountAtSlot, ChainRpcClientMock, ChainRpcClientMockBuilder,
         },
@@ -24,13 +23,8 @@ use crate::{
 };
 
 struct ProviderTestCtx {
-    provider: Arc<
-        RemoteAccountProvider<
-            ChainRpcClientMock,
-            ChainPubsubClientMock,
-            PhotonClientMock,
-        >,
-    >,
+    provider:
+        Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
     rpc_client: ChainRpcClientMock,
     _pubsub_client: ChainPubsubClientMock,
     _forward_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
@@ -66,7 +60,6 @@ async fn setup_provider_with_lru_capacity(
         RemoteAccountProvider::new(
             rpc_client.clone(),
             pubsub_client.clone(),
-            None,
             forward_tx,
             &config,
             subscribed_accounts,
@@ -123,8 +116,6 @@ async fn test_try_get_multi_short_multi_account_response_returns_error() {
     let pubsub_client =
         ChainPubsubClientMock::new(updates_sender, updates_receiver);
 
-    let photon_client = Some(PhotonClientMock::default());
-
     let (forward_tx, _forward_rx) = mpsc::channel(1_000);
     let (subscribed_accounts, config) = create_test_lru_cache(1000);
     let chain_slot = Arc::<AtomicU64>::default();
@@ -132,7 +123,6 @@ async fn test_try_get_multi_short_multi_account_response_returns_error() {
     let provider = RemoteAccountProvider::new(
         rpc_client,
         pubsub_client,
-        photon_client,
         forward_tx,
         &config,
         subscribed_accounts,
@@ -161,11 +151,7 @@ async fn setup_matching_slots(
     pubkey1: Pubkey,
     pubkey2: Pubkey,
 ) -> (
-    RemoteAccountProvider<
-        ChainRpcClientMock,
-        ChainPubsubClientMock,
-        PhotonClientMock,
-    >,
+    RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
     mpsc::Receiver<ForwardedSubscriptionUpdate>,
 ) {
     init_logger();
@@ -206,7 +192,6 @@ async fn setup_matching_slots(
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
-            None,
             forward_tx,
             &config,
             subscribed_accounts,
@@ -928,7 +913,6 @@ async fn test_get_non_existing_account() {
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
-            None::<PhotonClientMock>,
             fwd_tx,
             &config,
             subscribed_accounts,
@@ -980,7 +964,6 @@ async fn test_get_existing_account_for_valid_slot() {
                 RemoteAccountProvider::new(
                     rpc_client.clone(),
                     pubsub_client,
-                    None::<PhotonClientMock>,
                     fwd_tx,
                     &config,
                     subscribed_accounts,
@@ -1084,7 +1067,6 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
         RemoteAccountProvider::new(
             rpc_client.clone(),
             pubsub_client.clone(),
-            None::<PhotonClientMock>,
             forward_tx,
             &config,
             subscribed_accounts,
@@ -1298,11 +1280,7 @@ async fn setup_with_accounts(
     pubkeys: &[Pubkey],
     accounts_capacity: usize,
 ) -> (
-    RemoteAccountProvider<
-        ChainRpcClientMock,
-        ChainPubsubClientMock,
-        PhotonClientMock,
-    >,
+    RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
     mpsc::Receiver<ForwardedSubscriptionUpdate>,
     mpsc::Receiver<Pubkey>,
 ) {
@@ -1334,7 +1312,6 @@ async fn setup_with_accounts(
     let provider = RemoteAccountProvider::new(
         rpc_client,
         pubsub_client,
-        None,
         forward_tx,
         &config,
         subscribed_accounts,

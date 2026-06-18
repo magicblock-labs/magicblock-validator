@@ -14,12 +14,10 @@ use tracing::error;
 
 use crate::{
     intent_executor::task_info_fetcher::{
-        CompressedData, PhotonFetcherError, TaskInfoFetcher,
-        TaskInfoFetcherError, TaskInfoFetcherResult,
+        TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult,
     },
     persist::IntentPersister,
     tasks::{
-        commit_finalize_compressed_task::CommitFinalizeCompressedTask,
         commit_task::{CommitDelivery, CommitTask},
         BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
         CommitFinalizeTask, FinalizeTask, UndelegateTask,
@@ -48,9 +46,6 @@ pub struct CommitStageTaskInfo {
     commit_nonces: HashMap<Pubkey, u64>,
     /// Base account state for diff calculation
     base_accounts: HashMap<Pubkey, Account>,
-    /// Data used for compressed accounts
-    compressed_data:
-        HashMap<Pubkey, Result<CompressedData, TaskInfoFetcherError>>,
 }
 
 /// Task builder
@@ -111,81 +106,35 @@ impl TaskBuilderImpl {
 
     async fn fetch_commit_nonces<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
-        accounts: &[(CommittedAccount, bool)],
+        accounts: &[CommittedAccount],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        let (regular_accounts, compressed_accounts): (Vec<_>, Vec<_>) =
-            accounts.iter().partition(|(_, compressed)| !compressed);
-        let regular_pubkeys = regular_accounts
-            .into_iter()
-            .map(|(account, _)| account.pubkey)
-            .collect::<Vec<_>>();
-        let compressed_pubkeys = compressed_accounts
-            .into_iter()
-            .map(|(account, _)| account.pubkey)
+        let committed_pubkeys = accounts
+            .iter()
+            .map(|account| account.pubkey)
             .collect::<Vec<_>>();
 
-        let (regular_nonces, compressed_nonces) = tokio::join!(
-            task_info_fetcher.fetch_next_commit_nonces(
-                &regular_pubkeys,
-                false,
-                min_context_slot
-            ),
-            task_info_fetcher.fetch_next_commit_nonces(
-                &compressed_pubkeys,
-                true,
-                min_context_slot,
-            )
-        );
-        Ok(regular_nonces?
-            .into_iter()
-            .chain(compressed_nonces?.into_iter())
-            .collect::<HashMap<Pubkey, u64>>())
+        task_info_fetcher
+            .fetch_next_commit_nonces(&committed_pubkeys, min_context_slot)
+            .await
     }
 
     async fn fetch_diffable_accounts<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
-        accounts: &[(CommittedAccount, bool)],
+        accounts: &[CommittedAccount],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
         let diffable_pubkeys = accounts
             .iter()
-            .filter(|(account, compressed)| {
+            .filter(|account| {
                 account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
-                    && !compressed
             })
-            .map(|(account, _)| account.pubkey)
+            .map(|account| account.pubkey)
             .collect::<Vec<_>>();
 
         task_info_fetcher
             .get_base_accounts(&diffable_pubkeys, min_context_slot)
             .await
-    }
-
-    async fn fetch_compressed_data<C: TaskInfoFetcher>(
-        task_info_fetcher: &Arc<C>,
-        accounts: &[(CommittedAccount, bool)],
-        min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<
-        HashMap<Pubkey, TaskInfoFetcherResult<CompressedData>>,
-    > {
-        let pubkeys = accounts
-            .iter()
-            .filter(|(_, compressed)| *compressed)
-            .map(|(account, _)| account.pubkey)
-            .collect::<Vec<_>>();
-        Ok(pubkeys
-            .iter()
-            .zip(
-                task_info_fetcher
-                    .get_compressed_data_for_accounts(
-                        &pubkeys,
-                        Some(min_context_slot),
-                    )
-                    .await?,
-            )
-            .map(|(pk, data)| (*pk, data))
-            .collect())
     }
 
     async fn fetch_commit_stage_info<C: TaskInfoFetcher, P: IntentPersister>(
@@ -195,39 +144,21 @@ impl TaskBuilderImpl {
     ) -> TaskBuilderResult<CommitStageTaskInfo> {
         // Fetch necessary data for BaseTasks creation
         let all_committed_accounts = intent_bundle.get_all_committed_accounts();
-        let all_regular_committed_accounts =
-            intent_bundle.get_all_regular_committed_accounts();
-        let all_compressed_committed_accounts =
-            intent_bundle.get_all_compressed_committed_accounts();
-        let flagged_accounts = all_regular_committed_accounts
-            .into_iter()
-            .map(|acc| (acc, false))
-            .chain(
-                all_compressed_committed_accounts
-                    .into_iter()
-                    .map(|acc| (acc, true)),
-            )
-            .collect::<Vec<_>>();
         // Get commit nonces and base accounts
         let min_context_slot = all_committed_accounts
             .iter()
             .map(|account| account.remote_slot)
             .max()
             .unwrap_or(0);
-        let (commit_ids, base_accounts, compressed_data) = tokio::join!(
+        let (commit_ids, base_accounts) = tokio::join!(
             Self::fetch_commit_nonces(
                 task_info_fetcher,
-                &flagged_accounts,
+                &all_committed_accounts,
                 min_context_slot
             ),
             Self::fetch_diffable_accounts(
                 task_info_fetcher,
-                &flagged_accounts,
-                min_context_slot
-            ),
-            Self::fetch_compressed_data(
-                task_info_fetcher,
-                &flagged_accounts,
+                &all_committed_accounts,
                 min_context_slot
             )
         );
@@ -237,9 +168,6 @@ impl TaskBuilderImpl {
             tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
             Default::default()
         });
-        let compressed_data = compressed_data.map_err(
-            TaskBuilderError::CommitFinalizeCompressedTasksBuildError,
-        )?;
 
         // Persist commit ids for commitees
         commit_nonces
@@ -253,7 +181,6 @@ impl TaskBuilderImpl {
         Ok(CommitStageTaskInfo {
             commit_nonces,
             base_accounts,
-            compressed_data,
         })
     }
 
@@ -283,20 +210,6 @@ impl TaskBuilderImpl {
             delivery: delivery_details,
         }
     }
-
-    pub fn create_commit_finalize_compressed_task(
-        commit_id: u64,
-        allow_undelegation: bool,
-        account: CommittedAccount,
-        compressed_data: CompressedData,
-    ) -> CommitFinalizeCompressedTask {
-        CommitFinalizeCompressedTask {
-            commit_id,
-            allow_undelegation,
-            committed_account: account,
-            compressed_data,
-        }
-    }
 }
 
 #[async_trait]
@@ -317,7 +230,6 @@ impl TasksBuilder for TaskBuilderImpl {
         let CommitStageTaskInfo {
             mut commit_nonces,
             mut base_accounts,
-            mut compressed_data,
         } = Self::fetch_commit_stage_info(
             intent_bundle,
             task_info_fetcher,
@@ -364,31 +276,6 @@ impl TasksBuilder for TaskBuilderImpl {
                     base_accounts: &mut base_accounts,
                 }
                 .build(&value.commit_action),
-            );
-        }
-        if let Some(ref value) =
-            intent_bundle.intent_bundle.commit_finalize_compressed
-        {
-            tasks.extend(
-                CommitFinalizeCompressedBuilder {
-                    commit_nonces: &mut commit_nonces,
-                    base_accounts: &mut base_accounts,
-                    compressed_data: &mut compressed_data,
-                }
-                .build(value)?,
-            );
-        }
-        if let Some(ref value) = intent_bundle
-            .intent_bundle
-            .commit_finalize_compressed_and_undelegate
-        {
-            tasks.extend(
-                CommitFinalizeAndUndelegateCompressedBuilder {
-                    commit_nonces: &mut commit_nonces,
-                    base_accounts: &mut base_accounts,
-                    compressed_data: &mut compressed_data,
-                }
-                .build(value)?,
             );
         }
 
@@ -623,105 +510,6 @@ impl<'a> CommitFinalizeAndUndelegateBuilder<'a> {
     }
 }
 
-struct CommitFinalizeCompressedBuilder<'a> {
-    commit_nonces: &'a mut HashMap<Pubkey, u64>,
-    base_accounts: &'a mut HashMap<Pubkey, Account>,
-    compressed_data:
-        &'a mut HashMap<Pubkey, Result<CompressedData, TaskInfoFetcherError>>,
-}
-
-impl<'a> CommitFinalizeCompressedBuilder<'a> {
-    fn build(
-        &mut self,
-        commit_type: &CommitType,
-    ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
-        let mut tasks: Vec<BaseTaskImpl> = commit_type
-            .get_committed_accounts()
-            .iter()
-            .map(|account| -> TaskBuilderResult<BaseTaskImpl> {
-                let nonce =
-                    take_commit_nonce(self.commit_nonces, account.pubkey);
-                let _base = self.base_accounts.remove(&account.pubkey);
-                let compressed_data = self
-                    .compressed_data
-                    .remove(&account.pubkey)
-                    .ok_or(
-                        TaskBuilderError::CommitFinalizeCompressedTasksBuildError(
-                            PhotonFetcherError::MissingCompressedData.into(),
-                        ),
-                    )?
-                    .map_err(TaskBuilderError::CommitFinalizeCompressedTasksBuildError)?;
-                Ok(
-                    TaskBuilderImpl::create_commit_finalize_compressed_task(
-                        nonce,
-                        false,
-                        account.clone(),
-                        compressed_data,
-                    )
-                    .into(),
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if let CommitType::WithBaseActions {
-            ref base_actions, ..
-        } = commit_type
-        {
-            tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
-        }
-        Ok(tasks)
-    }
-}
-
-struct CommitFinalizeAndUndelegateCompressedBuilder<'a> {
-    commit_nonces: &'a mut HashMap<Pubkey, u64>,
-    base_accounts: &'a mut HashMap<Pubkey, Account>,
-    compressed_data:
-        &'a mut HashMap<Pubkey, Result<CompressedData, TaskInfoFetcherError>>,
-}
-
-impl<'a> CommitFinalizeAndUndelegateCompressedBuilder<'a> {
-    fn build(
-        &mut self,
-        commit_and_undelegate: &CommitAndUndelegate,
-    ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
-        let commit_type = &commit_and_undelegate.commit_action;
-        let mut tasks: Vec<BaseTaskImpl> = commit_type
-            .get_committed_accounts()
-            .iter()
-            .map(|account| -> TaskBuilderResult<BaseTaskImpl> {
-                let nonce =
-                    take_commit_nonce(self.commit_nonces, account.pubkey);
-                let _base = self.base_accounts.remove(&account.pubkey);
-                let compressed_data = self
-                    .compressed_data
-                    .remove(&account.pubkey)
-                    .ok_or(
-                        TaskBuilderError::CommitFinalizeCompressedTasksBuildError(
-                            PhotonFetcherError::MissingCompressedData.into(),
-                        ),
-                    )?
-                    .map_err(TaskBuilderError::CommitFinalizeCompressedTasksBuildError)?;
-                Ok(
-                    TaskBuilderImpl::create_commit_finalize_compressed_task(
-                        nonce,
-                        true,
-                        account.clone(),
-                        compressed_data,
-                    )
-                    .into(),
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if let CommitType::WithBaseActions {
-            ref base_actions, ..
-        } = commit_type
-        {
-            tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
-        }
-        Ok(tasks)
-    }
-}
-
 fn take_commit_nonce(
     commit_nonces: &mut HashMap<Pubkey, u64>,
     pubkey: Pubkey,
@@ -741,8 +529,6 @@ pub enum TaskBuilderError {
     CommitTasksBuildError(#[source] TaskInfoFetcherError),
     #[error("FinalizedTasksBuildError: {0}")]
     FinalizedTasksBuildError(#[source] TaskInfoFetcherError),
-    #[error("CommitFinalizeCompressedTasksBuildError: {0}")]
-    CommitFinalizeCompressedTasksBuildError(#[source] TaskInfoFetcherError),
 }
 
 impl TaskBuilderError {
@@ -750,7 +536,6 @@ impl TaskBuilderError {
         match self {
             Self::CommitTasksBuildError(err) => err.signature(),
             Self::FinalizedTasksBuildError(err) => err.signature(),
-            Self::CommitFinalizeCompressedTasksBuildError(_) => None,
         }
     }
 }

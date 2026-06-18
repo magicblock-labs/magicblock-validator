@@ -90,11 +90,6 @@ impl ChainUpdatesClient {
                     "{endpoint:?}"
                 )))
             }
-            Compression { .. } => {
-                Err(RemoteAccountProviderError::InvalidPubsubEndpoint(format!(
-                    "{endpoint:?}"
-                )))
-            }
         }
     }
 }

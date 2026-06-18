@@ -310,30 +310,8 @@ mod test {
     use magicblock_magic_program_api::args::ScheduleTaskArgs;
     use solana_instruction::AccountMeta;
     use solana_program_runtime::invoke_context::mock_process_instruction;
-    use solana_pubkey::Pubkey;
 
     use super::*;
-
-    #[test]
-    fn crank_entrypoint_decodes_execute_crank_before_account_validation() {
-        let data = bincode::serialize(&MagicBlockInstruction::ExecuteCrank {
-            authority: Pubkey::new_unique(),
-            instructions: vec![],
-        })
-        .unwrap();
-
-        mock_process_instruction(
-            &crate::CRANK_PROGRAM_ID,
-            None,
-            &data,
-            Vec::new(),
-            vec![AccountMeta::new_readonly(crate::CRANK_PROGRAM_ID, false)],
-            Err(InstructionError::MissingAccount),
-            CrankEntrypoint::vm,
-            |_invoke_context| {},
-            |_invoke_context| {},
-        );
-    }
 
     #[test]
     fn crank_entrypoint_rejects_non_execute_crank_instructions() {

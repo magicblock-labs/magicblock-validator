@@ -7,12 +7,11 @@ use std::{
 };
 
 use async_trait::async_trait;
-use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
-            CacheTaskInfoFetcher, CompressedData, TaskInfoFetcher,
-            TaskInfoFetcherError, TaskInfoFetcherResult,
+            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
+            TaskInfoFetcherResult,
         },
         IntentExecutorImpl,
     },
@@ -46,15 +45,9 @@ pub async fn create_test_client() -> MagicblockRpcClient {
     MagicblockRpcClient::new(Arc::new(rpc_client))
 }
 
-pub fn create_test_photon_indexer() -> Arc<PhotonIndexer> {
-    Arc::new(PhotonIndexer::new("http://localhost:8784".to_string()))
-}
-
 // Test fixture structure
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
-    #[allow(dead_code)]
-    pub photon_indexer: Arc<PhotonIndexer>,
     pub table_mania: TableMania,
     #[allow(dead_code)]
     pub authority: Keypair,
@@ -70,7 +63,6 @@ impl TestFixture {
 
     pub async fn new_with_keypair(authority: Keypair) -> Self {
         let rpc_client = create_test_client().await;
-        let photon_indexer = create_test_photon_indexer();
 
         // TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -89,7 +81,6 @@ impl TestFixture {
         let compute_budget_config = ComputeBudgetConfig::new(1_000_000);
         Self {
             rpc_client,
-            photon_indexer,
             table_mania,
             authority,
             compute_budget_config,
@@ -180,7 +171,6 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
-        _: bool,
         _: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
@@ -189,7 +179,6 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
-        _: bool,
         _: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
@@ -221,14 +210,6 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
                     .filter_map(|(key, value)| value.map(|value| (*key, value)))
                     .collect()
             })
-    }
-
-    async fn get_compressed_data(
-        &self,
-        _: &Pubkey,
-        _: Option<u64>,
-    ) -> TaskInfoFetcherResult<CompressedData> {
-        Ok(CompressedData::default())
     }
 }
 

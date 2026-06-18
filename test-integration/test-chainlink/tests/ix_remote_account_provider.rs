@@ -2,15 +2,15 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
         chain_updates_client::ChainUpdatesClient,
-        config::RemoteAccountProviderConfig, photon_client::PhotonClientImpl,
-        Endpoint, Endpoints, RemoteAccountProvider, RemoteAccountUpdateSource,
+        config::RemoteAccountProviderConfig, Endpoint, Endpoints,
+        RemoteAccountProvider, RemoteAccountUpdateSource,
     },
     submux::SubMuxClient,
     testing::utils::{
         airdrop, await_next_slot, current_slot, dump_remote_account_lamports,
         dump_remote_account_update_source, get_remote_account_lamports,
         get_remote_account_update_sources, init_logger, random_pubkey,
-        sleep_ms, COMPRESSION_URL, PUBSUB_URL, RPC_URL,
+        sleep_ms, PUBSUB_URL, RPC_URL,
     },
     AccountFetchOrigin,
 };
@@ -22,11 +22,9 @@ use solana_rpc_client_api::{
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
-async fn init_remote_account_provider() -> RemoteAccountProvider<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainUpdatesClient>,
-    PhotonClientImpl,
-> {
+async fn init_remote_account_provider(
+) -> RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
+{
     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
     let endpoints_vec = vec![
         Endpoint::Rpc {
@@ -37,16 +35,11 @@ async fn init_remote_account_provider() -> RemoteAccountProvider<
             url: PUBSUB_URL.to_string(),
             label: "test-ws".to_string(),
         },
-        Endpoint::Compression {
-            label: "test-compression".to_string(),
-            url: COMPRESSION_URL.to_string(),
-        },
     ];
     let endpoints = Endpoints::from(endpoints_vec.as_slice());
     let provider = RemoteAccountProvider::<
         ChainRpcClientImpl,
         SubMuxClient<ChainUpdatesClient>,
-        PhotonClientImpl,
     >::try_from_urls_and_config(
         &endpoints,
         CommitmentConfig::confirmed(),
