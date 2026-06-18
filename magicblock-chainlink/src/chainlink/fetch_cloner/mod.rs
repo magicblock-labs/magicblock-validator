@@ -596,11 +596,18 @@ where
                         let this = Arc::clone(&self);
                         metrics::inc_inflight_subscription_updates();
                         pending_tasks.spawn(async move {
+                            struct InflightSubscriptionUpdateGuard;
+                            impl Drop for InflightSubscriptionUpdateGuard {
+                                fn drop(&mut self) {
+                                    metrics::dec_inflight_subscription_updates();
+                                }
+                            }
+                            let _inflight_guard = InflightSubscriptionUpdateGuard;
+                            
                             Self::process_subscription_update(
                                 &this, pubkey, update,
                             )
                             .await;
-                            metrics::dec_inflight_subscription_updates();
                             drop(permit);
                         });
                     }
