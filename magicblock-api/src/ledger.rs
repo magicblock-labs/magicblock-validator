@@ -49,7 +49,7 @@ pub fn ledger_lockfile(ledger_path: &Path) -> RwLock<File> {
             .create(true)
             .truncate(false)
             .open(lockfile)
-            .unwrap(),
+            .expect(&format!("Unable to open ledger lockfile {}. Ensure proper permissions and disk space.", ledger_path.display())),
     )
 }
 
