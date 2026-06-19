@@ -770,6 +770,11 @@ impl LookupTableRc {
                 signature = %signature,
                 "Failed to deactivate table"
             );
+            return Err(MagicBlockRpcClientError::SentTransactionError(
+                error.clone(),
+                signature,
+            )
+            .into());
         }
 
         let slot = rpc_client.get_slot().await?;
