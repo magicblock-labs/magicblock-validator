@@ -10,6 +10,8 @@ use std::{
 use solana_signature::Signature;
 use tokio::time::{self, Interval};
 
+use crate::server::websocket::connection::ConnectionID;
+
 /// Manages the lifecycle of `signatureSubscribe` websocket subscriptions.
 ///
 /// `signatureSubscribe` is a one-shot subscription, meaning it is fulfilled by a single
@@ -44,6 +46,8 @@ pub(crate) struct SignaturesExpirer {
 pub(crate) struct ExpiringSignature {
     /// The value of the expirer's `tick` at which this signature should expire.
     ttl: u64,
+    /// The connection whose subscription should expire.
+    pub(crate) conid: ConnectionID,
     /// The transaction signature being tracked.
     pub(crate) signature: Signature,
     /// A shared flag indicating if the subscription is still active. If the subscription
@@ -76,10 +80,12 @@ impl SignaturesExpirer {
     pub(crate) fn push(
         &mut self,
         signature: Signature,
+        conid: ConnectionID,
         subscribed: Arc<AtomicBool>,
     ) {
         let sig = ExpiringSignature {
             signature,
+            conid,
             ttl: self.tick + Self::TTL,
             subscribed,
         };
@@ -95,7 +101,7 @@ impl SignaturesExpirer {
     /// If an expired signature is found and is still marked as `subscribed`,
     /// this method returns it so that it can be removed from subscriptions
     /// database. If the subscription was resolved, it's silently discarded.
-    pub(crate) async fn expire(&mut self) -> Signature {
+    pub(crate) async fn expire(&mut self) -> ExpiringSignature {
         loop {
             // This inner block allows checking the queue multiple times per tick,
             // which efficiently clears out a batch of already-expired signatures.
@@ -117,9 +123,9 @@ impl SignaturesExpirer {
                     break 'expire;
                 };
 
-                // Only return the sibscription that hasn't resolved yet
+                // Only return the subscription that hasn't resolved yet.
                 if s.subscribed.load(Ordering::Relaxed) {
-                    return s.signature;
+                    return s;
                 }
             }
 

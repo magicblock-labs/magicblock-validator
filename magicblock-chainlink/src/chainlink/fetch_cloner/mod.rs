@@ -50,9 +50,7 @@ mod types;
 
 pub use self::types::FetchAndCloneResult;
 use self::{
-    pending_clone_guard::{
-        CloneClaim, CloneCompletion, CloneKey, PendingCloneGuard,
-    },
+    pending_clone_guard::{CloneClaim, CloneCompletion, PendingCloneGuard},
     pending_operation::{
         claim_or_join_pending, finish_pending, Pending, PendingClaim,
         PendingFailure, PendingHandles, PendingOwner, PendingTerminal,
@@ -77,7 +75,9 @@ use crate::{
         AccountCloneRequest, Cloner, DelegationActions,
     },
     remote_account_provider::{
-        program_account::get_loaderv3_get_program_data_address,
+        program_account::{
+            get_loaderv3_get_program_data_address, LoadedProgram,
+        },
         pubsub_common::{is_internal_dlp_account_data, SubscriptionSource},
         CapacityEvictionProtection, ChainPubsubClient, ChainRpcClient,
         ForwardedSubscriptionUpdate, MatchSlotsConfig, RemoteAccount,
@@ -123,15 +123,13 @@ where
     /// Negative cache for derived eATAs confirmed missing on chain.
     known_empty_eatas: Arc<PlMutex<LruCache<Pubkey, ()>>>,
 
-    /// Tracks in-flight clone operations per (pubkey, slot).
+    /// Tracks in-flight clone operations.
     /// The first caller to claim a key becomes the owner and performs
     /// the actual clone. Subsequent callers become waiters and receive
     /// the result via oneshot channels. Prevents duplicate clone
     /// submissions across concurrent fetch and subscription paths.
     pending_clones: Arc<
-        Mutex<
-            hash_map::HashMap<CloneKey, Vec<oneshot::Sender<CloneCompletion>>>,
-        >,
+        Mutex<hash_map::HashMap<Pubkey, Vec<oneshot::Sender<CloneCompletion>>>>,
     >,
 
     pending_operation_timeout_ms: Arc<AtomicU64>,
@@ -300,6 +298,17 @@ where
             .read(pubkey, |_, state| state.waiters.len())
     }
 
+    /// Returns the number of waiters currently joined to the low-level
+    /// clone operation keyed by `pubkey`, or `None` if no clone is pending.
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn pending_clone_waiter_count(&self, pubkey: &Pubkey) -> Option<usize> {
+        let map = self
+            .pending_clones
+            .lock()
+            .expect("pending_clones mutex poisoned");
+        map.get(pubkey).map(Vec::len)
+    }
+
     /// Cancels the in-flight fetch+clone owner for `pubkey`, if one exists.
     pub fn cancel_pending(&self, pubkey: &Pubkey) {
         self.pending_requests
@@ -330,17 +339,16 @@ where
         }
     }
 
-    /// Attempt to claim ownership of a clone operation for (pubkey, slot).
+    /// Attempt to claim ownership of a clone operation for a clone key.
     /// Returns `CloneClaim::Owner` if this caller is the first and should
     /// perform the clone. Returns `CloneClaim::Waiter(rx)` if another
     /// caller already owns this clone and this caller should wait.
-    fn claim_pending_clone(&self, pubkey: Pubkey, slot: u64) -> CloneClaim {
-        let key = (pubkey, slot);
+    fn claim_pending_clone(&self, pubkey: Pubkey) -> CloneClaim {
         let mut map = self
             .pending_clones
             .lock()
             .expect("pending_clones mutex poisoned");
-        match map.entry(key) {
+        match map.entry(pubkey) {
             hash_map::Entry::Vacant(entry) => {
                 entry.insert(Vec::new());
                 CloneClaim::Owner
@@ -355,19 +363,13 @@ where
 
     /// Called by the owner when the clone operation completes.
     /// Removes the pending entry and notifies all waiters.
-    fn finish_pending_clone(
-        &self,
-        pubkey: Pubkey,
-        slot: u64,
-        result: CloneCompletion,
-    ) {
-        let key = (pubkey, slot);
+    fn finish_pending_clone(&self, pubkey: Pubkey, result: CloneCompletion) {
         let waiters = {
             let mut map = self
                 .pending_clones
                 .lock()
                 .expect("pending_clones mutex poisoned");
-            map.remove(&key).unwrap_or_default()
+            map.remove(&pubkey).unwrap_or_default()
         };
         for tx in waiters {
             let _ = tx.send(result);
@@ -444,51 +446,152 @@ where
             .fetch_add(1, Ordering::Relaxed)
     }
 
+    fn local_account_satisfies_clone_request(
+        &self,
+        pubkey: &Pubkey,
+        request_account: &AccountSharedData,
+    ) -> bool {
+        self.accounts_bank
+            .get_account(pubkey)
+            .is_some_and(|account| {
+                let local_slot = account.remote_slot();
+                let request_slot = request_account.remote_slot();
+                local_slot > request_slot
+                    || (local_slot == request_slot
+                        && account == *request_account)
+            })
+    }
+
     /// Submits a clone request through ownership coordination.
-    /// Only one caller per (pubkey, slot) will actually submit the
-    /// clone transaction. All other concurrent callers wait for the
-    /// owner's result.
+    /// Only one account clone per pubkey is submitted at a time. Waiters
+    /// retry local freshness checks after a successful owner so a newer
+    /// request can clone after an older request finishes.
     async fn clone_account_with_ownership(
         &self,
         request: AccountCloneRequest,
     ) -> ClonerResult<Signature> {
         let pubkey = request.pubkey;
-        let slot = request.account.remote_slot();
+        let mut request = Some(request);
 
-        match self.claim_pending_clone(pubkey, slot) {
-            CloneClaim::Owner => {
-                let mut guard = PendingCloneGuard::new(
-                    Arc::clone(&self.pending_clones),
-                    pubkey,
-                    slot,
-                );
-                let result = self.cloner.clone_account(request).await;
-                let completion = if result.is_ok() {
-                    CloneCompletion::Success
-                } else {
-                    CloneCompletion::Failed
-                };
-                self.finish_pending_clone(pubkey, slot, completion);
-                guard.dismiss();
-                result
+        loop {
+            if self.local_account_satisfies_clone_request(
+                &pubkey,
+                &request
+                    .as_ref()
+                    .expect("request must be present before ownership claim")
+                    .account,
+            ) {
+                return Ok(Signature::default());
             }
-            CloneClaim::Waiter(rx) => match rx.await {
-                Ok(CloneCompletion::Success) => Ok(Signature::default()),
-                Ok(CloneCompletion::Failed) => {
-                    Err(ClonerError::FailedToCloneRegularAccount(
+
+            match self.claim_pending_clone(pubkey) {
+                CloneClaim::Owner => {
+                    let mut guard = PendingCloneGuard::new(
+                        Arc::clone(&self.pending_clones),
                         pubkey,
-                        Box::new(ClonerError::CommittorServiceError(
-                            "Clone owner failed".to_string(),
-                        )),
-                    ))
+                    );
+                    let result = self
+                        .cloner
+                        .clone_account(
+                            request
+                                .take()
+                                .expect("owner must still have request"),
+                        )
+                        .await;
+                    let completion = if result.is_ok() {
+                        CloneCompletion::Success
+                    } else {
+                        CloneCompletion::Failed
+                    };
+                    self.finish_pending_clone(pubkey, completion);
+                    guard.dismiss();
+                    return result;
                 }
-                Err(_) => Err(ClonerError::FailedToCloneRegularAccount(
-                    pubkey,
-                    Box::new(ClonerError::CommittorServiceError(
-                        "Clone owner dropped".to_string(),
-                    )),
-                )),
-            },
+                CloneClaim::Waiter(rx) => match rx.await {
+                    Ok(CloneCompletion::Success) => continue,
+                    Ok(CloneCompletion::Failed) => {
+                        return Err(ClonerError::FailedToCloneRegularAccount(
+                            pubkey,
+                            Box::new(ClonerError::CommittorServiceError(
+                                "Clone owner failed".to_string(),
+                            )),
+                        ));
+                    }
+                    Err(_) => {
+                        return Err(ClonerError::FailedToCloneRegularAccount(
+                            pubkey,
+                            Box::new(ClonerError::CommittorServiceError(
+                                "Clone owner dropped".to_string(),
+                            )),
+                        ));
+                    }
+                },
+            }
+        }
+    }
+
+    async fn clone_program_with_ownership(
+        &self,
+        program: LoadedProgram,
+    ) -> ClonerResult<Signature> {
+        let program_id = program.program_id;
+        let remote_slot = program.remote_slot;
+
+        loop {
+            if self
+                .accounts_bank
+                .get_account(&program_id)
+                .is_some_and(|account| account.remote_slot() >= remote_slot)
+            {
+                return Ok(Signature::default());
+            }
+
+            match self.claim_pending_clone(program_id) {
+                CloneClaim::Owner => {
+                    let mut guard = PendingCloneGuard::new(
+                        Arc::clone(&self.pending_clones),
+                        program_id,
+                    );
+
+                    let result = if self
+                        .accounts_bank
+                        .get_account(&program_id)
+                        .is_some_and(|account| {
+                            account.remote_slot() >= remote_slot
+                        }) {
+                        Ok(Signature::default())
+                    } else {
+                        self.cloner.clone_program(program).await
+                    };
+                    let completion = if result.is_ok() {
+                        CloneCompletion::Success
+                    } else {
+                        CloneCompletion::Failed
+                    };
+                    self.finish_pending_clone(program_id, completion);
+                    guard.dismiss();
+                    return result;
+                }
+                CloneClaim::Waiter(rx) => match rx.await {
+                    Ok(CloneCompletion::Success) => continue,
+                    Ok(CloneCompletion::Failed) => {
+                        return Err(ClonerError::FailedToCloneProgram(
+                            program_id,
+                            Box::new(ClonerError::CommittorServiceError(
+                                "Clone owner failed".to_string(),
+                            )),
+                        ));
+                    }
+                    Err(_) => {
+                        return Err(ClonerError::FailedToCloneProgram(
+                            program_id,
+                            Box::new(ClonerError::CommittorServiceError(
+                                "Clone owner dropped".to_string(),
+                            )),
+                        ));
+                    }
+                },
+            }
         }
     }
 
