@@ -71,9 +71,11 @@ Public surface from `src/lib.rs`:
 
 Public surface from `src/convert.rs`:
 
-- `convert::generated` includes `OUT_DIR/solana.storage.confirmed_block.rs` generated from `confirmed_block.proto`.
-- `convert::tx_by_addr` includes `OUT_DIR/solana.storage.transaction_by_addr.rs` generated from `transaction_by_addr.proto`.
-- `convert::entries` includes `OUT_DIR/solana.storage.entries.rs` generated from `entries.proto`.
+The generated modules are:
+
+- `convert::generated` for `OUT_DIR/solana.storage.confirmed_block.rs`, generated from `confirmed_block.proto`.
+- `convert::tx_by_addr` for `OUT_DIR/solana.storage.transaction_by_addr.rs`, generated from `transaction_by_addr.proto`.
+- `convert::entries` for `OUT_DIR/solana.storage.entries.rs`, generated from `entries.proto`.
 - `From` conversions cover Solana-to-protobuf paths for rewards, confirmed blocks, transactions, versioned messages, transaction status metadata, token balances, address table lookups, return data, compiled/inner instructions, transaction-by-address entries, and entry summaries.
 - `TryFrom` conversions cover protobuf-to-Solana paths that can fail due to invalid bincode error payloads, invalid signatures/pubkeys/hashes, or unmapped enum values.
 
