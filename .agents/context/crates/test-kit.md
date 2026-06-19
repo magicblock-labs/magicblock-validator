@@ -277,8 +277,8 @@ Validate from the same working directory used by CI/test commands so the relativ
 
 ## Adjacent implementation references
 
-- `.agents/context/crates/magicblock-core.md` — channel and shared-type boundaries used by the harness.
-- `.agents/context/crates/magicblock-magic-program-api.md` and `.agents/context/crates/magicblock-task-scheduler.md` — protocol/task tests that commonly consume `test-kit` helpers.
-- `magicblock-processor/tests/` and `magicblock-aperture/tests/setup.rs` — representative full-harness call sites.
-- `programs/guinea/` and `programs/elfs/guinea.so` — test program source and loaded ELF.
-- `test-integration/**` — integration crates that use logging macros and Solana re-exports.
+- For harness boundaries, see `.agents/context/crates/magicblock-core.md` for channel and shared-type ownership.
+- Protocol/task consumers are covered by `.agents/context/crates/magicblock-magic-program-api.md` and `.agents/context/crates/magicblock-task-scheduler.md`.
+- Representative full-harness call sites live in `magicblock-processor/tests/` and `magicblock-aperture/tests/setup.rs`.
+- Test program artifacts are maintained in `programs/guinea/` and `programs/elfs/guinea.so`.
+- Use `test-integration/**` for integration crates that exercise logging macros and Solana re-exports.
