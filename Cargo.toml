@@ -41,13 +41,13 @@ members = [
 resolver = "2"
 
 [workspace.package]
-# Solana 3.x versions
+# Solana 4.x versions
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 edition = "2021"
 homepage = "https://www.magicblock.xyz"
 license = "Business Source License 1.1"
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
-version = "0.12.3"
+version = "0.13.0"
 
 [workspace.dependencies]
 agave-geyser-plugin-interface = { version = "4.0" }
