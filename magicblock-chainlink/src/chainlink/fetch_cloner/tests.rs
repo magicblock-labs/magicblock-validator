@@ -2641,7 +2641,6 @@ async fn test_batched_wire_failure_fails_keys_without_per_key_retry() {
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
-            None,
             forward_tx,
             &config,
             subscribed_accounts,
