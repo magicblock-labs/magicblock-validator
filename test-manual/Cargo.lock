@@ -584,6 +584,9 @@ name = "bytes"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "caps"
@@ -735,6 +738,16 @@ checksum = "e89f72f65e8501878b8a004d5a1afb780987e2ce2b4532c562e367a72c57499f"
 dependencies = [
  "log",
  "web-sys",
+]
+
+[[package]]
+name = "const-crypto"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c06f1eb05f06cf2e380fdded278fbf056a38974299d77960555a311dcf91a52"
+dependencies = [
+ "keccak-const",
+ "sha2-const-stable",
 ]
 
 [[package]]
@@ -1993,6 +2006,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "keccak-const"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57d8d8ce877200136358e0bbff3a77965875db3af755a11e1fa6b1b3e2df13ea"
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2087,13 +2106,14 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "magicblock-core"
-version = "0.9.0"
+version = "0.12.3"
 dependencies = [
  "bincode",
+ "bytes",
  "flume",
  "magicblock-magic-program-api",
  "serde",
- "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?branch=v3)",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b91ab7dad6642c63b9ea177fb318840b4c64c6cb)",
  "solana-account-decoder",
  "solana-clock 3.0.1",
  "solana-hash 3.1.0",
@@ -2102,9 +2122,9 @@ dependencies = [
  "solana-pubkey 3.0.0",
  "solana-signature 3.4.0",
  "solana-transaction 3.1.0",
- "solana-transaction-context 3.1.12",
+ "solana-transaction-context 3.1.12 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b91ab7dad6642c63b9ea177fb318840b4c64c6cb)",
  "solana-transaction-error 3.2.0",
- "solana-transaction-status-client-types 3.1.13",
+ "solana-transaction-status-client-types 3.1.12",
  "spl-token-2022-interface",
  "spl-token-interface",
  "tokio",
@@ -2115,9 +2135,10 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.9.0"
+version = "0.12.3"
 dependencies = [
  "bincode",
+ "const-crypto",
  "serde",
  "solana-program 3.0.0",
  "solana-signature 3.4.0",
@@ -3508,7 +3529,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "3.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=v3#8d5041eddc6099cfddad8f348f6ff3e82e79e4c4"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b91ab7dad6642c63b9ea177fb318840b4c64c6cb#b91ab7dad6642c63b9ea177fb318840b4c64c6cb"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -3524,9 +3545,9 @@ dependencies = [
 
 [[package]]
 name = "solana-account-decoder"
-version = "3.1.13"
+version = "3.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1ad804381ba905f01c0ddeb9aa6315a625b19f17d1955eec1ff5241f9ce5bae"
+checksum = "8dbde78ccf7c3e14bc5ab230da1dfadfc2dc84b860cd2ffa39d0fd3030f7df4a"
 dependencies = [
  "Inflector",
  "base64 0.22.1",
@@ -3536,7 +3557,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solana-account 3.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "solana-account-decoder-client-types 3.1.13",
+ "solana-account-decoder-client-types 3.1.12",
  "solana-address-lookup-table-interface 3.1.0",
  "solana-clock 3.0.1",
  "solana-config-interface",
@@ -3582,9 +3603,9 @@ dependencies = [
 
 [[package]]
 name = "solana-account-decoder-client-types"
-version = "3.1.13"
+version = "3.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac4f565690f796906454c47edc6e85cc87cb7f07a2ccfed49ccf786e92bfcf5d"
+checksum = "22302265956e8f403cb0721bef0a79137dc1a9a25c95d732d101877629510700"
 dependencies = [
  "base64 0.22.1",
  "bs58",
@@ -6232,12 +6253,12 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "3.1.12"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?branch=v3#8d5041eddc6099cfddad8f348f6ff3e82e79e4c4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "077ee5d6af12af9747cb14255a92ab79e830c5dabf9baaa8f4196299f476dfa0"
 dependencies = [
  "bincode",
- "qualifier_attr",
  "serde",
- "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?branch=v3)",
+ "solana-account 3.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-instruction 3.4.0",
  "solana-instructions-sysvar 3.0.0",
  "solana-pubkey 3.0.0",
@@ -6248,13 +6269,13 @@ dependencies = [
 
 [[package]]
 name = "solana-transaction-context"
-version = "3.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9915ab3612760f71bf66b7100fb27f3f49c81107c6ee286d72633945d56ad059"
+version = "3.1.12"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b91ab7dad6642c63b9ea177fb318840b4c64c6cb#b91ab7dad6642c63b9ea177fb318840b4c64c6cb"
 dependencies = [
  "bincode",
+ "qualifier_attr",
  "serde",
- "solana-account 3.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=b91ab7dad6642c63b9ea177fb318840b4c64c6cb)",
  "solana-instruction 3.4.0",
  "solana-instructions-sysvar 3.0.0",
  "solana-pubkey 3.0.0",
@@ -6329,16 +6350,16 @@ dependencies = [
 
 [[package]]
 name = "solana-transaction-status-client-types"
-version = "3.1.13"
+version = "3.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41f7f59cc02dacf2a775983dd890b5ac1d76260dfb12d2bfe5e0f9e88bdfec3d"
+checksum = "cf6050ff0021c138fd522283a743b8a62e39e9710590c17873ec232054dbc03a"
 dependencies = [
  "base64 0.22.1",
  "bincode",
  "bs58",
  "serde",
  "serde_json",
- "solana-account-decoder-client-types 3.1.13",
+ "solana-account-decoder-client-types 3.1.12",
  "solana-commitment-config 3.1.1",
  "solana-instruction 3.4.0",
  "solana-message 3.1.0",
@@ -6346,7 +6367,7 @@ dependencies = [
  "solana-reward-info 3.0.0",
  "solana-signature 3.4.0",
  "solana-transaction 3.1.0",
- "solana-transaction-context 3.1.13",
+ "solana-transaction-context 3.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-transaction-error 3.2.0",
  "thiserror 2.0.18",
 ]
