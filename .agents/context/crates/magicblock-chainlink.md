@@ -41,14 +41,14 @@ Primary source files:
 | Path | Role |
 |---|---|
 | `magicblock-chainlink/src/lib.rs` | Crate exports. Re-exports Chainlink types and `AccountFetchOrigin`. |
-| `src/chainlink/mod.rs` | Public Chainlink facade, replication-mode wrapper, transaction/account ensure entrypoints, removed-account eviction listener. |
-| `src/chainlink/fetch_cloner/` | Main fetch/clone pipeline, delegation handling, subscription-update processing, ATA/eATA projection, pending operation deduplication. |
-| `src/remote_account_provider/` | RPC/pubsub provider, subscription ownership, LRU capacity, websocket/gRPC clients, program-account resolution. |
-| `src/submux/` | Multiplexes multiple pubsub clients, deduplicates/debounces updates, reconnects clients, fans updates into one stream. |
-| `src/cloner/mod.rs` | `Cloner` trait implemented by `magicblock-account-cloner`; request types passed from Chainlink to the clone executor. |
-| `src/accounts_bank.rs` | Test/mock-oriented `AccountsBank` helpers for this crate. |
-| `src/testing/` | Test support behind `dev-context`. |
-| `tests/` | Integration-style Chainlink tests for account ensure, delegation, redelegation, ordering, and race recovery. |
+| `magicblock-chainlink/src/chainlink/mod.rs` | Public Chainlink facade, replication-mode wrapper, transaction/account ensure entrypoints, removed-account eviction listener. |
+| `magicblock-chainlink/src/chainlink/fetch_cloner/` | Main fetch/clone pipeline, delegation handling, subscription-update processing, ATA/eATA projection, pending operation deduplication. |
+| `magicblock-chainlink/src/remote_account_provider/` | RPC/pubsub provider, subscription ownership, LRU capacity, websocket/gRPC clients, program-account resolution. |
+| `magicblock-chainlink/src/submux/` | Multiplexes multiple pubsub clients, deduplicates/debounces updates, reconnects clients, fans updates into one stream. |
+| `magicblock-chainlink/src/cloner/mod.rs` | `Cloner` trait implemented by `magicblock-account-cloner`; request types passed from Chainlink to the clone executor. |
+| `magicblock-chainlink/src/accounts_bank.rs` | Test/mock-oriented `AccountsBank` helpers for this crate. |
+| `magicblock-chainlink/src/testing/` | Test support behind `dev-context`. |
+| `magicblock-chainlink/tests/` | Integration-style Chainlink tests for account ensure, delegation, redelegation, ordering, and race recovery. |
 
 Main consumers:
 
