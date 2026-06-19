@@ -3,6 +3,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs,
     instruction::{
@@ -150,16 +151,29 @@ impl InstructionUtils {
     // -----------------
     // Accept Scheduled Commits
     // -----------------
-    pub fn accept_scheduled_commits(recent_blockhash: Hash) -> Transaction {
-        let ix = Self::accept_scheduled_commits_instruction();
+    pub fn accept_scheduled_commits(
+        recent_blockhash: Hash,
+        intent_ids: impl IntoIterator<Item = u64>,
+    ) -> Transaction {
+        let ix = Self::accept_scheduled_commits_instruction(intent_ids);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
-    pub(crate) fn accept_scheduled_commits_instruction() -> Instruction {
-        let account_metas = vec![
+    pub(crate) fn accept_scheduled_commits_instruction(
+        intent_ids: impl IntoIterator<Item = u64>,
+    ) -> Instruction {
+        let mut account_metas = vec![
             AccountMeta::new_readonly(validator_authority_id(), true),
             AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
         ];
+
+        // Add outbox intent accounts
+        let outbox_intent_metas = intent_ids
+            .into_iter()
+            .map(|intent_id| outbox_intent_pda(intent_id))
+            .map(|intent_pda| AccountMeta::new(intent_pda, false));
+        account_metas.extend(outbox_intent_metas);
+
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::AcceptScheduleCommits,

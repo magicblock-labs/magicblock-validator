@@ -54,6 +54,7 @@ agave-geyser-plugin-interface = { version = "3.1" }
 agave-precompiles = { version = "=3.1.12" }
 agave-syscalls = { version = "=3.1.12" }
 anyhow = "1.0.86"
+backoff = { version = "0.4", features = ["tokio"] }
 arc-swap = { version = "1.7" }
 assert_matches = "1.5.0"
 async-nats = "0.46"

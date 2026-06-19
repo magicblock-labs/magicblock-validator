@@ -741,12 +741,9 @@ mod tests {
         let intent = create_test_intent(0, &pubkey, false);
 
         let info_fetcher = Arc::new(MockInfoFetcher);
-        let commit_task = TaskBuilderImpl::commit_tasks(
-            &info_fetcher,
-            &intent,
-        )
-        .await
-        .unwrap();
+        let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
         let finalize_task =
             TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
                 .await
@@ -771,12 +768,9 @@ mod tests {
         let intent = create_test_intent(0, &pubkeys, true);
 
         let info_fetcher = Arc::new(MockInfoFetcher);
-        let commit_task = TaskBuilderImpl::commit_tasks(
-            &info_fetcher,
-            &intent,
-        )
-        .await
-        .unwrap();
+        let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
         let finalize_task =
             TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
                 .await
@@ -802,12 +796,9 @@ mod tests {
         let intent = create_test_intent(0, &pubkeys, false);
 
         let info_fetcher = Arc::new(MockInfoFetcher);
-        let commit_task = TaskBuilderImpl::commit_tasks(
-            &info_fetcher,
-            &intent,
-        )
-        .await
-        .unwrap();
+        let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
         let finalize_task =
             TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
                 .await

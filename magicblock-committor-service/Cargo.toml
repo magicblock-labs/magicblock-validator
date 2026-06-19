@@ -12,6 +12,7 @@ doctest = false
 
 [dependencies]
 async-trait = { workspace = true }
+backoff = { workspace = true }
 bincode = { workspace = true }
 borsh = { workspace = true }
 futures-util = { workspace = true }

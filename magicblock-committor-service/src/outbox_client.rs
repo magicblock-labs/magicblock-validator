@@ -1,18 +1,35 @@
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{
+    num::{NonZeroU64, NonZeroUsize},
+    sync::Arc,
+    time::Duration,
+};
 
 use async_trait::async_trait;
+use backoff::{future::retry, ExponentialBackoff};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
-    link::transactions::{with_encoded, TransactionSchedulerHandle},
+    intent::outbox::outbox_intent_pda,
+    link::{
+        accounts::LockedAccount,
+        transactions::{with_encoded, TransactionSchedulerHandle},
+    },
     traits::LatestBlockProvider,
 };
 use magicblock_program::{
     instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    register_scheduled_commit_sent, MagicContext, SentCommit,
-    TransactionScheduler, MAGIC_CONTEXT_PUBKEY,
+    outbox_intent_bundles::OutboxIntentBundle, register_scheduled_commit_sent,
+    MagicContext, Pubkey, SentCommit, TransactionScheduler,
+    MAGIC_CONTEXT_PUBKEY,
 };
-use solana_account::ReadableAccount;
+use solana_account::{Account, ReadableAccount};
+use solana_rpc_client::{
+    nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
+};
+use solana_rpc_client_api::{
+    client_error,
+    client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
+};
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tracing::{debug, error};
@@ -58,6 +75,8 @@ pub trait OutboxClient: Send + Sync + 'static {
 pub struct InternalOutboxClient<L: LatestBlockProvider> {
     /// Provides access to MagicContext
     accounts_db: Arc<AccountsDb>,
+    /// RPC client for sending accept transactions to the ER
+    rpc_client: Arc<RpcClient>,
     /// Internal endpoint for scheduling ER TXs
     transaction_scheduler: TransactionSchedulerHandle,
     /// Provides access to ER latest block for TX creation
@@ -67,33 +86,97 @@ pub struct InternalOutboxClient<L: LatestBlockProvider> {
 impl<L: LatestBlockProvider> InternalOutboxClient<L> {
     pub fn new(
         accounts_db: Arc<AccountsDb>,
+        rpc_client: Arc<RpcClient>,
         transaction_scheduler: TransactionSchedulerHandle,
         latest_block_provider: L,
     ) -> Self {
         Self {
             accounts_db,
+            rpc_client,
             transaction_scheduler,
             latest_block_provider,
         }
     }
 
-    /// Sends transaction to move the scheduled commits from the `MagicContext`
-    /// to the global ScheduledCommit store
-    async fn send_accept_tx(&self) -> Result<(), InternalOutboxClientError> {
-        let tx = InstructionUtils::accept_scheduled_commits(
-            self.latest_block_provider.blockhash(),
-        );
-        let encoded_tx = with_encoded(tx).inspect_err(|err| {
-            error!(error = ?err, "Failed to bincode intent transaction");
-        })?;
-        self.transaction_scheduler
-            .execute(encoded_tx)
-            .await
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to accept scheduled commits");
-            })?;
+    async fn send_with_backoff(
+        &self,
+        backoff_config: ExponentialBackoff,
+        tx: &impl SerializableTransaction,
+    ) -> Result<(), client_error::Error> {
+        let signature = tx.get_signature();
+        retry(backoff_config, || async {
+            self.rpc_client
+                .send_and_confirm_transaction(tx)
+                .await
+                .map_err(|err| {
+                    match err.kind() {
+                        RpcClientErrorKind::TransactionError(_) => {
+                            backoff::Error::Permanent(err)
+                        }
+                        _ => {
+                            error!(signature = ?signature, error = ?err, "Transient error accepting intents, retrying");
+                            backoff::Error::transient(err)
+                        }
+                    }
+                })
+        }).await?;
 
         Ok(())
+    }
+
+    /// Sends `AcceptScheduledCommits` transactions to the ER, moving scheduled
+    /// commits from `MagicContext` into outbox PDA accounts, up to CHUNK_SIZE intents per transaction.
+    /// On first error returns the successfully accepted intents so far alongside the error.
+    async fn send_accept_tx(
+        &self,
+        scheduled_intents: Vec<ScheduledIntentBundle>,
+    ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, InternalOutboxClientError)> {
+        const CHUNK_SIZE: usize = 50;
+
+        let mut remaining = scheduled_intents;
+        let mut accepted = Vec::with_capacity(remaining.len());
+        while !remaining.is_empty() {
+            let chunk_size = CHUNK_SIZE.min(remaining.len());
+            let tx = InstructionUtils::accept_scheduled_commits(
+                self.latest_block_provider.blockhash(),
+                remaining[..chunk_size].iter().map(|i| i.id),
+            );
+            let backoff_config = ExponentialBackoff {
+                max_elapsed_time: Some(Duration::from_secs(25)),
+                max_interval: Duration::from_secs(5),
+                ..ExponentialBackoff::default()
+            };
+            match self.send_with_backoff(backoff_config, &tx).await {
+                Ok(_) => accepted.extend(remaining.drain(..chunk_size)),
+                Err(err) => return Err((accepted, err.into())),
+            }
+        }
+
+        Ok(accepted)
+    }
+
+    /// Returns account corresponding to `pubkey` if it exists
+    /// Safely handles race-conditions and any concurrent changes to an account
+    fn safe_get_account(&self, pubkey: &Pubkey) -> Option<Account> {
+        let shared_account = self.accounts_db.get_account(pubkey)?;
+        let locked_account = LockedAccount::new(*pubkey, shared_account);
+        let output = locked_account
+            .read_locked(|pubkey, account| Account::from(account.clone()));
+
+        Some(output)
+    }
+
+    /// Returns just accepted OutboxIntents
+    fn read_outbox_intent(
+        &self,
+        intent_id: u64,
+    ) -> InternalOutboxClientResult<Option<OutboxIntentBundle>> {
+        let pda = outbox_intent_pda(intent_id);
+        let Some(account) = self.safe_get_account(&pda) else {
+            return Ok(None);
+        };
+
+        todo!()
     }
 }
 
@@ -104,17 +187,16 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
 
     async fn accept_scheduled_intents(
         &self,
-    ) -> Result<Vec<ScheduledIntentBundle>, Self::Error> {
+    ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, Self::Error)> {
         // If accounts were scheduled to be committed, we accept them here
         // and processs the commits
         let magic_context_acc =
-            self.accounts_db.get_account(&MAGIC_CONTEXT_PUBKEY).expect(
+            self.safe_get_account(&MAGIC_CONTEXT_PUBKEY).expect(
                 "Validator found to be running without MagicContext account!",
             );
-        if !MagicContext::has_scheduled_commits(magic_context_acc.data()) {
-            return Ok(vec![]);
-        }
-        self.send_accept_tx().await?;
+
+        let magic_context = MagicContext::deserialize(magic_context_acc.data())?;
+        self.send_accept_tx(magic_context.scheduled_base_intents).await?;
 
         // Return intents from global store
         Ok(TransactionScheduler::default().take_scheduled_intent_bundles())
@@ -164,4 +246,10 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
 pub enum InternalOutboxClientError {
     #[error("TransactionError: {0}")]
     TransactionError(#[from] TransactionError),
+    #[error("RpcClientError: {0}")]
+    RpcClientError(#[from] client_error::Error),
+    #[error("BincodeError: {0}")]
+    BincodeError(#[from] bincode::Error),
 }
+
+pub type InternalOutboxClientResult<T> = Result<T, InternalOutboxClientError>;
