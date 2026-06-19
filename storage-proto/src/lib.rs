@@ -54,6 +54,7 @@ impl From<StoredExtendedReward> for Reward {
             post_balance,
             reward_type,
             commission,
+            commission_bps: None,
         }
     }
 }
@@ -66,6 +67,7 @@ impl From<Reward> for StoredExtendedReward {
             post_balance,
             reward_type,
             commission,
+            commission_bps: _,
         } = value;
         Self {
             pubkey,

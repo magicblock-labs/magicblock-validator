@@ -148,6 +148,7 @@ impl From<generated::Reward> for Reward {
                 _ => None,
             },
             commission: reward.commission.parse::<u8>().ok(),
+            commission_bps: None,
         }
     }
 }
@@ -1359,6 +1360,7 @@ mod test {
             post_balance: 321,
             reward_type: None,
             commission: None,
+            commission_bps: None,
         };
         let gen_reward: generated::Reward = reward.clone().into();
         assert_eq!(reward, gen_reward.into());
