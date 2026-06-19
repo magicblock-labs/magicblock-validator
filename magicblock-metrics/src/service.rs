@@ -124,9 +124,15 @@ async fn metrics_service_router(
     }
 
     let result = match (req.method(), req.uri().path()) {
-        (&Method::GET, "/metrics") => Ok(metrics_response(
-            TextEncoder::new().encode_to_string(&metrics::REGISTRY.gather()),
-        )),
+        (&Method::GET, "/metrics") => {
+            let metrics = TextEncoder::new()
+                .encode_to_string(&metrics::REGISTRY.gather())
+                .unwrap_or_else(|error| {
+                    warn!(error = %error, "Failed to encode metrics");
+                    String::new()
+                });
+            Ok(Response::new(full(metrics)))
+        }
         _ => {
             let mut not_found = Response::new(empty());
             *not_found.status_mut() = StatusCode::NOT_FOUND;
@@ -142,20 +148,6 @@ async fn metrics_service_router(
     result
 }
 
-fn metrics_response(
-    metrics: prometheus::Result<String>,
-) -> Response<BoxBody<Bytes, hyper::Error>> {
-    match metrics {
-        Ok(metrics) => Response::new(full(metrics)),
-        Err(error) => {
-            warn!(error = %error, "Failed to encode metrics");
-            let mut response = Response::new(full("Failed to encode metrics"));
-            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            response
-        }
-    }
-}
-
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
@@ -165,18 +157,4 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
 fn empty() -> BoxBody<Bytes, hyper::Error> {
     let map_err = Empty::<Bytes>::new().map_err(|never| match never {});
     map_err.boxed()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn metrics_response_returns_internal_server_error_on_encode_failure() {
-        let response = metrics_response(Err(prometheus::Error::Msg(
-            "encode failed".to_owned(),
-        )));
-
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    }
 }

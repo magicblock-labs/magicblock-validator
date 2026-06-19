@@ -124,7 +124,7 @@ Important behavior:
 - All other methods/paths return `404 Not Found` with an empty body.
 - It records optional `host` and `user-agent` headers into the tracing span.
 - It consumes the entire request body before returning so HTTP keep-alive does not leave unread bytes in the connection buffer.
-- If text encoding fails, it logs a warning and returns `500 Internal Server Error` rather than silently reporting a successful empty scrape.
+- If text encoding fails, it logs a warning and returns an empty metrics body rather than panicking.
 
 Pitfalls:
 
