@@ -401,6 +401,7 @@ async fn wait_for_pending_clone_waiter_count(
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >,
     >,
     pubkey: Pubkey,
