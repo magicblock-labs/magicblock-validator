@@ -87,7 +87,7 @@ Public surface from `src/lib.rs`:
 
 Key configuration/API contracts:
 
-- `ApertureConfig::listen` binds the HTTP listener. The WebSocket listener uses `listen.port() + 1`; if HTTP port is `0`, WebSocket also binds port `0` and the actual bound ports are available from `JsonRpcServer`.
+- `ApertureConfig::listen` binds the HTTP listener. The WebSocket listener binds to `listen.port() + 1`, except when the configured HTTP port is `0`; in that case both HTTP and WebSocket request OS-assigned ports by binding port `0`. After startup, use `JsonRpcServer::http_addr()` and `JsonRpcServer::ws_addr()` to discover the actual bound ports.
 - `ApertureConfig::event_processors` controls the number of event-processing Tokio tasks.
 - `ApertureConfig::geyser_plugins` is a list of JSON config paths. Each JSON file must contain `libpath` pointing to a shared library exporting `_create_plugin`.
 - `NodeContext` carries validator identity, base fee, feature set, and block time. `SharedState::new` uses block time to compute blockhash validity and initializes transaction/block/subscription caches.
