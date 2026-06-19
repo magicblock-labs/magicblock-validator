@@ -6,8 +6,6 @@ use std::{
 use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
 
-pub(super) type CloneKey = (Pubkey, u64);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CloneCompletion {
     Success,
@@ -24,11 +22,9 @@ pub(super) enum CloneClaim {
 /// leaving waiters hanging forever.
 pub(super) struct PendingCloneGuard {
     pending_clones: Arc<
-        Mutex<
-            hash_map::HashMap<CloneKey, Vec<oneshot::Sender<CloneCompletion>>>,
-        >,
+        Mutex<hash_map::HashMap<Pubkey, Vec<oneshot::Sender<CloneCompletion>>>>,
     >,
-    key: CloneKey,
+    key: Pubkey,
     dismissed: bool,
 }
 
@@ -37,17 +33,16 @@ impl PendingCloneGuard {
         pending_clones: Arc<
             Mutex<
                 hash_map::HashMap<
-                    CloneKey,
+                    Pubkey,
                     Vec<oneshot::Sender<CloneCompletion>>,
                 >,
             >,
         >,
         pubkey: Pubkey,
-        slot: u64,
     ) -> Self {
         Self {
             pending_clones,
-            key: (pubkey, slot),
+            key: pubkey,
             dismissed: false,
         }
     }

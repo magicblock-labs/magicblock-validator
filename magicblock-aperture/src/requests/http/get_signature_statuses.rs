@@ -1,3 +1,4 @@
+use solana_rpc_client_api::request::MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status::{
     TransactionConfirmationStatus, TransactionStatus,
@@ -23,6 +24,11 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         let signatures = parse_params!(request.params()?, Vec<SerdeSignature>);
         let signatures: Vec<_> = some_or_err!(signatures);
+        if signatures.len() > MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS {
+            return Err(RpcError::invalid_params(
+                "too many signatures were requested, max allowed: 256",
+            ));
+        }
         let mut statuses = Vec::with_capacity(signatures.len());
 
         for signature in signatures.into_iter().map(Into::into) {
