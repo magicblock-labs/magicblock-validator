@@ -84,7 +84,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     name: Build SBF Artifacts
     env:
-      SOLANA_VERSION: v3.1.5
+      SOLANA_VERSION: v4.0.3
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -378,7 +378,7 @@ jobs:
     needs: [build_validator, build_sbf, build_integration_tests]
     runs-on: ${{ matrix.runner || 'blacksmith-8vcpu-ubuntu-2404' }}
     env:
-      SOLANA_VERSION: v3.1.5
+      SOLANA_VERSION: v4.0.3
     strategy:
       matrix:
         include:

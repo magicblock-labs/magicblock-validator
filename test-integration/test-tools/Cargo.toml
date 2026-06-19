@@ -21,6 +21,6 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 solana-system-interface = { workspace = true }
-solana-transaction-status = { workspace = true }
+solana-transaction-status-client-types = { workspace = true }
 tempfile = { workspace = true }
 toml = { workspace = true }
