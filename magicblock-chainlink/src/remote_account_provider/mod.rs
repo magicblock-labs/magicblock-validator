@@ -1467,11 +1467,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
-        // 1. First realize subscription
-        if self.capacity_eviction_protection_for(pubkey).ephemeral {
-            trace!(pubkey = %pubkey, "Skipping subscription for ephemeral account");
-            return Ok(());
-        }
         self.pubsub_client.subscribe(*pubkey, None).await?;
 
         // 2. Add to LRU cache
@@ -1696,6 +1691,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(());
         }
         drop(ownership);
+
+        if self.capacity_eviction_protection_for(pubkey).ephemeral {
+            trace!(pubkey = %pubkey, "Skipping subscription for ephemeral account");
+            return Ok(());
+        }
 
         self.register_subscription(pubkey, reason).await?;
 
