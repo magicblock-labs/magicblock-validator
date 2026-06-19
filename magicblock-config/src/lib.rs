@@ -22,8 +22,8 @@ pub mod types;
 use crate::{
     config::{
         AccountsDbConfig, ChainLinkConfig, ChainOperationConfig,
-        CommittorConfig, LedgerConfig, LoadableProgram, TaskSchedulerConfig,
-        ValidatorConfig,
+        CommittorConfig, CompressionConfig, LedgerConfig, LoadableProgram,
+        TaskSchedulerConfig, ValidatorConfig,
     },
     types::Remote,
 };
@@ -67,6 +67,7 @@ pub struct ValidatorParams {
     pub chainlink: ChainLinkConfig,
     pub chain_operation: Option<ChainOperationConfig>,
     pub task_scheduler: TaskSchedulerConfig,
+    pub compression: Option<CompressionConfig>,
     pub programs: Vec<LoadableProgram>,
 }
 

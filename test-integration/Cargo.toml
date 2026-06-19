@@ -19,7 +19,7 @@ members = [
     "test-schedule-intent",
     "test-table-mania",
     "test-task-scheduler",
-    "test-tools"
+    "test-tools",
 ]
 resolver = "2"
 
@@ -35,8 +35,12 @@ borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
 chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
+compressed-delegation-api = { path = "../compressed-delegation-api" }
+compressed-delegation-client = { path = "../compressed-delegation-client" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { version = "0.14", default-features = false, features = ["modular-sdk"] }
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "01abca6e74631a10376c014bcc843ab168a8ba95", features = [
+    "modular-sdk",
+] }
 futures = "0.3.31"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
@@ -46,11 +50,15 @@ light-hasher = "5"
 light-sdk = "0.23"
 light-sdk-types = "0.23"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "6cb903d", default-features = false }
-magicblock-accounts-db = { path = "../magicblock-accounts-db", features = ["dev-tools"] }
+magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [
+    "dev-tools",
+] }
 magicblock-api = { path = "../magicblock-api" }
-magicblock-chainlink = { path = "../magicblock-chainlink", features = ["dev-context"] }
+magicblock-chainlink = { path = "../magicblock-chainlink", features = [
+    "dev-context",
+] }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
-    "no-entrypoint"
+    "no-entrypoint",
 ] }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-config = { path = "../magicblock-config" }

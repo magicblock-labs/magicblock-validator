@@ -10,6 +10,7 @@ use tracing::error;
 #[derive(Clone)]
 pub struct MagicSysAdapter {
     committor_service: Option<Arc<CommittorService>>,
+    is_compression_enabled: bool,
 }
 
 impl MagicSysAdapter {
@@ -24,8 +25,14 @@ impl MagicSysAdapter {
 
     const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-    pub fn new(committor_service: Option<Arc<CommittorService>>) -> Self {
-        Self { committor_service }
+    pub fn new(
+        committor_service: Option<Arc<CommittorService>>,
+        is_compression_enabled: bool,
+    ) -> Self {
+        Self {
+            committor_service,
+            is_compression_enabled,
+        }
     }
 }
 
@@ -33,6 +40,7 @@ impl MagicSys for MagicSysAdapter {
     fn fetch_current_commit_nonces(
         &self,
         commits: &[CommittedAccount],
+        compressed: bool,
     ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
         if commits.is_empty() {
             return Ok(HashMap::new());
@@ -53,8 +61,11 @@ impl MagicSys for MagicSysAdapter {
             commits.iter().map(|account| account.pubkey).collect();
 
         let _timer = metrics::start_fetch_commit_nonces_wait_timer();
-        let receiver = committor_service
-            .fetch_current_commit_nonces_sync(&pubkeys, min_context_slot);
+        let receiver = committor_service.fetch_current_commit_nonces_sync(
+            &pubkeys,
+            compressed,
+            min_context_slot,
+        );
         receiver
             .recv_timeout(Self::FETCH_TIMEOUT)
             .map_err(|err| match err {
@@ -71,5 +82,9 @@ impl MagicSys for MagicSysAdapter {
                 error!(error = ?err, "Failed to fetch current commit nonces")
             })
             .map_err(|_| InstructionError::Custom(Self::FETCH_ERR))
+    }
+
+    fn is_compression_enabled(&self) -> bool {
+        self.is_compression_enabled
     }
 }

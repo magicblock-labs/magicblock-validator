@@ -6,7 +6,12 @@ version.workspace = true
 [dependencies]
 bincode = { workspace = true }
 borsh = { workspace = true }
+compressed-delegation-api = { workspace = true }
+compressed-delegation-client = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
+light-hasher = { workspace = true }
+light-sdk = { workspace = true, features = ["v2"] }
+light-sdk-types = { workspace = true, features = ["v2"] }
 magicblock-magic-program-api = { workspace = true }
 serde = { workspace = true }
 solana-program = { workspace = true }

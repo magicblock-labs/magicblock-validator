@@ -201,6 +201,7 @@ fn test_clone_account_basic() {
         executable: true,
         delegated: true,
         confined: true,
+        compressed: true,
         remote_slot: 42,
     };
     let ix = InstructionUtils::clone_account_instruction(
@@ -224,6 +225,7 @@ fn test_clone_account_basic() {
     assert!(account.executable());
     assert!(account.delegated());
     assert!(account.confined());
+    assert!(account.compressed());
     assert_eq!(account.remote_slot(), 42);
     assert_eq!(account.data(), &[1, 2, 3]);
 }

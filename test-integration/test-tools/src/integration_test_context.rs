@@ -4,6 +4,7 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::{
     nonblocking,
@@ -45,6 +46,7 @@ use crate::{
 const URL_CHAIN: &str = "http://localhost:7799";
 const WS_URL_CHAIN: &str = "ws://localhost:7800";
 const URL_EPHEM: &str = "http://localhost:8899";
+const URL_PHOTON: &str = "http://localhost:8784";
 
 fn async_rpc_client(
     rpc_client: &RpcClient,
@@ -83,6 +85,7 @@ pub struct IntegrationTestContext {
     pub commitment: CommitmentConfig,
     pub chain_client: Option<RpcClient>,
     pub ephem_client: Option<RpcClient>,
+    pub photon_client: Option<PhotonIndexer>,
     pub ephem_validator_identity: Option<Pubkey>,
 }
 
@@ -100,6 +103,7 @@ impl IntegrationTestContext {
             commitment,
             chain_client: None,
             ephem_client: Some(ephem_client),
+            photon_client: None,
             ephem_validator_identity: Some(validator_identity),
         })
     }
@@ -116,6 +120,7 @@ impl IntegrationTestContext {
             commitment,
             chain_client: Some(chain_client),
             ephem_client: None,
+            photon_client: None,
             ephem_validator_identity: None,
         })
     }
@@ -137,12 +142,14 @@ impl IntegrationTestContext {
             Self::url_local_ephem_at_port(port).to_string(),
             commitment,
         );
+        let photon_client = PhotonIndexer::new(Self::url_photon().to_string());
         let validator_identity = ephem_client.get_identity()?;
 
         Ok(Self {
             commitment,
             chain_client: Some(chain_client),
             ephem_client: Some(ephem_client),
+            photon_client: Some(photon_client),
             ephem_validator_identity: Some(validator_identity),
         })
     }
@@ -1370,6 +1377,9 @@ impl IntegrationTestContext {
     }
     pub fn ws_url_chain() -> &'static str {
         WS_URL_CHAIN
+    }
+    pub fn url_photon() -> &'static str {
+        URL_PHOTON
     }
 
     // -----------------

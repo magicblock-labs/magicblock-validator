@@ -34,6 +34,7 @@ magicblock-replicator = { workspace = true }
 magicblock-task-scheduler = { workspace = true }
 magicblock-validator-admin = { workspace = true }
 
+light-client = { workspace = true, features = ["v2"] }
 num_cpus = { workspace = true }
 paste = { workspace = true }
 solana-account = { workspace = true }

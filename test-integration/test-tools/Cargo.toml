@@ -13,8 +13,12 @@ rayon = { workspace = true }
 serde = { workspace = true }
 ureq = { workspace = true }
 url = { workspace = true }
+light-client = { workspace = true, features = ["v2"] }
 magicblock-config = { workspace = true }
-magicblock-delegation-program-api = { workspace = true, features = ["instruction"] }
+magicblock-delegation-program-api = { workspace = true, features = [
+    "instruction",
+] }
+shlex = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }

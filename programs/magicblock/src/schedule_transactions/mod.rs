@@ -126,9 +126,10 @@ pub fn check_magic_context_id(
 
 pub(crate) fn check_commit_limits(
     commits: &[CommittedAccount],
+    compressed: bool,
     invoke_context: &InvokeContext,
 ) -> Result<(), InstructionError> {
-    let mut nonces = fetch_current_commit_nonces(commits)?;
+    let mut nonces = fetch_current_commit_nonces(commits, compressed)?;
     let mut limit_exceeded = false;
     for account in commits {
         let nonce = nonces

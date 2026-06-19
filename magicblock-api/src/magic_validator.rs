@@ -19,8 +19,9 @@ use magicblock_aperture::{
     state::{NodeContext, SharedState},
 };
 use magicblock_chainlink::{
-    config::ChainlinkConfig, remote_account_provider::Endpoints, ProdChainlink,
-    ProdInnerChainlink,
+    config::ChainlinkConfig,
+    remote_account_provider::{Endpoint, Endpoints},
+    ProdChainlink, ProdInnerChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -226,9 +227,14 @@ impl MagicValidator {
             shared_chain_slot.clone(),
         )
         .await?;
+        let is_compression_enabled = config
+            .compression
+            .as_ref()
+            .is_some_and(|compression| compression.photon_url.is_some());
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             committor_service.clone(),
+            is_compression_enabled,
         )));
 
         let step_start = Instant::now();
@@ -472,6 +478,10 @@ impl MagicValidator {
             committor_persist_path,
             ChainConfig {
                 rpc_uri: config.rpc_url().to_owned(),
+                photon_uri: config
+                    .compression
+                    .as_ref()
+                    .and_then(|compression| compression.photon_url.clone()),
                 websocket_uri: config
                     .websocket_urls()
                     .next()
@@ -504,12 +514,23 @@ impl MagicValidator {
             return ChainlinkImpl::disabled().map_err(ApiError::from);
         }
 
-        let endpoints = Endpoints::try_from(config.remotes.as_slice())
+        let mut endpoints = Endpoints::try_from(config.remotes.as_slice())
             .map_err(|e| {
                 ApiError::from(
                     magicblock_chainlink::errors::ChainlinkError::from(e),
                 )
             })?;
+
+        if let Some(photon_url) = config
+            .compression
+            .as_ref()
+            .and_then(|compression| compression.photon_url.clone())
+        {
+            endpoints.push(Endpoint::Compression {
+                label: "photon".to_string(),
+                url: photon_url,
+            });
+        }
 
         let cloner = ChainlinkCloner::new(
             transaction_scheduler.clone(),

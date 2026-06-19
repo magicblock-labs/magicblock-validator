@@ -54,6 +54,7 @@ pub mod config;
 pub mod endpoint;
 pub mod errors;
 mod lru_cache;
+pub mod photon_client;
 pub mod program_account;
 pub mod pubsub_common;
 pub mod pubsub_connection;
@@ -65,13 +66,17 @@ mod subscription_reconciler;
 mod tests;
 
 pub use endpoint::{Endpoint, Endpoints};
-use magicblock_metrics::{
-    metrics,
-    metrics::{
-        inc_account_fetches_failed, inc_account_fetches_found,
-        inc_account_fetches_not_found, inc_account_fetches_success,
-        set_monitored_accounts_count, AccountFetchOrigin,
-    },
+use magicblock_metrics::metrics::{
+    self, inc_account_fetches_failed, inc_account_fetches_found,
+    inc_account_fetches_not_found, inc_account_fetches_success,
+    inc_compressed_account_fetches_found,
+    inc_compressed_account_fetches_not_found,
+    inc_compressed_account_fetches_success, set_monitored_accounts_count,
+    AccountFetchOrigin,
+};
+use remote_account::{
+    is_synthetic_mark_empty_fresh,
+    should_prefer_rpc_over_photon_compressed_shell,
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
@@ -79,13 +84,19 @@ use crate::{
     errors::ChainlinkResult,
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient,
+        photon_client::{PhotonClient, PhotonClientImpl},
         pubsub_common::{SubscriptionSource, SubscriptionUpdate},
+        remote_account::FetchedRemoteAccounts,
     },
     submux::SubMuxClient,
 };
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 pub(crate) const DEFAULT_SUBSCRIPTION_RETRIES: usize = 5;
+
+fn install_default_rustls_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
 
 type ChainUpdatesPubsub = (Arc<ChainUpdatesClient>, mpsc::Receiver<()>);
 
@@ -374,13 +385,19 @@ const RPC_FETCH_MAX_RETRIES: u64 = 3;
 const RPC_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
 const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
-pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
+pub struct RemoteAccountProvider<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    P: PhotonClient,
+> {
     /// The RPC client to fetch accounts from chain the first time we receive
     /// a request for them
     rpc_client: T,
     /// The pubsub client to listen for updates on chain and keep the account
     /// states up to date
     pubsub_client: U,
+    /// The photon client to fetch compressed accounts from
+    photon_client: Option<P>,
     /// Minimal tracking of accounts currently being fetched to handle race conditions
     /// between fetch and subscription updates. Only used during active fetch operations.
     fetching_accounts: Arc<FetchingAccounts>,
@@ -491,7 +508,11 @@ fn match_slots_retry_delay(config: &MatchSlotsConfig) -> Duration {
 }
 
 impl
-    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
+    RemoteAccountProvider<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainUpdatesClient>,
+        PhotonClientImpl,
+    >
 {
     pub async fn try_from_urls_and_config(
         endpoints: &Endpoints,
@@ -504,6 +525,7 @@ impl
             RemoteAccountProvider<
                 ChainRpcClientImpl,
                 SubMuxClient<ChainUpdatesClient>,
+                PhotonClientImpl,
             >,
         >,
     > {
@@ -513,6 +535,7 @@ impl
             let provider = RemoteAccountProvider::<
                 ChainRpcClientImpl,
                 SubMuxClient<ChainUpdatesClient>,
+                PhotonClientImpl,
             >::try_new_from_endpoints(
                 endpoints,
                 commitment,
@@ -528,7 +551,9 @@ impl
     }
 }
 
-impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
+    RemoteAccountProvider<T, U, P>
+{
     fn next_fetching_account_generation(&self) -> FetchingAccountGeneration {
         self.next_fetching_account_generation
             .fetch_add(1, Ordering::Relaxed)
@@ -538,17 +563,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub async fn try_from_clients_and_mode(
         rpc_client: T,
         pubsub_client: U,
+        photon_client: Option<P>,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
         chain_slot: Arc<AtomicU64>,
-    ) -> ChainlinkResult<Option<RemoteAccountProvider<T, U>>> {
+    ) -> ChainlinkResult<Option<RemoteAccountProvider<T, U, P>>> {
         let chain_slot = ChainSlot::new(chain_slot);
         if config.lifecycle_mode().needs_remote_account_provider() {
             Ok(Some(
                 Self::new(
                     rpc_client,
                     pubsub_client,
+                    photon_client,
                     subscription_forwarder,
                     config,
                     lrucache_subscribed_accounts,
@@ -596,11 +623,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub(crate) async fn new(
         rpc_client: T,
         pubsub_client: U,
+        photon_client: Option<P>,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
         chain_slot: ChainSlot,
     ) -> RemoteAccountProviderResult<Self> {
+        install_default_rustls_crypto_provider();
+
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
 
@@ -623,6 +653,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscription_key_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             rpc_client,
             pubsub_client,
+            photon_client,
             chain_slot,
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
@@ -662,8 +693,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         RemoteAccountProvider<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
+            PhotonClientImpl,
         >,
     > {
+        install_default_rustls_crypto_provider();
+
         if endpoints.is_empty() {
             return Err(
                 RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
@@ -680,6 +714,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         })?;
         let rpc_client =
             ChainRpcClientImpl::new_from_url(rpc_url.as_str(), commitment);
+
+        let photon_client =
+            endpoints.photon_url().map(PhotonClientImpl::new_from_url);
 
         // Build startup pubsub clients and wrap them into a SubMuxClient.
         // gRPC clients are cheap to create and backfill subscriptions, so
@@ -701,6 +738,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             deferred_pubsubs,
             commitment,
             rpc_client.clone(),
+            photon_client.clone(),
             chain_slot.clone(),
             subscription_forwarder.clone(),
             config,
@@ -736,6 +774,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     Vec::new(),
                     commitment,
                     rpc_client,
+                    photon_client,
                     chain_slot,
                     subscription_forwarder,
                     config,
@@ -746,11 +785,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn try_new_from_pubsubs(
         startup_pubsubs: Vec<Endpoint>,
         mut deferred_pubsubs: Vec<Endpoint>,
         commitment: CommitmentConfig,
         rpc_client: ChainRpcClientImpl,
+        photon_client: Option<PhotonClientImpl>,
         chain_slot: Arc<AtomicU64>,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
@@ -758,6 +799,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         RemoteAccountProvider<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
+            PhotonClientImpl,
         >,
         Vec<Endpoint>,
     )> {
@@ -822,9 +864,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let provider = RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
+            PhotonClientImpl,
         >::new(
             rpc_client,
             submux,
+            photon_client,
             subscription_forwarder,
             config,
             subscribed_accounts,
@@ -1915,13 +1959,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(())
     }
 
-    /// Tries to fetch the given accounts from RPC.
-    /// NOTE: if we get an RPC error we just log it and give up since there is no
-    ///       obvious way how to handle this even if we were to bubble the error up.
-    /// Any action that depends on those accounts to be there will fail.
-    /// NOTE: this is not used during subscription updates since we receive the data
-    ///       as part of that update, thus we won't have stale data issues.
-    #[allow(clippy::too_many_arguments)]
     fn fetch(
         &self,
         pubkeys: Vec<Pubkey>,
@@ -1931,29 +1968,81 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         fetch_origin: AccountFetchOrigin,
     ) {
         let rpc_client = self.rpc_client.clone();
+        let photon_client = self.photon_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
-        let commitment = self.rpc_client.commitment();
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
         tokio::spawn(async move {
-            use RemoteAccount::*;
-
-            let fetch_started_at = std::time::Instant::now();
-            // Helper to notify all pending requests of fetch failure
-            let notify_error = |error_msg: &str| {
-                let mut fetching = fetching_accounts.lock().unwrap();
-                warn!(
-                    pubkey_count = pubkeys.len(),
-                    pubkeys = %pubkeys_str(&pubkeys),
-                    min_context_slot = min_context_slot,
-                    commitment = ?commitment,
-                    fetch_origin = %fetch_origin,
-                    elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
-                    error = %error_msg,
-                    "{error_msg}"
+            let results = if let Some(photon_client) = photon_client {
+                let (rpc_accounts, photon_accounts) = tokio::join!(
+                    Self::fetch_from_rpc(
+                        rpc_client,
+                        pubkeys.clone(),
+                        &mark_empty_if_not_found,
+                        min_context_slot,
+                        fetch_origin,
+                    ),
+                    Self::fetch_from_photon(
+                        photon_client,
+                        pubkeys.clone(),
+                        &mark_empty_if_not_found,
+                        min_context_slot,
+                    )
                 );
-                inc_account_fetches_failed(pubkeys.len() as u64);
+                trace!(rpc_accounts = ?rpc_accounts, photon_accounts = ?photon_accounts, "Fetched accounts from RPC and Photon");
+                vec![rpc_accounts, photon_accounts]
+            } else {
+                let rpc_accounts = Self::fetch_from_rpc(
+                    rpc_client,
+                    pubkeys.clone(),
+                    &mark_empty_if_not_found,
+                    min_context_slot,
+                    fetch_origin,
+                )
+                .await;
+                trace!(rpc_accounts = ?rpc_accounts, "Fetched accounts from RPC");
+                vec![rpc_accounts]
+            };
 
+            let mut remote_accounts_results = Vec::with_capacity(2);
+            let mut rpc_fetch_success = false;
+            let mut found_cnt = 0;
+            let mut not_found_cnt = 0;
+            let mut compressed_found_count = 0;
+            let mut compressed_not_found_count = 0;
+            let mut fetch_errors = vec![];
+
+            for result in results {
+                match result {
+                    Ok((FetchedRemoteAccounts::Rpc(accs), fc, nfc)) => {
+                        rpc_fetch_success = true;
+                        remote_accounts_results
+                            .push(FetchedRemoteAccounts::Rpc(accs));
+                        found_cnt += fc;
+                        not_found_cnt += nfc;
+                    }
+                    Ok((FetchedRemoteAccounts::Compressed(accs), fc, nfc)) => {
+                        remote_accounts_results
+                            .push(FetchedRemoteAccounts::Compressed(accs));
+                        compressed_found_count += fc;
+                        compressed_not_found_count += nfc;
+                    }
+                    Err(err) => {
+                        inc_account_fetches_failed(pubkeys.len() as u64);
+                        error!("Failed to fetch accounts: {err:?}");
+                        fetch_errors.push(err.to_string());
+                    }
+                }
+            }
+
+            if !fetch_errors.is_empty() {
+                let msg = format!(
+                    "failed to fetch accounts: {}",
+                    fetch_errors.join(", ")
+                );
+                let mut fetching = fetching_accounts
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 for pubkey in &pubkeys {
                     // Update metrics
                     // Remove pending requests and send error
@@ -1967,229 +2056,81 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         {
                             for sender in state.waiters {
                                 let error = RemoteAccountProviderError::AccountResolutionsFailed(
-                                    format!("{}: {}", pubkey, error_msg)
+                                    format!("{}: {}", pubkey, msg)
                                 );
                                 let _ = sender.send(Err(error));
                             }
                         }
                     }
                 }
-            };
-
-            let mut remaining_retries: u64 = RPC_FETCH_MAX_RETRIES;
-
-            if tracing::enabled!(tracing::Level::TRACE) {
-                trace!(pubkeys = pubkeys_str(&pubkeys), "Fetching accounts");
+                return Err(
+                    RemoteAccountProviderError::AccountResolutionsFailed(msg),
+                );
             }
 
-            macro_rules! retry {
-                ($msg:expr) => {{
-                    trace!($msg);
-                    remaining_retries -= 1;
-                    if remaining_retries <= 0 {
-                        let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
-                        notify_error(&err_msg);
-                        return;
-                    }
-                    tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
-                    continue;
-                }};
-            }
-            let response = loop {
-                // We provide the min_context slot in order to _force_ the RPC to update
-                // its account cache. Otherwise we could just keep fetching the accounts
-                // until the context slot is high enough.
-                metrics::inc_remote_account_provider_a_count();
-                match tokio::time::timeout(RPC_FETCH_TIMEOUT, async {
-                    let config = RpcAccountInfoConfig {
-                        commitment: Some(commitment),
-                        min_context_slot: Some(min_context_slot),
-                        encoding: Some(UiAccountEncoding::Base64Zstd),
-                        data_slice: None,
-                    };
+            let remote_accounts = Self::consolidate_fetched_remote_accounts(
+                &pubkeys,
+                remote_accounts_results,
+            );
 
-                    if pubkeys.len() == 1 {
-                        rpc_client
-                            .get_account_with_config(&pubkeys[0], config)
-                            .await
-                            .map(|res| (res.context.slot, vec![res.value]))
-                    } else {
-                        rpc_client
-                            .get_multiple_accounts_with_config(&pubkeys, config)
-                            .await
-                            .map(|res| (res.context.slot, res.value))
-                    }
-                })
-                .await
-                {
-                    Ok(Ok(res)) => {
-                        let (slot, value) = res;
-                        if slot < min_context_slot {
-                            retry!("Response slot {slot} < {min_context_slot}. Retrying...");
-                        } else {
-                            break (slot, value);
-                        }
-                    }
-                    Ok(Err(err)) => match *err.kind {
-                        ErrorKind::RpcError(rpc_err) => {
-                            match rpc_err {
-                                RpcError::ForUser(ref rpc_user_err) => {
-                                    // When an account is not present for the desired
-                                    // min-context slot then we normally get the below
-                                    // handled `RpcResponseError`, but may also get the
-                                    // following error from the RPC.
-                                    // See test::ixtest_existing_account_for_future_slot
-                                    // ```
-                                    // RpcError(
-                                    //   ForUser(
-                                    //       "AccountNotFound: \
-                                    // pubkey=DaeruQ4SukTQaJA5muyv51MQZok7oaCAF8fAW19mbJv5: \
-                                    //        RPC response error -32016: \
-                                    //        Minimum context slot has not been reached; ",
-                                    //   ),
-                                    // )
-                                    // ```
-                                    retry!("Fetching accounts failed: {rpc_user_err:?}");
-                                 }
-                                RpcError::RpcResponseError {
-                                    code,
-                                    message,
-                                    data,
-                                } => {
-                                    if code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED || code == HELIUS_CONTEXT_SLOT_NOT_REACHED {
-                                        retry!("Minimum context slot {min_context_slot} not reached for {commitment:?}. code={code}, message={message}, data={data:?}");
-                                    } else {
-                                        let err = RpcError::RpcResponseError {
-                                            code,
-                                            message,
-                                            data,
-                                        };
-                                        let err_msg = format!(
-                                            "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
-                                        );
-                                        notify_error(&err_msg);
-                                        return;
-                                    }
-                                }
-                                err => {
-                                    let err_msg = format!(
-                                        "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
-                                    );
-                                     notify_error(&err_msg);
-                                     return;
-                                 }
+            if remote_accounts.len() != pubkeys.len() {
+                let msg = format!(
+                    "resolved {} of {} accounts after fetch",
+                    remote_accounts.len(),
+                    pubkeys.len()
+                );
+                let mut fetching = fetching_accounts
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                for pubkey in &pubkeys {
+                    if let Some(generation) = generations.get(pubkey).copied() {
+                        if let Some(state) =
+                            remove_fetching_account_if_generation_matches(
+                                &mut fetching,
+                                pubkey,
+                                generation,
+                            )
+                        {
+                            for request in state.waiters {
+                                let _ = request.send(Err(
+                                                RemoteAccountProviderError::AccountResolutionsFailed(msg.clone())
+                                            ));
                             }
                         }
-                        ErrorKind::Custom(message)
-                            if message
-                                .to_ascii_lowercase()
-                                .contains("minimum context slot") =>
-                        {
-                            retry!(
-                                "Minimum context slot {min_context_slot} not reached for {commitment:?}: {message}"
-                            );
-                        }
-                        _ => {
-                            let err_msg = format!(
-                                "RpcError fetching accounts {}: {err:?}",
-                                pubkeys_str(&pubkeys)
-                            );
-                            notify_error(&err_msg);
-                            return;
-                        }
-                    },
-                    Err(_) => {
-                        let attempt =
-                            RPC_FETCH_MAX_RETRIES - remaining_retries + 1;
-                        warn!(
-                            pubkey_count = pubkeys.len(),
-                            pubkeys = %pubkeys_str(&pubkeys),
-                            attempt = attempt,
-                            max_retries = RPC_FETCH_MAX_RETRIES,
-                            remaining_retries = remaining_retries.saturating_sub(1),
-                            timeout_ms = RPC_FETCH_TIMEOUT.as_millis() as u64,
-                            elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
-                            min_context_slot = min_context_slot,
-                            commitment = ?commitment,
-                            fetch_origin = %fetch_origin,
-                            "RPC call timeout. Retrying..."
-                        );
-                        remaining_retries -= 1;
-                        if remaining_retries == 0 {
-                            let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
-                            notify_error(&err_msg);
-                            return;
-                        }
-                        tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
-                        continue;
                     }
-                };
-            };
-
-            // TODO: should we retry if not or respond with an error?
-            let (response_slot, response_value) = response;
-            assert!(response_slot >= min_context_slot);
-
-            if response_value.len() != pubkeys.len() {
-                let err_msg = format!(
-                    "RPC returned {} account results for {} requested accounts: {}",
-                    response_value.len(),
-                    pubkeys.len(),
-                    pubkeys_str(&pubkeys)
+                }
+                return Err(
+                    RemoteAccountProviderError::AccountResolutionsFailed(msg),
                 );
-                notify_error(&err_msg);
-                return;
             }
 
-            let mut found_count = 0u64;
-            let mut not_found_count = 0u64;
-
-            let remote_accounts: Vec<RemoteAccount> = pubkeys
-                .iter()
-                .zip(response_value)
-                .map(|(pubkey, acc)| match acc {
-                    Some(value) => {
-                        found_count += 1;
-                        RemoteAccount::from_fresh_account(
-                            value,
-                            response_slot,
-                            RemoteAccountUpdateSource::Fetch,
-                        )
-                    }
-                    None if mark_empty_if_not_found.contains(pubkey) => {
-                        not_found_count += 1;
-                        RemoteAccount::from_fresh_account(
-                            Account {
-                                lamports: 0,
-                                data: vec![],
-                                owner: Pubkey::default(),
-                                executable: false,
-                                rent_epoch: 0,
-                            },
-                            response_slot,
-                            RemoteAccountUpdateSource::Fetch,
-                        )
-                    }
-                    None => {
-                        not_found_count += 1;
-                        NotFound(response_slot)
-                    }
-                })
-                .collect();
-
             // Update metrics for successful RPC fetch
-            inc_account_fetches_success(pubkeys.len() as u64);
-            inc_account_fetches_found(fetch_origin, found_count);
-            inc_account_fetches_not_found(fetch_origin, not_found_count);
+            if rpc_fetch_success {
+                inc_account_fetches_success(pubkeys.len() as u64);
+                inc_account_fetches_found(fetch_origin, found_cnt);
+                inc_account_fetches_not_found(fetch_origin, not_found_cnt);
+            }
+
+            let compressed_total =
+                compressed_found_count + compressed_not_found_count;
+            if compressed_total > 0 {
+                // Update metrics for successful compressed fetch
+                inc_compressed_account_fetches_success(pubkeys.len() as u64);
+                inc_compressed_account_fetches_found(
+                    fetch_origin,
+                    compressed_found_count,
+                );
+                inc_compressed_account_fetches_not_found(
+                    fetch_origin,
+                    compressed_not_found_count,
+                );
+            }
 
             if tracing::enabled!(tracing::Level::TRACE) {
-                let pubkeys = pubkeys
-                    .iter()
-                    .map(|pk| pk.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 trace!(
-                    pubkeys = %pubkeys, remote_accounts = ?remote_accounts, "Fetched, notifying pending requests"
+                    pubkeys = pubkeys_str(&pubkeys),
+                    remote_accounts = %format!("{:?}", remote_accounts),
+                    "Fetched accounts, notifying pending requests",
                 );
             }
 
@@ -2218,7 +2159,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         // Account was already resolved or replaced, skip.
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
-                                "Account {pubkey} generation {generation} was already resolved or replaced"
+                                pubkey = %pubkey,
+                                generation = generation,
+                                "Account was already resolved or replaced"
                             );
                         }
                         continue;
@@ -2230,7 +2173,421 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     let _ = request.send(Ok(remote_account.clone()));
                 }
             }
+            Ok::<(), RemoteAccountProviderError>(())
         });
+    }
+
+    /// Tries to fetch the given accounts from RPC.
+    /// NOTE: if we get an RPC error we just log it and give up since there is no
+    ///       obvious way how to handle this even if we were to bubble the error up.
+    /// Any action that depends on those accounts to be there will fail.
+    /// NOTE: this is not used during subscription updates since we receive the data
+    ///       as part of that update, thus we won't have stale data issues.
+    async fn fetch_from_rpc(
+        rpc_client: T,
+        pubkeys: Vec<Pubkey>,
+        mark_empty_if_not_found: &[Pubkey],
+        min_context_slot: u64,
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<(FetchedRemoteAccounts, u64, u64)> {
+        let fetch_started_at = std::time::Instant::now();
+        let commitment = rpc_client.commitment();
+        let mut remaining_retries: u64 = RPC_FETCH_MAX_RETRIES;
+
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!(pubkeys = pubkeys_str(&pubkeys), "Fetching accounts");
+        }
+
+        macro_rules! retry {
+                ($msg:expr) => {{
+                    trace!($msg);
+                    remaining_retries -= 1;
+                    if remaining_retries <= 0 {
+                        let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
+                        return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                            err_msg
+                        ).into());
+                    }
+                    tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
+                    continue;
+                }};
+            }
+        let response = loop {
+            // We provide the min_context slot in order to _force_ the RPC to update
+            // its account cache. Otherwise we could just keep fetching the accounts
+            // until the context slot is high enough.
+            metrics::inc_remote_account_provider_a_count();
+            match tokio::time::timeout(RPC_FETCH_TIMEOUT, async {
+                let config = RpcAccountInfoConfig {
+                    commitment: Some(commitment),
+                    min_context_slot: Some(min_context_slot),
+                    encoding: Some(UiAccountEncoding::Base64Zstd),
+                    data_slice: None,
+                };
+
+                if pubkeys.len() == 1 {
+                    rpc_client
+                        .get_account_with_config(&pubkeys[0], config)
+                        .await
+                        .map(|res| (res.context.slot, vec![res.value]))
+                } else {
+                    rpc_client
+                        .get_multiple_accounts_with_config(&pubkeys, config)
+                        .await
+                        .map(|res| (res.context.slot, res.value))
+                }
+            })
+            .await
+            {
+                Ok(Ok(res)) => {
+                    let (slot, value) = res;
+                    if slot < min_context_slot {
+                        retry!("Response slot {slot} < {min_context_slot}. Retrying...");
+                    } else {
+                        break (slot, value);
+                    }
+                }
+                Ok(Err(err)) => match *err.kind {
+                    ErrorKind::RpcError(rpc_err) => {
+                        match rpc_err {
+                                RpcError::ForUser(ref rpc_user_err) => {
+                                    // When an account is not present for the desired
+                                    // min-context slot then we normally get the below
+                                    // handled `RpcResponseError`, but may also get the
+                                    // following error from the RPC.
+                                    // See test::ixtest_existing_account_for_future_slot
+                                    // ```
+                                    // RpcError(
+                                    //   ForUser(
+                                    //       "AccountNotFound: \
+                                    // pubkey=DaeruQ4SukTQaJA5muyv51MQZok7oaCAF8fAW19mbJv5: \
+                                    //        RPC response error -32016: \
+                                    //        Minimum context slot has not been reached; ",
+                                    //   ),
+                                    // )
+                                    // ```
+                                    retry!("Fetching accounts failed: {rpc_user_err:?}");
+                                }
+                                RpcError::RpcResponseError {
+                                    code,
+                                    message,
+                                    data,
+                                } => {
+                                    if code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED || code == HELIUS_CONTEXT_SLOT_NOT_REACHED {
+                                        retry!("Minimum context slot {min_context_slot} not reached for {commitment:?}. code={code}, message={message}, data={data:?}");
+                                    } else {
+                                        let err = RpcError::RpcResponseError {
+                                            code,
+                                            message,
+                                            data,
+                                        };
+                                        let err_msg = format!(
+                                            "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
+                                        );
+                                        return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                                            err_msg
+                                        ).into());
+                                    }
+                                }
+                                err => {
+                                    let err_msg = format!(
+                                        "RpcError fetching accounts {}: {err:?}", pubkeys_str(&pubkeys)
+                                    );
+                                     return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                                        err_msg
+                                    ).into());
+                                 }
+                            }
+                    }
+                    ErrorKind::Custom(message)
+                        if message
+                            .to_ascii_lowercase()
+                            .contains("minimum context slot") =>
+                    {
+                        retry!(
+                                "Minimum context slot {min_context_slot} not reached for {commitment:?}: {message}"
+                            );
+                    }
+                    _ => {
+                        let err_msg = format!(
+                            "RpcError fetching accounts {}: {err:?}",
+                            pubkeys_str(&pubkeys)
+                        );
+                        return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                            err_msg
+                        ).into());
+                    }
+                },
+                Err(_) => {
+                    let attempt = RPC_FETCH_MAX_RETRIES - remaining_retries + 1;
+                    warn!(
+                        pubkey_count = pubkeys.len(),
+                        pubkeys = %pubkeys_str(&pubkeys),
+                        attempt = attempt,
+                        max_retries = RPC_FETCH_MAX_RETRIES,
+                        remaining_retries = remaining_retries.saturating_sub(1),
+                        timeout_ms = RPC_FETCH_TIMEOUT.as_millis() as u64,
+                        elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
+                        min_context_slot = min_context_slot,
+                        commitment = ?commitment,
+                        fetch_origin = %fetch_origin,
+                        "RPC call timeout. Retrying..."
+                    );
+                    remaining_retries -= 1;
+                    if remaining_retries == 0 {
+                        let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
+                        return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                            err_msg
+                        ).into());
+                    }
+                    tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
+                    continue;
+                }
+            };
+        };
+
+        // TODO: should we retry if not or respond with an error?
+        let (response_slot, response_value) = response;
+        assert!(response_slot >= min_context_slot);
+
+        if response_value.len() != pubkeys.len() {
+            let err_msg = format!(
+                "RPC returned {} account results for {} requested accounts: {}",
+                response_value.len(),
+                pubkeys.len(),
+                pubkeys_str(&pubkeys)
+            );
+            return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                err_msg,
+            )
+            .into());
+        }
+
+        let mut found_count = 0u64;
+        let mut not_found_count = 0u64;
+
+        let remote_accounts: Vec<RemoteAccount> = pubkeys
+            .iter()
+            .zip(response_value)
+            .map(|(pubkey, acc)| match acc {
+                Some(value) => {
+                    found_count += 1;
+                    RemoteAccount::from_fresh_account(
+                        value,
+                        response_slot,
+                        RemoteAccountUpdateSource::Fetch,
+                    )
+                }
+                None if mark_empty_if_not_found.contains(pubkey) => {
+                    not_found_count += 1;
+                    RemoteAccount::from_fresh_account(
+                        Account {
+                            lamports: 0,
+                            data: vec![],
+                            owner: Pubkey::default(),
+                            executable: false,
+                            rent_epoch: 0,
+                        },
+                        response_slot,
+                        RemoteAccountUpdateSource::Fetch,
+                    )
+                }
+                None => {
+                    not_found_count += 1;
+                    RemoteAccount::NotFound(response_slot)
+                }
+            })
+            .collect();
+
+        Ok((
+            FetchedRemoteAccounts::Rpc(remote_accounts),
+            found_count,
+            not_found_count,
+        ))
+    }
+
+    async fn fetch_from_photon(
+        photon_client: P,
+        pubkeys: Vec<Pubkey>,
+        mark_empty_if_not_found: &[Pubkey],
+        min_context_slot: u64,
+    ) -> ChainlinkResult<(FetchedRemoteAccounts, u64, u64)> {
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!(
+                pubkeys = pubkeys_str(&pubkeys),
+                "Fetching accounts from photon"
+            );
+        }
+
+        // The photon client already handles the retry logic
+        let response = if pubkeys.len() == 1 {
+            match photon_client
+                .get_account(&pubkeys[0], Some(min_context_slot))
+                .await?
+            {
+                Some((acc, slot)) => (slot, vec![Some(acc)]),
+                None => (min_context_slot, vec![None]),
+            }
+        } else {
+            photon_client
+                .get_multiple_accounts(&pubkeys, Some(min_context_slot))
+                .await
+                .map(|(accs, slot)| (slot, accs))?
+        };
+
+        // TODO: should we retry if not or respond with an error?
+        let (response_slot, response_value) = response;
+        assert!(response_slot >= min_context_slot);
+
+        let mut found_count = 0u64;
+        let mut not_found_count = 0u64;
+
+        let remote_accounts: Vec<RemoteAccount> = pubkeys
+            .iter()
+            .zip(response_value)
+            .map(|(pubkey, acc)| match acc {
+                Some(value) => {
+                    found_count += 1;
+                    RemoteAccount::from_fresh_account(
+                        value,
+                        response_slot,
+                        RemoteAccountUpdateSource::Compressed,
+                    )
+                }
+                None if mark_empty_if_not_found.contains(pubkey) => {
+                    not_found_count += 1;
+                    RemoteAccount::from_fresh_account(
+                        Account {
+                            lamports: 0,
+                            data: vec![],
+                            owner: Pubkey::default(),
+                            executable: false,
+                            rent_epoch: 0,
+                        },
+                        response_slot,
+                        RemoteAccountUpdateSource::Compressed,
+                    )
+                }
+                None => {
+                    not_found_count += 1;
+                    RemoteAccount::NotFound(response_slot)
+                }
+            })
+            .collect();
+
+        Ok((
+            FetchedRemoteAccounts::Compressed(remote_accounts),
+            found_count,
+            not_found_count,
+        ))
+    }
+
+    fn consolidate_fetched_remote_accounts(
+        pubkeys: &[Pubkey],
+        remote_accounts_results: Vec<FetchedRemoteAccounts>,
+    ) -> Vec<RemoteAccount> {
+        const STALE_SLOT_THRESHOLD: u64 = 100;
+        let (rpc_accounts, compressed_accounts) = {
+            if remote_accounts_results.is_empty() {
+                return vec![];
+            }
+            if remote_accounts_results.len() == 1 {
+                match &remote_accounts_results[0] {
+                    FetchedRemoteAccounts::Rpc(rpc_accounts) => {
+                        return rpc_accounts.clone();
+                    }
+                    FetchedRemoteAccounts::Compressed(compressed_accounts) => {
+                        return compressed_accounts.clone();
+                    }
+                }
+            }
+            if remote_accounts_results.len() == 2 {
+                let mut rpc_accounts = None;
+                let mut compressed_accounts = None;
+                for res in remote_accounts_results {
+                    match res {
+                        FetchedRemoteAccounts::Rpc(rpc_accs) => {
+                            rpc_accounts.replace(rpc_accs);
+                        }
+                        FetchedRemoteAccounts::Compressed(comp_accs) => {
+                            compressed_accounts.replace(comp_accs);
+                        }
+                    }
+                }
+                (rpc_accounts.unwrap_or_default(), compressed_accounts)
+            } else {
+                error!("BUG: More than 2 fetch results found");
+                return vec![];
+            }
+        };
+
+        debug_assert_eq!(rpc_accounts.len(), pubkeys.len());
+        debug_assert!(compressed_accounts
+            .as_ref()
+            .is_none_or(|comp_accs| comp_accs.len() == pubkeys.len()));
+
+        let all_lens_match = pubkeys.len() == rpc_accounts.len()
+            && pubkeys.len()
+                == compressed_accounts
+                    .as_ref()
+                    .map_or(rpc_accounts.len(), |comp_accs| comp_accs.len());
+        if !all_lens_match {
+            error!("BUG: Fetched accounts length mismatch: pubkeys {}, rpc {}, compressed {:?}",
+                    pubkeys.len(), rpc_accounts.len(),
+                    compressed_accounts.as_ref().map(|c| c.len()));
+            return rpc_accounts;
+        }
+
+        use RemoteAccount::*;
+        match compressed_accounts {
+                Some(compressed_accounts) =>
+                    pubkeys.iter().zip(
+                        rpc_accounts
+                            .into_iter()
+                            .zip(compressed_accounts))
+                            .map(|(pubkey, (rpc_acc, comp_acc))| match (rpc_acc, comp_acc) {
+                                (Found(rpc_state), Found(comp_state)) => {
+                                    if is_synthetic_mark_empty_fresh(&rpc_state.account)
+                                        && is_synthetic_mark_empty_fresh(
+                                            &comp_state.account,
+                                        )
+                                    {
+                                        // Both sides materialized the same not-found +
+                                        // `mark_empty_if_not_found` placeholder. Prefer
+                                        // the RPC `Fresh` (not marked compressed) so
+                                        // classification and cloning do not run empty
+                                        // data through the compressed delegation path.
+                                        Found(rpc_state)
+                                    } else if should_prefer_rpc_over_photon_compressed_shell(
+                                        &rpc_state,
+                                        &comp_state,
+                                    ) {
+                                        trace!(
+                                            pubkey = %pubkey,
+                                            "Photon compressed account has no payload; using RPC ledger account"
+                                        );
+                                        Found(rpc_state)
+                                    } else {
+                                        debug!("Both RPC and Compressed account found for pubkey {}. Using Compressed account.", pubkey);
+                                        if rpc_state.account.slot() > comp_state.account.slot() + STALE_SLOT_THRESHOLD {
+                                            warn!("Compressed account is stale. rpc_slot={}, comp_slot={}", rpc_state.account.slot(), comp_state.account.slot());
+                                        }
+                                        Found(comp_state)
+                                    }
+                                }
+                                (Found(rpc_state), NotFound(_)) => Found(rpc_state),
+                                (NotFound(_), Found(comp_state)) => Found(comp_state),
+                                (NotFound(rpc_slot), NotFound(comp_slot)) => {
+                                    if rpc_slot >= comp_slot {
+                                        NotFound(rpc_slot)
+                                    } else {
+                                        NotFound(comp_slot)
+                                    }
+                                }
+                            })
+                            .collect(),
+                None => rpc_accounts,
+            }
     }
 }
 
@@ -2247,7 +2604,13 @@ fn remove_fetching_account_if_generation_matches(
     }
 }
 
-impl RemoteAccountProvider<ChainRpcClientImpl, ChainPubsubClientImpl> {
+impl
+    RemoteAccountProvider<
+        ChainRpcClientImpl,
+        ChainPubsubClientImpl,
+        PhotonClientImpl,
+    >
+{
     #[cfg(any(test, feature = "dev-context"))]
     pub fn rpc_client(&self) -> &RpcClient {
         &self.rpc_client.rpc_client
@@ -2258,6 +2621,7 @@ impl
     RemoteAccountProvider<
         ChainRpcClientImpl,
         SubMuxClient<ChainPubsubClientImpl>,
+        PhotonClientImpl,
     >
 {
     #[cfg(any(test, feature = "dev-context"))]
@@ -2267,7 +2631,11 @@ impl
 }
 
 impl
-    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
+    RemoteAccountProvider<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainUpdatesClient>,
+        PhotonClientImpl,
+    >
 {
     #[cfg(any(test, feature = "dev-context"))]
     pub fn rpc_client(&self) -> &RpcClient {

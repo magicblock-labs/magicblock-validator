@@ -6,7 +6,9 @@ version.workspace = true
 [dependencies]
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
-magicblock-delegation-program-api = { workspace = true, features = ["instruction"] }
+magicblock-delegation-program-api = { workspace = true, features = [
+    "instruction",
+] }
 magicblock-magic-program-api = { workspace = true }
 rkyv = { workspace = true }
 solana-program = { workspace = true }

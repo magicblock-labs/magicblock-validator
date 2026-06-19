@@ -15,6 +15,7 @@ macro_rules! debug_panic {
     )
 }
 
+pub mod compression;
 pub mod coordination_mode;
 pub mod intent;
 pub mod link;
