@@ -275,7 +275,7 @@ pub struct BaseLayerBlockhash {
 impl BaseLayerBlockhash {
     /// Lock-free read of the cached blockhash, if the refresher has
     /// populated it at least once and it hasn't been invalidated.
-    pub fn get(&self) -> Option<CachedBlockhash> {
+    fn get(&self) -> Option<CachedBlockhash> {
         self.inner.load().as_deref().copied()
     }
 
