@@ -1,17 +1,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use light_sdk::{LightDiscriminator, LightHasher};
 use solana_program::pubkey::Pubkey;
 
-#[derive(
-    BorshSerialize,
-    BorshDeserialize,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    LightDiscriminator,
-    LightHasher,
-)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct FlexiCounter {
     pub count: u64,
     pub updates: u64,

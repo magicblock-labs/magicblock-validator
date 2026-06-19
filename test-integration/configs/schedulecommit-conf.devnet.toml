@@ -48,16 +48,5 @@ path = "../target/deploy/program_schedulecommit.so"
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
 path = "../target/deploy/program_schedulecommit_security.so"
 
-[[programs]]
-id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
-path = "../target/deploy/program_flexi_counter.so"
-
-[[programs]]
-id = "DEL2rPzhFaS5qzo8XY9ZNxSzuunWueySq3p2dxJfwPbT"
-path = "../programs/compressed_delegation/compressed_delegation.so"
-
-[compression]
-photon-url = "http://localhost:8784"
-
 [metrics]
 address = "0.0.0.0:9000"

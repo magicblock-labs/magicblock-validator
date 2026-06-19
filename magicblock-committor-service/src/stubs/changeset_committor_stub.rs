@@ -195,7 +195,6 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
     fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
-        _compressed: bool,
         _min_context_slot: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>> {
         let (tx, rx) = oneshot::channel();
