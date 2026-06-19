@@ -114,7 +114,7 @@ Common methods:
 - `Send` submits and returns a `MagicBlockSendTransactionOutcome` without status checks;
 - `SendAndConfirm` waits for processed status and optionally for the client's configured commitment level;
 - `ensure_sent()` returns `Send`;
-- `ensure_processed()` waits for processed status, with a 2s blockhash-valid wait hint and a 50s processed timeout;
+- `ensure_processed()` waits up to 50s for processed status;
 - `ensure_committed()` waits for processed status and then up to 8s for the client's commitment level;
 - `ensures_committed()` reports whether a config includes the commitment-level wait.
 
@@ -218,7 +218,7 @@ Avoid holding the `PollState` mutex across RPC calls. The current implementation
 
 ### Blockhash validity and retries
 
-`wait_for_processed_status` currently accepts a `_blockhash_valid_timeout` parameter but does not actively wait for blockhash validity through that value. It relies on `SignatureConfirmer` timeout behavior plus cached blockhash metadata for better error text. Do not assume the parameter enforces a separate blockhash-valid wait without changing the implementation and tests.
+`wait_for_processed_status` does not perform a separate blockhash-validity wait. It relies on `SignatureConfirmer` timeout behavior plus cached blockhash metadata for better error text. Do not add blockhash-validity waiting without preserving confirmation coalescing, avoiding mutexes across network calls, and updating tests.
 
 ### Account batching concurrency
 

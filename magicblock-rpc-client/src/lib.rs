@@ -123,12 +123,8 @@ pub enum MagicBlockSendTransactionConfig {
     Send,
     /// Send a transaction and confirm it with the given parameters.
     SendAndConfirm {
-        /// If provided we will wait for the given blockhash to become valid if
-        /// getting the signature status fails due to `BlockhashNotFound`.
-        wait_for_blockhash_to_become_valid: Option<Duration>,
-        /// If provided we will try multiple time so find the signature status
-        /// of the transaction at the 'processed' level even if the recent blockhash
-        /// already became valid.
+        /// If provided we will try multiple times to find the signature status
+        /// of the transaction at the 'processed' level.
         wait_for_processed_level: Option<Duration>,
         /// How long to wait in between checks for processed commitment level.
         check_for_processed_interval: Option<Duration>,
@@ -156,9 +152,6 @@ impl MagicBlockSendTransactionConfig {
 
     pub fn ensure_processed() -> Self {
         Self::SendAndConfirm {
-            wait_for_blockhash_to_become_valid: Some(Duration::from_millis(
-                2_000,
-            )),
             wait_for_processed_level: Some(DEFAULT_MAX_TIME_TO_PROCESSED),
             check_for_processed_interval: Some(Duration::from_millis(400)),
             wait_for_commitment_level: None,
@@ -168,9 +161,6 @@ impl MagicBlockSendTransactionConfig {
 
     pub fn ensure_committed() -> Self {
         Self::SendAndConfirm {
-            wait_for_blockhash_to_become_valid: Some(Duration::from_millis(
-                2_000,
-            )),
             wait_for_processed_level: Some(DEFAULT_MAX_TIME_TO_PROCESSED),
             check_for_processed_interval: Some(Duration::from_millis(400)),
             // NOTE: that this time is after we already verified that the transaction was
@@ -656,7 +646,6 @@ impl MagicblockRpcClient {
         let MagicBlockSendTransactionConfig::SendAndConfirm {
             wait_for_processed_level,
             check_for_processed_interval,
-            wait_for_blockhash_to_become_valid,
             wait_for_commitment_level,
             check_for_commitment_interval,
         } = config
@@ -679,7 +668,6 @@ impl MagicblockRpcClient {
                 tx.get_recent_blockhash(),
                 wait_for_processed_level,
                 check_for_processed_interval,
-                wait_for_blockhash_to_become_valid,
             )
             .await?;
 
@@ -727,7 +715,6 @@ impl MagicblockRpcClient {
         recent_blockhash: &Hash,
         timeout: Duration,
         check_interval: Duration,
-        _blockhash_valid_timeout: &Option<Duration>,
     ) -> MagicBlockRpcClientResult<TransactionResult<()>> {
         if let Some(status) = Box::pin(self.confirmer.wait_for_status(
             signature,
