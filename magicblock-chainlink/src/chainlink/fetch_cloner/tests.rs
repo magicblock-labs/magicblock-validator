@@ -374,6 +374,32 @@ async fn wait_for_pending_waiter_count(
     );
 }
 
+async fn wait_for_pending_clone_waiter_count(
+    fetch_cloner: &Arc<
+        FetchCloner<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            AccountsBankStub,
+            ClonerStub,
+        >,
+    >,
+    pubkey: Pubkey,
+    expected: usize,
+) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    while fetch_cloner.pending_clone_waiter_count(&pubkey) != Some(expected)
+        && start.elapsed() < timeout
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        fetch_cloner.pending_clone_waiter_count(&pubkey),
+        Some(expected),
+        "pending clone waiter count for {pubkey} should be {expected}"
+    );
+}
+
 async fn wait_for_rpc_fetch_activity(
     rpc_client: &ChainRpcClientMock,
     expected_minimum: u64,
@@ -2739,7 +2765,7 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
         validator_keypair.insecure_clone(),
     )
     .await;
-    cloner.set_program_clone_delay(Duration::from_millis(200));
+    cloner.block_clone_completion();
 
     let program = loaded_test_program(program_id, CURRENT_SLOT, vec![1, 2, 3]);
     let first_task = {
@@ -2757,6 +2783,8 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
             fetch_cloner.clone_program_with_ownership(program).await
         })
     };
+    wait_for_pending_clone_waiter_count(&fetch_cloner, program_id, 1).await;
+    cloner.allow_clone_completion();
 
     first_task.await.unwrap().unwrap();
     second_task.await.unwrap().unwrap();
@@ -2799,7 +2827,7 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
         validator_keypair.insecure_clone(),
     )
     .await;
-    cloner.set_program_clone_delay(Duration::from_millis(200));
+    cloner.block_clone_completion();
 
     let old_program = loaded_test_program(program_id, OLD_SLOT, vec![1, 2, 3]);
     let new_program = loaded_test_program(program_id, NEW_SLOT, vec![4, 5, 6]);
@@ -2818,6 +2846,8 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
             fetch_cloner.clone_program_with_ownership(new_program).await
         })
     };
+    wait_for_pending_clone_waiter_count(&fetch_cloner, program_id, 1).await;
+    cloner.allow_clone_completion();
 
     old_task.await.unwrap().unwrap();
     new_task.await.unwrap().unwrap();
@@ -5593,10 +5623,8 @@ async fn test_fetch_subscription_race_duplicate_clone() {
     )
     .await;
 
-    // Clone delay ensures both paths enter clone_account_with_ownership
-    // before the owner finishes, so the second caller becomes a waiter.
     let cloner_stub = Arc::new(ClonerStub::new(accounts_bank.clone()));
-    cloner_stub.set_clone_delay(std::time::Duration::from_millis(200));
+    cloner_stub.block_clone_completion();
 
     let (subscription_tx, subscription_rx) = mpsc::channel(100);
     let fetch_cloner = FetchCloner::new(
@@ -5646,6 +5674,8 @@ async fn test_fetch_subscription_race_duplicate_clone() {
             .await
         })
     };
+    wait_for_pending_clone_waiter_count(&fetch_cloner, account_pubkey, 1).await;
+    cloner_stub.allow_clone_completion();
 
     let fetch_result = fetch_task.await.unwrap();
     assert!(
@@ -5725,7 +5755,7 @@ async fn test_newer_account_clone_waits_then_replaces_older_slot() {
     .await;
 
     let cloner_stub = Arc::new(ClonerStub::new(accounts_bank.clone()));
-    cloner_stub.set_clone_delay(Duration::from_millis(300));
+    cloner_stub.block_clone_completion();
 
     let (subscription_tx, subscription_rx) = mpsc::channel(100);
     let fetch_cloner = FetchCloner::new(
@@ -5776,6 +5806,8 @@ async fn test_newer_account_clone_waits_then_replaces_older_slot() {
                 .await
         })
     };
+    wait_for_pending_clone_waiter_count(&fetch_cloner, account_pubkey, 1).await;
+    cloner_stub.allow_clone_completion();
 
     let newer_result = newer_task.await.unwrap();
     assert!(

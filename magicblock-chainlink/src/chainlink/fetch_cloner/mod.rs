@@ -298,6 +298,17 @@ where
             .read(pubkey, |_, state| state.waiters.len())
     }
 
+    /// Returns the number of waiters currently joined to the low-level
+    /// clone operation keyed by `pubkey`, or `None` if no clone is pending.
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn pending_clone_waiter_count(&self, pubkey: &Pubkey) -> Option<usize> {
+        let map = self
+            .pending_clones
+            .lock()
+            .expect("pending_clones mutex poisoned");
+        map.get(pubkey).map(Vec::len)
+    }
+
     /// Cancels the in-flight fetch+clone owner for `pubkey`, if one exists.
     pub fn cancel_pending(&self, pubkey: &Pubkey) {
         self.pending_requests

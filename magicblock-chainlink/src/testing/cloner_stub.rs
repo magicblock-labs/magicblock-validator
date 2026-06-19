@@ -164,6 +164,16 @@ impl ClonerStub {
     pub fn clone_request_count(&self) -> usize {
         self.clone_requests.lock().unwrap().len()
     }
+
+    async fn wait_for_clone_completion_allowed(&self) {
+        loop {
+            let notified = self.clone_completion_notify.notified();
+            if !self.block_clone_completion.load(Ordering::SeqCst) {
+                break;
+            }
+            notified.await;
+        }
+    }
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -200,13 +210,7 @@ impl Cloner for ClonerStub {
                 );
             }
         }
-        loop {
-            let notified = self.clone_completion_notify.notified();
-            if !self.block_clone_completion.load(Ordering::SeqCst) {
-                break;
-            }
-            notified.await;
-        }
+        self.wait_for_clone_completion_allowed().await;
         self.accounts_bank.insert(request.pubkey, request.account);
         self.active_account_clones.fetch_sub(1, Ordering::SeqCst);
         Ok(Signature::default())
@@ -239,6 +243,7 @@ impl Cloner for ClonerStub {
         if let Some(delay) = delay {
             tokio::time::sleep(delay).await;
         }
+        self.wait_for_clone_completion_allowed().await;
 
         // 1. Add the program account to the bank
         {
