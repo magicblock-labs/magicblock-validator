@@ -2709,6 +2709,86 @@ async fn test_batched_wire_failure_fails_keys_without_per_key_retry() {
 }
 
 #[tokio::test]
+async fn test_batched_wire_failure_after_deadline_reports_timeout() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let accounts: Vec<(Pubkey, Account)> = (0..3)
+        .map(|i| {
+            (
+                random_pubkey(),
+                Account {
+                    lamports: 1_000_000 + i as u64,
+                    data: vec![i as u8; 4],
+                    owner: account_owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
+    let pubkeys = accounts.iter().map(|(pk, _)| *pk).collect::<Vec<_>>();
+
+    let accounts_map: HashMap<Pubkey, Account> =
+        accounts.iter().cloned().collect();
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(CURRENT_SLOT)
+        .clock_sysvar_for_slot(CURRENT_SLOT)
+        .accounts(accounts_map)
+        .truncate_multi_account_response_to(2)
+        .build();
+
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+    let accounts_bank = Arc::new(AccountsBankStub::default());
+    let (forward_tx, _forward_rx) = mpsc::channel(1_000);
+    let (subscribed_accounts, config) = create_test_lru_cache(1_000);
+    let chain_slot = Arc::<AtomicU64>::default();
+    let remote_account_provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client,
+            pubsub_client,
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(chain_slot),
+        )
+        .await
+        .unwrap(),
+    );
+    let (fetch_cloner, _subscription_tx, _cloner) = init_fetch_cloner(
+        remote_account_provider,
+        &accounts_bank,
+        validator_keypair,
+    );
+
+    fetch_cloner.set_pending_operation_timeout(Duration::from_millis(0));
+
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &pubkeys,
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(ChainlinkError::PendingRequestTimeout(_))),
+        "a batched fetch failing past the deadline must surface as a \
+         timeout, got {result:?}"
+    );
+
+    // No stuck state and nothing cloned.
+    for pubkey in &pubkeys {
+        assert!(!fetch_cloner.has_pending_request(pubkey));
+    }
+    assert_not_cloned!(accounts_bank, &pubkeys);
+}
+
+#[tokio::test]
 async fn test_overlapping_concurrent_ensures_share_inflight_keys_at_rpc_level()
 {
     init_logger();

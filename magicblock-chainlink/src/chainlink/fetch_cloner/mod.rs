@@ -432,13 +432,19 @@ where
             {
                 Ok(accs) => accs,
                 Err(err) => {
-                    let failure = PendingFailure::OwnerFailed(err.to_string());
+                    let owner_msg = err.to_string();
+                    let now = tokio::time::Instant::now();
                     for mut op in claimed {
+                        let failure = if op.deadline <= now {
+                            PendingFailure::TimedOut
+                        } else {
+                            PendingFailure::OwnerFailed(owner_msg.clone())
+                        };
                         finish_pending(
                             &pending,
                             op.pubkey,
                             op.generation,
-                            PendingTerminal::Failed(failure.clone()),
+                            PendingTerminal::Failed(failure),
                         );
                         op.owner.dismiss();
                     }
