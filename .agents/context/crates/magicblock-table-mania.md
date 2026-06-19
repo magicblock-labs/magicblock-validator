@@ -218,8 +218,8 @@ Inspect `src/derive_keypair.rs`, `LookupTableRc::derive_keypair`, `create_new_ta
 
 ## Adjacent implementation references
 
-- `.agents/context/crates/magicblock-rpc-client.md` — RPC wrapper used by all table transactions and remote reads.
-- `.agents/context/crates/magicblock-committor-service.md` — main runtime ALT preparation and cleanup consumer.
-- `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` — main runtime call site.
-- `magicblock-metrics/src/metrics/mod.rs` — local metric definitions emitted by this crate.
-- `test-integration/test-table-mania/` — integration coverage of table lifecycle and reservation behavior.
+- See `.agents/context/crates/magicblock-rpc-client.md` for the RPC wrapper used by all table transactions and remote reads.
+- Consult `.agents/context/crates/magicblock-committor-service.md` when changing the main runtime ALT preparation and cleanup consumer.
+- Inspect `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` to understand the main runtime call site.
+- Refer to `magicblock-metrics/src/metrics/mod.rs` for local metric definitions emitted by this crate.
+- Use `test-integration/test-table-mania/` to review integration coverage of table lifecycle and reservation behavior.

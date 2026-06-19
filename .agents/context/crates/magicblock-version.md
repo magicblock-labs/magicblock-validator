@@ -223,8 +223,8 @@ Validate with the repository-supported toolchain. If you alter emitted cfgs, ens
 
 ## Adjacent implementation references
 
-- `.agents/context/crates/magicblock-aperture.md` — RPC layer that exposes `getVersion`.
-- `.agents/context/crates/magicblock-validator.md` — startup/headless/TUI version display.
-- `magicblock-aperture/src/requests/http/get_version.rs` — JSON-RPC field mapping.
-- `magicblock-aperture/tests/node.rs` and `magicblock-aperture/tests/batches.rs` — version RPC tests.
-- `tools/magicblock-tui-client/src/app.rs` and `tools/magicblock-tui-client/src/state.rs` — TUI consumers.
+- See `.agents/context/crates/magicblock-aperture.md` for the RPC layer that exposes `getVersion`.
+- Consult `.agents/context/crates/magicblock-validator.md` when changing startup, headless, or TUI version display.
+- Inspect `magicblock-aperture/src/requests/http/get_version.rs` to verify the JSON-RPC field mapping.
+- Refer to `magicblock-aperture/tests/node.rs` and `magicblock-aperture/tests/batches.rs` for version RPC tests.
+- Review `tools/magicblock-tui-client/src/app.rs` and `tools/magicblock-tui-client/src/state.rs` for TUI consumers.

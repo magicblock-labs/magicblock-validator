@@ -251,9 +251,9 @@ Inspect `TaskSchedulerService::start`, `run`, and `magicblock-api/src/magic_vali
 
 ## Adjacent implementation references
 
-- `.agents/context/crates/magicblock-api.md` — validator orchestration/startup owner for the scheduler service.
-- `.agents/context/crates/magicblock-config.md` — config loading and env/TOML behavior for scheduler settings.
-- `.agents/context/crates/magicblock-core.md` — shared channels, coordination mode, and `ExecutionTlsStash` boundaries.
-- `.agents/context/crates/magicblock-magic-program-api.md` — task request and Magic Program instruction wire types.
-- `magicblock-task-scheduler/README.md` — operator-facing scheduler configuration and performance notes.
-- `test-integration/test-task-scheduler/` — end-to-end scheduled-task behavior.
+- See `.agents/context/crates/magicblock-api.md` for the validator orchestration and startup code that owns the scheduler service.
+- Consult `.agents/context/crates/magicblock-config.md` when changing config loading or env/TOML behavior for scheduler settings.
+- Inspect `.agents/context/crates/magicblock-core.md` to understand shared channels, coordination mode, and `ExecutionTlsStash` boundaries.
+- Refer to `.agents/context/crates/magicblock-magic-program-api.md` for task request and Magic Program instruction wire types.
+- Use `magicblock-task-scheduler/README.md` for operator-facing scheduler configuration and performance notes.
+- Review `test-integration/test-task-scheduler/` for end-to-end scheduled-task behavior.

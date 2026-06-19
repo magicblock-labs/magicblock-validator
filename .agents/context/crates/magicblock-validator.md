@@ -258,9 +258,14 @@ Avoid blocking calls in the main async runtime unless they are already isolated 
 
 ## Adjacent implementation references
 
-- `.agents/context/crates/magicblock-api.md` — downstream `MagicValidator` lifecycle and service graph.
-- `.agents/context/crates/magicblock-config.md` — config layering and CLI/env/TOML behavior.
-- `.agents/context/crates/magicblock-core.md` — logging and shared runtime infrastructure.
-- `README.md` — operator-facing build/run overview.
-- `docs/architecture.md` — high-level architecture, including this binary as the entrypoint.
-- `docs/tui-externalization.md` and `tools/magicblock-tui-client/README.md` — embedded/external TUI behavior.
+Crate guides:
+
+- See `.agents/context/crates/magicblock-api.md` for the downstream `MagicValidator` lifecycle and service graph.
+- Consult `.agents/context/crates/magicblock-config.md` when changing config layering or CLI/env/TOML behavior.
+- Inspect `.agents/context/crates/magicblock-core.md` to understand logging and shared runtime infrastructure.
+
+Operator and UI docs:
+
+- Refer to `README.md` for the operator-facing build/run overview.
+- Use `docs/architecture.md` for the high-level architecture, including this binary as the entrypoint.
+- Review `docs/tui-externalization.md` and `tools/magicblock-tui-client/README.md` when touching embedded or external TUI behavior.
