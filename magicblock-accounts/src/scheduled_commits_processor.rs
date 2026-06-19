@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -260,6 +261,25 @@ impl ScheduledCommitsProcessorImpl {
         }
     }
 
+    fn pending_intent_results_count(
+        intents_meta_map: &Mutex<HashMap<u64, ScheduledBaseIntentMeta>>,
+    ) -> usize {
+        intents_meta_map.lock().expect(POISONED_MUTEX_MSG).len()
+    }
+
+    async fn wait_until_pending_results_drained(&self) {
+        while Self::pending_intent_results_count(&self.intents_meta_map) > 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    pub async fn shutdown(&self) {
+        if !self.cancellation_token.is_cancelled() {
+            self.cancellation_token.cancel();
+        }
+        self.wait_until_pending_results_drained().await;
+    }
+
     #[instrument(skip(
         result_subscriber,
         cancellation_token,
@@ -281,17 +301,27 @@ impl ScheduledCommitsProcessorImpl {
 
         let mut result_receiver =
             result_subscriber.await.expect(SUBSCRIPTION_ERR_MSG);
+        let mut draining = false;
         loop {
             let execution_result = tokio::select! {
                 biased;
-                _ = cancellation_token.cancelled() => {
-                    info!("Shutting down");
-                    return;
+                _ = cancellation_token.cancelled(), if !draining => {
+                    draining = true;
+                    info!("ScheduledCommitsProcessor draining in-flight results");
+                    continue;
                 }
                 execution_result = result_receiver.recv() => {
                     match execution_result {
                         Ok(result) => result,
                         Err(broadcast::error::RecvError::Closed) => {
+                            if Self::pending_intent_results_count(&intents_meta_map) > 0 {
+                                warn!(
+                                    pending_count = Self::pending_intent_results_count(
+                                        &intents_meta_map,
+                                    ),
+                                    "Intent execution service shut down with pending commit results",
+                                );
+                            }
                             info!("Intent execution service shut down");
                             break;
                         }
@@ -330,6 +360,8 @@ impl ScheduledCommitsProcessorImpl {
             )
             .await;
         }
+
+        info!("ScheduledCommitsProcessor result processor shutdown");
     }
 
     #[instrument(
@@ -446,6 +478,10 @@ impl ScheduledCommitsProcessorImpl {
 impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
     #[instrument(skip(self))]
     async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
+        if self.cancellation_token.is_cancelled() {
+            return Ok(());
+        }
+
         let intent_bundles =
             self.transaction_scheduler.take_scheduled_intent_bundles();
 
@@ -470,6 +506,10 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
 
     fn stop(&self) {
         self.cancellation_token.cancel();
+    }
+
+    async fn shutdown(&self) {
+        ScheduledCommitsProcessorImpl::shutdown(self).await;
     }
 }
 
@@ -500,5 +540,184 @@ impl ScheduledBaseIntentMeta {
             },
             requested_undelegation: intent.has_undelegate_intent(),
         }
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use std::{sync::Arc, time::Duration};
+
+    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+    use solana_hash::Hash;
+    use solana_pubkey::Pubkey;
+    use tokio::sync::broadcast;
+
+    use super::*;
+
+    fn test_intent(id: u64) -> ScheduledIntentBundle {
+        ScheduledIntentBundle {
+            id,
+            slot: 0,
+            blockhash: Hash::default(),
+            sent_transaction: Transaction::default(),
+            payer: Pubkey::default(),
+            intent_bundle: Default::default(),
+        }
+    }
+
+    /// Mirrors the drain-mode branch of `result_processor` without the full
+    /// commit-signaling pipeline, so we can verify shutdown keeps receiving
+    /// in-flight results after cancellation.
+    async fn drain_in_flight_result_after_stop(
+        cancellation_token: CancellationToken,
+        intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+        mut results_rx: broadcast::Receiver<BroadcastedIntentExecutionResult>,
+    ) {
+        let mut draining = false;
+        loop {
+            let intent_id = tokio::select! {
+                biased;
+                _ = cancellation_token.cancelled(), if !draining => {
+                    draining = true;
+                    continue;
+                }
+                execution_result = results_rx.recv() => {
+                    match execution_result {
+                        Ok(result) => result.id,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    }
+                }
+            };
+
+            intents_meta_map
+                .lock()
+                .expect(POISONED_MUTEX_MSG)
+                .remove(&intent_id);
+        }
+    }
+
+    #[tokio::test]
+    async fn result_processor_drains_in_flight_after_stop() {
+        let (results_tx, _) = broadcast::channel(16);
+        let results_rx = results_tx.subscribe();
+        let cancellation_token = CancellationToken::new();
+        let intents_meta_map = Arc::new(Mutex::new(HashMap::new()));
+        intents_meta_map
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .insert(1, ScheduledBaseIntentMeta::new(&test_intent(1)));
+
+        let drain_task = {
+            let cancellation_token = cancellation_token.clone();
+            let intents_meta_map = intents_meta_map.clone();
+            tokio::spawn(async move {
+                drain_in_flight_result_after_stop(
+                    cancellation_token,
+                    intents_meta_map,
+                    results_rx,
+                )
+                .await;
+            })
+        };
+
+        tokio::task::yield_now().await;
+        cancellation_token.cancel();
+        results_tx
+            .send(BroadcastedIntentExecutionResult {
+                id: 1,
+                inner: Ok(ExecutionOutput::SingleStage(
+                    solana_signature::Signature::new_unique(),
+                )),
+                patched_errors: Arc::new(vec![]),
+                callbacks_report: vec![],
+            })
+            .expect("broadcast result");
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while ScheduledCommitsProcessorImpl::pending_intent_results_count(
+                &intents_meta_map,
+            ) > 0
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("timed out waiting for drained intent metadata");
+
+        drop(results_tx);
+        tokio::time::timeout(Duration::from_secs(1), drain_task)
+            .await
+            .expect("timed out waiting for drain task")
+            .expect("drain task panicked");
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_until_pending_results_are_drained() {
+        let cancellation_token = CancellationToken::new();
+        let intents_meta_map = Arc::new(Mutex::new(HashMap::new()));
+        intents_meta_map
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .insert(1, ScheduledBaseIntentMeta::new(&test_intent(1)));
+
+        let (results_tx, _) = broadcast::channel(16);
+        let results_rx = results_tx.subscribe();
+
+        let drain_task = {
+            let cancellation_token = cancellation_token.clone();
+            let intents_meta_map = intents_meta_map.clone();
+            tokio::spawn(async move {
+                drain_in_flight_result_after_stop(
+                    cancellation_token,
+                    intents_meta_map,
+                    results_rx,
+                )
+                .await;
+            })
+        };
+
+        let shutdown_task = {
+            let cancellation_token = cancellation_token.clone();
+            let intents_meta_map = intents_meta_map.clone();
+            tokio::spawn(async move {
+                if !cancellation_token.is_cancelled() {
+                    cancellation_token.cancel();
+                }
+                while
+                    ScheduledCommitsProcessorImpl::pending_intent_results_count(
+                        &intents_meta_map,
+                    ) > 0
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+        };
+
+        tokio::task::yield_now().await;
+        results_tx
+            .send(BroadcastedIntentExecutionResult {
+                id: 1,
+                inner: Ok(ExecutionOutput::SingleStage(
+                    solana_signature::Signature::new_unique(),
+                )),
+                patched_errors: Arc::new(vec![]),
+                callbacks_report: vec![],
+            })
+            .expect("broadcast result");
+
+        tokio::time::timeout(Duration::from_secs(5), shutdown_task)
+            .await
+            .expect("timed out waiting for shutdown")
+            .expect("shutdown task panicked");
+        assert_eq!(
+            ScheduledCommitsProcessorImpl::pending_intent_results_count(
+                &intents_meta_map,
+            ),
+            0
+        );
+
+        drop(results_tx);
+        let _ = tokio::time::timeout(Duration::from_secs(1), drain_task).await;
     }
 }

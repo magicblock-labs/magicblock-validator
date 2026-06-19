@@ -283,6 +283,11 @@ impl IntentScheduler {
     pub fn intents_blocked(&self) -> usize {
         self.blocked_intents.len()
     }
+
+    /// Returns true when no intents are queued or executing in the scheduler.
+    pub fn is_idle(&self) -> bool {
+        self.blocked_intents.is_empty() && self.blocked_keys.is_empty()
+    }
 }
 
 #[derive(Error, Debug)]
@@ -314,7 +319,33 @@ mod simple_test {
         setup();
         let mut scheduler = IntentScheduler::new();
         assert_eq!(scheduler.intents_blocked(), 0);
+        assert!(scheduler.is_idle());
         assert!(scheduler.pop_next_scheduled_intent().is_none());
+    }
+
+    #[test]
+    fn test_is_idle_tracks_executing_and_blocked_intents() {
+        setup();
+        let mut scheduler = IntentScheduler::new();
+        let pubkey = pubkey!("1111111111111111111111111111111111111111111");
+        let msg1 = create_test_intent(1, &[pubkey], false);
+        let msg2 = create_test_intent(2, &[pubkey], false);
+
+        assert!(scheduler.is_idle());
+        assert!(scheduler.schedule(msg1.clone()).is_some());
+        assert!(!scheduler.is_idle());
+        assert!(scheduler.schedule(msg2).is_none());
+        assert!(!scheduler.is_idle());
+
+        assert!(scheduler.complete(&msg1).is_ok());
+        assert!(!scheduler.is_idle());
+
+        let next = scheduler.pop_next_scheduled_intent().unwrap();
+        assert_eq!(next.id, 2);
+        assert!(!scheduler.is_idle());
+
+        assert!(scheduler.complete(&next).is_ok());
+        assert!(scheduler.is_idle());
     }
 
     /// Ensure intents with non-conflicting set of keys can run in parallel

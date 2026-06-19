@@ -207,11 +207,23 @@ impl CommittorProcessor {
         Ok(bundles)
     }
 
+    pub async fn shutdown(&self) {
+        self.commits_scheduler.shutdown().await;
+    }
+
+    pub fn is_shutting_down(&self) -> bool {
+        self.commits_scheduler.is_shutting_down()
+    }
+
     #[instrument(skip(self, intent_bundles))]
     pub async fn schedule_intent_bundle(
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
+        if self.is_shutting_down() {
+            return Err(crate::error::CommittorServiceError::ShuttingDown);
+        }
+
         if let Err(err) = self.persister.start_base_intents(&intent_bundles) {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
@@ -234,6 +246,10 @@ impl CommittorProcessor {
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
+        if self.is_shutting_down() {
+            return Err(crate::error::CommittorServiceError::ShuttingDown);
+        }
+
         self.commits_scheduler
             .schedule(intent_bundles)
             .await
@@ -260,6 +276,36 @@ impl CommittorProcessor {
         self.task_info_fetcher
             .fetch_current_commit_nonces(pubkeys, min_context_slot)
             .await
+    }
+}
+
+#[cfg(test)]
+impl CommittorProcessor {
+    pub(crate) fn new_for_test(
+        factory: crate::intent_execution_manager::test_support::MockIntentExecutorFactory,
+    ) -> Self {
+        let authority = Keypair::new();
+        let rpc_client = Arc::new(RpcClient::new("http://127.0.0.1:1".to_string()));
+        let magicblock_rpc_client = MagicblockRpcClient::new(rpc_client);
+        let table_mania = TableMania::new(
+            magicblock_rpc_client.clone(),
+            &authority,
+            None,
+        );
+        let persister = IntentPersisterImpl::try_new(":memory:").unwrap();
+        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
+            RpcTaskInfoFetcher::new(magicblock_rpc_client.clone()),
+        ));
+        let commits_scheduler = crate::intent_execution_manager::test_support::new_test_intent_execution_manager(factory);
+
+        Self {
+            authority,
+            magicblock_rpc_client,
+            table_mania,
+            persister,
+            commits_scheduler,
+            task_info_fetcher,
+        }
     }
 }
 
@@ -391,10 +437,20 @@ fn committed_account_from_pending_row(
 
 #[cfg(test)]
 mod tests {
+    use std::{sync::Arc, time::Duration};
+
     use solana_hash::Hash;
 
     use super::*;
-    use crate::persist::CommitStatus;
+    use crate::{
+        error::CommittorServiceError,
+        intent_execution_manager::{
+            intent_scheduler::create_test_intent,
+            test_support::MockIntentExecutorFactory,
+        },
+        persist::CommitStatus,
+        test_utils,
+    };
 
     fn pending_row(
         message_id: u64,
@@ -446,6 +502,88 @@ mod tests {
         row.created_at = created_at;
         row.last_retried_at = last_retried_at;
         row
+    }
+
+    fn new_test_processor(
+        factory: MockIntentExecutorFactory,
+    ) -> CommittorProcessor {
+        CommittorProcessor::new_for_test(factory)
+    }
+
+    #[tokio::test]
+    async fn test_schedule_rejected_after_shutdown() {
+        test_utils::init_test_logger();
+        let processor =
+            new_test_processor(MockIntentExecutorFactory::new());
+        processor.shutdown().await;
+
+        let intent = create_test_intent(
+            1,
+            &[Pubkey::new_unique()],
+            false,
+        );
+        let err = processor
+            .schedule_intent_bundle(vec![intent])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommittorServiceError::ShuttingDown));
+    }
+
+    #[tokio::test]
+    async fn test_recovered_schedule_rejected_after_shutdown() {
+        test_utils::init_test_logger();
+        let processor =
+            new_test_processor(MockIntentExecutorFactory::new());
+        processor.shutdown().await;
+
+        let intent = create_test_intent(
+            2,
+            &[Pubkey::new_unique()],
+            false,
+        );
+        let err = processor
+            .schedule_recovered_intent_bundles(vec![intent])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommittorServiceError::ShuttingDown));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_waits_for_in_flight_intent() {
+        test_utils::init_test_logger();
+        let processor = Arc::new(new_test_processor(
+            MockIntentExecutorFactory::new()
+                .with_execution_delay(Duration::from_millis(200)),
+        ));
+        let mut result_receiver = processor.subscribe_for_results();
+
+        let intent = create_test_intent(
+            1,
+            &[Pubkey::new_unique()],
+            false,
+        );
+        processor
+            .schedule_intent_bundle(vec![intent])
+            .await
+            .unwrap();
+
+        let draining = {
+            let processor = processor.clone();
+            tokio::spawn(async move { processor.shutdown().await })
+        };
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            result_receiver.recv(),
+        )
+        .await
+        .expect("timed out waiting for in-flight intent result")
+        .expect("result channel closed");
+        assert!(result.is_ok());
+        assert_eq!(result.id, 1);
+
+        draining.await.expect("shutdown task panicked");
+        assert!(processor.is_shutting_down());
     }
 
     #[test]

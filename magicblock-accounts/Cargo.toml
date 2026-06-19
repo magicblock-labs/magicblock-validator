@@ -28,7 +28,5 @@ thiserror = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
-magicblock-committor-service = { workspace = true, features = [
-  "dev-context-only-utils",
-] }
+solana-signature = { workspace = true, features = ["rand"] }
 tokio-util = { workspace = true }

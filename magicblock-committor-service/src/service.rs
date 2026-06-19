@@ -317,24 +317,91 @@ impl CommittorActor {
         }
     }
 
-    #[instrument(skip(self, cancel_token))]
-    pub async fn run(&mut self, cancel_token: CancellationToken) {
+    fn reject_msg(msg: CommittorMessage) {
+        use CommittorMessage::*;
+        fn shutdown_err<T>(
+            respond_to: oneshot::Sender<Result<T, CommittorServiceError>>,
+        ) {
+            let _ = respond_to.send(Err(CommittorServiceError::ShuttingDown));
+        }
+
+        match msg {
+            ReservePubkeysForCommittee { respond_to, .. } => {
+                shutdown_err(respond_to)
+            }
+            ReserveCommonPubkeys { respond_to } => shutdown_err(respond_to),
+            ScheduleIntentBundle { respond_to, .. } => shutdown_err(respond_to),
+            GetPendingIntentBundles { respond_to } => shutdown_err(respond_to),
+            ScheduleRecoveredIntentBundle { respond_to, .. } => {
+                shutdown_err(respond_to)
+            }
+            GetCommitStatuses { respond_to, .. } => shutdown_err(respond_to),
+            GetCommitSignatures { respond_to, .. } => shutdown_err(respond_to),
+            GetTransaction { respond_to, .. } => shutdown_err(respond_to),
+            FetchCurrentCommitNonces { respond_to, .. } => {
+                shutdown_err(respond_to)
+            }
+            FetchCurrentCommitNoncesSync { respond_to, .. } => {
+                let _ =
+                    respond_to.send(Err(CommittorServiceError::ShuttingDown));
+            }
+
+            ReleaseCommonPubkeys { respond_to } => {
+                let _ = respond_to.send(());
+            }
+            GetLookupTables { respond_to } => {
+                let _ = respond_to.send(LookupTables {
+                    active: Vec::new(),
+                    released: Vec::new(),
+                });
+            }
+            SubscribeForResults { respond_to } => {
+                let (_tx, rx) = broadcast::channel(1);
+                let _ = respond_to.send(rx);
+            }
+        }
+    }
+
+    fn drain_rejected_messages(
+        receiver: &mut mpsc::Receiver<CommittorMessage>,
+    ) {
+        while let Ok(msg) = receiver.try_recv() {
+            Self::reject_msg(msg);
+        }
+    }
+
+    #[instrument(skip(self, shutdown_token))]
+    pub async fn run(&mut self, shutdown_token: CancellationToken) {
+        let mut shutting_down = false;
+
         loop {
+            if shutting_down {
+                break;
+            }
+
             select! {
-                msg = self.receiver.recv() => {
-                    if let Some(msg) = msg {
-                        self.handle_msg(msg).await;
-                    } else {
-                        break;
-                    }
+                biased;
+                _ = shutdown_token.cancelled(), if !shutting_down => {
+                    shutting_down = true;
+                    info!("CommittorActor shutdown initiated");
+                    Self::drain_rejected_messages(&mut self.receiver);
                 }
-                _ = cancel_token.cancelled() => {
-                    break;
+                msg = self.receiver.recv() => {
+                    match msg {
+                        Some(msg) if !shutting_down => {
+                            self.handle_msg(msg).await;
+                        }
+                        Some(msg) => {
+                            Self::reject_msg(msg);
+                        }
+                        None => break,
+                    }
                 }
             }
         }
 
-        info!("Actor shutdown");
+        self.processor.shutdown().await;
+        info!("CommittorActor shutdown complete");
     }
 }
 
@@ -343,7 +410,8 @@ impl CommittorActor {
 // -----------------
 pub struct CommittorService {
     sender: mpsc::Sender<CommittorMessage>,
-    cancel_token: CancellationToken,
+    shutdown_token: CancellationToken,
+    actor_done_token: CancellationToken,
 }
 
 impl CommittorService {
@@ -360,9 +428,11 @@ impl CommittorService {
     {
         debug!("Starting committor service");
         let (sender, receiver) = mpsc::channel(1_000);
-        let cancel_token = CancellationToken::new();
+        let shutdown_token = CancellationToken::new();
+        let actor_done_token = CancellationToken::new();
         {
-            let cancel_token = cancel_token.clone();
+            let shutdown_token = shutdown_token.clone();
+            let actor_done_token = actor_done_token.clone();
             let mut actor = CommittorActor::try_new(
                 receiver,
                 authority,
@@ -372,12 +442,14 @@ impl CommittorService {
                 actions_callback_executor,
             )?;
             tokio::spawn(async move {
-                actor.run(cancel_token).await;
+                actor.run(shutdown_token).await;
+                actor_done_token.cancel();
             });
         }
         Ok(Self {
             sender,
-            cancel_token,
+            shutdown_token,
+            actor_done_token,
         })
     }
 
@@ -569,11 +641,11 @@ impl BaseIntentCommittor for CommittorService {
     }
 
     fn stop(&self) {
-        self.cancel_token.cancel();
+        self.shutdown_token.cancel();
     }
 
     fn stopped(&self) -> WaitForCancellationFutureOwned {
-        self.cancel_token.clone().cancelled_owned()
+        self.actor_done_token.clone().cancelled_owned()
     }
 }
 
@@ -625,6 +697,201 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     /// Stops Committor service
     fn stop(&self);
 
-    /// Returns future which resolves once committor `stop` got called
+    /// Returns future which resolves once the committor actor has finished
+    /// draining in-flight intents and exited
     fn stopped(&self) -> WaitForCancellationFutureOwned;
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use std::{sync::Arc, time::Duration};
+
+    use solana_pubkey::pubkey;
+
+    use super::*;
+    use crate::{
+        intent_execution_manager::{
+            intent_scheduler::create_test_intent,
+            test_support::MockIntentExecutorFactory,
+        },
+        test_utils,
+    };
+
+    fn try_start_for_test(
+        factory: MockIntentExecutorFactory,
+    ) -> Arc<CommittorService> {
+        test_utils::init_test_logger();
+
+        let (sender, receiver) = mpsc::channel(1000);
+        let processor = Arc::new(CommittorProcessor::new_for_test(factory));
+        let shutdown_token = CancellationToken::new();
+        let actor_done_token = CancellationToken::new();
+        let mut actor = CommittorActor {
+            receiver,
+            processor,
+        };
+        tokio::spawn({
+            let shutdown_token = shutdown_token.clone();
+            let actor_done_token = actor_done_token.clone();
+            async move {
+                actor.run(shutdown_token).await;
+                actor_done_token.cancel();
+            }
+        });
+
+        Arc::new(CommittorService {
+            sender,
+            shutdown_token,
+            actor_done_token,
+        })
+    }
+
+    #[test]
+    fn reject_msg_responds_with_shutting_down_for_schedule() {
+        let (respond_to, mut response) = oneshot::channel();
+        CommittorActor::reject_msg(CommittorMessage::ScheduleIntentBundle {
+            intent_bundles: Vec::new(),
+            respond_to,
+        });
+
+        let err = response.try_recv().unwrap().unwrap_err();
+        assert!(matches!(err, CommittorServiceError::ShuttingDown));
+    }
+
+    #[test]
+    fn reject_msg_returns_empty_lookup_tables() {
+        let (respond_to, mut response) = oneshot::channel();
+        CommittorActor::reject_msg(CommittorMessage::GetLookupTables {
+            respond_to,
+        });
+
+        let tables = response.try_recv().unwrap();
+        assert!(tables.active.is_empty());
+        assert!(tables.released.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_stopped_waits_for_in_flight_intent() {
+        let service = try_start_for_test(
+            MockIntentExecutorFactory::new()
+                .with_execution_delay(Duration::from_millis(200)),
+        );
+        let mut result_receiver =
+            service.subscribe_for_results().await.unwrap();
+
+        let intent = create_test_intent(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
+        );
+        service
+            .schedule_intent_bundles(vec![intent])
+            .await
+            .unwrap()
+            .unwrap();
+
+        let stopped_task = {
+            let service = service.clone();
+            tokio::spawn(async move { service.stopped().await })
+        };
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !stopped_task.is_finished(),
+            "stopped() must not complete before shutdown is requested"
+        );
+
+        service.stop();
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            result_receiver.recv(),
+        )
+        .await
+        .expect("timed out waiting for in-flight intent result")
+        .expect("result channel closed");
+        assert!(result.is_ok());
+        assert_eq!(result.id, 1);
+
+        tokio::time::timeout(Duration::from_secs(5), stopped_task)
+            .await
+            .expect("timed out waiting for actor shutdown")
+            .expect("stopped task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_queued_schedule_rejected_when_shutdown_drains_channel() {
+        let service = try_start_for_test(
+            MockIntentExecutorFactory::new()
+                .with_execution_delay(Duration::from_millis(300)),
+        );
+
+        let blocking_intent = create_test_intent(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
+        );
+        let queued_intent = create_test_intent(
+            2,
+            &[pubkey!("22222222222222222222222222222222222222222222")],
+            false,
+        );
+
+        service
+            .schedule_intent_bundles(vec![blocking_intent])
+            .await
+            .unwrap()
+            .unwrap();
+
+        let queued_schedule =
+            service.schedule_intent_bundles(vec![queued_intent]);
+        service.stop();
+
+        let err = tokio::time::timeout(Duration::from_secs(5), queued_schedule)
+            .await
+            .expect("timed out waiting for queued schedule response")
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(err, CommittorServiceError::ShuttingDown));
+
+        tokio::time::timeout(Duration::from_secs(5), service.stopped())
+            .await
+            .expect("timed out waiting for actor shutdown");
+    }
+
+    #[tokio::test]
+    async fn test_service_ext_waits_for_in_flight_result_during_shutdown() {
+        use crate::service_ext::{BaseIntentCommittorExt, CommittorServiceExt};
+
+        let service = try_start_for_test(
+            MockIntentExecutorFactory::new()
+                .with_execution_delay(Duration::from_millis(200)),
+        );
+        let ext = CommittorServiceExt::new(service.clone());
+
+        let intent = create_test_intent(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
+        );
+        let waiting = tokio::spawn(async move {
+            ext.schedule_intent_bundles_waiting(vec![intent]).await
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        service.stop();
+
+        let results = tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("timed out waiting for in-flight result via CommittorServiceExt")
+            .expect("waiting task panicked")
+            .expect("schedule_intent_bundles_waiting failed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, 1);
+        assert!(results[0].inner.is_ok());
+
+        tokio::time::timeout(Duration::from_secs(5), service.stopped())
+            .await
+            .expect("timed out waiting for actor shutdown");
+    }
 }

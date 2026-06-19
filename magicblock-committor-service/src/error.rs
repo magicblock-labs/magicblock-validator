@@ -61,6 +61,9 @@ pub enum CommittorServiceError {
     #[error("Task {0} failed to create transaction: {1} ({1:?})")]
     FailedToCreateTransaction(String, solana_signer::SignerError),
 
+    #[error("Committor service is shutting down")]
+    ShuttingDown,
+
     #[error("Could not find commit strategy for bundle {0}")]
     CouldNotFindCommitStrategyForBundle(u64),
 
