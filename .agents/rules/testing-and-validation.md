@@ -144,14 +144,14 @@ Prefer `cargo nextest` when available:
 
 ```bash
 cd test-integration
-RUST_LOG=info cargo nextest run -p <test-crate> --test <test_file> <test_name> --no-capture
+RUST_LOG=info cargo nextest run -p <test-crate> <test_name> --no-capture
 ```
 
 Or with an exact nextest expression:
 
 ```bash
 cd test-integration
-RUST_LOG=info cargo nextest run -p <test-crate> --test <test_file> -E 'test(<exact_test_name>)' --no-capture
+RUST_LOG=info cargo nextest run -p <test-crate> -E 'test(<exact_test_name>)' --no-capture
 ```
 
 Use `cargo test` instead when you need libtest-only flags such as `--test-threads=1` or `--exact`:
