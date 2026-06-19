@@ -15,7 +15,7 @@ use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
-        error::{IntentExecutorError, TransactionStrategyExecutionError},
+        error::IntentExecutorError,
         intent_execution_client::IntentExecutionClient,
         strategy_executor::{
             two_stage::{Initialized, TwoStageStrategyExecutor},
@@ -69,7 +69,7 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
-
+use magicblock_committor_service::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
 use crate::{
     common::{MockActionsCallbackExecutor, TestFixture},
     utils::{

@@ -21,14 +21,13 @@ use magicblock_program::{
     outbox_intent_bundles::OutboxIntentBundleStatus,
 };
 use solana_signature::Signature;
-
+use strategy_executor::error::TransactionStrategyExecutionError;
 use crate::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
         cleanup_handle::CleanupHandle,
         error::{
             IntentExecutorError, IntentExecutorResult,
-            TransactionStrategyExecutionError,
         },
         intent_execution_client::IntentExecutionClient,
         single_stage_intent_executor::SingleStageIntentExecutor,

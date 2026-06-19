@@ -12,7 +12,6 @@ use crate::{
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
-            TransactionStrategyExecutionError,
         },
         intent_execution_client::IntentExecutionClient,
         strategy_executor::utils::{
@@ -25,6 +24,7 @@ use crate::{
     tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
     transaction_preparator::TransactionPreparator,
 };
+use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
 
 #[async_trait]
 pub(in crate::intent_executor) trait Patcher {

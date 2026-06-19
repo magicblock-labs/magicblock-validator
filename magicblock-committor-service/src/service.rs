@@ -174,10 +174,6 @@ where
             // TODO(edwin): early shutdown or cleanup errors to avoid this
             .expect("Failed to reschedule intents");
 
-        // if let Err(err) = self.reschedule_pending_bundles().await {
-        //     error!(error = ?err, "Failed to reschedule pending bundles")
-        // }
-
         let mut interval = tokio::time::interval(self.slot_interval);
         loop {
             tokio::select! {
@@ -190,13 +186,10 @@ where
                         .outbox_client
                         .accept_scheduled_intents()
                         .await;
-                    let intent_bundles = match accept_result {
-                        Ok(value) => value,
-                        Err(err) => {
-                            error!("Failed to accept intents: {}", err);
-                            continue;
-                        }
-                    };
+                    let intent_bundles = accept_result.unwrap_or_else(|(accepted_intents, err)| {
+                        error!("Failed to accept intents: {}", err);
+                        accepted_intents
+                    });
 
                     let intent_bundles= intent_bundles.into_iter().map(OutboxIntentBundle::accepted).collect();
                     if let Err(err) = self.schedule_intent_execution(intent_bundles).await {

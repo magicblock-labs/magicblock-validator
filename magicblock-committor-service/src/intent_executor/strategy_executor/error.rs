@@ -1,0 +1,251 @@
+use solana_instruction::error::InstructionError;
+use magicblock_rpc_client::utils::TransactionErrorMapper;
+use solana_transaction_error::TransactionError;
+use solana_signature::Signature;
+use tracing::error;
+use magicblock_core::traits::ActionError;
+use magicblock_metrics::metrics;
+use magicblock_rpc_client::MagicBlockRpcClientError;
+use crate::intent_executor::error::{InternalError};
+use crate::tasks::BaseTaskImpl;
+use crate::tasks::task_strategist::TaskStrategistError;
+
+/// Those are the errors that may occur during Commit/Finalize stages on Base layer
+#[derive(thiserror::Error, Debug)]
+pub enum TransactionStrategyExecutionError {
+    #[error("User supplied actions are ill-formed: {0}. {1:?}")]
+    ActionsError(#[source] TransactionError, Option<Signature>),
+    #[error("Invalid undelegation: {0}. {1:?}")]
+    UndelegationError(#[source] TransactionError, Option<Signature>),
+    #[error("Accounts committed with an invalid Commit id: {0}. {1:?}")]
+    CommitIDError(#[source] TransactionError, Option<Signature>),
+    #[error("Max instruction trace length exceeded: {0}. {1:?}")]
+    CpiLimitError(#[source] TransactionError, Option<Signature>),
+    #[error("Loaded accounts data size exceeded: {0}. {1:?}")]
+    LoadedAccountsDataSizeExceeded(
+        #[source] TransactionError,
+        Option<Signature>,
+    ),
+    #[error("Unfinalized account error: {0}, {1:?}")]
+    UnfinalizedAccountError(#[source] TransactionError, Option<Signature>),
+    #[error("Transaction too large to send over the wire: {0}")]
+    TransactionTooLargeError(#[source] InternalError),
+    #[error("InternalError: {0}")]
+    InternalError(#[from] InternalError),
+}
+
+impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
+    fn from(value: MagicBlockRpcClientError) -> Self {
+        Self::InternalError(InternalError::from(value))
+    }
+}
+
+impl TransactionStrategyExecutionError {
+    /// Number of compute budget instructions prepended to every transaction.
+    /// Used to map instruction indices back to task indices.
+    const TASK_OFFSET: u8 = 2;
+
+    pub fn is_cpi_limit_error(&self) -> bool {
+        matches!(
+            self,
+            Self::CpiLimitError(_, _)
+                | Self::LoadedAccountsDataSizeExceeded(_, _)
+        )
+    }
+
+    pub fn is_recoverable_by_two_stage(&self) -> bool {
+        self.is_cpi_limit_error()
+            || matches!(self, Self::TransactionTooLargeError(_))
+    }
+
+    pub fn task_index(&self) -> Option<u8> {
+        match self {
+            Self::CommitIDError(
+                TransactionError::InstructionError(index, _),
+                _,
+            )
+            | Self::ActionsError(
+                TransactionError::InstructionError(index, _),
+                _,
+            )
+            | Self::UndelegationError(
+                TransactionError::InstructionError(index, _),
+                _,
+            )
+            | Self::UnfinalizedAccountError(
+                TransactionError::InstructionError(index, _),
+                _,
+            )
+            | Self::CpiLimitError(
+                TransactionError::InstructionError(index, _),
+                _,
+            ) => index.checked_sub(Self::TASK_OFFSET),
+            _ => None,
+        }
+    }
+
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::InternalError(err) => err.signature(),
+            Self::TransactionTooLargeError(err) => err.signature(),
+            Self::CommitIDError(_, signature)
+            | Self::ActionsError(_, signature)
+            | Self::UndelegationError(_, signature)
+            | Self::UnfinalizedAccountError(_, signature)
+            | Self::CpiLimitError(_, signature)
+            | Self::LoadedAccountsDataSizeExceeded(_, signature) => *signature,
+        }
+    }
+
+    /// Convert [`TransactionError`] into known errors that can be handled
+    /// Otherwise return original [`TransactionError`]
+    /// [`TransactionStrategyExecutionError`]
+    pub fn try_from_transaction_error(
+        err: TransactionError,
+        signature: Option<Signature>,
+        tasks: &[BaseTaskImpl],
+    ) -> Result<Self, TransactionError> {
+        // Commit Nonce order error
+        const NONCE_OUT_OF_ORDER: u32 =
+            dlp_api::error::DlpError::NonceOutOfOrder as u32;
+        // Errors when commit state already exists
+        const COMMIT_STATE_INVALID_ACCOUNT_OWNER: u32 =
+            dlp_api::error::DlpError::CommitStateInvalidAccountOwner as u32;
+        const COMMIT_STATE_ALREADY_INITIALIZED: u32 =
+            dlp_api::error::DlpError::CommitStateAlreadyInitialized as u32;
+        const COMMIT_RECORD_INVALID_ACCOUNT_OWNER: u32 =
+            dlp_api::error::DlpError::CommitRecordInvalidAccountOwner as u32;
+        const COMMIT_RECORD_ALREADY_INITIALIZED: u32 =
+            dlp_api::error::DlpError::CommitRecordAlreadyInitialized as u32;
+
+        match err {
+            // Some tx may use too much CPIs and we can handle it in certain cases
+            transaction_err @ TransactionError::InstructionError(
+                _,
+                InstructionError::MaxInstructionTraceLengthExceeded,
+            ) => Ok(TransactionStrategyExecutionError::CpiLimitError(
+                transaction_err,
+                signature,
+            )),
+            err @ TransactionError::MaxLoadedAccountsDataSizeExceeded => {
+                Ok(TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
+                    err,
+                    signature,
+                ))
+            }
+            // Map per-task InstructionError into CommitID / Actions / Undelegation errors when possible
+            TransactionError::InstructionError(index, instruction_err) => {
+                let tx_err_helper = |instruction_err| -> TransactionError {
+                    TransactionError::InstructionError(index, instruction_err)
+                };
+                let Some(action_index) = index.checked_sub(Self::TASK_OFFSET)
+                else {
+                    return Err(tx_err_helper(instruction_err));
+                };
+
+                let Some(task) = tasks.get(action_index as usize) else {
+                    return Err(tx_err_helper(instruction_err));
+                };
+
+                match (task, instruction_err) {
+                    (
+                        BaseTaskImpl::Commit(_)
+                        | BaseTaskImpl::CommitFinalize(_),
+                        instruction_err,
+                    ) => match instruction_err {
+                        InstructionError::Custom(NONCE_OUT_OF_ORDER) => Ok(
+                            TransactionStrategyExecutionError::CommitIDError(
+                                tx_err_helper(InstructionError::Custom(
+                                    NONCE_OUT_OF_ORDER,
+                                )),
+                                signature,
+                            ),
+                        ),
+                        instruction_err @ (InstructionError::Custom(
+                            COMMIT_STATE_INVALID_ACCOUNT_OWNER,
+                        )
+                        | InstructionError::Custom(
+                            COMMIT_STATE_ALREADY_INITIALIZED,
+                        )
+                        | InstructionError::Custom(
+                            COMMIT_RECORD_INVALID_ACCOUNT_OWNER,
+                        )
+                        | InstructionError::Custom(
+                            COMMIT_RECORD_ALREADY_INITIALIZED,
+                        )) => {
+                            Ok(TransactionStrategyExecutionError::UnfinalizedAccountError(
+                                tx_err_helper(instruction_err),
+                                signature
+                            ))
+                        }
+                        err => Err(tx_err_helper(err)),
+                    },
+                    (BaseTaskImpl::BaseAction(_), instruction_err) => {
+                        Ok(TransactionStrategyExecutionError::ActionsError(
+                            tx_err_helper(instruction_err),
+                            signature,
+                        ))
+                    }
+                    (BaseTaskImpl::Undelegate(_), instruction_err) => Ok(
+                        TransactionStrategyExecutionError::UndelegationError(
+                            tx_err_helper(instruction_err),
+                            signature,
+                        ),
+                    ),
+                    (_, instruction_err) => Err(tx_err_helper(instruction_err)),
+                }
+            }
+            // This means transaction failed to other reasons that we don't handle - propagate
+            err => {
+                error!(error = ?err, "Message execution failed");
+                Err(err)
+            }
+        }
+    }
+}
+
+impl metrics::LabelValue for TransactionStrategyExecutionError {
+    fn value(&self) -> &str {
+        match self {
+            Self::ActionsError(_, _) => "actions_failed",
+            Self::CpiLimitError(_, _) => "cpi_limit_failed",
+            Self::LoadedAccountsDataSizeExceeded(_, _) => {
+                "loaded_accounts_data_limit_exceeded"
+            }
+            Self::CommitIDError(_, _) => "commit_nonce_failed",
+            Self::UndelegationError(_, _) => "undelegation_failed",
+            Self::UnfinalizedAccountError(_, _) => "unfinalized_account_failed",
+            Self::TransactionTooLargeError(_) => "transaction_too_large",
+            _ => "failed",
+        }
+    }
+}
+
+pub(crate) struct IntentTransactionErrorMapper<'a> {
+    pub tasks: &'a [BaseTaskImpl],
+}
+
+impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
+    type ExecutionError = TransactionStrategyExecutionError;
+    fn try_map(
+        &self,
+        error: TransactionError,
+        signature: Option<Signature>,
+    ) -> Result<Self::ExecutionError, TransactionError> {
+        TransactionStrategyExecutionError::try_from_transaction_error(
+            error, signature, self.tasks,
+        )
+    }
+}
+
+impl From<&TransactionStrategyExecutionError> for ActionError {
+    fn from(value: &TransactionStrategyExecutionError) -> Self {
+        if let TransactionStrategyExecutionError::ActionsError(err, signature) =
+            value
+        {
+            Self::ActionsError(err.clone(), *signature)
+        } else {
+            Self::IntentFailedError(value.to_string())
+        }
+    }
+}

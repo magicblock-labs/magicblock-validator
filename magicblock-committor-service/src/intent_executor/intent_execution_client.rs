@@ -22,13 +22,13 @@ use tracing::warn;
 use crate::{
     intent_executor::{
         error::{
-            IntentExecutorResult, IntentTransactionErrorMapper, InternalError,
-            TransactionStrategyExecutionError,
+            IntentExecutorResult, InternalError,
         },
         ExecutionOutput,
     },
     tasks::BaseTaskImpl,
 };
+use crate::intent_executor::strategy_executor::error::{IntentTransactionErrorMapper, TransactionStrategyExecutionError};
 
 #[derive(Clone)]
 pub struct IntentExecutionClient {

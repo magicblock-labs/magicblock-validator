@@ -48,7 +48,10 @@ pub trait OutboxClient: Send + Sync + 'static {
     /// Executes `Accept` tx and returns accepted intents
     async fn accept_scheduled_intents(
         &self,
-    ) -> Result<Vec<ScheduledIntentBundle>, Self::Error>;
+    ) -> Result<
+        Vec<ScheduledIntentBundle>,
+        (Vec<ScheduledIntentBundle>, Self::Error),
+    >;
 
     /// Sets execution stage for outbox intent
     /// Note: intent has to be accepted prior
@@ -130,7 +133,10 @@ impl<L: LatestBlockProvider> InternalOutboxClient<L> {
     async fn send_accept_tx(
         &self,
         scheduled_intents: Vec<ScheduledIntentBundle>,
-    ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, InternalOutboxClientError)> {
+    ) -> Result<
+        Vec<ScheduledIntentBundle>,
+        (Vec<ScheduledIntentBundle>, InternalOutboxClientError),
+    > {
         const CHUNK_SIZE: usize = 50;
 
         let mut remaining = scheduled_intents;
@@ -187,7 +193,10 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
 
     async fn accept_scheduled_intents(
         &self,
-    ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, Self::Error)> {
+    ) -> Result<
+        Vec<ScheduledIntentBundle>,
+        (Vec<ScheduledIntentBundle>, Self::Error),
+    > {
         // If accounts were scheduled to be committed, we accept them here
         // and processs the commits
         let magic_context_acc =
@@ -195,11 +204,10 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
                 "Validator found to be running without MagicContext account!",
             );
 
-        let magic_context = MagicContext::deserialize(magic_context_acc.data())?;
-        self.send_accept_tx(magic_context.scheduled_base_intents).await?;
-
-        // Return intents from global store
-        Ok(TransactionScheduler::default().take_scheduled_intent_bundles())
+        let magic_context =
+            MagicContext::deserialize(magic_context_acc.data()).map_err(|err| (vec![], err.into()))?;
+        self.send_accept_tx(magic_context.scheduled_base_intents)
+            .await
     }
 
     async fn set_intent_execution_stage(

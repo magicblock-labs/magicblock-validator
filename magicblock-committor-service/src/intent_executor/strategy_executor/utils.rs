@@ -17,7 +17,6 @@ use crate::{
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
-            TransactionStrategyExecutionError,
         },
         intent_execution_client::IntentExecutionClient,
         strategy_executor::{
@@ -38,6 +37,7 @@ use crate::{
         error::TransactionPreparatorError, TransactionPreparator,
     },
 };
+use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
 
 const STAGE_LOOP_CEILING: u8 = 10;
 
