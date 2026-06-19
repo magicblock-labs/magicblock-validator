@@ -116,6 +116,8 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
             }
         }
 
+        // A poisoned mutex means a prior panic occurred while holding this
+        // lock; continuing would be unsafe, so we abort.
         let pending_count = pending_message
             .lock()
             .expect(POISONED_MUTEX_MSG)
@@ -284,8 +286,7 @@ mod shutdown_tests {
     use super::*;
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,
-        intent_executor::ExecutionOutput,
-        test_utils,
+        intent_executor::ExecutionOutput, test_utils,
     };
 
     struct MockCommittor {
@@ -357,7 +358,8 @@ mod shutdown_tests {
         fn get_commit_statuses(
             &self,
             _: u64,
-        ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
+        ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>>
+        {
             empty_oneshot()
         }
 
@@ -402,11 +404,7 @@ mod shutdown_tests {
         let mock = MockCommittor::new();
         let ext = CommittorServiceExt::new(mock.clone());
 
-        let intent = create_test_intent(
-            1,
-            &[Pubkey::new_unique()],
-            false,
-        );
+        let intent = create_test_intent(1, &[Pubkey::new_unique()], false);
         let waiting = tokio::spawn(async move {
             ext.schedule_intent_bundles_waiting(vec![intent]).await
         });
