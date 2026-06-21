@@ -816,6 +816,53 @@ mod tests {
 
     #[test]
     #[serial]
+    fn test_schedule_undelegation_rescue_success() {
+        init_logger!();
+
+        validator::generate_validator_authority_if_needed();
+        let payer = validator::validator_authority();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        let ix = InstructionUtils::schedule_undelegation_rescue_instruction(
+            committee,
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        let magic_context_acc = assert_non_accepted_actions(
+            &processed_scheduled,
+            &payer.pubkey(),
+            1,
+        );
+        let magic_context =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap();
+        assert_first_commit(
+            &magic_context.scheduled_base_intents,
+            &payer.pubkey(),
+            &[committee],
+            true,
+        );
+    }
+
+    #[test]
+    #[serial]
     fn test_schedule_commit_three_accounts_success() {
         init_logger!();
 
@@ -1158,6 +1205,47 @@ mod tests {
             transaction_accounts.clone(),
             ix.accounts,
             Err(InstructionError::ReadonlyDataModified),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_undelegation_rescue_rejects_non_validator_payer() {
+        init_logger!();
+
+        let payer = Keypair::new();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        let ix = {
+            let account_metas = vec![
+                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+                AccountMeta::new(committee, false),
+            ];
+            Instruction::new_with_bincode(
+                crate::id(),
+                &MagicBlockInstruction::ScheduleUndelegationRescue,
+                account_metas,
+            )
+        };
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::IncorrectAuthority),
         );
     }
 

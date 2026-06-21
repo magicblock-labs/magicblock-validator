@@ -76,6 +76,7 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: false,
+                    ..Default::default()
                 },
             ),
             ScheduleCommitAndUndelegate => process_schedule_commit(
@@ -83,6 +84,15 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: true,
+                    ..Default::default()
+                },
+            ),
+            ScheduleUndelegationRescue => process_schedule_commit(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation: true,
+                    require_validator_authority_payer: true,
                 },
             ),
             Unused => {

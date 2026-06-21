@@ -26,12 +26,14 @@ use crate::{
         },
         instruction_utils::InstructionUtils,
     },
+    validator::effective_validator_authority_id,
     MagicContext,
 };
 
 #[derive(Default)]
 pub(crate) struct ProcessScheduleCommitOptions {
     pub request_undelegation: bool,
+    pub require_validator_authority_payer: bool,
 }
 
 pub(crate) fn process_schedule_commit(
@@ -71,6 +73,18 @@ pub(crate) fn process_schedule_commit(
             payer_pubkey
         );
         return Err(InstructionError::MissingRequiredSignature);
+    }
+    if opts.require_validator_authority_payer {
+        let validator_authority = effective_validator_authority_id();
+        if payer_pubkey != &validator_authority {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: payer pubkey {} is not validator authority {}",
+                payer_pubkey,
+                validator_authority
+            );
+            return Err(InstructionError::IncorrectAuthority);
+        }
     }
 
     let payer_account =

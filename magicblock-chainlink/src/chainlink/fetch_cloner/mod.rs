@@ -131,11 +131,26 @@ where
     pending_clones: Arc<
         Mutex<hash_map::HashMap<Pubkey, Vec<oneshot::Sender<CloneCompletion>>>>,
     >,
+    pending_undelegation_rescues: Arc<Mutex<HashSet<Pubkey>>>,
 
     pending_operation_timeout_ms: Arc<AtomicU64>,
 
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
+}
+
+struct PendingUndelegationRescueGuard {
+    pending_rescues: Arc<Mutex<HashSet<Pubkey>>>,
+    pubkey: Pubkey,
+}
+
+impl Drop for PendingUndelegationRescueGuard {
+    fn drop(&mut self) {
+        self.pending_rescues
+            .lock()
+            .expect("pending undelegation rescues lock poisoned")
+            .remove(&self.pubkey);
+    }
 }
 
 /// Negative-cache capacity for known-empty eATAs.
@@ -171,6 +186,9 @@ where
             programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
             pending_clones: self.pending_clones.clone(),
+            pending_undelegation_rescues: self
+                .pending_undelegation_rescues
+                .clone(),
             pending_operation_timeout_ms: self
                 .pending_operation_timeout_ms
                 .clone(),
@@ -219,6 +237,7 @@ where
                 KNOWN_EMPTY_EATAS_CAPACITY,
             ))),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
+            pending_undelegation_rescues: Arc::new(Mutex::new(HashSet::new())),
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
@@ -619,14 +638,76 @@ where
             ));
         }
 
-        self.ensure_delegation_action_dependencies(
-            request.pubkey,
-            request.account.remote_slot(),
-            &request.delegation_actions,
-        )
-        .await?;
+        let result = async {
+            self.ensure_delegation_action_dependencies(
+                request.pubkey,
+                request.account.remote_slot(),
+                &request.delegation_actions,
+            )
+            .await?;
 
-        Ok(self.clone_account_with_ownership(request).await?)
+            Ok(self.clone_account_with_ownership(request.clone()).await?)
+        }
+        .await;
+
+        match result {
+            Ok(signature) => Ok(signature),
+            Err(err) => {
+                let pubkey = request.pubkey;
+                if let Err(rescue_err) = self
+                    .rescue_undelegation_after_post_delegation_failure(request)
+                    .await
+                {
+                    warn!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        rescue_error = ?rescue_err,
+                        "Failed to schedule undelegation rescue after post-delegation action clone failure"
+                    );
+                }
+                Err(err)
+            }
+        }
+    }
+
+    async fn rescue_undelegation_after_post_delegation_failure(
+        &self,
+        mut request: AccountCloneRequest,
+    ) -> ChainlinkResult<()> {
+        let pubkey = request.pubkey;
+        if self
+            .accounts_bank
+            .get_account(&pubkey)
+            .is_some_and(|account| account.undelegating())
+        {
+            return Ok(());
+        }
+
+        let Some(_guard) = self.claim_undelegation_rescue(pubkey) else {
+            return Ok(());
+        };
+
+        request.delegation_actions = DelegationActions::default();
+        self.clone_account_with_ownership(request).await?;
+        self.cloner.schedule_undelegation_rescue(pubkey).await?;
+        Ok(())
+    }
+
+    fn claim_undelegation_rescue(
+        &self,
+        pubkey: Pubkey,
+    ) -> Option<PendingUndelegationRescueGuard> {
+        let mut pending_rescues = self
+            .pending_undelegation_rescues
+            .lock()
+            .expect("pending undelegation rescues lock poisoned");
+        if !pending_rescues.insert(pubkey) {
+            return None;
+        }
+        Some(PendingUndelegationRescueGuard {
+            pending_rescues: Arc::clone(&self.pending_undelegation_rescues),
+            pubkey,
+        })
     }
 
     fn normalize_unresolved_dlp_clone_request(

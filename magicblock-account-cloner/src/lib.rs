@@ -198,6 +198,10 @@ impl ChainlinkCloner {
         )
     }
 
+    fn undelegation_rescue_ix(pubkey: Pubkey) -> Instruction {
+        InstructionUtils::schedule_undelegation_rescue_instruction(pubkey)
+    }
+
     fn finalize_program_ix(
         program: Pubkey,
         buffer: Pubkey,
@@ -651,6 +655,23 @@ impl Cloner for ChainlinkCloner {
         Ok(last_sig.unwrap_or_default())
     }
 
+    async fn schedule_undelegation_rescue(
+        &self,
+        pubkey: Pubkey,
+    ) -> ClonerResult<Signature> {
+        let blockhash = self.block.load().blockhash;
+        let tx = self.create_signed_tx(
+            &[Self::undelegation_rescue_ix(pubkey)],
+            blockhash,
+        );
+        self.send_tx(tx).await.map_err(|err| {
+            ClonerError::FailedToScheduleUndelegationRescue(
+                pubkey,
+                Box::new(err),
+            )
+        })
+    }
+
     async fn clone_program(
         &self,
         program: LoadedProgram,
@@ -809,6 +830,31 @@ mod tests {
                 assert_eq!(max_size, MAX_INLINE_TRANSACTION_SIZE);
             }
             err => panic!("unexpected error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn undelegation_rescue_ix_uses_specific_magic_instruction() {
+        magicblock_program::validator::generate_validator_authority_if_needed();
+        let pubkey = Pubkey::new_unique();
+        let ix = ChainlinkCloner::undelegation_rescue_ix(pubkey);
+
+        assert_eq!(ix.program_id, magicblock_program::ID);
+        assert_eq!(ix.accounts.len(), 3);
+        assert_eq!(
+            ix.accounts[0].pubkey,
+            magicblock_program::validator::validator_authority_id()
+        );
+        assert!(ix.accounts[0].is_signer);
+        assert!(ix.accounts[0].is_writable);
+        assert_eq!(ix.accounts[1].pubkey, MAGIC_CONTEXT_PUBKEY);
+        assert!(ix.accounts[1].is_writable);
+        assert_eq!(ix.accounts[2].pubkey, pubkey);
+        assert!(ix.accounts[2].is_writable);
+
+        match bincode::deserialize(&ix.data).unwrap() {
+            MagicBlockInstruction::ScheduleUndelegationRescue => {}
+            _ => panic!("expected schedule undelegation rescue instruction"),
         }
     }
 

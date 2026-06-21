@@ -34,6 +34,7 @@ pub struct ClonerStub {
     accounts_bank: Arc<AccountsBankStub>,
     cloned_programs: Arc<Mutex<HashMap<Pubkey, LoadedProgram>>>,
     clone_requests: Arc<Mutex<Vec<AccountCloneRequest>>>,
+    undelegation_rescue_requests: Arc<Mutex<Vec<Pubkey>>>,
     clone_delay: Arc<Mutex<Option<Duration>>>,
     account_clone_count: Arc<AtomicU64>,
     active_account_clones: Arc<AtomicU64>,
@@ -57,6 +58,7 @@ impl ClonerStub {
             cloned_programs:
                 Arc::<Mutex<HashMap<Pubkey, LoadedProgram>>>::default(),
             clone_requests: Arc::new(Mutex::new(Vec::new())),
+            undelegation_rescue_requests: Arc::new(Mutex::new(Vec::new())),
             clone_delay: Arc::new(Mutex::new(None)),
             account_clone_count: Arc::new(AtomicU64::new(0)),
             active_account_clones: Arc::new(AtomicU64::new(0)),
@@ -165,6 +167,10 @@ impl ClonerStub {
         self.clone_requests.lock().unwrap().len()
     }
 
+    pub fn undelegation_rescue_requests(&self) -> Vec<Pubkey> {
+        self.undelegation_rescue_requests.lock().unwrap().clone()
+    }
+
     async fn wait_for_clone_completion_allowed(&self) {
         loop {
             let notified = self.clone_completion_notify.notified();
@@ -213,6 +219,17 @@ impl Cloner for ClonerStub {
         self.wait_for_clone_completion_allowed().await;
         self.accounts_bank.insert(request.pubkey, request.account);
         self.active_account_clones.fetch_sub(1, Ordering::SeqCst);
+        Ok(Signature::default())
+    }
+
+    async fn schedule_undelegation_rescue(
+        &self,
+        pubkey: Pubkey,
+    ) -> ClonerResult<Signature> {
+        self.undelegation_rescue_requests
+            .lock()
+            .unwrap()
+            .push(pubkey);
         Ok(Signature::default())
     }
 

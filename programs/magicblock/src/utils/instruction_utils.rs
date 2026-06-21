@@ -112,6 +112,20 @@ impl InstructionUtils {
         )
     }
 
+    pub fn schedule_undelegation_rescue_instruction(
+        pubkey: Pubkey,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleUndelegationRescue,
+            vec![
+                AccountMeta::new(validator_authority_id(), true),
+                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+                AccountMeta::new(pubkey, false),
+            ],
+        )
+    }
+
     // -----------------
     // Scheduled Commit Sent
     // -----------------

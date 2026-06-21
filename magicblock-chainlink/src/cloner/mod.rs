@@ -80,6 +80,13 @@ pub trait Cloner: Send + Sync + 'static {
         program: LoadedProgram,
     ) -> ClonerResult<Signature>;
 
+    /// Schedules a validator-initiated undelegation rescue for a delegated
+    /// account whose post-delegation actions could not be applied locally.
+    async fn schedule_undelegation_rescue(
+        &self,
+        pubkey: Pubkey,
+    ) -> ClonerResult<Signature>;
+
     /// Evicts an account from the ephemeral validator by submitting an
     /// EvictAccount transaction through the transaction pipeline.
     async fn evict_account(&self, pubkey: Pubkey) -> ClonerResult<()>;

@@ -310,6 +310,17 @@ pub enum MagicBlockInstruction {
         authority: Pubkey,
         instructions: Vec<Instruction>,
     },
+
+    /// Schedules an undelegation rescue after a post-delegation action clone
+    /// failure. This uses the same underlying commit-finalize-and-undelegate
+    /// flow as `ScheduleCommitAndUndelegate`, but is reserved for validator
+    /// initiated cleanup.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator authority
+    /// - **1.** `[WRITE]`         Magic Context Account
+    /// - **2.** `[WRITE]`         Account to commit and undelegate
+    ScheduleUndelegationRescue,
 }
 
 impl MagicBlockInstruction {
