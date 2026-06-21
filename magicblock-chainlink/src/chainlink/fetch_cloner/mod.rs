@@ -146,10 +146,9 @@ struct PendingUndelegationRescueGuard {
 
 impl Drop for PendingUndelegationRescueGuard {
     fn drop(&mut self) {
-        self.pending_rescues
-            .lock()
-            .expect("pending undelegation rescues lock poisoned")
-            .remove(&self.pubkey);
+        if let Ok(mut pending_rescues) = self.pending_rescues.lock() {
+            pending_rescues.remove(&self.pubkey);
+        }
     }
 }
 
@@ -697,10 +696,8 @@ where
         &self,
         pubkey: Pubkey,
     ) -> Option<PendingUndelegationRescueGuard> {
-        let mut pending_rescues = self
-            .pending_undelegation_rescues
-            .lock()
-            .expect("pending undelegation rescues lock poisoned");
+        let mut pending_rescues =
+            self.pending_undelegation_rescues.lock().ok()?;
         if !pending_rescues.insert(pubkey) {
             return None;
         }
