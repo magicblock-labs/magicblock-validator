@@ -1,73 +1,59 @@
-I tried to translate the MIMD into a concrete call flow to check whether I am
-interpreting the proposal correctly. I am intentionally not repeating the full
-actor list, economic rules, or commitment format from the proposal. This is only
-the extra structure I think is implied by the text, plus the places where the
-proposal still seems ambiguous.
+I tried to translate the MIMD into a concrete call flow to check whether I am interpreting the proposal
+correctly. I am intentionally not repeating the full actor list, economic rules, or commitment format
+from the proposal. This is only the extra structure I think is implied by the text, plus the places
+where the proposal still seems ambiguous.
 
 > [!NOTE]
 > **Assumptions / Terms / Scopes**
 >
-> - **Validator commitment**: a DLP-visible hash/claim plus metadata. Creating
->   it must not mutate the delegated account.
-> - **Finalization**: the later step that applies or accepts committed state
->   after the challenge window, council condition, or dispute path allows it.
-> - **Pre-commit challenges**: challenges raised before a `ValidatorCommitment`
->   exists. They are out of scope for V1; this LLD only covers challenges
->   anchored to an existing DLP-visible `ValidatorCommitment`.
-> - **Canonical account state**: `lamports + owner + data`. `executable` is
->   excluded because executable accounts are not delegatable. The
->   missing-account representation is still undefined.
-> - `SubmitValidatorCommitment` is commitment-only. Current
->   `CommitFinalize`-style behavior can run only after the commitment is no
->   longer challengeable, or after a challenge resolves and approves the state.
-> - Existing `CommitState` / `CommitStateFromBuffer` are the closest current
->   analogs for creating a pending commit artifact. Existing `CommitFinalize`
->   is an optimized apply/finalize path, not `SubmitValidatorCommitment`.
-> - The **challenge window** starts when the delegation program stores the
->   `ValidatorCommitment`. Normal finalization is blocked until that window
->   expires without a challenge, or until any raised challenge reaches a
->   terminal outcome.
-> - A **challenge** is anchored to a DLP-visible commitment artifact. Off-chain
->   challenger detection is only evidence for deciding to challenge; it is not
->   the protocol anchor.
-> - `Resolver` means the V1 security council mechanism. It is entered only when
->   valid validator and challenger openings disagree, or when validator-fault
->   handling routes the case there. The resolver's design is **out of scope**
->   for this document.
-> - `Keeper / anyone` is a permissionless transaction submitter. It pings the
->   delegation program to advance timeout or finalization transitions, and the
->   delegation program verifies from on-chain state whether the transition is
->   allowed.
-> - Low-level implementation details such as exact account types, PDA seeds,
->   serialization layouts, and buffer formats are intentionally out of scope for
->   this LLD unless they change the protocol flow.
+> - **Validator commitment**: a DLP-visible hash/claim plus metadata. Creating it must not mutate the delegated account.
+> - **Finalization**: the later step that applies or accepts committed state after the challenge window, council
+>   condition, or dispute path allows it.
+> - **Pre-commit challenges**: challenges raised before a `ValidatorCommitment` exists. They are out of scope
+>   for V1; this LLD only covers challenges anchored to an existing DLP-visible `ValidatorCommitment`.
+> - **Canonical account state**: `lamports + owner + data`. `executable` is excluded because executable
+>   accounts are not delegatable. The missing-account representation is still undefined.
+> - `SubmitValidatorCommitment` is commitment-only. Current `CommitFinalize`-style behavior can run only
+>   after the commitment is no longer challengeable, or after a challenge resolves and approves the state.
+> - Existing `CommitState` / `CommitStateFromBuffer` are the closest current analogs for creating a pending
+>   commit artifact. Existing `CommitFinalize` is an optimized apply/finalize path, not `SubmitValidatorCommitment`.
+> - The **challenge window** starts when the delegation program stores the `ValidatorCommitment`. Normal
+>   finalization is blocked until that window expires without a challenge, or until any raised challenge
+>   reaches a terminal outcome.
+> - A **challenge** is anchored to a DLP-visible commitment artifact. Off-chain challenger detection is only
+>   evidence for deciding to challenge; it is not the protocol anchor.
+> - `Resolver` means the V1 security council mechanism. It is entered only when valid validator and challenger
+>   openings disagree, or when validator-fault handling routes the case there. The resolver's design is
+>   **out of scope** for this document.
+> - `Keeper / anyone` is a permissionless transaction submitter. It pings the delegation program to advance
+>   timeout or finalization transitions, and the delegation program verifies from on-chain state whether the
+>   transition is allowed.
+> - Low-level implementation details such as exact account types, PDA seeds, serialization layouts, and buffer
+>   formats are intentionally out of scope for this LLD unless they change the protocol flow.
 >
 
 **Records I think are implied**
 
-- **ValidatorBond**: the slashable validator/operator stake, separate from the
-  fee vault.
-- **ValidatorCommitment**: one committed account update, keyed by validator,
-  account, and commit id. Including the validator identity avoids ambiguity if
-  more than one validator can commit state for the same account and commit id.
-- **ChallengeRecord**: one active challenge against a validator commitment,
-  including the challenge hash, locked stake, deadlines, and terminal outcome.
+- **ValidatorBond**: the slashable validator/operator stake, separate from the fee vault.
+- **ValidatorCommitment**: one committed account update, keyed by validator, account, and commit id. Including
+  the validator identity avoids ambiguity if more than one validator can commit state for the same account and
+  commit id.
+- **ChallengeRecord**: one active challenge against a validator commitment, including the challenge hash,
+  locked stake, deadlines, and terminal outcome.
 - **StateBuffer**: optional canonical buffer for large account data.
 - **ResolutionRecord**: resolver state for mismatches or validator failures.
 
 **Important interpretation: validator response opens the original commitment**
 
-My read is that `SubmitValidatorResponse` should not be a new claim made after
-the challenge starts. It should reveal the account state behind the original
-validator commitment, and the delegation program should verify:
+My read is that `SubmitValidatorResponse` should not be a new claim made after the challenge starts. It
+should reveal the account state behind the original validator commitment, and the delegation program should verify:
 
 ```text
 H(validator_response_state) == stored_validator_commitment_hash
 ```
 
-This avoids the case where a validator originally committed `H(bad_state)`, then
-responds to the challenge with `correct_state`, making the challenge look
-unnecessary.
+This avoids the case where a validator originally committed `H(bad_state)`, then responds to the challenge
+with `correct_state`, making the challenge look unnecessary.
 
 **Sequence as I understand it**
 
@@ -142,48 +128,39 @@ sequenceDiagram
 
 **Commentary on the sequence**
 
-- Start from an account that is already delegated, has been modified on ER, and
-  has a next `commit_id` / nonce for this account update.
-- The validator first creates a DLP-visible commitment artifact. In this LLD,
-  that artifact is called `ValidatorCommitment` and is bound to:
+- Start from an account that is already delegated, has been modified on ER, and has a next `commit_id` / nonce
+  for this account update.
+- The validator first creates a DLP-visible commitment artifact. In this LLD, that artifact is called
+  `ValidatorCommitment` and is bound to:
 
 ```text
 validator_identity + account_pubkey + commit_id
 ```
 
-- A challenger does not challenge unanchored validator memory. The challenger
-  independently computes the expected ER account state off-chain, then watches
-  DLP program transactions or DLP-owned account changes for the validator's
-  on-chain commitment for the same account and commit id.
-- In the current implementation, the closest concrete artifacts are the
-  `commit_state_pda` and `commit_record_pda` created by `CommitState` /
-  `CommitStateFromBuffer`. The challenge-enabled protocol should either define
-  a first-class `ValidatorCommitment` account or extend the commit record so it
-  explicitly stores the committed hash and challenge/finality status.
-- If the challenger disagrees with the validator commitment, it raises a
-  challenge by locking stake and submitting `challenge_hash`, which is a salted
-  commitment to the challenger state and full challenge context.
-- The delegation program records the challenge, locks challenger stake, marks
-  the validator commitment disputed, and blocks normal finalization for that
-  commitment until the challenge reaches a terminal outcome.
-- The validator response must reveal the state behind the original stored
-  validator commitment. The delegation program must verify that the response
-  opens the stored `validator_state_hash`; it must not accept a fresh state
+- A challenger does not challenge unanchored validator memory. The challenger independently computes the
+  expected ER account state off-chain, then watches DLP program transactions or DLP-owned account changes for
+  the validator's on-chain commitment for the same account and commit id.
+- In the current implementation, the closest concrete artifacts are the `commit_state_pda` and
+  `commit_record_pda` created by `CommitState` / `CommitStateFromBuffer`. The challenge-enabled protocol should
+  either define a first-class `ValidatorCommitment` account or extend the commit record so it explicitly stores
+  the committed hash and challenge/finality status.
+- If the challenger disagrees with the validator commitment, it raises a challenge by locking stake and
+  submitting `challenge_hash`, which is a salted commitment to the challenger state and full challenge context.
+- The delegation program records the challenge, locks challenger stake, marks the validator commitment disputed,
+  and blocks normal finalization for that commitment until the challenge reaches a terminal outcome.
+- The validator response must reveal the state behind the original stored validator commitment. The delegation
+  program must verify that the response opens the stored `validator_state_hash`; it must not accept a fresh state
   claim that differs from the original commitment.
-- After a valid validator opening, the challenger reveals its state and salt.
-  The delegation program recomputes `challenge_hash`. If the reveal does not
-  open the original challenge hash, the challenger is fully slashed.
-- If the challenger reveal is valid and both states match, the challenge was
-  unnecessary but valid. The challenger loses 20% of the locked stake to the
-  protocol, the remaining stake is unlocked, and the commitment is cleared for
-  finalization.
-- If the valid challenger state differs from the valid validator state, the
-  protocol has proven disagreement but not fault. The delegation program creates
-  a `ResolutionRecord`, and the resolver decides whether the validator state or
-  challenger state is correct.
-- Finalization is a later step. It can proceed only if no challenge exists, the
-  challenge has been cleared, or the challenge has been resolved and the
-  finalizing state matches the resolved state.
+- After a valid validator opening, the challenger reveals its state and salt. The delegation program recomputes
+  `challenge_hash`. If the reveal does not open the original challenge hash, the challenger is fully slashed.
+- If the challenger reveal is valid and both states match, the challenge was unnecessary but valid. The challenger
+  loses 20% of the locked stake to the protocol, the remaining stake is unlocked, and the commitment is cleared
+  for finalization.
+- If the valid challenger state differs from the valid validator state, the protocol has proven disagreement but
+  not fault. The delegation program creates a `ResolutionRecord`, and the resolver decides whether the validator
+  state or challenger state is correct.
+- Finalization is a later step. It can proceed only if no challenge exists, the challenge has been cleared, or the
+  challenge has been resolved and the finalizing state matches the resolved state.
 
 **Messages I think are missing or need to be explicit**
 
@@ -208,12 +185,9 @@ The 20% penalty for a valid but unnecessary challenge goes to the protocol.
 
 **Questions / possible gaps**
 
-- If the validator misses the response timeout, does the delegation program
-  immediately punish the validator, or does it send the case to the resolver
-  first?
-- What happens if the resolver does not get enough votes? The resolver design
-  is out of scope here, but the LLD still needs to know whether the challenge
-  remains blocked, times out, or reaches some fallback outcome.
-- Can multiple challengers challenge the same validator commitment, or is only
-  one active challenge allowed? This is out of scope for this LLD unless it
-  changes the core challenge flow.
+- If the validator misses the response timeout, does the delegation program immediately punish the validator,
+  or does it send the case to the resolver first?
+- What happens if the resolver does not get enough votes? The resolver design is out of scope here, but the LLD
+  still needs to know whether the challenge remains blocked, times out, or reaches some fallback outcome.
+- Can multiple challengers challenge the same validator commitment, or is only one active challenge allowed?
+  This is out of scope for this LLD unless it changes the core challenge flow.
