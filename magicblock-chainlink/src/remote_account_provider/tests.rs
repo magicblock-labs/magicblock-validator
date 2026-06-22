@@ -781,6 +781,74 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
 }
 
 #[tokio::test]
+async fn test_lock_aware_reconciler_still_removes_truly_stale_pubsub_only_subscription(
+) {
+    let setup_pubkey = solana_pubkey::Pubkey::new_unique();
+    let stale_pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(setup_pubkey, account).await;
+
+    _pubsub_client.insert_subscription(stale_pubkey);
+    assert!(_pubsub_client.subscriptions_union().contains(&stale_pubkey));
+    assert!(!provider.is_watching(&stale_pubkey));
+
+    provider.reconcile_subscriptions_once_for_test().await;
+
+    assert!(!_pubsub_client.subscriptions_union().contains(&stale_pubkey));
+}
+
+#[tokio::test]
+async fn test_lock_aware_reconciler_still_resubscribes_lru_owned_missing_pubsub(
+) {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    assert!(provider.is_watching(&pubkey));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+
+    _pubsub_client
+        .unsubscribe(pubkey)
+        .await
+        .expect("mock unsubscribe should remove pubsub state");
+    assert!(provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+
+    provider.reconcile_subscriptions_once_for_test().await;
+
+    assert!(provider.is_watching(&pubkey));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
 async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
 {
     let pubkey1 = solana_pubkey::Pubkey::new_unique();
