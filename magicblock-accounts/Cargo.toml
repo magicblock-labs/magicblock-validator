@@ -9,10 +9,23 @@ edition.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
+tracing = { workspace = true }
 
+magicblock-account-cloner = { workspace = true }
+magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
+magicblock-metrics = { workspace = true }
+magicblock-program = { workspace = true }
+solana-hash = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
 solana-pubkey = { workspace = true }
+solana-signer = { workspace = true }
+solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }

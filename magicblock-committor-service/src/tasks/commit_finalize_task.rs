@@ -1,7 +1,9 @@
 use dlp_api::{
     args::CommitFinalizeArgs,
     diff::compute_diff,
-    instruction_builder::{commit_diff_size_budget, commit_size_budget},
+    instruction_builder::{
+        commit_finalize_from_buffer_size_budget, commit_finalize_size_budget,
+    },
     AccountSizeClass,
 };
 use magicblock_committor_program::Chunks;
@@ -29,6 +31,7 @@ pub struct CommitFinalizeTask {
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
     pub delivery: CommitDelivery,
+    pub rent_reimbursement: Pubkey,
 }
 
 impl CommitFinalizeTask {
@@ -63,6 +66,8 @@ impl CommitFinalizeTask {
         dlp_api::instruction_builder::commit_finalize(
             *validator,
             self.committed_account.pubkey,
+            self.committed_account.account.owner,
+            self.rent_reimbursement,
             &mut args,
             &data,
         )
@@ -95,6 +100,8 @@ impl CommitFinalizeTask {
             *validator,
             self.committed_account.pubkey,
             data_buffer_pubkey,
+            self.committed_account.account.owner,
+            self.rent_reimbursement,
             &mut args,
         )
         .0
@@ -241,16 +248,16 @@ impl BaseTask for CommitFinalizeTask {
     fn accounts_size_budget(&self) -> u32 {
         match &self.delivery {
             CommitDelivery::StateInArgs => {
-                commit_size_budget(AccountSizeClass::Dynamic(
+                commit_finalize_size_budget(AccountSizeClass::Dynamic(
                     self.committed_account.account.data.len() as u32,
                 ))
             }
             CommitDelivery::StateInBuffer { .. }
             | CommitDelivery::DiffInBuffer { .. } => {
-                commit_size_budget(AccountSizeClass::Huge)
+                commit_finalize_from_buffer_size_budget(AccountSizeClass::Huge)
             }
             CommitDelivery::DiffInArgs { .. } => {
-                commit_diff_size_budget(AccountSizeClass::Dynamic(
+                commit_finalize_size_budget(AccountSizeClass::Dynamic(
                     self.committed_account.account.data.len() as u32,
                 ))
             }

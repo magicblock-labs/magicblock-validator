@@ -45,6 +45,8 @@ async fn test_prepare_commit_tx_with_single_account() {
         .into(),
         FinalizeTask {
             delegated_account: committed_account.pubkey,
+            owner_program: committed_account.account.owner,
+            rent_reimbursement: Pubkey::new_unique(),
         }
         .into(),
     ];
@@ -111,11 +113,15 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
         // finalize account 1
         FinalizeTask {
             delegated_account: committed_account1.pubkey,
+            owner_program: committed_account1.account.owner,
+            rent_reimbursement: Pubkey::new_unique(),
         }
         .into(),
         // finalize account 2
         FinalizeTask {
             delegated_account: committed_account2.pubkey,
+            owner_program: committed_account2.account.owner,
+            rent_reimbursement: Pubkey::new_unique(),
         }
         .into(),
     ];
@@ -204,6 +210,8 @@ async fn test_prepare_commit_tx_with_base_actions() {
         // finalize account
         FinalizeTask {
             delegated_account: committed_account.pubkey,
+            owner_program: committed_account.account.owner,
+            rent_reimbursement: Pubkey::new_unique(),
         }
         .into(),
         // BaseAction
@@ -280,6 +288,8 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
         // finalize account
         FinalizeTask {
             delegated_account: committed_account.pubkey,
+            owner_program: committed_account.account.owner,
+            rent_reimbursement: Pubkey::new_unique(),
         }
         .into(),
         // Undelegate
@@ -287,6 +297,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
             delegated_account: committed_account.pubkey,
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
+            request_rent_payer: None,
         }
         .into(),
     ];
