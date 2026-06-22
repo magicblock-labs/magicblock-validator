@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 bincode = { workspace = true }
+borsh = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
 magicblock-aml = { workspace = true }

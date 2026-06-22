@@ -9816,6 +9816,7 @@ name = "test-chainlink"
 version = "0.0.0"
 dependencies = [
  "bincode",
+ "borsh 1.7.0",
  "futures",
  "integration-test-tools",
  "magicblock-aml",

@@ -269,7 +269,7 @@ fn run_aml_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, None, success_output())
+        wait_for_ctrlc(devnet_validator, None, success_output())
     }
 }
 
