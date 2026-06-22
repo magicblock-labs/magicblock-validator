@@ -87,6 +87,34 @@ use crate::{
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 pub(crate) const DEFAULT_SUBSCRIPTION_RETRIES: usize = 5;
 
+type SubscriptionKeyLocks =
+    Arc<AsyncMutex<HashMap<Pubkey, Weak<AsyncMutex<()>>>>>;
+
+pub(crate) async fn subscription_key_lock_from_map(
+    subscription_key_locks: &SubscriptionKeyLocks,
+    pubkey: &Pubkey,
+) -> Arc<AsyncMutex<()>> {
+    let mut locks = subscription_key_locks.lock().await;
+    locks.retain(|_, lock| lock.strong_count() > 0);
+
+    if let Some(lock) = locks.get(pubkey).and_then(Weak::upgrade) {
+        return lock;
+    }
+
+    let lock = Arc::new(AsyncMutex::new(()));
+    locks.insert(*pubkey, Arc::downgrade(&lock));
+    lock
+}
+
+pub(crate) async fn subscription_key_owned_guard_from_map(
+    subscription_key_locks: &SubscriptionKeyLocks,
+    pubkey: Pubkey,
+) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock =
+        subscription_key_lock_from_map(subscription_key_locks, &pubkey).await;
+    lock.lock_owned().await
+}
+
 type ChainUpdatesPubsub = (Arc<ChainUpdatesClient>, mpsc::Receiver<()>);
 
 async fn connect_pubsub_client(
@@ -398,8 +426,7 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     ///
     /// Values are weak references so pubkeys do not accumulate forever after
     /// their transient transition lock is no longer in use.
-    subscription_key_locks:
-        Arc<AsyncMutex<HashMap<Pubkey, Weak<AsyncMutex<()>>>>>,
+    subscription_key_locks: SubscriptionKeyLocks,
     /// The current slot on chain.
     ///
     /// This value is updated from two sources and always stores the maximum
@@ -566,6 +593,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         subscribed_accounts: Arc<AccountsLruCache>,
         pubsub_client: Arc<PubsubClient>,
         removed_account_tx: mpsc::Sender<Pubkey>,
+        subscription_key_locks: SubscriptionKeyLocks,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(
@@ -576,11 +604,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             loop {
                 interval.tick().await;
                 let pubsub_total =
-                    subscription_reconciler::reconcile_subscriptions(
+                    subscription_reconciler::reconcile_subscriptions_with_key_locks(
                         &subscribed_accounts,
                         pubsub_client.as_ref(),
                         &never_evicted,
                         &removed_account_tx,
+                        Some(&subscription_key_locks),
                     )
                     .await;
 
@@ -603,6 +632,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<Self> {
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
+        let subscription_key_locks: SubscriptionKeyLocks =
+            Arc::new(AsyncMutex::new(HashMap::new()));
 
         let active_subscriptions_updater =
             if config.enable_subscription_metrics() {
@@ -610,6 +641,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     lrucache_subscribed_accounts.clone(),
                     Arc::new(pubsub_client.clone()),
                     removed_account_tx.clone(),
+                    subscription_key_locks.clone(),
                 ))
             } else {
                 None
@@ -620,7 +652,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             next_fetching_account_generation: AtomicU64::default(),
             subscription_ownership: Arc::new(AsyncMutex::new(HashMap::new())),
             subscription_transition_lock: Arc::new(AsyncMutex::new(())),
-            subscription_key_locks: Arc::new(AsyncMutex::new(HashMap::new())),
+            subscription_key_locks,
             rpc_client,
             pubsub_client,
             chain_slot,
@@ -1602,11 +1634,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub(crate) async fn reconcile_subscriptions_once_for_test(&self) -> usize {
         let never_evicted =
             self.lrucache_subscribed_accounts.never_evicted_accounts();
-        subscription_reconciler::reconcile_subscriptions(
+        subscription_reconciler::reconcile_subscriptions_with_key_locks(
             &self.lrucache_subscribed_accounts,
             &self.pubsub_client,
             &never_evicted,
             &self.removed_account_tx,
+            Some(&self.subscription_key_locks),
         )
         .await
     }
@@ -1641,16 +1674,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> Arc<AsyncMutex<()>> {
-        let mut locks = self.subscription_key_locks.lock().await;
-        locks.retain(|_, lock| lock.strong_count() > 0);
-
-        if let Some(lock) = locks.get(pubkey).and_then(Weak::upgrade) {
-            return lock;
-        }
-
-        let lock = Arc::new(AsyncMutex::new(()));
-        locks.insert(*pubkey, Arc::downgrade(&lock));
-        lock
+        subscription_key_lock_from_map(&self.subscription_key_locks, pubkey)
+            .await
     }
 
     pub async fn acquire_subscription(

@@ -5,7 +5,10 @@ use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 use tracing::*;
 
-use super::{AccountsLruCache, ChainPubsubClient};
+use super::{
+    subscription_key_owned_guard_from_map, AccountsLruCache, ChainPubsubClient,
+    SubscriptionKeyLocks,
+};
 use crate::remote_account_provider::RemoteAccountProviderError;
 
 /// Unsubscribes from pubsub and sends a removal notification to trigger bank
@@ -78,11 +81,31 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
 /// - `removed_account_tx`: Channel to notify upstream that an account was
 ///   unsubscribed and should be removed from the bank.
 /// - Returns: The number of accounts that are subscribed
+#[cfg(test)]
 pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &AccountsLruCache,
     pubsub_client: &PubsubClient,
     never_evicted: &[Pubkey],
     removed_account_tx: &mpsc::Sender<Pubkey>,
+) -> usize {
+    reconcile_subscriptions_with_key_locks(
+        subscribed_accounts,
+        pubsub_client,
+        never_evicted,
+        removed_account_tx,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn reconcile_subscriptions_with_key_locks<
+    PubsubClient: ChainPubsubClient,
+>(
+    subscribed_accounts: &AccountsLruCache,
+    pubsub_client: &PubsubClient,
+    never_evicted: &[Pubkey],
+    removed_account_tx: &mpsc::Sender<Pubkey>,
+    subscription_key_locks: Option<&SubscriptionKeyLocks>,
 ) -> usize {
     let pubsub_union = pubsub_client.subscriptions_union();
     let pubsub_intersection = pubsub_client.subscriptions_intersection();
@@ -137,7 +160,28 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         );
         trace!(pubkeys = ?extra_in_lru, "Resubscribing missing accounts");
         for pubkey in extra_in_lru {
-            if let Err(e) = pubsub_client.subscribe(*pubkey, None).await {
+            let pubkey = *pubkey;
+            let _subscription_guard =
+                acquire_subscription_key_guard(subscription_key_locks, pubkey)
+                    .await;
+
+            if !subscribed_accounts.contains(&pubkey) {
+                trace!(
+                    pubkey = %pubkey,
+                    "Skipping resubscribe because pubkey left LRU after reconciliation snapshot"
+                );
+                continue;
+            }
+
+            if pubsub_client.subscriptions_intersection().contains(&pubkey) {
+                trace!(
+                    pubkey = %pubkey,
+                    "Skipping resubscribe because pubkey is already ensured after reconciliation snapshot"
+                );
+                continue;
+            }
+
+            if let Err(e) = pubsub_client.subscribe(pubkey, None).await {
                 warn!(pubkey = %pubkey, error = ?e, "Failed to resubscribe account");
             }
         }
@@ -154,8 +198,29 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         );
         trace!(pubkeys = ?extra_in_pubsub, "Unsubscribing stale accounts");
         for pubkey in extra_in_pubsub {
+            let pubkey = *pubkey;
+            let _subscription_guard =
+                acquire_subscription_key_guard(subscription_key_locks, pubkey)
+                    .await;
+
+            if subscribed_accounts.contains(&pubkey) {
+                trace!(
+                    pubkey = %pubkey,
+                    "Skipping stale unsubscribe because pubkey entered LRU after reconciliation snapshot"
+                );
+                continue;
+            }
+
+            if !pubsub_client.subscriptions_union().contains(&pubkey) {
+                trace!(
+                    pubkey = %pubkey,
+                    "Skipping stale unsubscribe because pubkey left pubsub after reconciliation snapshot"
+                );
+                continue;
+            }
+
             unsubscribe_and_notify_removal(
-                *pubkey,
+                pubkey,
                 pubsub_client,
                 removed_account_tx,
             )
@@ -166,6 +231,22 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     // Pubsubs should be subscribed to all accounts in LRU accounts and accounts that
     // are never evicted (not tracked in LRU)
     lru_count + never_evicted.len()
+}
+
+async fn acquire_subscription_key_guard(
+    subscription_key_locks: Option<&SubscriptionKeyLocks>,
+    pubkey: Pubkey,
+) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+    match subscription_key_locks {
+        Some(subscription_key_locks) => Some(
+            subscription_key_owned_guard_from_map(
+                subscription_key_locks,
+                pubkey,
+            )
+            .await,
+        ),
+        None => None,
+    }
 }
 
 #[cfg(test)]
