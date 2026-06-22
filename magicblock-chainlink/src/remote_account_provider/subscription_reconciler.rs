@@ -46,6 +46,34 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
     }
 }
 
+/// Reconciles subscription state between the LRU cache and the pubsub client.
+///
+/// This function is called when a mismatch is detected between the accounts
+/// tracked in the LRU cache and the actual subscriptions held by the pubsub
+/// client. It repairs drift by:
+///
+/// - **Resubscribing**: Accounts present in the LRU cache but missing from the
+///   pubsub client are resubscribed. This can happen if subscriptions were
+///   dropped due to network issues or reconnects.
+///
+/// - **Unsubscribing**: Accounts present in the pubsub client but missing from
+///   the LRU cache are unsubscribed and reported through `removed_account_tx`.
+///   This can happen if the LRU evicted an account but the unsubscribe request
+///   failed or was lost.
+///
+/// `never_evicted` contains system accounts, such as sysvars, that are expected
+/// to be present in pubsub without being tracked in the LRU. These are excluded
+/// so reconciliation does not incorrectly unsubscribe them.
+///
+/// When `subscription_key_locks` is provided, reconciliation serializes each
+/// per-pubkey repair with normal subscription transitions and rechecks the live
+/// LRU/pubsub state after acquiring the lock. This prevents a stale snapshot
+/// from unsubscribing an account that is in the middle of being registered, while
+/// still allowing tests to exercise the unlocked reconciliation path by passing
+/// `None`.
+///
+/// Returns the expected total number of monitored accounts: LRU-tracked accounts
+/// plus never-evicted accounts.
 pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &AccountsLruCache,
     pubsub_client: &PubsubClient,
