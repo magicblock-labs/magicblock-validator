@@ -35,7 +35,7 @@ pub(crate) type AccountSubscriptionsDb =
 /// Manages subscriptions to accounts owned by a specific program. Maps a program `Pubkey` to its subscribers.
 pub(crate) type ProgramSubscriptionsDb =
     Arc<scc::HashMap<Pubkey, UpdateSubscribers<ProgramAccountEncoder>>>;
-/// Manages one-shot subscriptions for transaction signature statuses. Maps a `Signature` to its subscriber.
+/// Manages one-shot subscriptions for transaction signature statuses.
 pub(crate) type SignatureSubscriptionsDb =
     Arc<scc::HashMap<Signature, UpdateSubscriber<TransactionResultEncoder>>>;
 /// Manages subscriptions to all transaction logs.
@@ -178,13 +178,32 @@ impl SubscriptionsDb {
         signature: Signature,
         chan: WsConnectionChannel,
     ) -> (SubscriptionID, Arc<AtomicBool>) {
-        let encoder = TransactionResultEncoder;
-        let subscriber = self
+        let mut subscriber = self
             .signatures
             .entry_async(signature)
             .await
-            .or_insert_with(|| UpdateSubscriber::new(Some(chan), encoder));
-        (subscriber.id, subscriber.live.clone())
+            .or_insert_with(|| {
+                UpdateSubscriber::new(None, TransactionResultEncoder)
+            });
+        subscriber.txs.insert(chan.id, chan.tx);
+        let id = subscriber.id;
+        let live = subscriber.live.clone();
+        (id, live)
+    }
+
+    /// Removes one pending signature subscription.
+    pub(crate) async fn remove_signature_subscriber(
+        &self,
+        signature: &Signature,
+        conid: ConnectionID,
+    ) {
+        let Some(mut entry) = self.signatures.get_async(signature).await else {
+            return;
+        };
+        entry.txs.remove(&conid);
+        if entry.txs.is_empty() {
+            let _ = entry.remove();
+        }
     }
 
     /// Sends a notification to a signature subscriber and removes the subscription.
