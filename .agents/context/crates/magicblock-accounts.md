@@ -231,6 +231,10 @@ Do not replace this with an ordinary per-instance queue unless the Magic Program
 
 The code uses `expect(POISONED_MUTEX_MSG)` in the normal processing paths. One recovery cleanup path handles poisoning by logging and taking the inner map. Treat mutex poisoning as a serious invariant violation.
 
+### Owner-program undelegation requests
+
+`magicblock-api` starts `ScheduledCommitsProcessorImpl::spawn_undelegation_request_processor` for non-replica validators. That observer consumes Chainlink's observed Delegation Program `UndelegationRequest` updates and synthesizes the commit/finalize opportunity for owner-program requested undelegation. The committor then relies on DLP finalize/commit-finalize auto-undelegation accounts derived from `DelegationMetadata`; it does not need a separate request-PDA fetch to find the request rent payer.
+
 ### Undelegation notifications are best-effort
 
 Before scheduling an intent bundle, the processor calls `chainlink.undelegation_requested` for accounts from commit-and-undelegate intents. Errors are aggregated and logged but do not fail scheduling. This favors settlement progress over local watcher correctness; if you change it, document how accounts that are already locally immutable/undelegating recover from missed base-layer subscriptions.
@@ -296,6 +300,7 @@ Risks:
 Inspect first:
 
 - `prepare_intent_bundles_for_scheduling` and `process_undelegation_requests`;
+- `magicblock-api/src/magic_validator.rs` startup wiring, especially whether the observed `UndelegationRequest` processor is spawned;
 - `ScheduledIntentBundle::get_undelegate_intent_pubkeys` / `has_undelegate_intent`;
 - `magicblock-chainlink::undelegation_requested`;
 - Magic Program code that marks accounts undelegating/immutable when scheduling commit-and-undelegate.

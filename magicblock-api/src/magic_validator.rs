@@ -9,6 +9,7 @@ use std::{
 };
 
 use magicblock_account_cloner::ChainlinkCloner;
+use magicblock_accounts::scheduled_commits_processor::ScheduledCommitsProcessorImpl;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
     initialize_aperture,
@@ -113,6 +114,7 @@ pub struct MagicValidator {
     ledger_truncator: LedgerTruncator,
     intent_execution_service: IntentExecutionServiceImpl,
     replication_service: Option<ReplicationService>,
+    scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -323,6 +325,19 @@ impl MagicValidator {
         );
         log_timing("startup", "system_metrics_ticker_start", step_start);
 
+        let scheduled_commits_processor = (!matches!(
+            config.validator.replication_mode,
+            ReplicationMode::Replica { .. }
+        ))
+        .then(|| {
+                Arc::new(ScheduledCommitsProcessorImpl::new(
+                    chainlink.clone(),
+                    dispatch.transaction_scheduler.clone(),
+                    identity_keypair.insecure_clone(),
+                    ledger.latest_block().clone(),
+                ))
+        });
+
         let step_start = Instant::now();
         load_upgradeable_programs(
             &accountsdb,
@@ -444,6 +459,7 @@ impl MagicValidator {
             _metrics: (metrics_service, system_metrics_ticker),
             intent_execution_service,
             replication_service,
+            scheduled_commits_processor,
             token,
             ledger,
             ledger_truncator,
@@ -1037,6 +1053,15 @@ impl MagicValidator {
             }
         }
 
+        if !matches!(
+            self.config.validator.replication_mode,
+            ReplicationMode::Replica { .. }
+        ) {
+            if let Some(processor) = self.scheduled_commits_processor.as_ref() {
+                processor.spawn_undelegation_request_processor();
+            }
+        }
+
         // Now we are ready to start all services and are ready to accept transactions
         if let Some(frequency) = self
             .config
@@ -1125,6 +1150,17 @@ impl MagicValidator {
         // Ordering is important here
         // Commitor service shall be stopped last
         self.token.cancel();
+        if let Some(ref scheduled_commits_processor) =
+            self.scheduled_commits_processor
+        {
+            let step_start = Instant::now();
+            scheduled_commits_processor.stop();
+            log_timing(
+                "shutdown",
+                "scheduled_commits_processor_stop",
+                step_start,
+            );
+        }
 
         let step_start = Instant::now();
         if let Err(err) = self.intent_execution_service.stop().await {

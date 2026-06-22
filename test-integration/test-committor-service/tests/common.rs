@@ -7,6 +7,9 @@ use std::{
 };
 
 use async_trait::async_trait;
+use dlp_api::state::{
+    DelegationMetadata, UndelegationRequest, UndelegationRequester,
+};
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
@@ -190,6 +193,35 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         _: u64,
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
         Ok(pubkeys.to_vec())
+    }
+
+    async fn fetch_delegation_metadata(
+        &self,
+        pubkeys: &[Pubkey],
+        _: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        Ok(pubkeys
+            .iter()
+            .map(|pubkey| {
+                (
+                    *pubkey,
+                    DelegationMetadata {
+                        last_commit_id: 0,
+                        undelegation_requester: UndelegationRequester::None,
+                        seeds: vec![],
+                        rent_payer: *pubkey,
+                    },
+                )
+            })
+            .collect())
+    }
+
+    async fn fetch_undelegation_requests(
+        &self,
+        _delegated_accounts: &[Pubkey],
+        _: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, UndelegationRequest>> {
+        Ok(HashMap::new())
     }
 
     async fn get_base_accounts(

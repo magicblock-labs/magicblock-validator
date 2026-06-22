@@ -8,7 +8,7 @@ High-level responsibilities:
 
 - expose `CommittorService` / `BaseIntentCommittor` as the async service boundary used by `magicblock-api`, `magicblock-accounts`, and account cloning;
 - schedule intent bundles without executing mutually conflicting committed accounts in parallel;
-- fetch Delegation Program metadata, commit nonces, rent reimbursements, and base accounts needed for task construction;
+- fetch Delegation Program metadata, including commit nonces and rent payer data, plus base accounts needed for task construction;
 - choose commit delivery strategies: state args, diff args, state buffers, diff buffers, and optional ALTs;
 - prepare and clean up committor-program buffer accounts and TableMania lookup-table reservations;
 - execute single-stage or two-stage base-layer transaction flows and schedule action callbacks;
@@ -189,7 +189,7 @@ The scheduler blocks on the union of `ScheduledIntentBundle::get_all_committed_p
 IntentExecutorImpl::execute
   -> mark persisted rows Pending
   -> TaskBuilderImpl::commit_tasks + finalize_tasks
-     -> fetch next commit nonces and diffable base accounts using max(remote_slot)
+     -> fetch next commit nonces, delegation metadata, and diffable base accounts using max(remote_slot)
      -> persist commit_id for each committed account
      -> create commit, commit-finalize, undelegate, finalize, and action tasks
   -> TaskStrategist::build_execution_strategy
@@ -202,6 +202,10 @@ IntentExecutorImpl::execute
   -> persist final status/signatures and schedule callbacks
   -> reset nonce cache on errors or undelegation
 ```
+
+Task building fetches `DelegationMetadata` for accounts whose base-layer flow may finalize. `FinalizeTask` and `CommitFinalizeTask` include the delegated account owner and `DelegationMetadata.rent_payer` so the Delegation Program can auto-undelegate owner-program requests during finalize, commit-finalize, and commit-finalize-from-buffer. The active task-building path derives the request PDA through the DLP instruction builders and does not fetch or decode `UndelegationRequest`; explicit undelegate tasks still pass `request_rent_payer = None` unless a future path deliberately restores request-account decoding.
+
+Transaction fit is not only packet size. `TaskStrategist` currently checks whether a single-stage transaction or each two-stage transaction fits the wire size, optionally after switching commits to buffers and adding ALTs, but it does not split a transaction stage by compute units. Each commit, finalize, commit-finalize, and undelegate task currently advertises `120_000` CU, while Agave caps a transaction at `1_400_000` CU. Keep task bundles below that transaction-level cap unless the strategist and executor/output/persistence model are extended to split, record, and confirm multiple transactions for the affected stage.
 
 For committed accounts with `data.len() > COMMIT_STATE_SIZE_THRESHOLD` (`256`), the task builder fetches the base account and may use diff-in-args delivery. If the base-account fetch fails, it falls back to full state args and logs a warning. This can increase transaction size and trigger buffer/ALT strategy later.
 
@@ -227,7 +231,7 @@ Do not remove sorted lock acquisition or the retiring map without replacing the 
 
 ### `min_context_slot` and freshness
 
-Task-info RPC reads use the maximum `remote_slot` across committed accounts as `min_context_slot` when fetching delegation metadata and diffable base accounts. This helps avoid building commits against base-layer state older than the ER account snapshot. The fetcher retries `Minimum context slot not reached` up to five times with short sleeps. Preserve this freshness check unless the broader account-sync/settlement contract changes.
+Task-info RPC reads use the maximum `remote_slot` across committed accounts as `min_context_slot` when fetching delegation metadata and diffable base accounts. This helps avoid building commits against base-layer state older than the ER account snapshot, including stale rent-payer or owner-program undelegation-requester metadata used by auto-undelegation account metas. The fetcher retries `Minimum context slot not reached` up to five times with short sleeps. Preserve this freshness check unless the broader account-sync/settlement contract changes.
 
 ### Persistence is both status API and recovery state
 

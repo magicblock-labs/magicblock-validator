@@ -316,6 +316,8 @@ impl IxtestContext {
         let finalize_ix = dlp_api::instruction_builder::finalize(
             self.validator_kp.pubkey(),
             counter_pda,
+            program_flexi_counter::id(),
+            counter_auth.pubkey(),
         );
         let undelegate_ix = dlp_api::instruction_builder::undelegate(
             self.validator_kp.pubkey(),
