@@ -7,39 +7,29 @@ proposal still seems ambiguous.
 > [!NOTE]
 > **Assumptions / Terms / Scopes**
 >
-> - By **validator commitment**, I mean an already submitted on-chain commitment
->   hash for `validator + account + commit_id`, even if that commitment has not
->   been finalized yet.
-> - By **finalization**, I mean the later step that applies or accepts the
->   committed state as final after the challenge window / council condition /
->   dispute path allows it.
-> - By **pre-commit challenge**, I assume the MIMD means a challenge raised
->   before a `ValidatorCommitment` exists, using only an expected
->   `account + commit_id` or some statement about what the validator intends to
->   commit. 
->   - *pre-commit challenges* are **out of scope** for this LLD. V1 only supports
->   challenges anchored to an existing DLP-visible `ValidatorCommitment`.
-> - `SubmitValidatorCommitment` is a commitment-only step. It should not apply
->   the committed state to the delegated account and should not execute an
->   optimized commit+finalize path. Current `CommitFinalize`-style behavior can
->   run only after the commitment is no longer challengeable, or after a
->   challenge resolves and approves the state to finalize.
->   - Existing `CommitState` / `CommitStateFromBuffer` are the closest current
+> - **Validator commitment**: a DLP-visible hash/claim plus metadata. Creating
+>   it must not mutate the delegated account.
+> - **Finalization**: the later step that applies or accepts committed state
+>   after the challenge window, council condition, or dispute path allows it.
+> - **Pre-commit challenges**: challenges raised before a `ValidatorCommitment`
+>   exists. They are out of scope for V1; this LLD only covers challenges
+>   anchored to an existing DLP-visible `ValidatorCommitment`.
+> - **Canonical account state**: `lamports + owner + data`. `executable` is
+>   excluded because executable accounts are not delegatable. The
+>   missing-account representation is still undefined.
+> - `SubmitValidatorCommitment` is commitment-only. Current
+>   `CommitFinalize`-style behavior can run only after the commitment is no
+>   longer challengeable, or after a challenge resolves and approves the state.
+> - Existing `CommitState` / `CommitStateFromBuffer` are the closest current
 >   analogs for creating a pending commit artifact. Existing `CommitFinalize`
->   is not equivalent to `SubmitValidatorCommitment`; it is an optimized
->   apply/finalize path that must be gated in the challenge-enabled protocol.
->   - `ValidatorCommitment` is a hash/claim plus metadata. It is not the
->   finalized account state, and creating it must not mutate the delegated
->   account.
+>   is an optimized apply/finalize path, not `SubmitValidatorCommitment`.
 > - The **challenge window** starts when the delegation program stores the
->   `ValidatorCommitment`. Normal finalization is **blocked until** that window
+>   `ValidatorCommitment`. Normal finalization is blocked until that window
 >   expires without a challenge, or until any raised challenge reaches a
 >   terminal outcome.
->   - A **challenge** is anchored to a DLP-visible commitment artifact. Off-chain
+> - A **challenge** is anchored to a DLP-visible commitment artifact. Off-chain
 >   challenger detection is only evidence for deciding to challenge; it is not
 >   the protocol anchor.
-> - `SubmitValidatorResponse` must open the original validator commitment hash.
->   It cannot replace the original commitment with a new state claim.
 > - `Resolver` means the V1 security council mechanism. It is entered only when
 >   valid validator and challenger openings disagree, or when validator-fault
 >   handling routes the case there. The resolver's design is **out of scope**
@@ -52,35 +42,18 @@ proposal still seems ambiguous.
 >   serialization layouts, and buffer formats are intentionally out of scope for
 >   this LLD unless they change the protocol flow.
 >
-> With those meanings, my current interpretation is that V1 should only support
-> challenges against an existing validator commitment. If "pre-commit" instead
-> means "after validator commitment but before finalization", then I think that
-> is the normal challenge path below and we may not need a separate pre-commit
-> path.
->
-> The confusing case is a challenge before any validator commitment exists. That
-> seems harder to reason about unless the validator has produced a signed
-> pre-commit object that can be challenged objectively.
 
 **Records I think are implied**
 
 - **ValidatorBond**: the slashable validator/operator stake, separate from the
   fee vault.
 - **ValidatorCommitment**: one committed account update, keyed by validator,
-  account, and commit id.
+  account, and commit id. Including the validator identity avoids ambiguity if
+  more than one validator can commit state for the same account and commit id.
 - **ChallengeRecord**: one active challenge against a validator commitment,
   including the challenge hash, locked stake, deadlines, and terminal outcome.
 - **StateBuffer**: optional canonical buffer for large account data.
 - **ResolutionRecord**: resolver state for mismatches or validator failures.
-
-I think commitment keys need to include the validator identity:
-
-```text
-validator_identity + account_pubkey + commit_id
-```
-
-Otherwise `account_pubkey + commit_id` is ambiguous if more than one validator
-can commit state for the same account and commit id.
 
 **Important interpretation: validator response opens the original commitment**
 
@@ -231,14 +204,16 @@ validator_identity + account_pubkey + commit_id
 - if disputed, the finalizing state matches the resolved state;
 - required optimistic-finality or council co-signing conditions are satisfied.
 
-The 20% penalty for a valid but unnecessary challenge goes to the protocol. The
-48 hour timelock in the MIMD is a payout delay for a successful challenger, not
-an appeal window.
+The 20% penalty for a valid but unnecessary challenge goes to the protocol.
 
 **Questions / possible gaps**
 
-- Does validator timeout directly slash, or always go through resolver?
-- What happens on resolver no-quorum?
-- Is only one active challenge allowed per validator commitment?
-- Is full validator-bond slashing proportional for one account fault?
-- What are the exact serialization and missing-account rules?
+- If the validator misses the response timeout, does the delegation program
+  immediately punish the validator, or does it send the case to the resolver
+  first?
+- What happens if the resolver does not get enough votes? The resolver design
+  is out of scope here, but the LLD still needs to know whether the challenge
+  remains blocked, times out, or reaches some fallback outcome.
+- Can multiple challengers challenge the same validator commitment, or is only
+  one active challenge allowed? This is out of scope for this LLD unless it
+  changes the core challenge flow.
