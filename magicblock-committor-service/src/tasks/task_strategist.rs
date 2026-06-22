@@ -472,6 +472,9 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
+    use dlp_api::state::{
+        DelegationMetadata, UndelegationRequest, UndelegationRequester,
+    };
     use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, ProgramArgs,
@@ -497,6 +500,7 @@ mod tests {
         test_utils,
     };
 
+    #[derive(Default)]
     struct MockInfoFetcher;
 
     #[async_trait::async_trait]
@@ -523,6 +527,37 @@ mod tests {
             _: u64,
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
             Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
+        }
+
+        async fn fetch_delegation_metadata(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
+        {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (
+                        *pubkey,
+                        DelegationMetadata {
+                            last_commit_id: 0,
+                            undelegation_requester: UndelegationRequester::None,
+                            seeds: vec![],
+                            rent_payer: *pubkey,
+                        },
+                    )
+                })
+                .collect())
+        }
+
+        async fn fetch_undelegation_requests(
+            &self,
+            _delegated_accounts: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, UndelegationRequest>>
+        {
+            Ok(HashMap::new())
         }
 
         async fn get_base_accounts(
@@ -598,6 +633,8 @@ mod tests {
     fn create_test_finalize_task() -> FinalizeTask {
         FinalizeTask {
             delegated_account: Pubkey::new_unique(),
+            owner_program: Pubkey::new_unique(),
+            rent_reimbursement: Pubkey::new_unique(),
         }
     }
 
@@ -607,6 +644,7 @@ mod tests {
             delegated_account: Pubkey::new_unique(),
             owner_program: Pubkey::default(),
             rent_reimbursement: Pubkey::new_unique(),
+            request_rent_payer: None,
         }
     }
 
@@ -860,6 +898,30 @@ mod tests {
         // So had to switch to ALTs
         // As expected
         assert!(!strategy.lookup_tables_keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_finalize_tasks_uses_metadata_rent_payer_for_undelegate() {
+        let delegated_account = Pubkey::new_unique();
+        let intent = create_test_intent(0, &[delegated_account], true);
+        let info_fetcher = Arc::new(MockInfoFetcher);
+
+        let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
+
+        assert_eq!(tasks.len(), 2);
+        let BaseTaskImpl::Finalize(task) = &tasks[0] else {
+            panic!("expected finalize task");
+        };
+        assert_eq!(task.delegated_account, delegated_account);
+        assert_eq!(task.rent_reimbursement, delegated_account);
+        let BaseTaskImpl::Undelegate(task) = &tasks[1] else {
+            panic!("expected undelegate task");
+        };
+        assert_eq!(task.delegated_account, delegated_account);
+        assert_eq!(task.rent_reimbursement, delegated_account);
+        assert_eq!(task.request_rent_payer, None);
     }
 
     #[tokio::test]

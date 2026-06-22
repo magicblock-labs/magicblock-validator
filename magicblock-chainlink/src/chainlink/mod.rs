@@ -15,7 +15,10 @@ use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_transaction::sanitized::SanitizedTransaction;
-use tokio::{sync::mpsc, task};
+use tokio::{
+    sync::{broadcast, mpsc},
+    task,
+};
 use tracing::*;
 
 use crate::{
@@ -56,6 +59,18 @@ pub type ProdChainlink<C> = ReplicationModeAwareChainlink<
     C,
 >;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObservedUndelegationRequest {
+    pub request_pda: Pubkey,
+    pub delegated_account: Pubkey,
+    pub owner_program: Pubkey,
+    pub rent_payer: Pubkey,
+    pub created_slot: u64,
+    pub expires_at_slot: u64,
+    pub last_commit_id_at_request: u64,
+    pub observed_slot: u64,
+}
+
 // -----------------
 // Chainlink
 // -----------------
@@ -67,6 +82,7 @@ pub struct InnerChainlink<
 > {
     accounts_bank: Arc<V>,
     fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+    undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
     /// The subscription to events for each account that is removed from
     /// the accounts tracked by the provider.
     /// In that case we also remove it from the bank since it is no longer
@@ -188,6 +204,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             Self::Disabled => false,
         }
     }
+
+    pub fn subscribe_undelegation_requests(
+        &self,
+    ) -> Option<broadcast::Receiver<ObservedUndelegationRequest>> {
+        match self {
+            Self::Enabled(chainlink) => {
+                Some(chainlink.subscribe_undelegation_requests())
+            }
+            Self::Disabled => None,
+        }
+    }
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
@@ -196,6 +223,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub fn try_new(
         accounts_bank: &Arc<V>,
         fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+    ) -> ChainlinkResult<Self> {
+        let (undelegation_request_sender, _) = broadcast::channel(1024);
+        Self::try_new_with_undelegation_request_sender(
+            accounts_bank,
+            fetch_cloner,
+            undelegation_request_sender,
+        )
+    }
+
+    pub fn try_new_with_undelegation_request_sender(
+        accounts_bank: &Arc<V>,
+        fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+        undelegation_request_sender: broadcast::Sender<
+            ObservedUndelegationRequest,
+        >,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -213,6 +255,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(Self {
             accounts_bank: accounts_bank.clone(),
             fetch_cloner,
+            undelegation_request_sender,
             removed_accounts_sub,
         })
     }
@@ -254,6 +297,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             Some(chain_slot),
         )
         .await?;
+        let (undelegation_request_sender, _) = broadcast::channel(1024);
         let fetch_cloner = if let Some(provider) = account_provider {
             let provider = Arc::new(provider);
             let risk_service = RiskService::try_from_config(
@@ -261,21 +305,27 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 ledger_path,
             )?
             .map(Arc::new);
-            let fetch_cloner = FetchCloner::new(
-                &provider,
-                accounts_bank,
-                cloner,
-                validator_keypair,
-                rx,
-                chainlink_config.allowed_programs.clone(),
-                risk_service,
-            );
+            let fetch_cloner =
+                FetchCloner::new_with_undelegation_request_sender(
+                    &provider,
+                    accounts_bank,
+                    cloner,
+                    validator_keypair,
+                    rx,
+                    chainlink_config.allowed_programs.clone(),
+                    risk_service,
+                    undelegation_request_sender.clone(),
+                );
             Some(fetch_cloner)
         } else {
             None
         };
 
-        InnerChainlink::try_new(accounts_bank, fetch_cloner)
+        InnerChainlink::try_new_with_undelegation_request_sender(
+            accounts_bank,
+            fetch_cloner,
+            undelegation_request_sender,
+        )
     }
 
     fn subscribe_account_removals(
@@ -593,6 +643,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         self.fetch_cloner()
             .map(|provider| provider.is_watching(pubkey))
             .unwrap_or(false)
+    }
+
+    pub fn subscribe_undelegation_requests(
+        &self,
+    ) -> broadcast::Receiver<ObservedUndelegationRequest> {
+        self.undelegation_request_sender.subscribe()
     }
 }
 

@@ -1955,7 +1955,7 @@ dependencies = [
  "ephemeral-rollups-sdk-attribute-ephemeral-accounts",
  "five8 0.2.1",
  "getrandom 0.2.17",
- "magicblock-delegation-program-api 3.0.0",
+ "magicblock-delegation-program-api 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "magicblock-magic-program-api 0.10.1",
  "solana-account 3.4.0",
  "solana-account-info 2.3.0",
@@ -2041,7 +2041,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2102,7 +2102,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3050,7 +3050,7 @@ dependencies = [
  "borsh 1.7.0",
  "color-backtrace",
  "magicblock-config",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "rand 0.8.6",
  "rayon",
  "serde",
@@ -3527,11 +3527,24 @@ name = "magicblock-accounts"
 version = "0.13.3"
 dependencies = [
  "async-trait",
+ "magicblock-account-cloner",
+ "magicblock-chainlink",
  "magicblock-committor-service",
+ "magicblock-core",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
+ "magicblock-metrics",
+ "magicblock-program",
+ "solana-hash 4.2.0",
+ "solana-instruction 3.3.0",
+ "solana-keypair",
  "solana-pubkey 4.1.0",
+ "solana-signer",
+ "solana-transaction",
  "solana-transaction-error 3.1.0",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
+ "tracing",
  "url",
 ]
 
@@ -3634,7 +3647,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-ledger",
  "magicblock-magic-program-api 0.13.3",
  "magicblock-metrics",
@@ -3696,7 +3709,7 @@ dependencies = [
  "magicblock-aml",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-magic-program-api 0.13.3",
  "magicblock-metrics",
  "parking_lot",
@@ -3765,7 +3778,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-committor-program",
  "magicblock-core",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-metrics",
  "magicblock-program",
  "magicblock-rpc-client",
@@ -3789,6 +3802,7 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-error 3.1.0",
  "solana-transaction-status-client-types",
+ "static_assertions",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -3844,10 +3858,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-delegation-program-api"
-version = "0.3.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b#25386a7c1d406d06b8d07a4d5b0fd37d5e74213b"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "288904a9950bd20f27f0ef934f320ab1410bd35a6d5c9cf138eca276442b6b2e"
 dependencies = [
  "bincode",
+ "borsh 0.10.4",
  "borsh 1.7.0",
  "bytemuck",
  "const-crypto",
@@ -3863,6 +3879,7 @@ dependencies = [
  "solana-instruction 3.3.0",
  "solana-loader-v3-interface 6.1.1",
  "solana-program 3.0.0",
+ "solana-pubkey 2.4.0",
  "solana-sdk",
  "solana-sdk-ids 3.1.0",
  "solana-sha256-hasher 3.1.0",
@@ -3875,8 +3892,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program-api"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "288904a9950bd20f27f0ef934f320ab1410bd35a6d5c9cf138eca276442b6b2e"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7#72af1c7542ee00a383f0945184fee4a0d9cec6e0"
 dependencies = [
  "bincode",
  "borsh 0.10.4",
@@ -4035,7 +4051,7 @@ dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-magic-program-api 0.13.3",
  "num-derive",
  "num-traits",
@@ -4193,7 +4209,7 @@ dependencies = [
 name = "magicblock-validator-admin"
 version = "0.13.3"
 dependencies = [
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-commitment-config",
@@ -4451,7 +4467,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5042,7 +5058,7 @@ version = "0.0.0"
 dependencies = [
  "borsh 1.7.0",
  "ephemeral-rollups-sdk",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-magic-program-api 0.13.3",
  "rkyv 0.7.46",
  "solana-program 3.0.0",
@@ -5801,7 +5817,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5930,7 +5946,7 @@ dependencies = [
  "anyhow",
  "borsh 1.7.0",
  "integration-test-tools",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "program-schedulecommit",
  "solana-commitment-config",
  "solana-compute-budget-interface",
@@ -5952,7 +5968,7 @@ dependencies = [
  "magicblock-committor-program",
  "magicblock-committor-service",
  "magicblock-core",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
@@ -5980,7 +5996,7 @@ dependencies = [
  "ephemeral-rollups-sdk",
  "integration-test-tools",
  "magicblock-core",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-magic-program-api 0.13.3",
  "magicblock-program",
  "program-schedulecommit",
@@ -6001,7 +6017,7 @@ name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-magic-program-api 0.13.3",
  "program-schedulecommit",
  "program-schedulecommit-security",
@@ -9759,7 +9775,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9780,7 +9796,7 @@ dependencies = [
  "integration-test-tools",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "program-flexi-counter",
  "program-mini",
  "solana-loader-v4-interface 3.1.0",
@@ -9807,7 +9823,7 @@ dependencies = [
  "magicblock-aml",
  "magicblock-chainlink",
  "magicblock-config",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "program-flexi-counter",
  "program-mini",
  "solana-account 3.4.0",
@@ -9833,7 +9849,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "magicblock-core",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "program-flexi-counter",
  "program-mini",
  "solana-loader-v4-interface 3.1.0",
@@ -9903,7 +9919,7 @@ dependencies = [
  "integration-test-tools",
  "magicblock-accounts-db",
  "magicblock-config",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "program-flexi-counter",
  "solana-commitment-config",
  "solana-rpc-client",
@@ -9926,7 +9942,7 @@ dependencies = [
  "magic-domain-program",
  "magicblock-api",
  "magicblock-config",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-program",
  "magicblock-validator-admin",
  "solana-commitment-config",
@@ -9972,7 +9988,7 @@ dependencies = [
  "ephemeral-rollups-sdk",
  "integration-test-tools",
  "log",
- "magicblock-delegation-program-api 0.3.0",
+ "magicblock-delegation-program-api 3.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=72af1c7)",
  "magicblock-magic-program-api 0.13.3",
  "program-flexi-counter",
  "solana-rpc-client-api",
@@ -10944,7 +10960,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11095,15 +11111,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]
