@@ -266,6 +266,23 @@ impl ChainlinkCloner {
         self.create_signed_tx(&ixs, blockhash)
     }
 
+    fn build_small_account_undelegation_rescue_tx(
+        &self,
+        request: &AccountCloneRequest,
+        blockhash: Hash,
+    ) -> Transaction {
+        let fields = Self::clone_fields(request);
+        let clone_ix = Self::clone_ix(
+            request.pubkey,
+            request.account.data().to_vec(),
+            fields,
+            Vec::new(),
+        );
+        let rescue_ix = Self::undelegation_rescue_ix(request.pubkey);
+
+        self.create_signed_tx(&[clone_ix, rescue_ix], blockhash)
+    }
+
     /// Builds crank commits instruction for periodic account commits.
     /// Currently disabled - see https://github.com/magicblock-labs/magicblock-validator/issues/625
     #[allow(dead_code)]
@@ -350,6 +367,67 @@ impl ChainlinkCloner {
                 Self::post_delegation_action_ix(request.pubkey, actions);
             txs.push(
                 self.create_signed_tx(&[continue_ix, action_ix], blockhash),
+            );
+        }
+
+        txs
+    }
+
+    fn build_large_account_undelegation_rescue_txs(
+        &self,
+        request: &AccountCloneRequest,
+        blockhash: Hash,
+    ) -> Vec<Transaction> {
+        let data = request.account.data();
+        let fields = Self::clone_fields(request);
+        let mut txs = Vec::new();
+
+        // Init tx with first chunk
+        let first_chunk = data[..MAX_INLINE_DATA_SIZE.min(data.len())].to_vec();
+        let init_ix = Self::clone_init_ix(
+            request.pubkey,
+            data.len() as u32,
+            first_chunk,
+            fields,
+        );
+        txs.push(self.create_signed_tx(&[init_ix], blockhash));
+
+        let rescue_ix = Self::undelegation_rescue_ix(request.pubkey);
+
+        // Continue txs for remaining chunks. The rescue schedule is attached
+        // only to the final continue, after the clone has completed.
+        let mut offset = MAX_INLINE_DATA_SIZE;
+        while offset < data.len() {
+            let end = (offset + MAX_INLINE_DATA_SIZE).min(data.len());
+            let chunk = data[offset..end].to_vec();
+            let is_last = end == data.len();
+
+            let continue_ix = Self::clone_continue_ix(
+                request.pubkey,
+                offset as u32,
+                chunk,
+                is_last,
+                Vec::new(),
+            );
+            let ixs = if is_last {
+                vec![continue_ix, rescue_ix.clone()]
+            } else {
+                vec![continue_ix]
+            };
+            txs.push(self.create_signed_tx(&ixs, blockhash));
+            offset = end;
+        }
+
+        if txs.len() == 1 {
+            let continue_ix = Self::clone_continue_ix(
+                request.pubkey,
+                data.len() as u32,
+                Vec::new(),
+                true,
+                Vec::new(),
+            );
+            txs.push(
+                self.create_signed_tx(&[continue_ix, rescue_ix], blockhash),
             );
         }
 
@@ -655,21 +733,60 @@ impl Cloner for ChainlinkCloner {
         Ok(last_sig.unwrap_or_default())
     }
 
-    async fn schedule_undelegation_rescue(
+    async fn clone_account_and_schedule_undelegation_rescue(
         &self,
-        pubkey: Pubkey,
+        request: AccountCloneRequest,
     ) -> ClonerResult<Signature> {
         let blockhash = self.block.load().blockhash;
-        let tx = self.create_signed_tx(
-            &[Self::undelegation_rescue_ix(pubkey)],
-            blockhash,
-        );
-        self.send_tx(tx).await.map_err(|err| {
-            ClonerError::FailedToScheduleUndelegationRescue(
-                pubkey,
-                Box::new(err),
-            )
-        })
+        let data_len = request.account.data().len();
+
+        if data_len <= MAX_INLINE_DATA_SIZE {
+            let tx = self.build_small_account_undelegation_rescue_tx(
+                &request, blockhash,
+            );
+            let tx_size = Self::transaction_size(&tx)?;
+            if tx_size <= MAX_INLINE_TRANSACTION_SIZE {
+                let signature = self.send_tx(tx).await.map_err(|err| {
+                    ClonerError::FailedToCloneAndScheduleUndelegationRescue(
+                        request.pubkey,
+                        Box::new(err),
+                    )
+                })?;
+
+                return Ok(signature);
+            }
+
+            debug!(
+                pubkey = %request.pubkey,
+                data_len,
+                tx_size,
+                "Small account clone and undelegation rescue transaction is too large, using chunked clone"
+            );
+        }
+
+        let txs = self
+            .build_large_account_undelegation_rescue_txs(&request, blockhash);
+        Self::ensure_transactions_fit(request.pubkey, &txs)?;
+
+        let mut last_sig = None;
+        for tx in txs {
+            match self.send_tx(tx).await {
+                Ok(sig) => {
+                    last_sig.replace(sig);
+                }
+                Err(e) => {
+                    self.send_cleanup(request.pubkey).await;
+                    return Err(
+                        ClonerError::FailedToCloneAndScheduleUndelegationRescue(
+                            request.pubkey,
+                            Box::new(e),
+                        ),
+                    );
+                }
+            }
+        }
+
+        Ok(last_sig.unwrap_or_default())
     }
 
     async fn clone_program(
@@ -853,6 +970,120 @@ mod tests {
         assert!(ix.accounts[2].is_writable);
 
         match bincode::deserialize(&ix.data).unwrap() {
+            MagicBlockInstruction::ScheduleUndelegationRescue => {}
+            _ => panic!("expected schedule undelegation rescue instruction"),
+        }
+    }
+
+    #[test]
+    fn small_undelegation_rescue_clone_schedules_in_same_tx_without_actions() {
+        let pubkey = Pubkey::new_unique();
+        let tx = cloner().build_small_account_undelegation_rescue_tx(
+            &request(pubkey, vec![1, 2, 3], vec![action()]),
+            Hash::default(),
+        );
+
+        assert_eq!(tx.message().instructions.len(), 2);
+        assert_eq!(instruction_program_id(&tx, 0), magicblock_program::ID);
+        assert_eq!(instruction_program_id(&tx, 1), magicblock_program::ID);
+
+        match bincode::deserialize(instruction_data(&tx, 0)).unwrap() {
+            MagicBlockInstruction::CloneAccount {
+                pubkey: clone_pubkey,
+                actions,
+                fields,
+                ..
+            } => {
+                assert_eq!(clone_pubkey, pubkey);
+                assert!(fields.delegated);
+                assert!(actions.is_empty());
+            }
+            _ => panic!("expected clone account instruction"),
+        }
+        match bincode::deserialize(instruction_data(&tx, 1)).unwrap() {
+            MagicBlockInstruction::ScheduleUndelegationRescue => {}
+            _ => panic!("expected schedule undelegation rescue instruction"),
+        }
+    }
+
+    #[test]
+    fn large_undelegation_rescue_clone_schedules_on_final_chunk_tx() {
+        let pubkey = Pubkey::new_unique();
+        let txs = cloner().build_large_account_undelegation_rescue_txs(
+            &request(pubkey, vec![7; MAX_INLINE_DATA_SIZE + 1], vec![action()]),
+            Hash::default(),
+        );
+
+        assert_eq!(txs.len(), 2);
+
+        let final_tx = txs.last().unwrap();
+        assert_eq!(final_tx.message().instructions.len(), 2);
+        assert_eq!(instruction_program_id(final_tx, 0), magicblock_program::ID);
+        assert_eq!(instruction_program_id(final_tx, 1), magicblock_program::ID);
+
+        match bincode::deserialize(instruction_data(final_tx, 0)).unwrap() {
+            MagicBlockInstruction::CloneAccountContinue {
+                pubkey: continue_pubkey,
+                offset,
+                data,
+                is_last,
+                actions,
+            } => {
+                assert_eq!(continue_pubkey, pubkey);
+                assert_eq!(offset, MAX_INLINE_DATA_SIZE as u32);
+                assert_eq!(data, vec![7]);
+                assert!(is_last);
+                assert!(actions.is_empty());
+            }
+            _ => panic!("expected clone account continue instruction"),
+        }
+        match bincode::deserialize(instruction_data(final_tx, 1)).unwrap() {
+            MagicBlockInstruction::ScheduleUndelegationRescue => {}
+            _ => panic!("expected schedule undelegation rescue instruction"),
+        }
+    }
+
+    #[test]
+    fn large_undelegation_rescue_max_final_chunk_fits() {
+        let pubkey = Pubkey::new_unique();
+        let txs = cloner().build_large_account_undelegation_rescue_txs(
+            &request(pubkey, vec![7; MAX_INLINE_DATA_SIZE * 2], vec![]),
+            Hash::default(),
+        );
+
+        ChainlinkCloner::ensure_transactions_fit(pubkey, &txs).unwrap();
+    }
+
+    #[test]
+    fn chunked_undelegation_rescue_short_data_uses_empty_final_continue() {
+        let pubkey = Pubkey::new_unique();
+        let data = vec![1, 2, 3];
+        let txs = cloner().build_large_account_undelegation_rescue_txs(
+            &request(pubkey, data.clone(), vec![action()]),
+            Hash::default(),
+        );
+
+        assert_eq!(txs.len(), 2);
+
+        let final_tx = txs.last().unwrap();
+        assert_eq!(final_tx.message().instructions.len(), 2);
+        match bincode::deserialize(instruction_data(final_tx, 0)).unwrap() {
+            MagicBlockInstruction::CloneAccountContinue {
+                pubkey: continue_pubkey,
+                offset,
+                data: continue_data,
+                is_last,
+                actions,
+            } => {
+                assert_eq!(continue_pubkey, pubkey);
+                assert_eq!(offset, data.len() as u32);
+                assert!(continue_data.is_empty());
+                assert!(is_last);
+                assert!(actions.is_empty());
+            }
+            _ => panic!("expected clone account continue instruction"),
+        }
+        match bincode::deserialize(instruction_data(final_tx, 1)).unwrap() {
             MagicBlockInstruction::ScheduleUndelegationRescue => {}
             _ => panic!("expected schedule undelegation rescue instruction"),
         }

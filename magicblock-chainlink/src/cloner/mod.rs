@@ -73,18 +73,18 @@ pub trait Cloner: Send + Sync + 'static {
         request: AccountCloneRequest,
     ) -> ClonerResult<Signature>;
 
+    /// Clones a delegated account without post-delegation actions and schedules
+    /// validator-initiated undelegation rescue in the same final transaction.
+    async fn clone_account_and_schedule_undelegation_rescue(
+        &self,
+        request: AccountCloneRequest,
+    ) -> ClonerResult<Signature>;
+
     // Overrides the accounts in the bank to make sure the program is usable normally (and upgraded)
     // We make sure all accounts involved in the program are present in the bank with latest state
     async fn clone_program(
         &self,
         program: LoadedProgram,
-    ) -> ClonerResult<Signature>;
-
-    /// Schedules a validator-initiated undelegation rescue for a delegated
-    /// account whose post-delegation actions could not be applied locally.
-    async fn schedule_undelegation_rescue(
-        &self,
-        pubkey: Pubkey,
     ) -> ClonerResult<Signature>;
 
     /// Evicts an account from the ephemeral validator by submitting an

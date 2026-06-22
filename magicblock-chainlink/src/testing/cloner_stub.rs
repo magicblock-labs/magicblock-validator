@@ -222,10 +222,13 @@ impl Cloner for ClonerStub {
         Ok(Signature::default())
     }
 
-    async fn schedule_undelegation_rescue(
+    async fn clone_account_and_schedule_undelegation_rescue(
         &self,
-        pubkey: Pubkey,
+        mut request: AccountCloneRequest,
     ) -> ClonerResult<Signature> {
+        let pubkey = request.pubkey;
+        request.delegation_actions = Default::default();
+        self.clone_account(request).await?;
         self.undelegation_rescue_requests
             .lock()
             .unwrap()

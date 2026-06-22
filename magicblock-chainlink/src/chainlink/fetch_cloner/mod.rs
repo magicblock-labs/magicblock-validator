@@ -671,7 +671,7 @@ where
 
     async fn rescue_undelegation_after_post_delegation_failure(
         &self,
-        mut request: AccountCloneRequest,
+        request: AccountCloneRequest,
     ) -> ChainlinkResult<()> {
         let pubkey = request.pubkey;
         if self
@@ -686,10 +686,73 @@ where
             return Ok(());
         };
 
-        request.delegation_actions = DelegationActions::default();
-        self.clone_account_with_ownership(request).await?;
-        self.cloner.schedule_undelegation_rescue(pubkey).await?;
+        self.clone_account_and_schedule_undelegation_rescue_with_ownership(
+            request,
+        )
+        .await?;
         Ok(())
+    }
+
+    async fn clone_account_and_schedule_undelegation_rescue_with_ownership(
+        &self,
+        request: AccountCloneRequest,
+    ) -> ClonerResult<Signature> {
+        let pubkey = request.pubkey;
+        let mut request = Some(request);
+
+        loop {
+            if self
+                .accounts_bank
+                .get_account(&pubkey)
+                .is_some_and(|account| account.undelegating())
+            {
+                return Ok(Signature::default());
+            }
+
+            match self.claim_pending_clone(pubkey) {
+                CloneClaim::Owner => {
+                    let mut guard = PendingCloneGuard::new(
+                        Arc::clone(&self.pending_clones),
+                        pubkey,
+                    );
+                    let result = self
+                        .cloner
+                        .clone_account_and_schedule_undelegation_rescue(
+                            request
+                                .take()
+                                .expect("owner must still have request"),
+                        )
+                        .await;
+                    let completion = if result.is_ok() {
+                        CloneCompletion::Success
+                    } else {
+                        CloneCompletion::Failed
+                    };
+                    self.finish_pending_clone(pubkey, completion);
+                    guard.dismiss();
+                    return result;
+                }
+                CloneClaim::Waiter(rx) => match rx.await {
+                    Ok(CloneCompletion::Success) => continue,
+                    Ok(CloneCompletion::Failed) => {
+                        return Err(ClonerError::FailedToCloneRegularAccount(
+                            pubkey,
+                            Box::new(ClonerError::CommittorServiceError(
+                                "Clone owner failed".to_string(),
+                            )),
+                        ));
+                    }
+                    Err(_) => {
+                        return Err(ClonerError::FailedToCloneRegularAccount(
+                            pubkey,
+                            Box::new(ClonerError::CommittorServiceError(
+                                "Clone owner dropped".to_string(),
+                            )),
+                        ));
+                    }
+                },
+            }
+        }
     }
 
     fn claim_undelegation_rescue(
