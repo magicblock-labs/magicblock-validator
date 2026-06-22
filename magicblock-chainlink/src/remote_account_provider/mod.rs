@@ -28,8 +28,6 @@ use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
-#[cfg(any(test, feature = "dev-context"))]
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig,
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
@@ -86,6 +84,40 @@ use crate::{
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 pub(crate) const DEFAULT_SUBSCRIPTION_RETRIES: usize = 5;
+
+type SubscriptionKeyLocks =
+    Arc<AsyncMutex<HashMap<Pubkey, Weak<AsyncMutex<()>>>>>;
+
+pub(crate) async fn subscription_key_lock_from_map(
+    subscription_key_locks: &SubscriptionKeyLocks,
+    pubkey: &Pubkey,
+) -> Arc<AsyncMutex<()>> {
+    let mut locks = subscription_key_locks.lock().await;
+    locks.retain(|_, lock| lock.strong_count() > 0);
+
+    if let Some(lock) = locks.get(pubkey).and_then(Weak::upgrade) {
+        return lock;
+    }
+
+    let lock = Arc::new(AsyncMutex::new(()));
+    locks.insert(*pubkey, Arc::downgrade(&lock));
+    lock
+}
+
+pub(crate) async fn subscription_key_owned_guard_from_map(
+    subscription_key_locks: &SubscriptionKeyLocks,
+    pubkey: Pubkey,
+) -> tokio::sync::OwnedMutexGuard<()> {
+    // The reconciler uses this to serialize repair work with normal
+    // acquire/release/unsubscribe transitions for the same pubkey. Creating the
+    // lock when it is missing is intentional: if reconciliation only looked up
+    // existing locks, a new same-pubkey transition could start immediately after
+    // the lookup and race the repair. Reconciliation only calls this for drifted
+    // pubkeys it is about to repair, not for every subscribed account.
+    let lock =
+        subscription_key_lock_from_map(subscription_key_locks, &pubkey).await;
+    lock.lock_owned().await
+}
 
 type ChainUpdatesPubsub = (Arc<ChainUpdatesClient>, mpsc::Receiver<()>);
 
@@ -415,8 +447,7 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     ///
     /// Values are weak references so pubkeys do not accumulate forever after
     /// their transient transition lock is no longer in use.
-    subscription_key_locks:
-        Arc<AsyncMutex<HashMap<Pubkey, Weak<AsyncMutex<()>>>>>,
+    subscription_key_locks: SubscriptionKeyLocks,
     /// The current slot on chain.
     ///
     /// This value is updated from two sources and always stores the maximum
@@ -583,6 +614,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         subscribed_accounts: Arc<AccountsLruCache>,
         pubsub_client: Arc<PubsubClient>,
         removed_account_tx: mpsc::Sender<Pubkey>,
+        subscription_key_locks: SubscriptionKeyLocks,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(
@@ -598,6 +630,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         pubsub_client.as_ref(),
                         &never_evicted,
                         &removed_account_tx,
+                        Some(&subscription_key_locks),
                     )
                     .await;
 
@@ -620,6 +653,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<Self> {
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
+        let subscription_key_locks: SubscriptionKeyLocks =
+            Arc::new(AsyncMutex::new(HashMap::new()));
 
         let active_subscriptions_updater =
             if config.enable_subscription_metrics() {
@@ -627,6 +662,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     lrucache_subscribed_accounts.clone(),
                     Arc::new(pubsub_client.clone()),
                     removed_account_tx.clone(),
+                    subscription_key_locks.clone(),
                 ))
             } else {
                 None
@@ -637,7 +673,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             next_fetching_account_generation: AtomicU64::default(),
             subscription_ownership: Arc::new(AsyncMutex::new(HashMap::new())),
             subscription_transition_lock: Arc::new(AsyncMutex::new(())),
-            subscription_key_locks: Arc::new(AsyncMutex::new(HashMap::new())),
+            subscription_key_locks,
             rpc_client,
             pubsub_client,
             chain_slot,
@@ -1647,26 +1683,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         true
     }
 
-    /// Check if an account is currently pending (being fetched)
-    pub fn is_pending(&self, pubkey: &Pubkey) -> bool {
-        let fetching = self.fetching_accounts.lock().unwrap();
-        fetching.contains_key(pubkey)
-    }
-
     async fn subscription_key_lock(
         &self,
         pubkey: &Pubkey,
     ) -> Arc<AsyncMutex<()>> {
-        let mut locks = self.subscription_key_locks.lock().await;
-        locks.retain(|_, lock| lock.strong_count() > 0);
-
-        if let Some(lock) = locks.get(pubkey).and_then(Weak::upgrade) {
-            return lock;
-        }
-
-        let lock = Arc::new(AsyncMutex::new(()));
-        locks.insert(*pubkey, Arc::downgrade(&lock));
-        lock
+        subscription_key_lock_from_map(&self.subscription_key_locks, pubkey)
+            .await
     }
 
     pub async fn acquire_subscription(
@@ -1685,19 +1707,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<()> {
         self.acquire_subscription_with_mode(pubkey, reason, true)
             .await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn has_subscription_reason(
-        &self,
-        pubkey: &Pubkey,
-        reason: SubscriptionReason,
-    ) -> bool {
-        self.subscription_ownership
-            .lock()
-            .await
-            .get(pubkey)
-            .is_some_and(|ownership| ownership.contains(reason))
     }
 
     async fn acquire_subscription_with_mode(
@@ -1901,12 +1910,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         program_id: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         self.pubsub_client.subscribe_program(program_id).await
-    }
-
-    /// Get a reference to the pubsub client (for testing)
-    #[cfg(any(test, feature = "dev-context"))]
-    pub fn pubsub_client(&self) -> &U {
-        &self.pubsub_client
     }
 
     /// Unsubscribe from an account
@@ -2276,34 +2279,6 @@ fn remove_fetching_account_if_generation_matches(
     }
 }
 
-impl RemoteAccountProvider<ChainRpcClientImpl, ChainPubsubClientImpl> {
-    #[cfg(any(test, feature = "dev-context"))]
-    pub fn rpc_client(&self) -> &RpcClient {
-        &self.rpc_client.rpc_client
-    }
-}
-
-impl
-    RemoteAccountProvider<
-        ChainRpcClientImpl,
-        SubMuxClient<ChainPubsubClientImpl>,
-    >
-{
-    #[cfg(any(test, feature = "dev-context"))]
-    pub fn rpc_client(&self) -> &RpcClient {
-        &self.rpc_client.rpc_client
-    }
-}
-
-impl
-    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
-{
-    #[cfg(any(test, feature = "dev-context"))]
-    pub fn rpc_client(&self) -> &RpcClient {
-        &self.rpc_client.rpc_client
-    }
-}
-
 fn all_slots_match(accs: &[RemoteAccount]) -> bool {
     if accs.is_empty() {
         return true;
@@ -2350,4 +2325,67 @@ fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
         .map(|pk| pk.to_string())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+    /// Get a reference to the pubsub client for tests and dev tooling.
+    pub fn pubsub_client(&self) -> &U {
+        &self.pubsub_client
+    }
+}
+
+#[cfg(test)]
+impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+    /// Check if an account is currently pending (being fetched).
+    pub(crate) fn is_pending(&self, pubkey: &Pubkey) -> bool {
+        let fetching = self.fetching_accounts.lock().unwrap();
+        fetching.contains_key(pubkey)
+    }
+
+    pub(crate) async fn has_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> bool {
+        self.subscription_ownership
+            .lock()
+            .await
+            .get(pubkey)
+            .is_some_and(|ownership| ownership.contains(reason))
+    }
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+impl RemoteAccountProvider<ChainRpcClientImpl, ChainPubsubClientImpl> {
+    pub fn rpc_client(
+        &self,
+    ) -> &solana_rpc_client::nonblocking::rpc_client::RpcClient {
+        &self.rpc_client.rpc_client
+    }
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+impl
+    RemoteAccountProvider<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainPubsubClientImpl>,
+    >
+{
+    pub fn rpc_client(
+        &self,
+    ) -> &solana_rpc_client::nonblocking::rpc_client::RpcClient {
+        &self.rpc_client.rpc_client
+    }
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+impl
+    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
+{
+    pub fn rpc_client(
+        &self,
+    ) -> &solana_rpc_client::nonblocking::rpc_client::RpcClient {
+        &self.rpc_client.rpc_client
+    }
 }
