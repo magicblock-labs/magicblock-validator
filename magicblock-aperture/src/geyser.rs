@@ -100,10 +100,7 @@ impl GeyserPluginManager {
             lamports: account.lamports(),
             executable: account.executable(),
             rent_epoch: account.rent_epoch(),
-            // TODO(bmuddha):
-            // Syncing account updates with the transactions that mutated them is
-            // not trivial and requires significant architectural system changes
-            txn: None,
+            txn: Some(data.transaction.as_ref()),
             write_version: 0,
         };
         for plugin in &self.plugins {
