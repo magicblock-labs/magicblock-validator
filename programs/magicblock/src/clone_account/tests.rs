@@ -662,6 +662,7 @@ fn test_clone_continue_writes_at_offset() {
         vec![5, 6, 7],
         false,
         Vec::new(),
+        false,
     );
     let mut result = process_instruction(
         &ix.data,
@@ -694,6 +695,7 @@ fn test_clone_continue_completes_clone() {
         vec![8, 9, 10],
         true,
         Vec::new(),
+        false,
     );
     let mut result = process_instruction(
         &ix.data,
@@ -733,6 +735,7 @@ fn test_clone_continue_with_actions_waits_for_executor_to_clear_pending() {
         vec![8, 9, 10],
         true,
         actions.clone(),
+        false,
     );
     let executor_ix =
         InstructionUtils::post_delegation_action_executor_instruction(
@@ -782,6 +785,7 @@ fn test_clone_continue_rejects_actions_before_final_chunk() {
         vec![5, 6, 7],
         false,
         vec![schedule_task_action(payer)],
+        false,
     );
 
     process_instruction(
@@ -847,6 +851,7 @@ fn test_clone_continue_rejects_without_init() {
         vec![1],
         true,
         Vec::new(),
+        false,
     );
     process_instruction(
         &ix.data,
@@ -870,6 +875,7 @@ fn test_clone_continue_rejects_offset_overflow() {
         vec![1],
         true,
         Vec::new(),
+        false,
     );
     process_instruction(
         &ix.data,

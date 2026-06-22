@@ -23,6 +23,7 @@ use crate::errors::MagicBlockProgramError;
 /// 3. If `is_last=true`, removes from `PENDING_CLONES` (clone complete)
 ///
 /// No lamports adjustment needed - account already has correct lamports from Init.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn process_clone_account_continue(
     signers: &HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
