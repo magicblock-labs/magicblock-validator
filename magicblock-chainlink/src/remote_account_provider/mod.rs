@@ -406,6 +406,23 @@ const RPC_FETCH_MAX_RETRIES: u64 = 3;
 const RPC_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
 const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
+
+// getMultipleAccounts accepts at most this many keys per request.
+const MAX_MULTIPLE_ACCOUNTS_PER_REQUEST: usize = 100;
+
+// Splits keys into the minimum number of chunks that fit the RPC's
+// getMultipleAccounts limit, sized as evenly as possible.
+fn balanced_chunks(keys: Vec<Pubkey>) -> Vec<Vec<Pubkey>> {
+    if keys.len() <= MAX_MULTIPLE_ACCOUNTS_PER_REQUEST {
+        return vec![keys];
+    }
+    let num_chunks = keys.len().div_ceil(MAX_MULTIPLE_ACCOUNTS_PER_REQUEST);
+    let chunk_size = keys.len().div_ceil(num_chunks);
+    keys.chunks(chunk_size)
+        .map(|chunk| chunk.to_vec())
+        .collect()
+}
+
 pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// The RPC client to fetch accounts from chain the first time we receive
     /// a request for them
@@ -1265,15 +1282,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             }
             subscription_setup_guard.disarm();
 
-            // Start the fetch for the claimed pubkeys only.
+            // Start the fetch for the claimed pubkeys only. Claim sets
+            // above the RPC limit are split into evenly sized chunks
             let min_context_slot = fetch_start_slot;
-            self.fetch(
-                claimed_pubkeys.clone(),
-                claimed_generations,
-                mark_empty_if_not_found,
-                min_context_slot,
-                fetch_origin,
-            );
+            for chunk in balanced_chunks(claimed_pubkeys) {
+                self.fetch(
+                    chunk,
+                    claimed_generations.clone(),
+                    mark_empty_if_not_found,
+                    min_context_slot,
+                    fetch_origin,
+                );
+            }
         }
 
         // Wait for all accounts to resolve (either from fetch or
@@ -1336,6 +1356,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         min_context_slot: u64,
         fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
+        // This must stay a single wire call so all results share one
+        // response slot (the slot-match contract callers verify);
+        // slot-consistent sets must fit within the RPC limit.
+        debug_assert!(
+            pubkeys.len() <= MAX_MULTIPLE_ACCOUNTS_PER_REQUEST,
+            "fetch_multi_rpc_only cannot chunk {} keys (limit {})",
+            pubkeys.len(),
+            MAX_MULTIPLE_ACCOUNTS_PER_REQUEST
+        );
         let config = RpcAccountInfoConfig {
             commitment: Some(self.rpc_client.commitment()),
             min_context_slot: Some(min_context_slot),
