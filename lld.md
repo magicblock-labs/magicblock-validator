@@ -44,14 +44,13 @@ proposal still seems ambiguous.
 >   valid validator and challenger openings disagree, or when validator-fault
 >   handling routes the case there. The resolver's design is **out of scope**
 >   for this document.
-> - `Keeper / anyone` is not trusted. This actor only advances objective
->   timeout/finalization transitions that the delegation program can verify from
->   on-chain state. It's basically a ping / awake / tick.
-> - The commitment-addressing model is still a design decision. If we keep the
->   current PDA shape, there is effectively one pending commit artifact per
->   delegated account. If the protocol key is truly
->   `validator_identity + account_pubkey + commit_id`, then the commitment PDA
->   should include those fields so commitments cannot collide.
+> - `Keeper / anyone` is a permissionless transaction submitter. It pings the
+>   delegation program to advance timeout or finalization transitions, and the
+>   delegation program verifies from on-chain state whether the transition is
+>   allowed.
+> - Low-level implementation details such as exact account types, PDA seeds,
+>   serialization layouts, and buffer formats are intentionally out of scope for
+>   this LLD unless they change the protocol flow.
 >
 > With those meanings, my current interpretation is that V1 should only support
 > challenges against an existing validator commitment. If "pre-commit" instead
