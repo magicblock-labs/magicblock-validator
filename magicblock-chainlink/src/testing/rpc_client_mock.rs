@@ -279,6 +279,26 @@ impl ChainRpcClientMock {
         self.multi_account_fetches.load(Ordering::Relaxed)
     }
 
+    /// Account lookup shared by both fetch methods of the
+    /// [ChainRpcClient] impl; does not touch the per-method call
+    /// counters.
+    fn account_at_slot_checked(
+        &self,
+        pubkey: &Pubkey,
+        config: &RpcAccountInfoConfig,
+    ) -> client_error::Result<Option<AccountAtSlot>> {
+        if let Some(min_context_slot) = config.min_context_slot {
+            let current_slot = self.current_slot.load(Ordering::Relaxed);
+            if current_slot < min_context_slot {
+                return Err(client_error::ErrorKind::Custom(
+                    "minimum context slot not reached".to_string(),
+                )
+                .into());
+            }
+        }
+        Ok(self.get_account_at_slot(pubkey))
+    }
+
     pub fn block_fetches(&self) {
         self.block_fetches.store(true, Ordering::SeqCst);
     }
@@ -325,18 +345,8 @@ impl ChainRpcClient for ChainRpcClientMock {
         self.single_account_fetches.fetch_add(1, Ordering::Relaxed);
         self.wait_if_fetches_blocked().await;
 
-        let current_slot = self.current_slot.load(Ordering::Relaxed);
-        if let Some(min_context_slot) = config.min_context_slot {
-            if current_slot < min_context_slot {
-                return Err(client_error::ErrorKind::Custom(
-                    "minimum context slot not reached".to_string(),
-                )
-                .into());
-            }
-        }
-
         let res = if let Some(AccountAtSlot { account, slot }) =
-            self.get_account_at_slot(pubkey)
+            self.account_at_slot_checked(pubkey, &config)?
         {
             Response {
                 context: RpcResponseContext {
@@ -348,7 +358,7 @@ impl ChainRpcClient for ChainRpcClientMock {
         } else {
             Response {
                 context: RpcResponseContext {
-                    slot: current_slot,
+                    slot: self.current_slot.load(Ordering::Relaxed),
                     api_version: None,
                 },
                 value: None,
@@ -375,9 +385,8 @@ impl ChainRpcClient for ChainRpcClientMock {
         let mut accounts = vec![];
         for pubkey in pubkeys {
             let val = self
-                .get_account_with_config(pubkey, config.clone())
-                .await?
-                .value;
+                .account_at_slot_checked(pubkey, &config)?
+                .map(|AccountAtSlot { account, .. }| account);
             accounts.push(val);
         }
         if let Some(len) = self.multi_account_response_truncate {

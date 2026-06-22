@@ -704,8 +704,10 @@ where
             debug!(program_id = %acc.program_id, "Skipping clone of program");
             continue;
         }
-        let cloner = this.cloner.clone();
-        program_join_set.spawn(async move { cloner.clone_program(acc).await });
+        let this_clone = this.clone();
+        program_join_set.spawn(async move {
+            this_clone.clone_program_with_ownership(acc).await
+        });
     }
     program_join_set
         .join_all()

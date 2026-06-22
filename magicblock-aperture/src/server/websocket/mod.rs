@@ -21,6 +21,8 @@ use crate::{
     RpcResult,
 };
 
+const MAX_BODY_SIZE: usize = 1024 * 1024;
+
 /// The main WebSocket server.
 ///
 /// This server listens for TCP connections and manages the HTTP Upgrade handshake
@@ -127,7 +129,7 @@ async fn handle_upgrade(
     // Spawn a new task to manage the WebSocket communication, freeing up the
     // Hyper service to handle other potential incoming connections.
     tokio::spawn(async move {
-        let ws = match ws.await {
+        let mut ws = match ws.await {
             Ok(ws) => ws,
             Err(e) => {
                 warn!(
@@ -137,6 +139,7 @@ async fn handle_upgrade(
                 return;
             }
         };
+        ws.set_max_message_size(MAX_BODY_SIZE);
         // The `ConnectionHandler` will now take over the WebSocket stream.
         let handler = ConnectionHandler::new(ws, state);
         handler.run().await

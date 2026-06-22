@@ -26,7 +26,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use solana_transaction_status::{
+use solana_transaction_status_client_types::{
     EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
     UiTransactionEncoding,
 };

@@ -227,6 +227,7 @@ impl HttpDispatcher {
             rpc: None,
             pubsub: None,
             version: None,
+            client_id: None,
             shred_version: None,
             feature_set: None,
         };
