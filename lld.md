@@ -16,8 +16,7 @@ proposal still seems ambiguous.
 > - By **pre-commit challenge**, I assume the MIMD means a challenge raised
 >   before a `ValidatorCommitment` exists, using only an expected
 >   `account + commit_id` or some statement about what the validator intends to
->   commit.
-> - True pre-commit challenges are out of scope for this LLD. V1 only supports
+>   commit. **pre-commit challenges* are out of scope for this LLD. V1 only supports
 >   challenges anchored to an existing DLP-visible `ValidatorCommitment`.
 > - `SubmitValidatorCommitment` is a commitment-only step. It should not apply
 >   the committed state to the delegated account and should not execute an
