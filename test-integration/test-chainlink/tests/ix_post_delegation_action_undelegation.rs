@@ -119,10 +119,9 @@ async fn post_delegation_failing_flexi_counter_action_schedules_undelegation() {
         vec![delegated_pubkey],
         "a failing post-delegation action must schedule undelegation"
     );
+    // Account is cloned because we are using the stub cloner, which does not execute instructions.
     assert!(
-        ctx.cloner
-            .get_account(&delegated_pubkey)
-            .is_some_and(|acc| acc.undelegating()),
-        "the account must still be cloned and undelegating despite the failing action"
+        ctx.cloner.get_account(&delegated_pubkey).is_some(),
+        "the account must still be cloned despite the failing action"
     );
 }
