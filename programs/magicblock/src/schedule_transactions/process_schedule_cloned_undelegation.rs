@@ -17,6 +17,7 @@ use crate::{
     },
     schedule_transactions::get_clock,
     utils::{
+        account_actions::mark_account_as_undelegated,
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
@@ -73,6 +74,13 @@ pub(crate) fn process_schedule_cloned_account_undelegation(
         );
         return Err(InstructionError::InvalidAccountData);
     }
+
+    mark_account_as_undelegated(&cloned_account)?;
+    ic_msg!(
+        invoke_context,
+        "ScheduleClonedAccountUndelegation: Marking account {} as undelegating",
+        cloned_account_pubkey
+    );
 
     let committed = CommittedAccount::from_account_shared(
         cloned_account_pubkey,
