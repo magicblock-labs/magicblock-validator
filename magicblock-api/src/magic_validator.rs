@@ -19,9 +19,8 @@ use magicblock_aperture::{
     state::{NodeContext, SharedState},
 };
 use magicblock_chainlink::{
-    config::ChainlinkConfig,
-    remote_account_provider::{Endpoint, Endpoints},
-    ProdChainlink, ProdInnerChainlink,
+    config::ChainlinkConfig, remote_account_provider::Endpoints, ProdChainlink,
+    ProdInnerChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -227,14 +226,9 @@ impl MagicValidator {
             shared_chain_slot.clone(),
         )
         .await?;
-        let is_compression_enabled = config
-            .compression
-            .as_ref()
-            .is_some_and(|compression| compression.photon_url.is_some());
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             committor_service.clone(),
-            is_compression_enabled,
         )));
 
         let step_start = Instant::now();
@@ -478,10 +472,6 @@ impl MagicValidator {
             committor_persist_path,
             ChainConfig {
                 rpc_uri: config.rpc_url().to_owned(),
-                photon_uri: config
-                    .compression
-                    .as_ref()
-                    .and_then(|compression| compression.photon_url.clone()),
                 websocket_uri: config
                     .websocket_urls()
                     .next()
@@ -514,23 +504,12 @@ impl MagicValidator {
             return ChainlinkImpl::disabled().map_err(ApiError::from);
         }
 
-        let mut endpoints = Endpoints::try_from(config.remotes.as_slice())
+        let endpoints = Endpoints::try_from(config.remotes.as_slice())
             .map_err(|e| {
                 ApiError::from(
                     magicblock_chainlink::errors::ChainlinkError::from(e),
                 )
             })?;
-
-        if let Some(photon_url) = config
-            .compression
-            .as_ref()
-            .and_then(|compression| compression.photon_url.clone())
-        {
-            endpoints.push(Endpoint::Compression {
-                label: "photon".to_string(),
-                url: photon_url,
-            });
-        }
 
         let cloner = ChainlinkCloner::new(
             transaction_scheduler.clone(),
@@ -583,6 +562,15 @@ impl MagicValidator {
         replication_mode: &ReplicationMode,
     ) -> bool {
         matches!(replication_mode, ReplicationMode::Replica { .. })
+    }
+
+    fn replication_mode_manages_onchain_registration(
+        replication_mode: &ReplicationMode,
+    ) -> bool {
+        matches!(
+            replication_mode,
+            ReplicationMode::Standalone | ReplicationMode::Primary(_)
+        )
     }
 
     fn init_ledger(
@@ -709,7 +697,9 @@ impl MagicValidator {
             return;
         }
         if self.config.chain_operation.is_none()
-            || !self.is_standalone
+            || !Self::replication_mode_manages_onchain_registration(
+                &self.config.validator.replication_mode,
+            )
             || !matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
             || !CoordinationMode::current().needs_onchain_interactions()
         {
@@ -1012,6 +1002,12 @@ impl MagicValidator {
             }
         } else if let Some(replicator) = self.replication_service.take() {
             self.replication_handle.replace(replicator.spawn());
+            if Self::replication_mode_manages_onchain_registration(
+                &self.config.validator.replication_mode,
+            ) && matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
+            {
+                self.spawn_primary_onchain_setup();
+            }
         }
 
         // Now we are ready to start all services and are ready to accept transactions
@@ -1019,7 +1015,11 @@ impl MagicValidator {
             .config
             .chain_operation
             .as_ref()
-            .filter(|_| self.is_standalone)
+            .filter(|_| {
+                Self::replication_mode_manages_onchain_registration(
+                    &self.config.validator.replication_mode,
+                )
+            })
             .filter(|co| !co.claim_fees_frequency.is_zero())
             .map(|co| co.claim_fees_frequency)
         {
@@ -1028,17 +1028,6 @@ impl MagicValidator {
                 .start(frequency, self.config.rpc_url().to_owned());
             log_timing("startup", "claim_fees_task_start", step_start);
         }
-
-        let step_start = Instant::now();
-        self.slot_ticker = Some(init_slot_ticker(
-            self.accountsdb.clone(),
-            &self.scheduled_commits_processor,
-            self.ledger.latest_block().clone(),
-            self.config.ledger.block_time,
-            self.transaction_scheduler.clone(),
-            self.exit.clone(),
-        ));
-        log_timing("startup", "slot_ticker_start", step_start);
 
         let step_start = Instant::now();
         self.ledger_truncator.start();
@@ -1091,6 +1080,16 @@ impl MagicValidator {
                     }
                 }
             });
+            let step_start = Instant::now();
+            self.slot_ticker = Some(init_slot_ticker(
+                self.accountsdb.clone(),
+                &self.scheduled_commits_processor,
+                self.ledger.latest_block().clone(),
+                self.config.ledger.block_time,
+                self.transaction_scheduler.clone(),
+                self.exit.clone(),
+            ));
+            log_timing("startup", "slot_ticker_start", step_start);
         }
 
         Ok(())
@@ -1258,5 +1257,35 @@ mod tests {
                 authority_override: SerdePubkey(Pubkey::new_unique()),
             },
         ));
+    }
+
+    #[test]
+    fn standalone_replication_mode_manages_onchain_registration() {
+        assert!(
+            MagicValidator::replication_mode_manages_onchain_registration(
+                &ReplicationMode::Standalone,
+            )
+        );
+    }
+
+    #[test]
+    fn primary_replication_mode_manages_onchain_registration() {
+        assert!(
+            MagicValidator::replication_mode_manages_onchain_registration(
+                &ReplicationMode::Primary(replication_config()),
+            )
+        );
+    }
+
+    #[test]
+    fn replica_replication_mode_does_not_manage_onchain_registration() {
+        assert!(
+            !MagicValidator::replication_mode_manages_onchain_registration(
+                &ReplicationMode::Replica {
+                    config: replication_config(),
+                    authority_override: SerdePubkey(Pubkey::new_unique()),
+                },
+            )
+        );
     }
 }

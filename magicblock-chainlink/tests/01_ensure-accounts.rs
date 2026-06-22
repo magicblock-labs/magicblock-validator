@@ -1,16 +1,11 @@
 use assert_matches::assert_matches;
-use compressed_delegation_client::CompressedDelegationRecord;
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
     assert_not_undelegating, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
-    testing::{
-        accounts::compressed_account_shared_with_owner_and_slot,
-        deleg::add_delegation_record_for,
-    },
-    AccountFetchOrigin,
+    testing::deleg::add_delegation_record_for, AccountFetchOrigin,
 };
 use solana_account::{Account, AccountSharedData};
 use solana_program::clock::Slot;
@@ -353,130 +348,4 @@ async fn test_write_existing_account_invalid_delegation_record() {
     assert!(cloner.get_account(&pubkey).is_none());
 
     assert_not_subscribed!(chainlink, &[&deleg_record_pubkey, &pubkey]);
-}
-
-// -----------------
-// Compressed delegation record is initialized and delegated to us
-// -----------------
-#[tokio::test]
-async fn test_compressed_delegation_record_delegated() {
-    let TestContext {
-        chainlink,
-        photon_client,
-        cloner,
-        validator_pubkey,
-        ..
-    } = setup(CURRENT_SLOT).await;
-
-    let pubkey = Pubkey::new_unique();
-    let owner = Pubkey::new_unique();
-    let account = Account::new(0, 0, &owner);
-    let compressed_account = compressed_account_shared_with_owner_and_slot(
-        pubkey,
-        validator_pubkey,
-        CURRENT_SLOT,
-        account,
-    );
-    photon_client.add_account(
-        pubkey,
-        compressed_account.clone().into(),
-        CURRENT_SLOT,
-    );
-
-    let pubkeys = [pubkey];
-    let res = chainlink
-        .ensure_accounts(
-            &pubkeys,
-            None,
-            AccountFetchOrigin::GetMultipleAccounts,
-        )
-        .await
-        .unwrap();
-    debug!("res: {res:?}");
-
-    assert_cloned_as_delegated!(cloner, &pubkeys, CURRENT_SLOT, owner);
-    assert_not_subscribed!(chainlink, &[&pubkey]);
-}
-
-// -----------------
-// Compressed delegation record is initialized and delegated to another authority
-// -----------------
-#[tokio::test]
-async fn test_compressed_delegation_record_delegated_to_other() {
-    let TestContext {
-        chainlink,
-        photon_client,
-        cloner,
-        ..
-    } = setup(CURRENT_SLOT).await;
-
-    let pubkey = Pubkey::new_unique();
-    let authority = Pubkey::new_unique();
-    let owner = Pubkey::new_unique();
-    let account = Account::new(0, 0, &owner);
-    let compressed_account = compressed_account_shared_with_owner_and_slot(
-        pubkey,
-        authority,
-        CURRENT_SLOT,
-        account,
-    );
-    photon_client.add_account(
-        pubkey,
-        compressed_account.clone().into(),
-        CURRENT_SLOT,
-    );
-
-    let pubkeys = [pubkey];
-    let res = chainlink
-        .ensure_accounts(
-            &pubkeys,
-            None,
-            AccountFetchOrigin::GetMultipleAccounts,
-        )
-        .await
-        .unwrap();
-    debug!("res: {res:?}");
-
-    assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT, owner);
-    assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
-}
-
-// -----------------
-// Compressed delegation record is initialized and empty (undelegated)
-// -----------------
-#[tokio::test]
-async fn test_compressed_account_undelegated() {
-    let TestContext {
-        chainlink,
-        photon_client,
-        rpc_client,
-        cloner,
-        ..
-    } = setup(CURRENT_SLOT).await;
-
-    let pubkey = Pubkey::new_unique();
-    rpc_client.add_account(pubkey, Account::default());
-    photon_client.add_account(
-        pubkey,
-        Account {
-            data: borsh::to_vec(&CompressedDelegationRecord::default())
-                .unwrap(),
-            ..Account::default()
-        },
-        CURRENT_SLOT,
-    );
-
-    let pubkeys = [pubkey];
-    let res = chainlink
-        .ensure_accounts(
-            &pubkeys,
-            None,
-            AccountFetchOrigin::GetMultipleAccounts,
-        )
-        .await
-        .unwrap();
-    debug!("res: {res:?}");
-
-    assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
-    assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }

@@ -8,7 +8,6 @@ use super::{subscription::release_program_data_subs, FetchCloner};
 use crate::{
     cloner::Cloner,
     remote_account_provider::{
-        photon_client::PhotonClient,
         program_account::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
             LOADER_V1, LOADER_V3,
@@ -17,8 +16,8 @@ use crate::{
     },
 };
 
-pub(crate) async fn handle_executable_sub_update<T, U, V, C, P>(
-    this: &FetchCloner<T, U, V, C, P>,
+pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
+    this: &FetchCloner<T, U, V, C>,
     pubkey: Pubkey,
     account: AccountSharedData,
 ) where
@@ -26,7 +25,6 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C, P>(
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
-    P: PhotonClient,
 {
     if !this.is_program_allowed(&pubkey) {
         debug!(pubkey = %pubkey, "Skipping clone of program, not in allowed_programs");
@@ -128,7 +126,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C, P>(
             return;
         }
     };
-    if let Err(err) = this.cloner.clone_program(loaded_program).await {
+    if let Err(err) = this.clone_program_with_ownership(loaded_program).await {
         warn!(pubkey = %pubkey, error = %err, "Failed to clone program into bank");
     }
 

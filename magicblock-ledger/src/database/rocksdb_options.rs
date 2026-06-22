@@ -26,6 +26,7 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     // By default num of threads in LOW is 1
     let max_jobs = std::cmp::max(high_pri + 1, bottom_pri);
     options.set_max_background_jobs(max_jobs);
+    options.set_max_subcompactions(high_pri as u32);
 
     // Bound WAL size
     options.set_max_total_wal_size(4 * 1024 * 1024 * 1024);

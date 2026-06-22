@@ -11,7 +11,6 @@ use crate::{
     Pubkey,
 };
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {
     /// Modify one or more accounts
@@ -324,7 +323,6 @@ pub struct AccountModification {
     pub pubkey: Pubkey,
     pub owner: Option<Pubkey>,
     pub delegated: Option<bool>,
-    pub compressed: Option<bool>,
     pub confined: Option<bool>,
 }
 
@@ -332,7 +330,6 @@ pub struct AccountModification {
 pub struct AccountModificationForInstruction {
     pub owner: Option<Pubkey>,
     pub delegated: Option<bool>,
-    pub compressed: Option<bool>,
     pub confined: Option<bool>,
 }
 
@@ -346,7 +343,6 @@ pub struct AccountCloneFields {
     pub executable: bool,
     pub delegated: bool,
     pub confined: bool,
-    pub compressed: bool,
     pub remote_slot: u64,
 }
 

@@ -10,13 +10,12 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
-use magicblock_core::intent::{BaseActionCallback, CommittedAccount};
+use magicblock_core::intent::BaseActionCallback;
 use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::BaseAction;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-pub mod commit_finalize_compressed_task;
 pub mod commit_finalize_task;
 pub mod commit_task;
 pub mod task_builder;
@@ -26,9 +25,17 @@ pub mod utils;
 pub use task_builder::TaskBuilderImpl;
 
 use crate::tasks::{
-    commit_finalize_compressed_task::CommitFinalizeCompressedTask,
     commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
 };
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TaskType {
+    Commit,
+    CommitFinalize,
+    Finalize,
+    Undelegate,
+    Action,
+}
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {
@@ -43,7 +50,6 @@ pub enum BaseTaskImpl {
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask),
     BaseAction(BaseActionTask),
-    CommitFinalizeCompressed(CommitFinalizeCompressedTask),
 }
 
 impl BaseTask for BaseTaskImpl {
@@ -58,9 +64,6 @@ impl BaseTask for BaseTaskImpl {
             Self::Finalize(value) => value.instruction(validator),
             Self::Undelegate(value) => value.instruction(validator),
             Self::BaseAction(value) => value.instruction(validator),
-            Self::CommitFinalizeCompressed(value) => {
-                value.instruction(validator)
-            }
         }
     }
 
@@ -79,7 +82,6 @@ impl BaseTask for BaseTaskImpl {
             Self::BaseAction(value) => value.compute_units(),
             Self::Finalize(_) => 120_000,
             Self::Undelegate(_) => 120_000,
-            Self::CommitFinalizeCompressed(_) => 250_000,
         }
     }
 
@@ -87,11 +89,6 @@ impl BaseTask for BaseTaskImpl {
         match self {
             Self::Commit(value) => value.accounts_size_budget(),
             Self::CommitFinalize(value) => value.accounts_size_budget(),
-            Self::CommitFinalizeCompressed(_) => {
-                dlp_api::instruction_builder::finalize_size_budget(
-                    AccountSizeClass::Huge,
-                )
-            }
             Self::BaseAction(value) => value.accounts_size_budget(),
             Self::Finalize(_) => {
                 dlp_api::instruction_builder::finalize_size_budget(
@@ -114,43 +111,7 @@ impl BaseTaskImpl {
             Self::CommitFinalize(task) if task.is_buffer() => {
                 TaskStrategy::Buffer
             }
-            Self::Commit(_)
-            | Self::CommitFinalize(_)
-            | Self::Finalize(_)
-            | Self::Undelegate(_)
-            | Self::BaseAction(_)
-            | Self::CommitFinalizeCompressed(_) => TaskStrategy::Args,
-        }
-    }
-
-    pub fn commit_id(&self) -> Option<u64> {
-        match self {
-            Self::Commit(task) => Some(task.commit_id),
-            Self::CommitFinalize(task) => Some(task.commit_id),
-            Self::CommitFinalizeCompressed(task) => Some(task.commit_id),
-            _ => None,
-        }
-    }
-
-    pub fn reset_commit_id(&mut self, commit_id: u64) {
-        match self {
-            Self::Commit(task) => task.reset_commit_id(commit_id),
-            Self::CommitFinalize(task) => task.reset_commit_id(commit_id),
-            Self::CommitFinalizeCompressed(task) => {
-                task.reset_commit_id(commit_id)
-            }
-            _ => {}
-        }
-    }
-
-    pub fn committed_account(&self) -> Option<&CommittedAccount> {
-        match self {
-            Self::Commit(task) => Some(&task.committed_account),
-            Self::CommitFinalize(task) => Some(&task.committed_account),
-            Self::CommitFinalizeCompressed(task) => {
-                Some(&task.committed_account)
-            }
-            _ => None,
+            _ => TaskStrategy::Args,
         }
     }
 }
@@ -176,9 +137,6 @@ impl LabelValue for BaseTaskImpl {
             Self::Undelegate(_) => "args_undelegate",
             Self::BaseAction(BaseActionTask::V1(_)) => "args_action",
             Self::BaseAction(BaseActionTask::V2(_)) => "args_action_v2",
-            Self::CommitFinalizeCompressed(_) => {
-                "args_commit_finalize_compressed"
-            }
         }
     }
 }

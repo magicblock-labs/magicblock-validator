@@ -72,7 +72,7 @@ impl SubscriptionUpdate {
         rpc_response: RpcResponse<UiAccount>,
         source: SubscriptionSource,
     ) -> Self {
-        let account: Option<Account> = rpc_response.value.decode::<Account>();
+        let account: Option<Account> = rpc_response.value.to_account();
         Self {
             pubkey,
             slot: rpc_response.context.slot,

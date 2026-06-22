@@ -13,14 +13,12 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_pubsub_client::{mock::ChainPubsubClientMock, ChainPubsubClient},
         config::RemoteAccountProviderConfig,
-        photon_client::PhotonClient,
         RemoteAccountProvider,
     },
     testing::{
         accounts::account_shared_with_owner,
         cloner_stub::ClonerStub,
         deleg::add_delegation_record_for,
-        photon_client_mock::PhotonClientMock,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
         utils::{create_test_lru_cache, create_test_lru_cache_with_config},
     },
@@ -41,24 +39,16 @@ pub type TestChainlink = InnerChainlink<
     ChainPubsubClientMock,
     AccountsBankStub,
     ClonerStub,
-    PhotonClientMock,
 >;
 
 #[derive(Clone)]
 pub struct TestContext {
     pub rpc_client: ChainRpcClientMock,
     pub pubsub_client: ChainPubsubClientMock,
-    pub photon_client: PhotonClientMock,
     pub chainlink: Arc<TestChainlink>,
     pub bank: Arc<AccountsBankStub>,
     pub remote_account_provider: Option<
-        Arc<
-            RemoteAccountProvider<
-                ChainRpcClientMock,
-                ChainPubsubClientMock,
-                PhotonClientMock,
-            >,
-        >,
+        Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
     >,
     pub cloner: Arc<ClonerStub>,
     pub validator_pubkey: Pubkey,
@@ -73,14 +63,13 @@ impl TestContext {
         slot: Slot,
         risk_service: Option<Arc<RiskService>>,
     ) -> Self {
-        let (rpc_client, pubsub_client, photon_client) = {
+        let (rpc_client, pubsub_client) = {
             let rpc_client =
                 ChainRpcClientMockBuilder::new().slot(slot).build();
             let (updates_sndr, updates_rcvr) = mpsc::channel(100);
             let pubsub_client =
                 ChainPubsubClientMock::new(updates_sndr, updates_rcvr);
-            let photon_client = PhotonClientMock::default();
-            (rpc_client, pubsub_client, photon_client)
+            (rpc_client, pubsub_client)
         };
 
         let lifecycle_mode = LifecycleMode::Ephemeral;
@@ -102,7 +91,6 @@ impl TestContext {
                 RemoteAccountProvider::try_from_clients_and_mode(
                     rpc_client.clone(),
                     pubsub_client.clone(),
-                    Some(photon_client.clone()),
                     tx,
                     &config,
                     subscribed_accounts,
@@ -137,7 +125,6 @@ impl TestContext {
         Self {
             rpc_client,
             pubsub_client,
-            photon_client,
             chainlink: Arc::new(chainlink),
             bank,
             cloner,
@@ -264,39 +251,6 @@ impl TestContext {
         let delegation_record_pubkey =
             dlp_api::pda::delegation_record_pda_from_delegated_account(pubkey);
         self.rpc_client.remove_account(&delegation_record_pubkey);
-        let updated = self
-            .send_and_receive_account_update(
-                *pubkey,
-                undelegated_acc.clone(),
-                Some(400),
-            )
-            .await;
-        assert!(updated, "Failed to receive undelegation update");
-
-        Ok(undelegated_acc)
-    }
-
-    /// Assumes that account was already marked as undelegate in the bank
-    /// see [`force_undelegation`](Self::force_undelegation)
-    #[allow(dead_code)]
-    pub async fn commit_and_undelegate_compressed(
-        &self,
-        pubkey: &Pubkey,
-        owner: &Pubkey,
-    ) -> ChainlinkResult<AccountSharedData> {
-        // For compressed accounts, undelegation means the compressed account is emptied.
-        let acc = self.bank.get(pubkey).unwrap();
-        self.rpc_client.add_account(*pubkey, acc.clone().into());
-        self.photon_client.remove_account(pubkey);
-        // Committor service calls this to trigger subscription
-        self.chainlink.undelegation_requested(*pubkey).await?;
-
-        // Committor service then requests undelegation on chain
-        let undelegated_acc = account_shared_with_owner_and_slot(
-            &acc.into(),
-            *owner,
-            self.rpc_client.get_slot(),
-        );
         let updated = self
             .send_and_receive_account_update(
                 *pubkey,

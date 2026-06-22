@@ -6,7 +6,9 @@ use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
-    client_error, config::RpcAccountInfoConfig, response::RpcResult,
+    client_error,
+    config::RpcAccountInfoConfig,
+    response::{Response, RpcResult},
 };
 
 // -----------------
@@ -68,17 +70,31 @@ impl ChainRpcClient for ChainRpcClientImpl {
         pubkey: &Pubkey,
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Option<Account>> {
-        self.rpc_client
-            .get_account_with_config(pubkey, config)
-            .await
+        let resp = self
+            .rpc_client
+            .get_ui_account_with_config(pubkey, config)
+            .await?;
+        Ok(Response {
+            context: resp.context,
+            value: resp.value.and_then(|ui| ui.to_account()),
+        })
     }
     async fn get_multiple_accounts_with_config(
         &self,
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>> {
-        self.rpc_client
-            .get_multiple_accounts_with_config(pubkeys, config)
-            .await
+        let resp = self
+            .rpc_client
+            .get_multiple_ui_accounts_with_config(pubkeys, config)
+            .await?;
+        Ok(Response {
+            context: resp.context,
+            value: resp
+                .value
+                .into_iter()
+                .map(|opt| opt.and_then(|ui| ui.to_account()))
+                .collect(),
+        })
     }
 }

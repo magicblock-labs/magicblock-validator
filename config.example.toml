@@ -339,15 +339,6 @@ failed-task-retention = "14d"
 failed-task-cleanup-interval = "1h"
 
 # ==============================================================================
-# Compression
-# ==============================================================================
-[compression]
-# The URL of the Photon indexer.
-# Default: http://localhost:8784
-# Env: MBV_COMPRESSION__PHOTON_URL
-photon-url = "http://localhost:8784"
-
-# ==============================================================================
 # Pre-loaded Programs
 # ==============================================================================
 # You can specify multiple programs to load at startup.

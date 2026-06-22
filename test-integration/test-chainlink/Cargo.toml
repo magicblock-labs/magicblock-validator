@@ -5,17 +5,11 @@ edition.workspace = true
 
 [dependencies]
 bincode = { workspace = true }
-borsh = { workspace = true }
-compressed-delegation-client = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
-light-client = { workspace = true, features = ["v2"] }
-light-hasher = { workspace = true }
-light-sdk = { workspace = true, features = ["v2"] }
 magicblock-aml = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
-magicblock-core = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
 program-mini = { workspace = true, features = ["no-entrypoint"] }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
@@ -27,7 +21,6 @@ solana-loader-v4-interface = { workspace = true, features = [
     "serde",
 ] }
 solana-commitment-config = { workspace = true }
-solana-compute-budget-interface = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }

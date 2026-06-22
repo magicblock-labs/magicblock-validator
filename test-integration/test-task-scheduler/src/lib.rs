@@ -32,7 +32,9 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use program_schedulecommit::MainAccount;
-use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_sdk::{
+    signature::Keypair, signer::Signer, transaction::Transaction,
+};
 use tempfile::TempDir;
 
 pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
@@ -86,28 +88,49 @@ pub fn create_delegated_counter(
     validator: &mut Child,
     commit_frequency_ms: u32,
 ) {
-    let init_ix = create_init_ix(payer.pubkey(), "test".to_string());
-    let delegate_ix = create_delegate_ix_with_commit_frequency_ms(
-        payer.pubkey(),
-        commit_frequency_ms,
+    // Initialize the counter
+    let blockhash = expect!(
+        ctx.try_chain_client().and_then(|client| client
+            .get_latest_blockhash()
+            .map_err(|e| anyhow::anyhow!(
+                "Failed to get latest blockhash: {}",
+                e
+            ))),
+        validator
+    );
+    expect!(
+        ctx.send_transaction_chain(
+            &mut Transaction::new_signed_with_payer(
+                &[create_init_ix(payer.pubkey(), "test".to_string())],
+                Some(&payer.pubkey()),
+                &[&payer],
+                blockhash,
+            ),
+            &[payer]
+        ),
+        format!("Failed to send init transaction: blockhash {:?}", blockhash),
+        validator
     );
 
+    // Delegate the counter to the ephem validator
     expect!(
-        ctx.send_and_confirm_instructions_with_payer_chain(
-            &[init_ix, delegate_ix],
-            payer,
+        ctx.send_transaction_chain(
+            &mut Transaction::new_signed_with_payer(
+                &[create_delegate_ix_with_commit_frequency_ms(
+                    payer.pubkey(),
+                    commit_frequency_ms
+                )],
+                Some(&payer.pubkey()),
+                &[&payer],
+                blockhash,
+            ),
+            &[payer]
         ),
         validator
     );
 
-    let (counter_pda, _) = FlexiCounter::pda(&payer.pubkey());
-    wait_for_incremented_counter(
-        ctx,
-        &counter_pda,
-        0,
-        Duration::from_secs(10),
-        validator,
-    );
+    // Wait for account to be delegated
+    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
 }
 
 pub fn wait_for_incremented_counter(
@@ -118,46 +141,24 @@ pub fn wait_for_incremented_counter(
     validator: &mut Child,
 ) {
     let now = Instant::now();
-    let mut last_count = None;
-    let mut last_error = None;
     while now.elapsed() < max_timeout {
-        let counter = ctx
-            .try_ephem_client()
-            .and_then(|client| {
-                client.get_account(counter_pda).map_err(|e| {
-                    anyhow::anyhow!("Failed to get account: {}", e)
-                })
-            })
-            .and_then(|counter_account| {
-                FlexiCounter::try_decode(&counter_account.data).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to decode counter account ({} bytes): {}",
-                        counter_account.data.len(),
-                        e
-                    )
-                })
-            });
-        match counter {
-            Ok(counter) => {
-                last_count = Some(counter.count);
-                last_error = None;
-                if counter.count == expected_count {
-                    return;
-                }
-            }
-            Err(err) => {
-                last_error = Some(err.to_string());
-            }
+        let counter_account = expect!(
+            ctx.try_ephem_client().and_then(|client| client
+                .get_account(counter_pda)
+                .map_err(|e| anyhow::anyhow!("Failed to get account: {}", e))),
+            validator
+        );
+        let counter =
+            expect!(FlexiCounter::try_decode(&counter_account.data), validator);
+        if counter.count == expected_count {
+            return;
         }
         expect!(ctx.wait_for_next_slot_ephem(), validator);
     }
     assert!(
         false,
         cleanup(validator),
-        "Failed to wait for incremented counter; expected_count: {}, last_count: {:?}, last_error: {:?}",
-        expected_count,
-        last_count,
-        last_error
+        "Failed to wait for incremented counter"
     );
 }
 
