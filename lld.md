@@ -5,7 +5,7 @@ the extra structure I think is implied by the text, plus the places where the
 proposal still seems ambiguous.
 
 > [!NOTE]
-> **Assumptions / terms I am using**
+> **Assumptions / Terms / Scopes**
 >
 > - By **validator commitment**, I mean an already submitted on-chain commitment
 >   hash for `validator + account + commit_id`, even if that commitment has not
@@ -16,39 +16,37 @@ proposal still seems ambiguous.
 > - By **pre-commit challenge**, I assume the MIMD means a challenge raised
 >   before a `ValidatorCommitment` exists, using only an expected
 >   `account + commit_id` or some statement about what the validator intends to
->   commit. **pre-commit challenges* are out of scope for this LLD. V1 only supports
+>   commit. 
+>   - *pre-commit challenges* are **out of scope** for this LLD. V1 only supports
 >   challenges anchored to an existing DLP-visible `ValidatorCommitment`.
 > - `SubmitValidatorCommitment` is a commitment-only step. It should not apply
 >   the committed state to the delegated account and should not execute an
 >   optimized commit+finalize path. Current `CommitFinalize`-style behavior can
 >   run only after the commitment is no longer challengeable, or after a
 >   challenge resolves and approves the state to finalize.
-> - `ValidatorCommitment` is a hash/claim plus metadata. It is not the
->   finalized account state, and creating it must not mutate the delegated
->   account.
-> - The challenge window starts when the delegation program stores the
->   `ValidatorCommitment`. Normal finalization is blocked until that window
->   expires without a challenge, or until any raised challenge reaches a
->   terminal outcome.
-> - The canonical account state for this LLD is `lamports + owner + data`.
->   `executable` is excluded because executable accounts are not delegatable.
->   The missing-account representation is still undefined.
-> - Existing `CommitState` / `CommitStateFromBuffer` are the closest current
+>   - Existing `CommitState` / `CommitStateFromBuffer` are the closest current
 >   analogs for creating a pending commit artifact. Existing `CommitFinalize`
 >   is not equivalent to `SubmitValidatorCommitment`; it is an optimized
 >   apply/finalize path that must be gated in the challenge-enabled protocol.
-> - A challenge is anchored to a DLP-visible commitment artifact. Off-chain
+>   - `ValidatorCommitment` is a hash/claim plus metadata. It is not the
+>   finalized account state, and creating it must not mutate the delegated
+>   account.
+> - The **challenge window** starts when the delegation program stores the
+>   `ValidatorCommitment`. Normal finalization is **blocked until** that window
+>   expires without a challenge, or until any raised challenge reaches a
+>   terminal outcome.
+>   - A **challenge** is anchored to a DLP-visible commitment artifact. Off-chain
 >   challenger detection is only evidence for deciding to challenge; it is not
 >   the protocol anchor.
 > - `SubmitValidatorResponse` must open the original validator commitment hash.
 >   It cannot replace the original commitment with a new state claim.
 > - `Resolver` means the V1 security council mechanism. It is entered only when
 >   valid validator and challenger openings disagree, or when validator-fault
->   handling routes the case there. The resolver's internal design is out of
->   scope for this document.
+>   handling routes the case there. The resolver's design is **out of scope**
+>   for this document.
 > - `Keeper / anyone` is not trusted. This actor only advances objective
 >   timeout/finalization transitions that the delegation program can verify from
->   on-chain state.
+>   on-chain state. It's basically a ping / awake / tick.
 > - The commitment-addressing model is still a design decision. If we keep the
 >   current PDA shape, there is effectively one pending commit artifact per
 >   delegated account. If the protocol key is truly
