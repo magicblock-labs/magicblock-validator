@@ -301,6 +301,10 @@ impl TransactionScheduler {
                 else => break,
             }
         }
+        if self.coordinator.is_primary() {
+            let slot = self.transition_to_new_slot(None).await;
+            self.handle_superblock(slot).await;
+        }
         // Shutdown: drop executor channels to signal workers to stop,
         // then drain remaining ready notifications
         drop(self.executors);
