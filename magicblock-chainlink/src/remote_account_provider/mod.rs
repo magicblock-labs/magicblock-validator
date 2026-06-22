@@ -108,6 +108,12 @@ pub(crate) async fn subscription_key_owned_guard_from_map(
     subscription_key_locks: &SubscriptionKeyLocks,
     pubkey: Pubkey,
 ) -> tokio::sync::OwnedMutexGuard<()> {
+    // The reconciler uses this to serialize repair work with normal
+    // acquire/release/unsubscribe transitions for the same pubkey. Creating the
+    // lock when it is missing is intentional: if reconciliation only looked up
+    // existing locks, a new same-pubkey transition could start immediately after
+    // the lookup and race the repair. Reconciliation only calls this for drifted
+    // pubkeys it is about to repair, not for every subscribed account.
     let lock =
         subscription_key_lock_from_map(subscription_key_locks, &pubkey).await;
     lock.lock_owned().await
