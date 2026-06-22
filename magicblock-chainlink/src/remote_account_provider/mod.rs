@@ -28,8 +28,6 @@ use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
-#[cfg(any(test, feature = "dev-context"))]
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig,
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
@@ -604,7 +602,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             loop {
                 interval.tick().await;
                 let pubsub_total =
-                    subscription_reconciler::reconcile_subscriptions_with_key_locks(
+                    subscription_reconciler::reconcile_subscriptions(
                         &subscribed_accounts,
                         pubsub_client.as_ref(),
                         &never_evicted,
@@ -1630,20 +1628,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         self.lrucache_subscribed_accounts.contains(pubkey)
     }
 
-    #[cfg(test)]
-    pub(crate) async fn reconcile_subscriptions_once_for_test(&self) -> usize {
-        let never_evicted =
-            self.lrucache_subscribed_accounts.never_evicted_accounts();
-        subscription_reconciler::reconcile_subscriptions_with_key_locks(
-            &self.lrucache_subscribed_accounts,
-            &self.pubsub_client,
-            &never_evicted,
-            &self.removed_account_tx,
-            Some(&self.subscription_key_locks),
-        )
-        .await
-    }
-
     pub(crate) async fn evict_unwatched_with_subscription_lock<F, Fut>(
         &self,
         pubkey: &Pubkey,
@@ -1662,12 +1646,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         evict().await;
         true
-    }
-
-    /// Check if an account is currently pending (being fetched)
-    pub fn is_pending(&self, pubkey: &Pubkey) -> bool {
-        let fetching = self.fetching_accounts.lock().unwrap();
-        fetching.contains_key(pubkey)
     }
 
     async fn subscription_key_lock(
@@ -1694,19 +1672,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<()> {
         self.acquire_subscription_with_mode(pubkey, reason, true)
             .await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn has_subscription_reason(
-        &self,
-        pubkey: &Pubkey,
-        reason: SubscriptionReason,
-    ) -> bool {
-        self.subscription_ownership
-            .lock()
-            .await
-            .get(pubkey)
-            .is_some_and(|ownership| ownership.contains(reason))
     }
 
     async fn acquire_subscription_with_mode(
@@ -1910,12 +1875,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         program_id: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         self.pubsub_client.subscribe_program(program_id).await
-    }
-
-    /// Get a reference to the pubsub client (for testing)
-    #[cfg(any(test, feature = "dev-context"))]
-    pub fn pubsub_client(&self) -> &U {
-        &self.pubsub_client
     }
 
     /// Unsubscribe from an account
@@ -2285,34 +2244,6 @@ fn remove_fetching_account_if_generation_matches(
     }
 }
 
-impl RemoteAccountProvider<ChainRpcClientImpl, ChainPubsubClientImpl> {
-    #[cfg(any(test, feature = "dev-context"))]
-    pub fn rpc_client(&self) -> &RpcClient {
-        &self.rpc_client.rpc_client
-    }
-}
-
-impl
-    RemoteAccountProvider<
-        ChainRpcClientImpl,
-        SubMuxClient<ChainPubsubClientImpl>,
-    >
-{
-    #[cfg(any(test, feature = "dev-context"))]
-    pub fn rpc_client(&self) -> &RpcClient {
-        &self.rpc_client.rpc_client
-    }
-}
-
-impl
-    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
-{
-    #[cfg(any(test, feature = "dev-context"))]
-    pub fn rpc_client(&self) -> &RpcClient {
-        &self.rpc_client.rpc_client
-    }
-}
-
 fn all_slots_match(accs: &[RemoteAccount]) -> bool {
     if accs.is_empty() {
         return true;
@@ -2359,4 +2290,67 @@ fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
         .map(|pk| pk.to_string())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+    /// Get a reference to the pubsub client for tests and dev tooling.
+    pub fn pubsub_client(&self) -> &U {
+        &self.pubsub_client
+    }
+}
+
+#[cfg(test)]
+impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+    /// Check if an account is currently pending (being fetched).
+    pub(crate) fn is_pending(&self, pubkey: &Pubkey) -> bool {
+        let fetching = self.fetching_accounts.lock().unwrap();
+        fetching.contains_key(pubkey)
+    }
+
+    pub(crate) async fn has_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> bool {
+        self.subscription_ownership
+            .lock()
+            .await
+            .get(pubkey)
+            .is_some_and(|ownership| ownership.contains(reason))
+    }
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+impl RemoteAccountProvider<ChainRpcClientImpl, ChainPubsubClientImpl> {
+    pub fn rpc_client(
+        &self,
+    ) -> &solana_rpc_client::nonblocking::rpc_client::RpcClient {
+        &self.rpc_client.rpc_client
+    }
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+impl
+    RemoteAccountProvider<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainPubsubClientImpl>,
+    >
+{
+    pub fn rpc_client(
+        &self,
+    ) -> &solana_rpc_client::nonblocking::rpc_client::RpcClient {
+        &self.rpc_client.rpc_client
+    }
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+impl
+    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
+{
+    pub fn rpc_client(
+        &self,
+    ) -> &solana_rpc_client::nonblocking::rpc_client::RpcClient {
+        &self.rpc_client.rpc_client
+    }
 }

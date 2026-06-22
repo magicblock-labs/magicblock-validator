@@ -1808,3 +1808,18 @@ fn test_removed_stuck_pubkey_symbols_are_absent_from_production_code() {
         hits.join("\n")
     );
 }
+
+impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+    async fn reconcile_subscriptions_once_for_test(&self) -> usize {
+        let never_evicted =
+            self.lrucache_subscribed_accounts.never_evicted_accounts();
+        subscription_reconciler::reconcile_subscriptions(
+            &self.lrucache_subscribed_accounts,
+            &self.pubsub_client,
+            &never_evicted,
+            &self.removed_account_tx,
+            Some(&self.subscription_key_locks),
+        )
+        .await
+    }
+}

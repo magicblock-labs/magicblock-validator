@@ -46,61 +46,7 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
     }
 }
 
-/// Reconciles subscription state between the LRU cache and the pubsub client.
-///
-/// This function is called when a mismatch is detected between the accounts
-/// tracked in the LRU cache and the actual subscriptions held by the pubsub
-/// client. It ensures both are in sync by:
-///
-/// - **Resubscribing**: Accounts present in the LRU cache but missing from the
-///   pubsub client are resubscribed. This can happen if subscriptions were
-///   dropped due to network issues or reconnections.
-///
-/// - **Unsubscribing**: Accounts present in the pubsub client but missing from
-///   the LRU cache are unsubscribed. This can happen if the LRU evicted an
-///   account but the unsubscribe request failed or was lost.
-///
-/// # Parameters
-///
-/// - `subscribed_accounts`: The LRU cache that tracks which accounts should be
-///   subscribed. This is the source of truth for user-requested subscriptions.
-///
-/// - `pubsub_client`: The client managing actual WebSocket/gRPC subscriptions
-///   to the chain. Provides the current set of active subscriptions.
-///
-/// - `never_evicted`: A list of system accounts (e.g., sysvar::clock) that are
-///   always subscribed but are **not** tracked in the LRU cache. These accounts
-///   are excluded from reconciliation because:
-///   1. They are subscribed directly without going through the LRU.
-///   2. They should never be unsubscribed regardless of LRU state.
-///   3. Their presence in pubsub but absence from LRU is expected and correct.
-///
-///   Without filtering these out, the reconciler would incorrectly attempt to
-///   unsubscribe them since they appear in pubsub but not in the LRU cache.
-///
-/// - `removed_account_tx`: Channel to notify upstream that an account was
-///   unsubscribed and should be removed from the bank.
-/// - Returns: The number of accounts that are subscribed
-#[cfg(test)]
-pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
-    subscribed_accounts: &AccountsLruCache,
-    pubsub_client: &PubsubClient,
-    never_evicted: &[Pubkey],
-    removed_account_tx: &mpsc::Sender<Pubkey>,
-) -> usize {
-    reconcile_subscriptions_with_key_locks(
-        subscribed_accounts,
-        pubsub_client,
-        never_evicted,
-        removed_account_tx,
-        None,
-    )
-    .await
-}
-
-pub(crate) async fn reconcile_subscriptions_with_key_locks<
-    PubsubClient: ChainPubsubClient,
->(
+pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &AccountsLruCache,
     pubsub_client: &PubsubClient,
     never_evicted: &[Pubkey],
@@ -294,7 +240,8 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+        reconcile_subscriptions_local(&lru, &mock_client, &[], &removed_tx)
+            .await;
 
         // Verify subscriptions are unchanged
         let subs = mock_client.subscriptions_union();
@@ -328,7 +275,8 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+        reconcile_subscriptions_local(&lru, &mock_client, &[], &removed_tx)
+            .await;
 
         // Verify pk3 was resubscribed
         let subs = mock_client.subscriptions_union();
@@ -364,7 +312,7 @@ mod tests {
         let never_evicted = vec![never_evict_pk];
 
         // Reconcile
-        reconcile_subscriptions(
+        reconcile_subscriptions_local(
             &lru,
             &mock_client,
             &never_evicted,
@@ -408,7 +356,8 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+        reconcile_subscriptions_local(&lru, &mock_client, &[], &removed_tx)
+            .await;
 
         // Verify pk3 was resubscribed
         let subs = mock_client.subscriptions_union();
@@ -435,7 +384,8 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+        reconcile_subscriptions_local(&lru, &mock_client, &[], &removed_tx)
+            .await;
 
         // Verify state unchanged (both empty)
         let subs = mock_client.subscriptions_union();
@@ -464,7 +414,8 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+        reconcile_subscriptions_local(&lru, &mock_client, &[], &removed_tx)
+            .await;
 
         // Verify all subscriptions added
         let subs = mock_client.subscriptions_union();
@@ -502,7 +453,8 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+        reconcile_subscriptions_local(&lru, &mock_client, &[], &removed_tx)
+            .await;
 
         // Verify all accounts are now subscribed
         let subs = mock_client.subscriptions_union();
@@ -539,7 +491,7 @@ mod tests {
         let never_evicted: Vec<Pubkey> = vec![];
 
         // Reconcile should resubscribe pubkey2 and pubkey3
-        reconcile_subscriptions(
+        reconcile_subscriptions_local(
             &lru_cache,
             &pubsub_client,
             &never_evicted,
@@ -591,7 +543,7 @@ mod tests {
         let never_evicted: Vec<Pubkey> = vec![];
 
         // Reconcile should unsubscribe pubkey2 and pubkey3
-        reconcile_subscriptions(
+        reconcile_subscriptions_local(
             &lru_cache,
             &pubsub_client,
             &never_evicted,
@@ -640,7 +592,7 @@ mod tests {
         // preserved even though it's not in the LRU cache
         let never_evicted = vec![never_evicted_pubkey];
 
-        reconcile_subscriptions(
+        reconcile_subscriptions_local(
             &lru_cache,
             &pubsub_client,
             &never_evicted,
@@ -670,5 +622,21 @@ mod tests {
         let removed = drain_removed_account_rx(&mut removed_rx);
         assert_eq!(removed.len(), 1);
         assert!(removed.contains(&stale_pubkey));
+    }
+
+    async fn reconcile_subscriptions_local<PubsubClient: ChainPubsubClient>(
+        subscribed_accounts: &AccountsLruCache,
+        pubsub_client: &PubsubClient,
+        never_evicted: &[Pubkey],
+        removed_account_tx: &mpsc::Sender<Pubkey>,
+    ) -> usize {
+        reconcile_subscriptions(
+            subscribed_accounts,
+            pubsub_client,
+            never_evicted,
+            removed_account_tx,
+            None,
+        )
+        .await
     }
 }
