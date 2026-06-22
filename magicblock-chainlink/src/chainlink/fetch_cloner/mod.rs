@@ -715,12 +715,27 @@ where
                         Arc::clone(&self.pending_clones),
                         pubkey,
                     );
+                    let Some(owned_request) = request.take() else {
+                        let err = ClonerError::CommittorServiceError(
+                            "owner missing request for undelegation rescue clone"
+                                .to_string(),
+                        );
+                        self.finish_pending_clone(
+                            pubkey,
+                            CloneCompletion::Failed,
+                        );
+                        guard.dismiss();
+                        return Err(
+                            ClonerError::FailedToCloneAndScheduleUndelegationRescue(
+                                pubkey,
+                                Box::new(err),
+                            ),
+                        );
+                    };
                     let result = self
                         .cloner
                         .clone_account_and_schedule_undelegation_rescue(
-                            request
-                                .take()
-                                .expect("owner must still have request"),
+                            owned_request,
                         )
                         .await;
                     let completion = if result.is_ok() {
