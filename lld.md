@@ -73,45 +73,110 @@ sequenceDiagram
     participant R as Resolver
     participant K as Keeper / anyone
 
-    V->>DP: SubmitValidatorCommitment<br/>validator, account, commit_id, validator_state_hash
-    DP->>DP: Store commitment<br/>start challenge window
+    rect rgba(80, 160, 255, 0.12)
+        V->>DP: SubmitValidatorCommitment<br/>validator, account, commit_id, validator_state_hash
+        DP->>DP: Store commitment<br/>start challenge window
+    end
 
-    C->>C: Detect divergence<br/>compute challenger state + salt<br/>compute challenge_hash
-    C->>DP: RaiseChallenge<br/>validator, account, commit_id, challenge_hash, stake
-    DP->>DP: Lock stake<br/>mark commitment disputed<br/>start validator response timeout
+    rect rgba(255, 190, 80, 0.16)
+        C->>C: Detect divergence off-chain<br/>compute challenger state + salt<br/>compute challenge_hash
+        C->>DP: RaiseChallenge<br/>validator, account, commit_id, challenge_hash, stake
+        DP->>DP: Lock stake<br/>mark commitment disputed<br/>start validator response timeout
+    end
 
     alt validator responds in time
-        V->>DP: SubmitValidatorResponse<br/>full state or canonical buffer reference
-        DP->>DP: Verify response opens stored commitment hash
+        rect rgba(120, 220, 140, 0.14)
+            V->>DP: SubmitValidatorResponse<br/>full state or canonical buffer reference
+            DP->>DP: Verify response opens stored commitment hash
+        end
 
         alt valid validator opening
             DP->>DP: Start challenger reveal timeout
-            C->>DP: RevealChallengerState<br/>state, salt
-            DP->>DP: Verify reveal opens challenge_hash
+            alt challenger reveals in time
+                rect rgba(120, 220, 140, 0.14)
+                    C->>DP: RevealChallengerState<br/>state, salt
+                    DP->>DP: Verify reveal opens challenge_hash
+                end
 
-            alt invalid reveal
-                DP->>DP: Slash challenger
-            else states match
-                DP->>DP: Apply partial challenger penalty<br/>clear dispute
-            else states mismatch
-                DP->>DP: Create ResolutionRecord
-                R->>DP: Vote
-                K->>DP: FinalizeResolution
-                DP->>DP: Apply resolver outcome
+                alt invalid reveal
+                    rect rgba(255, 90, 90, 0.16)
+                        DP->>DP: Slash challenger
+                    end
+                else states match
+                    rect rgba(120, 220, 140, 0.14)
+                        DP->>DP: Charge 20% challenger stake to protocol<br/>clear dispute
+                    end
+                else states mismatch
+                    rect rgba(255, 90, 90, 0.16)
+                        DP->>DP: Create ResolutionRecord
+                        R->>DP: Vote
+                        K->>DP: FinalizeResolution
+                        DP->>DP: Apply resolver outcome
+                    end
+                end
+            else challenger reveal timeout
+                rect rgba(255, 90, 90, 0.16)
+                    K->>DP: ClaimChallengerRevealTimeout
+                    DP->>DP: Penalize challenger<br/>release commitment if valid validator opening exists
+                end
             end
         else invalid validator opening
-            DP->>DP: Validator-fault handling or resolver
+            rect rgba(255, 90, 90, 0.16)
+                DP->>DP: Validator-fault handling or resolver
+            end
         end
     else validator timeout
-        K->>DP: ClaimValidatorResponseTimeout
-        DP->>DP: Validator-fault handling or resolver
-    end
-
-    alt challenger reveal timeout
-        K->>DP: ClaimChallengerRevealTimeout
-        DP->>DP: Penalize challenger<br/>release commitment if valid validator opening exists
+        rect rgba(255, 90, 90, 0.16)
+            K->>DP: ClaimValidatorResponseTimeout
+            DP->>DP: Validator-fault handling or resolver
+        end
     end
 ```
+
+**Commentary on the sequence**
+
+- Start from an account that is already delegated, has been modified on ER, and
+  has a next `commit_id` / nonce for this account update.
+- The validator first creates a DLP-visible commitment artifact. In this LLD,
+  that artifact is called `ValidatorCommitment` and is bound to:
+
+```text
+validator_identity + account_pubkey + commit_id
+```
+
+- A challenger does not challenge unanchored validator memory. The challenger
+  independently computes the expected ER account state off-chain, then watches
+  DLP program transactions or DLP-owned account changes for the validator's
+  on-chain commitment for the same account and commit id.
+- In the current implementation, the closest concrete artifacts are the
+  `commit_state_pda` and `commit_record_pda` created by `CommitState` /
+  `CommitStateFromBuffer`. The challenge-enabled protocol should either define
+  a first-class `ValidatorCommitment` account or extend the commit record so it
+  explicitly stores the committed hash and challenge/finality status.
+- If the challenger disagrees with the validator commitment, it raises a
+  challenge by locking stake and submitting `challenge_hash`, which is a salted
+  commitment to the challenger state and full challenge context.
+- The delegation program records the challenge, locks challenger stake, marks
+  the validator commitment disputed, and blocks normal finalization for that
+  commitment until the challenge reaches a terminal outcome.
+- The validator response must reveal the state behind the original stored
+  validator commitment. The delegation program must verify that the response
+  opens the stored `validator_state_hash`; it must not accept a fresh state
+  claim that differs from the original commitment.
+- After a valid validator opening, the challenger reveals its state and salt.
+  The delegation program recomputes `challenge_hash`. If the reveal does not
+  open the original challenge hash, the challenger is fully slashed.
+- If the challenger reveal is valid and both states match, the challenge was
+  unnecessary but valid. The challenger loses 20% of the locked stake to the
+  protocol, the remaining stake is unlocked, and the commitment is cleared for
+  finalization.
+- If the valid challenger state differs from the valid validator state, the
+  protocol has proven disagreement but not fault. The delegation program creates
+  a `ResolutionRecord`, and the resolver decides whether the validator state or
+  challenger state is correct.
+- Finalization is a later step. It can proceed only if no challenge exists, the
+  challenge has been cleared, or the challenge has been resolved and the
+  finalizing state matches the resolved state.
 
 **Messages I think are missing or need to be explicit**
 
@@ -132,13 +197,14 @@ sequenceDiagram
 - if disputed, the finalizing state matches the resolved state;
 - required optimistic-finality or council co-signing conditions are satisfied.
 
+The 20% penalty for a valid but unnecessary challenge goes to the protocol. The
+48 hour timelock in the MIMD is a payout delay for a successful challenger, not
+an appeal window.
+
 **Questions / possible gaps**
 
 - Does validator timeout directly slash, or always go through resolver?
 - What happens on resolver no-quorum?
 - Is only one active challenge allowed per validator commitment?
-- Where does the partial challenger penalty go?
 - Is full validator-bond slashing proportional for one account fault?
-- What is the purpose of the 48 hour payout timelock if it is not an appeal
-  window?
 - What are the exact serialization and missing-account rules?
