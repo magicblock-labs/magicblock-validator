@@ -288,19 +288,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
         task::spawn(async move {
             while let Some(pubkey) = removed_accounts_rx.recv().await {
-                // Pre-flight check: skip if delegated/undelegating
+                // Pre-flight check: skip if delegated/undelegating/ephemeral
                 // (the processor enforces this too, but this avoids
-                // the overhead of building and submitting a doomed tx)
+                // the overhead of building and submitting an incorrect tx).
+                // Ephemeral accounts are local-validator state and must not update on
+                // base chain, so losing the remote subscription cannot make the local
+                // ephemeral bank state stale.
                 let should_evict = match accounts_bank.get_account(&pubkey) {
                     Some(account) => {
                         let undelegating = account.undelegating();
                         let delegated = account.delegated();
-                        let evict = !undelegating && !delegated;
+                        let ephemeral = account.ephemeral();
+                        let evict = !undelegating && !delegated && !ephemeral;
                         if !evict {
                             trace!(
                                 pubkey = %pubkey,
                                 undelegating,
                                 delegated,
+                                ephemeral,
                                 owner = %account.owner(),
                                 "Ignoring removal notification because bank \
                                  state is protected; no EvictAccount \
@@ -311,7 +316,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                     }
                     None => false,
                 };
-                // Skipping a delegated/undelegating LRU candidate is not a
+                // Skipping a delegated/undelegating/ephemeral LRU candidate is not a
                 // removal event; protected bank state must not be translated
                 // into a downstream bank eviction.
                 if !should_evict {
