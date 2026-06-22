@@ -24,15 +24,13 @@ use crate::{
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
     },
     intent_executor::{
-        error::{
-            IntentExecutorError, IntentExecutorResult,
-        },
+        error::{IntentExecutorError, IntentExecutorResult},
         intent_executor_factory::IntentExecutorBuilder,
+        strategy_executor::error::TransactionStrategyExecutionError,
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
     transaction_preparator::TransactionPreparator,
 };
-use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 /// Max number of executors that can send messages in parallel to Base layer

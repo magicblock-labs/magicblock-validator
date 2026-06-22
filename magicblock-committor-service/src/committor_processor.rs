@@ -46,13 +46,13 @@ pub struct CommittorProcessor {
 }
 
 impl CommittorProcessor {
-    pub fn try_new<A, O>(
+    pub fn new<A, O>(
         authority: Keypair,
         chain_config: ChainConfig,
         chain_slot: Option<Arc<AtomicU64>>,
         outbox_client: Arc<O>,
         actions_callback_executor: A,
-    ) -> CommittorServiceResult<Self>
+    ) -> Self
     where
         A: ActionsCallbackScheduler,
         O: OutboxClient,
@@ -115,14 +115,14 @@ impl CommittorProcessor {
             pending_result_listeners.clone(),
         ));
 
-        Ok(Self {
+        Self {
             authority,
             _table_mania: table_mania,
             magic_rpc_client: magic_block_rpc_client,
             commits_scheduler,
             task_info_fetcher,
             pending_result_listeners,
-        })
+        }
     }
 
     #[instrument(skip(self, intent_bundles))]

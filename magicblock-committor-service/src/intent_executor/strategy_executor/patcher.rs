@@ -10,13 +10,14 @@ use tracing::{error, warn};
 
 use crate::{
     intent_executor::{
-        error::{
-            IntentExecutorError, IntentExecutorResult,
-        },
+        error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
-        strategy_executor::utils::{
-            handle_actions_result, handle_commit_id_error,
-            handle_undelegation_error, prepare_and_execute_strategy,
+        strategy_executor::{
+            error::TransactionStrategyExecutionError,
+            utils::{
+                handle_actions_result, handle_commit_id_error,
+                handle_undelegation_error, prepare_and_execute_strategy,
+            },
         },
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         IntentExecutionReport,
@@ -24,7 +25,6 @@ use crate::{
     tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
     transaction_preparator::TransactionPreparator,
 };
-use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
 
 #[async_trait]
 pub(in crate::intent_executor) trait Patcher {

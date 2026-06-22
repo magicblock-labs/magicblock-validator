@@ -260,7 +260,7 @@ fn assert_first_commit(
                 assert!(intent_bundle.commit_finalize.is_some());
                 assert!(intent_bundle.commit_finalize_and_undelegate.is_none());
             }
-            let _instruction = MagicBlockInstruction::ScheduledCommitSent((*id, 0));
+            let _instruction = MagicBlockInstruction::ScheduledCommitSent(*id);
             // TODO(edwin) @@@ this fails in CI only with the similar to the below
             //   left: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0]
             //  right: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]

@@ -8,12 +8,13 @@ use solana_signer::SignerError;
 use tracing::error;
 
 use crate::{
+    intent_executor::strategy_executor::error::TransactionStrategyExecutionError,
     outbox_client::InternalOutboxClientError,
-    tasks::task_builder::TaskBuilderError,
+    tasks::{
+        task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
+    },
     transaction_preparator::error::TransactionPreparatorError,
 };
-use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
-use crate::tasks::task_strategist::TaskStrategistError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalError {
@@ -178,8 +179,9 @@ mod tests {
         },
         request::{RpcError, RpcRequest, RpcResponseErrorData},
     };
-    use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
+
     use super::InternalError;
+    use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
 
     const TX_TOO_LARGE_SOLANA: &str = "base64 encoded too large";
     const TX_TOO_LARGE_MAGICBLOCK: &str =

@@ -84,15 +84,17 @@ pub enum MagicBlockInstruction {
     },
 
     /// Records the attempt to realize a scheduled commit on chain.
+    /// Closes the associated outbox intent PDA account.
     ///
     /// The signature of this transaction can be pre-calculated since we pass the
     /// ID of the scheduled commit and retrieve the signature from a globally
-    /// stored hashmap.
+    /// stored hashmap. Transaction uniqueness is guaranteed by the per-intent PDA.
     ///
-    /// We implement it this way so we can log the signature of this transaction
-    /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
-    /// Args: (intent_id, bump) - bump is needed in order to guarantee unique transactions
-    ScheduledCommitSent((u64, u64)),
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
+    /// - **1.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    /// - **2.** `[WRITE]`         Ephemeral vault
+    ScheduledCommitSent(u64),
 
     /// Schedules execution of a single *base intent*.
     ///

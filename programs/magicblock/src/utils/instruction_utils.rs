@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::collections::HashMap;
 
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_magic_program_api::{
@@ -10,8 +7,9 @@ use magicblock_magic_program_api::{
         AccountModification, AccountModificationForInstruction,
         MagicBlockInstruction, PostDelegationActionExecutorInstruction,
     },
+    outbox,
     pda::crank_signer_pda,
-    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY,
+    CRANK_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY, MAGIC_CONTEXT_PUBKEY,
     POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
 };
 use solana_hash::Hash;
@@ -120,30 +118,21 @@ impl InstructionUtils {
         scheduled_commit_id: u64,
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix = Self::scheduled_commit_sent_instruction(
-            &crate::id(),
-            &validator_authority_id(),
-            scheduled_commit_id,
-        );
+        let ix = Self::scheduled_commit_sent_instruction(scheduled_commit_id);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
     pub(crate) fn scheduled_commit_sent_instruction(
-        magic_block_program: &Pubkey,
-        validator_authority: &Pubkey,
         scheduled_commit_id: u64,
     ) -> Instruction {
-        static COMMIT_SENT_BUMP: AtomicU64 = AtomicU64::new(0);
         let account_metas = vec![
-            AccountMeta::new_readonly(*magic_block_program, false),
-            AccountMeta::new_readonly(*validator_authority, true),
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new(outbox_intent_pda(scheduled_commit_id), false),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
         ];
         Instruction::new_with_bincode(
-            *magic_block_program,
-            &MagicBlockInstruction::ScheduledCommitSent((
-                scheduled_commit_id,
-                COMMIT_SENT_BUMP.fetch_add(1, Ordering::SeqCst),
-            )),
+            crate::id(),
+            &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
             account_metas,
         )
     }
@@ -177,6 +166,37 @@ impl InstructionUtils {
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::AcceptScheduleCommits,
+            account_metas,
+        )
+    }
+
+    // -----------------
+    // SetIntentExecutionStage
+    // -----------------
+
+    pub fn set_intent_execution_stage(
+        recent_blockhash: Hash,
+        intent_id: u64,
+        stage: outbox::ExecutionStage,
+    ) -> Transaction {
+        let ix = Self::set_intent_execution_stage_instruction(intent_id, stage);
+        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
+    }
+
+    pub(crate) fn set_intent_execution_stage_instruction(
+        intent_id: u64,
+        stage: outbox::ExecutionStage,
+    ) -> Instruction {
+        let account_metas = vec![
+            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new(outbox_intent_pda(intent_id), false),
+        ];
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::SetIntentExecutionStage {
+                intent_id,
+                stage,
+            },
             account_metas,
         )
     }

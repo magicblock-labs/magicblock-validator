@@ -15,11 +15,10 @@ use tracing::{error, info, warn};
 
 use crate::{
     intent_executor::{
-        error::{
-            IntentExecutorError, IntentExecutorResult,
-        },
+        error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
         strategy_executor::{
+            error::TransactionStrategyExecutionError,
             patcher::Patcher,
             single_stage::SingleStageStrategyExecutor,
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
@@ -37,7 +36,6 @@ use crate::{
         error::TransactionPreparatorError, TransactionPreparator,
     },
 };
-use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
 
 const STAGE_LOOP_CEILING: u8 = 10;
 

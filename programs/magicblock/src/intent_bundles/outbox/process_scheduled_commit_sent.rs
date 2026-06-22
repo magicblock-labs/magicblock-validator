@@ -4,15 +4,17 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use magicblock_core::coordination_mode;
+use magicblock_core::{coordination_mode, intent::outbox::outbox_intent_pda};
+use magicblock_magic_program_api::{
+    instruction::MagicBlockInstruction, EPHEMERAL_VAULT_PUBKEY,
+};
 use solana_clock::Slot;
 use solana_hash::Hash;
-use solana_instruction::error::InstructionError;
+use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_transaction_context::TransactionContext;
 
 use crate::{
     errors::custom_error_codes,
@@ -114,8 +116,7 @@ fn get_scheduled_commit(id: u64) -> Option<SentCommitPrintable> {
 
 pub fn process_scheduled_commit_sent(
     signers: HashSet<Pubkey>,
-    invoke_context: &InvokeContext,
-    transaction_context: &TransactionContext,
+    invoke_context: &mut InvokeContext,
     commit_id: u64,
 ) -> Result<(), InstructionError> {
     let mode = coordination_mode::CoordinationMode::current();
@@ -128,19 +129,19 @@ pub fn process_scheduled_commit_sent(
         return Ok(());
     }
 
-    const PROGRAM_IDX: u16 = 0;
-    const VALIDATOR_IDX: u16 = 1;
+    const VALIDATOR_IDX: u16 = 0;
+    const CLOSING_PDA_IDX: u16 = 1;
+
+    let transaction_context = &invoke_context.transaction_context;
+    let ix_ctx = transaction_context.get_current_instruction_context()?;
 
     // Assert MagicBlock program
-    let program_id =
-        get_instruction_pubkey_with_idx(transaction_context, PROGRAM_IDX)?;
-    if program_id.ne(&crate::id()) {
+    if ix_ctx.get_program_key()? != &crate::id() {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent ERR: Invalid program id '{}'",
-            program_id
+            "ScheduleCommitSent ERR: Magic program account not found"
         );
-        return Err(InstructionError::IncorrectProgramId);
+        return Err(InstructionError::UnsupportedProgramId);
     }
 
     // Assert validator identity matches
@@ -163,6 +164,22 @@ pub fn process_scheduled_commit_sent(
             "ScheduleCommitSent ERR: validator authority not found in signers"
         );
         return Err(InstructionError::MissingRequiredSignature);
+    }
+
+    // Validate outbox intent PDA
+    let provided_pda =
+        get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    let expected_pda = outbox_intent_pda(commit_id);
+    if *provided_pda != expected_pda {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommitSent ERR: account at idx {} is {}, expected PDA {} for intent {}",
+            CLOSING_PDA_IDX,
+            provided_pda,
+            expected_pda,
+            commit_id
+        );
+        return Err(InstructionError::InvalidArgument);
     }
 
     // Only after we passed all checks do we remove the commit from the global hashmap
@@ -250,17 +267,45 @@ pub fn process_scheduled_commit_sent(
         );
     }
 
-    if let Some(error_message) = commit.error_message {
+    let result = if let Some(error_message) = commit.error_message {
         ic_msg!(
             invoke_context,
             "ScheduledCommitSent error message: {}",
             error_message
         );
-
         Err(InstructionError::Custom(INTENT_FAILED_CODE))
     } else {
         Ok(())
-    }
+    };
+
+    close_outbox_account_cpi(
+        invoke_context,
+        validator_authority_id,
+        expected_pda,
+    )?;
+
+    result
+}
+
+fn close_outbox_account_cpi(
+    invoke_context: &mut InvokeContext,
+    sponsor: Pubkey,
+    pda: Pubkey,
+) -> Result<(), InstructionError> {
+    invoke_context.native_invoke(
+        Instruction {
+            program_id: crate::id(),
+            accounts: vec![
+                AccountMeta::new(sponsor, true),
+                AccountMeta::new(pda, false),
+                AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+            ],
+            data: MagicBlockInstruction::CloseEphemeralAccount
+                .try_to_vec()
+                .map_err(|_| InstructionError::InvalidInstructionData)?,
+        },
+        &[],
+    )
 }
 
 #[cfg(test)]

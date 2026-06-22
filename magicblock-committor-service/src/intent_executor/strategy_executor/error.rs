@@ -1,14 +1,17 @@
-use solana_instruction::error::InstructionError;
-use magicblock_rpc_client::utils::TransactionErrorMapper;
-use solana_transaction_error::TransactionError;
-use solana_signature::Signature;
-use tracing::error;
 use magicblock_core::traits::ActionError;
 use magicblock_metrics::metrics;
-use magicblock_rpc_client::MagicBlockRpcClientError;
-use crate::intent_executor::error::{InternalError};
-use crate::tasks::BaseTaskImpl;
-use crate::tasks::task_strategist::TaskStrategistError;
+use magicblock_rpc_client::{
+    utils::TransactionErrorMapper, MagicBlockRpcClientError,
+};
+use solana_instruction::error::InstructionError;
+use solana_signature::Signature;
+use solana_transaction_error::TransactionError;
+use tracing::error;
+
+use crate::{
+    intent_executor::error::InternalError,
+    tasks::{task_strategist::TaskStrategistError, BaseTaskImpl},
+};
 
 /// Those are the errors that may occur during Commit/Finalize stages on Base layer
 #[derive(thiserror::Error, Debug)]

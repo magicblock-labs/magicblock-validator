@@ -79,6 +79,7 @@ pub struct InternalOutboxClient<L: LatestBlockProvider> {
     /// Provides access to MagicContext
     accounts_db: Arc<AccountsDb>,
     /// RPC client for sending accept transactions to the ER
+    // TODO(edwin): check if needs to be Arc
     rpc_client: Arc<RpcClient>,
     /// Internal endpoint for scheduling ER TXs
     transaction_scheduler: TransactionSchedulerHandle,
@@ -204,8 +205,8 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
                 "Validator found to be running without MagicContext account!",
             );
 
-        let magic_context =
-            MagicContext::deserialize(magic_context_acc.data()).map_err(|err| (vec![], err.into()))?;
+        let magic_context = MagicContext::deserialize(magic_context_acc.data())
+            .map_err(|err| (vec![], err.into()))?;
         self.send_accept_tx(magic_context.scheduled_base_intents)
             .await
     }
@@ -215,8 +216,22 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
         intent_id: u64,
         stage: ExecutionStage,
     ) -> Result<(), Self::Error> {
-        // TODO(edwin): use rpc of scheduler
-        todo!()
+        let tx = InstructionUtils::set_intent_execution_stage(
+            self.latest_block_provider.blockhash(),
+            intent_id,
+            stage,
+        );
+
+        self.send_with_backoff(
+            ExponentialBackoff {
+                max_elapsed_time: Some(Duration::from_secs(25)),
+                max_interval: Duration::from_secs(5),
+                ..ExponentialBackoff::default()
+            },
+            &tx,
+        )
+        .await
+        .map_err(Into::into)
     }
 
     async fn notify_commit_sent(

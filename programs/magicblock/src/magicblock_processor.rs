@@ -104,12 +104,9 @@ declare_process_instruction!(
                     stage,
                 )
             }
-            ScheduledCommitSent((id, _bump)) => process_scheduled_commit_sent(
-                signers,
-                invoke_context,
-                transaction_context,
-                id,
-            ),
+            ScheduledCommitSent(id) => {
+                process_scheduled_commit_sent(signers, invoke_context, id)
+            }
             ScheduleBaseIntent(args) => process_schedule_intent_bundle(
                 signers,
                 invoke_context,

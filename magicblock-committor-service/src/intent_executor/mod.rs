@@ -22,13 +22,12 @@ use magicblock_program::{
 };
 use solana_signature::Signature;
 use strategy_executor::error::TransactionStrategyExecutionError;
+
 use crate::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
         cleanup_handle::CleanupHandle,
-        error::{
-            IntentExecutorError, IntentExecutorResult,
-        },
+        error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
         single_stage_intent_executor::SingleStageIntentExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},

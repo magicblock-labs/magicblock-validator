@@ -240,7 +240,7 @@ async fn commit_single_account(
 
     // Run each test with and without finalizing
     let processor = Arc::new(
-        CommittorProcessor::try_new(
+        CommittorProcessor::new(
             validator_auth.insecure_clone(),
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
@@ -324,7 +324,7 @@ async fn commit_book_order_account(
 
     // Run each test with and without finalizing
     let processor = Arc::new(
-        CommittorProcessor::try_new(
+        CommittorProcessor::new(
             validator_auth.insecure_clone(),
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
@@ -799,7 +799,7 @@ async fn commit_multiple_accounts(
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     let processor = Arc::new(
-        CommittorProcessor::try_new(
+        CommittorProcessor::new(
             validator_auth.insecure_clone(),
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
@@ -870,7 +870,7 @@ async fn execute_intent_bundle(
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     let processor = Arc::new(
-        CommittorProcessor::try_new(
+        CommittorProcessor::new(
             validator_auth.insecure_clone(),
             ":memory:",
             ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
