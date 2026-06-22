@@ -392,10 +392,8 @@ impl ChainlinkCloner {
         );
         txs.push(self.create_signed_tx(&[init_ix], blockhash));
 
-        let rescue_ix = Self::undelegation_rescue_ix(request.pubkey);
-
-        // Continue txs for remaining chunks. The rescue schedule is attached
-        // only to the final continue, after the clone has completed.
+        // Continue txs for remaining chunks. Rescue scheduling is sent as a
+        // separate final transaction once the chunked clone has completed.
         let mut offset = MAX_INLINE_DATA_SIZE;
         while offset < data.len() {
             let end = (offset + MAX_INLINE_DATA_SIZE).min(data.len());
@@ -409,12 +407,7 @@ impl ChainlinkCloner {
                 is_last,
                 Vec::new(),
             );
-            let ixs = if is_last {
-                vec![continue_ix, rescue_ix.clone()]
-            } else {
-                vec![continue_ix]
-            };
-            txs.push(self.create_signed_tx(&ixs, blockhash));
+            txs.push(self.create_signed_tx(&[continue_ix], blockhash));
             offset = end;
         }
 
@@ -426,10 +419,13 @@ impl ChainlinkCloner {
                 true,
                 Vec::new(),
             );
-            txs.push(
-                self.create_signed_tx(&[continue_ix, rescue_ix], blockhash),
-            );
+            txs.push(self.create_signed_tx(&[continue_ix], blockhash));
         }
+
+        txs.push(self.create_signed_tx(
+            &[Self::undelegation_rescue_ix(request.pubkey)],
+            blockhash,
+        ));
 
         txs
     }
@@ -769,13 +765,16 @@ impl Cloner for ChainlinkCloner {
         Self::ensure_transactions_fit(request.pubkey, &txs)?;
 
         let mut last_sig = None;
-        for tx in txs {
+        let rescue_tx_idx = txs.len().saturating_sub(1);
+        for (idx, tx) in txs.into_iter().enumerate() {
             match self.send_tx(tx).await {
                 Ok(sig) => {
                     last_sig.replace(sig);
                 }
                 Err(e) => {
-                    self.send_cleanup(request.pubkey).await;
+                    if idx < rescue_tx_idx {
+                        self.send_cleanup(request.pubkey).await;
+                    }
                     return Err(
                         ClonerError::FailedToCloneAndScheduleUndelegationRescue(
                             request.pubkey,
@@ -1007,21 +1006,24 @@ mod tests {
     }
 
     #[test]
-    fn large_undelegation_rescue_clone_schedules_on_final_chunk_tx() {
+    fn large_undelegation_rescue_clone_schedules_after_final_chunk_tx() {
         let pubkey = Pubkey::new_unique();
         let txs = cloner().build_large_account_undelegation_rescue_txs(
             &request(pubkey, vec![7; MAX_INLINE_DATA_SIZE + 1], vec![action()]),
             Hash::default(),
         );
 
-        assert_eq!(txs.len(), 2);
+        assert_eq!(txs.len(), 3);
 
-        let final_tx = txs.last().unwrap();
-        assert_eq!(final_tx.message().instructions.len(), 2);
-        assert_eq!(instruction_program_id(final_tx, 0), magicblock_program::ID);
-        assert_eq!(instruction_program_id(final_tx, 1), magicblock_program::ID);
+        let final_clone_tx = &txs[1];
+        assert_eq!(final_clone_tx.message().instructions.len(), 1);
+        assert_eq!(
+            instruction_program_id(final_clone_tx, 0),
+            magicblock_program::ID
+        );
 
-        match bincode::deserialize(instruction_data(final_tx, 0)).unwrap() {
+        match bincode::deserialize(instruction_data(final_clone_tx, 0)).unwrap()
+        {
             MagicBlockInstruction::CloneAccountContinue {
                 pubkey: continue_pubkey,
                 offset,
@@ -1037,7 +1039,14 @@ mod tests {
             }
             _ => panic!("expected clone account continue instruction"),
         }
-        match bincode::deserialize(instruction_data(final_tx, 1)).unwrap() {
+
+        let rescue_tx = txs.last().unwrap();
+        assert_eq!(rescue_tx.message().instructions.len(), 1);
+        assert_eq!(
+            instruction_program_id(rescue_tx, 0),
+            magicblock_program::ID
+        );
+        match bincode::deserialize(instruction_data(rescue_tx, 0)).unwrap() {
             MagicBlockInstruction::ScheduleUndelegationRescue => {}
             _ => panic!("expected schedule undelegation rescue instruction"),
         }
@@ -1063,11 +1072,12 @@ mod tests {
             Hash::default(),
         );
 
-        assert_eq!(txs.len(), 2);
+        assert_eq!(txs.len(), 3);
 
-        let final_tx = txs.last().unwrap();
-        assert_eq!(final_tx.message().instructions.len(), 2);
-        match bincode::deserialize(instruction_data(final_tx, 0)).unwrap() {
+        let final_clone_tx = &txs[1];
+        assert_eq!(final_clone_tx.message().instructions.len(), 1);
+        match bincode::deserialize(instruction_data(final_clone_tx, 0)).unwrap()
+        {
             MagicBlockInstruction::CloneAccountContinue {
                 pubkey: continue_pubkey,
                 offset,
@@ -1083,7 +1093,10 @@ mod tests {
             }
             _ => panic!("expected clone account continue instruction"),
         }
-        match bincode::deserialize(instruction_data(final_tx, 1)).unwrap() {
+
+        let rescue_tx = txs.last().unwrap();
+        assert_eq!(rescue_tx.message().instructions.len(), 1);
+        match bincode::deserialize(instruction_data(rescue_tx, 0)).unwrap() {
             MagicBlockInstruction::ScheduleUndelegationRescue => {}
             _ => panic!("expected schedule undelegation rescue instruction"),
         }
