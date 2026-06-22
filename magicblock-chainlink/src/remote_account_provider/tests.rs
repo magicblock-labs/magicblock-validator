@@ -26,7 +26,7 @@ struct ProviderTestCtx {
     provider:
         Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
     rpc_client: ChainRpcClientMock,
-    _pubsub_client: ChainPubsubClientMock,
+    pubsub_client: ChainPubsubClientMock,
     _forward_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
 }
 
@@ -72,7 +72,7 @@ async fn setup_provider_with_lru_capacity(
     ProviderTestCtx {
         provider,
         rpc_client,
-        _pubsub_client: pubsub_client,
+        pubsub_client,
         _forward_rx: forward_rx,
     }
 }
@@ -217,12 +217,12 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
 
-    _pubsub_client.block_subscribe();
+    pubsub_client.block_subscribe();
 
     let task_handle = tokio::spawn({
         let provider = provider.clone();
@@ -238,12 +238,12 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
         }
     });
 
-    _pubsub_client.wait_for_subscribe_attempts(1).await;
+    pubsub_client.wait_for_subscribe_attempts(1).await;
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(provider.is_pending(&pubkey));
 
-    _pubsub_client.simulate_disconnect();
-    _pubsub_client.release_subscribe();
+    pubsub_client.simulate_disconnect();
+    pubsub_client.release_subscribe();
 
     let result = tokio::time::timeout(Duration::from_secs(2), task_handle)
         .await
@@ -253,7 +253,7 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
     assert!(err.to_string().contains("subscription(s) failed"));
     assert!(!provider.is_pending(&pubkey));
 
-    _pubsub_client.try_reconnect().await.unwrap();
+    pubsub_client.try_reconnect().await.unwrap();
     let retry = provider
         .try_get_multi(&[pubkey], None, AccountFetchOrigin::GetAccount, None)
         .await
@@ -274,12 +274,12 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
 
-    _pubsub_client.block_subscribe();
+    pubsub_client.block_subscribe();
 
     let first_task_handle = tokio::spawn({
         let provider = provider.clone();
@@ -295,7 +295,7 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
         }
     });
 
-    _pubsub_client.wait_for_subscribe_attempts(1).await;
+    pubsub_client.wait_for_subscribe_attempts(1).await;
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let second_task_handle = tokio::spawn({
@@ -331,8 +331,8 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    _pubsub_client.simulate_disconnect();
-    _pubsub_client.release_subscribe();
+    pubsub_client.simulate_disconnect();
+    pubsub_client.release_subscribe();
 
     let first_result =
         tokio::time::timeout(Duration::from_secs(2), first_task_handle)
@@ -397,7 +397,7 @@ async fn test_release_subscription_reason_keeps_watching_until_last_direct_refco
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
@@ -418,7 +418,7 @@ async fn test_release_subscription_reason_keeps_watching_until_last_direct_refco
 
     assert!(!unsubscribed);
     assert!(provider.is_watching(&pubkey));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
 
     let unsubscribed = provider
         .release_single_subscription(&pubkey, SubscriptionReason::DirectAccount)
@@ -427,7 +427,7 @@ async fn test_release_subscription_reason_keeps_watching_until_last_direct_refco
 
     assert!(unsubscribed);
     assert!(!provider.is_watching(&pubkey));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(!pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]
@@ -443,7 +443,6 @@ async fn test_release_subscription_reason_all_clears_duplicate_reason_counts() {
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
@@ -501,7 +500,7 @@ async fn test_release_subscription_reason_unsubscribes_after_final_release() {
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
@@ -518,7 +517,7 @@ async fn test_release_subscription_reason_unsubscribes_after_final_release() {
 
     assert!(unsubscribed);
     assert!(!provider.is_watching(&pubkey));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(!pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]
@@ -535,7 +534,7 @@ async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notif
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
@@ -556,7 +555,7 @@ async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notif
 
     assert!(unsubscribed);
     assert!(!provider.is_watching(&pubkey));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(!pubsub_client.subscriptions_union().contains(&pubkey));
     assert!(matches!(
         removed_rx.try_recv(),
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
@@ -576,7 +575,7 @@ async fn test_delegated_direct_cleanup_keeps_undelegation_tracking() {
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
@@ -600,7 +599,7 @@ async fn test_delegated_direct_cleanup_keeps_undelegation_tracking() {
 
     assert!(!unsubscribed);
     assert!(provider.is_watching(&pubkey));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
 
     let unsubscribed = provider
         .release_subscription_with_mode(
@@ -613,7 +612,7 @@ async fn test_delegated_direct_cleanup_keeps_undelegation_tracking() {
 
     assert!(unsubscribed);
     assert!(!provider.is_watching(&pubkey));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(!pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]
@@ -629,7 +628,7 @@ async fn test_subscription_reasons_do_not_release_each_other() {
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
@@ -650,7 +649,7 @@ async fn test_subscription_reasons_do_not_release_each_other() {
 
     assert!(!unsubscribed);
     assert!(provider.is_watching(&pubkey));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
 
     let unsubscribed = provider
         .release_single_subscription(
@@ -662,7 +661,7 @@ async fn test_subscription_reasons_do_not_release_each_other() {
 
     assert!(unsubscribed);
     assert!(!provider.is_watching(&pubkey));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(!pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]
@@ -679,7 +678,7 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
@@ -704,7 +703,7 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
 
     assert!(!unsubscribed);
     assert!(provider.is_watching(&pubkey));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
 
     let unsubscribed = provider
         .release_single_subscription(
@@ -716,7 +715,7 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
 
     assert!(unsubscribed);
     assert!(!provider.is_watching(&pubkey));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(!pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]
@@ -733,13 +732,13 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
 
-    _pubsub_client.pause_after_subscribe_insert();
-    let insertions_before = _pubsub_client.subscribe_insertions();
+    pubsub_client.pause_after_subscribe_insert();
+    let insertions_before = pubsub_client.subscribe_insertions();
 
     let provider_for_acquire = provider.clone();
     let acquire = tokio::spawn(async move {
@@ -748,11 +747,11 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
             .await
     });
 
-    _pubsub_client
+    pubsub_client
         .wait_for_subscribe_insertions(insertions_before + 1)
         .await;
 
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
     assert!(!provider.is_watching(&pubkey));
 
     let provider_for_reconcile = provider.clone();
@@ -765,11 +764,11 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     assert!(
-        _pubsub_client.subscriptions_union().contains(&pubkey),
+        pubsub_client.subscriptions_union().contains(&pubkey),
         "reconciler must not unsubscribe a registration that is in pubsub but not yet in the LRU"
     );
 
-    _pubsub_client.resume_after_subscribe_insert();
+    pubsub_client.resume_after_subscribe_insert();
     acquire
         .await
         .expect("acquire task should not panic")
@@ -777,7 +776,7 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
     reconcile.await.expect("reconcile task should not panic");
 
     assert!(provider.is_watching(&pubkey));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]
@@ -795,18 +794,18 @@ async fn test_lock_aware_reconciler_still_removes_truly_stale_pubsub_only_subscr
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(setup_pubkey, account).await;
 
-    _pubsub_client.insert_subscription(stale_pubkey);
-    assert!(_pubsub_client.subscriptions_union().contains(&stale_pubkey));
+    pubsub_client.insert_subscription(stale_pubkey);
+    assert!(pubsub_client.subscriptions_union().contains(&stale_pubkey));
     assert!(!provider.is_watching(&stale_pubkey));
 
     provider.reconcile_subscriptions_once_for_test().await;
 
-    assert!(!_pubsub_client.subscriptions_union().contains(&stale_pubkey));
+    assert!(!pubsub_client.subscriptions_union().contains(&stale_pubkey));
 }
 
 #[tokio::test]
@@ -823,7 +822,7 @@ async fn test_lock_aware_reconciler_still_resubscribes_lru_owned_missing_pubsub(
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
@@ -833,19 +832,19 @@ async fn test_lock_aware_reconciler_still_resubscribes_lru_owned_missing_pubsub(
         .await
         .unwrap();
     assert!(provider.is_watching(&pubkey));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
 
-    _pubsub_client
+    pubsub_client
         .unsubscribe(pubkey)
         .await
         .expect("mock unsubscribe should remove pubsub state");
     assert!(provider.is_watching(&pubkey));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(!pubsub_client.subscriptions_union().contains(&pubkey));
 
     provider.reconcile_subscriptions_once_for_test().await;
 
     assert!(provider.is_watching(&pubkey));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]
@@ -863,7 +862,7 @@ async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider_with_lru_capacity(pubkey1, account, 1).await;
@@ -882,7 +881,7 @@ async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
         .unwrap();
 
     assert!(provider.is_watching(&pubkey1));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey1));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey1));
     assert!(provider
         .subscription_ownership
         .lock()
@@ -896,8 +895,8 @@ async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
 
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey1));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey2));
+    assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
     assert!(!provider
         .subscription_ownership
         .lock()
@@ -924,7 +923,7 @@ async fn test_lru_eviction_and_reason_release_are_serialized() {
 
     let ProviderTestCtx {
         provider,
-        _pubsub_client,
+        pubsub_client,
         _forward_rx,
         ..
     } = setup_provider_with_lru_capacity(pubkey1, account, 1).await;
@@ -952,8 +951,8 @@ async fn test_lru_eviction_and_reason_release_are_serialized() {
 
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey1));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey2));
+    assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
     assert!(!provider
         .subscription_ownership
         .lock()
