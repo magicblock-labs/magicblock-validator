@@ -319,6 +319,10 @@ pub mod mock {
         pending_program_subscribe_failures: Arc<Mutex<usize>>,
         reconnectable: Arc<Mutex<bool>>,
         subscribe_blocked: Arc<Mutex<bool>>,
+        subscribe_pause_after_insert: Arc<Mutex<bool>>,
+        subscribe_insertions: Arc<AtomicU64>,
+        subscribe_insert_notify: Arc<Notify>,
+        subscribe_continue_notify: Arc<Notify>,
         subscribe_attempts: Arc<AtomicU64>,
         program_subscribe_attempts: Arc<AtomicU64>,
         subscribe_notify: Arc<Notify>,
@@ -344,6 +348,10 @@ pub mod mock {
                 pending_program_subscribe_failures: Arc::new(Mutex::new(0)),
                 reconnectable: Arc::new(Mutex::new(true)),
                 subscribe_blocked: Arc::new(Mutex::new(false)),
+                subscribe_pause_after_insert: Arc::new(Mutex::new(false)),
+                subscribe_insertions: Arc::new(AtomicU64::new(0)),
+                subscribe_insert_notify: Arc::new(Notify::new()),
+                subscribe_continue_notify: Arc::new(Notify::new()),
                 subscribe_attempts: Arc::new(AtomicU64::new(0)),
                 program_subscribe_attempts: Arc::new(AtomicU64::new(0)),
                 subscribe_notify: Arc::new(Notify::new()),
@@ -436,6 +444,35 @@ pub mod mock {
             self.subscribe_notify.notify_waiters();
         }
 
+        /// Pause subscribe() after it has inserted the pubkey into the mock
+        /// pubsub set but before subscribe() returns to the caller.
+        pub fn pause_after_subscribe_insert(&self) {
+            *self.subscribe_pause_after_insert.lock() = true;
+        }
+
+        /// Resume subscribe() calls paused by pause_after_subscribe_insert().
+        pub fn resume_after_subscribe_insert(&self) {
+            *self.subscribe_pause_after_insert.lock() = false;
+            self.subscribe_continue_notify.notify_waiters();
+        }
+
+        pub fn subscribe_insertions(&self) -> u64 {
+            self.subscribe_insertions.load(AtomicOrdering::SeqCst)
+        }
+
+        pub async fn wait_for_subscribe_insertions(&self, min_insertions: u64) {
+            loop {
+                let notified = self.subscribe_insert_notify.notified();
+                tokio::pin!(notified);
+                let current =
+                    self.subscribe_insertions.load(AtomicOrdering::SeqCst);
+                if current >= min_insertions {
+                    break;
+                }
+                notified.await;
+            }
+        }
+
         /// Wait until at least `min_attempts` subscribe attempts have been made.
         /// Used for testing to ensure subscribes are being called.
         pub async fn wait_for_subscribe_attempts(&self, min_attempts: u64) {
@@ -515,8 +552,23 @@ pub mod mock {
                     ),
                 );
             }
-            let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
-            subscribed_pubkeys.insert(pubkey);
+            {
+                let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
+                subscribed_pubkeys.insert(pubkey);
+            }
+            self.subscribe_insertions
+                .fetch_add(1, AtomicOrdering::SeqCst);
+            self.subscribe_insert_notify.notify_waiters();
+
+            loop {
+                let notified = self.subscribe_continue_notify.notified();
+                tokio::pin!(notified);
+                if !*self.subscribe_pause_after_insert.lock() {
+                    break;
+                }
+                notified.await;
+            }
+
             Ok(())
         }
 

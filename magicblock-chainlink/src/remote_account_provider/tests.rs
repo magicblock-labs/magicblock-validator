@@ -720,6 +720,67 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
 }
 
 #[tokio::test]
+async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lru(
+) {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+
+    _pubsub_client.pause_after_subscribe_insert();
+    let insertions_before = _pubsub_client.subscribe_insertions();
+
+    let provider_for_acquire = provider.clone();
+    let acquire = tokio::spawn(async move {
+        provider_for_acquire
+            .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+            .await
+    });
+
+    _pubsub_client
+        .wait_for_subscribe_insertions(insertions_before + 1)
+        .await;
+
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(!provider.is_watching(&pubkey));
+
+    let provider_for_reconcile = provider.clone();
+    let reconcile = tokio::spawn(async move {
+        provider_for_reconcile
+            .reconcile_subscriptions_once_for_test()
+            .await
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert!(
+        _pubsub_client.subscriptions_union().contains(&pubkey),
+        "reconciler must not unsubscribe a registration that is in pubsub but not yet in the LRU"
+    );
+
+    _pubsub_client.resume_after_subscribe_insert();
+    acquire
+        .await
+        .expect("acquire task should not panic")
+        .expect("subscription acquire should succeed");
+    reconcile.await.expect("reconcile task should not panic");
+
+    assert!(provider.is_watching(&pubkey));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
 async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
 {
     let pubkey1 = solana_pubkey::Pubkey::new_unique();

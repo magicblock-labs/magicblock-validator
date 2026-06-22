@@ -1598,6 +1598,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         self.lrucache_subscribed_accounts.contains(pubkey)
     }
 
+    #[cfg(test)]
+    pub(crate) async fn reconcile_subscriptions_once_for_test(&self) -> usize {
+        let never_evicted =
+            self.lrucache_subscribed_accounts.never_evicted_accounts();
+        subscription_reconciler::reconcile_subscriptions(
+            &self.lrucache_subscribed_accounts,
+            &self.pubsub_client,
+            &never_evicted,
+            &self.removed_account_tx,
+        )
+        .await
+    }
+
     pub(crate) async fn evict_unwatched_with_subscription_lock<F, Fut>(
         &self,
         pubkey: &Pubkey,
