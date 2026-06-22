@@ -746,20 +746,27 @@ where
                     return Err(err);
                 };
 
-                if let Err(undelegation_err) = self
+                // The post-delegation actions could not be satisfied (e.g. a
+                // high-risk signer or a missing dependency): the account is
+                // still cloned, but flagged so it gets automatically
+                // undelegated back to chain.
+                match self
                     .clone_account_and_schedule_undelegation_with_ownership(
                         request,
                     )
                     .await
                 {
-                    warn!(
-                        pubkey = %pubkey,
-                        error = ?err,
-                        undelegation_error = ?undelegation_err,
-                        "Failed to schedule undelegation after post-delegation action clone failure"
-                    );
+                    Ok(signature) => Ok(signature),
+                    Err(undelegation_err) => {
+                        warn!(
+                            pubkey = %pubkey,
+                            error = ?err,
+                            undelegation_error = ?undelegation_err,
+                            "Failed to schedule undelegation after post-delegation action clone failure"
+                        );
+                        Err(err)
+                    }
                 }
-                Err(err)
             }
         }
     }

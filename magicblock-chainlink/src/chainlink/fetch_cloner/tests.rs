@@ -5794,7 +5794,7 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
     )]);
 
     cloner.set_fail_next_clone(true);
-    let err = fetch_cloner
+    fetch_cloner
         .clone_account_with_post_delegation_action_invariants(
             AccountCloneRequest {
                 pubkey: target_pubkey,
@@ -5806,9 +5806,10 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
             },
         )
         .await
-        .expect_err("action-bearing clone failure must be returned");
+        .expect(
+            "failed action must be rescued by cloning and scheduling undelegation",
+        );
 
-    assert!(matches!(err, ChainlinkError::ClonerError(_)));
     let clone_requests = cloner.clone_requests();
     assert_eq!(clone_requests.len(), 2);
     assert_eq!(cloner.undelegation_requests(), vec![target_pubkey]);
