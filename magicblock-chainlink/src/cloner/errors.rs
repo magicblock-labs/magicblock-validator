@@ -38,6 +38,11 @@ pub enum ClonerError {
     #[error("Failed to clone program {0} : {1:?}")]
     FailedToCloneProgram(Pubkey, Box<ClonerError>),
 
+    #[error(
+        "Failed to clone and schedule undelegation for account {0} : {1:?}"
+    )]
+    FailedToCloneAndScheduleUndelegation(Pubkey, Box<ClonerError>),
+
     #[error("Failed to evict account {0} : {1:?}")]
     FailedToEvictAccount(Pubkey, Box<ClonerError>),
 
