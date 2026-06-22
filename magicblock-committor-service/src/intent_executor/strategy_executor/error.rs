@@ -8,10 +8,7 @@ use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use tracing::error;
 
-use crate::{
-    intent_executor::error::InternalError,
-    tasks::{task_strategist::TaskStrategistError, BaseTaskImpl},
-};
+use crate::{intent_executor::error::InternalError, tasks::BaseTaskImpl};
 
 /// Those are the errors that may occur during Commit/Finalize stages on Base layer
 #[derive(thiserror::Error, Debug)]

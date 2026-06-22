@@ -24,7 +24,7 @@ use tokio::{
     task::{JoinError, JoinHandle},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument, warn};
+use tracing::{error, info, instrument};
 
 use crate::{
     committor_processor::CommittorProcessor,

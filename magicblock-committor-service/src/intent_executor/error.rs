@@ -1,11 +1,8 @@
 use magicblock_core::traits::ActionError;
 use magicblock_metrics::metrics;
-use magicblock_rpc_client::{
-    utils::TransactionErrorMapper, MagicBlockRpcClientError,
-};
+use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_signature::Signature;
 use solana_signer::SignerError;
-use tracing::error;
 
 use crate::{
     intent_executor::strategy_executor::error::TransactionStrategyExecutionError,

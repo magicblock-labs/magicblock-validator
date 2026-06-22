@@ -10,7 +10,6 @@ use magicblock_accounts_db::{error::AccountsDbError, AccountsDb};
 use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::{AccountSharedData, ReadableAccount};
-use solana_pubkey::Pubkey;
 use tracing::warn;
 
 #[async_trait]
@@ -38,8 +37,6 @@ pub struct InternalOutboxIntentBundlesReader {
 }
 
 impl InternalOutboxIntentBundlesReader {
-    const TARGET_PROGRAM_ID: Pubkey = magicblock_program::ID;
-
     pub fn new(accounts_db: Arc<AccountsDb>, capacity: NonZeroUsize) -> Self {
         Self {
             capacity,

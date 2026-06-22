@@ -95,6 +95,7 @@ impl CommittorProcessor {
         ));
         let commits_scheduler = IntentExecutionManager::new(
             magic_block_rpc_client.clone(),
+            // TODO(edwin): use DumberDb
             DummyDB::new(),
             task_info_fetcher.clone(),
             outbox_client,

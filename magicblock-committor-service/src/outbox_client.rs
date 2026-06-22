@@ -1,14 +1,9 @@
-use std::{
-    num::{NonZeroU64, NonZeroUsize},
-    sync::Arc,
-    time::Duration,
-};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use backoff::{future::retry, ExponentialBackoff};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
-    intent::outbox::outbox_intent_pda,
     link::{
         accounts::LockedAccount,
         transactions::{with_encoded, TransactionSchedulerHandle},
@@ -18,8 +13,7 @@ use magicblock_core::{
 use magicblock_program::{
     instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    outbox_intent_bundles::OutboxIntentBundle, register_scheduled_commit_sent,
-    MagicContext, Pubkey, SentCommit, TransactionScheduler,
+    register_scheduled_commit_sent, MagicContext, Pubkey, SentCommit,
     MAGIC_CONTEXT_PUBKEY,
 };
 use solana_account::{Account, ReadableAccount};
@@ -27,8 +21,7 @@ use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
 use solana_rpc_client_api::{
-    client_error,
-    client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
+    client_error, client_error::ErrorKind as RpcClientErrorKind,
 };
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
@@ -168,22 +161,9 @@ impl<L: LatestBlockProvider> InternalOutboxClient<L> {
         let shared_account = self.accounts_db.get_account(pubkey)?;
         let locked_account = LockedAccount::new(*pubkey, shared_account);
         let output = locked_account
-            .read_locked(|pubkey, account| Account::from(account.clone()));
+            .read_locked(|_, account| Account::from(account.clone()));
 
         Some(output)
-    }
-
-    /// Returns just accepted OutboxIntents
-    fn read_outbox_intent(
-        &self,
-        intent_id: u64,
-    ) -> InternalOutboxClientResult<Option<OutboxIntentBundle>> {
-        let pda = outbox_intent_pda(intent_id);
-        let Some(account) = self.safe_get_account(&pda) else {
-            return Ok(None);
-        };
-
-        todo!()
     }
 }
 
