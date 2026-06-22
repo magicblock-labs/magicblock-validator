@@ -288,6 +288,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
             delegated_account: committed_account.pubkey,
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
+            include_undelegation_request: false,
         }
         .into(),
     ];

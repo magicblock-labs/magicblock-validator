@@ -198,6 +198,9 @@ pub enum ScheduleCommitInstruction {
     ScheduleCommitWithVaultAndOrderBookCpi(ScheduleCommitWithOrderBookArgs),
 
     ScheduleCommitForOrderBook(ScheduleCommitType),
+
+    /// CPI into DLP to request undelegation for a schedulecommit-owned PDA.
+    RequestUndelegationCpi(Pubkey),
 }
 
 ///
@@ -347,6 +350,9 @@ pub fn process_instruction<'a>(
         UpdateOrderBook(args) => process_update_order_book(accounts, args),
         ScheduleCommitForOrderBook(commit_type) => {
             process_schedulecommit_for_orderbook(accounts, commit_type)
+        }
+        RequestUndelegationCpi(player) => {
+            process_request_undelegation_cpi(program_id, accounts, player)
         }
         ScheduleCommitWithVaultAndOrderBookCpi(args) => {
             process_schedulecommit_with_vault_and_order_book_cpi(
@@ -644,6 +650,66 @@ pub fn process_delegate_cpi(
     )?;
 
     Ok(())
+}
+
+fn process_request_undelegation_cpi(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    player: Pubkey,
+) -> Result<(), ProgramError> {
+    msg!("Processing request_undelegation_cpi instruction");
+
+    let [payer, delegated_account, owner_program, undelegation_request, delegation_record, delegation_metadata, system_program, dlp_program] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    assert_is_signer(payer, "payer")?;
+    assert_keys_equal(owner_program.key, program_id, || {
+        format!(
+            "Owner program '{}' does not match schedulecommit program '{}'",
+            owner_program.key, program_id
+        )
+    })?;
+    assert_keys_equal(dlp_program.key, &dlp_api::id(), || {
+        format!(
+            "DLP program '{}' does not match expected program '{}'",
+            dlp_program.key,
+            dlp_api::id()
+        )
+    })?;
+
+    let (expected_pda, bump) = pda_and_bump(&player);
+    assert_keys_equal(delegated_account.key, &expected_pda, || {
+        format!(
+            "Delegated account '{}' does not match PDA '{}' for player '{}'",
+            delegated_account.key, expected_pda, player
+        )
+    })?;
+
+    let ix = dlp_api::instruction_builder::request_undelegation(
+        *payer.key,
+        *delegated_account.key,
+        *owner_program.key,
+    );
+    let bump_arr = [bump];
+    let signer_seeds = pda_seeds_with_bump(&player, &bump_arr);
+
+    invoke_signed(
+        &ix,
+        &[
+            payer.clone(),
+            delegated_account.clone(),
+            owner_program.clone(),
+            undelegation_request.clone(),
+            delegation_record.clone(),
+            delegation_metadata.clone(),
+            system_program.clone(),
+            dlp_program.clone(),
+        ],
+        &[&signer_seeds],
+    )
 }
 
 pub struct ProcessSchedulecommitCpiArgs {
