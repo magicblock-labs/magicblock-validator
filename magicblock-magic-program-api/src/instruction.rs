@@ -229,6 +229,7 @@ pub enum MagicBlockInstruction {
         data: Vec<u8>,
         is_last: bool,
         actions: Vec<Instruction>,
+        needs_undelegation: bool,
     },
 
     /// Cleanup a partial clone on failure. Removes from PENDING_CLONES

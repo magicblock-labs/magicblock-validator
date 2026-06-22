@@ -178,9 +178,15 @@ impl ChainlinkCloner {
         data: Vec<u8>,
         is_last: bool,
         actions: Vec<Instruction>,
+        needs_undelegation: bool,
     ) -> Instruction {
         InstructionUtils::clone_account_continue_instruction(
-            pubkey, offset, data, is_last, actions,
+            pubkey,
+            offset,
+            data,
+            is_last,
+            actions,
+            needs_undelegation,
         )
     }
 
@@ -349,6 +355,7 @@ impl ChainlinkCloner {
                 chunk,
                 final_without_actions,
                 Vec::new(),
+                false,
             );
             txs.push(self.create_signed_tx(&[continue_ix], blockhash));
             offset = end;
@@ -361,6 +368,7 @@ impl ChainlinkCloner {
                 Vec::new(),
                 true,
                 clone_actions,
+                request.needs_undelegation,
             );
             let ix = if request.needs_undelegation {
                 Self::schedule_undelegation_ix(request.pubkey)
@@ -585,6 +593,7 @@ impl ChainlinkCloner {
                 chunk.to_vec(),
                 false,
                 Vec::new(),
+                false,
             );
             txs.push(self.create_signed_tx(&[continue_ix], blockhash));
         }
@@ -597,6 +606,7 @@ impl ChainlinkCloner {
             last_chunk.to_vec(),
             true,
             Vec::new(),
+            false,
         )];
         ixs.extend(finalize_ixs);
         txs.push(self.create_signed_tx(&ixs, blockhash));
@@ -926,12 +936,14 @@ mod tests {
                 data,
                 is_last,
                 actions,
+                needs_undelegation,
             } => {
                 assert_eq!(continue_pubkey, pubkey);
                 assert_eq!(offset, MAX_INLINE_DATA_SIZE as u32);
                 assert_eq!(data, vec![7]);
                 assert!(!is_last);
                 assert!(actions.is_empty());
+                assert!(!needs_undelegation);
             }
             _ => panic!("expected clone account continue instruction"),
         }
@@ -950,12 +962,14 @@ mod tests {
                 data,
                 is_last,
                 actions,
+                needs_undelegation,
             } => {
                 assert_eq!(continue_pubkey, pubkey);
                 assert_eq!(offset, (MAX_INLINE_DATA_SIZE + 1) as u32);
                 assert_eq!(data, Vec::<u8>::new());
                 assert!(is_last);
                 assert!(actions.is_empty());
+                assert!(needs_undelegation);
             }
             _ => panic!("expected clone account continue instruction"),
         }
@@ -1003,12 +1017,14 @@ mod tests {
                 data: continue_data,
                 is_last,
                 actions,
+                needs_undelegation,
             } => {
                 assert_eq!(continue_pubkey, pubkey);
                 assert_eq!(offset, data.len() as u32);
                 assert!(continue_data.is_empty());
                 assert!(is_last);
                 assert!(actions.is_empty());
+                assert!(needs_undelegation);
             }
             _ => panic!("expected clone account continue instruction"),
         }
@@ -1093,12 +1109,14 @@ mod tests {
                 data,
                 is_last,
                 actions: continue_actions,
+                needs_undelegation,
             } => {
                 assert_eq!(continue_pubkey, pubkey);
                 assert_eq!(offset, (MAX_INLINE_DATA_SIZE + 1) as u32);
                 assert!(data.is_empty());
                 assert!(is_last);
                 assert_eq!(continue_actions, actions);
+                assert!(!needs_undelegation);
             }
             _ => panic!("expected clone account continue instruction"),
         }

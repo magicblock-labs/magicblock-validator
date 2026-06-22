@@ -447,6 +447,7 @@ impl InstructionUtils {
         data: Vec<u8>,
         is_last: bool,
         actions: Vec<Instruction>,
+        needs_undelegation: bool,
     ) -> Instruction {
         let mut account_metas = vec![
             AccountMeta::new(validator_authority_id(), true),
@@ -462,6 +463,7 @@ impl InstructionUtils {
                 data,
                 is_last,
                 actions,
+                needs_undelegation,
             },
             account_metas,
         )

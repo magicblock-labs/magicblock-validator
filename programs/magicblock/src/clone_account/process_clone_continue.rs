@@ -31,10 +31,11 @@ pub(crate) fn process_clone_account_continue(
     data: Vec<u8>,
     is_last: bool,
     actions: Vec<Instruction>,
+    needs_undelegation: bool,
 ) -> Result<(), InstructionError> {
     validate_authority(signers, invoke_context)?;
 
-    if !is_last && !actions.is_empty() {
+    if !is_last && (!actions.is_empty() || needs_undelegation) {
         ic_msg!(
             invoke_context,
             "CloneAccountContinue: actions require final clone chunk for {}",
@@ -88,9 +89,9 @@ pub(crate) fn process_clone_account_continue(
     };
 
     if is_last {
-        if actions.is_empty() {
+        if actions.is_empty() && !needs_undelegation {
             remove_pending_clone(&pubkey);
-        } else {
+        } else if !actions.is_empty() {
             validate_post_delegation_action_sibling(
                 invoke_context,
                 &pubkey,

@@ -185,6 +185,7 @@ declare_process_instruction!(
                 data,
                 is_last,
                 actions,
+                needs_undelegation,
             } => process_clone_account_continue(
                 &signers,
                 invoke_context,
@@ -193,6 +194,7 @@ declare_process_instruction!(
                 data,
                 is_last,
                 actions,
+                needs_undelegation,
             ),
             CleanupPartialClone { pubkey } => process_cleanup_partial_clone(
                 &signers,
