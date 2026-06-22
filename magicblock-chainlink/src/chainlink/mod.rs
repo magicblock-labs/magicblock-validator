@@ -737,6 +737,7 @@ mod tests {
 
         let delegated_pubkey = Pubkey::new_unique();
         let undelegating_pubkey = Pubkey::new_unique();
+        let ephemeral_pubkey = Pubkey::new_unique();
         let normal_pubkey = Pubkey::new_unique();
         let owner = Pubkey::new_unique();
 
@@ -749,6 +750,11 @@ mod tests {
             AccountSharedData::new(1_000_000, 0, &owner);
         undelegating_account.set_undelegating(true);
         accounts_bank.insert(undelegating_pubkey, undelegating_account);
+
+        let mut ephemeral_account =
+            AccountSharedData::new(1_000_000, 0, &owner);
+        ephemeral_account.set_ephemeral(true);
+        accounts_bank.insert(ephemeral_pubkey, ephemeral_account);
 
         let normal_account = AccountSharedData::new(1_000_000, 0, &owner);
         accounts_bank.insert(normal_pubkey, normal_account);
@@ -767,6 +773,7 @@ mod tests {
 
         removed_tx.send(delegated_pubkey).await.unwrap();
         removed_tx.send(undelegating_pubkey).await.unwrap();
+        removed_tx.send(ephemeral_pubkey).await.unwrap();
         removed_tx.send(normal_pubkey).await.unwrap();
 
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -782,6 +789,10 @@ mod tests {
 
         assert!(accounts_bank.get_account(&delegated_pubkey).is_some());
         assert!(accounts_bank.get_account(&undelegating_pubkey).is_some());
+        let ephemeral_account = accounts_bank
+            .get_account(&ephemeral_pubkey)
+            .expect("ephemeral account should not be evicted");
+        assert!(ephemeral_account.ephemeral());
         assert!(accounts_bank.get_account(&normal_pubkey).is_none());
 
         drop(removed_tx);
