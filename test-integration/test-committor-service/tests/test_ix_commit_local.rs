@@ -1060,9 +1060,6 @@ async fn ix_commit_local(
         .into_iter()
         .collect::<Vec<_>>();
 
-    execution_outputs.iter().for_each(|asd| {
-        println!("kek: {:?}", asd.successful_transaction_strategies);
-    });
     // Assert that all completed
     assert_eq!(execution_outputs.len(), intent_bundles.len());
 
@@ -1164,8 +1161,6 @@ async fn ix_commit_local(
         })
         .collect();
 
-        println!("ffff {:?}", execution_result
-            .successful_transaction_strategies);
         let account_commit_infos: Vec<(Pubkey, AccountCommitInfo)> =
             execution_result
                 .successful_transaction_strategies
@@ -1179,7 +1174,6 @@ async fn ix_commit_local(
             let (is_undelegate, account) = committed_accounts
                 .remove(&pubkey)
                 .expect("Account should be persisted");
-            println!("account: {}", pubkey);
 
             // When we finalize it is possible to also undelegate the account
             let expected_owner = if is_undelegate {

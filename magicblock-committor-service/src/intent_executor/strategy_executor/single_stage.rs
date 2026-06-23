@@ -140,12 +140,7 @@ where
         self.execution_report.dispose(junk_strategy);
     }
 
-    pub fn done(self) -> TransactionStrategy {
-        #[cfg(feature = "dev-context-only-utils")]
-        self.execution_report.add_succeeded_transaction_strategy(
-            self.transaction_strategy.clone(),
-        );
-
+    pub fn consume_strategy(self) -> TransactionStrategy {
         self.transaction_strategy
     }
 }
