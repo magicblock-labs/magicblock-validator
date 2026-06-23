@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use solana_account::{cow::AccountSeqLock, AccountSharedData};
 use solana_account_decoder::{
     encode_ui_account, UiAccount, UiAccountEncoding, UiDataSliceConfig,
 };
 use solana_pubkey::Pubkey;
+use solana_transaction::sanitized::SanitizedTransaction;
 
 use crate::Slot;
 
@@ -16,6 +19,8 @@ pub type AccountUpdateTx = MpmcSender<AccountWithSlot>;
 pub struct AccountWithSlot {
     pub account: LockedAccount,
     pub slot: Slot,
+    /// The transaction whose execution produced this account update.
+    pub transaction: Arc<SanitizedTransaction>,
 }
 
 /// A wrapper for account data that provides a mechanism for safe, optimistic concurrent reads.

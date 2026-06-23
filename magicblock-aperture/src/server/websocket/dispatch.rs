@@ -105,7 +105,9 @@ impl WsDispatcher {
         let signature = self.signatures.expire().await;
         // The subscription might have already been fulfilled and removed, so we
         // don't need to handle the case where `remove_async` finds nothing.
-        self.subscriptions.signatures.remove_async(&signature).await;
+        self.subscriptions
+            .remove_signature_subscriber(&signature.signature, signature.conid)
+            .await;
     }
 
     /// Handles a request to unsubscribe from a previously established subscription.
@@ -167,16 +169,4 @@ pub(crate) enum SubResult {
 pub(crate) struct WsDispatchResult {
     pub(crate) id: Value,
     pub(crate) result: SubResult,
-}
-
-impl Drop for WsDispatcher {
-    /// Ensures all of a client's pending `signatureSubscribe` requests
-    /// are removed from the global database when the client disconnects.
-    fn drop(&mut self) {
-        // Drain the per-connection cache and remove each corresponding entry from the
-        // global signature subscription database to prevent orphans (memory leak)
-        for s in self.signatures.cache.drain(..) {
-            self.subscriptions.signatures.remove(&s.signature);
-        }
-    }
 }

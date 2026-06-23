@@ -17,7 +17,7 @@ use super::{
     adjust_authority_lamports, close_buffer_account, get_deploy_slot,
     loader_v4_state_to_bytes, minimum_balance, validate_authority,
 };
-use crate::validator::validator_authority_id;
+use crate::validator::effective_validator_authority_id;
 
 /// Finalizes a LoaderV4 program from a buffer account.
 ///
@@ -68,7 +68,7 @@ pub(crate) fn process_finalize_program_from_buffer(
     // Build LoaderV4 account data: header + ELF
     let state = LoaderV4State {
         slot: deploy_slot,
-        authority_address_or_next_version: validator_authority_id(),
+        authority_address_or_next_version: effective_validator_authority_id(),
         status: LoaderV4Status::Retracted, // Deploy instruction will activate it
     };
     let program_data = build_loader_v4_data(&state, &buf_data);

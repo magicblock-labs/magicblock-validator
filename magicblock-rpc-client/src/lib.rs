@@ -548,9 +548,14 @@ impl MagicblockRpcClient {
             let config = config.clone();
             async move {
                 self.client
-                    .get_multiple_accounts_with_config(pubkey_chunk, config)
+                    .get_multiple_ui_accounts_with_config(pubkey_chunk, config)
                     .await
-                    .map(|r| r.value)
+                    .map(|r| {
+                        r.value
+                            .into_iter()
+                            .map(|opt| opt.and_then(|ui| ui.to_account()))
+                            .collect::<Vec<_>>()
+                    })
                     .map_err(MagicBlockRpcClientError::from)
             }
         });
