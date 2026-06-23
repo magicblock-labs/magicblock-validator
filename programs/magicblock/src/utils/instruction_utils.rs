@@ -502,7 +502,7 @@ impl InstructionUtils {
             },
             vec![
                 AccountMeta::new_readonly(validator_authority_id(), true),
-                AccountMeta::new_readonly(cloned_account_pubkey, false),
+                AccountMeta::new(cloned_account_pubkey, false),
                 AccountMeta::new_readonly(
                     solana_sdk_ids::sysvar::instructions::id(),
                     false,

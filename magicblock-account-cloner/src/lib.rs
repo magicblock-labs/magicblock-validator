@@ -859,7 +859,7 @@ mod tests {
         assert!(ix.accounts[0].is_signer);
         assert!(!ix.accounts[0].is_writable);
         assert_eq!(ix.accounts[1].pubkey, pubkey);
-        assert!(!ix.accounts[1].is_writable);
+        assert!(ix.accounts[1].is_writable);
         assert_eq!(
             ix.accounts[2].pubkey,
             solana_sdk_ids::sysvar::instructions::id()

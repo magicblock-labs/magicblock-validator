@@ -87,6 +87,21 @@ fn test_post_delegation_executor_target_is_writable_only_for_writable_action() {
     assert!(writable_target.is_writable);
 }
 
+#[test]
+fn test_schedule_undelegation_marks_cloned_account_writable() {
+    crate::validator::generate_validator_authority_if_needed();
+    let pubkey = Pubkey::new_unique();
+    let ix = InstructionUtils::schedule_cloned_account_undelegation_instruction(
+        pubkey,
+    );
+    let target = ix
+        .accounts
+        .iter()
+        .find(|account| account.pubkey == pubkey)
+        .expect("cloned account must be present in the instruction");
+    assert!(target.is_writable);
+}
+
 fn instructions_sysvar_data(
     instructions: &[Instruction],
     current_index: u16,
