@@ -104,7 +104,7 @@ where
             let signature = res.as_ref().ok().copied();
             single_stage_executor
                 .execute_callbacks(signature, res.as_ref().map(|_| ()));
-            let transaction_strategy = single_stage_executor.consume_strategy();
+            let transaction_strategy = single_stage_executor.done();
             execution_report.dispose(transaction_strategy);
             return res.map(ExecutionOutput::SingleStage);
         }
@@ -113,7 +113,7 @@ where
     // With actions, we can't predict num of CPIs
     // If we get here we will try to switch from Single stage to Two Stage commit
     // Note that this not necessarily will pass at the end due to the same reason
-    let strategy = single_stage_executor.consume_strategy();
+    let strategy = single_stage_executor.done();
     let (commit_strategy, finalize_strategy, cleanup) =
         handle_cpi_limit_error(&authority.pubkey(), strategy);
     execution_report.dispose(cleanup);

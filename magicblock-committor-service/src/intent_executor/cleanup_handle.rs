@@ -33,7 +33,7 @@ impl<T: TransactionPreparator> CleanupHandle<T> {
         }
     }
 
-    pub(crate) async fn clean(self) -> Result<(), BufferExecutionError> {
+    pub async fn clean(self) -> Result<(), BufferExecutionError> {
         let close_buffers = self.close_buffers;
         let cleanup_futs = self.junk.iter().map(|to_cleanup| {
             self.transaction_preparator.cleanup_for_strategy(

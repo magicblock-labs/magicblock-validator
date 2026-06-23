@@ -233,6 +233,9 @@ where
             inner: result,
             patched_errors: execution_report.patched_errors,
             callbacks_report: execution_report.callbacks_report,
+            #[cfg(feature = "dev-context-only-utils")]
+            successful_transaction_strategies: execution_report
+                .successful_transaction_strategies,
         };
         let cleanup_handle = CleanupHandle::new(
             self.authority,

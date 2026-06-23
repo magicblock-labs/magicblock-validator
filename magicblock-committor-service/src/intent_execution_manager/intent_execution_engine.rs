@@ -44,6 +44,9 @@ pub struct BroadcastedIntentExecutionResult {
     pub id: u64,
     pub patched_errors: Arc<PatchedErrors>,
     pub callbacks_report: Vec<Result<Signature, Arc<CallbackScheduleError>>>,
+    #[cfg(feature = "dev-context-only-utils")]
+    pub successful_transaction_strategies:
+        Vec<crate::tasks::task_strategist::TransactionStrategy>,
 }
 
 impl BroadcastedIntentExecutionResult {
@@ -61,6 +64,9 @@ impl BroadcastedIntentExecutionResult {
             patched_errors,
             inner,
             callbacks_report,
+            #[cfg(feature = "dev-context-only-utils")]
+            successful_transaction_strategies: execution_result
+                .successful_transaction_strategies,
         }
     }
 }

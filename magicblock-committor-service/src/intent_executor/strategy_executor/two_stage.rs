@@ -229,6 +229,11 @@ where
         self,
         commit_signature: Signature,
     ) -> TwoStageStrategyExecutor<'a, A, O, Committed> {
+        #[cfg(feature = "dev-context-only-utils")]
+        self.execution_report.add_succeeded_transaction_strategy(
+            self.state.commit_strategy.clone(),
+        );
+
         TwoStageStrategyExecutor {
             authority: self.authority,
             intent_id: self.intent_id,
@@ -352,6 +357,11 @@ where
 
     /// Transitions to next executor state
     pub fn done(self, finalize_signature: Signature) -> Finalized {
+        #[cfg(feature = "dev-context-only-utils")]
+        self.execution_report.add_succeeded_transaction_strategy(
+            self.state.finalize_strategy.clone(),
+        );
+
         Finalized {
             commit_signature: self.state.commit_signature,
             finalize_signature,
