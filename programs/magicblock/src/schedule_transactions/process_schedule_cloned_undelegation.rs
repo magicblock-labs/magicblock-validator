@@ -11,6 +11,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    clone_account::remove_pending_clone,
     magic_scheduled_base_intent::{
         CommitAndUndelegate, CommitType, MagicBaseIntent,
         ScheduledIntentBundle, UndelegateType,
@@ -39,7 +40,8 @@ pub(crate) fn process_schedule_cloned_account_undelegation(
     cloned_account_pubkey: Pubkey,
 ) -> Result<(), InstructionError> {
     validate_authority(&signers, invoke_context)?;
-    validate_previous_clone(invoke_context, cloned_account_pubkey)?;
+    let previous_was_final_continue =
+        validate_previous_clone(invoke_context, cloned_account_pubkey)?;
     let clock = get_clock(invoke_context)?;
     let blockhash = invoke_context.environment_config.blockhash;
 
@@ -124,6 +126,10 @@ pub(crate) fn process_schedule_cloned_account_undelegation(
     context.add_scheduled_action(scheduled);
     context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
 
+    if previous_was_final_continue {
+        remove_pending_clone(&cloned_account_pubkey);
+    }
+
     ic_msg!(
         invoke_context,
         "ScheduleClonedAccountUndelegation: scheduled undelegation for {} with ID {}",
@@ -154,10 +160,16 @@ fn validate_authority(
     Ok(())
 }
 
+/// Validates that the previous top-level instruction is the clone this
+/// undelegation belongs to.
+///
+/// #Returns:
+/// - `true` if the previous instruction was a final `CloneAccountContinue` for a chunked clone.
+/// - `false` if the previous instruction was a `CloneAccount` for a plain clone.
 fn validate_previous_clone(
     invoke_context: &mut InvokeContext,
     cloned_account_pubkey: Pubkey,
-) -> Result<(), InstructionError> {
+) -> Result<bool, InstructionError> {
     let previous_instruction = validate_last_after_clone(
         invoke_context,
         "ScheduleClonedAccountUndelegation",
@@ -170,13 +182,13 @@ fn validate_previous_clone(
         MagicBlockInstruction::CloneAccount { pubkey, fields, .. }
             if pubkey == cloned_account_pubkey && fields.delegated =>
         {
-            Ok(())
+            Ok(false)
         }
         MagicBlockInstruction::CloneAccountContinue {
             pubkey,
             is_last: true,
             ..
-        } if pubkey == cloned_account_pubkey => Ok(()),
+        } if pubkey == cloned_account_pubkey => Ok(true),
         _ => {
             ic_msg!(
                 invoke_context,
