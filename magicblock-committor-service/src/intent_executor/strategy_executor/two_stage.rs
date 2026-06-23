@@ -176,7 +176,7 @@ where
             commit_result.as_ref().map(|_| ()),
         );
         self.execution_report
-            .dispose(mem::take(&mut self.state.commit_strategy));
+            .dispose(self.state.commit_strategy.clone());
         if commit_result.is_err() {
             self.execution_report
                 .dispose(mem::take(&mut self.state.finalize_strategy));
@@ -226,13 +226,14 @@ where
 
     /// Transitions to next executor state
     pub fn done(
-        self,
+        mut self,
         commit_signature: Signature,
     ) -> TwoStageStrategyExecutor<'a, A, O, Committed> {
         #[cfg(feature = "dev-context-only-utils")]
-        self.execution_report.add_succeeded_transaction_strategy(
-            self.state.commit_strategy.clone(),
-        );
+        self.execution_report
+            .add_succeeded_transaction_strategy(mem::take(
+                &mut self.state.commit_strategy,
+            ));
 
         TwoStageStrategyExecutor {
             authority: self.authority,
@@ -324,7 +325,7 @@ where
             finalize_result.as_ref().map(|_| ()),
         );
         self.execution_report
-            .dispose(mem::take(&mut self.state.finalize_strategy));
+            .dispose(self.state.finalize_strategy.clone());
         finalize_result.map_err(|err| {
             IntentExecutorError::from_finalize_execution_error(
                 err,
@@ -356,11 +357,12 @@ where
     }
 
     /// Transitions to next executor state
-    pub fn done(self, finalize_signature: Signature) -> Finalized {
+    pub fn done(mut self, finalize_signature: Signature) -> Finalized {
         #[cfg(feature = "dev-context-only-utils")]
-        self.execution_report.add_succeeded_transaction_strategy(
-            self.state.finalize_strategy.clone(),
-        );
+        self.execution_report
+            .add_succeeded_transaction_strategy(mem::take(
+                &mut self.state.finalize_strategy,
+            ));
 
         Finalized {
             commit_signature: self.state.commit_signature,

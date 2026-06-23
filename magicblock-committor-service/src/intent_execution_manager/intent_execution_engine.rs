@@ -29,6 +29,7 @@ use crate::{
         strategy_executor::error::TransactionStrategyExecutionError,
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
+    tasks::task_strategist::TransactionStrategy,
     transaction_preparator::TransactionPreparator,
 };
 
@@ -45,8 +46,7 @@ pub struct BroadcastedIntentExecutionResult {
     pub patched_errors: Arc<PatchedErrors>,
     pub callbacks_report: Vec<Result<Signature, Arc<CallbackScheduleError>>>,
     #[cfg(feature = "dev-context-only-utils")]
-    pub successful_transaction_strategies:
-        Vec<crate::tasks::task_strategist::TransactionStrategy>,
+    pub successful_transaction_strategies: Vec<TransactionStrategy>,
 }
 
 impl BroadcastedIntentExecutionResult {

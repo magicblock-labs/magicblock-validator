@@ -1060,6 +1060,9 @@ async fn ix_commit_local(
         .into_iter()
         .collect::<Vec<_>>();
 
+    execution_outputs.iter().for_each(|asd| {
+        println!("kek: {:?}", asd.successful_transaction_strategies);
+    });
     // Assert that all completed
     assert_eq!(execution_outputs.len(), intent_bundles.len());
 
@@ -1161,6 +1164,8 @@ async fn ix_commit_local(
         })
         .collect();
 
+        println!("ffff {:?}", execution_result
+            .successful_transaction_strategies);
         let account_commit_infos: Vec<(Pubkey, AccountCommitInfo)> =
             execution_result
                 .successful_transaction_strategies
