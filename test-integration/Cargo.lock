@@ -11312,15 +11312,24 @@ dependencies = [
 name = "test-schedule-intent"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "ephemeral-rollups-sdk",
  "integration-test-tools",
  "log",
+ "magicblock-committor-service",
+ "magicblock-core",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
  "magicblock-magic-program-api 0.12.3",
+ "magicblock-program",
+ "magicblock-rpc-client",
+ "magicblock-table-mania",
  "program-flexi-counter",
+ "solana-commitment-config",
+ "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
  "test-kit",
+ "tokio",
  "tracing",
 ]
 
