@@ -260,6 +260,13 @@ impl TransactionScheduler {
                         pending_command =
                             Some(SchedulerCommand::Block { block, ack });
                     }
+                    SchedulerCommand::Drain { ack } => {
+                        if self.coordinator.is_idle() {
+                            let _ = ack.send(Ok(()));
+                            continue;
+                        }
+                        pending_command = Some(SchedulerCommand::Drain { ack });
+                    }
                 }
             }
             tokio::select! {
@@ -293,6 +300,10 @@ impl TransactionScheduler {
                 _ = self.shutdown.cancelled() => break,
                 else => break,
             }
+        }
+        if self.coordinator.is_primary() {
+            let slot = self.transition_to_new_slot(None).await;
+            self.handle_superblock(slot).await;
         }
         // Shutdown: drop executor channels to signal workers to stop,
         // then drain remaining ready notifications

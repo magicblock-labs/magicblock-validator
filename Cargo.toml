@@ -34,25 +34,25 @@ members = [
     "tools/genx",
     "tools/keypair-base58",
     "tools/ledger-stats",
-    "tools/magicblock-tui-client",
+    "tools/magicblock-tui-client"
 ]
 
 # This prevents a Travis CI error when building for Windows.
 resolver = "2"
 
 [workspace.package]
-# Solana 3.x versions
+# Solana 4.x versions
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 edition = "2021"
 homepage = "https://www.magicblock.xyz"
 license = "Business Source License 1.1"
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
-version = "0.12.3"
+version = "0.13.0"
 
 [workspace.dependencies]
-agave-geyser-plugin-interface = { version = "3.1" }
-agave-precompiles = { version = "=3.1.12" }
-agave-syscalls = { version = "=3.1.12" }
+agave-geyser-plugin-interface = { version = "4.0" }
+agave-precompiles = { version = "4.0", features = ["agave-unstable-api"] }
+agave-syscalls = { version = "=4.0.0", features = ["agave-unstable-api"] }
 anyhow = "1.0.86"
 backoff = { version = "0.4", features = ["tokio"] }
 arc-swap = { version = "1.7" }
@@ -63,6 +63,7 @@ base64 = "0.21.7"
 bincode = "1.3.3"
 blake3 = "1.8"
 borsh = { version = "1.5.1", features = ["derive", "unstable__schema"] }
+borsh10 = { package = "borsh", version = "0.10.4" }
 bs58 = "0.5.1"
 byteorder = "1.5.0"
 bytes = { version = "1.0", features = ["serde"] }
@@ -81,7 +82,7 @@ futures = "0.3"
 futures-util = "0.3.30"
 git-version = "0.3.9"
 guinea = { path = "./programs/guinea" }
-helius-laserstream = { git = "https://github.com/magicblock-labs/laserstream-sdk", branch = "v0.2.8+conn-fix" }
+helius-laserstream = { git = "https://github.com/magicblock-labs/laserstream-sdk.git", branch = "mbv-4.0+conn-fix" }
 http-body-util = "0.1.3"
 humantime = { version = "1.1", package = "humantime-serde" }
 hyper = "1.6.0"
@@ -92,21 +93,24 @@ json = { package = "sonic-rs", version = "0.5.3" }
 lazy_static = "1.4.0"
 libc = "0.2.153"
 libloading = "0.8"
+light-client = "0.23"
+light-compressed-account = "0.11"
+light-hasher = "5"
+light-sdk = "0.23"
+light-sdk-types = "0.23"
 # Only used in magicblock-ledger for solana_metrics::datapoint_info!
 log = { version = "0.4.20" }
 lru = "0.16.0"
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "335a22", default-features = false }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "6cb903d", default-features = false }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
 magicblock-accounts = { path = "./magicblock-accounts" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-aml = { path = "./magicblock-aml" }
 magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-api = { path = "./magicblock-api" }
-magicblock-chainlink = { path = "./magicblock-chainlink", features = [
-    "dev-context",
-] }
+magicblock-chainlink = { path = "./magicblock-chainlink", features = ["dev-context"] }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
-    "no-entrypoint",
+    "no-entrypoint"
 ] }
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
@@ -135,86 +139,15 @@ paste = "1.0"
 pin-project = "1.1.13"
 prometheus = "0.13.4"
 # Keep in sync with `solana-storage-proto` codegen.
-prost = "0.14"
-protobuf-src = "1.1"
-rand = "0.9"
-reqwest = "0.12"
-# bundled sqlite 3.44
-rusqlite = { version = "0.37.0", features = ["bundled"] }
-rustc-hash = "2.1"
-rustc_version = "0.4"
-scc = "2.4"
-semver = "1.0.22"
-serde = "1.0.217"
-serde_json = "1.0"
-serde_with = "3.16"
-serial_test = "3.2"
-sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb" }
-solana-account-decoder = { version = "3.1" }
-solana-account-decoder-client-types = { version = "3.1" }
-solana-account-info = { version = "3.1" }
-solana-address-lookup-table-interface = { version = "3.0" }
-solana-bpf-loader-program = { version = "=3.1.12" }
-solana-clock = { version = "3.0" }
-solana-cluster-type = { version = "3.1" }
-solana-commitment-config = { version = "3.1" }
-solana-compute-budget = { version = "=3.1.12" }
-solana-compute-budget-instruction = { version = "=3.1.12" }
-solana-compute-budget-interface = { version = "3.0" }
-solana-compute-budget-program = { version = "=3.1.12" }
-solana-feature-gate-interface = { version = "3.1" }
-solana-feature-set = { package = "agave-feature-set", version = "=3.1.12" }
-solana-fee-calculator = { version = "3.1" }
-solana-fee-structure = { version = "3.0" }
-solana-frozen-abi-macro = { version = "3.0" }
-solana-genesis-config = { version = "3.0" }
-solana-hash = { version = "3.1" }
-solana-instruction = { version = "3.0" }
-solana-instructions-sysvar = { version = "3.0" }
-solana-keypair = { version = "=3.1.0" }
-solana-loader-v3-interface = { version = "6.1.0" }
-solana-loader-v4-interface = { version = "3.1" }
-solana-loader-v4-program = { version = "=3.1.12" }
-solana-log-collector = { package = "solana-svm-log-collector", version = "3.1" }
-solana-measure = { package = "solana-svm-measure", version = "3.1" }
-solana-message = { version = "3.0" }
-solana-metrics = { version = "2.3.13" }
-solana-native-token = { version = "3.0" }
-solana-precompile-error = "3.0"
-solana-program = "3.0"
-solana-program-option = { version = "3.0" }
-solana-program-pack = { version = "3.0" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb" }
-solana-packet = { version = "3.0" }
-solana-pubkey = { version = "3.0" }
-solana-pubsub-client = { version = "3.1" }
-solana-rent = { version = "3.0" }
-solana-rpc-client = { version = "3.1" }
-solana-rpc-client-api = { version = "3.1" }
-solana-sanitize = { version = "3.0" }
-solana-sdk-ids = { version = "3.0" }
-solana-seed-derivable = { version = "3.0" }
-solana-sha256-hasher = { version = "3.1" }
-solana-signature = { version = "3.1" }
-solana-signer = { version = "3.0" }
-solana-slot-hashes = { version = "3.0" }
-solana-storage-proto = { path = "storage-proto" }
-solana-svm-callback = { version = "=3.1.12" }
-solana-svm-transaction = { version = "=3.1.12" }
-solana-system-interface = { version = "3.1" }
-solana-system-program = { version = "=3.1.12" }
-solana-system-transaction = { version = "3.0" }
-solana-sysvar = { version = "3.0" }
-solana-timings = { package = "solana-svm-timings", version = "3.1" }
-solana-transaction = { version = "3.0" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb", features = [
-    "dev-context-only-utils",
+
+
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82", features = [
+    "dev-context-only-utils"
 ] }
 solana-transaction-error = { version = "3.0" }
-solana-transaction-status = { version = "=3.1.12" }
-solana-transaction-status-client-types = "=3.1.12"
-solana-zk-elgamal-proof-program = { version = "=3.1.12" }
+solana-transaction-status = { version = "4.0" }
+solana-transaction-status-client-types = "4.0"
+solana-zk-elgamal-proof-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
 static_assertions = "1.1.0"
 tempfile = "3.10.1"
 test-kit = { path = "./test-kit" }
@@ -228,35 +161,109 @@ tonic-prost-build = "0.14"
 tracing = "0.1"
 tracing-log = { version = "0.2", features = ["log-tracer"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-twox-hash = { version = "2.1", default-features = false, features = [
-    "alloc",
-    "xxhash3_64",
-] }
+twox-hash = { version = "2.1", default-features = false, features = ["alloc", "xxhash3_64"] }
 url = "2.5.0"
 
 # SPL Token crates used across the workspace
 spl-token = { package = "spl-token-interface", version = "2.0" }
 spl-token-2022 = { package = "spl-token-2022-interface", version = "2.1" }
 
+
+# Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
+prost = "0.14"
+protobuf-src = "1.1"
+rand = "0.9"
+reqwest = "0.12"
+rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
+rusqlite = { version = "0.37.0", features = ["bundled"] } # bundled sqlite 3.44
+rustc-hash = "2.1"
+rustc_version = "0.4"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+scc = "2.4"
+semver = "1.0.22"
+serde = "1.0.217"
+serde_json = "1.0"
+serde_with = "3.16"
+serial_test = "3.2"
+sha3 = "0.10.8"
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+solana-account-decoder = { version = "4.0" }
+solana-account-decoder-client-types = { version = "4.0" }
+solana-account-info = { version = "3.1" }
+solana-address-lookup-table-interface = { version = "3.0" }
+solana-bpf-loader-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-clock = { version = "3.0" }
+solana-cluster-type = { version = "3.1" }
+solana-commitment-config = { version = "3.1" }
+solana-compute-budget = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-compute-budget-instruction = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-compute-budget-interface = { version = "3.0" }
+solana-compute-budget-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-cpi = { version = "3.1" }
+solana-feature-gate-interface = { version = "3.1" }
+solana-feature-set = { package = "agave-feature-set", version = "4.0" }
+solana-fee-calculator = { version = "3.1" }
+solana-fee-structure = { version = "3.0" }
+solana-frozen-abi-macro = { version = "3.0" }
+solana-genesis-config = { version = "3.0" }
+solana-hash = { version = "4.2" }
+solana-instruction = { version = "3.0" }
+solana-instructions-sysvar = { version = "3.0" }
+solana-keypair = { version = "=3.1.0" }
+solana-loader-v3-interface = { version = "6.1.0" }
+solana-loader-v4-interface = { version = "3.1" }
+solana-loader-v4-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-log-collector = { package = "solana-svm-log-collector", version = "=4.0.0", features = [
+    "agave-unstable-api"
+] }
+solana-measure = { package = "solana-svm-measure", version = "=4.0.0", features = [
+    "agave-unstable-api"
+] }
+solana-message = { version = "3.0" }
+solana-metrics = { version = "4.0", features = ["agave-unstable-api"] }
+solana-native-token = { version = "3.0" }
+solana-packet = { version = "4.1" }
+solana-precompile-error = "3.0"
+solana-program = "3.0"
+solana-program-error = { version = "3.0" }
+solana-program-option = { version = "3.0" }
+solana-program-pack = { version = "3.0" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+solana-pubkey = { version = "4.1" }
+solana-pubsub-client = { version = "4.0" }
+solana-rent = { version = "3.0" }
+solana-rpc-client = { version = "4.0" }
+solana-rpc-client-api = { version = "4.0" }
+solana-sanitize = { version = "3.0" }
+solana-sdk-ids = { version = "3.0" }
+solana-seed-derivable = { version = "3.0" }
+solana-sha256-hasher = { version = "3.1" }
+solana-signature = { version = "3.1" }
+solana-signer = { version = "3.0" }
+solana-slot-hashes = { version = "3.0" }
+solana-storage-proto = { path = "storage-proto" }
+solana-svm-callback = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-svm-transaction = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-system-interface = { version = "3.1" }
+solana-system-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-system-transaction = { version = "3.0" }
+solana-sysvar = { version = "3.0" }
+solana-timings = { package = "solana-svm-timings", version = "=4.0.0", features = [
+    "agave-unstable-api"
+] }
+solana-transaction = { version = "3.0" }
+
 [workspace.dependencies.solana-svm]
 features = ["dev-context-only-utils"]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb"
-
-[workspace.dependencies.rocksdb]
-# Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
-# when also using the bzip2 crate
-version = "0.22.0"
+rev = "b275f82"
 
 [patch.crates-io]
-# some solana dependencies have solana-storage-proto as dependency
-# we need to patch them with our version, because they use protobuf-src v1.1.0
-# and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb" }
-solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b91ab7dad6642c63b9ea177fb318840b4c64c6cb" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+solana-storage-proto = { path = "storage-proto" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
 # Fork is used to enable `disable_manual_compaction` usage
 # Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
 # without patching update isn't possible due to conflict with solana deps

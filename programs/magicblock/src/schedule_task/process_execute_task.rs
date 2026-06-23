@@ -9,7 +9,7 @@ use solana_pubkey::Pubkey;
 use crate::{
     schedule_task::validate_cranks_instructions,
     utils::accounts::get_instruction_pubkey_with_idx,
-    validator::validator_authority_id,
+    validator::effective_validator_authority_id,
 };
 
 pub(crate) fn process_execute_crank(
@@ -55,7 +55,8 @@ pub(crate) fn process_execute_crank(
             transaction_context,
             VALIDATOR_IDX,
         )?;
-        if validator_pubkey != &validator_authority_id() {
+        let validator_authority = effective_validator_authority_id();
+        if validator_pubkey != &validator_authority {
             ic_msg!(
                 invoke_context,
                 "ExecuteCrank ERR: validator pubkey {} is not the expected validator",
@@ -113,7 +114,7 @@ mod test {
     use crate::{
         test_utils::process_instruction,
         utils::instruction_utils::InstructionUtils,
-        validator::init_validator_authority,
+        validator::{init_validator_authority, validator_authority_id},
     };
 
     pub fn complex_ix(payer: Pubkey) -> Instruction {

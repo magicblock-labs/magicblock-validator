@@ -40,7 +40,7 @@ use crate::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx, InstructionAccount,
     },
-    validator::validator_authority_id,
+    validator::effective_validator_authority_id,
 };
 
 pub(crate) const PAYER_IDX: u16 = 0;
@@ -245,7 +245,7 @@ pub(crate) fn validate_callback_accounts(
             return Err(InstructionError::IncorrectAuthority);
         }
 
-        if pubkey == &validator_authority_id() {
+        if pubkey == &effective_validator_authority_id() {
             ic_msg!(
                 invoke_context,
                 "{}: the validator authority cannot be used in callbacks",

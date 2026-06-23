@@ -217,6 +217,21 @@ fn insert_plain_ata_in_bank(
     accounts_bank.insert(ata_pubkey, ata_account);
 }
 
+fn loaded_test_program(
+    program_id: Pubkey,
+    remote_slot: u64,
+    program_data: Vec<u8>,
+) -> crate::remote_account_provider::program_account::LoadedProgram {
+    crate::remote_account_provider::program_account::LoadedProgram {
+        program_id,
+        authority: random_pubkey(),
+        program_data,
+        loader: crate::remote_account_provider::program_account::RemoteProgramLoader::V4,
+        loader_status: solana_loader_v4_interface::state::LoaderV4Status::Deployed,
+        remote_slot,
+    }
+}
+
 fn create_non_raw_eata_owned_account(
     pubkey: Pubkey,
     data_len: usize,
@@ -356,6 +371,32 @@ async fn wait_for_pending_waiter_count(
         fetch_cloner.pending_request_waiter_count(&pubkey),
         Some(expected),
         "pending waiter count for {pubkey} should be {expected}"
+    );
+}
+
+async fn wait_for_pending_clone_waiter_count(
+    fetch_cloner: &Arc<
+        FetchCloner<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            AccountsBankStub,
+            ClonerStub,
+        >,
+    >,
+    pubkey: Pubkey,
+    expected: usize,
+) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    while fetch_cloner.pending_clone_waiter_count(&pubkey) != Some(expected)
+        && start.elapsed() < timeout
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        fetch_cloner.pending_clone_waiter_count(&pubkey),
+        Some(expected),
+        "pending clone waiter count for {pubkey} should be {expected}"
     );
 }
 
@@ -2112,6 +2153,851 @@ async fn test_parallel_fetch_prevention_multiple_accounts() {
     );
 }
 
+#[tokio::test]
+async fn test_cold_accounts_fetch_is_batched_into_single_rpc_call() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const ACCOUNTS_LEN: usize = 5;
+
+    let accounts: Vec<(Pubkey, Account)> = (0..ACCOUNTS_LEN)
+        .map(|i| {
+            (
+                random_pubkey(),
+                Account {
+                    lamports: 1_000_000 + i as u64,
+                    data: vec![i as u8; 8],
+                    owner: account_owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
+    let pubkeys = accounts.iter().map(|(pk, _)| *pk).collect::<Vec<_>>();
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        accounts.clone(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let single_before = rpc_client.single_account_fetches();
+    let multi_before = rpc_client.multi_account_fetches();
+
+    fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &pubkeys,
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .unwrap();
+
+    for (pubkey, account) in &accounts {
+        assert_cloned_undelegated_account!(
+            accounts_bank,
+            *pubkey,
+            account.clone(),
+            CURRENT_SLOT,
+            account_owner
+        );
+    }
+
+    // One ensure call for N cold accounts should produce one batched
+    // getMultipleAccounts request, not N single-account requests.
+    let single_calls = rpc_client.single_account_fetches() - single_before;
+    let multi_calls = rpc_client.multi_account_fetches() - multi_before;
+    assert_eq!(
+        (multi_calls, single_calls),
+        (1, 0),
+        "expected 1 batched RPC call for {ACCOUNTS_LEN} cold accounts, \
+         got {multi_calls} multi + {single_calls} single"
+    );
+}
+
+#[tokio::test]
+async fn test_requerying_same_accounts_adds_no_rpc_calls() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const ACCOUNTS_LEN: usize = 5;
+
+    let accounts: Vec<(Pubkey, Account)> = (0..ACCOUNTS_LEN)
+        .map(|i| {
+            (
+                random_pubkey(),
+                Account {
+                    lamports: 1_000_000 + i as u64,
+                    data: vec![i as u8; 8],
+                    owner: account_owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
+    let pubkeys = accounts.iter().map(|(pk, _)| *pk).collect::<Vec<_>>();
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        accounts.clone(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let single_before = rpc_client.single_account_fetches();
+    let multi_before = rpc_client.multi_account_fetches();
+
+    fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &pubkeys,
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .unwrap();
+
+    let single_after_first =
+        rpc_client.single_account_fetches() - single_before;
+    let multi_after_first = rpc_client.multi_account_fetches() - multi_before;
+    assert_eq!(
+        (multi_after_first, single_after_first),
+        (1, 0),
+        "first ensure should be a single batched call"
+    );
+
+    // Same accounts again: all in bank now, must not hit the RPC at all.
+    fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &pubkeys,
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .unwrap();
+
+    let single_after_second =
+        rpc_client.single_account_fetches() - single_before;
+    let multi_after_second = rpc_client.multi_account_fetches() - multi_before;
+    assert_eq!(
+        (multi_after_second, single_after_second),
+        (1, 0),
+        "re-querying warm accounts must add no RPC calls"
+    );
+    assert_eq!(fetch_cloner.fetch_count(), ACCOUNTS_LEN as u64);
+}
+
+#[tokio::test]
+async fn test_cold_accounts_fetch_chunks_batches_at_rpc_limit() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    // getMultipleAccounts accepts at most 100 keys per request
+    const ACCOUNTS_LEN: usize = 101;
+    const EXPECTED_MULTI_CALLS: u64 = 2;
+
+    let accounts: Vec<(Pubkey, Account)> = (0..ACCOUNTS_LEN)
+        .map(|i| {
+            (
+                random_pubkey(),
+                Account {
+                    lamports: 1_000_000 + i as u64,
+                    data: vec![i as u8; 8],
+                    owner: account_owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
+    let pubkeys = accounts.iter().map(|(pk, _)| *pk).collect::<Vec<_>>();
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        accounts.clone(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let single_before = rpc_client.single_account_fetches();
+    let multi_before = rpc_client.multi_account_fetches();
+
+    fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &pubkeys,
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .unwrap();
+
+    for (pubkey, account) in &accounts {
+        assert_cloned_undelegated_account!(
+            accounts_bank,
+            *pubkey,
+            account.clone(),
+            CURRENT_SLOT,
+            account_owner
+        );
+    }
+
+    let single_calls = rpc_client.single_account_fetches() - single_before;
+    let multi_calls = rpc_client.multi_account_fetches() - multi_before;
+    assert_eq!(
+        (multi_calls, single_calls),
+        (EXPECTED_MULTI_CALLS, 0),
+        "expected {EXPECTED_MULTI_CALLS} chunked batch calls for \
+         {ACCOUNTS_LEN} cold accounts, got {multi_calls} multi + \
+         {single_calls} single"
+    );
+    assert_eq!(fetch_cloner.fetch_count(), ACCOUNTS_LEN as u64);
+}
+
+#[tokio::test]
+async fn test_mixed_class_batch_uses_one_main_rpc_call_plus_companions() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let plain_pubkey = random_pubkey();
+    let plain_account = Account {
+        lamports: 500_000,
+        data: vec![10, 20, 30],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let delegated_pubkey = random_pubkey();
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    // LoaderV2 program: cloned from the program account alone, so no
+    // programdata companion fetch is involved.
+    let program_pubkey = random_pubkey();
+    let program_account = Account {
+        lamports: 1_000_000,
+        data: vec![5, 6, 7, 8],
+        owner: solana_sdk_ids::bpf_loader::id(),
+        executable: true,
+        rent_epoch: 0,
+    };
+
+    let missing_pubkey = random_pubkey();
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [
+            (plain_pubkey, plain_account.clone()),
+            (delegated_pubkey, delegated_account.clone()),
+            (program_pubkey, program_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        delegated_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    let single_before = rpc_client.single_account_fetches();
+    let multi_before = rpc_client.multi_account_fetches();
+
+    fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[
+                plain_pubkey,
+                delegated_pubkey,
+                program_pubkey,
+                missing_pubkey,
+            ],
+            Some(&[missing_pubkey]),
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .unwrap();
+
+    assert_cloned_undelegated_account!(
+        accounts_bank,
+        plain_pubkey,
+        plain_account,
+        CURRENT_SLOT,
+        account_owner
+    );
+    assert_cloned_delegated_account!(
+        accounts_bank,
+        delegated_pubkey,
+        delegated_account,
+        CURRENT_SLOT,
+        account_owner
+    );
+    assert!(
+        accounts_bank.get_account(&program_pubkey).is_some(),
+        "program should be cloned into the bank"
+    );
+    assert_cloned_undelegated_account!(
+        accounts_bank,
+        missing_pubkey,
+        Account {
+            lamports: 0,
+            data: vec![],
+            owner: Pubkey::default(),
+            executable: false,
+            rent_epoch: 0,
+        },
+        CURRENT_SLOT,
+        system_program::id()
+    );
+
+    // All four cold keys (including the mark-empty one) share one main
+    // batched call; the delegated account adds exactly one 2-key companion
+    // call (account + delegation record). The LoaderV2 program needs no
+    // companion. Nothing goes out as a single-account fetch.
+    let single_calls = rpc_client.single_account_fetches() - single_before;
+    let multi_calls = rpc_client.multi_account_fetches() - multi_before;
+    assert_eq!(
+        (multi_calls, single_calls),
+        (2, 0),
+        "expected 1 main batch + 1 delegation-record companion call, \
+         got {multi_calls} multi + {single_calls} single"
+    );
+}
+
+#[tokio::test]
+async fn test_cancel_single_key_keeps_other_keys_in_same_ensure_alive() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let accounts: Vec<(Pubkey, Account)> = (0..3)
+        .map(|i| {
+            (
+                random_pubkey(),
+                Account {
+                    lamports: 1_000_000 + i as u64,
+                    data: vec![i as u8; 4],
+                    owner: account_owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
+    let pubkeys = accounts.iter().map(|(pk, _)| *pk).collect::<Vec<_>>();
+    let cancelled_pubkey = pubkeys[1];
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        accounts.clone(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    // Block the clone phase so all three keys are fetched in one batched wire
+    // call and reach their per-key clone, parked just before the bank write,
+    // when we cancel one of them.
+    let blocking_cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    blocking_cloner.block_clone_completion();
+    let (_subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &fetch_cloner.remote_account_provider.clone(),
+        &accounts_bank,
+        &blocking_cloner,
+        validator_keypair.insecure_clone(),
+        subscription_rx,
+        None,
+        None,
+    );
+
+    let ensure_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        let pubkeys = pubkeys.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &pubkeys,
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
+        })
+    };
+
+    // All three keys reach the (blocked) clone phase via the shared fetch.
+    let start = tokio::time::Instant::now();
+    while blocking_cloner.clone_request_count() < pubkeys.len()
+        && start.elapsed() < Duration::from_secs(5)
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(blocking_cloner.clone_request_count(), pubkeys.len());
+
+    // Cancel one key and wait until its clone has actually been dropped (its
+    // pending entry is gone) before unblocking, so there is no race with the
+    // sibling clone writes.
+    fetch_cloner.cancel_pending(&cancelled_pubkey);
+    let start = tokio::time::Instant::now();
+    while fetch_cloner.has_pending_request(&cancelled_pubkey)
+        && start.elapsed() < Duration::from_secs(5)
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(!fetch_cloner.has_pending_request(&cancelled_pubkey));
+    blocking_cloner.allow_clone_completion();
+
+    let result = tokio::time::timeout(Duration::from_secs(5), ensure_task)
+        .await
+        .expect("ensure should complete after cancellation")
+        .expect("ensure task join should succeed");
+    assert!(
+        matches!(
+            result,
+            Err(ChainlinkError::PendingRequestCancelled(pubkey))
+                if pubkey == cancelled_pubkey
+        ),
+        "cancelling one key must surface as that key's cancellation, \
+         got {result:?}"
+    );
+
+    // The sibling keys share the batched fetch but clone on their own, so the
+    // cancellation does not affect them. The dedup call can return on the
+    // cancelled key before the last sibling's clone lands, so wait for them.
+    let start = tokio::time::Instant::now();
+    while (accounts_bank.get_account(&pubkeys[0]).is_none()
+        || accounts_bank.get_account(&pubkeys[2]).is_none())
+        && start.elapsed() < Duration::from_secs(2)
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_cloned_undelegated_account!(
+        accounts_bank,
+        pubkeys[0],
+        accounts[0].1.clone(),
+        CURRENT_SLOT,
+        account_owner
+    );
+    assert_cloned_undelegated_account!(
+        accounts_bank,
+        pubkeys[2],
+        accounts[2].1.clone(),
+        CURRENT_SLOT,
+        account_owner
+    );
+
+    assert!(
+        accounts_bank.get_account(&cancelled_pubkey).is_none(),
+        "cancelled key must not be cloned into the bank"
+    );
+}
+
+#[tokio::test]
+async fn test_batched_wire_failure_fails_keys_without_per_key_retry() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let accounts: Vec<(Pubkey, Account)> = (0..3)
+        .map(|i| {
+            (
+                random_pubkey(),
+                Account {
+                    lamports: 1_000_000 + i as u64,
+                    data: vec![i as u8; 4],
+                    owner: account_owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
+    let pubkeys = accounts.iter().map(|(pk, _)| *pk).collect::<Vec<_>>();
+
+    // Custom mock: any getMultipleAccounts response for more than two keys
+    // is truncated and therefore fails the wire call. Single-key fetches
+    // and 2-key companion fetches are unaffected.
+    let accounts_map: HashMap<Pubkey, Account> =
+        accounts.iter().cloned().collect();
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(CURRENT_SLOT)
+        .clock_sysvar_for_slot(CURRENT_SLOT)
+        .accounts(accounts_map)
+        .truncate_multi_account_response_to(2)
+        .build();
+    let rpc_client_handle = rpc_client.clone();
+
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+    let accounts_bank = Arc::new(AccountsBankStub::default());
+    let (forward_tx, _forward_rx) = mpsc::channel(1_000);
+    let (subscribed_accounts, config) = create_test_lru_cache(1_000);
+    let chain_slot = Arc::<AtomicU64>::default();
+    let remote_account_provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client,
+            pubsub_client,
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(chain_slot),
+        )
+        .await
+        .unwrap(),
+    );
+    let (fetch_cloner, _subscription_tx, _cloner) = init_fetch_cloner(
+        remote_account_provider,
+        &accounts_bank,
+        validator_keypair,
+    );
+
+    let single_before = rpc_client_handle.single_account_fetches();
+    let multi_before = rpc_client_handle.multi_account_fetches();
+
+    // The provider already retries the wire call internally; once the
+    // batched call ultimately fails, every key fails with it. No hidden
+    // per-key refetch is attempted (the single-call counter stays at 0).
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &pubkeys,
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(ChainlinkError::PendingRequestOwnerFailed(_, _))),
+        "a failing batched RPC call must fail the ensure, got {result:?}"
+    );
+
+    let single_calls =
+        rpc_client_handle.single_account_fetches() - single_before;
+    let multi_calls = rpc_client_handle.multi_account_fetches() - multi_before;
+    assert_eq!(
+        (multi_calls, single_calls),
+        (1, 0),
+        "the failed batch must not be retried per key"
+    );
+
+    // No stuck state: every pending entry is resolved and the keys stay
+    // individually retryable by callers.
+    for pubkey in &pubkeys {
+        assert!(!fetch_cloner.has_pending_request(pubkey));
+    }
+    assert_not_cloned!(accounts_bank, &pubkeys);
+
+    fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &pubkeys[0..1],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .expect("a single-key retry must succeed");
+    assert_cloned_undelegated_account!(
+        accounts_bank,
+        pubkeys[0],
+        accounts[0].1.clone(),
+        CURRENT_SLOT,
+        account_owner
+    );
+}
+
+#[tokio::test]
+async fn test_batched_wire_failure_after_deadline_reports_timeout() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let accounts: Vec<(Pubkey, Account)> = (0..3)
+        .map(|i| {
+            (
+                random_pubkey(),
+                Account {
+                    lamports: 1_000_000 + i as u64,
+                    data: vec![i as u8; 4],
+                    owner: account_owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
+    let pubkeys = accounts.iter().map(|(pk, _)| *pk).collect::<Vec<_>>();
+
+    let accounts_map: HashMap<Pubkey, Account> =
+        accounts.iter().cloned().collect();
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(CURRENT_SLOT)
+        .clock_sysvar_for_slot(CURRENT_SLOT)
+        .accounts(accounts_map)
+        .truncate_multi_account_response_to(2)
+        .build();
+
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+    let accounts_bank = Arc::new(AccountsBankStub::default());
+    let (forward_tx, _forward_rx) = mpsc::channel(1_000);
+    let (subscribed_accounts, config) = create_test_lru_cache(1_000);
+    let chain_slot = Arc::<AtomicU64>::default();
+    let remote_account_provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client,
+            pubsub_client,
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(chain_slot),
+        )
+        .await
+        .unwrap(),
+    );
+    let (fetch_cloner, _subscription_tx, _cloner) = init_fetch_cloner(
+        remote_account_provider,
+        &accounts_bank,
+        validator_keypair,
+    );
+
+    fetch_cloner.set_pending_operation_timeout(Duration::from_millis(0));
+
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &pubkeys,
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(ChainlinkError::PendingRequestTimeout(_))),
+        "a batched fetch failing past the deadline must surface as a \
+         timeout, got {result:?}"
+    );
+
+    // No stuck state and nothing cloned.
+    for pubkey in &pubkeys {
+        assert!(!fetch_cloner.has_pending_request(pubkey));
+    }
+    assert_not_cloned!(accounts_bank, &pubkeys);
+}
+
+#[tokio::test]
+async fn test_overlapping_concurrent_ensures_share_inflight_keys_at_rpc_level()
+{
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let accounts: Vec<(Pubkey, Account)> = (0..3)
+        .map(|i| {
+            (
+                random_pubkey(),
+                Account {
+                    lamports: 1_000_000 + i as u64,
+                    data: vec![i as u8; 4],
+                    owner: account_owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
+    let pubkeys = accounts.iter().map(|(pk, _)| *pk).collect::<Vec<_>>();
+    let (key_a, key_b, key_c) = (pubkeys[0], pubkeys[1], pubkeys[2]);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        accounts.clone(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let single_before = rpc_client.single_account_fetches();
+    let multi_before = rpc_client.multi_account_fetches();
+
+    rpc_client.block_fetches();
+
+    let first_ensure = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[key_a, key_b],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
+        })
+    };
+    wait_for_pending_request(&fetch_cloner, key_a).await;
+    wait_for_pending_request(&fetch_cloner, key_b).await;
+
+    // The overlapping key joins the first ensure's in-flight operation as
+    // a waiter instead of fetching again.
+    let second_ensure = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[key_b, key_c],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
+        })
+    };
+    wait_for_pending_request(&fetch_cloner, key_c).await;
+    wait_for_pending_waiter_count(&fetch_cloner, key_b, 2).await;
+
+    rpc_client.allow_fetches();
+
+    tokio::time::timeout(Duration::from_secs(5), first_ensure)
+        .await
+        .expect("first ensure should complete")
+        .expect("first ensure task join should succeed")
+        .expect("first ensure should succeed");
+    tokio::time::timeout(Duration::from_secs(5), second_ensure)
+        .await
+        .expect("second ensure should complete")
+        .expect("second ensure task join should succeed")
+        .expect("second ensure should succeed");
+
+    for (pubkey, account) in &accounts {
+        assert_cloned_undelegated_account!(
+            accounts_bank,
+            *pubkey,
+            account.clone(),
+            CURRENT_SLOT,
+            account_owner
+        );
+    }
+
+    // The overlapping key is fetched exactly once even though both calls
+    // requested it.
+    assert_eq!(fetch_cloner.fetch_count(), 3);
+
+    // The first ensure batches its two claimed keys into one
+    // getMultipleAccounts call. The second ensure only claims the
+    // non-overlapping key, and a claimed set of one key goes out as a
+    // single getAccountInfo call.
+    let single_calls = rpc_client.single_account_fetches() - single_before;
+    let multi_calls = rpc_client.multi_account_fetches() - multi_before;
+    assert_eq!(
+        (multi_calls, single_calls),
+        (1, 1),
+        "expected one 2-key batch and one single-key call, \
+         got {multi_calls} multi + {single_calls} single"
+    );
+}
+
+#[tokio::test]
+async fn test_mock_multi_account_fetch_increments_only_multi_counter() {
+    use solana_rpc_client_api::config::RpcAccountInfoConfig;
+
+    init_logger();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let accounts: HashMap<Pubkey, Account> = (0..3)
+        .map(|i| {
+            (
+                random_pubkey(),
+                Account {
+                    lamports: 1_000_000 + i as u64,
+                    data: vec![i as u8; 4],
+                    owner: account_owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+        })
+        .collect();
+    let pubkeys = accounts.keys().copied().collect::<Vec<_>>();
+
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(CURRENT_SLOT)
+        .accounts(accounts)
+        .build();
+
+    let response = rpc_client
+        .get_multiple_accounts_with_config(
+            &pubkeys,
+            RpcAccountInfoConfig::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.value.len(), 3);
+    assert!(response.value.iter().all(|account| account.is_some()));
+
+    // The per-method counters must reflect trait-method calls 1:1 — one
+    // batched fetch is one multi call and zero single calls. The wire-call
+    // assertions of the batching tests above depend on this.
+    assert_eq!(
+        (
+            rpc_client.multi_account_fetches(),
+            rpc_client.single_account_fetches(),
+        ),
+        (1, 0),
+        "a batched fetch must count as one multi call and no single calls"
+    );
+}
+
 // -----------------
 // Marked Non Existing Accounts
 // -----------------
@@ -2704,6 +3590,133 @@ async fn test_allowed_programs_empty_allows_all() {
         accounts_bank.get_account(&program_id2).is_some(),
         "Program 2 should be in the bank (empty allowed_programs allows all)"
     );
+}
+
+#[tokio::test]
+async fn test_concurrent_same_slot_program_clone_submits_once() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_id = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+    cloner.block_clone_completion();
+
+    let program = loaded_test_program(program_id, CURRENT_SLOT, vec![1, 2, 3]);
+    let first_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        let program = program.clone();
+        tokio::spawn(async move {
+            fetch_cloner.clone_program_with_ownership(program).await
+        })
+    };
+    cloner.wait_for_program_clone_count(1).await;
+
+    let second_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner.clone_program_with_ownership(program).await
+        })
+    };
+    wait_for_pending_clone_waiter_count(&fetch_cloner, program_id, 1).await;
+    cloner.allow_clone_completion();
+
+    first_task.await.unwrap().unwrap();
+    second_task.await.unwrap().unwrap();
+
+    assert_eq!(
+        cloner.program_clone_count(),
+        1,
+        "same-slot concurrent program clones should share the owner result"
+    );
+    assert_eq!(
+        cloner.max_active_program_clones(),
+        1,
+        "program clone submissions must not run concurrently"
+    );
+    assert_eq!(
+        accounts_bank
+            .get_account(&program_id)
+            .expect("program should be in bank")
+            .remote_slot(),
+        CURRENT_SLOT
+    );
+}
+
+#[tokio::test]
+async fn test_newer_program_clone_waits_then_replaces_older_slot() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_id = random_pubkey();
+    const OLD_SLOT: u64 = 100;
+    const NEW_SLOT: u64 = 101;
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        NEW_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+    cloner.block_clone_completion();
+
+    let old_program = loaded_test_program(program_id, OLD_SLOT, vec![1, 2, 3]);
+    let new_program = loaded_test_program(program_id, NEW_SLOT, vec![4, 5, 6]);
+
+    let old_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner.clone_program_with_ownership(old_program).await
+        })
+    };
+    cloner.wait_for_program_clone_count(1).await;
+
+    let new_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner.clone_program_with_ownership(new_program).await
+        })
+    };
+    wait_for_pending_clone_waiter_count(&fetch_cloner, program_id, 1).await;
+    cloner.allow_clone_completion();
+
+    old_task.await.unwrap().unwrap();
+    new_task.await.unwrap().unwrap();
+
+    assert_eq!(
+        cloner.program_clone_count(),
+        2,
+        "newer program update should clone after the older owner finishes"
+    );
+    assert_eq!(
+        cloner.max_active_program_clones(),
+        1,
+        "program clone submissions must not run concurrently"
+    );
+
+    let in_bank = accounts_bank
+        .get_account(&program_id)
+        .expect("program should be in bank");
+    assert_eq!(in_bank.remote_slot(), NEW_SLOT);
+    let cloned_program = cloner
+        .get_cloned_program(&program_id)
+        .expect("program clone should be recorded");
+    assert_eq!(cloned_program.remote_slot, NEW_SLOT);
+    assert_eq!(cloned_program.program_data, vec![4, 5, 6]);
 }
 
 // -----------------
@@ -5455,10 +6468,8 @@ async fn test_fetch_subscription_race_duplicate_clone() {
     )
     .await;
 
-    // Clone delay ensures both paths enter clone_account_with_ownership
-    // before the owner finishes, so the second caller becomes a waiter.
     let cloner_stub = Arc::new(ClonerStub::new(accounts_bank.clone()));
-    cloner_stub.set_clone_delay(std::time::Duration::from_millis(200));
+    cloner_stub.block_clone_completion();
 
     let (subscription_tx, subscription_rx) = mpsc::channel(100);
     let fetch_cloner = FetchCloner::new(
@@ -5470,6 +6481,12 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         None,
         None,
     );
+
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &account_pubkey,
+    )
+    .await;
 
     // Send subscription update (this will become the owner).
     let subscription_account =
@@ -5487,8 +6504,7 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         .await
         .unwrap();
 
-    // Let subscription listener pick up the update and start cloning.
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    cloner_stub.wait_for_account_clone_count(1).await;
 
     // Trigger concurrent fetch (becomes a waiter via pending_clones).
     let fetch_task = {
@@ -5503,6 +6519,8 @@ async fn test_fetch_subscription_race_duplicate_clone() {
             .await
         })
     };
+    wait_for_pending_clone_waiter_count(&fetch_cloner, account_pubkey, 1).await;
+    cloner_stub.allow_clone_completion();
 
     let fetch_result = fetch_task.await.unwrap();
     assert!(
@@ -5528,10 +6546,146 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         same_account_clones, 1,
         "Expected 1 clone request (ownership should prevent duplicate)"
     );
+    assert_eq!(
+        cloner_stub.account_clone_count(),
+        1,
+        "same-slot concurrent account clones should submit once"
+    );
+    assert_eq!(
+        cloner_stub.max_active_account_clones(),
+        1,
+        "same-slot account clone submissions must not run concurrently"
+    );
 
     assert!(
         accounts_bank.get_account(&account_pubkey).is_some(),
         "Account should be present in bank"
+    );
+}
+
+#[tokio::test]
+async fn test_newer_account_clone_waits_then_replaces_older_slot() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const OLD_SLOT: u64 = 100;
+    const NEW_SLOT: u64 = OLD_SLOT + 1;
+
+    let account_pubkey = random_pubkey();
+    let old_account = Account {
+        lamports: 1_000_000,
+        data: vec![1; 4096],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+    let new_account = Account {
+        lamports: 2_000_000,
+        data: vec![2, 3, 5],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        remote_account_provider,
+        rpc_client,
+        ..
+    } = setup(
+        [(account_pubkey, old_account.clone())],
+        OLD_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let cloner_stub = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    cloner_stub.block_clone_completion();
+
+    let (subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &remote_account_provider,
+        &accounts_bank,
+        &cloner_stub,
+        validator_keypair.insecure_clone(),
+        subscription_rx,
+        None,
+        None,
+    );
+
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &account_pubkey,
+    )
+    .await;
+
+    let old_subscription_account =
+        crate::remote_account_provider::RemoteAccount::from_fresh_account(
+            old_account.clone(),
+            OLD_SLOT,
+            crate::remote_account_provider::RemoteAccountUpdateSource::Subscription,
+        );
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: old_subscription_account,
+            source: SubscriptionSource::Account,
+        })
+        .await
+        .unwrap();
+    cloner_stub.wait_for_account_clone_count(1).await;
+
+    rpc_client.set_slot(NEW_SLOT);
+    rpc_client.add_account(account_pubkey, new_account.clone());
+
+    let newer_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    Some(NEW_SLOT),
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
+        })
+    };
+    wait_for_pending_clone_waiter_count(&fetch_cloner, account_pubkey, 1).await;
+    cloner_stub.allow_clone_completion();
+
+    let newer_result = newer_task.await.unwrap();
+    assert!(
+        newer_result.is_ok(),
+        "newer fetch should succeed, got: {:?}",
+        newer_result
+    );
+
+    assert_eq!(
+        cloner_stub.account_clone_count(),
+        2,
+        "newer account update should clone after the older owner finishes"
+    );
+    assert_eq!(
+        cloner_stub.max_active_account_clones(),
+        1,
+        "account clone submissions for one pubkey must not run concurrently"
+    );
+
+    let requests = cloner_stub.clone_requests();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.account.remote_slot())
+            .collect::<Vec<_>>(),
+        vec![OLD_SLOT, NEW_SLOT]
+    );
+    assert_cloned_undelegated_account!(
+        accounts_bank,
+        account_pubkey,
+        new_account,
+        NEW_SLOT,
+        account_owner
     );
 }
 

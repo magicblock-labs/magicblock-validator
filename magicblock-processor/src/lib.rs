@@ -13,9 +13,9 @@ use solana_feature_gate_interface::state::Feature;
 use solana_feature_set::{
     curve25519_restrict_msm_length, curve25519_syscall_enabled,
     disable_rent_fees_collection, ed25519_program_enabled,
-    enable_poseidon_syscall, enable_secp256r1_precompile,
-    enable_transaction_loading_failure_fees, get_sysvar_syscall_enabled,
-    secp256k1_program_enabled, FeatureSet,
+    enable_poseidon_syscall, enable_sbpf_v3_deployment_and_execution,
+    enable_secp256r1_precompile, enable_transaction_loading_failure_fees,
+    get_sysvar_syscall_enabled, secp256k1_program_enabled, FeatureSet,
 };
 use solana_program::{pubkey::Pubkey, rent::Rent};
 use solana_program_runtime::{
@@ -48,11 +48,13 @@ pub fn build_svm_env(
     // - Curve25519 syscalls.
     // - Poseidon syscall.
     // - Fees for failed transaction loading (DoS mitigation).
+    // - sBPF v3 deployment/execution for cloned Devnet programs.
     for id in [
         disable_rent_fees_collection::ID,
         curve25519_syscall_enabled::ID,
         curve25519_restrict_msm_length::ID,
         enable_poseidon_syscall::ID,
+        enable_sbpf_v3_deployment_and_execution::ID,
         enable_transaction_loading_failure_fees::ID,
         get_sysvar_syscall_enabled::ID,
         ed25519_program_enabled::ID,
@@ -106,6 +108,116 @@ pub fn build_svm_env(
     SvmEnv {
         environment,
         feature_set,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_program_runtime::{
+        invoke_context::InvokeContext,
+        solana_sbpf::{ebpf, elf::Executable, program::SBPFVersion},
+    };
+
+    use super::*;
+
+    #[test]
+    fn loads_stripped_sbpf_v3_elf() {
+        let bytes = minimal_stripped_sbpf_v3_elf();
+        let runtime = BuiltinProgram::new_loader(Default::default());
+
+        let executable =
+            Executable::<InvokeContext>::load(&bytes, Arc::new(runtime))
+                .unwrap();
+        assert_eq!(executable.get_sbpf_version(), SBPFVersion::V3);
+    }
+
+    fn minimal_stripped_sbpf_v3_elf() -> Vec<u8> {
+        const ELF_HEADER_LEN: usize = 64;
+        const PROGRAM_HEADER_LEN: usize = 56;
+        const ET_DYN: u16 = 3;
+        const EM_BPF: u16 = 247;
+        const EV_CURRENT: u32 = 1;
+        const PT_LOAD: u32 = 1;
+        const PF_X: u32 = 1;
+        const PF_R: u32 = 4;
+
+        let rodata_offset = ELF_HEADER_LEN + PROGRAM_HEADER_LEN * 3;
+        let rodata_len = ebpf::INSN_SIZE as u64;
+        let text_offset = rodata_offset + rodata_len as usize;
+        let text_len = ebpf::INSN_SIZE as u64;
+        let mut bytes = Vec::with_capacity(text_offset + text_len as usize);
+
+        bytes.extend_from_slice(&[
+            0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        push_u16(&mut bytes, ET_DYN);
+        push_u16(&mut bytes, EM_BPF);
+        push_u32(&mut bytes, EV_CURRENT);
+        push_u64(&mut bytes, ebpf::MM_BYTECODE_START);
+        push_u64(&mut bytes, ELF_HEADER_LEN as u64);
+        push_u64(&mut bytes, 0);
+        push_u32(&mut bytes, 3);
+        push_u16(&mut bytes, ELF_HEADER_LEN as u16);
+        push_u16(&mut bytes, PROGRAM_HEADER_LEN as u16);
+        push_u16(&mut bytes, 3);
+        push_u16(&mut bytes, 0);
+        push_u16(&mut bytes, 0);
+        push_u16(&mut bytes, 0);
+        assert_eq!(bytes.len(), ELF_HEADER_LEN);
+
+        push_program_header(
+            &mut bytes,
+            PT_LOAD,
+            PF_R,
+            rodata_offset as u64,
+            ebpf::MM_RODATA_START,
+            rodata_len,
+        );
+        push_program_header(
+            &mut bytes,
+            PT_LOAD,
+            PF_X,
+            text_offset as u64,
+            ebpf::MM_BYTECODE_START,
+            text_len,
+        );
+        push_program_header(&mut bytes, 0, 0, 0, 0, 0);
+        assert_eq!(bytes.len(), rodata_offset);
+
+        bytes.extend_from_slice(b"fake-ro\0");
+        assert_eq!(bytes.len(), text_offset);
+        bytes.extend_from_slice(&[ebpf::EXIT, 0, 0, 0, 0, 0, 0, 0]);
+        bytes
+    }
+
+    fn push_program_header(
+        bytes: &mut Vec<u8>,
+        p_type: u32,
+        p_flags: u32,
+        p_offset: u64,
+        p_vaddr: u64,
+        p_filesz: u64,
+    ) {
+        push_u32(bytes, p_type);
+        push_u32(bytes, p_flags);
+        push_u64(bytes, p_offset);
+        push_u64(bytes, p_vaddr);
+        push_u64(bytes, p_vaddr);
+        push_u64(bytes, p_filesz);
+        push_u64(bytes, p_filesz);
+        push_u64(bytes, ebpf::INSN_SIZE as u64);
+    }
+
+    fn push_u16(bytes: &mut Vec<u8>, value: u16) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u64(bytes: &mut Vec<u8>, value: u64) {
+        bytes.extend_from_slice(&value.to_le_bytes());
     }
 }
 

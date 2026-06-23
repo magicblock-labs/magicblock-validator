@@ -167,8 +167,21 @@ pub async fn process_ledger(
 ) -> LedgerResult<u64> {
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well
-    let blockhashes_only_starting_slot =
+    let requested_blockhash_start =
         full_process_starting_slot.saturating_sub(max_age);
+    // If accountsdb.reset wipes the database while the ledger is retained, the
+    // fresh AccountsDb starts at slot 0. The retained ledger may not contain
+    // slot 0 (the first produced block is usually slot 1, and older slots may
+    // have been pruned), so start scanning at the ledger's first available block.
+    let blockhashes_only_starting_slot = match ledger.get_lowest_slot()? {
+        Some(lowest_ledger_slot) => {
+            requested_blockhash_start.max(lowest_ledger_slot)
+        }
+        None => {
+            debug!("Ledger replay skipped: ledger has no blocks");
+            return Ok(full_process_starting_slot);
+        }
+    };
     debug!("Ledger replay starting");
     let slot = replay_blocks(
         IterBlocksParams {
@@ -176,8 +189,16 @@ pub async fn process_ledger(
             full_process_starting_slot,
             blockhashes_only_starting_slot,
         },
-        transaction_scheduler,
+        transaction_scheduler.clone(),
     )
     .await?;
+    // Replay submits transactions fire-and-forget so non-conflicting ones run in
+    // parallel. Wait for the scheduler to drain them (all executed and committed)
+    // before returning, so callers can rely on the replayed state and safely
+    // clear any temporary replay authority override.
+    transaction_scheduler
+        .wait_for_replay_drain()
+        .await
+        .map_err(LedgerError::BlockStoreProcessor)?;
     Ok(slot)
 }
