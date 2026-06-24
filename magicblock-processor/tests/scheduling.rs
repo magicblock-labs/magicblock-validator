@@ -527,3 +527,27 @@ async fn test_wait_for_idle_coordination() {
     .await
     .expect("should acquire permit quickly when scheduler is idle");
 }
+
+#[tokio::test]
+async fn test_primary_slot_transition_sets_parent_blockhash() {
+    let mut env = setup_env(1);
+    let parent_hash = env.ledger.latest_block().load().blockhash;
+    let initial_slot = env.ledger.latest_block().load().slot;
+
+    env.run_scheduler();
+    env.yield_to_scheduler().await;
+
+    // Wait for the first primary slot tick to finalize the in-progress slot.
+    timeout(TIMEOUT, async {
+        loop {
+            let latest = env.ledger.latest_block().load();
+            if latest.slot > initial_slot {
+                assert_eq!(latest.parent_blockhash, parent_hash);
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for primary slot transition");
+}

@@ -226,7 +226,10 @@ async fn test_replay_block_waits_for_queued_transactions() {
         .expect("failed to apply replayed block");
 
     assert_eq!(env.get_account(acc).data()[0], 77);
-    assert_eq!(env.ledger.latest_block().load().slot, slot);
+    let latest = env.ledger.latest_block().load();
+    assert_eq!(latest.slot, slot);
+    assert_eq!(latest.blockhash, hash);
+    assert_eq!(latest.parent_blockhash, prev_hash);
     assert_eq!(env.accountsdb.slot(), slot);
 }
 
@@ -254,6 +257,11 @@ async fn test_replica_replayed_superblock_takes_snapshot_without_publishing() {
         })
         .await
         .expect("failed to apply replayed superblock boundary");
+
+    let latest = env.ledger.latest_block().load();
+    assert_eq!(latest.slot, slot);
+    assert_eq!(latest.blockhash, hash);
+    assert_eq!(latest.parent_blockhash, prev_hash);
 
     timeout(Duration::from_secs(5), async {
         while !snapshot.exists() {
