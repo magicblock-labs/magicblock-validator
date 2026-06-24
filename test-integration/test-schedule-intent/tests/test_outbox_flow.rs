@@ -1,9 +1,8 @@
 mod common;
-use common::*;
-
 use std::sync::{Arc, Mutex, Once};
 
 use async_trait::async_trait;
+use common::*;
 use integration_test_tools::{
     loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
@@ -12,7 +11,7 @@ use magicblock_committor_service::{
         accepted_intent_executor::AcceptedIntentExecutor,
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
-        IntentExecutorCtx,
+        IntentExecutor, IntentExecutorCtx,
     },
     outbox_client::{InternalOutboxClientError, OutboxClient},
     service::outbox_intent_bundles_reader::OutboxIntentBundlesReader,
@@ -27,16 +26,16 @@ use magicblock_magic_program_api::{
     instruction::MagicBlockInstruction, outbox::ExecutionStage,
     MAGIC_CONTEXT_PUBKEY,
 };
-use magicblock_committor_service::intent_executor::IntentExecutor;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox_intent_bundles::OutboxIntentBundle,
-    validator::init_validator_authority,
-    MagicContext, SentCommit,
+    validator::init_validator_authority, MagicContext, SentCommit,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
-use program_flexi_counter::{instruction::create_intent_bundle_ix, state::FlexiCounter};
+use program_flexi_counter::{
+    instruction::create_intent_bundle_ix, state::FlexiCounter,
+};
 use solana_rpc_client::nonblocking::rpc_client::RpcClient as AsyncRpcClient;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -44,7 +43,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-
 
 // ---------------------------------------------------------------------------
 // NoopCallbackScheduler
@@ -60,7 +58,10 @@ impl ActionsCallbackScheduler for NoopCallbackScheduler {
         _signature: Option<Signature>,
         _result: ActionResult,
     ) -> Vec<Result<Signature, CallbackScheduleError>> {
-        callbacks.iter().map(|_| Ok(Signature::new_unique())).collect()
+        callbacks
+            .iter()
+            .map(|_| Ok(Signature::new_unique()))
+            .collect()
     }
 }
 
@@ -117,7 +118,10 @@ impl OutboxClient for TestOutboxClient {
         intent_id: u64,
         stage: ExecutionStage,
     ) -> Result<(), Self::Error> {
-        self.stage_calls.lock().unwrap().push((intent_id, stage.clone()));
+        self.stage_calls
+            .lock()
+            .unwrap()
+            .push((intent_id, stage.clone()));
         let blockhash = self
             .ephem_rpc
             .get_latest_blockhash()
@@ -125,9 +129,15 @@ impl OutboxClient for TestOutboxClient {
             .map_err(InternalOutboxClientError::RpcClientError)?;
         let ix = Instruction::new_with_bincode(
             magicblock_magic_program_api::id(),
-            &MagicBlockInstruction::SetIntentExecutionStage { intent_id, stage },
+            &MagicBlockInstruction::SetIntentExecutionStage {
+                intent_id,
+                stage,
+            },
             vec![
-                AccountMeta::new_readonly(self.validator_keypair.pubkey(), true),
+                AccountMeta::new_readonly(
+                    self.validator_keypair.pubkey(),
+                    true,
+                ),
                 AccountMeta::new(outbox_intent_pda(intent_id), false),
             ],
         );
@@ -171,9 +181,7 @@ fn ensure_validator_authority() -> Keypair {
 }
 
 fn read_next_intent_id(ctx: &IntegrationTestContext) -> u64 {
-    let data = ctx
-        .fetch_ephem_account_data(MAGIC_CONTEXT_PUBKEY)
-        .unwrap();
+    let data = ctx.fetch_ephem_account_data(MAGIC_CONTEXT_PUBKEY).unwrap();
     MagicContext::intent_id(&data)
 }
 
@@ -213,7 +221,10 @@ fn schedule_and_accept(
         Some(&payer.pubkey()),
     );
     let (_, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(&mut tx, &[payer, &validator_keypair])
+        .send_and_confirm_transaction_ephem(
+            &mut tx,
+            &[payer, &validator_keypair],
+        )
         .unwrap();
     assert!(confirmed, "schedule_and_accept tx not confirmed");
 
@@ -283,11 +294,7 @@ async fn test_accepted_executor_outbox_flow() {
         Box::new(executor).execute(outbox_bundle.inner).await;
     let _ = cleanup_handle.clean().await;
 
-    assert!(
-        result.inner.is_ok(),
-        "Executor failed: {:?}",
-        result.inner
-    );
+    assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
     let calls = stage_calls.lock().unwrap();
     assert!(
         !calls.is_empty(),

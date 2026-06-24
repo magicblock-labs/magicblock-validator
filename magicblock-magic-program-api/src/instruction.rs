@@ -72,17 +72,6 @@ pub enum MagicBlockInstruction {
     ///            seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     AcceptScheduleCommits,
 
-    /// Sets or advances the execution stage of an outbox intent.
-    /// Must be called before sending the L1 transaction.
-    ///
-    /// # Account references
-    /// - **0.** `[SIGNER]` Validator Authority
-    /// - **1.** `[WRITE]`  Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
-    SetIntentExecutionStage {
-        intent_id: u64,
-        stage: ExecutionStage,
-    },
-
     /// Records the attempt to realize a scheduled commit on chain.
     /// Closes the associated outbox intent PDA account.
     ///
@@ -326,6 +315,17 @@ pub enum MagicBlockInstruction {
     ExecuteCrank {
         authority: Pubkey,
         instructions: Vec<Instruction>,
+    },
+
+    /// Sets or advances the execution stage of an outbox intent.
+    /// Must be called before sending the L1 transaction.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]`  Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    SetIntentExecutionStage {
+        intent_id: u64,
+        stage: ExecutionStage,
     },
 }
 

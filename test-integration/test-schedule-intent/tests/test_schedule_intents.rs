@@ -1,6 +1,5 @@
 mod common;
 use common::*;
-
 use integration_test_tools::{
     conversions::stringify_simulation_result,
     loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
@@ -15,7 +14,8 @@ use program_flexi_counter::{
 };
 use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
 use solana_sdk::{
-    pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction,
+    pubkey::Pubkey, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use test_kit::init_logger;
 use tracing::*;
@@ -643,7 +643,6 @@ fn test_intent_bundle_commit_and_commit_finalize() {
     assert_eq!(owner_finalize, delegation_program_id());
 }
 
-
 fn schedule_intent(
     ctx: &IntegrationTestContext,
     payers: &[&Keypair],
@@ -864,4 +863,3 @@ fn dump_ephem_simulation(
         }
     }
 }
-

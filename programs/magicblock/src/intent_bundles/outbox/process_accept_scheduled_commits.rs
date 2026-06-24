@@ -12,6 +12,7 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
+    magic_scheduled_base_intent::ScheduledIntentBundle,
     schedule_transactions,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
@@ -21,7 +22,8 @@ use crate::{
 };
 
 const VALIDATOR_AUTHORITY_IDX: u16 = 0;
-const MAGIC_CONTEXT_IDX: u16 = VALIDATOR_AUTHORITY_IDX + 1;
+const MAGIC_PROGRAM_ID: u16 = VALIDATOR_AUTHORITY_IDX + 1;
+const MAGIC_CONTEXT_IDX: u16 = MAGIC_PROGRAM_ID + 1;
 const VAULT_IDX: u16 = MAGIC_CONTEXT_IDX + 1;
 const INTENT_PDAS_OFFSET: u16 = VAULT_IDX + 1;
 
@@ -74,6 +76,9 @@ fn validate(
 
     // Validate authority
     let transaction_context = &*invoke_context.transaction_context;
+    // TODO(edwin): add check for vault?
+    // TODO(edwin): add check for magic-program
+
     let provided_validator_auth = get_instruction_pubkey_with_idx(
         transaction_context,
         VALIDATOR_AUTHORITY_IDX,
@@ -127,10 +132,7 @@ fn verify_intent_pda(
 
 fn pop_scheduled_intents(
     invoke_context: &InvokeContext,
-) -> Result<
-    Vec<crate::magic_scheduled_base_intent::ScheduledIntentBundle>,
-    InstructionError,
-> {
+) -> Result<Vec<ScheduledIntentBundle>, InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
     let num_ix_accounts = transaction_context
         .get_current_instruction_context()?
@@ -189,7 +191,7 @@ fn create_outbox_account_cpi(
     invoke_context: &mut InvokeContext,
     validator_auth: Pubkey,
     pda: Pubkey,
-    outbox_account: OutboxIntentBundle,
+    mut outbox_account: OutboxIntentBundle,
 ) -> Result<(), InstructionError> {
     let intent_id = outbox_account.inner.id;
     let data = outbox_account.try_to_bytes().map_err(|_| {

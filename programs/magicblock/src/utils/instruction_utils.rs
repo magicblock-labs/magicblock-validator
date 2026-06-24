@@ -127,8 +127,9 @@ impl InstructionUtils {
     ) -> Instruction {
         let account_metas = vec![
             AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new(outbox_intent_pda(scheduled_commit_id), false),
+            AccountMeta::new_readonly(crate::id(), false),
             AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+            AccountMeta::new(outbox_intent_pda(scheduled_commit_id), false),
         ];
         Instruction::new_with_bincode(
             crate::id(),
@@ -152,8 +153,10 @@ impl InstructionUtils {
         intent_ids: impl IntoIterator<Item = u64>,
     ) -> Instruction {
         let mut account_metas = vec![
-            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new_readonly(crate::id(), false),
             AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
         ];
 
         // Add outbox intent accounts

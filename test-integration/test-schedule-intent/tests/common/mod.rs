@@ -14,7 +14,8 @@ pub const LABEL: &str = "I am a label";
 
 pub fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
     let payer = Keypair::new();
-    ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL).unwrap();
+    ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
+        .unwrap();
 
     let ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
@@ -76,13 +77,13 @@ pub fn add_to_counter(
     ctx.wait_for_next_slot_ephem().unwrap();
 
     let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
-    let counter_before =
-        ctx.fetch_ephem_account_struct::<FlexiCounter>(counter_pda)
-            .unwrap_or(FlexiCounter {
-                count: 0,
-                updates: 0,
-                label: LABEL.to_string(),
-            });
+    let counter_before = ctx
+        .fetch_ephem_account_struct::<FlexiCounter>(counter_pda)
+        .unwrap_or(FlexiCounter {
+            count: 0,
+            updates: 0,
+            label: LABEL.to_string(),
+        });
 
     let ix = create_add_ix(payer.pubkey(), value);
     ctx.send_and_confirm_instructions_with_payer_ephem(&[ix], payer)
@@ -115,9 +116,11 @@ pub fn assert_counters(
         .iter()
         .map(|c| {
             if is_base {
-                ctx.fetch_chain_account_struct::<FlexiCounter>(c.pda).unwrap()
+                ctx.fetch_chain_account_struct::<FlexiCounter>(c.pda)
+                    .unwrap()
             } else {
-                ctx.fetch_ephem_account_struct::<FlexiCounter>(c.pda).unwrap()
+                ctx.fetch_ephem_account_struct::<FlexiCounter>(c.pda)
+                    .unwrap()
             }
         })
         .collect::<Vec<_>>();

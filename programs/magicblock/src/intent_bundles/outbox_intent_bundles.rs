@@ -1,8 +1,9 @@
-use std::ops::Deref;
+use std::{mem, ops::Deref};
 
 use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
 use magicblock_magic_program_api::outbox::{ExecutionStage, TwoStageProgress};
 use serde::{Deserialize, Serialize};
+use solana_signature::Signature;
 
 use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 
@@ -27,12 +28,27 @@ impl OutboxIntentBundle {
         self.status.apply_stage_transition(stage)
     }
 
-    pub fn try_to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
-        let body = bincode::serialize(self)?;
-        let mut out =
-            Vec::with_capacity(OUTBOX_INTENT_DISCRIMINATOR.len() + body.len());
-        out.extend_from_slice(&OUTBOX_INTENT_DISCRIMINATOR);
-        out.extend_from_slice(&body);
+    pub(crate) fn try_to_bytes(&mut self) -> Result<Vec<u8>, bincode::Error> {
+        const DISCRIMINATOR_LEN: usize = OUTBOX_INTENT_DISCRIMINATOR.len();
+
+        // Replace current status with max size one
+        // Needed in order to estimate higher bound of account size to allocate
+        let prev_status = mem::replace(
+            &mut self.status,
+            OutboxIntentBundleStatus::max_size_variant(),
+        );
+        let max_body_size = bincode::serialized_size(self)? as usize;
+
+        // Allocate array of higher bound size
+        let mut out = vec![0u8; DISCRIMINATOR_LEN + max_body_size];
+        out[..DISCRIMINATOR_LEN].copy_from_slice(&OUTBOX_INTENT_DISCRIMINATOR);
+
+        // Switch status back
+        self.status = prev_status;
+        bincode::serialize_into(
+            std::io::Cursor::new(&mut out[DISCRIMINATOR_LEN..]),
+            self,
+        )?;
         Ok(out)
     }
 
@@ -56,6 +72,15 @@ pub enum OutboxIntentBundleStatus {
 }
 
 impl OutboxIntentBundleStatus {
+    fn max_size_variant() -> Self {
+        Self::Executing(ExecutionStage::TwoStage(
+            TwoStageProgress::Finalizing {
+                commit: Signature::default(),
+                finalize: Signature::default(),
+            },
+        ))
+    }
+
     // TODO(edwin): split into is_valid_transition and apply_transaction
     fn apply_stage_transition(
         &mut self,

@@ -130,7 +130,10 @@ pub fn process_scheduled_commit_sent(
     }
 
     const VALIDATOR_IDX: u16 = 0;
-    const CLOSING_PDA_IDX: u16 = 1;
+    // TODO(edwin): check presense of those
+    const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
+    const MAGIC_VAULT_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
+    const CLOSING_PDA_IDX: u16 = MAGIC_VAULT_IDX + 1;
 
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -273,6 +276,7 @@ pub fn process_scheduled_commit_sent(
             "ScheduledCommitSent error message: {}",
             error_message
         );
+        // TODO(edwin): fails to close intent then
         Err(InstructionError::Custom(INTENT_FAILED_CODE))
     } else {
         Ok(())
