@@ -392,7 +392,10 @@ impl TransactionScheduler {
             .map_err(|_| "scheduler semaphore closed".to_string())?;
 
         // once write_block runs, latest_block is overwritten with the block that's being applied
-        let parent_blockhash = self.ledger.latest_block().load().blockhash;
+        let parent_blockhash = Self::initial_blockhash(
+            &self.accountsdb,
+            &self.ledger.latest_block(),
+        );
         let block = LatestBlockInner::new_with_parent(
             block.slot,
             block.hash,
@@ -582,7 +585,10 @@ impl TransactionScheduler {
     /// Prepares block as primary: computes blockhash and broadcasts to replicas.
     async fn prepare_block_as_primary(&mut self) -> LatestBlockInner {
         let blockhash = (*self.hasher.finalize().as_bytes()).into();
-        let parent_blockhash = self.ledger.latest_block().load().blockhash;
+        let parent_blockhash = Self::initial_blockhash(
+            &self.accountsdb,
+            &self.ledger.latest_block(),
+        );
         // NOTE:
         // As we have a single node network, we have no
         // option but to use the time from host machine
