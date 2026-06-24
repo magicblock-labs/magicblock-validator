@@ -8,7 +8,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use crate::{
     schedule_transactions::validate_callback_accounts,
     utils::accounts::get_instruction_pubkey_with_idx,
-    validator::validator_authority_id, Pubkey,
+    validator::effective_validator_authority_id, Pubkey,
 };
 
 const VALIDATOR_IDX: u16 = 0;
@@ -55,7 +55,8 @@ fn validate(
     // Only the validator can execute a callback
     let validator_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    if validator_pubkey != &validator_authority_id() {
+    let validator_authority = effective_validator_authority_id();
+    if validator_pubkey != &validator_authority {
         ic_msg!(
             invoke_context,
             "ExecuteCallback ERR: validator pubkey {} is not the expected validator",
@@ -97,13 +98,12 @@ mod tests {
     };
     use serial_test::serial;
     use solana_account::AccountSharedData;
-    use solana_instruction::{
-        error::InstructionError, AccountMeta, Instruction,
-    };
+    use solana_instruction::{error::InstructionError, AccountMeta};
     use solana_program_runtime::invoke_context::mock_process_instruction;
     use solana_pubkey::Pubkey;
 
     use crate::{
+        instruction_utils::InstructionUtils,
         magicblock_processor::CallbackEntrypoint,
         validator::{
             generate_validator_authority_if_needed, validator_authority_id,
@@ -111,12 +111,10 @@ mod tests {
     };
 
     fn make_data(inner_accounts: Vec<AccountMeta>) -> Vec<u8> {
+        let mut instruction = InstructionUtils::noop_instruction(0);
+        instruction.accounts = inner_accounts;
         bincode::serialize(&CallbackInstruction::ExecuteCallback {
-            instruction: Instruction {
-                program_id: Pubkey::new_unique(),
-                accounts: inner_accounts,
-                data: vec![],
-            },
+            instruction,
         })
         .unwrap()
     }

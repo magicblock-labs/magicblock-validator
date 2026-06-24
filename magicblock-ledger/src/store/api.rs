@@ -809,6 +809,7 @@ impl Ledger {
                 block_time,
                 err: status,
                 memo,
+                index: 0,
             };
             infos.push(info)
         }
@@ -866,6 +867,7 @@ impl Ledger {
                     slot,
                     block_time,
                     tx_with_meta,
+                    index: 0,
                 }))
             }
             None => Ok(None),
@@ -1599,6 +1601,7 @@ mod tests {
                 slot,
                 block_time,
                 tx_with_meta,
+                index: 0,
             },
             sanitized_transaction,
         )
@@ -2127,6 +2130,7 @@ mod tests {
                 )),
                 memo: None,
                 block_time: Some(5),
+                index: 0,
             }
         );
 

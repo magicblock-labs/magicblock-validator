@@ -3,7 +3,10 @@
 use std::time::Duration;
 
 use magicblock_core::link::replication::Message;
-use tokio::{sync::mpsc::Receiver, time::Instant};
+use tokio::{
+    sync::mpsc::{error::TryRecvError, Receiver},
+    time::{timeout, Instant},
+};
 use tracing::{error, info, instrument, warn};
 
 use super::{ReplicationContext, LOCK_REFRESH_INTERVAL};
@@ -17,6 +20,7 @@ const LOCK_RETRY_WARN_INTERVAL: Duration = Duration::from_secs(5);
 const PUBLISH_RETRY_BASE_DELAY: Duration = Duration::from_millis(50);
 const PUBLISH_RETRY_MAX_DELAY: Duration = Duration::from_secs(1);
 const PUBLISH_RETRY_LIMIT: usize = 5;
+const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Primary node: publishes events and holds leader lock.
 pub struct Primary {
@@ -85,16 +89,16 @@ impl Primary {
     pub async fn run(mut self) {
         info!("entering primary replication mode");
         let mut lock_tick = tokio::time::interval(LOCK_REFRESH_INTERVAL);
-        let mut draining = self.ctx.cancel.is_cancelled();
         let mut lock_state = LockState::Held;
         let mut pending = None;
 
         loop {
             tokio::select! {
                 biased;
-                _ = self.ctx.cancel.cancelled(), if !draining => {
-                    draining = true;
-                    info!("shutdown received, draining replication messages");
+                _ = self.ctx.cancel.cancelled() => {
+                    self.drain_on_shutdown(&mut pending, lock_state).await;
+                    self.release_producer_lock(lock_state).await;
+                    return;
                 }
                 _ = async {}, if lock_state.can_publish() && pending.is_some() => {
                     if let Some(msg) = pending.as_ref() {
@@ -136,11 +140,7 @@ impl Primary {
                 }
                 msg = self.messages.recv(), if pending.is_none() => {
                     let Some(msg) = msg else {
-                        if lock_state.can_publish() {
-                            if let Err(error) = self.producer.release().await {
-                                warn!(%error, "failed to release the lock");
-                            }
-                        }
+                        self.release_producer_lock(lock_state).await;
                         return;
                     };
                     if lock_state.can_publish() {
@@ -151,7 +151,7 @@ impl Primary {
                         pending = Some(msg);
                     }
                 }
-                snapshot = self.snapshots.recv(), if !draining => {
+                snapshot = self.snapshots.recv() => {
                     if let Some((file, slot)) = snapshot {
                         if let Err(e) = self.ctx.upload_snapshot(file, slot).await {
                             warn!(%e, "snapshot upload failed");
@@ -159,6 +159,76 @@ impl Primary {
                     }
                 }
             }
+        }
+    }
+
+    async fn drain_on_shutdown(
+        &mut self,
+        pending: &mut Option<Message>,
+        lock_state: LockState,
+    ) {
+        info!(
+            timeout_ms = SHUTDOWN_DRAIN_TIMEOUT.as_millis() as u64,
+            "shutdown received, draining replication messages"
+        );
+
+        if !lock_state.can_publish() {
+            warn!("primary lock is not held, skipping replication drain");
+            return;
+        }
+
+        let deadline = Instant::now() + SHUTDOWN_DRAIN_TIMEOUT;
+        let mut drained = 0_u64;
+
+        if let Some(msg) = pending.take() {
+            if !self.publish_with_retry_until(&msg, Some(deadline)).await {
+                warn!(drained, "failed to drain pending replication message");
+                return;
+            }
+            drained += 1;
+        }
+
+        loop {
+            if Instant::now() >= deadline {
+                warn!(drained, "replication shutdown drain timed out");
+                return;
+            }
+
+            match self.messages.try_recv() {
+                Ok(msg) => {
+                    if !self
+                        .publish_with_retry_until(&msg, Some(deadline))
+                        .await
+                    {
+                        warn!(
+                            drained,
+                            "failed to drain queued replication message"
+                        );
+                        return;
+                    }
+                    drained += 1;
+                }
+                Err(TryRecvError::Empty) => {
+                    info!(drained, "replication shutdown drain complete");
+                    return;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    info!(
+                        drained,
+                        "replication channel closed during shutdown drain"
+                    );
+                    return;
+                }
+            }
+        }
+    }
+
+    async fn release_producer_lock(&self, lock_state: LockState) {
+        if !lock_state.can_publish() {
+            return;
+        }
+        if let Err(error) = self.producer.release().await {
+            warn!(%error, "failed to release the lock");
         }
     }
 
@@ -184,14 +254,38 @@ impl Primary {
     }
 
     async fn publish_with_retry(&mut self, msg: &Message) -> bool {
+        self.publish_with_retry_until(msg, None).await
+    }
+
+    async fn publish_with_retry_until(
+        &mut self,
+        msg: &Message,
+        deadline: Option<Instant>,
+    ) -> bool {
         let mut delay = PUBLISH_RETRY_BASE_DELAY;
 
         for attempt in 0..PUBLISH_RETRY_LIMIT {
-            if self.ctx.cancel.is_cancelled() {
+            if deadline.is_none() && self.ctx.cancel.is_cancelled() {
                 return false;
             }
 
-            match self.publish(msg).await {
+            let result = match deadline {
+                Some(deadline) => {
+                    let Some(remaining) = remaining_until(deadline) else {
+                        return false;
+                    };
+                    match timeout(remaining, self.publish(msg)).await {
+                        Ok(result) => result,
+                        Err(_) => {
+                            warn!("timed out publishing the message");
+                            return false;
+                        }
+                    }
+                }
+                None => self.publish(msg).await,
+            };
+
+            match result {
                 Ok(()) => return true,
                 Err(error) => {
                     warn!(
@@ -207,12 +301,26 @@ impl Primary {
                 break;
             }
 
+            if let Some(deadline) = deadline {
+                let Some(remaining) = remaining_until(deadline) else {
+                    return false;
+                };
+                if remaining <= delay {
+                    return false;
+                }
+            }
+
             tokio::time::sleep(delay).await;
             delay = (delay * 2).min(PUBLISH_RETRY_MAX_DELAY);
         }
 
         false
     }
+}
+
+fn remaining_until(deadline: Instant) -> Option<Duration> {
+    let now = Instant::now();
+    (now < deadline).then_some(deadline - now)
 }
 
 fn message_id(slot: u64, index: u32) -> String {

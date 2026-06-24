@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    num::NonZeroUsize,
+};
 
 use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
@@ -53,7 +56,7 @@ impl StreamKey {
 #[derive(Debug, Clone, Copy)]
 pub struct StreamManagerConfig {
     /// Max subscriptions per optimized old stream chunk.
-    pub max_subs_in_old_optimized: usize,
+    pub max_subs_in_old_optimized: NonZeroUsize,
     /// Max unoptimized old streams before optimization is triggered.
     pub max_old_unoptimized: usize,
     /// Max subscriptions in the current-new stream before it is
@@ -219,7 +222,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // account for any existing current_new_subs so the combined
         // count never exceeds the limit. Subsequent chunks use the
         // full limit (since promotion clears current_new_subs).
-        let max = self.config.max_subs_in_old_optimized;
+        let max = self.config.max_subs_in_old_optimized.get();
         let remaining_capacity =
             max.saturating_sub(self.current_new_subs.len());
 
@@ -476,7 +479,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         let mut new_optimized_streams = Vec::new();
         let mut new_optimized_handles = Vec::new();
         for (i, chunk) in all_pks
-            .chunks(self.config.max_subs_in_old_optimized)
+            .chunks(self.config.max_subs_in_old_optimized.get())
             .enumerate()
         {
             let refs: Vec<&Pubkey> = chunk.iter().collect();
@@ -751,7 +754,7 @@ mod tests {
     // -----------------
     fn test_config() -> StreamManagerConfig {
         StreamManagerConfig {
-            max_subs_in_old_optimized: 10,
+            max_subs_in_old_optimized: NonZeroUsize::new(10).unwrap(),
             max_old_unoptimized: 3,
             max_subs_in_new: 5,
         }
@@ -1991,7 +1994,7 @@ mod tests {
         let batch = make_pubkeys(80);
         mgr.account_subscribe(&batch, &COMMITMENT, 0).await.unwrap();
 
-        let max = test_config().max_subs_in_old_optimized;
+        let max = test_config().max_subs_in_old_optimized.get();
 
         // Every request sent via subscribe() or handle.write()
         // must have at most `max` pubkeys.

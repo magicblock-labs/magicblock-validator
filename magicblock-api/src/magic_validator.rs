@@ -564,6 +564,15 @@ impl MagicValidator {
         matches!(replication_mode, ReplicationMode::Replica { .. })
     }
 
+    fn replication_mode_manages_onchain_registration(
+        replication_mode: &ReplicationMode,
+    ) -> bool {
+        matches!(
+            replication_mode,
+            ReplicationMode::Standalone | ReplicationMode::Primary(_)
+        )
+    }
+
     fn init_ledger(
         ledger_config: &LedgerConfig,
         storage: &Path,
@@ -688,7 +697,9 @@ impl MagicValidator {
             return;
         }
         if self.config.chain_operation.is_none()
-            || !self.is_standalone
+            || !Self::replication_mode_manages_onchain_registration(
+                &self.config.validator.replication_mode,
+            )
             || !matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
             || !CoordinationMode::current().needs_onchain_interactions()
         {
@@ -991,6 +1002,12 @@ impl MagicValidator {
             }
         } else if let Some(replicator) = self.replication_service.take() {
             self.replication_handle.replace(replicator.spawn());
+            if Self::replication_mode_manages_onchain_registration(
+                &self.config.validator.replication_mode,
+            ) && matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
+            {
+                self.spawn_primary_onchain_setup();
+            }
         }
 
         // Now we are ready to start all services and are ready to accept transactions
@@ -998,7 +1015,11 @@ impl MagicValidator {
             .config
             .chain_operation
             .as_ref()
-            .filter(|_| self.is_standalone)
+            .filter(|_| {
+                Self::replication_mode_manages_onchain_registration(
+                    &self.config.validator.replication_mode,
+                )
+            })
             .filter(|co| !co.claim_fees_frequency.is_zero())
             .map(|co| co.claim_fees_frequency)
         {
@@ -1007,17 +1028,6 @@ impl MagicValidator {
                 .start(frequency, self.config.rpc_url().to_owned());
             log_timing("startup", "claim_fees_task_start", step_start);
         }
-
-        let step_start = Instant::now();
-        self.slot_ticker = Some(init_slot_ticker(
-            self.accountsdb.clone(),
-            &self.scheduled_commits_processor,
-            self.ledger.latest_block().clone(),
-            self.config.ledger.block_time,
-            self.transaction_scheduler.clone(),
-            self.exit.clone(),
-        ));
-        log_timing("startup", "slot_ticker_start", step_start);
 
         let step_start = Instant::now();
         self.ledger_truncator.start();
@@ -1070,6 +1080,16 @@ impl MagicValidator {
                     }
                 }
             });
+            let step_start = Instant::now();
+            self.slot_ticker = Some(init_slot_ticker(
+                self.accountsdb.clone(),
+                &self.scheduled_commits_processor,
+                self.ledger.latest_block().clone(),
+                self.config.ledger.block_time,
+                self.transaction_scheduler.clone(),
+                self.exit.clone(),
+            ));
+            log_timing("startup", "slot_ticker_start", step_start);
         }
 
         Ok(())
@@ -1119,6 +1139,9 @@ impl MagicValidator {
         }
         log_timing("shutdown", "ledger_truncator_join", step_start);
         let step_start = Instant::now();
+        let _ = self.transaction_execution.join();
+        log_timing("shutdown", "transaction_execution_join", step_start);
+        let step_start = Instant::now();
         if let Some(handle) = self.replication_handle {
             match handle.join() {
                 Ok(Ok(())) => {}
@@ -1131,9 +1154,6 @@ impl MagicValidator {
             }
         }
         log_timing("shutdown", "replication_service_join", step_start);
-        let step_start = Instant::now();
-        let _ = self.transaction_execution.join();
-        log_timing("shutdown", "transaction_execution_join", step_start);
 
         // Flush durable state only after every worker that can still admit,
         // commit, or truncate state has stopped.
@@ -1237,5 +1257,35 @@ mod tests {
                 authority_override: SerdePubkey(Pubkey::new_unique()),
             },
         ));
+    }
+
+    #[test]
+    fn standalone_replication_mode_manages_onchain_registration() {
+        assert!(
+            MagicValidator::replication_mode_manages_onchain_registration(
+                &ReplicationMode::Standalone,
+            )
+        );
+    }
+
+    #[test]
+    fn primary_replication_mode_manages_onchain_registration() {
+        assert!(
+            MagicValidator::replication_mode_manages_onchain_registration(
+                &ReplicationMode::Primary(replication_config()),
+            )
+        );
+    }
+
+    #[test]
+    fn replica_replication_mode_does_not_manage_onchain_registration() {
+        assert!(
+            !MagicValidator::replication_mode_manages_onchain_registration(
+                &ReplicationMode::Replica {
+                    config: replication_config(),
+                    authority_override: SerdePubkey(Pubkey::new_unique()),
+                },
+            )
+        );
     }
 }

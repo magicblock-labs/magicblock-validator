@@ -100,6 +100,12 @@ pub enum SchedulerCommand {
         block: replication::Block,
         ack: oneshot::Sender<SchedulerCommandResult>,
     },
+    /// Ordered drain barrier. Acknowledged only once the scheduler is idle, i.e.
+    /// after every previously queued transaction (including fire-and-forget
+    /// replay transactions) has finished executing. Carries no state change.
+    Drain {
+        ack: oneshot::Sender<SchedulerCommandResult>,
+    },
 }
 
 /// Specifies the position and persistence behavior for replaying a transaction.
@@ -344,6 +350,24 @@ impl TransactionSchedulerHandle {
             .map_err(|_| "scheduler command channel closed".to_string())?;
         rx.await.map_err(|_| {
             "scheduler dropped block acknowledgement".to_string()
+        })?
+    }
+
+    /// Waits until all previously queued transactions have finished executing.
+    ///
+    /// Sends an ordered drain barrier through the same FIFO channel as
+    /// transactions; the scheduler acknowledges it only once it is idle (all
+    /// queued and blocked transactions have been applied). Use this after
+    /// fire-and-forget `replay()` calls to ensure replayed state is committed
+    /// before continuing.
+    pub async fn wait_for_replay_drain(&self) -> SchedulerCommandResult {
+        let (ack, rx) = oneshot::channel();
+        self.tx
+            .send(SchedulerCommand::Drain { ack })
+            .await
+            .map_err(|_| "scheduler command channel closed".to_string())?;
+        rx.await.map_err(|_| {
+            "scheduler dropped drain acknowledgement".to_string()
         })?
     }
 

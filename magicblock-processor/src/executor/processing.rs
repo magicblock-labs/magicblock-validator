@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use magicblock_accounts_db::AccountsDbResult;
 use magicblock_core::{
     link::{
@@ -27,7 +29,7 @@ use solana_svm::{
         ProcessedTransaction, TransactionProcessingResult,
     },
 };
-use solana_svm_transaction::svm_message::SVMMessage;
+use solana_svm_transaction::svm_message::SVMStaticMessage;
 use solana_transaction::sanitized::SanitizedTransaction;
 use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status::{
@@ -72,9 +74,12 @@ impl super::TransactionExecutor {
         // 2. Commit Account State (DB Update)
         // Note: Failed transactions still pay fees, so we attempt commit even on execution failure.
         let fee_payer = *transaction.fee_payer();
-        // Only send account updates for Execution mode (persist is None)
+        // Only send account updates for Execution mode (persist is None).
+        // Wrap the causing transaction in an `Arc` so it can be shared cheaply
+        // across every account it mutated and across the notification channel.
         let notify = persist.is_none();
-        if let Err(err) = self.commit_accounts(fee_payer, &processed, notify) {
+        let txn = notify.then(|| Arc::new(transaction.txn.transaction.clone()));
+        if let Err(err) = self.commit_accounts(fee_payer, &processed, txn) {
             return self.handle_failure(
                 transaction,
                 TransactionError::CommitCancelled,
@@ -350,7 +355,7 @@ impl super::TransactionExecutor {
         &self,
         fee_payer: Pubkey,
         result: &ProcessedTransaction,
-        notify: bool,
+        txn: Option<Arc<SanitizedTransaction>>,
     ) -> AccountsDbResult<()> {
         let succeeded = result.status().is_ok();
         let accounts = match result {
@@ -374,7 +379,7 @@ impl super::TransactionExecutor {
                 {
                     return self.insert_and_notify(
                         &[(fee_payer, account.1.clone())],
-                        notify,
+                        txn,
                         false,
                     );
                 }
@@ -387,13 +392,13 @@ impl super::TransactionExecutor {
             .map(|(_, acc)| acc.privileged())
             .unwrap_or(false);
 
-        self.insert_and_notify(accounts, notify, privileged)
+        self.insert_and_notify(accounts, txn, privileged)
     }
 
     fn insert_and_notify(
         &self,
         accounts: &[(Pubkey, AccountSharedData)],
-        notify: bool,
+        txn: Option<Arc<SanitizedTransaction>>,
         privileged: bool,
     ) -> AccountsDbResult<()> {
         // Filter: Persist only dirty or privileged accounts
@@ -403,14 +408,16 @@ impl super::TransactionExecutor {
 
         self.accountsdb.insert_batch(to_commit)?;
 
-        if !notify {
+        // `txn` is `Some` only in Execution mode, where subscribers are notified.
+        let Some(txn) = txn else {
             return Ok(());
-        }
+        };
 
         for (pubkey, account) in accounts {
             let update = AccountWithSlot {
                 slot: self.processor.slot,
                 account: LockedAccount::new(*pubkey, account.clone()),
+                transaction: txn.clone(),
             };
             let _ = self.accounts_tx.send(update);
         }
@@ -499,6 +506,6 @@ fn signature_fee(
     lamports_per_signature: u64,
 ) -> u64 {
     txn.message()
-        .num_transaction_signatures()
+        .num_total_signatures()
         .saturating_mul(lamports_per_signature)
 }
