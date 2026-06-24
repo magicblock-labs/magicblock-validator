@@ -29,20 +29,21 @@ impl WsDispatcher {
                 TransactionResultEncoder.encode(s.slot, &s.result, sub_id)
             });
 
-        let (id, subscribed) = if let Some(payload) = cached_status {
+        let id = if let Some(payload) = cached_status {
             // If already cached, send the notification immediately without creating
             // a persistent subscription.
             let _ = self.chan.tx.send(payload).await;
-            (sub_id, Default::default())
+            sub_id
         } else {
             // Otherwise, register a new one-shot subscription.
-            self.subscriptions
+            let (id, subscribed) = self
+                .subscriptions
                 .subscribe_to_signature(signature, self.chan.clone())
-                .await
+                .await;
+            self.signatures.push(signature, self.chan.id, subscribed);
+            id
         };
 
-        // Track the subscription in the per-connection expirer to prevent leaks.
-        self.signatures.push(signature, subscribed);
         Ok(SubResult::SubId(id))
     }
 }
