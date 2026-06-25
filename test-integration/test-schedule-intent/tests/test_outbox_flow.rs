@@ -1,8 +1,13 @@
 mod common;
-use std::sync::{Arc, Mutex, Once};
+use std::{
+    sync::{Arc, Mutex, Once},
+    time::Duration,
+};
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use common::*;
+use ephemeral_rollups_sdk::{compat, ephem::MagicIntentBundleBuilder};
 use integration_test_tools::{
     loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
@@ -27,6 +32,7 @@ use magicblock_magic_program_api::{
     MAGIC_CONTEXT_PUBKEY,
 };
 use magicblock_program::{
+    instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox_intent_bundles::OutboxIntentBundle,
     validator::init_validator_authority, MagicContext, SentCommit,
@@ -34,23 +40,228 @@ use magicblock_program::{
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use program_flexi_counter::{
-    instruction::create_intent_bundle_ix, state::FlexiCounter,
+    instruction::{
+        create_intent_bundle_commit_and_finalize_ix, create_intent_bundle_ix,
+    },
+    state::FlexiCounter,
 };
-use solana_rpc_client::nonblocking::rpc_client::RpcClient as AsyncRpcClient;
+use solana_rpc_client::{
+    nonblocking::rpc_client::RpcClient as AsyncRpcClient,
+    rpc_client::SerializableTransaction,
+};
+use solana_rpc_client_api::client_error;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
     transaction::Transaction,
 };
 
-// ---------------------------------------------------------------------------
-// NoopCallbackScheduler
-// ---------------------------------------------------------------------------
+type TestIntentExecutorCtx = IntentExecutorCtx<
+    TransactionPreparatorImpl,
+    RpcTaskInfoFetcher,
+    NoopCallbackScheduler,
+    TestOutboxClient,
+>;
+
+struct TestEnv {
+    ctx: IntegrationTestContext,
+    validator_authority: Keypair,
+    chain_mb_client: MagicblockRpcClient,
+    intent_client: IntentExecutionClient,
+    outbox_client: Arc<TestOutboxClient>,
+    table_mania: TableMania,
+    task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
+    stage_calls: Arc<Mutex<Vec<(u64, ExecutionStage)>>>,
+}
+
+impl TestEnv {
+    async fn setup() -> Self {
+        let validator_authority = ensure_validator_authority();
+        let ctx = IntegrationTestContext::try_new().unwrap();
+        let chain_rpc = Arc::new(ctx.try_chain_client_async().unwrap());
+        let ephem_rpc = Arc::new(ctx.try_ephem_client_async().unwrap());
+        let chain_mb_rpc = MagicblockRpcClient::new(chain_rpc);
+        let ephem_mb_rpc = MagicblockRpcClient::new(ephem_rpc.clone());
+
+        let intent_client = IntentExecutionClient::new(chain_mb_rpc.clone());
+        let outbox_client = Arc::new(TestOutboxClient::new(
+            ephem_rpc,
+            validator_authority.insecure_clone(),
+        ));
+        let stage_calls = outbox_client.stage_calls.clone();
+
+        let gc_config = GarbageCollectorConfig::default();
+        let table_mania = TableMania::new(
+            chain_mb_rpc.clone(),
+            &validator_authority,
+            Some(gc_config),
+        );
+        let compute_budget = ComputeBudgetConfig::new(1_000_000);
+        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
+            RpcTaskInfoFetcher::new(chain_mb_rpc.clone()),
+        ));
+
+        Self {
+            ctx,
+            validator_authority,
+            chain_mb_client: chain_mb_rpc,
+            intent_client,
+            outbox_client,
+            table_mania,
+            task_info_fetcher,
+
+            stage_calls,
+        }
+    }
+
+    fn executor_ctx(&self, actions_timeout: Duration) -> TestIntentExecutorCtx {
+        TestIntentExecutorCtx {
+            intent_client: self.intent_client.clone(),
+            transaction_preparator: self.transaction_preparator(),
+            task_info_fetcher: self.task_info_fetcher.clone(),
+            outbox_client: self.outbox_client.clone(),
+            actions_callback_executor: NoopCallbackScheduler,
+            actions_timeout,
+        }
+    }
+
+    fn transaction_preparator(&self) -> TransactionPreparatorImpl {
+        let compute_budget = ComputeBudgetConfig::new(1_000_000);
+        TransactionPreparatorImpl::new(
+            self.chain_mb_client.clone(),
+            self.table_mania.clone(),
+            compute_budget,
+        )
+    }
+}
+
+/// Schedyles commit of counters directly via magic-program using validator authority
+fn schedule(ctx: &IntegrationTestContext, counters: &[Pubkey]) {
+    let validator_keypair = ensure_validator_authority();
+
+    let schedule_ix = schedule_commit_instruction(
+        &validator_keypair.pubkey(),
+        counters.to_vec(),
+    );
+    let mut tx = Transaction::new_with_payer(
+        &[schedule_ix],
+        Some(&validator_keypair.pubkey()),
+    );
+    let sig = ctx
+        .send_transaction_ephem(&mut tx, &[&validator_keypair])
+        .unwrap();
+    println!("schedule sig: {}", sig);
+}
+
+/// Tries to accept intent
+fn steal_accept_intent(
+    ctx: &IntegrationTestContext,
+    intent_id: u64,
+) -> Result<(), anyhow::Error> {
+    let validator_keypair = ensure_validator_authority();
+
+    let accept_ix =
+        InstructionUtils::accept_scheduled_commits_instruction([intent_id]);
+    let mut tx = Transaction::new_with_payer(
+        &[accept_ix],
+        Some(&validator_keypair.pubkey()),
+    );
+
+    let (sig, confirmed) =
+        ctx.send_and_confirm_transaction_ephem(&mut tx, &[&validator_keypair])?;
+
+    if !confirmed {
+        Err(anyhow!("tx not confirmed: {}", sig))
+    } else {
+        println!("accept sig: {}", sig);
+        Ok(())
+    }
+}
+
+fn steal_schedule_accept_intent(
+    ctx: &IntegrationTestContext,
+    counters: &[Pubkey],
+) -> u64 {
+    const MAX_ATTEMPTS: u8 = 5;
+
+    let mut attempt = 0;
+    loop {
+        let intent_id = read_next_intent_id(ctx);
+        schedule(ctx, counters);
+        let result = steal_accept_intent(&ctx, intent_id);
+        match result {
+            Ok(()) => return intent_id,
+            Err(err) => {
+                println!("Failed to steal");
+
+                if attempt >= MAX_ATTEMPTS {
+                    panic!("Failed to steal intent: {}", err);
+                }
+                attempt += 1;
+            }
+        }
+    }
+}
+
+fn schedule_and_accept_2(
+    ctx: &IntegrationTestContext,
+    counters: &[Pubkey],
+) -> OutboxIntentBundle {
+    ctx.wait_for_next_slot_ephem().unwrap();
+
+    let intent_id = steal_schedule_accept_intent(&ctx, counters);
+    let pda = outbox_intent_pda(intent_id);
+    let data = ctx.fetch_ephem_account_data(pda).unwrap();
+    OutboxIntentBundle::try_from_bytes(&data).unwrap()
+}
+
+/// AcceptedIntentExecutor drives the full commit flow using TestOutboxClient.
+/// Verifies: executor succeeds, set_intent_execution_stage is called,
+/// and the committed value lands on the base chain.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_accepted_executor_outbox_flow() {
+    let test_env = TestEnv::setup().await;
+
+    let payer = setup_payer(&test_env.ctx);
+    let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+
+    init_counter(&test_env.ctx, &payer);
+    delegate_counter(&test_env.ctx, &payer);
+    add_to_counter(&test_env.ctx, &payer, 42);
+
+    let outbox_bundle = schedule_and_accept_2(&test_env.ctx, &[counter_pda]);
+    let intent_id = outbox_bundle.inner.id;
+
+    let executor_ctx = test_env.executor_ctx(DEFAULT_ACTIONS_TIMEOUT);
+    let executor = AcceptedIntentExecutor::new(executor_ctx);
+
+    let (result, cleanup_handle) =
+        Box::new(executor).execute(outbox_bundle.inner).await;
+    let _ = cleanup_handle.clean().await;
+
+    assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
+    let calls = test_env.stage_calls.lock().unwrap();
+    assert!(
+        !calls.is_empty(),
+        "Expected at least one set_intent_execution_stage call"
+    );
+    assert!(
+        calls.iter().all(|(id, _)| *id == intent_id),
+        "Stage calls contain unexpected intent ids"
+    );
+
+    let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+    let counter = test_env
+        .ctx
+        .fetch_chain_account_struct::<FlexiCounter>(counter_pda)
+        .unwrap();
+    assert_eq!(counter.count, 42);
+}
 
 #[derive(Clone, Default)]
 struct NoopCallbackScheduler;
-
 impl ActionsCallbackScheduler for NoopCallbackScheduler {
     fn schedule(
         &self,
@@ -65,12 +276,7 @@ impl ActionsCallbackScheduler for NoopCallbackScheduler {
     }
 }
 
-// ---------------------------------------------------------------------------
-// TestOutboxClient
-// ---------------------------------------------------------------------------
-
 struct TestOutboxReader;
-
 #[async_trait]
 impl OutboxIntentBundlesReader for TestOutboxReader {
     type Error = std::convert::Infallible;
@@ -167,10 +373,6 @@ impl OutboxClient for TestOutboxClient {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn ensure_validator_authority() -> Keypair {
     static ONCE: Once = Once::new();
     let kp = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
@@ -185,129 +387,20 @@ fn read_next_intent_id(ctx: &IntegrationTestContext) -> u64 {
     MagicContext::intent_id(&data)
 }
 
-/// Sends a single ER transaction: [schedule_commit_ix, accept_ix].
-/// Both instructions land atomically — MagicContext is drained within the
-/// same tx so CommittorService never sees the intent.
-/// Returns the OutboxIntentBundle in Accepted stage.
-fn schedule_and_accept(
-    ctx: &IntegrationTestContext,
-    payer: &Keypair,
-) -> OutboxIntentBundle {
-    ctx.wait_for_next_slot_ephem().unwrap();
-
-    let validator_keypair = ensure_validator_authority();
-    let intent_id = read_next_intent_id(ctx);
-
-    let destination = Keypair::new();
-    let schedule_ix = create_intent_bundle_ix(
-        vec![payer.pubkey()],
-        vec![],
-        destination.pubkey(),
-        vec![],
-        100_000,
-    );
-    let accept_ix = Instruction::new_with_bincode(
+pub fn schedule_commit_instruction(
+    payer: &Pubkey,
+    pdas: Vec<Pubkey>,
+) -> Instruction {
+    let mut account_metas = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+    ];
+    for pubkey in &pdas {
+        account_metas.push(AccountMeta::new_readonly(*pubkey, false));
+    }
+    Instruction::new_with_bincode(
         magicblock_magic_program_api::id(),
-        &MagicBlockInstruction::AcceptScheduleCommits,
-        vec![
-            AccountMeta::new_readonly(validator_keypair.pubkey(), true),
-            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-            AccountMeta::new(outbox_intent_pda(intent_id), false),
-        ],
-    );
-
-    let mut tx = Transaction::new_with_payer(
-        &[schedule_ix, accept_ix],
-        Some(&payer.pubkey()),
-    );
-    let (_, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(
-            &mut tx,
-            &[payer, &validator_keypair],
-        )
-        .unwrap();
-    assert!(confirmed, "schedule_and_accept tx not confirmed");
-
-    let pda = outbox_intent_pda(intent_id);
-    let data = ctx.fetch_ephem_account_data(pda).unwrap();
-    OutboxIntentBundle::try_from_bytes(&data).unwrap()
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-/// AcceptedIntentExecutor drives the full commit flow using TestOutboxClient.
-/// Verifies: executor succeeds, set_intent_execution_stage is called,
-/// and the committed value lands on the base chain.
-#[tokio::test]
-#[ignore]
-async fn test_accepted_executor_outbox_flow() {
-    let ctx = IntegrationTestContext::try_new().unwrap();
-    let payer = setup_payer(&ctx);
-
-    init_counter(&ctx, &payer);
-    delegate_counter(&ctx, &payer);
-    add_to_counter(&ctx, &payer, 42);
-
-    let outbox_bundle = schedule_and_accept(&ctx, &payer);
-    let intent_id = outbox_bundle.inner.id;
-
-    let validator_keypair = ensure_validator_authority();
-    let chain_rpc = Arc::new(ctx.try_chain_client_async().unwrap());
-    let ephem_rpc = Arc::new(ctx.try_ephem_client_async().unwrap());
-    let chain_mb_rpc = MagicblockRpcClient::new(chain_rpc);
-    let ephem_mb_rpc = MagicblockRpcClient::new(ephem_rpc.clone());
-
-    let outbox_client = Arc::new(TestOutboxClient::new(
-        ephem_rpc,
-        validator_keypair.insecure_clone(),
-    ));
-    let stage_calls = outbox_client.stage_calls.clone();
-
-    let gc_config = GarbageCollectorConfig::default();
-    let table_mania = TableMania::new(
-        chain_mb_rpc.clone(),
-        &validator_keypair,
-        Some(gc_config),
-    );
-    let compute_budget = ComputeBudgetConfig::new(1_000_000);
-    let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
-        RpcTaskInfoFetcher::new(ephem_mb_rpc),
-    ));
-    let transaction_preparator = TransactionPreparatorImpl::new(
-        chain_mb_rpc.clone(),
-        table_mania,
-        compute_budget,
-    );
-
-    let executor = AcceptedIntentExecutor::new(IntentExecutorCtx {
-        intent_client: IntentExecutionClient::new(chain_mb_rpc),
-        transaction_preparator,
-        task_info_fetcher,
-        outbox_client,
-        actions_callback_executor: NoopCallbackScheduler,
-        actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
-    });
-
-    let (result, cleanup_handle) =
-        Box::new(executor).execute(outbox_bundle.inner).await;
-    let _ = cleanup_handle.clean().await;
-
-    assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
-    let calls = stage_calls.lock().unwrap();
-    assert!(
-        !calls.is_empty(),
-        "Expected at least one set_intent_execution_stage call"
-    );
-    assert!(
-        calls.iter().all(|(id, _)| *id == intent_id),
-        "Stage calls contain unexpected intent ids"
-    );
-
-    let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
-    let counter = ctx
-        .fetch_chain_account_struct::<FlexiCounter>(counter_pda)
-        .unwrap();
-    assert_eq!(counter.count, 42);
+        &MagicBlockInstruction::ScheduleCommit,
+        account_metas,
+    )
 }

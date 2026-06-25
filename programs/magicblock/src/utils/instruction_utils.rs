@@ -36,8 +36,7 @@ impl InstructionUtils {
         Self::into_transaction(payer, ix, recent_blockhash)
     }
 
-    #[cfg(test)]
-    pub(crate) fn schedule_commit_instruction(
+    pub fn schedule_commit_instruction(
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Instruction {
@@ -149,7 +148,7 @@ impl InstructionUtils {
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
-    pub(crate) fn accept_scheduled_commits_instruction(
+    pub fn accept_scheduled_commits_instruction(
         intent_ids: impl IntoIterator<Item = u64>,
     ) -> Instruction {
         let mut account_metas = vec![

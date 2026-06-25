@@ -9953,6 +9953,7 @@ dependencies = [
 name = "test-schedule-intent"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "ephemeral-rollups-sdk",
  "integration-test-tools",
