@@ -34,6 +34,7 @@ pub struct ClonerStub {
     accounts_bank: Arc<AccountsBankStub>,
     cloned_programs: Arc<Mutex<HashMap<Pubkey, LoadedProgram>>>,
     clone_requests: Arc<Mutex<Vec<AccountCloneRequest>>>,
+    undelegation_requests: Arc<Mutex<Vec<Pubkey>>>,
     clone_delay: Arc<Mutex<Option<Duration>>>,
     account_clone_count: Arc<AtomicU64>,
     active_account_clones: Arc<AtomicU64>,
@@ -57,6 +58,7 @@ impl ClonerStub {
             cloned_programs:
                 Arc::<Mutex<HashMap<Pubkey, LoadedProgram>>>::default(),
             clone_requests: Arc::new(Mutex::new(Vec::new())),
+            undelegation_requests: Arc::new(Mutex::new(Vec::new())),
             clone_delay: Arc::new(Mutex::new(None)),
             account_clone_count: Arc::new(AtomicU64::new(0)),
             active_account_clones: Arc::new(AtomicU64::new(0)),
@@ -174,6 +176,10 @@ impl ClonerStub {
             notified.await;
         }
     }
+
+    pub fn undelegation_requests(&self) -> Vec<Pubkey> {
+        self.undelegation_requests.lock().unwrap().clone()
+    }
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -192,6 +198,13 @@ impl Cloner for ClonerStub {
             .fetch_max(active, Ordering::SeqCst);
         self.account_clone_count.fetch_add(1, Ordering::SeqCst);
         self.account_clone_notify.notify_waiters();
+
+        if request.needs_undelegation {
+            self.undelegation_requests
+                .lock()
+                .unwrap()
+                .push(request.pubkey);
+        }
 
         self.clone_requests.lock().unwrap().push(request.clone());
         let delay = *self.clone_delay.lock().unwrap();

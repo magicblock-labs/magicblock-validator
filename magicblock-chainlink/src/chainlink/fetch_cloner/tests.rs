@@ -5625,6 +5625,7 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 commit_frequency_ms: None,
                 delegation_actions: actions,
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -5676,6 +5677,7 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 commit_frequency_ms: None,
                 delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -5727,6 +5729,7 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 commit_frequency_ms: None,
                 delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -5814,6 +5817,7 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 commit_frequency_ms: None,
                 delegation_actions: actions,
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -5889,6 +5893,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                     commit_frequency_ms: None,
                     delegation_actions: actions.clone(),
                     delegated_to_other: None,
+                    needs_undelegation: false,
                 },
             )
             .await
@@ -5909,6 +5914,63 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
         !target_requests[0].delegation_actions.is_empty(),
         "the first clone remains the only action-bearing clone"
     );
+}
+
+#[tokio::test]
+async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let target_pubkey = random_pubkey();
+    let mut target_account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    target_account.set_remote_slot(CURRENT_SLOT);
+    target_account.set_delegated(true);
+
+    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
+        target_pubkey,
+        &[1],
+        vec![],
+    )]);
+
+    cloner.set_fail_next_clone(true);
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: target_pubkey,
+                account: target_account,
+                commit_frequency_ms: None,
+                delegation_actions: actions,
+                delegated_to_other: None,
+                needs_undelegation: false,
+            },
+        )
+        .await
+        .expect(
+            "failed action must be rescued by cloning and scheduling undelegation",
+        );
+
+    let clone_requests = cloner.clone_requests();
+    assert_eq!(clone_requests.len(), 2);
+    assert_eq!(cloner.undelegation_requests(), vec![target_pubkey]);
 }
 
 #[tokio::test]
@@ -5959,6 +6021,7 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 commit_frequency_ms: None,
                 delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await

@@ -221,7 +221,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         accounts_bank,
         cloner,
         config,
-        chainlink_config
+        chainlink_config,
     ))]
     pub async fn try_new_from_endpoints(
         endpoints: &Endpoints,

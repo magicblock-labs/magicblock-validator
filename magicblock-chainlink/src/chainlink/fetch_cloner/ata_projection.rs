@@ -217,6 +217,7 @@ where
         commit_frequency_ms: None,
         delegation_actions: delegation_actions.clone(),
         delegated_to_other: None,
+        needs_undelegation: false,
     })
 }
 
@@ -593,6 +594,7 @@ where
             commit_frequency_ms,
             delegation_actions: actions.unwrap_or_default(),
             delegated_to_other,
+            needs_undelegation: false,
         });
     }
 
