@@ -26,7 +26,7 @@ use solana_rpc_client_api::{
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tracing::{debug, error};
-
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use crate::service::outbox_intent_bundles_reader::{
     InternalOutboxIntentBundlesReader, OutboxIntentBundlesReader,
 };

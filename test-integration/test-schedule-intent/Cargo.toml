@@ -11,7 +11,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
-magicblock-committor-service = { workspace = true }
+magicblock-committor-service = { workspace = true, features = ["dev-context-only-utils"] }
 magicblock-core = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
 magicblock-magic-program-api = { workspace = true }

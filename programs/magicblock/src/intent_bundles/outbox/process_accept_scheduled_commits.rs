@@ -191,7 +191,7 @@ fn create_outbox_account_cpi(
     invoke_context: &mut InvokeContext,
     validator_auth: Pubkey,
     pda: Pubkey,
-    mut outbox_account: OutboxIntentBundle,
+    outbox_account: OutboxIntentBundle,
 ) -> Result<(), InstructionError> {
     let intent_id = outbox_account.inner.id;
     let data = outbox_account.try_to_bytes().map_err(|_| {

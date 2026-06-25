@@ -6,8 +6,8 @@ use std::{
 };
 
 use async_trait::async_trait;
-use magicblock_accounts_db::{error::AccountsDbError, AccountsDb};
-use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
+use magicblock_accounts_db::{error::AccountsDbError, traits::AccountsBank, AccountsDb};
+use magicblock_core::intent::outbox::{outbox_intent_pda, OUTBOX_INTENT_DISCRIMINATOR};
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::{AccountSharedData, ReadableAccount};
 use tracing::warn;
@@ -22,6 +22,12 @@ pub trait OutboxIntentBundlesReader: Send + 'static {
         &mut self,
         n: usize,
     ) -> Result<Vec<OutboxIntentBundle>, Self::Error>;
+
+    /// Fetches a single outbox intent by id. Returns `None` if the account does not exist.
+    async fn fetch_outbox_intent(
+        &self,
+        intent_id: u64,
+    ) -> Result<Option<OutboxIntentBundle>, Self::Error>;
 }
 
 pub struct InternalOutboxIntentBundlesReader {
@@ -163,6 +169,17 @@ impl OutboxIntentBundlesReader for InternalOutboxIntentBundlesReader {
         let take = n.min(self.buffer.len());
         Ok(self.buffer.drain(..take).collect())
     }
+
+    async fn fetch_outbox_intent(
+        &self,
+        intent_id: u64,
+    ) -> Result<Option<OutboxIntentBundle>, Self::Error> {
+        let pda = outbox_intent_pda(intent_id);
+        let Some(account) = self.accounts_db.get_account(&pda) else {
+            return Ok(None);
+        };
+        Ok(Some(OutboxIntentBundle::try_from_bytes(account.data())?))
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -171,6 +188,8 @@ pub enum OutboxIntentBundlesReaderError {
     ReadExceedsCapacityError(usize, usize),
     #[error("AccountsDbError: {0}")]
     AccountsDbError(#[from] AccountsDbError),
+    #[error("BincodeError: {0}")]
+    BincodeError(#[from] bincode::Error),
 }
 
 pub type OutboxIntentBundlesReaderResult<T> =

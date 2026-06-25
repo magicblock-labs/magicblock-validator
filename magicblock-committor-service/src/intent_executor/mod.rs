@@ -49,7 +49,7 @@ pub trait IntentExecutor<T>: Send + Sync + 'static {
     ) -> (IntentExecutionResult, CleanupHandle<T>);
 }
 
-fn build_stage_intent_executor<T, F, A, O>(
+pub fn build_stage_intent_executor<T, F, A, O>(
     ctx: IntentExecutorCtx<T, F, A, O>,
     status: OutboxIntentBundleStatus,
 ) -> Box<dyn IntentExecutor<T>>

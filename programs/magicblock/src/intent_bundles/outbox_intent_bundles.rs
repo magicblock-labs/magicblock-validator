@@ -1,4 +1,4 @@
-use std::{mem, ops::Deref};
+use std::ops::Deref;
 
 use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
 use magicblock_magic_program_api::outbox::{ExecutionStage, TwoStageProgress};
@@ -10,6 +10,7 @@ use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutboxIntentBundle {
     pub inner: ScheduledIntentBundle,
+    // TODO(edwin): define visibility
     pub status: OutboxIntentBundleStatus,
 }
 
@@ -21,30 +22,35 @@ impl OutboxIntentBundle {
         }
     }
 
-    pub fn apply_stage_transition(
+    pub(crate) fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,
     ) -> Result<(), &'static str> {
         self.status.apply_stage_transition(stage)
     }
 
-    pub(crate) fn try_to_bytes(&mut self) -> Result<Vec<u8>, bincode::Error> {
+    #[cfg(not(feature = "dev-context-only-utils"))]
+    pub(crate) fn try_to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
+        self.try_to_bytes_impl()
+    }
+
+    #[cfg(feature = "dev-context-only-utils")]
+    pub fn try_to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
+        self.try_to_bytes_impl()
+    }
+
+    fn try_to_bytes_impl(&self) -> Result<Vec<u8>, bincode::Error> {
         const DISCRIMINATOR_LEN: usize = OUTBOX_INTENT_DISCRIMINATOR.len();
 
-        // Replace current status with max size one
-        // Needed in order to estimate higher bound of account size to allocate
-        let prev_status = mem::replace(
-            &mut self.status,
-            OutboxIntentBundleStatus::max_size_variant(),
-        );
-        let max_body_size = bincode::serialized_size(self)? as usize;
+        // bincode serializes structs as field concatenation, so max body size
+        // is inner size + worst-case status size (TwoStage::Finalizing with 2 sigs)
+        let max_body_size = (bincode::serialized_size(&self.inner)?
+            + bincode::serialized_size(
+                &OutboxIntentBundleStatus::max_size_variant(),
+            )?) as usize;
 
-        // Allocate array of higher bound size
         let mut out = vec![0u8; DISCRIMINATOR_LEN + max_body_size];
         out[..DISCRIMINATOR_LEN].copy_from_slice(&OUTBOX_INTENT_DISCRIMINATOR);
-
-        // Switch status back
-        self.status = prev_status;
         bincode::serialize_into(
             std::io::Cursor::new(&mut out[DISCRIMINATOR_LEN..]),
             self,

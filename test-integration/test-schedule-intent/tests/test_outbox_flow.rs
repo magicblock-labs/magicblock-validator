@@ -14,9 +14,10 @@ use integration_test_tools::{
 use magicblock_committor_service::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
+        build_stage_intent_executor,
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
-        IntentExecutor, IntentExecutorCtx,
+        ExecutionOutput, IntentExecutor, IntentExecutorCtx,
     },
     outbox_client::{InternalOutboxClientError, OutboxClient},
     service::outbox_intent_bundles_reader::OutboxIntentBundlesReader,
@@ -34,8 +35,9 @@ use magicblock_magic_program_api::{
 use magicblock_program::{
     instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox_intent_bundles::OutboxIntentBundle,
-    validator::init_validator_authority, MagicContext, SentCommit,
+    outbox_intent_bundles::{OutboxIntentBundle, OutboxIntentBundleStatus},
+    validator::init_validator_authority,
+    MagicContext, SentCommit,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -205,7 +207,7 @@ fn steal_schedule_accept_intent(
     }
 }
 
-fn schedule_and_accept_2(
+fn schedule_and_accept(
     ctx: &IntegrationTestContext,
     counters: &[Pubkey],
 ) -> OutboxIntentBundle {
@@ -221,7 +223,7 @@ fn schedule_and_accept_2(
 /// Verifies: executor succeeds, set_intent_execution_stage is called,
 /// and the committed value lands on the base chain.
 #[tokio::test(flavor = "multi_thread")]
-async fn test_accepted_executor_outbox_flow() {
+async fn test_pickup_executed_intent() {
     let test_env = TestEnv::setup().await;
 
     let payer = setup_payer(&test_env.ctx);
@@ -230,29 +232,60 @@ async fn test_accepted_executor_outbox_flow() {
     init_counter(&test_env.ctx, &payer);
     delegate_counter(&test_env.ctx, &payer);
     add_to_counter(&test_env.ctx, &payer, 42);
+    let outbox_bundle = schedule_and_accept(&test_env.ctx, &[counter_pda]);
 
-    let outbox_bundle = schedule_and_accept_2(&test_env.ctx, &[counter_pda]);
-    let intent_id = outbox_bundle.inner.id;
-
+    // Execute intent
     let executor_ctx = test_env.executor_ctx(DEFAULT_ACTIONS_TIMEOUT);
     let executor = AcceptedIntentExecutor::new(executor_ctx);
-
-    let (result, cleanup_handle) =
-        Box::new(executor).execute(outbox_bundle.inner).await;
-    let _ = cleanup_handle.clean().await;
-
+    let (result, cleanup_handle) = Box::new(executor)
+        .execute(outbox_bundle.inner.clone())
+        .await;
     assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
-    let calls = test_env.stage_calls.lock().unwrap();
-    assert!(
-        !calls.is_empty(),
-        "Expected at least one set_intent_execution_stage call"
-    );
-    assert!(
-        calls.iter().all(|(id, _)| *id == intent_id),
-        "Stage calls contain unexpected intent ids"
-    );
 
-    let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+    cleanup_handle.clean().await.expect("cleanup failed");
+
+    // Simulates shutdown/crash after successful execution
+    // Validator could sent tx and then crash
+    // On restart validator will extract outbox bundles
+    let outbox_bundle = test_env
+        .outbox_client
+        .outbox_reader()
+        .fetch_outbox_intent(outbox_bundle.inner.id)
+        .await
+        .expect("fetch failed")
+        .expect("outbox bundle not found");
+
+    let ExecutionOutput::SingleStage(signature) = result.inner.unwrap() else {
+        panic!("Unexpected execution strategy");
+    };
+    assert!(
+        matches!(
+            outbox_bundle.status,
+            OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
+                signature
+            ))
+        ),
+        "Invalid outbox state"
+    );
+    // Builder executor
+    let executor = build_stage_intent_executor(
+        test_env.executor_ctx(DEFAULT_ACTIONS_TIMEOUT),
+        outbox_bundle.status,
+    );
+    let (result, cleanup_handle) = Box::new(executor)
+        .execute(outbox_bundle.inner.clone())
+        .await;
+    let ExecutionOutput::SingleStage(retried_signature) = result.inner.unwrap()
+    else {
+        panic!("Unexpected execution strategy");
+    };
+    assert_eq!(
+        signature, retried_signature,
+        "Execution shouldn't be retried"
+    );
+    cleanup_handle.clean().await.expect("cleanup failed");
+
+    // Validate on chain state
     let counter = test_env
         .ctx
         .fetch_chain_account_struct::<FlexiCounter>(counter_pda)
@@ -276,16 +309,29 @@ impl ActionsCallbackScheduler for NoopCallbackScheduler {
     }
 }
 
-struct TestOutboxReader;
+struct TestOutboxReader(Arc<AsyncRpcClient>);
+
 #[async_trait]
 impl OutboxIntentBundlesReader for TestOutboxReader {
-    type Error = std::convert::Infallible;
+    type Error = anyhow::Error;
 
     async fn read(
         &mut self,
         _n: usize,
     ) -> Result<Vec<OutboxIntentBundle>, Self::Error> {
         Ok(vec![])
+    }
+
+    async fn fetch_outbox_intent(
+        &self,
+        intent_id: u64,
+    ) -> Result<Option<OutboxIntentBundle>, Self::Error> {
+        let pda = outbox_intent_pda(intent_id);
+        let mut accounts = self.0.get_multiple_accounts(&[pda]).await?;
+        let Some(account) = accounts.pop().flatten() else {
+            return Ok(None);
+        };
+        Ok(Some(OutboxIntentBundle::try_from_bytes(&account.data)?))
     }
 }
 
@@ -369,7 +415,7 @@ impl OutboxClient for TestOutboxClient {
     }
 
     fn outbox_reader(&self) -> Self::OutboxReader {
-        TestOutboxReader
+        TestOutboxReader(self.ephem_rpc.clone())
     }
 }
 
