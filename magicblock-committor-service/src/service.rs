@@ -29,7 +29,7 @@ use tracing::{error, info, instrument};
 use crate::{
     committor_processor::CommittorProcessor,
     error::CommittorServiceResult,
-    intent_execution_manager::BroadcastedIntentExecutionResult,
+    intent_engine_handle::BroadcastedIntentExecutionResult,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
     outbox_client::{InternalOutboxClientError, OutboxClient},
     service::outbox_intent_bundles_reader::{

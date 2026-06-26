@@ -17,8 +17,8 @@ use tracing::{error, info, instrument};
 use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
-    intent_execution_manager::{
-        db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
+    intent_engine_handle::{
+        db::DummyDB, BroadcastedIntentExecutionResult, IntentEngineHandle,
     },
     intent_executor::{
         error::IntentExecutorError,
@@ -40,7 +40,7 @@ pub struct CommittorProcessor {
     authority: Keypair,
     _table_mania: TableMania,
     magic_rpc_client: MagicblockRpcClient,
-    commits_scheduler: IntentExecutionManager<DummyDB>,
+    commits_scheduler: IntentEngineHandle<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
 }
@@ -93,7 +93,7 @@ impl CommittorProcessor {
         let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
             RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
         ));
-        let commits_scheduler = IntentExecutionManager::new(
+        let commits_scheduler = IntentEngineHandle::new(
             magic_block_rpc_client.clone(),
             // TODO(edwin): use DumberDb
             DummyDB::new(),

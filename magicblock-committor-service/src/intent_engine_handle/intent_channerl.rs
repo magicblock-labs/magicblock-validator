@@ -13,7 +13,7 @@ use tokio::sync::{
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 
-use crate::intent_execution_manager::{db, db::DB};
+use crate::intent_engine_handle::{db, db::DB};
 
 const POISONED_MSG: &str = "Dummy DB mutex poisoned";
 

@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::anyhow;
-use serial_test::serial;
 use async_trait::async_trait;
 use common::*;
 use ephemeral_rollups_sdk::{compat, ephem::MagicIntentBundleBuilder};
@@ -57,6 +56,7 @@ use program_flexi_counter::{
     },
     state::FlexiCounter,
 };
+use serial_test::serial;
 use solana_rpc_client::{
     http_sender::HttpSender,
     nonblocking::rpc_client::RpcClient as AsyncRpcClient,

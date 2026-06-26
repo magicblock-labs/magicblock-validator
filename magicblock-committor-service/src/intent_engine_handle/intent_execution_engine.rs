@@ -18,7 +18,7 @@ use tokio_stream::StreamExt;
 use tracing::{error, info, instrument, trace, warn};
 
 use crate::{
-    intent_execution_manager::{
+    intent_engine_handle::{
         db::DB,
         intent_channerl::{IntentScheduleError, IntentStream},
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
@@ -29,7 +29,6 @@ use crate::{
         strategy_executor::error::TransactionStrategyExecutionError,
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
-    tasks::task_strategist::TransactionStrategy,
     transaction_preparator::TransactionPreparator,
 };
 
@@ -357,7 +356,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        intent_execution_manager::{
+        intent_engine_handle::{
             db::{DummyDB, DB},
             intent_channerl::{channel, IntentScheduleHandle},
             intent_scheduler::{create_test_intent, create_test_intent_bundle},

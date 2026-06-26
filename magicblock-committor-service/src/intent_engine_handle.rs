@@ -13,7 +13,7 @@ use magicblock_table_mania::TableMania;
 use tokio::sync::broadcast;
 
 use crate::{
-    intent_execution_manager::{
+    intent_engine_handle::{
         db::DB,
         intent_channerl::{channel, IntentScheduleError, IntentScheduleHandle},
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
@@ -26,14 +26,12 @@ use crate::{
     outbox_client::OutboxClient,
 };
 
-// TODO(edwin): rename
-pub struct IntentExecutionManager<D: DB> {
-    // TODO(edwin): add JoinHandle of
+pub struct IntentEngineHandle<D: DB> {
     intent_schedule_handle: IntentScheduleHandle<D>,
     result_subscriber: ResultSubscriber,
 }
 
-impl<D: DB> IntentExecutionManager<D> {
+impl<D: DB> IntentEngineHandle<D> {
     pub fn new<A, O>(
         rpc_client: MagicblockRpcClient,
         db: D,
