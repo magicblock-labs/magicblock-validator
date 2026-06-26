@@ -57,9 +57,6 @@ pub mod pubsub_common;
 pub mod pubsub_connection;
 pub mod pubsub_connection_pool;
 mod remote_account;
-#[cfg(not(test))]
-mod subscription_reconciler;
-#[cfg(test)]
 pub(crate) mod subscription_reconciler;
 
 #[cfg(test)]
