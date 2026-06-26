@@ -17,7 +17,6 @@ use crate::{
     ComputeBudgetConfig,
 };
 
-// TODO(edwin): T could be removed if cleanuphandle is a trait
 pub trait IntentExecutorBuilder<T> {
     fn create_instance(
         &self,

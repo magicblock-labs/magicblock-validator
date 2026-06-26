@@ -726,7 +726,7 @@ fn test_close_buffer_limit() {
     use solana_transaction::Transaction;
     use tracing::info;
 
-    use crate::{self, test_utils};
+    use crate::test_utils;
 
     test_utils::init_test_logger();
 
