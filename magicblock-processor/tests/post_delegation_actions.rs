@@ -1,6 +1,7 @@
 use guinea::GuineaInstruction;
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs, instruction::AccountCloneFields,
+    MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
 };
 use magicblock_program::{
     instruction_utils::InstructionUtils,
@@ -12,6 +13,20 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 use solana_signer::Signer;
 use test_kit::ExecutionTestEnv;
+
+/// Inserts the magic context account so that scheduling instructions which
+/// write scheduled actions into it can execute against the runtime.
+fn insert_magic_context(env: &ExecutionTestEnv) {
+    let mut magic_context = AccountSharedData::new(
+        u64::MAX,
+        MAGIC_CONTEXT_SIZE,
+        &magicblock_magic_program_api::ID,
+    );
+    magic_context.set_delegated(true);
+    env.accountsdb
+        .insert_account(&MAGIC_CONTEXT_PUBKEY, &magic_context)
+        .unwrap();
+}
 
 #[tokio::test]
 async fn executor_runs_post_delegation_actions_after_clone() {
@@ -89,4 +104,125 @@ async fn executor_runs_post_delegation_actions_after_clone() {
 
     let counter_account = env.get_account(counter);
     assert_eq!(counter_account.data(), &[1]);
+}
+
+#[tokio::test]
+async fn schedule_undelegation_marks_cloned_account_as_undelegated() {
+    generate_validator_authority_if_needed();
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let validator = validator_authority();
+    env.fund_account(validator.pubkey(), 10_000_000);
+    insert_magic_context(&env);
+
+    // The account being rescued starts as a plain remote account.
+    let target = Pubkey::new_unique();
+    env.accountsdb
+        .insert_account(
+            &target,
+            &AccountSharedData::new(100, 0, &system_program::id()),
+        )
+        .unwrap();
+
+    // Clone it as a delegated account, then schedule its undelegation in the
+    // same transaction (mirrors the cloner's small-account rescue path).
+    let clone_ix = InstructionUtils::clone_account_instruction(
+        target,
+        vec![7],
+        AccountCloneFields {
+            lamports: 1_000_000,
+            owner: system_program::id(),
+            delegated: true,
+            remote_slot: 1,
+            ..Default::default()
+        },
+        Vec::new(),
+    );
+    let schedule_ix =
+        InstructionUtils::schedule_cloned_account_undelegation_instruction(
+            target,
+        );
+
+    let txn = env.build_transaction_with_signers(
+        &[clone_ix, schedule_ix],
+        &[&validator],
+    );
+    env.execute_transaction(txn).await.unwrap();
+
+    // The schedule instruction mutates the cloned account's owner/state, so it
+    // must be writable in the instruction. After execution the account is
+    // marked undelegating and no longer delegated.
+    let target_account = env.get_account(target);
+    assert!(target_account.undelegating());
+    assert!(!target_account.delegated());
+}
+
+#[tokio::test]
+async fn chunked_rescue_undelegation_clears_pending_clone() {
+    generate_validator_authority_if_needed();
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let validator = validator_authority();
+    env.fund_account(validator.pubkey(), 10_000_000);
+    insert_magic_context(&env);
+
+    let target = Pubkey::new_unique();
+    env.accountsdb
+        .insert_account(
+            &target,
+            &AccountSharedData::new(100, 0, &system_program::id()),
+        )
+        .unwrap();
+
+    let fields = AccountCloneFields {
+        lamports: 1_000_000,
+        owner: system_program::id(),
+        delegated: true,
+        remote_slot: 1,
+        ..Default::default()
+    };
+
+    // 1. Initialize a chunked (large-account) clone. This registers the pubkey
+    //    in the process-global PENDING_CLONES set.
+    let init_ix = InstructionUtils::clone_account_init_instruction(
+        target,
+        1,
+        vec![1],
+        fields,
+    );
+    let init_tx = env.build_transaction_with_signers(&[init_ix], &[&validator]);
+    env.execute_transaction(init_tx).await.unwrap();
+
+    // 2. Final chunk requesting undelegation, paired with the schedule
+    //    instruction. The final `CloneAccountContinue(needs_undelegation=true)`
+    //    intentionally leaves the clone pending so the sibling schedule
+    //    instruction can validate the previous clone; the schedule instruction
+    //    must then clear the pending entry.
+    let continue_ix = InstructionUtils::clone_account_continue_instruction(
+        target,
+        1,
+        Vec::new(),
+        true,
+        Vec::new(),
+        true,
+    );
+    let schedule_ix =
+        InstructionUtils::schedule_cloned_account_undelegation_instruction(
+            target,
+        );
+    let rescue_tx = env.build_transaction_with_signers(
+        &[continue_ix, schedule_ix],
+        &[&validator],
+    );
+
+    // Before the rescue, the chunked clone is still pending (the final continue
+    // intentionally leaves it so the schedule instruction can validate it).
+    assert!(magicblock_program::is_pending_clone(&target));
+
+    env.execute_transaction(rescue_tx).await.unwrap();
+    assert!(env.get_account(target).undelegating());
+    assert!(!env.get_account(target).delegated());
+
+    // The schedule instruction must clear the process-global pending-clone
+    // entry; otherwise a later clone init fails with CloneAlreadyPending and
+    // cleanup could close already-completed state.
+    assert!(!magicblock_program::is_pending_clone(&target));
 }

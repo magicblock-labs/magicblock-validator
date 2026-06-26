@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use magicblock_aml::RiskService;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     errors::ChainlinkResult,
@@ -54,6 +55,13 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn init(slot: Slot) -> Self {
+        Self::init_with_risk_service(slot, None).await
+    }
+
+    pub async fn init_with_risk_service(
+        slot: Slot,
+        risk_service: Option<Arc<RiskService>>,
+    ) -> Self {
         let (rpc_client, pubsub_client) = {
             let rpc_client =
                 ChainRpcClientMockBuilder::new().slot(slot).build();
@@ -103,7 +111,7 @@ impl TestContext {
                             validator_keypair.insecure_clone(),
                             rx,
                             None,
-                            None,
+                            risk_service,
                         )),
                         Some(provider),
                     )
