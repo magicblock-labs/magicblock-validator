@@ -20,8 +20,9 @@ use magicblock_chainlink::{
 };
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor, config::ChainConfig,
-    outbox_client::InternalOutboxClient, service::IntentExecutionService,
-    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
+    outbox::outbox_client::InternalOutboxClient,
+    service::IntentExecutionService, ComputeBudgetConfig,
+    DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{
     config::{

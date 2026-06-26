@@ -31,7 +31,7 @@ use crate::{
         single_stage_intent_executor::SingleStageIntentExecutor,
         two_stage_intent_executor::TwoStageIntentExecutor,
     },
-    outbox_client::OutboxClient,
+    outbox::outbox_client::OutboxClient,
     tasks::{
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         task_strategist::TransactionStrategy,

@@ -9,14 +9,20 @@ use std::{
 use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
-        accepted_intent_executor::AcceptedIntentExecutor
-        ,
-        intent_execution_client::IntentExecutionClient,
-        IntentExecutorCtx,
+        accepted_intent_executor::AcceptedIntentExecutor,
+        intent_execution_client::IntentExecutionClient, IntentExecutorCtx,
     },
-    outbox_client::{InternalOutboxClientError, OutboxClient},
-    service::outbox_intent_bundles_reader::OutboxIntentBundlesReader,
-    tasks::commit_task::{CommitDelivery, CommitTask},
+    outbox::{
+        outbox_client::{InternalOutboxClientError, OutboxClient},
+        outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+    },
+    tasks::{
+        commit_task::{CommitDelivery, CommitTask},
+        task_info_fetcher::{
+            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
+            TaskInfoFetcherResult,
+        },
+    },
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -40,10 +46,6 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
     transaction::Transaction,
-};
-use magicblock_committor_service::tasks::task_info_fetcher::{
-    CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
-    TaskInfoFetcherResult,
 };
 
 // Helper function to create a test RPC client
@@ -155,6 +157,13 @@ impl OutboxIntentBundlesReader for MockOutboxReader {
         _n: usize,
     ) -> Result<Vec<OutboxIntentBundle>, Self::Error> {
         Ok(vec![])
+    }
+
+    async fn fetch_outbox_intent(
+        &self,
+        intent_id: u64,
+    ) -> Result<Option<OutboxIntentBundle>, Self::Error> {
+        Ok(None)
     }
 }
 

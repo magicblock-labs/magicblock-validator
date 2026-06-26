@@ -11,7 +11,7 @@ use crate::{
         intent_execution_client::IntentExecutionClient, IntentExecutor,
         IntentExecutorCtx,
     },
-    outbox_client::OutboxClient,
+    outbox::outbox_client::OutboxClient,
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     transaction_preparator::TransactionPreparatorImpl,
     ComputeBudgetConfig,

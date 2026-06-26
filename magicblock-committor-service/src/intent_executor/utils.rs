@@ -20,7 +20,7 @@ use crate::{
         },
         ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
     },
-    outbox_client::OutboxClient,
+    outbox::outbox_client::OutboxClient,
     tasks::{
         task_builder::{TaskBuilderImpl, TasksBuilder},
         task_info_fetcher::TaskInfoFetcher,

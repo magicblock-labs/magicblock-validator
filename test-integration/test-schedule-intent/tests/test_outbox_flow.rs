@@ -14,11 +14,14 @@ use magicblock_committor_service::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
         build_stage_intent_executor,
-        intent_execution_client::IntentExecutionClient,
-        ExecutionOutput, IntentExecutor, IntentExecutorCtx,
+        intent_execution_client::IntentExecutionClient, ExecutionOutput,
+        IntentExecutor, IntentExecutorCtx,
     },
-    outbox_client::{InternalOutboxClientError, OutboxClient},
-    service::outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+    outbox::{
+        outbox_client::{InternalOutboxClientError, OutboxClient},
+        outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+    },
+    tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     transaction_preparator::TransactionPreparatorImpl,
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
@@ -48,8 +51,7 @@ use magicblock_program::{
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use program_flexi_counter::{
-    instruction::create_transfer_intent_ix,
-    state::FlexiCounter,
+    instruction::create_transfer_intent_ix, state::FlexiCounter,
 };
 use serial_test::serial;
 use solana_rpc_client::{
@@ -66,7 +68,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use magicblock_committor_service::tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher};
 
 type CallbackRecord =
     (Vec<BaseActionCallback>, Option<Signature>, ActionResult);

@@ -27,6 +27,10 @@ use magicblock_committor_service::{
     },
     tasks::{
         task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
+        task_info_fetcher::{
+            CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+            TaskInfoFetcherError,
+        },
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
     transaction_preparator::{
@@ -65,10 +69,7 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
-use magicblock_committor_service::tasks::task_info_fetcher::{
-    CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
-    TaskInfoFetcherError,
-};
+
 use crate::{
     common::{MockActionsCallbackExecutor, MockOutboxClient, TestFixture},
     utils::{
@@ -1428,7 +1429,7 @@ async fn create_two_stage_executor<'a>(
         TaskStrategist::build_strategy(commit_tasks, authority).unwrap();
     let finalize_strategy =
         TaskStrategist::build_strategy(finalize_tasks, authority).unwrap();
-    let state = Initialized::new(commit_strategy, finalize_strategy, None);
+    let state = Initialized::new(commit_strategy, finalize_strategy);
     TwoStageStrategyExecutor::new(
         state,
         fixture.authority.insecure_clone(),

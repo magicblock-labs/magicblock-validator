@@ -27,7 +27,7 @@ use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tracing::{debug, error};
 
-use crate::service::outbox_intent_bundles_reader::{
+use crate::outbox::outbox_intent_bundles_reader::{
     InternalOutboxIntentBundlesReader, OutboxIntentBundlesReader,
 };
 

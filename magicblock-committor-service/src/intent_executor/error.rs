@@ -6,7 +6,7 @@ use solana_signer::SignerError;
 
 use crate::{
     intent_executor::strategy_executor::error::TransactionStrategyExecutionError,
-    outbox_client::InternalOutboxClientError,
+    outbox::outbox_client::InternalOutboxClientError,
     tasks::{
         task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
     },

@@ -1,5 +1,3 @@
-pub mod outbox_intent_bundles_reader;
-
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
@@ -31,9 +29,11 @@ use crate::{
     error::CommittorServiceResult,
     intent_engine::BroadcastedIntentExecutionResult,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
-    outbox_client::{InternalOutboxClientError, OutboxClient},
-    service::outbox_intent_bundles_reader::{
-        OutboxIntentBundlesReader, OutboxIntentBundlesReaderError,
+    outbox::{
+        outbox_client::{InternalOutboxClientError, OutboxClient},
+        outbox_intent_bundles_reader::{
+            OutboxIntentBundlesReader, OutboxIntentBundlesReaderError,
+        },
     },
 };
 

@@ -25,7 +25,7 @@ use crate::{
         },
         IntentExecutionReport,
     },
-    outbox_client::OutboxClient,
+    outbox::outbox_client::OutboxClient,
     tasks::{
         task_builder::TaskBuilderError,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},

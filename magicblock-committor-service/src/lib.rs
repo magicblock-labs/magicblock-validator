@@ -10,7 +10,7 @@ pub mod transaction_preparator;
 pub mod transactions;
 pub(crate) mod utils;
 
-pub mod outbox_client;
+pub mod outbox;
 pub mod service;
 #[cfg(test)]
 pub mod test_utils;
