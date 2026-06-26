@@ -255,9 +255,12 @@ impl MagicValidator {
 
         let replication_service =
             if let Some((broker_source, is_fresh_start)) = broker {
-                let messages_rx = dispatch.replication_messages.take().expect(
-                    "replication channel should always exist after init",
-                );
+                let messages_rx =
+                    dispatch.replication_messages.take().ok_or_else(|| {
+                        ApiError::FailedToSendModeSwitch(
+                            "replication channel missing after init".to_owned(),
+                        )
+                    })?;
                 Some(ReplicationService::new(
                     broker_source,
                     mode_tx.clone(),
