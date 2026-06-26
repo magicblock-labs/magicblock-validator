@@ -18,13 +18,15 @@ use crate::{
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::utils::check_pending_signature,
-        task_info_fetcher::{ResetType, TaskInfoFetcher},
         utils::{build_commit_finalize_tasks, execute_single_stage_flow},
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
     outbox_client::OutboxClient,
-    tasks::task_strategist::{TaskStrategist, TransactionStrategy},
+    tasks::{
+        task_info_fetcher::{ResetType, TaskInfoFetcher},
+        task_strategist::{TaskStrategist, TransactionStrategy},
+    },
     transaction_preparator::TransactionPreparator,
 };
 

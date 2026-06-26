@@ -15,7 +15,6 @@ use crate::{
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::two_stage::Initialized,
-        task_info_fetcher::{ResetType, TaskInfoFetcher},
         utils::{
             build_commit_finalize_tasks, execute_single_stage_flow,
             execute_two_stage_flow,
@@ -26,6 +25,7 @@ use crate::{
     outbox_client::OutboxClient,
     tasks::{
         task_builder::TasksBuilder,
+        task_info_fetcher::{ResetType, TaskInfoFetcher},
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
             TwoStageExecutionMode,

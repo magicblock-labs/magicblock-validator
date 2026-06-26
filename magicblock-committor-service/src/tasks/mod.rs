@@ -19,6 +19,7 @@ use solana_pubkey::Pubkey;
 pub mod commit_finalize_task;
 pub mod commit_task;
 pub mod task_builder;
+pub mod task_info_fetcher;
 pub mod task_strategist;
 pub mod utils;
 

@@ -19,11 +19,13 @@ use crate::{
                 handle_actions_result, stage_execution_loop, ExecutionState,
             },
         },
-        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         IntentExecutionReport,
     },
     outbox_client::OutboxClient,
-    tasks::task_strategist::TransactionStrategy,
+    tasks::{
+        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
+        task_strategist::TransactionStrategy,
+    },
     transaction_preparator::TransactionPreparator,
 };
 

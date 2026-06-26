@@ -5,7 +5,6 @@ pub mod intent_execution_client;
 pub(crate) mod intent_executor_factory;
 pub mod single_stage_intent_executor;
 pub mod strategy_executor;
-pub mod task_info_fetcher;
 pub mod two_stage_intent_executor;
 pub mod utils;
 
@@ -30,11 +29,13 @@ use crate::{
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
         single_stage_intent_executor::SingleStageIntentExecutor,
-        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         two_stage_intent_executor::TwoStageIntentExecutor,
     },
     outbox_client::OutboxClient,
-    tasks::task_strategist::TransactionStrategy,
+    tasks::{
+        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
+        task_strategist::TransactionStrategy,
+    },
     transaction_preparator::TransactionPreparator,
 };
 

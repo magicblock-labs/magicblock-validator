@@ -18,12 +18,12 @@ use crate::{
                 FinalizeStage, SingleStage,
             },
         },
-        task_info_fetcher::TaskInfoFetcher,
         ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
     },
     outbox_client::OutboxClient,
     tasks::{
         task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_info_fetcher::TaskInfoFetcher,
         task_strategist::TransactionStrategy,
         BaseTaskImpl,
     },

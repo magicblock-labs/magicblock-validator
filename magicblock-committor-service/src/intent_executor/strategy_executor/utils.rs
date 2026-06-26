@@ -23,12 +23,12 @@ use crate::{
             single_stage::SingleStageStrategyExecutor,
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
         },
-        task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         IntentExecutionReport,
     },
     outbox_client::OutboxClient,
     tasks::{
         task_builder::TaskBuilderError,
+        task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         task_strategist::{TaskStrategist, TransactionStrategy},
         BaseTaskImpl,
     },

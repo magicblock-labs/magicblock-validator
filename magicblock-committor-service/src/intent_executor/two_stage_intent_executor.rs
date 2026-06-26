@@ -23,7 +23,6 @@ use crate::{
                 check_pending_signature, execute_with_timeout, FinalizeStage,
             },
         },
-        task_info_fetcher::{ResetType, TaskInfoFetcher},
         utils::{build_commit_finalize_tasks, execute_two_stage_flow},
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
@@ -31,6 +30,7 @@ use crate::{
     outbox_client::OutboxClient,
     tasks::{
         task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_info_fetcher::{ResetType, TaskInfoFetcher},
         task_strategist::{
             TaskStrategist, TransactionStrategy, TwoStageExecutionMode,
         },

@@ -7,13 +7,12 @@ use magicblock_table_mania::TableMania;
 
 use crate::{
     intent_executor::{
-        build_stage_intent_executor,
-        error::IntentExecutorError,
-        intent_execution_client::IntentExecutionClient,
-        task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
-        IntentExecutor, IntentExecutorCtx,
+        build_stage_intent_executor, error::IntentExecutorError,
+        intent_execution_client::IntentExecutionClient, IntentExecutor,
+        IntentExecutorCtx,
     },
     outbox_client::OutboxClient,
+    tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     transaction_preparator::TransactionPreparatorImpl,
     ComputeBudgetConfig,
 };

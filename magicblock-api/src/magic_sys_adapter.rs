@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
-    intent_executor::task_info_fetcher::TaskInfoFetcherResult,
+    tasks::task_info_fetcher::TaskInfoFetcherResult,
 };
 use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use magicblock_metrics::metrics;

@@ -22,10 +22,6 @@ use magicblock_committor_service::{
             two_stage::{Initialized, TwoStageStrategyExecutor},
             utils::prepare_and_execute_strategy,
         },
-        task_info_fetcher::{
-            CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
-            TaskInfoFetcherError,
-        },
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
@@ -69,7 +65,10 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
-
+use magicblock_committor_service::tasks::task_info_fetcher::{
+    CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+    TaskInfoFetcherError,
+};
 use crate::{
     common::{MockActionsCallbackExecutor, MockOutboxClient, TestFixture},
     utils::{

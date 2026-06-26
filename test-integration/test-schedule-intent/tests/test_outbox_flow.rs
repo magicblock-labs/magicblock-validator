@@ -7,7 +7,6 @@ use std::{
 use anyhow::anyhow;
 use async_trait::async_trait;
 use common::*;
-use ephemeral_rollups_sdk::{compat, ephem::MagicIntentBundleBuilder};
 use integration_test_tools::{
     loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
@@ -16,7 +15,6 @@ use magicblock_committor_service::{
         accepted_intent_executor::AcceptedIntentExecutor,
         build_stage_intent_executor,
         intent_execution_client::IntentExecutionClient,
-        task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
         ExecutionOutput, IntentExecutor, IntentExecutorCtx,
     },
     outbox_client::{InternalOutboxClientError, OutboxClient},
@@ -50,10 +48,7 @@ use magicblock_program::{
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use program_flexi_counter::{
-    instruction::{
-        create_intent_bundle_commit_and_finalize_ix, create_intent_bundle_ix,
-        create_transfer_intent_ix,
-    },
+    instruction::create_transfer_intent_ix,
     state::FlexiCounter,
 };
 use serial_test::serial;
@@ -71,6 +66,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use magicblock_committor_service::tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher};
 
 type CallbackRecord =
     (Vec<BaseActionCallback>, Option<Signature>, ActionResult);

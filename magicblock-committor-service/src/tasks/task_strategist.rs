@@ -397,14 +397,12 @@ mod tests {
     use super::*;
     use crate::{
         intent_engine::intent_scheduler::create_test_intent,
-        intent_executor::task_info_fetcher::{
-            TaskInfoFetcher, TaskInfoFetcherResult,
-        },
         tasks::{
             commit_task::CommitTask,
             task_builder::{
                 TaskBuilderImpl, TasksBuilder, COMMIT_STATE_SIZE_THRESHOLD,
             },
+            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
             BaseActionTask, BaseActionTaskV1, FinalizeTask, TaskStrategy,
             UndelegateTask,
         },

@@ -19,10 +19,13 @@ use crate::{
                 handle_undelegation_error, prepare_and_execute_strategy,
             },
         },
-        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         IntentExecutionReport,
     },
-    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
+    tasks::{
+        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
+        task_strategist::TransactionStrategy,
+        BaseTaskImpl, FinalizeTask,
+    },
     transaction_preparator::TransactionPreparator,
 };
 

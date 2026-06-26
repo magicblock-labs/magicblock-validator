@@ -12,15 +12,13 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use tracing::error;
 
-use crate::{
-    intent_executor::task_info_fetcher::{
+use crate::tasks::{
+    commit_task::{CommitDelivery, CommitTask},
+    task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult,
     },
-    tasks::{
-        commit_task::{CommitDelivery, CommitTask},
-        BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
-        CommitFinalizeTask, FinalizeTask, UndelegateTask,
-    },
+    BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
+    CommitFinalizeTask, FinalizeTask, UndelegateTask,
 };
 
 #[async_trait]

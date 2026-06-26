@@ -21,9 +21,9 @@ use crate::{
     intent_executor::{
         error::IntentExecutorError,
         intent_executor_factory::{ExecutorConfig, IntentExecutorBuilderImpl},
-        task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     },
     outbox_client::OutboxClient,
+    tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
 };
 
 pub struct IntentEngineHandle<D: DB> {

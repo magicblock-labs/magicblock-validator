@@ -9,13 +9,9 @@ use std::{
 use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
-        accepted_intent_executor::AcceptedIntentExecutor,
-        error::IntentExecutorError,
+        accepted_intent_executor::AcceptedIntentExecutor
+        ,
         intent_execution_client::IntentExecutionClient,
-        task_info_fetcher::{
-            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
-            TaskInfoFetcherResult,
-        },
         IntentExecutorCtx,
     },
     outbox_client::{InternalOutboxClientError, OutboxClient},
@@ -44,6 +40,10 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
     transaction::Transaction,
+};
+use magicblock_committor_service::tasks::task_info_fetcher::{
+    CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
+    TaskInfoFetcherResult,
 };
 
 // Helper function to create a test RPC client

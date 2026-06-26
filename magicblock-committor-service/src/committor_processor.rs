@@ -21,14 +21,13 @@ use crate::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentEngineHandle,
     },
     intent_executor::{
-        error::IntentExecutorError,
-        intent_executor_factory::ExecutorConfig,
-        task_info_fetcher::{
-            CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
-            TaskInfoFetcherResult,
-        },
+        error::IntentExecutorError, intent_executor_factory::ExecutorConfig,
     },
     outbox_client::OutboxClient,
+    tasks::task_info_fetcher::{
+        CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+        TaskInfoFetcherResult,
+    },
 };
 
 const POISONED_MUTEX_MSG: &str =
