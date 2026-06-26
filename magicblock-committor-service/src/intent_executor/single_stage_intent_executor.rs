@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    ops::ControlFlow,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
@@ -14,6 +17,7 @@ use crate::{
     intent_executor::{
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
+        strategy_executor::utils::check_pending_signature,
         task_info_fetcher::{ResetType, TaskInfoFetcher},
         utils::{build_commit_finalize_tasks, execute_single_stage_flow},
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
@@ -76,29 +80,43 @@ where
         intent_bundle: ScheduledIntentBundle,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        // It we're here so previous run determined this should be single stage
-        let (commit_tasks, finalize_tasks) = build_commit_finalize_tasks(
-            &intent_bundle,
-            &self.ctx.task_info_fetcher,
+        let flow = check_pending_signature(
+            &self.ctx.intent_client,
+            &self.pending_signature,
         )
         .await?;
+        match flow {
+            // Intent was executed - return
+            ControlFlow::Break(()) => {
+                Ok(ExecutionOutput::SingleStage(self.pending_signature))
+            }
+            ControlFlow::Continue(()) => {
+                // It we're here so previous run determined this should be single stage
+                let (commit_tasks, finalize_tasks) =
+                    build_commit_finalize_tasks(
+                        &intent_bundle,
+                        &self.ctx.task_info_fetcher,
+                    )
+                    .await?;
 
-        let single_stage_tasks = [commit_tasks, finalize_tasks].concat();
-        let transaction_strategy = TaskStrategist::build_strategy(
-            single_stage_tasks,
-            &self.authority.pubkey(),
-        )?;
+                let single_stage_tasks =
+                    [commit_tasks, finalize_tasks].concat();
+                let transaction_strategy = TaskStrategist::build_strategy(
+                    single_stage_tasks,
+                    &self.authority.pubkey(),
+                )?;
 
-        execute_single_stage_flow(
-            &self.ctx,
-            &self.authority,
-            intent_bundle,
-            Some(self.pending_signature),
-            transaction_strategy,
-            execution_report,
-            || self.time_left(),
-        )
-        .await
+                execute_single_stage_flow(
+                    &self.ctx,
+                    &self.authority,
+                    intent_bundle,
+                    transaction_strategy,
+                    execution_report,
+                    || self.time_left(),
+                )
+                .await
+            }
+        }
     }
 }
 

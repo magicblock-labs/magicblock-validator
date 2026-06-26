@@ -42,12 +42,11 @@ impl Initialized {
     pub fn new(
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
-        pending_signature: Option<Signature>,
     ) -> Self {
         Self {
             commit_strategy,
             finalize_strategy,
-            pending_signature,
+            pending_signature: None,
             current_attempt: 0,
         }
     }
@@ -68,12 +67,11 @@ impl Committed {
     pub fn new(
         commit_signature: Signature,
         finalize_strategy: TransactionStrategy,
-        pending_signature: Option<Signature>,
     ) -> Self {
         Self {
             commit_signature,
             finalize_strategy,
-            pending_signature,
+            pending_signature: None,
             current_attempt: 0,
         }
     }
@@ -226,7 +224,7 @@ where
 
     /// Transitions to next executor state
     pub fn done(
-        mut self,
+        #[allow(unused_mut)] mut self,
         commit_signature: Signature,
     ) -> TwoStageStrategyExecutor<'a, A, O, Committed> {
         #[cfg(feature = "dev-context-only-utils")]
@@ -357,6 +355,7 @@ where
     }
 
     /// Transitions to next executor state
+    #[allow(unused_mut)]
     pub fn done(mut self, finalize_signature: Signature) -> Finalized {
         #[cfg(feature = "dev-context-only-utils")]
         self.execution_report

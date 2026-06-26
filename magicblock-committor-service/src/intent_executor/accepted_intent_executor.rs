@@ -157,7 +157,6 @@ where
             &self.ctx,
             &self.authority,
             intent_bundle,
-            None, // No pending signature
             transaction_strategy,
             execution_report,
             || self.time_left(),
@@ -172,7 +171,7 @@ where
         finalize_strategy: TransactionStrategy,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let state = Initialized::new(commit_strategy, finalize_strategy, None);
+        let state = Initialized::new(commit_strategy, finalize_strategy);
         execute_two_stage_flow(
             &self.ctx,
             state,

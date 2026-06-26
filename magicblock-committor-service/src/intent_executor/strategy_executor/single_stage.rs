@@ -50,7 +50,6 @@ where
     pub fn new(
         authority: Keypair,
         intent_id: u64,
-        pending_signature: Option<Signature>,
         intent_client: IntentExecutionClient,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
         outbox_client: Arc<O>,
@@ -61,7 +60,7 @@ where
         Self {
             authority,
             intent_id,
-            pending_signature,
+            pending_signature: None,
             intent_client,
             task_info_fetcher,
             outbox_client,

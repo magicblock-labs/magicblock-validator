@@ -9967,6 +9967,7 @@ dependencies = [
  "magicblock-table-mania",
  "program-flexi-counter",
  "serde_json",
+ "serial_test",
  "solana-commitment-config",
  "solana-rpc-client",
  "solana-rpc-client-api",

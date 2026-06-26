@@ -51,7 +51,6 @@ pub(in crate::intent_executor) async fn execute_single_stage_flow<T, F, A, O>(
     ctx: &IntentExecutorCtx<T, F, A, O>,
     authority: &Keypair,
     intent_bundle: ScheduledIntentBundle,
-    pending_signature: Option<Signature>,
     transaction_strategy: TransactionStrategy,
     execution_report: &mut IntentExecutionReport,
     time_left: impl Fn() -> Option<Duration>,
@@ -68,7 +67,6 @@ where
     let mut single_stage_executor = SingleStageStrategyExecutor::new(
         authority.insecure_clone(),
         intent_bundle.id,
-        pending_signature,
         ctx.intent_client.clone(),
         ctx.task_info_fetcher.clone(),
         ctx.outbox_client.clone(),
@@ -125,8 +123,7 @@ where
 
     // Create state for two stage flow
     // Pending signature set to None as if we're here tx failed
-    let state =
-        two_stage::Initialized::new(commit_strategy, finalize_strategy, None);
+    let state = two_stage::Initialized::new(commit_strategy, finalize_strategy);
 
     execute_two_stage_flow(
         ctx,

@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::anyhow;
+use serial_test::serial;
 use async_trait::async_trait;
 use common::*;
 use ephemeral_rollups_sdk::{compat, ephem::MagicIntentBundleBuilder};
@@ -295,7 +296,7 @@ fn schedule_and_accept(
 /// Verifies: executor succeeds, set_intent_execution_stage is called,
 /// and the committed value lands on the base chain.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
+#[serial]
 async fn test_pickup_executed_intent() {
     let test_env = TestEnv::setup().await;
 
@@ -374,7 +375,7 @@ async fn test_pickup_executed_intent() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
+#[serial]
 async fn test_pickup_failed_intent() {
     let test_env = TestEnv::setup().await;
 
@@ -447,6 +448,7 @@ async fn test_pickup_failed_intent() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn test_pickup_after_timeout() {
     const ACTIONS_TIMEOUT: Duration = Duration::from_millis(15);
     /// Larger than `ACTIONS_TIMEOUT` in order to trigger timeout int `execute_with_timeout`
@@ -544,6 +546,7 @@ async fn test_pickup_after_timeout() {
 /// re-submitting.
 /// TODO(edwin): add same but where tx wasn't actually sent and we timedout
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn test_pick_up_after_tx_submission() {
     const SEND_SLEEP: Duration = Duration::from_millis(80);
     const ACTIONS_TIMEOUT: Duration = Duration::from_millis(100);
@@ -632,6 +635,7 @@ async fn test_pick_up_after_tx_submission() {
 ///   3. On restart, build_stage_intent_executor sees TwoStage::Committing, confirms
 ///      the commit sig on chain, then executes the finalize stage.
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn test_pickup_after_committing() {
     const COUNTER_COUNT: usize = 9;
 
@@ -739,6 +743,7 @@ async fn test_pickup_after_committing() {
 ///      the finalize sig on chain, and returns the same signatures without
 ///      re-submitting anything.
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn test_pickup_after_finalizing() {
     const COUNTER_COUNT: usize = 9;
 

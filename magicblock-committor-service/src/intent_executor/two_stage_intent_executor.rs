@@ -90,7 +90,6 @@ where
     async fn execute_committing_intent(
         &mut self,
         intent_bundle: ScheduledIntentBundle,
-        pending_signature: Signature,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
         // This stage was chosen prior so we build tasks for it
@@ -111,11 +110,7 @@ where
             &self.authority.pubkey(),
         )?;
 
-        let state = Initialized::new(
-            commit_stage,
-            finalize_stage,
-            Some(pending_signature),
-        );
+        let state = Initialized::new(commit_stage, finalize_stage);
         execute_two_stage_flow(
             &self.ctx,
             state,
@@ -132,7 +127,6 @@ where
         &mut self,
         intent: ScheduledIntentBundle,
         commit_signature: Signature,
-        pending_finalize_signature: Option<Signature>,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
         // Commit succeeded so we skip those tasks all together
@@ -148,11 +142,8 @@ where
             &self.authority.pubkey(),
         )?;
 
-        let committed_state = Committed::new(
-            commit_signature,
-            finalize_strategy,
-            pending_finalize_signature,
-        );
+        let committed_state =
+            Committed::new(commit_signature, finalize_strategy);
         let mut finalize_strategy_executor =
             TwoStageStrategyExecutor::committed(
                 committed_state,
@@ -194,19 +185,14 @@ where
         match (&self.stage, flow) {
             // Signature wasn't confirmed - need to reexecute from commit
             (TwoStageProgress::Committing(_), ControlFlow::Continue(())) => {
-                self.execute_committing_intent(
-                    intent,
-                    *pending_signature, // TODO(edwin): should be none or nothing as we checked
-                    execution_report,
-                )
-                .await
+                self.execute_committing_intent(intent, execution_report)
+                    .await
             }
             // Signature confirmed - commit was executed, finalizing...
-            (TwoStageProgress::Committing(_), ControlFlow::Break(())) => {
+            (TwoStageProgress::Committing(commit), ControlFlow::Break(())) => {
                 self.execute_finalizing_intent(
                     intent,
-                    *pending_signature,
-                    None,
+                    *commit,
                     execution_report,
                 )
                 .await
@@ -219,12 +205,11 @@ where
                 self.execute_finalizing_intent(
                     intent,
                     *commit,
-                    Some(*pending_signature), // TODO(edwin): stage_execution_loop will check twice then
                     execution_report,
                 )
                 .await
             }
-            // Finilize was executed - return
+            // Finalize was executed - return
             (
                 TwoStageProgress::Finalizing { commit, finalize },
                 ControlFlow::Break(()),
