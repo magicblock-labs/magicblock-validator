@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    ops::ControlFlow,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
@@ -16,7 +19,9 @@ use crate::{
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::{
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
-            utils::{execute_with_timeout, FinalizeStage},
+            utils::{
+                check_pending_signature, execute_with_timeout, FinalizeStage,
+            },
         },
         task_info_fetcher::{ResetType, TaskInfoFetcher},
         utils::{build_commit_finalize_tasks, execute_two_stage_flow},
@@ -127,7 +132,7 @@ where
         &mut self,
         intent: ScheduledIntentBundle,
         commit_signature: Signature,
-        pending_finalize_signature: Signature,
+        pending_finalize_signature: Option<Signature>,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
         // Commit succeeded so we skip those tasks all together
@@ -146,7 +151,7 @@ where
         let committed_state = Committed::new(
             commit_signature,
             finalize_strategy,
-            Some(pending_finalize_signature),
+            pending_finalize_signature,
         );
         let mut finalize_strategy_executor =
             TwoStageStrategyExecutor::committed(
@@ -175,6 +180,60 @@ where
             finalize_signature: finalized_stage.finalize_signature,
         })
     }
+
+    async fn execute_inner(
+        &mut self,
+        intent: ScheduledIntentBundle,
+        execution_report: &mut IntentExecutionReport,
+    ) -> IntentExecutorResult<ExecutionOutput> {
+        let pending_signature = self.stage.pending_signature();
+        let flow =
+            check_pending_signature(&self.ctx.intent_client, pending_signature)
+                .await?;
+
+        match (&self.stage, flow) {
+            // Signature wasn't confirmed - need to reexecute from commit
+            (TwoStageProgress::Committing(_), ControlFlow::Continue(())) => {
+                self.execute_committing_intent(
+                    intent,
+                    *pending_signature, // TODO(edwin): should be none or nothing as we checked
+                    execution_report,
+                )
+                .await
+            }
+            // Signature confirmed - commit was executed, finalizing...
+            (TwoStageProgress::Committing(_), ControlFlow::Break(())) => {
+                self.execute_finalizing_intent(
+                    intent,
+                    *pending_signature,
+                    None,
+                    execution_report,
+                )
+                .await
+            }
+            // Finalize didn't occur - execute
+            (
+                TwoStageProgress::Finalizing { commit, .. },
+                ControlFlow::Continue(()),
+            ) => {
+                self.execute_finalizing_intent(
+                    intent,
+                    *commit,
+                    Some(*pending_signature), // TODO(edwin): stage_execution_loop will check twice then
+                    execution_report,
+                )
+                .await
+            }
+            // Finilize was executed - return
+            (
+                TwoStageProgress::Finalizing { commit, finalize },
+                ControlFlow::Break(()),
+            ) => Ok(ExecutionOutput::TwoStage {
+                commit_signature: *commit,
+                finalize_signature: *finalize,
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -197,32 +256,13 @@ where
         let pubkeys = intent.get_all_committed_pubkeys();
 
         let mut execution_report = IntentExecutionReport::default();
-        let result = match &self.stage {
-            TwoStageProgress::Committing(signature) => {
-                self.execute_committing_intent(
-                    intent,
-                    *signature,
-                    &mut execution_report,
-                )
-                .await
-            }
-            TwoStageProgress::Finalizing { commit, finalize } => {
-                self.execute_finalizing_intent(
-                    intent,
-                    *commit,
-                    *finalize,
-                    &mut execution_report,
-                )
-                .await
-            }
-        };
+        let result = self.execute_inner(intent, &mut execution_report).await;
 
         if is_undelegate {
             self.ctx
                 .task_info_fetcher
                 .reset(ResetType::Specific(&pubkeys));
         }
-
         self.close_buffers = result.is_ok();
         self.junk = execution_report.junk;
         let result = IntentExecutionResult {

@@ -56,6 +56,13 @@ impl ExecutionStage {
 
         Ok(())
     }
+
+    pub fn pending_signature(&self) -> &Signature {
+        match self {
+            Self::SingleStage(signature) => signature,
+            Self::TwoStage(value) => value.pending_signature(),
+        }
+    }
 }
 
 impl TwoStageProgress {
@@ -107,5 +114,12 @@ impl TwoStageProgress {
 
         *self = new_state;
         Ok(())
+    }
+
+    pub fn pending_signature(&self) -> &Signature {
+        match self {
+            Self::Committing(signature) => signature,
+            Self::Finalizing { finalize, .. } => finalize,
+        }
     }
 }
