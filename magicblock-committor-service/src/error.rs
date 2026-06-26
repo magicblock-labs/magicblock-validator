@@ -1,7 +1,7 @@
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 
-use crate::intent_engine_handle::intent_channerl::IntentScheduleError;
+use crate::intent_engine::intent_channerl::IntentScheduleError;
 
 pub type CommittorServiceResult<T, E = CommittorServiceError> = Result<T, E>;
 

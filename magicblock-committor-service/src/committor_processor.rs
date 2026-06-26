@@ -17,7 +17,7 @@ use tracing::{error, info, instrument};
 use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
-    intent_engine_handle::{
+    intent_engine::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentEngineHandle,
     },
     intent_executor::{

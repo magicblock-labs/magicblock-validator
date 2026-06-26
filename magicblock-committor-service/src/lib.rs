@@ -3,7 +3,7 @@ mod compute_budget;
 pub mod config;
 mod consts;
 pub mod error;
-pub mod intent_engine_handle;
+pub mod intent_engine;
 pub mod intent_executor;
 pub mod tasks;
 pub mod transaction_preparator;

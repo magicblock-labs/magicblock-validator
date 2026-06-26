@@ -396,7 +396,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        intent_engine_handle::intent_scheduler::create_test_intent,
+        intent_engine::intent_scheduler::create_test_intent,
         intent_executor::task_info_fetcher::{
             TaskInfoFetcher, TaskInfoFetcherResult,
         },

@@ -13,7 +13,7 @@ use magicblock_table_mania::TableMania;
 use tokio::sync::broadcast;
 
 use crate::{
-    intent_engine_handle::{
+    intent_engine::{
         db::DB,
         intent_channerl::{channel, IntentScheduleError, IntentScheduleHandle},
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},

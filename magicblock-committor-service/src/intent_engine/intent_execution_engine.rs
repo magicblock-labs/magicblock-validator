@@ -20,7 +20,7 @@ use tracing::{error, info, instrument, trace, warn};
 #[cfg(feature = "dev-context-only-utils")]
 use crate::tasks::task_strategist::TransactionStrategy;
 use crate::{
-    intent_engine_handle::{
+    intent_engine::{
         db::DB,
         intent_channerl::{IntentScheduleError, IntentStream},
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
@@ -358,7 +358,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        intent_engine_handle::{
+        intent_engine::{
             db::{DummyDB, DB},
             intent_channerl::{channel, IntentScheduleHandle},
             intent_scheduler::{create_test_intent, create_test_intent_bundle},
