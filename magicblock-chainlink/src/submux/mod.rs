@@ -1162,10 +1162,6 @@ where
             .collect()
     }
 
-    fn reconciliation_available(&self) -> bool {
-        !self.connected_clients_snapshot().is_empty()
-    }
-
     fn subscription_reconciliation_snapshot(
         &self,
     ) -> Option<SubscriptionReconciliationSnapshot> {
@@ -2226,7 +2222,7 @@ mod tests {
         wait_for_connected_clients(&mux, 0).await;
 
         assert_eq!(mux.connected_clients.load(Ordering::SeqCst), 0);
-        assert!(!mux.reconciliation_available());
+        assert!(mux.subscription_reconciliation_snapshot().is_none());
 
         let before_client1_attempts = client1.subscribe_attempts();
         let before_client2_attempts = client2.subscribe_attempts();
