@@ -54,6 +54,15 @@ test-force-mb: $(PROGRAMS_SO)
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
 
+test-aml:
+	RUN_TESTS=aml \
+	$(MAKE) test
+setup-aml-devnet:
+	RUST_LOG_STYLE=none \
+	RUN_TESTS=aml \
+	SETUP_ONLY=devnet \
+	$(MAKE) test
+
 test-schedulecommit:
 	RUN_TESTS=schedulecommit \
 	$(MAKE) test
@@ -274,6 +283,7 @@ ci-lint: lint
 	list \
 	list-programs \
 	programs \
+	setup-aml-devnet \
 	setup-chainlink-devnet \
 	setup-cloning-both \
 	setup-cloning-devnet \
@@ -296,6 +306,7 @@ ci-lint: lint
 	setup-table-mania-devnet \
 	setup-task-scheduler-devnet \
 	test \
+	test-aml \
 	test-chainlink \
 	test-cloning \
 	test-committor \

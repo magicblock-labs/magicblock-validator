@@ -10,10 +10,13 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use super::{
-    execute_post_delegation_actions, load_instructions_sysvar_data,
-    remove_pending_clone, validate_and_get_index, validate_authority,
+    execute_post_delegation_actions, remove_pending_clone,
+    validate_and_get_index, validate_authority,
 };
-use crate::{errors::MagicBlockProgramError, utils::instruction_sysvar};
+use crate::{
+    errors::MagicBlockProgramError,
+    utils::validation::validate_last_after_clone,
+};
 
 pub(crate) fn process_execute_post_delegation_actions(
     signers: HashSet<Pubkey>,
@@ -23,55 +26,10 @@ pub(crate) fn process_execute_post_delegation_actions(
 ) -> Result<(), InstructionError> {
     validate_authority(&signers, invoke_context)?;
     validate_program_account(invoke_context)?;
-
-    let mut sysvar_data = load_instructions_sysvar_data(invoke_context)?;
-    let current_index =
-        instruction_sysvar::load_current_index(&mut sysvar_data)?;
-    validate_current_top_level_instruction(
+    let previous_instruction = validate_last_after_clone(
         invoke_context,
-        &mut sysvar_data,
-        current_index,
+        "Post-delegation action executor",
     )?;
-    if current_index == 0 {
-        ic_msg!(
-            invoke_context,
-            "Post-delegation action executor has no previous clone instruction"
-        );
-        return Err(
-            MagicBlockProgramError::PostDelegationActionExecutorMissing.into(),
-        );
-    }
-
-    // The executor mutates process-global pending-clone state for final chunked
-    // clones, so it must be the last top-level instruction in the transaction.
-    if instruction_sysvar::load_instruction_at(
-        &mut sysvar_data,
-        current_index.saturating_add(1),
-    )
-    .is_ok()
-    {
-        ic_msg!(
-            invoke_context,
-            "Post-delegation action executor must be the last instruction"
-        );
-        return Err(
-            MagicBlockProgramError::PostDelegationActionExecutorMismatch.into(),
-        );
-    }
-
-    let previous_instruction = instruction_sysvar::load_instruction_at(
-        &mut sysvar_data,
-        current_index - 1,
-    )?;
-    if previous_instruction.program_id != crate::ID {
-        ic_msg!(
-            invoke_context,
-            "Post-delegation action executor previous instruction is not Magic"
-        );
-        return Err(
-            MagicBlockProgramError::PostDelegationActionExecutorMismatch.into(),
-        );
-    }
 
     let previous_magic_instruction: MagicBlockInstruction =
         bincode::deserialize(&previous_instruction.data)
@@ -156,47 +114,6 @@ fn validate_program_account(
             "Post-delegation action executor program account not found"
         );
         return Err(InstructionError::UnsupportedProgramId);
-    }
-    Ok(())
-}
-
-fn validate_current_top_level_instruction(
-    invoke_context: &mut InvokeContext,
-    sysvar_data: &mut [u8],
-    current_index: usize,
-) -> Result<(), InstructionError> {
-    if invoke_context
-        .transaction_context
-        .get_instruction_stack_height()
-        != 1
-    {
-        ic_msg!(
-            invoke_context,
-            "Post-delegation action executor must be top-level"
-        );
-        return Err(
-            MagicBlockProgramError::PostDelegationActionExecutorNotTopLevel
-                .into(),
-        );
-    }
-
-    let current_instruction =
-        instruction_sysvar::load_instruction_at(sysvar_data, current_index)?;
-    let current_ix_ctx = invoke_context
-        .transaction_context
-        .get_current_instruction_context()?;
-    if current_instruction.program_id
-        != POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID
-        || current_instruction.data != current_ix_ctx.get_instruction_data()
-    {
-        ic_msg!(
-            invoke_context,
-            "Post-delegation action executor must be top-level"
-        );
-        return Err(
-            MagicBlockProgramError::PostDelegationActionExecutorNotTopLevel
-                .into(),
-        );
     }
     Ok(())
 }
