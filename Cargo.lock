@@ -4035,6 +4035,7 @@ dependencies = [
 name = "magicblock-rpc-client"
 version = "0.13.1"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "futures-util",
  "magicblock-metrics",
@@ -4055,6 +4056,7 @@ dependencies = [
  "solana-transaction-status-client-types",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

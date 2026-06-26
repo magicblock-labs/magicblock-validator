@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use magicblock_rpc_client::BaseLayerBlockhash;
 use solana_commitment_config::CommitmentConfig;
 
 use crate::compute_budget::ComputeBudgetConfig;
@@ -13,6 +14,7 @@ pub struct ChainConfig {
     pub commitment: CommitmentConfig,
     pub compute_budget_config: ComputeBudgetConfig,
     pub actions_timeout: Duration,
+    pub blockhash_registry: Option<BaseLayerBlockhash>,
 }
 
 impl ChainConfig {
@@ -23,6 +25,7 @@ impl ChainConfig {
             commitment: CommitmentConfig::confirmed(),
             compute_budget_config,
             actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
+            blockhash_registry: None,
         }
     }
 
@@ -33,6 +36,7 @@ impl ChainConfig {
             commitment: CommitmentConfig::confirmed(),
             compute_budget_config,
             actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
+            blockhash_registry: None,
         }
     }
 
@@ -43,6 +47,7 @@ impl ChainConfig {
             commitment: CommitmentConfig::processed(),
             compute_budget_config,
             actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
+            blockhash_registry: None,
         }
     }
 }

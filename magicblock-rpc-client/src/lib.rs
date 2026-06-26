@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use arc_swap::ArcSwapOption;
 use futures_util::future::try_join_all;
 use serde_json::json;
 use signature_confirmer::{SignatureConfirmer, SignatureConfirmerConfig};
@@ -42,6 +43,7 @@ use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
 use tokio::sync::Mutex as TMutex;
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 /// The encoding to use when sending transactions
@@ -254,13 +256,107 @@ struct BlockhashCache {
     recent: HashMap<Hash, CachedBlockhash>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct CachedBlockhash {
-    blockhash: Hash,
+    pub blockhash: Hash,
     context_slot: Slot,
     last_valid_block_height: u64,
     fetched_at: Instant,
 }
+
+/// Process-wide, shared source of truth for the latest base-layer
+/// blockhash. A single background task writes it; all consumers read it
+/// lock-free. Cloning is cheap (Arc bump) and all clones share state.
+#[derive(Clone, Default, Debug)]
+pub struct BaseLayerBlockhash {
+    inner: Arc<ArcSwapOption<CachedBlockhash>>,
+}
+
+impl BaseLayerBlockhash {
+    /// Lock-free read of the cached blockhash, if the refresher has
+    /// populated it at least once and it hasn't been invalidated.
+    fn get(&self) -> Option<CachedBlockhash> {
+        self.inner.load().as_deref().copied()
+    }
+
+    /// Returns the cached base-layer blockhash, if available.
+    pub fn latest_blockhash(&self) -> Option<Hash> {
+        self.get().map(|cached| cached.blockhash)
+    }
+
+    fn store(&self, value: CachedBlockhash) {
+        self.inner.store(Some(Arc::new(value)));
+    }
+
+    /// Drop the cached value so the next read falls back to a direct
+    /// fetch and the next refresh tick re-populates. Called by retry
+    /// paths after a transaction is rejected for a stale blockhash.
+    pub fn invalidate(&self) {
+        self.inner.store(None);
+    }
+
+    /// Primes the cache synchronously (so the first reader never races an
+    /// empty cache) then spawns the single background refresher.
+    pub async fn spawn_blockhash_refresher(
+        &self,
+        rpc_client: Arc<RpcClient>,
+        cancel: CancellationToken,
+    ) {
+        if let Err(err) = self.refresh_once(&rpc_client).await {
+            warn!(error = ?err, "Initial base-layer blockhash fetch failed");
+        }
+        let cache = self.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(REFRESH_INTERVAL);
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(err) = cache.refresh_once(&rpc_client).await {
+                            warn!(error = ?err, "Failed to refresh base-layer blockhash");
+                        }
+                    }
+                    _ = cancel.cancelled() => break,
+                }
+            }
+        });
+    }
+
+    async fn refresh_once(
+        &self,
+        rpc_client: &RpcClient,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let resp: Response<RpcBlockhash> = rpc_client
+            .send(
+                RpcRequest::GetLatestBlockhash,
+                json!([rpc_client.commitment()]),
+            )
+            .await
+            .map_err(|e| {
+                MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e))
+            })?;
+        let blockhash = resp.value.blockhash.parse().map_err(|_| {
+            MagicBlockRpcClientError::GetLatestBlockhash(Box::new(
+                RpcClientError::new_with_request(
+                    RpcClientErrorKind::RpcError(RpcError::ParseError(
+                        "Hash".to_string(),
+                    )),
+                    RpcRequest::GetLatestBlockhash,
+                ),
+            ))
+        })?;
+
+        self.store(CachedBlockhash {
+            blockhash,
+            last_valid_block_height: resp.value.last_valid_block_height,
+            context_slot: resp.context.slot,
+            fetched_at: Instant::now(),
+        });
+
+        Ok(())
+    }
+}
+
+const REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy)]
 struct CachedSlot {
@@ -276,6 +372,7 @@ pub struct MagicblockRpcClient {
     cache: Arc<RpcClientCache>,
     chain_slot: Option<Arc<AtomicU64>>,
     confirmer: Arc<SignatureConfirmer>,
+    blockhash_registry: Option<BaseLayerBlockhash>,
 }
 
 impl From<RpcClient> for MagicblockRpcClient {
@@ -287,21 +384,21 @@ impl From<RpcClient> for MagicblockRpcClient {
 impl MagicblockRpcClient {
     /// Create a new [MagicBlockRpcClient] from an existing [RpcClient].
     pub fn new(client: Arc<RpcClient>) -> Self {
-        Self::new_with_options(client, None, None)
+        Self::new_with_options(client, None, None, None)
     }
 
     pub fn new_with_chain_slot(
         client: Arc<RpcClient>,
         chain_slot: Arc<AtomicU64>,
     ) -> Self {
-        Self::new_with_options(client, Some(chain_slot), None)
+        Self::new_with_options(client, Some(chain_slot), None, None)
     }
 
     pub fn new_with_websocket(
         client: Arc<RpcClient>,
         websocket_url: Option<String>,
     ) -> Self {
-        Self::new_with_options(client, None, websocket_url)
+        Self::new_with_options(client, None, websocket_url, None)
     }
 
     pub fn new_with_chain_slot_and_websocket(
@@ -309,13 +406,28 @@ impl MagicblockRpcClient {
         chain_slot: Arc<AtomicU64>,
         websocket_url: Option<String>,
     ) -> Self {
-        Self::new_with_options(client, Some(chain_slot), websocket_url)
+        Self::new_with_options(client, Some(chain_slot), websocket_url, None)
+    }
+
+    pub fn new_with_registry(
+        client: Arc<RpcClient>,
+        chain_slot: Option<Arc<AtomicU64>>,
+        websocket_url: Option<String>,
+        blockhash_registry: Option<BaseLayerBlockhash>,
+    ) -> Self {
+        Self::new_with_options(
+            client,
+            chain_slot,
+            websocket_url,
+            blockhash_registry,
+        )
     }
 
     fn new_with_options(
         client: Arc<RpcClient>,
         chain_slot: Option<Arc<AtomicU64>>,
         websocket_url: Option<String>,
+        blockhash_registry: Option<BaseLayerBlockhash>,
     ) -> Self {
         let confirmer = Arc::new(SignatureConfirmer::new(
             client.clone(),
@@ -326,12 +438,25 @@ impl MagicblockRpcClient {
             cache: Arc::new(RpcClientCache::default()),
             chain_slot,
             confirmer,
+            blockhash_registry,
         }
     }
 
     pub async fn get_latest_blockhash(
         &self,
     ) -> MagicBlockRpcClientResult<Hash> {
+        // 1. Shared registry: lock-free, no RPC.
+        if let Some(ref bh_registry) = self.blockhash_registry {
+            if let Some(cached) = bh_registry.get() {
+                self.record_observed_slot(cached.context_slot).await;
+
+                let mut local = self.cache.blockhash.lock().await;
+                Self::cache_blockhash(&mut local, cached);
+                return Ok(cached.blockhash);
+            }
+        }
+
+        // 2. Legacy per-client cache + direct fetch
         let mut cached = self.cache.blockhash.lock().await;
         if let Some(blockhash) = Self::fresh_cached_blockhash(&cached) {
             return Ok(blockhash);
@@ -412,6 +537,9 @@ impl MagicblockRpcClient {
     }
 
     pub async fn invalidate_cached_blockhash(&self) {
+        if let Some(registry) = &self.blockhash_registry {
+            registry.invalidate();
+        }
         let mut cached = self.cache.blockhash.lock().await;
         cached.latest = None;
     }

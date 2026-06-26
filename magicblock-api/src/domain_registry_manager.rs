@@ -3,7 +3,7 @@ use std::{io, sync::Arc, thread, time::Duration};
 use anyhow::Context;
 use borsh::BorshDeserialize;
 use magicblock_rpc_client::{
-    MagicBlockSendTransactionConfig, MagicblockRpcClient,
+    BaseLayerBlockhash, MagicBlockSendTransactionConfig, MagicblockRpcClient,
 };
 use mdp::{
     consts::ER_RECORD_SEED,
@@ -29,16 +29,25 @@ const UNREGISTER_CONFIRMATION_INTERVAL: Duration = Duration::from_millis(400);
 pub struct DomainRegistryManager {
     client: Arc<RpcClient>,
     rpc_client: MagicblockRpcClient,
+    blockhash_registry: Option<BaseLayerBlockhash>,
 }
 
 impl DomainRegistryManager {
-    pub fn new(url: impl ToString) -> Self {
-        Self::new_with_commitment(url, CommitmentConfig::confirmed())
+    pub fn new(
+        url: impl ToString,
+        blockhash_registry: Option<BaseLayerBlockhash>,
+    ) -> Self {
+        Self::new_with_commitment(
+            url,
+            CommitmentConfig::confirmed(),
+            blockhash_registry,
+        )
     }
 
     pub fn new_with_commitment(
         url: impl ToString,
         commitment: CommitmentConfig,
+        blockhash_registry: Option<BaseLayerBlockhash>,
     ) -> Self {
         let client = Arc::new(RpcClient::new_with_commitment(
             url.to_string(),
@@ -47,6 +56,7 @@ impl DomainRegistryManager {
         Self {
             client: client.clone(),
             rpc_client: MagicblockRpcClient::new(client),
+            blockhash_registry,
         }
     }
 
@@ -189,8 +199,9 @@ impl DomainRegistryManager {
         url: impl ToString,
         payer: &Keypair,
         validator_info: ErRecord,
+        blockhash_registry: Option<BaseLayerBlockhash>,
     ) -> Result<(), Error> {
-        let manager = DomainRegistryManager::new(url);
+        let manager = DomainRegistryManager::new(url, blockhash_registry);
         manager.handle_registration(payer, validator_info).await
     }
 
@@ -239,11 +250,19 @@ impl DomainRegistryManager {
 
         let instruction =
             Instruction::new_with_borsh(ID, &instruction, accounts);
-        let recent_blockhash = self
-            .client
-            .get_latest_blockhash()
-            .await
-            .context("Failed to get latest blockhash")?;
+        let recent_blockhash = match self
+            .blockhash_registry
+            .as_ref()
+            .and_then(|r| r.latest_blockhash())
+        {
+            Some(cached) => cached,
+            None => self
+                .client
+                .get_latest_blockhash()
+                .await
+                .context("Failed to get latest blockhash")?,
+        };
+
         Ok(Transaction::new_signed_with_payer(
             &[instruction],
             Some(&payer.pubkey()),
@@ -255,11 +274,13 @@ impl DomainRegistryManager {
     pub async fn handle_unregistration_static(
         url: impl ToString,
         payer: &Keypair,
+        blockhash_registry: Option<BaseLayerBlockhash>,
     ) -> Result<(), Error> {
         info!("Unregistering validator from domain registry");
         let manager = DomainRegistryManager::new_with_commitment(
             url,
             CommitmentConfig::confirmed(),
+            blockhash_registry,
         );
         manager.unregister(payer).await
     }
@@ -267,11 +288,13 @@ impl DomainRegistryManager {
     pub async fn send_unregistration_static(
         url: impl ToString,
         payer: &Keypair,
+        blockhash_registry: Option<BaseLayerBlockhash>,
     ) -> Result<Signature, Error> {
         info!("Sending validator unregister transaction");
         let manager = DomainRegistryManager::new_with_commitment(
             url,
             CommitmentConfig::confirmed(),
+            blockhash_registry,
         );
         manager.send_unregister(payer).await
     }
@@ -279,11 +302,13 @@ impl DomainRegistryManager {
     pub async fn send_unregistration_and_confirm_in_background_static(
         url: impl ToString,
         payer: &Keypair,
+        blockhash_registry: Option<BaseLayerBlockhash>,
     ) -> Result<(Signature, thread::JoinHandle<()>), Error> {
         info!("Sending validator unregister transaction");
         let manager = DomainRegistryManager::new_with_commitment(
             url,
             CommitmentConfig::confirmed(),
+            blockhash_registry,
         );
         let signature = manager.send_unregister(payer).await?;
         let rpc_client = manager.rpc_client.clone();
