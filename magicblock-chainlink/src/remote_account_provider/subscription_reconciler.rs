@@ -81,10 +81,20 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     removed_account_tx: &mpsc::Sender<Pubkey>,
     subscription_key_locks: Option<&SubscriptionKeyLocks>,
 ) -> usize {
-    let pubsub_union = pubsub_client.subscriptions_union();
-    let pubsub_intersection = pubsub_client.subscriptions_intersection();
     let lru_pubkeys = subscribed_accounts.pubkeys();
     let lru_count = lru_pubkeys.len();
+
+    if !pubsub_client.reconciliation_available() {
+        debug!(
+            lru_count = lru_count,
+            never_evicted_count = never_evicted.len(),
+            "Skipping subscription reconciliation because no connected pubsub client is available"
+        );
+        return lru_count + never_evicted.len();
+    }
+
+    let pubsub_union = pubsub_client.subscriptions_union();
+    let pubsub_intersection = pubsub_client.subscriptions_intersection();
 
     let ensured_subs_without_never_evict: HashSet<_> = pubsub_intersection
         .into_iter()

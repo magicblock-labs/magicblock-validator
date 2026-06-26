@@ -58,6 +58,16 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         self.subscriptions_union()
     }
 
+    /// Returns whether subscription reconciliation has at least one live
+    /// subscription client it can meaningfully inspect and repair.
+    ///
+    /// Single-client implementations default to available. Multi-client
+    /// implementations such as SubMuxClient should override this when all
+    /// inner clients are disconnected/reconnecting.
+    fn reconciliation_available(&self) -> bool {
+        true
+    }
+
     fn subs_immediately(&self) -> bool;
 
     fn id(&self) -> &str;

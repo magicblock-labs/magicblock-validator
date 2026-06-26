@@ -1159,6 +1159,10 @@ where
             .collect()
     }
 
+    fn reconciliation_available(&self) -> bool {
+        !self.connected_clients_snapshot().is_empty()
+    }
+
     /// Returns true if any inner client subscribes immediately
     fn subs_immediately(&self) -> bool {
         self.clients_snapshot().iter().any(|c| c.subs_immediately())
@@ -1171,12 +1175,17 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use solana_account::Account;
     use tokio::sync::mpsc;
 
     use super::*;
     use crate::{
-        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        remote_account_provider::{
+            chain_pubsub_client::mock::ChainPubsubClientMock,
+            subscription_reconciler::reconcile_subscriptions, AccountsLruCache,
+        },
         submux::subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker,
         testing::{init_logger, utils::sleep_ms},
     };
@@ -2118,6 +2127,53 @@ mod tests {
             !union.contains(&reconnecting_only_pk),
             "reconnecting-only subscriptions must not affect union"
         );
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_skips_repair_when_no_submux_clients_connected() {
+        init_logger();
+
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+
+        let pk = Pubkey::new_unique();
+        let (mux, aborts) = new_submux_with_abort(
+            vec![client1.clone(), client2.clone()],
+            vec![pk],
+            Some(100),
+        );
+
+        mux.subscribe(pk, None).await.unwrap();
+
+        client1.disable_reconnect();
+        client2.disable_reconnect();
+        client1.simulate_disconnect();
+        client2.simulate_disconnect();
+        aborts[0].send(()).await.expect("abort send 1");
+        aborts[1].send(()).await.expect("abort send 2");
+        sleep_ms(100).await;
+
+        assert_eq!(mux.connected_clients.load(Ordering::SeqCst), 0);
+        assert!(!mux.reconciliation_available());
+
+        let before_client1_attempts = client1.subscribe_attempts();
+        let before_client2_attempts = client2.subscribe_attempts();
+
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        lru.add(pk);
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+
+        let count =
+            reconcile_subscriptions(&lru, &mux, &[], &removed_tx, None).await;
+
+        assert_eq!(count, 1);
+        assert_eq!(client1.subscribe_attempts(), before_client1_attempts);
+        assert_eq!(client2.subscribe_attempts(), before_client2_attempts);
+        assert!(removed_rx.try_recv().is_err());
 
         mux.shutdown().await.unwrap();
     }
