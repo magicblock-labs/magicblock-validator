@@ -2067,6 +2067,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_reconciliation_snapshots_ignore_reconnecting_clients() {
+        init_logger();
+
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let (tx3, rx3) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+        let client3 = Arc::new(ChainPubsubClientMock::new(tx3, rx3));
+
+        let shared_pk = Pubkey::new_unique();
+        let reconnecting_only_pk = Pubkey::new_unique();
+        let (mux, aborts) = new_submux_with_abort(
+            vec![client1.clone(), client2.clone(), client3.clone()],
+            vec![shared_pk],
+            Some(100),
+        );
+
+        mux.subscribe(shared_pk, None).await.unwrap();
+        assert!(client1.subscriptions_union().contains(&shared_pk));
+        assert!(client2.subscriptions_union().contains(&shared_pk));
+        assert!(client3.subscriptions_union().contains(&shared_pk));
+
+        client3.disable_reconnect();
+        client3.simulate_disconnect();
+        client3.insert_subscription(reconnecting_only_pk);
+        aborts[2].send(()).await.expect("abort send");
+        sleep_ms(100).await;
+
+        assert_eq!(mux.connected_clients.load(Ordering::SeqCst), 2);
+        assert_eq!(mux.connected_clients_snapshot().len(), 2);
+
+        let intersection = mux.subscriptions_intersection();
+        assert!(
+            intersection.contains(&shared_pk),
+            "connected clients still agree on the shared subscription"
+        );
+        assert!(
+            !intersection.contains(&reconnecting_only_pk),
+            "reconnecting-only subscriptions must not affect intersection"
+        );
+
+        let union = mux.subscriptions_union();
+        assert!(
+            union.contains(&shared_pk),
+            "connected-client union should include shared subscriptions"
+        );
+        assert!(
+            !union.contains(&reconnecting_only_pk),
+            "reconnecting-only subscriptions must not affect union"
+        );
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn test_subscribe_skips_disconnected_client_during_reconnect() {
         init_logger();
 
