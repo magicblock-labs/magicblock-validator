@@ -157,7 +157,7 @@ where
             &self.ctx,
             &self.authority,
             intent_bundle,
-            None,
+            None, // No pending signature
             transaction_strategy,
             execution_report,
             || self.time_left(),

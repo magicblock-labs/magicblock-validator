@@ -13,8 +13,8 @@ use magicblock_core::{
 use magicblock_program::{
     instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    register_scheduled_commit_sent, MagicContext, Pubkey, SentCommit,
-    MAGIC_CONTEXT_PUBKEY,
+    outbox_intent_bundles::OutboxIntentBundle, register_scheduled_commit_sent,
+    MagicContext, Pubkey, SentCommit, MAGIC_CONTEXT_PUBKEY,
 };
 use solana_account::{Account, ReadableAccount};
 use solana_rpc_client::{
@@ -26,7 +26,7 @@ use solana_rpc_client_api::{
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tracing::{debug, error};
-use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
+
 use crate::service::outbox_intent_bundles_reader::{
     InternalOutboxIntentBundlesReader, OutboxIntentBundlesReader,
 };

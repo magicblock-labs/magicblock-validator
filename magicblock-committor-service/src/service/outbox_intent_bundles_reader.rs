@@ -6,8 +6,12 @@ use std::{
 };
 
 use async_trait::async_trait;
-use magicblock_accounts_db::{error::AccountsDbError, traits::AccountsBank, AccountsDb};
-use magicblock_core::intent::outbox::{outbox_intent_pda, OUTBOX_INTENT_DISCRIMINATOR};
+use magicblock_accounts_db::{
+    error::AccountsDbError, traits::AccountsBank, AccountsDb,
+};
+use magicblock_core::intent::outbox::{
+    outbox_intent_pda, OUTBOX_INTENT_DISCRIMINATOR,
+};
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::{AccountSharedData, ReadableAccount};
 use tracing::warn;

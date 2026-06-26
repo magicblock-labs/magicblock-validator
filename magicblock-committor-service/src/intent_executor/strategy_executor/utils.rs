@@ -407,14 +407,21 @@ pub(in crate::intent_executor) fn handle_actions_result<A>(
 where
     A: ActionsCallbackScheduler,
 {
-    let (callbacks, junk) = if result.is_ok() {
-        let callbacks = transaction_strategy.extract_action_callbacks();
-        (callbacks, TransactionStrategy::default())
-    } else {
-        let mut removed_actions =
-            transaction_strategy.remove_actions(authority);
-        let callbacks = removed_actions.extract_action_callbacks();
-        (callbacks, removed_actions)
+    let (callbacks, junk) = match result {
+        // TODO(edwin): add in PR description
+        // Timeout may be triggered right after tx was sent
+        // It could also be triggered prior
+        // In order to give simple contract to user we keep actions in both cases
+        Ok(()) | Err(ActionError::TimeoutError) => {
+            let callbacks = transaction_strategy.extract_action_callbacks();
+            (callbacks, TransactionStrategy::default())
+        }
+        _ => {
+            let mut removed_actions =
+                transaction_strategy.remove_actions(authority);
+            let callbacks = removed_actions.extract_action_callbacks();
+            (callbacks, removed_actions)
+        }
     };
     if !callbacks.is_empty() {
         let result = callback_scheduler.schedule(callbacks, signature, result);

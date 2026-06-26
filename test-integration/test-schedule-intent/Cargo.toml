@@ -20,6 +20,7 @@ magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 solana-commitment-config = { workspace = true }
+serde_json = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }

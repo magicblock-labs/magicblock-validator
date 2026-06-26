@@ -11,6 +11,8 @@ use solana_sdk::{
 };
 
 pub const LABEL: &str = "I am a label";
+pub const BASE_ACTION_FEE: u64 = 5000;
+pub const CALLBACK_FEE: u64 = 5000;
 
 pub fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
     let payer = Keypair::new();

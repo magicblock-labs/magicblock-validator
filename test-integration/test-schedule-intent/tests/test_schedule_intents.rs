@@ -517,9 +517,6 @@ fn test_transfer_intent_success() {
     // Cross-chain transfer amount
     // Also min rent for destination account as well
     const AMOUNT: u64 = 890_880;
-    // Fees charged from payer
-    const BASE_ACTION_FEE: u64 = 5000;
-    const CALLBACK_FEE: u64 = 5000;
     const CHARGED_AMOUNT: u64 = AMOUNT + BASE_ACTION_FEE + CALLBACK_FEE;
 
     init_logger!();
@@ -557,9 +554,6 @@ fn test_transfer_intent_failure_refunds_payer() {
     // Cross-chain transfer amount
     // Also min rent for destination account as well
     const AMOUNT: u64 = 890_880;
-    // Fees charged from payer
-    const BASE_ACTION_FEE: u64 = 5000;
-    const CALLBACK_FEE: u64 = 5000;
 
     init_logger!();
 
