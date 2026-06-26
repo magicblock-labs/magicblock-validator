@@ -1303,6 +1303,26 @@ mod tests {
         )
     }
 
+    async fn wait_for_connected_clients(
+        mux: &SubMuxClient<ChainPubsubClientMock>,
+        expected: u16,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let connected = mux.connected_clients.load(Ordering::SeqCst);
+            let snapshot_len = mux.connected_clients_snapshot().len();
+            if connected == expected && snapshot_len == expected as usize {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {expected} connected clients; \
+                 connected_clients={connected}, snapshot_len={snapshot_len}"
+            );
+            sleep_ms(10).await;
+        }
+    }
+
     // -----------------
     // Subscribe/Unsubscribe
     // -----------------
@@ -2151,7 +2171,7 @@ mod tests {
         client3.simulate_disconnect();
         client3.insert_subscription(reconnecting_only_pk);
         aborts[2].send(()).await.expect("abort send");
-        sleep_ms(100).await;
+        wait_for_connected_clients(&mux, 2).await;
 
         assert_eq!(mux.connected_clients.load(Ordering::SeqCst), 2);
         assert_eq!(mux.connected_clients_snapshot().len(), 2);
@@ -2203,7 +2223,7 @@ mod tests {
         client2.simulate_disconnect();
         aborts[0].send(()).await.expect("abort send 1");
         aborts[1].send(()).await.expect("abort send 2");
-        sleep_ms(100).await;
+        wait_for_connected_clients(&mux, 0).await;
 
         assert_eq!(mux.connected_clients.load(Ordering::SeqCst), 0);
         assert!(!mux.reconciliation_available());
@@ -2247,7 +2267,7 @@ mod tests {
         client1.disable_reconnect();
         client1.simulate_disconnect();
         aborts[0].send(()).await.expect("abort send");
-        sleep_ms(100).await;
+        wait_for_connected_clients(&mux, 1).await;
 
         assert_eq!(mux.connected_clients.load(Ordering::SeqCst), 1);
         let client1_attempts = client1.subscribe_attempts();
