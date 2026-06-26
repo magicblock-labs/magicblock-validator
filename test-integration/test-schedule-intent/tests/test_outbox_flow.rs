@@ -26,10 +26,16 @@ use magicblock_committor_service::{
 };
 use magicblock_core::{
     intent::{outbox::outbox_intent_pda, BaseActionCallback},
-    traits::{ActionError, ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
+    traits::{
+        ActionError, ActionResult, ActionsCallbackScheduler,
+        CallbackScheduleError,
+    },
 };
 use magicblock_magic_program_api::{
-    args::{CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs, UndelegateTypeArgs},
+    args::{
+        CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs,
+        UndelegateTypeArgs,
+    },
     instruction::MagicBlockInstruction,
     outbox::{ExecutionStage, TwoStageProgress},
     MAGIC_CONTEXT_PUBKEY,
@@ -65,7 +71,8 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-type CallbackRecord = (Vec<BaseActionCallback>, Option<Signature>, ActionResult);
+type CallbackRecord =
+    (Vec<BaseActionCallback>, Option<Signature>, ActionResult);
 
 type TestIntentExecutorCtx = IntentExecutorCtx<
     TransactionPreparatorImpl,
@@ -457,26 +464,40 @@ async fn test_pickup_after_timeout() {
     test_env.ctx.delegate_account(&chain_payer, &payer).unwrap();
 
     let destination = Keypair::new();
-    let payer_balance_before = test_env.ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    let payer_balance_before = test_env
+        .ctx
+        .fetch_ephem_account_balance(&payer.pubkey())
+        .unwrap();
     let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
-        schedule_intent_with_callback(ctx, &payer, destination.pubkey(), TRANSFER_AMOUNT);
+        schedule_intent_with_callback(
+            ctx,
+            &payer,
+            destination.pubkey(),
+            TRANSFER_AMOUNT,
+        );
     });
 
     let mut slow_outbox_client = test_env.outbox_client();
-    slow_outbox_client.with_set_execution_stage_sleep(SET_EXECUTION_STAGE_SLEEP);
+    slow_outbox_client
+        .with_set_execution_stage_sleep(SET_EXECUTION_STAGE_SLEEP);
     let executor_ctx = test_env
         .executor_ctx_builder(ACTIONS_TIMEOUT)
         .with_outbox_client(slow_outbox_client.into())
         .build();
 
     let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx));
-    let (result, cleanup_handle) = executor.execute(outbox_bundle.inner.clone()).await;
+    let (result, cleanup_handle) =
+        executor.execute(outbox_bundle.inner.clone()).await;
     assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
     cleanup_handle.clean().await.expect("cleanup failed");
 
     // Callback was triggered with TimeoutError (set_intent_execution_stage exceeded ACTIONS_TIMEOUT)
     let callback_calls = test_env.callback_scheduler.recorded_calls();
-    assert_eq!(callback_calls.len(), 1, "Expected exactly one callback invocation");
+    assert_eq!(
+        callback_calls.len(),
+        1,
+        "Expected exactly one callback invocation"
+    );
     let (callbacks, signature, cb_result) = &callback_calls[0];
     assert!(!callbacks.is_empty(), "Callback list must not be empty");
     assert!(signature.is_none(), "No signature on timeout");
@@ -487,7 +508,10 @@ async fn test_pickup_after_timeout() {
     );
 
     // Despite the callback timeout the commit tx still lands on chain
-    let payer_balance_after = test_env.ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    let payer_balance_after = test_env
+        .ctx
+        .fetch_ephem_account_balance(&payer.pubkey())
+        .unwrap();
     assert_eq!(
         payer_balance_after + BASE_ACTION_FEE + CALLBACK_FEE + TRANSFER_AMOUNT,
         payer_balance_before,
@@ -497,7 +521,10 @@ async fn test_pickup_after_timeout() {
         .ctx
         .fetch_chain_account_balance(&destination.pubkey())
         .unwrap();
-    assert_eq!(dest_balance, TRANSFER_AMOUNT, "Destination did not receive funds");
+    assert_eq!(
+        dest_balance, TRANSFER_AMOUNT,
+        "Destination did not receive funds"
+    );
 }
 
 /// Similar to `test_pickup_after_timeout` but the slow-down is at the RpcSender
@@ -533,10 +560,17 @@ async fn test_pick_up_after_tx_submission() {
     test_env.ctx.delegate_account(&chain_payer, &payer).unwrap();
 
     let destination = Keypair::new();
-    let payer_balance_before =
-        test_env.ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    let payer_balance_before = test_env
+        .ctx
+        .fetch_ephem_account_balance(&payer.pubkey())
+        .unwrap();
     let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
-        schedule_intent_with_callback(ctx, &payer, destination.pubkey(), TRANSFER_AMOUNT);
+        schedule_intent_with_callback(
+            ctx,
+            &payer,
+            destination.pubkey(),
+            TRANSFER_AMOUNT,
+        );
     });
 
     let slow_intent_client = test_env.intent_client_with_send_sleep(SEND_SLEEP);
@@ -546,13 +580,18 @@ async fn test_pick_up_after_tx_submission() {
         .build();
 
     let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx));
-    let (result, cleanup_handle) = executor.execute(outbox_bundle.inner.clone()).await;
+    let (result, cleanup_handle) =
+        executor.execute(outbox_bundle.inner.clone()).await;
     assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
     cleanup_handle.clean().await.expect("cleanup failed");
 
     // Callback triggered with TimeoutError — tx was submitted before timeout.
     let callback_calls = test_env.callback_scheduler.recorded_calls();
-    assert_eq!(callback_calls.len(), 1, "Expected exactly one callback invocation");
+    assert_eq!(
+        callback_calls.len(),
+        1,
+        "Expected exactly one callback invocation"
+    );
     let (callbacks, signature, cb_result) = &callback_calls[0];
     assert!(!callbacks.is_empty(), "Callback list must not be empty");
     assert!(signature.is_none(), "No signature on timeout");
@@ -563,8 +602,10 @@ async fn test_pick_up_after_tx_submission() {
     );
 
     // Despite the callback timeout the commit tx still lands on chain.
-    let payer_balance_after =
-        test_env.ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    let payer_balance_after = test_env
+        .ctx
+        .fetch_ephem_account_balance(&payer.pubkey())
+        .unwrap();
     assert_eq!(
         payer_balance_after + BASE_ACTION_FEE + CALLBACK_FEE + TRANSFER_AMOUNT,
         payer_balance_before,
@@ -574,7 +615,10 @@ async fn test_pick_up_after_tx_submission() {
         .ctx
         .fetch_chain_account_balance(&destination.pubkey())
         .unwrap();
-    assert_eq!(dest_balance, TRANSFER_AMOUNT, "Destination did not receive funds");
+    assert_eq!(
+        dest_balance, TRANSFER_AMOUNT,
+        "Destination did not receive funds"
+    );
 }
 
 /// Verifies recovery when the validator crashes after the commit tx lands on chain
@@ -656,8 +700,9 @@ async fn test_pickup_after_committing() {
             .build(),
         outbox_bundle.status,
     );
-    let (result, cleanup_handle) =
-        Box::new(executor).execute(outbox_bundle.inner.clone()).await;
+    let (result, cleanup_handle) = Box::new(executor)
+        .execute(outbox_bundle.inner.clone())
+        .await;
     let ExecutionOutput::TwoStage {
         commit_signature,
         finalize_signature: _,
@@ -669,7 +714,10 @@ async fn test_pickup_after_committing() {
         commit_signature, commit_sig,
         "Commit sig must not change on recovery"
     );
-    cleanup_handle.clean().await.expect("cleanup after recovery");
+    cleanup_handle
+        .clean()
+        .await
+        .expect("cleanup after recovery");
 
     // Counters should be finalized (undelegated) on chain
     for (_, pda) in &counters {
@@ -717,7 +765,10 @@ async fn test_pickup_after_finalizing() {
     else {
         panic!("Expected TwoStage output");
     };
-    cleanup_handle.clean().await.expect("cleanup after first run");
+    cleanup_handle
+        .clean()
+        .await
+        .expect("cleanup after first run");
 
     // Outbox should now show TwoStage::Finalizing
     let outbox_bundle = test_env
@@ -746,8 +797,9 @@ async fn test_pickup_after_finalizing() {
             .build(),
         outbox_bundle.status,
     );
-    let (result, cleanup_handle) =
-        Box::new(executor).execute(outbox_bundle.inner.clone()).await;
+    let (result, cleanup_handle) = Box::new(executor)
+        .execute(outbox_bundle.inner.clone())
+        .await;
     let ExecutionOutput::TwoStage {
         commit_signature: retried_commit,
         finalize_signature: retried_finalize,
@@ -763,7 +815,10 @@ async fn test_pickup_after_finalizing() {
         retried_finalize, finalize_signature,
         "Finalize sig must not change on recovery"
     );
-    cleanup_handle.clean().await.expect("cleanup after recovery");
+    cleanup_handle
+        .clean()
+        .await
+        .expect("cleanup after recovery");
 
     // Counters are finalized and undelegated on chain
     for (_, pda) in &counters {
