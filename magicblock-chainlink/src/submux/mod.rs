@@ -18,7 +18,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::remote_account_provider::{
-    chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
+    chain_pubsub_client::{
+        ChainPubsubClient, ReconnectableClient,
+        SubscriptionReconciliationSnapshot,
+    },
     errors::RemoteAccountProviderResult,
     pubsub_common::SubscriptionUpdate,
 };
@@ -1161,6 +1164,51 @@ where
 
     fn reconciliation_available(&self) -> bool {
         !self.connected_clients_snapshot().is_empty()
+    }
+
+    fn subscription_reconciliation_snapshot(
+        &self,
+    ) -> Option<SubscriptionReconciliationSnapshot> {
+        let connected_clients = self.connected_clients_snapshot();
+        if connected_clients.is_empty() {
+            return None;
+        }
+
+        let mut union = HashSet::new();
+        let mut intersection_sets = Vec::with_capacity(connected_clients.len());
+        for client in connected_clients {
+            let snapshot = match client.subscription_reconciliation_snapshot() {
+                Some(snapshot) => snapshot,
+                None => continue,
+            };
+            union.extend(snapshot.union);
+            intersection_sets.push(snapshot.intersection);
+        }
+
+        if intersection_sets.is_empty() {
+            return None;
+        }
+
+        // Find the smallest set to iterate over, then check membership
+        // in all others — no intermediate cloning/collecting.
+        // SAFETY: we return above if the set is empty, so unwrap is safe here.
+        let smallest =
+            intersection_sets.iter().min_by_key(|s| s.len()).unwrap();
+        let intersection = smallest
+            .iter()
+            .filter(|pk| {
+                intersection_sets
+                    .iter()
+                    .filter(|s| !std::ptr::eq(*s, smallest))
+                    .all(|s| s.contains(pk))
+            })
+            .copied()
+            .collect();
+
+        Some(SubscriptionReconciliationSnapshot {
+            union,
+            intersection,
+        })
     }
 
     /// Returns true if any inner client subscribes immediately

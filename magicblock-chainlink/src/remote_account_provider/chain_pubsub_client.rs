@@ -22,6 +22,12 @@ use super::{
 
 const MAX_RESUB_DELAY_MS: u64 = 800;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubscriptionReconciliationSnapshot {
+    pub union: HashSet<Pubkey>,
+    pub intersection: HashSet<Pubkey>,
+}
+
 // -----------------
 // Trait
 // -----------------
@@ -66,6 +72,22 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     /// inner clients are disconnected/reconnecting.
     fn reconciliation_available(&self) -> bool {
         true
+    }
+
+    /// Returns an atomic reconciliation snapshot. `None` means no live
+    /// subscription client is available to inspect or repair.
+    fn subscription_reconciliation_snapshot(
+        &self,
+    ) -> Option<SubscriptionReconciliationSnapshot> {
+        if !self.reconciliation_available() {
+            return None;
+        }
+
+        let union = self.subscriptions_union();
+        Some(SubscriptionReconciliationSnapshot {
+            intersection: union.clone(),
+            union,
+        })
     }
 
     fn subs_immediately(&self) -> bool;
