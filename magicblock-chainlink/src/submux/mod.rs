@@ -1128,7 +1128,7 @@ where
 
     fn subscriptions_union(&self) -> HashSet<Pubkey> {
         let mut union = HashSet::new();
-        for client in self.clients_snapshot() {
+        for client in self.connected_clients_snapshot() {
             let subs = client.subscriptions_union();
             union.extend(subs);
         }
@@ -1137,7 +1137,7 @@ where
 
     fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
         let sets: Vec<HashSet<Pubkey>> = self
-            .clients_snapshot()
+            .connected_clients_snapshot()
             .iter()
             .map(|c| c.subscriptions_intersection())
             .collect();
