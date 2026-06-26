@@ -41,8 +41,10 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
+use tracing::error;
+use url::Url;
 
-use crate::{nats::Broker, Error, Result};
+use crate::{nats::Broker, Result};
 
 // =============================================================================
 // Constants
@@ -53,13 +55,29 @@ pub(crate) const LEADER_TIMEOUT: Duration = Duration::from_secs(15);
 const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 // =============================================================================
+// Broker source
+// =============================================================================
+
+pub enum BrokerSource {
+    Connected(Broker),
+    Pending { url: Url, secret: String },
+}
+
+// =============================================================================
 // Service
 // =============================================================================
 
-/// Replication service for the selected replication role.
-pub enum Service {
-    Primary(Primary),
-    Replica(Replica),
+pub struct Service {
+    broker: BrokerSource,
+    mode_tx: Sender<SchedulerMode>,
+    accountsdb: Arc<AccountsDb>,
+    ledger: Arc<Ledger>,
+    scheduler: TransactionSchedulerHandle,
+    messages: Receiver<Message>,
+    cancel: CancellationToken,
+    reset: bool,
+    mode: ReplicationMode,
+    validator_identity: Pubkey,
 }
 
 impl Service {
@@ -68,8 +86,8 @@ impl Service {
     /// When `can_promote` is false (ReplicaOnly mode), skips lock acquisition
     /// and goes directly to Replica mode.
     #[allow(clippy::too_many_arguments)]
-    pub async fn new(
-        broker: Broker,
+    pub fn new(
+        broker: BrokerSource,
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
@@ -77,10 +95,56 @@ impl Service {
         messages: Receiver<Message>,
         cancel: CancellationToken,
         reset: bool,
-        mode: &ReplicationMode,
+        mode: ReplicationMode,
         validator_identity: Pubkey,
-    ) -> crate::Result<Option<Self>> {
-        let ctx = ReplicationContext::new(
+    ) -> Self {
+        Self {
+            broker,
+            mode_tx,
+            accountsdb,
+            ledger,
+            scheduler,
+            messages,
+            cancel,
+            reset,
+            mode,
+            validator_identity,
+        }
+    }
+
+    /// Connects, enters the configured role, and runs until shutdown.
+    ///
+    /// Failing to connect or acquire the producer lock is fatal: it is logged
+    /// and the process exits, since a primary cannot run without them.
+    pub async fn run(self) {
+        let Self {
+            broker,
+            mode_tx,
+            accountsdb,
+            ledger,
+            scheduler,
+            messages,
+            cancel,
+            reset,
+            mode,
+            validator_identity,
+        } = self;
+
+        // Connect once (for `Pending`, this runs connect + init_resources here).
+        let broker = match broker {
+            BrokerSource::Connected(broker) => broker,
+            BrokerSource::Pending { url, secret } => {
+                match Broker::connect(url, secret).await {
+                    Ok(broker) => broker,
+                    Err(e) => {
+                        error!(%e, "replication broker connect failed");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        };
+
+        let ctx = match ReplicationContext::new(
             broker,
             mode_tx,
             accountsdb,
@@ -89,40 +153,52 @@ impl Service {
             cancel,
             validator_identity,
         )
-        .await?;
-
-        if let ReplicationMode::Primary(_) = mode {
-            // Try to become primary
-            match ctx.try_acquire_producer().await? {
-                Some(producer) => Ok(Some(Self::Primary(
-                    ctx.into_primary(producer, messages).await?,
-                ))),
-                None => Err(Error::Internal(
-                    "Failed to acquire producer lock".into(),
-                )),
+        .await
+        {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                error!(%e, "failed to initialize replication context");
+                std::process::exit(1);
             }
-        } else {
-            // Replica mode: skip lock acquisition, go directly to Replica
-            let Some(replica) = ctx.into_replica(reset).await? else {
-                // Shutdown during consumer creation
-                return Ok(None);
-            };
-            Ok(Some(Self::Replica(replica)))
+        };
+
+        match mode {
+            ReplicationMode::Primary(_) => {
+                let producer = match ctx.try_acquire_producer().await {
+                    Ok(Some(producer)) => producer,
+                    Ok(None) => {
+                        error!("failed to acquire producer lock");
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        error!(%e, "producer lock acquisition failed");
+                        std::process::exit(1);
+                    }
+                };
+                match ctx.into_primary(producer, messages).await {
+                    Ok(primary) => primary.run().await,
+                    Err(e) => {
+                        error!(%e, "failed to enter primary mode");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            ReplicationMode::Replica { .. } => {
+                match ctx.into_replica(reset).await {
+                    Ok(Some(replica)) => replica.run().await,
+                    // Shutdown was signalled during consumer creation.
+                    Ok(None) => {}
+                    Err(e) => {
+                        error!(%e, "failed to enter replica mode");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            ReplicationMode::Standalone => {}
         }
     }
 
-    /// Runs the configured replication role until it exits.
-    pub async fn run(self) {
-        match self {
-            Service::Primary(p) => p.run().await,
-            Service::Replica(s) => s.run().await,
-        }
-    }
-
-    /// Spawns the service in a dedicated OS thread with a single-threaded runtime.
-    ///
-    /// Returns a `JoinHandle` that yields startup/runtime errors from the
-    /// service thread.
+    /// Spawns the service on a dedicated OS thread with a single-threaded runtime.
     pub fn spawn(self) -> JoinHandle<Result<()>> {
         std::thread::spawn(move || {
             let runtime = Builder::new_current_thread()

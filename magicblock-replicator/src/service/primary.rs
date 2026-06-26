@@ -176,21 +176,27 @@ impl Primary {
             warn!("primary lock is not held, skipping replication drain");
             return;
         }
+        let _timing = ShutdownTiming::new("replication_service_drain");
 
         let deadline = Instant::now() + SHUTDOWN_DRAIN_TIMEOUT;
         let mut drained = 0_u64;
+        let mut acked = 0_u64;
 
         if let Some(msg) = pending.take() {
             if !self.publish_with_retry_until(&msg, Some(deadline)).await {
-                warn!(drained, "failed to drain pending replication message");
+                warn!(
+                    drained,
+                    acked, "failed to drain pending replication message"
+                );
                 return;
             }
             drained += 1;
+            acked += msg.requires_ack() as u64;
         }
 
         loop {
             if Instant::now() >= deadline {
-                warn!(drained, "replication shutdown drain timed out");
+                warn!(drained, acked, "replication shutdown drain timed out");
                 return;
             }
 
@@ -202,19 +208,24 @@ impl Primary {
                     {
                         warn!(
                             drained,
-                            "failed to drain queued replication message"
+                            acked, "failed to drain queued replication message"
                         );
                         return;
                     }
                     drained += 1;
+                    acked += msg.requires_ack() as u64;
                 }
                 Err(TryRecvError::Empty) => {
-                    info!(drained, "replication shutdown drain complete");
+                    info!(
+                        drained,
+                        acked, "replication shutdown drain complete"
+                    );
                     return;
                 }
                 Err(TryRecvError::Disconnected) => {
                     info!(
                         drained,
+                        acked,
                         "replication channel closed during shutdown drain"
                     );
                     return;
@@ -227,6 +238,7 @@ impl Primary {
         if !lock_state.can_publish() {
             return;
         }
+        let _timing = ShutdownTiming::new("replication_service_lock_release");
         if let Err(error) = self.producer.release().await {
             warn!(%error, "failed to release the lock");
         }
@@ -243,7 +255,7 @@ impl Primary {
         let subject = Subjects::from_message(msg);
         let (slot, index) = msg.slot_and_index();
         let msg_id = message_id(slot, index);
-        let ack = matches!(msg, Message::SuperBlock(_) | Message::Reset(_));
+        let ack = msg.requires_ack();
 
         self.ctx
             .broker
@@ -315,6 +327,31 @@ impl Primary {
         }
 
         false
+    }
+}
+
+struct ShutdownTiming {
+    step: &'static str,
+    start: Instant,
+}
+
+impl ShutdownTiming {
+    fn new(step: &'static str) -> Self {
+        Self {
+            step,
+            start: Instant::now(),
+        }
+    }
+}
+
+impl Drop for ShutdownTiming {
+    fn drop(&mut self) {
+        info!(
+            phase = "shutdown",
+            step = self.step,
+            duration_ms = self.start.elapsed().as_millis() as u64,
+            "Validator timing"
+        );
     }
 }
 
