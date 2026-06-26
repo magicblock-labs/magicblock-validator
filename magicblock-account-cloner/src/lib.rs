@@ -178,9 +178,15 @@ impl ChainlinkCloner {
         data: Vec<u8>,
         is_last: bool,
         actions: Vec<Instruction>,
+        needs_undelegation: bool,
     ) -> Instruction {
         InstructionUtils::clone_account_continue_instruction(
-            pubkey, offset, data, is_last, actions,
+            pubkey,
+            offset,
+            data,
+            is_last,
+            actions,
+            needs_undelegation,
         )
     }
 
@@ -214,6 +220,12 @@ impl ChainlinkCloner {
         InstructionUtils::set_program_authority_instruction(program, authority)
     }
 
+    fn schedule_undelegation_ix(pubkey: Pubkey) -> Instruction {
+        InstructionUtils::schedule_cloned_account_undelegation_instruction(
+            pubkey,
+        )
+    }
+
     // -----------------
     // Clone Fields Helper
     // -----------------
@@ -240,11 +252,16 @@ impl ChainlinkCloner {
         let fields = Self::clone_fields(request);
         let actions: Vec<Instruction> =
             request.delegation_actions.clone().into();
+        let clone_actions = if request.needs_undelegation {
+            Vec::new()
+        } else {
+            actions.clone()
+        };
         let clone_ix = Self::clone_ix(
             request.pubkey,
             request.account.data().to_vec(),
             fields,
-            actions.clone(),
+            clone_actions,
         );
 
         // TODO(#625): Re-enable frequency commits when proper limits are in place:
@@ -255,7 +272,9 @@ impl ChainlinkCloner {
         // To re-enable, uncomment the following and use `ixs` instead of `[clone_ix]`:
         // let ixs = self.maybe_add_crank_commits_ix(request, clone_ix);
         let mut ixs = vec![clone_ix];
-        if !actions.is_empty() {
+        if request.needs_undelegation {
+            ixs.push(Self::schedule_undelegation_ix(request.pubkey));
+        } else if !actions.is_empty() {
             ixs.push(Self::post_delegation_action_ix(request.pubkey, actions));
         }
 
@@ -314,14 +333,21 @@ impl ChainlinkCloner {
 
         let actions: Vec<Instruction> =
             request.delegation_actions.clone().into();
+        let clone_actions = if request.needs_undelegation {
+            Vec::new()
+        } else {
+            actions.clone()
+        };
 
         // Continue txs for remaining chunks
+        let has_post_delegation_action =
+            !clone_actions.is_empty() || request.needs_undelegation;
         let mut offset = MAX_INLINE_DATA_SIZE;
         while offset < data.len() {
             let end = (offset + MAX_INLINE_DATA_SIZE).min(data.len());
             let chunk = data[offset..end].to_vec();
             let is_last = end == data.len();
-            let final_without_actions = is_last && actions.is_empty();
+            let final_without_actions = is_last && !has_post_delegation_action;
 
             let continue_ix = Self::clone_continue_ix(
                 request.pubkey,
@@ -329,24 +355,27 @@ impl ChainlinkCloner {
                 chunk,
                 final_without_actions,
                 Vec::new(),
+                false,
             );
             txs.push(self.create_signed_tx(&[continue_ix], blockhash));
             offset = end;
         }
 
-        if !actions.is_empty() {
+        if request.needs_undelegation || !actions.is_empty() {
             let continue_ix = Self::clone_continue_ix(
                 request.pubkey,
                 data.len() as u32,
                 Vec::new(),
                 true,
-                actions.clone(),
+                clone_actions,
+                request.needs_undelegation,
             );
-            let action_ix =
-                Self::post_delegation_action_ix(request.pubkey, actions);
-            txs.push(
-                self.create_signed_tx(&[continue_ix, action_ix], blockhash),
-            );
+            let ix = if request.needs_undelegation {
+                Self::schedule_undelegation_ix(request.pubkey)
+            } else {
+                Self::post_delegation_action_ix(request.pubkey, actions)
+            };
+            txs.push(self.create_signed_tx(&[continue_ix, ix], blockhash));
         }
 
         txs
@@ -564,6 +593,7 @@ impl ChainlinkCloner {
                 chunk.to_vec(),
                 false,
                 Vec::new(),
+                false,
             );
             txs.push(self.create_signed_tx(&[continue_ix], blockhash));
         }
@@ -576,6 +606,7 @@ impl ChainlinkCloner {
             last_chunk.to_vec(),
             true,
             Vec::new(),
+            false,
         )];
         ixs.extend(finalize_ixs);
         txs.push(self.create_signed_tx(&ixs, blockhash));
@@ -740,6 +771,7 @@ mod tests {
             commit_frequency_ms: None,
             delegation_actions: DelegationActions::from(actions),
             delegated_to_other: None,
+            needs_undelegation: false,
         }
     }
 
@@ -813,6 +845,200 @@ mod tests {
     }
 
     #[test]
+    fn undelegation_ix_uses_specific_magic_instruction() {
+        magicblock_program::validator::generate_validator_authority_if_needed();
+        let pubkey = Pubkey::new_unique();
+        let ix = ChainlinkCloner::schedule_undelegation_ix(pubkey);
+
+        assert_eq!(ix.program_id, POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID);
+        assert_eq!(ix.accounts.len(), 4);
+        assert_eq!(
+            ix.accounts[0].pubkey,
+            magicblock_program::validator::validator_authority_id()
+        );
+        assert!(ix.accounts[0].is_signer);
+        assert!(!ix.accounts[0].is_writable);
+        assert_eq!(ix.accounts[1].pubkey, pubkey);
+        assert!(ix.accounts[1].is_writable);
+        assert_eq!(
+            ix.accounts[2].pubkey,
+            solana_sdk_ids::sysvar::instructions::id()
+        );
+        assert!(!ix.accounts[2].is_writable);
+        assert_eq!(ix.accounts[3].pubkey, MAGIC_CONTEXT_PUBKEY);
+        assert!(ix.accounts[3].is_writable);
+
+        match bincode::deserialize(&ix.data).unwrap() {
+            PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                ..
+            } => {}
+            _ => panic!("expected schedule undelegation instruction"),
+        }
+    }
+
+    #[test]
+    fn small_undelegation_clone_schedules_in_same_tx_without_actions() {
+        let pubkey = Pubkey::new_unique();
+        let mut request = request(pubkey, vec![1, 2, 3], vec![action()]);
+        request.needs_undelegation = true;
+        let tx = cloner().build_small_account_tx(&request, Hash::default());
+
+        assert_eq!(tx.message().instructions.len(), 2);
+        assert_eq!(instruction_program_id(&tx, 0), magicblock_program::ID);
+        assert_eq!(
+            instruction_program_id(&tx, 1),
+            POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID
+        );
+
+        match bincode::deserialize(instruction_data(&tx, 0)).unwrap() {
+            MagicBlockInstruction::CloneAccount {
+                pubkey: clone_pubkey,
+                actions,
+                fields,
+                ..
+            } => {
+                assert_eq!(clone_pubkey, pubkey);
+                assert!(fields.delegated);
+                assert!(actions.is_empty());
+            }
+            _ => panic!("expected clone account instruction"),
+        }
+        match bincode::deserialize(instruction_data(&tx, 1)).unwrap() {
+            PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                ..
+            } => {}
+            _ => panic!("expected schedule undelegation instruction"),
+        }
+    }
+
+    #[test]
+    fn large_undelegation_clone_schedules_after_final_chunk_tx() {
+        let pubkey = Pubkey::new_unique();
+        let mut request =
+            request(pubkey, vec![7; MAX_INLINE_DATA_SIZE + 1], vec![action()]);
+        request.needs_undelegation = true;
+        let txs = cloner().build_large_account_txs(&request, Hash::default());
+
+        assert_eq!(txs.len(), 3);
+
+        let final_clone_tx = &txs[1];
+        assert_eq!(final_clone_tx.message().instructions.len(), 1);
+        assert_eq!(
+            instruction_program_id(final_clone_tx, 0),
+            magicblock_program::ID
+        );
+
+        match bincode::deserialize(instruction_data(final_clone_tx, 0)).unwrap()
+        {
+            MagicBlockInstruction::CloneAccountContinue {
+                pubkey: continue_pubkey,
+                offset,
+                data,
+                is_last,
+                actions,
+                needs_undelegation,
+            } => {
+                assert_eq!(continue_pubkey, pubkey);
+                assert_eq!(offset, MAX_INLINE_DATA_SIZE as u32);
+                assert_eq!(data, vec![7]);
+                assert!(!is_last);
+                assert!(actions.is_empty());
+                assert!(!needs_undelegation);
+            }
+            _ => panic!("expected clone account continue instruction"),
+        }
+
+        let rescue_tx = txs.last().unwrap();
+        assert_eq!(rescue_tx.message().instructions.len(), 2);
+
+        assert_eq!(
+            instruction_program_id(rescue_tx, 0),
+            magicblock_program::ID
+        );
+        match bincode::deserialize(instruction_data(rescue_tx, 0)).unwrap() {
+            MagicBlockInstruction::CloneAccountContinue {
+                pubkey: continue_pubkey,
+                offset,
+                data,
+                is_last,
+                actions,
+                needs_undelegation,
+            } => {
+                assert_eq!(continue_pubkey, pubkey);
+                assert_eq!(offset, (MAX_INLINE_DATA_SIZE + 1) as u32);
+                assert_eq!(data, Vec::<u8>::new());
+                assert!(is_last);
+                assert!(actions.is_empty());
+                assert!(needs_undelegation);
+            }
+            _ => panic!("expected clone account continue instruction"),
+        }
+
+        assert_eq!(
+            instruction_program_id(rescue_tx, 1),
+            POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID
+        );
+        match bincode::deserialize(instruction_data(rescue_tx, 1)).unwrap() {
+            PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                ..
+            } => {}
+            _ => panic!("expected schedule undelegation instruction"),
+        }
+    }
+
+    #[test]
+    fn large_undelegation_max_final_chunk_fits() {
+        let pubkey = Pubkey::new_unique();
+        let mut request =
+            request(pubkey, vec![7; MAX_INLINE_DATA_SIZE * 2], vec![]);
+        request.needs_undelegation = true;
+        let txs = cloner().build_large_account_txs(&request, Hash::default());
+
+        ChainlinkCloner::ensure_transactions_fit(pubkey, &txs).unwrap();
+    }
+
+    #[test]
+    fn chunked_undelegation_short_data_uses_empty_final_continue() {
+        let pubkey = Pubkey::new_unique();
+        let data = vec![1, 2, 3];
+        let mut request = request(pubkey, data.clone(), vec![action()]);
+        request.needs_undelegation = true;
+        let txs = cloner().build_large_account_txs(&request, Hash::default());
+
+        assert_eq!(txs.len(), 2);
+
+        let final_clone_tx = &txs[1];
+        assert_eq!(final_clone_tx.message().instructions.len(), 2);
+        match bincode::deserialize(instruction_data(final_clone_tx, 0)).unwrap()
+        {
+            MagicBlockInstruction::CloneAccountContinue {
+                pubkey: continue_pubkey,
+                offset,
+                data: continue_data,
+                is_last,
+                actions,
+                needs_undelegation,
+            } => {
+                assert_eq!(continue_pubkey, pubkey);
+                assert_eq!(offset, data.len() as u32);
+                assert!(continue_data.is_empty());
+                assert!(is_last);
+                assert!(actions.is_empty());
+                assert!(needs_undelegation);
+            }
+            _ => panic!("expected clone account continue instruction"),
+        }
+
+        match bincode::deserialize(instruction_data(final_clone_tx, 1)).unwrap()
+        {
+            PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                ..
+            } => {}
+            _ => panic!("expected schedule undelegation instruction"),
+        }
+    }
+
+    #[test]
     fn small_delegated_clone_with_actions_emits_executor_sibling() {
         let pubkey = Pubkey::new_unique();
         let actions = vec![action()];
@@ -849,6 +1075,11 @@ mod tests {
                 assert_eq!(executor_pubkey, pubkey);
                 assert_eq!(executor_actions, actions);
             }
+            PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                ..
+            } => {
+                panic!("expected execute instruction")
+            }
         }
     }
 
@@ -878,12 +1109,14 @@ mod tests {
                 data,
                 is_last,
                 actions: continue_actions,
+                needs_undelegation,
             } => {
                 assert_eq!(continue_pubkey, pubkey);
                 assert_eq!(offset, (MAX_INLINE_DATA_SIZE + 1) as u32);
                 assert!(data.is_empty());
                 assert!(is_last);
                 assert_eq!(continue_actions, actions);
+                assert!(!needs_undelegation);
             }
             _ => panic!("expected clone account continue instruction"),
         }
@@ -894,6 +1127,11 @@ mod tests {
             } => {
                 assert_eq!(executor_pubkey, pubkey);
                 assert_eq!(executor_actions, actions);
+            }
+            PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                ..
+            } => {
+                panic!("expected execute instruction")
             }
         }
     }
