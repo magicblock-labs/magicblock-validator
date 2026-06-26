@@ -7,7 +7,7 @@ use solana_signer::{Signer, SignerError};
 
 use crate::{
     tasks::{utils::TransactionUtils, BaseActionTask, BaseTask, BaseTaskImpl},
-    transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+    utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
 };
 
 #[derive(Default, Clone)]

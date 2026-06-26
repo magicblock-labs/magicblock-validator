@@ -11,11 +11,11 @@ use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{
         commit_task::{CommitBufferStage, CommitDelivery},
         BaseTask, BaseTaskImpl, PreparationTask,
     },
+    utils::MAX_WRITE_CHUNK_SIZE,
 };
 
 /// A task that commits a delegated account's state to the base layer and finalizes it in the same

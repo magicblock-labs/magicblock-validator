@@ -25,8 +25,11 @@ pub mod utils;
 
 pub use task_builder::TaskBuilderImpl;
 
-use crate::tasks::{
-    commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
+use crate::{
+    tasks::{
+        commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
+    },
+    utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -723,12 +726,7 @@ fn test_close_buffer_limit() {
     use solana_transaction::Transaction;
     use tracing::info;
 
-    use crate::{
-        test_utils,
-        transactions::{
-            serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
-        },
-    };
+    use crate::{self, test_utils};
 
     test_utils::init_test_logger();
 
