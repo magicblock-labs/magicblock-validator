@@ -5840,6 +5840,62 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
 }
 
 #[tokio::test]
+async fn test_delegated_malformed_ata_clone_is_rejected() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let wallet_owner = random_pubkey();
+    let mint = spl_token::native_mint::id();
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let mut data = vec![0u8; 72];
+    data[0..32].copy_from_slice(mint.as_ref());
+    data[32..64].copy_from_slice(wallet_owner.as_ref());
+    let mut account = AccountSharedData::from(Account {
+        lamports: Rent::default().minimum_balance(SplAccount::LEN),
+        data,
+        owner: spl_token::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    account.set_remote_slot(CURRENT_SLOT);
+    account.set_delegated(true);
+
+    let err = fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: ata_pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+                needs_undelegation: false,
+            },
+        )
+        .await
+        .expect_err("malformed delegated ATA clone should be rejected");
+
+    assert!(
+        matches!(err, ChainlinkError::InvalidTokenAccount(pubkey, _) if pubkey == ata_pubkey)
+    );
+    assert!(
+        cloner.clone_requests().is_empty(),
+        "malformed delegated ATA must not be cloned"
+    );
+}
+
+#[tokio::test]
 async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
 ) {
     init_logger();

@@ -701,10 +701,14 @@ where
     ) -> ChainlinkResult<Signature> {
         if request.account.delegated()
             && is_ata(&request.pubkey, &request.account).is_some()
-        {
-            normalize_native_token_account_for_local_clone(
+            && !normalize_native_token_account_for_local_clone(
                 &mut request.account,
-            );
+            )
+        {
+            return Err(ChainlinkError::InvalidTokenAccount(
+                request.pubkey,
+                "delegated ATA token data is malformed".to_string(),
+            ));
         }
         self.normalize_unresolved_dlp_clone_request(&mut request)?;
 
