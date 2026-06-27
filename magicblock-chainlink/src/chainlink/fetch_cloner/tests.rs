@@ -14,7 +14,7 @@ use spl_token::state::{Account as SplAccount, AccountState};
 use spl_token_2022::{
     extension::{
         immutable_owner::ImmutableOwner, BaseStateWithExtensions,
-        StateWithExtensions,
+        StateWithExtensions, StateWithExtensionsMut,
     },
     state::Account as Token2022Account,
 };
@@ -5109,6 +5109,12 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
     assert_eq!(projected_mint, mint);
     assert_eq!(projected_owner, wallet_owner);
     assert_eq!(projected_amount, AMOUNT);
+    let projected_token =
+        SplAccount::unpack(ata_data).expect("unpack projected ATA");
+    assert_eq!(
+        projected_token.close_authority,
+        COption::Some(Pubkey::default())
+    );
 }
 
 #[tokio::test]
@@ -5812,6 +5818,7 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 commit_frequency_ms: None,
                 delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -5830,6 +5837,65 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
         token_account.close_authority,
         COption::Some(Pubkey::default())
     );
+}
+
+#[tokio::test]
+async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 100_000_000;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let wallet_owner = random_pubkey();
+    let account_pubkey = loop {
+        let candidate = random_pubkey();
+        if candidate != derive_ata(&wallet_owner, &spl_token::native_mint::id())
+        {
+            break candidate;
+        }
+    };
+    let (native_account, rent_exempt_reserve) =
+        create_native_ata_account(&wallet_owner, AMOUNT);
+    let mut account = AccountSharedData::from(native_account);
+    account.set_remote_slot(CURRENT_SLOT);
+    account.set_delegated(true);
+
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: account_pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+                needs_undelegation: false,
+            },
+        )
+        .await
+        .expect("non-ATA native token clone should be preserved");
+
+    let clone_requests = cloner.clone_requests();
+    assert_eq!(clone_requests.len(), 1);
+    let cloned_account = &clone_requests[0].account;
+    assert_eq!(cloned_account.lamports(), rent_exempt_reserve + AMOUNT);
+
+    let token_account = SplAccount::unpack(cloned_account.data())
+        .expect("unpack non-ATA native token account");
+    assert_eq!(token_account.amount, AMOUNT);
+    assert_eq!(token_account.is_native, COption::Some(rent_exempt_reserve));
+    assert_eq!(token_account.close_authority, COption::None);
 }
 
 #[tokio::test]
@@ -5865,6 +5931,7 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 commit_frequency_ms: None,
                 delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -6782,6 +6849,13 @@ async fn test_greedy_delegated_eata_update_projects_remote_token_2022_ata() {
     assert_eq!(projected_mint, mint);
     assert_eq!(projected_owner, wallet_owner);
     assert_eq!(projected_amount, EATA_AMOUNT);
+    let projected_token_account =
+        StateWithExtensions::<Token2022Account>::unpack(ata_data)
+            .expect("unpack projected Token-2022 ATA");
+    assert_eq!(
+        projected_token_account.base.close_authority,
+        COption::Some(Pubkey::default())
+    );
 
     assert!(
         accounts_bank.get_account(&legacy_ata_pubkey).is_none(),
@@ -7348,12 +7422,13 @@ async fn test_ata_projection_releases_ata_direct_ref_after_fetch() {
 }
 
 #[tokio::test]
-async fn test_token_2022_ata_projection_preserves_token_program_and_layout() {
+async fn test_token_2022_native_ata_projection_normalizes_and_preserves_layout()
+{
     init_logger();
     let validator_keypair = Keypair::new();
     let validator_pubkey = validator_keypair.pubkey();
     let wallet_owner = random_pubkey();
-    let mint = random_pubkey();
+    let mint = spl_token_2022::native_mint::id();
     const CURRENT_SLOT: u64 = 100;
     const AMOUNT: u64 = 777;
 
@@ -7363,9 +7438,20 @@ async fn test_token_2022_ata_projection_preserves_token_program_and_layout() {
         &TOKEN_2022_PROGRAM_ID,
     );
     let eata_pubkey = derive_eata(&wallet_owner, &mint);
-    let ata_account = create_token_2022_ata_account(&wallet_owner, &mint);
+    let mut ata_account = create_token_2022_ata_account(&wallet_owner, &mint);
     let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
     let expected_len = ata_account.data.len();
+    let rent_exempt_reserve = Rent::default().minimum_balance(expected_len);
+    {
+        let mut token_account =
+            StateWithExtensionsMut::<Token2022Account>::unpack(
+                &mut ata_account.data,
+            )
+            .expect("unpack Token-2022 native ATA");
+        token_account.base.is_native = COption::Some(rent_exempt_reserve);
+        token_account.pack_base();
+    }
+    ata_account.lamports = rent_exempt_reserve + AMOUNT;
 
     let FetcherTestCtx {
         accounts_bank,
@@ -7403,19 +7489,25 @@ async fn test_token_2022_ata_projection_preserves_token_program_and_layout() {
         .expect("Token-2022 ATA should be projected");
     assert!(projected_ata.delegated());
     assert_eq!(*projected_ata.owner(), TOKEN_2022_PROGRAM_ID);
+    assert_eq!(projected_ata.lamports(), rent_exempt_reserve);
     assert_eq!(projected_ata.data().len(), expected_len);
     assert_eq!(projected_ata.remote_slot(), CURRENT_SLOT);
 
     let ata_data = projected_ata.data();
-    let projected_mint =
-        Pubkey::new_from_array(ata_data[0..32].try_into().unwrap());
-    let projected_owner =
-        Pubkey::new_from_array(ata_data[32..64].try_into().unwrap());
-    let projected_amount =
-        u64::from_le_bytes(ata_data[64..72].try_into().unwrap());
-    assert_eq!(projected_mint, mint);
-    assert_eq!(projected_owner, wallet_owner);
-    assert_eq!(projected_amount, AMOUNT);
+    let projected_token_account =
+        StateWithExtensions::<Token2022Account>::unpack(ata_data)
+            .expect("unpack projected Token-2022 ATA");
+    assert_eq!(projected_token_account.base.mint, mint);
+    assert_eq!(projected_token_account.base.owner, wallet_owner);
+    assert_eq!(projected_token_account.base.amount, AMOUNT);
+    assert_eq!(projected_token_account.base.is_native, COption::None);
+    assert_eq!(
+        projected_token_account.base.close_authority,
+        COption::Some(Pubkey::default())
+    );
+    projected_token_account
+        .get_extension::<ImmutableOwner>()
+        .expect("projected Token-2022 ATA preserves ImmutableOwner");
 }
 
 #[tokio::test]

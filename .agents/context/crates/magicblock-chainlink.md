@@ -233,6 +233,8 @@ Chainlink has special handling for associated token accounts and ephemeral ATAs:
 Pitfalls:
 
 - Do not rebuild Token-2022 accounts as legacy SPL Token accounts; use the projection helpers that preserve layout.
+- Native-token normalization is safe only after Chainlink has proved the cloned account is a canonical ATA/eATA projection target. Non-canonical delegated wrapped-SOL token accounts must be preserved because commit settlement will not remap them to eATA.
+- Projected ATAs are virtual eATA views and should be uncloseable locally; do not preserve base close authority on the projected clone.
 - Same-slot delegated refreshes are a narrow ordering exception for allowing a delegated update over plain/undelegating local state at the same `remote_slot`. They do not mean same-slot re-delegation to the same validator is fully supported; without a delegation generation/index, `account_still_undelegating_on_chain` cannot distinguish `delegation_slot == remote_slot_in_bank` from a still-pending undelegation, and `magicblock-chainlink/tests/07_redeleg_us_same_slot.rs` remains ignored for that reason.
 - Undelegating ATAs may remain in bank while a companion eATA is still delegated to this validator.
 
