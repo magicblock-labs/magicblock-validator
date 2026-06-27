@@ -481,8 +481,9 @@ impl From<EphemeralAta> for Account {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use spl_token::state::AccountState;
+
+    use super::*;
 
     #[test]
     fn project_non_native_ata_is_uncloseable() {
