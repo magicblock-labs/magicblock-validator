@@ -641,10 +641,13 @@ impl MagicValidator {
         // we have this number for our max blockhash age in slots, which correspond to 60 seconds
         let max_block_age =
             SOLANA_VALID_BLOCKHASH_AGE / self.config.ledger.block_time_ms();
+        // replay has to start 1 slot after accountsdb_slot
+        let full_process_starting_slot = accountsdb_slot + 1;
+
         let step_start = Instant::now();
         let process_ledger_result = process_ledger(
             &self.ledger,
-            accountsdb_slot,
+            full_process_starting_slot,
             self.transaction_scheduler.clone(),
             max_block_age,
         )
