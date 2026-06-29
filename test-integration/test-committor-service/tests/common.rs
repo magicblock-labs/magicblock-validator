@@ -10,11 +10,14 @@ use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
-        intent_execution_client::IntentExecutionClient, IntentExecutorCtx,
+        error::IntentExecutorResult,
+        intent_execution_client::IntentExecutionClient, ExecutionOutput,
+        IntentExecutionReport, IntentExecutorCtx,
     },
     outbox::{
         outbox_client::InternalOutboxClientError,
-        outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+        outbox_intent_bundles_reader::OutboxIntentBundlesReader, OutboxClient,
+        ScheduledBaseIntentMeta,
     },
     tasks::{
         commit_task::{CommitDelivery, CommitTask},
@@ -34,7 +37,7 @@ use magicblock_core::{
 };
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    outbox_intent_bundles::OutboxIntentBundle, SentCommit,
+    outbox_intent_bundles::OutboxIntentBundle,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -45,9 +48,7 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
 };
-use magicblock_committor_service::outbox::OutboxClient;
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
@@ -127,14 +128,19 @@ impl TestFixture {
         MockActionsCallbackExecutor,
         MockOutboxClient,
     > {
-        AcceptedIntentExecutor::new(IntentExecutorCtx {
-            intent_client: IntentExecutionClient::new(self.rpc_client.clone()),
-            transaction_preparator: self.create_transaction_preparator(),
-            task_info_fetcher: self.create_task_info_fetcher(),
-            outbox_client: Arc::new(MockOutboxClient),
-            actions_callback_executor: MockActionsCallbackExecutor::default(),
-            actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
-        })
+        AcceptedIntentExecutor::new(
+            IntentExecutorCtx {
+                intent_client: IntentExecutionClient::new(
+                    self.rpc_client.clone(),
+                ),
+                transaction_preparator: self.create_transaction_preparator(),
+                task_info_fetcher: self.create_task_info_fetcher(),
+                outbox_client: Arc::new(MockOutboxClient),
+                actions_callback_executor: MockActionsCallbackExecutor::default(
+                ),
+            },
+            DEFAULT_ACTIONS_TIMEOUT,
+        )
     }
 
     #[allow(dead_code)]
@@ -162,7 +168,7 @@ impl OutboxIntentBundlesReader for MockOutboxReader {
 
     async fn fetch_outbox_intent(
         &self,
-        intent_id: u64,
+        _intent_id: u64,
     ) -> Result<Option<OutboxIntentBundle>, Self::Error> {
         Ok(None)
     }
@@ -195,8 +201,9 @@ impl OutboxClient for MockOutboxClient {
 
     async fn notify_commit_sent(
         &self,
-        _sent_tx: Transaction,
-        _sent_commit: SentCommit,
+        _meta: ScheduledBaseIntentMeta,
+        _result: &IntentExecutorResult<ExecutionOutput>,
+        _execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

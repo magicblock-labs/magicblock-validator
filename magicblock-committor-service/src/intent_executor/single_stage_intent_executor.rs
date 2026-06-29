@@ -25,7 +25,7 @@ use crate::{
     outbox::OutboxClient,
     tasks::{
         task_info_fetcher::{ResetType, TaskInfoFetcher},
-        task_strategist::{TaskStrategist, TransactionStrategy},
+        task_strategist::TaskStrategist,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -37,14 +37,10 @@ pub struct SingleStageIntentExecutor<T, F, A, O> {
     /// Intent Executor context
     ctx: IntentExecutorCtx<T, F, A, O>,
 
+    /// Timeout for Intent's actions
+    pub actions_timeout: Duration,
     /// Intent execution started at
     pub started_at: Instant,
-    /// Junk that needs to be cleaned up
-    junk: Vec<TransactionStrategy>,
-    /// Set to false on execution failure so cleanup only releases ALT
-    /// reservations without closing buffer PDAs (see race condition note in
-    /// intent_execution_engine)
-    close_buffers: bool,
 }
 
 impl<T, F, A, O> SingleStageIntentExecutor<T, F, A, O>
@@ -57,6 +53,7 @@ where
 {
     pub fn new(
         ctx: IntentExecutorCtx<T, F, A, O>,
+        actions_timeout: Duration,
         pending_signature: Signature,
     ) -> Self {
         let authority = validator_authority();
@@ -65,16 +62,13 @@ where
             pending_signature,
             ctx,
 
+            actions_timeout,
             started_at: Instant::now(),
-            junk: vec![],
-            close_buffers: true,
         }
     }
 
     fn time_left(&self) -> Option<Duration> {
-        self.ctx
-            .actions_timeout
-            .checked_sub(self.started_at.elapsed())
+        self.actions_timeout.checked_sub(self.started_at.elapsed())
     }
 
     pub async fn execute_inner(
@@ -162,8 +156,8 @@ where
             });
         });
 
-        self.close_buffers = result.is_ok();
-        self.junk = execution_report.junk;
+        let close_buffers = result.is_ok();
+        let junk = execution_report.junk;
         let result = IntentExecutionResult {
             inner: result,
             patched_errors: execution_report.patched_errors,
@@ -174,8 +168,8 @@ where
         };
         let cleanup_handle = CleanupHandle::new(
             self.authority,
-            self.junk,
-            self.close_buffers,
+            junk,
+            close_buffers,
             self.ctx.transaction_preparator,
         );
 

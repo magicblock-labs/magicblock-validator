@@ -419,6 +419,14 @@ lazy_static::lazy_static! {
         "Number of signatures included in batched getSignatureStatuses requests"
     ).unwrap();
 
+    static ref RPC_CLIENT_SIGNATURE_HISTORY_DURATION_SECONDS: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "rpc_client_signature_history_duration_seconds",
+            "Time in seconds spent on getSignatureStatuses-with-history (restart recovery)"
+        )
+        .buckets(vec![0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0])
+    ).unwrap();
+
 
     static ref COMMITTOR_INTENT_TASK_PREPARATION_TIME: HistogramVec = HistogramVec::new(
         HistogramOpts::new(
@@ -640,6 +648,7 @@ pub(crate) fn register() {
         register!(RPC_CLIENT_SIGNATURE_WS_FALLBACK_COUNT);
         register!(RPC_CLIENT_SIGNATURE_STATUS_BATCH_COUNT);
         register!(RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT);
+        register!(RPC_CLIENT_SIGNATURE_HISTORY_DURATION_SECONDS);
         register!(CONNECTED_PUBSUB_CLIENTS_GAUGE);
         register!(CONNECTED_DIRECT_PUBSUB_CLIENTS_GAUGE);
         register!(PUBSUB_CLIENT_UPTIME_GAUGE);
@@ -927,6 +936,10 @@ pub fn inc_rpc_client_signature_status_batch_count() {
 
 pub fn inc_rpc_client_signature_status_batch_signatures_count(count: u64) {
     RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT.inc_by(count)
+}
+
+pub fn start_rpc_client_signature_history_timer() -> HistogramTimer {
+    RPC_CLIENT_SIGNATURE_HISTORY_DURATION_SECONDS.start_timer()
 }
 
 pub fn set_connected_pubsub_clients_count(count: usize) {

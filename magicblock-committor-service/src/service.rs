@@ -141,13 +141,10 @@ where
         // Reschedule existing outbox intents first
         // We need to ensure that accounts in outbox a scheduled before
         // we accept new incoming Intents
-        self.reschedule_intents()
-            .await
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to reschedule pending bundles")
-            })
-            // TODO(edwin): early shutdown or cleanup errors to avoid this
-            .expect("Failed to reschedule intents");
+        if let Err(err) = self.reschedule_intents().await {
+            // TODO(edwin): alerts
+            error!(error = ?err, "Failed to reschedule pending bundles")
+        }
 
         let mut interval = tokio::time::interval(self.slot_interval);
         loop {
@@ -193,7 +190,6 @@ where
                 return Ok(());
             }
 
-            // TODO(edwin): use status
             let read_len = intent_bundles_chunk.len();
             // Schedule  without initial persistence as bundle already exists in db
             let result = self

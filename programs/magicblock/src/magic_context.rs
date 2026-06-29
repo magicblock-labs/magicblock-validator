@@ -53,12 +53,6 @@ impl MagicContext {
         self.scheduled_base_intents.push(base_intent);
     }
 
-    pub(crate) fn take_scheduled_commits(
-        &mut self,
-    ) -> Vec<ScheduledIntentBundle> {
-        mem::take(&mut self.scheduled_base_intents)
-    }
-
     pub(crate) fn take_front_scheduled_commits(
         &mut self,
         n: usize,

@@ -1,7 +1,4 @@
-use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle, Pubkey, SentCommit,
-};
-use solana_hash::Hash;
+use magicblock_program::SentCommit;
 use solana_transaction::Transaction;
 use tracing::{error, info};
 

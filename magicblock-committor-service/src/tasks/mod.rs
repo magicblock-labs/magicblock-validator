@@ -25,11 +25,8 @@ pub mod utils;
 
 pub use task_builder::TaskBuilderImpl;
 
-use crate::{
-    tasks::{
-        commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
-    },
-    utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+use crate::tasks::{
+    commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -119,16 +119,18 @@ impl TestEnv {
         }
 
         let callback_executor = MockActionsCallbackExecutor::default();
-        let intent_executor = AcceptedIntentExecutor::new(IntentExecutorCtx {
-            intent_client: IntentExecutionClient::new(
-                fixture.rpc_client.clone(),
-            ),
-            transaction_preparator,
-            task_info_fetcher: task_info_fetcher.clone(),
-            outbox_client: Arc::new(MockOutboxClient),
-            actions_callback_executor: callback_executor.clone(),
-            actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
-        });
+        let intent_executor = AcceptedIntentExecutor::new(
+            IntentExecutorCtx {
+                intent_client: IntentExecutionClient::new(
+                    fixture.rpc_client.clone(),
+                ),
+                transaction_preparator,
+                task_info_fetcher: task_info_fetcher.clone(),
+                outbox_client: Arc::new(MockOutboxClient),
+                actions_callback_executor: callback_executor.clone(),
+            },
+            DEFAULT_ACTIONS_TIMEOUT,
+        );
 
         Self {
             fixture,
@@ -1268,14 +1270,18 @@ async fn test_action_callback_fired_on_timeout() {
     let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
         RpcTaskInfoFetcher::new(fixture.rpc_client.clone()),
     ));
-    let intent_executor = AcceptedIntentExecutor::new(IntentExecutorCtx {
-        intent_client: IntentExecutionClient::new(fixture.rpc_client.clone()),
-        transaction_preparator: fixture.create_transaction_preparator(),
-        task_info_fetcher,
-        outbox_client: Arc::new(MockOutboxClient),
-        actions_callback_executor: callback_executor.clone(),
-        actions_timeout: Duration::ZERO,
-    });
+    let intent_executor = AcceptedIntentExecutor::new(
+        IntentExecutorCtx {
+            intent_client: IntentExecutionClient::new(
+                fixture.rpc_client.clone(),
+            ),
+            transaction_preparator: fixture.create_transaction_preparator(),
+            task_info_fetcher,
+            outbox_client: Arc::new(MockOutboxClient),
+            actions_callback_executor: callback_executor.clone(),
+        },
+        Duration::ZERO,
+    );
 
     let scheduled_intent = create_scheduled_intent(base_intent);
     let (res, cleanup_handle) =

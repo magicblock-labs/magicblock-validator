@@ -111,13 +111,12 @@ impl IntentExecutionClient {
         signatures: &[Signature],
     ) -> MagicBlockRpcClientResult<Vec<Option<Result<(), TransactionError>>>>
     {
-        // TODO(edwin): add metrics/log for this one
+        let _timer = metrics::start_rpc_client_signature_history_timer();
         let response = self
             .rpc_client
             .get_inner()
             .get_signature_statuses_with_history(signatures)
             .await
-            // TODO(edwin): map to more specific error? verify
             .map_err(MagicBlockRpcClientError::from)?;
         Ok(response
             .value
@@ -231,7 +230,6 @@ struct IntentErrorMapper<TxMap> {
     transaction_error_mapper: TxMap,
 }
 
-// TODO(edwin): probably could be removed
 impl<TxMap> SendErrorMapper<InternalError> for IntentErrorMapper<TxMap>
 where
     TxMap: TransactionErrorMapper<

@@ -178,8 +178,8 @@ pub(in crate::intent_executor) async fn check_pending_signature(
 
     match statuses.get(0) {
         Some(Some(Ok(()))) => Ok(ControlFlow::Break(())),
-        // TODO(edwin): well, that is bizarre one
         None => {
+            // well, that is bizarre one
             warn!(pending_signature = ?sig, "RPC did not return status for signature");
             Ok(ControlFlow::Continue(()))
         }
@@ -431,7 +431,10 @@ where
     junk
 }
 
-// TODO(edwin): docs
+/// Executes a stage with an optional timeout that applies only to callbacks.
+/// If the timeout fires, callbacks are triggered with `TimeoutError` immediately
+/// (respecting the timeout contract on the user smart contract side), then
+/// execution continues without a timeout to drive the intent to completion.
 pub(in crate::intent_executor) async fn execute_with_timeout(
     time_left: Option<Duration>,
     mut executor: impl StageExecutor,

@@ -36,9 +36,7 @@ const POISONED_MUTEX_MSG: &str =
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
 pub struct CommittorProcessor {
-    authority: Keypair,
     _table_mania: TableMania,
-    magic_rpc_client: MagicblockRpcClient,
     commits_scheduler: IntentEngineHandle<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
@@ -116,9 +114,7 @@ impl CommittorProcessor {
         ));
 
         Self {
-            authority,
             _table_mania: table_mania,
-            magic_rpc_client: magic_block_rpc_client,
             commits_scheduler,
             task_info_fetcher,
             pending_result_listeners,

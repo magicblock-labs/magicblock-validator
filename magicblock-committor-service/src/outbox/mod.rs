@@ -54,13 +54,13 @@ pub trait OutboxClient: Send + Sync + 'static {
 }
 
 pub struct ScheduledBaseIntentMeta {
-    pub(crate) id: u64,
-    pub(crate) slot: u64,
-    pub(crate) blockhash: Hash,
-    pub(crate) payer: Pubkey,
-    pub(crate) included_pubkeys: Vec<Pubkey>,
-    pub(crate) intent_sent_transaction: Transaction,
-    pub(crate) requested_undelegation: bool,
+    pub id: u64,
+    pub slot: u64,
+    pub blockhash: Hash,
+    pub payer: Pubkey,
+    pub included_pubkeys: Vec<Pubkey>,
+    pub intent_sent_transaction: Transaction,
+    pub requested_undelegation: bool,
 }
 
 impl ScheduledBaseIntentMeta {

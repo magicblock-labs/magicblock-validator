@@ -13,14 +13,14 @@ use integration_test_tools::{
 use magicblock_committor_service::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
-        build_stage_intent_executor,
-        error::IntentExecutorResult,
-        intent_execution_client::IntentExecutionClient,
-        ExecutionOutput, IntentExecutionReport, IntentExecutor, IntentExecutorCtx,
+        build_stage_intent_executor, error::IntentExecutorResult,
+        intent_execution_client::IntentExecutionClient, ExecutionOutput,
+        IntentExecutionReport, IntentExecutor, IntentExecutorCtx,
     },
     outbox::{
         outbox_client::InternalOutboxClientError,
-        outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+        outbox_intent_bundles_reader::OutboxIntentBundlesReader, OutboxClient,
+        ScheduledBaseIntentMeta,
     },
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     transaction_preparator::TransactionPreparatorImpl,
@@ -58,7 +58,7 @@ use serial_test::serial;
 use solana_rpc_client::{
     http_sender::HttpSender,
     nonblocking::rpc_client::RpcClient as AsyncRpcClient,
-    rpc_client::{RpcClientConfig, SerializableTransaction},
+    rpc_client::RpcClientConfig,
     rpc_sender::{RpcSender, RpcTransportStats},
 };
 use solana_rpc_client_api::{client_error, request::RpcRequest};
@@ -69,7 +69,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use magicblock_committor_service::outbox::{OutboxClient, ScheduledBaseIntentMeta};
 
 type CallbackRecord =
     (Vec<BaseActionCallback>, Option<Signature>, ActionResult);
@@ -123,17 +122,13 @@ impl TestEnv {
         }
     }
 
-    fn executor_ctx_builder(
-        &self,
-        actions_timeout: Duration,
-    ) -> TestIntentExecutorCtxBuilder {
+    fn executor_ctx_builder(&self) -> TestIntentExecutorCtxBuilder {
         let ctx = TestIntentExecutorCtx {
             intent_client: self.intent_client.clone(),
             transaction_preparator: self.transaction_preparator(),
             task_info_fetcher: self.task_info_fetcher.clone(),
             outbox_client: self.outbox_client().into(),
             actions_callback_executor: self.callback_scheduler.clone(),
-            actions_timeout,
         };
         TestIntentExecutorCtxBuilder { ctx }
     }
@@ -311,10 +306,9 @@ async fn test_pickup_executed_intent() {
     });
 
     // Execute intent
-    let executor_ctx = test_env
-        .executor_ctx_builder(DEFAULT_ACTIONS_TIMEOUT)
-        .build();
-    let executor = AcceptedIntentExecutor::new(executor_ctx);
+    let executor_ctx = test_env.executor_ctx_builder().build();
+    let executor =
+        AcceptedIntentExecutor::new(executor_ctx, DEFAULT_ACTIONS_TIMEOUT);
     let (result, cleanup_handle) = Box::new(executor)
         .execute(outbox_bundle.inner.clone())
         .await;
@@ -347,10 +341,9 @@ async fn test_pickup_executed_intent() {
     );
     // Builder executor
     let executor = build_stage_intent_executor(
-        test_env
-            .executor_ctx_builder(DEFAULT_ACTIONS_TIMEOUT)
-            .build(),
+        test_env.executor_ctx_builder().build(),
         outbox_bundle.status,
+        DEFAULT_ACTIONS_TIMEOUT,
     );
     let (result, cleanup_handle) = Box::new(executor)
         .execute(outbox_bundle.inner.clone())
@@ -394,11 +387,14 @@ async fn test_pickup_failed_intent() {
     failing_outbox.with_fail_execution_stage(true);
 
     let executor_ctx = test_env
-        .executor_ctx_builder(DEFAULT_ACTIONS_TIMEOUT)
+        .executor_ctx_builder()
         .with_outbox_client(failing_outbox.into())
         .build();
 
-    let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx));
+    let executor = Box::new(AcceptedIntentExecutor::new(
+        executor_ctx,
+        DEFAULT_ACTIONS_TIMEOUT,
+    ));
     let (result, cleanup_handle) = executor.execute(outbox_bundle.inner).await;
     assert!(result
         .inner
@@ -425,10 +421,11 @@ async fn test_pickup_failed_intent() {
     );
 
     // Build executor that will drive execution to success
-    let executor_ctx = test_env
-        .executor_ctx_builder(DEFAULT_ACTIONS_TIMEOUT)
-        .build();
-    let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx));
+    let executor_ctx = test_env.executor_ctx_builder().build();
+    let executor = Box::new(AcceptedIntentExecutor::new(
+        executor_ctx,
+        DEFAULT_ACTIONS_TIMEOUT,
+    ));
     let (result, cleanup_handle) =
         executor.execute(chain_outbox_bundle.inner).await;
     let ExecutionOutput::SingleStage(_) =
@@ -482,11 +479,12 @@ async fn test_pickup_after_timeout() {
     slow_outbox_client
         .with_set_execution_stage_sleep(SET_EXECUTION_STAGE_SLEEP);
     let executor_ctx = test_env
-        .executor_ctx_builder(ACTIONS_TIMEOUT)
+        .executor_ctx_builder()
         .with_outbox_client(slow_outbox_client.into())
         .build();
 
-    let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx));
+    let executor =
+        Box::new(AcceptedIntentExecutor::new(executor_ctx, ACTIONS_TIMEOUT));
     let (result, cleanup_handle) =
         executor.execute(outbox_bundle.inner.clone()).await;
     assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
@@ -577,11 +575,12 @@ async fn test_pick_up_after_tx_submission() {
 
     let slow_intent_client = test_env.intent_client_with_send_sleep(SEND_SLEEP);
     let executor_ctx = test_env
-        .executor_ctx_builder(ACTIONS_TIMEOUT)
+        .executor_ctx_builder()
         .with_intent_client(slow_intent_client)
         .build();
 
-    let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx));
+    let executor =
+        Box::new(AcceptedIntentExecutor::new(executor_ctx, ACTIONS_TIMEOUT));
     let (result, cleanup_handle) =
         executor.execute(outbox_bundle.inner.clone()).await;
     assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
@@ -654,11 +653,14 @@ async fn test_pickup_after_committing() {
     let stage_calls = failing_outbox.stage_calls.clone();
 
     let executor_ctx = test_env
-        .executor_ctx_builder(DEFAULT_ACTIONS_TIMEOUT)
+        .executor_ctx_builder()
         .with_outbox_client(failing_outbox.into())
         .build();
 
-    let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx));
+    let executor = Box::new(AcceptedIntentExecutor::new(
+        executor_ctx,
+        DEFAULT_ACTIONS_TIMEOUT,
+    ));
     let (result, cleanup_handle) =
         executor.execute(outbox_bundle.inner.clone()).await;
     assert!(
@@ -698,10 +700,9 @@ async fn test_pickup_after_committing() {
     // Recovery: build_stage_intent_executor detects the commit sig on chain and
     // runs the finalize stage without re-submitting the commit tx.
     let executor = build_stage_intent_executor(
-        test_env
-            .executor_ctx_builder(DEFAULT_ACTIONS_TIMEOUT)
-            .build(),
+        test_env.executor_ctx_builder().build(),
         outbox_bundle.status,
+        DEFAULT_ACTIONS_TIMEOUT,
     );
     let (result, cleanup_handle) = Box::new(executor)
         .execute(outbox_bundle.inner.clone())
@@ -756,10 +757,11 @@ async fn test_pickup_after_finalizing() {
     });
 
     // Run to completion with a normal outbox client
-    let executor_ctx = test_env
-        .executor_ctx_builder(DEFAULT_ACTIONS_TIMEOUT)
-        .build();
-    let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx));
+    let executor_ctx = test_env.executor_ctx_builder().build();
+    let executor = Box::new(AcceptedIntentExecutor::new(
+        executor_ctx,
+        DEFAULT_ACTIONS_TIMEOUT,
+    ));
     let (result, cleanup_handle) =
         executor.execute(outbox_bundle.inner.clone()).await;
     let ExecutionOutput::TwoStage {
@@ -796,10 +798,9 @@ async fn test_pickup_after_finalizing() {
     // Recovery: build_stage_intent_executor detects the finalize sig on chain and
     // returns the same signatures without re-executing either stage.
     let executor = build_stage_intent_executor(
-        test_env
-            .executor_ctx_builder(DEFAULT_ACTIONS_TIMEOUT)
-            .build(),
+        test_env.executor_ctx_builder().build(),
         outbox_bundle.status,
+        DEFAULT_ACTIONS_TIMEOUT,
     );
     let (result, cleanup_handle) = Box::new(executor)
         .execute(outbox_bundle.inner.clone())
@@ -891,6 +892,7 @@ struct TestOutboxClient {
     ephem_rpc: Arc<AsyncRpcClient>,
     validator_keypair: Keypair,
     pub stage_calls: Arc<Mutex<Vec<(u64, ExecutionStage)>>>,
+    pub sent_commits: Arc<Mutex<Vec<(u64, bool)>>>,
 
     fail_set_execution_stage: bool,
     set_execution_stage_sleep: Option<Duration>,
@@ -904,6 +906,7 @@ impl TestOutboxClient {
             ephem_rpc,
             validator_keypair,
             stage_calls: Default::default(),
+            sent_commits: Default::default(),
             fail_set_execution_stage: false,
             set_execution_stage_sleep: None,
             fail_committing: false,
@@ -1010,10 +1013,16 @@ impl OutboxClient for TestOutboxClient {
 
     async fn notify_commit_sent(
         &self,
-        _meta: ScheduledBaseIntentMeta,
-        _result: &IntentExecutorResult<ExecutionOutput>,
+        meta: ScheduledBaseIntentMeta,
+        result: &IntentExecutorResult<ExecutionOutput>,
         _execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
+        let succeeded = result.is_ok();
+        self.ephem_rpc
+            .send_and_confirm_transaction(&meta.intent_sent_transaction)
+            .await
+            .map_err(InternalOutboxClientError::RpcClientError)?;
+        self.sent_commits.lock().unwrap().push((meta.id, succeeded));
         Ok(())
     }
 

@@ -3,7 +3,7 @@
 use std::{thread::sleep, time::Duration};
 
 use solana_commitment_config::CommitmentConfig;
-use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
+use solana_rpc_client::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error,
     config::{RpcSendTransactionConfig, RpcSimulateTransactionConfig},

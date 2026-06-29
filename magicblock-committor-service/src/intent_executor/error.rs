@@ -57,7 +57,6 @@ pub enum IntentExecutorError {
     OutboxClientError(#[from] InternalOutboxClientError),
     #[error("Failed to get pending signature status: {0}")]
     GetPendingSignatureStatusError(#[source] MagicBlockRpcClientError),
-    // TODO(edwin): remove once proper retries introduced
     #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
     #[error("FailedToCommitError: {err}")]

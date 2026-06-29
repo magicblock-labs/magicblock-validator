@@ -53,6 +53,7 @@ pub trait IntentExecutor<T>: Send + Sync + 'static {
 pub fn build_stage_intent_executor<T, F, A, O>(
     ctx: IntentExecutorCtx<T, F, A, O>,
     status: OutboxIntentBundleStatus,
+    actions_timeout: Duration,
 ) -> Box<dyn IntentExecutor<T>>
 where
     T: TransactionPreparator,
@@ -63,17 +64,21 @@ where
 {
     match status {
         OutboxIntentBundleStatus::Accepted => {
-            Box::new(AcceptedIntentExecutor::new(ctx))
+            Box::new(AcceptedIntentExecutor::new(ctx, actions_timeout))
                 as Box<dyn IntentExecutor<T> + 'static>
         }
         OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
             sig,
-        )) => Box::new(SingleStageIntentExecutor::new(ctx, sig))
-            as Box<dyn IntentExecutor<T> + 'static>,
+        )) => {
+            Box::new(SingleStageIntentExecutor::new(ctx, actions_timeout, sig))
+                as Box<dyn IntentExecutor<T> + 'static>
+        }
         OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
             value,
-        )) => Box::new(TwoStageIntentExecutor::new(ctx, value))
-            as Box<dyn IntentExecutor<T> + 'static>,
+        )) => {
+            Box::new(TwoStageIntentExecutor::new(ctx, actions_timeout, value))
+                as Box<dyn IntentExecutor<T> + 'static>
+        }
     }
 }
 
@@ -83,9 +88,6 @@ pub struct IntentExecutorCtx<T, F, A, O> {
     pub task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
     pub outbox_client: Arc<O>,
     pub actions_callback_executor: A,
-    // TODO(edwin): more like config field. exclude?
-    /// Timeout for Intent's actions
-    pub actions_timeout: Duration,
 }
 
 #[derive(Clone, Copy, Debug)]

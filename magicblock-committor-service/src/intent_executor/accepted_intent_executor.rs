@@ -38,14 +38,10 @@ use crate::{
 pub struct AcceptedIntentExecutor<T, F, A, O> {
     ctx: IntentExecutorCtx<T, F, A, O>,
     authority: Keypair,
+    /// Timeout for Intent's actions
+    pub actions_timeout: Duration,
     /// Intent execution started at
     pub started_at: Instant,
-    /// Junk that needs to be cleaned up
-    junk: Vec<TransactionStrategy>,
-    /// Set to false on execution failure so cleanup only releases ALT
-    /// reservations without closing buffer PDAs (see race condition note in
-    /// intent_execution_engine)
-    close_buffers: bool,
 }
 
 impl<T, F, A, O> AcceptedIntentExecutor<T, F, A, O>
@@ -56,14 +52,16 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    pub fn new(ctx: IntentExecutorCtx<T, F, A, O>) -> Self {
+    pub fn new(
+        ctx: IntentExecutorCtx<T, F, A, O>,
+        actions_timeout: Duration,
+    ) -> Self {
         let authority = validator_authority();
         Self {
             ctx,
             authority,
+            actions_timeout,
             started_at: Instant::now(),
-            junk: vec![],
-            close_buffers: true,
         }
     }
 
@@ -141,9 +139,7 @@ where
     }
 
     fn time_left(&self) -> Option<Duration> {
-        self.ctx
-            .actions_timeout
-            .checked_sub(self.started_at.elapsed())
+        self.actions_timeout.checked_sub(self.started_at.elapsed())
     }
 
     /// Starting execution from single stage
@@ -226,8 +222,8 @@ where
             });
         });
 
-        self.close_buffers = result.is_ok();
-        self.junk = execution_report.junk;
+        let close_buffers = result.is_ok();
+        let junk = execution_report.junk;
         let result = IntentExecutionResult {
             inner: result,
             patched_errors: execution_report.patched_errors,
@@ -238,8 +234,8 @@ where
         };
         let cleanup_handle = CleanupHandle::new(
             self.authority,
-            self.junk,
-            self.close_buffers,
+            junk,
+            close_buffers,
             self.ctx.transaction_preparator,
         );
 

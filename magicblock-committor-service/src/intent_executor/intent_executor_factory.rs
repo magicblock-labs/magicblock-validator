@@ -14,7 +14,7 @@ use crate::{
     outbox::OutboxClient,
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     transaction_preparator::TransactionPreparatorImpl,
-    ComputeBudgetConfig,
+    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 
 pub trait IntentExecutorBuilder<T> {
@@ -61,8 +61,7 @@ where
             task_info_fetcher: self.task_info_fetcher.clone(),
             outbox_client: self.outbox_client.clone(),
             actions_callback_executor: self.actions_callback_executor.clone(),
-            actions_timeout: self.executor_config.actions_timeout,
         };
-        build_stage_intent_executor(ctx, status)
+        build_stage_intent_executor(ctx, status, DEFAULT_ACTIONS_TIMEOUT)
     }
 }

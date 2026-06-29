@@ -30,11 +30,8 @@ use crate::{
         error::IntentExecutorResult, ExecutionOutput, IntentExecutionReport,
     },
     outbox::{
-        outbox_intent_bundles_reader::{
-            InternalOutboxIntentBundlesReader, OutboxIntentBundlesReader,
-        },
-        utils::build_sent_commit,
-        OutboxClient, ScheduledBaseIntentMeta,
+        outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader,
+        utils::build_sent_commit, OutboxClient, ScheduledBaseIntentMeta,
     },
 };
 
@@ -44,7 +41,6 @@ pub struct InternalOutboxClient<L: LatestBlockProvider> {
     /// Provides access to MagicContext
     accounts_db: Arc<AccountsDb>,
     /// RPC client for sending accept transactions to the ER
-    // TODO(edwin): check if needs to be Arc
     rpc_client: Arc<RpcClient>,
     /// Internal endpoint for scheduling ER TXs
     transaction_scheduler: TransactionSchedulerHandle,
