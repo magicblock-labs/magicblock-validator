@@ -117,7 +117,7 @@ fn get_scheduled_commit(id: u64) -> Option<SentCommitPrintable> {
 pub fn process_scheduled_commit_sent(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
-    commit_id: u64,
+    intent_id: u64,
 ) -> Result<(), InstructionError> {
     let mode = coordination_mode::CoordinationMode::current();
     if !mode.should_schedule_intents() {
@@ -129,8 +129,59 @@ pub fn process_scheduled_commit_sent(
         return Ok(());
     }
 
+    let (validator_authority_id, expected_pda) =
+        validate(&signers, invoke_context, intent_id)?;
+
+    // Only after we passed all checks do we remove the commit from the global hashmap
+    // Otherwise a malicious actor could remove a commit from the hashmap without
+    // signing as the validator
+    let commit = match SENT_COMMITS.write() {
+        Ok(mut commits) => match commits.remove(&intent_id) {
+            Some(commit) => commit,
+            None => {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommitSent ERR: commit with id {} not found",
+                    intent_id
+                );
+                return Err(InstructionError::Custom(
+                    custom_error_codes::CANNOT_FIND_SCHEDULED_COMMIT,
+                ));
+            }
+        },
+        Err(err) => {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommitSent ERR: failed to lock SENT_COMMITS: {}",
+                err
+            );
+            return Err(InstructionError::Custom(
+                custom_error_codes::UNABLE_TO_UNLOCK_SENT_COMMITS,
+            ));
+        }
+    };
+
+    // Log data
+    log_sent_commit(invoke_context, &commit);
+    commit
+        .error_message
+        .map(|_| Err(InstructionError::Custom(INTENT_FAILED_CODE)))
+        .unwrap_or(Ok(()))?;
+
+    // Close Outbox intent
+    close_outbox_account_cpi(
+        invoke_context,
+        validator_authority_id,
+        expected_pda,
+    )
+}
+
+fn validate(
+    signers: &HashSet<Pubkey>,
+    invoke_context: &InvokeContext,
+    intent_id: u64,
+) -> Result<(Pubkey, Pubkey), InstructionError> {
     const VALIDATOR_IDX: u16 = 0;
-    // TODO(edwin): check presense of those
     const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
     const MAGIC_VAULT_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
     const CLOSING_PDA_IDX: u16 = MAGIC_VAULT_IDX + 1;
@@ -160,6 +211,22 @@ pub fn process_scheduled_commit_sent(
         return Err(InstructionError::IncorrectAuthority);
     }
 
+    // Assert magic program account
+    let magic_program_pubkey = get_instruction_pubkey_with_idx(
+        transaction_context,
+        MAGIC_PROGRAM_IDX,
+    )?;
+    if *magic_program_pubkey != crate::id() {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommitSent ERR: account at idx {} is {}, expected magic program {}",
+            MAGIC_PROGRAM_IDX,
+            magic_program_pubkey,
+            crate::id()
+        );
+        return Err(InstructionError::IncorrectProgramId);
+    }
+
     // Assert signers
     if !signers.contains(&validator_authority_id) {
         ic_msg!(
@@ -172,7 +239,7 @@ pub fn process_scheduled_commit_sent(
     // Validate outbox intent PDA
     let provided_pda =
         get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
-    let expected_pda = outbox_intent_pda(commit_id);
+    let expected_pda = outbox_intent_pda(intent_id);
     if *provided_pda != expected_pda {
         ic_msg!(
             invoke_context,
@@ -180,40 +247,18 @@ pub fn process_scheduled_commit_sent(
             CLOSING_PDA_IDX,
             provided_pda,
             expected_pda,
-            commit_id
+            intent_id
         );
         return Err(InstructionError::InvalidArgument);
     }
 
-    // Only after we passed all checks do we remove the commit from the global hashmap
-    // Otherwise a malicious actor could remove a commit from the hashmap without
-    // signing as the validator
-    let commit = match SENT_COMMITS.write() {
-        Ok(mut commits) => match commits.remove(&commit_id) {
-            Some(commit) => commit,
-            None => {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleCommitSent ERR: commit with id {} not found",
-                    commit_id
-                );
-                return Err(InstructionError::Custom(
-                    custom_error_codes::CANNOT_FIND_SCHEDULED_COMMIT,
-                ));
-            }
-        },
-        Err(err) => {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommitSent ERR: failed to lock SENT_COMMITS: {}",
-                err
-            );
-            return Err(InstructionError::Custom(
-                custom_error_codes::UNABLE_TO_UNLOCK_SENT_COMMITS,
-            ));
-        }
-    };
+    Ok((validator_authority_id, expected_pda))
+}
 
+fn log_sent_commit(
+    invoke_context: &InvokeContext,
+    commit: &SentCommitPrintable,
+) {
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent id: {}, slot: {}, blockhash: {}",
@@ -221,13 +266,11 @@ pub fn process_scheduled_commit_sent(
         commit.slot,
         commit.blockhash,
     );
-
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent payer: {}",
         commit.payer
     );
-
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent included: [{}]",
@@ -246,11 +289,9 @@ pub fn process_scheduled_commit_sent(
             sig
         );
     }
-
     if commit.requested_undelegation {
-        ic_msg!(invoke_context, "ScheduledCommitSent requested undelegation",);
+        ic_msg!(invoke_context, "ScheduledCommitSent requested undelegation");
     }
-
     for (idx, error) in commit.patched_errors.iter().enumerate() {
         ic_msg!(
             invoke_context,
@@ -259,7 +300,6 @@ pub fn process_scheduled_commit_sent(
             error
         );
     }
-
     for (idx, report) in commit.callbacks_scheduling_results.iter().enumerate()
     {
         ic_msg!(
@@ -269,26 +309,13 @@ pub fn process_scheduled_commit_sent(
             report
         );
     }
-
-    let result = if let Some(error_message) = commit.error_message {
+    if let Some(error_message) = &commit.error_message {
         ic_msg!(
             invoke_context,
             "ScheduledCommitSent error message: {}",
             error_message
         );
-        // TODO(edwin): fails to close intent then
-        Err(InstructionError::Custom(INTENT_FAILED_CODE))
-    } else {
-        Ok(())
-    };
-
-    close_outbox_account_cpi(
-        invoke_context,
-        validator_authority_id,
-        expected_pda,
-    )?;
-
-    result
+    }
 }
 
 fn close_outbox_account_cpi(
@@ -324,7 +351,6 @@ mod tests {
     use crate::{
         instruction_utils::InstructionUtils,
         test_utils::{ensure_started_validator, process_instruction},
-        validator,
     };
 
     fn single_acc_commit(commit_id: u64) -> SentCommit {
@@ -379,7 +405,7 @@ mod tests {
         let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
             commit.message_id,
         );
-        ix.accounts[1].is_signer = false;
+        ix.accounts[0].is_signer = false;
 
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
@@ -469,7 +495,20 @@ mod tests {
     fn test_registered_all_checks_out() {
         let commit = setup_registered_commit();
 
-        let mut account_data = HashMap::new();
+        let pda = outbox_intent_pda(commit.message_id);
+        let mut pda_account = AccountSharedData::new(0, 0, &crate::id());
+        pda_account.set_ephemeral(true);
+
+        let mut account_data = {
+            let mut map = HashMap::new();
+            // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor
+            let mut vault = AccountSharedData::new(10_000, 0, &crate::id());
+            vault.set_ephemeral(true);
+            map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
+            // Add outbox PDA as existing ephemeral account (created by accept)
+            map.insert(pda, pda_account);
+            map
+        };
 
         ensure_started_validator(&mut account_data, None);
 

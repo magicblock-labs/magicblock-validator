@@ -76,7 +76,6 @@ fn validate(
 
     // Validate authority
     let transaction_context = &*invoke_context.transaction_context;
-    // TODO(edwin): add check for vault?
     // TODO(edwin): add check for magic-program
 
     let provided_validator_auth = get_instruction_pubkey_with_idx(

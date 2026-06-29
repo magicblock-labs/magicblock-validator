@@ -11,7 +11,6 @@ pub mod magicblock_processor;
 pub mod test_utils;
 mod utils;
 pub mod validator;
-// TODO(edwin): safe to just rename or will break integrations?
 pub use intent_bundles::{
     magic_scheduled_base_intent, outbox_intent_bundles,
     schedule as schedule_transactions,

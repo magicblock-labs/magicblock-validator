@@ -20,14 +20,13 @@ use solana_sdk_ids::{system_program, sysvar::clock};
 use solana_signer::Signer;
 
 use crate::{
+    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
     magic_context::MagicContext,
     magic_scheduled_base_intent::{
         ScheduledIntentBundle, ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
     },
     magic_sys::COMMIT_LIMIT,
-    schedule_transactions::{
-        magic_fee_vault_pubkey, transaction_scheduler::TransactionScheduler,
-    },
+    schedule_transactions::magic_fee_vault_pubkey,
     test_utils::{
         ensure_started_validator, process_instruction,
         process_instruction_with_logs, StubNonces,
@@ -161,7 +160,6 @@ fn find_magic_context_account(
 
 fn assert_non_accepted_actions<'a>(
     processed_scheduled: &'a [AccountSharedData],
-    payer: &Pubkey,
     expected_non_accepted_commits: usize,
 ) -> &'a AccountSharedData {
     let magic_context_acc = find_magic_context_account(processed_scheduled)
@@ -169,34 +167,68 @@ fn assert_non_accepted_actions<'a>(
     let magic_context =
         bincode::deserialize::<MagicContext>(magic_context_acc.data()).unwrap();
 
-    let accepted_scheduled_actions =
-        TransactionScheduler::default().get_scheduled_actions_by_payer(payer);
     assert_eq!(
         magic_context.scheduled_base_intents.len(),
         expected_non_accepted_commits
     );
-    assert_eq!(accepted_scheduled_actions.len(), 0);
 
     magic_context_acc
 }
 
 fn assert_accepted_actions(
     processed_accepted: &[AccountSharedData],
-    payer: &Pubkey,
-    expected_scheduled_actions: usize,
+    pre_accept_magic_context: &AccountSharedData,
+    expected_accepted_count: usize,
 ) -> Vec<ScheduledIntentBundle> {
-    let magic_context_acc = find_magic_context_account(processed_accepted)
+    let post_magic_context_acc = find_magic_context_account(processed_accepted)
         .expect("magic context account not found");
-    let magic_context =
-        bincode::deserialize::<MagicContext>(magic_context_acc.data()).unwrap();
+    let post_magic_context =
+        bincode::deserialize::<MagicContext>(post_magic_context_acc.data())
+            .unwrap();
+    assert_eq!(post_magic_context.scheduled_base_intents.len(), 0);
 
-    let scheduled_actions =
-        TransactionScheduler::default().get_scheduled_actions_by_payer(payer);
+    let pre_magic_context =
+        bincode::deserialize::<MagicContext>(pre_accept_magic_context.data())
+            .unwrap();
+    let accepted_intents = pre_magic_context.scheduled_base_intents;
+    assert_eq!(accepted_intents.len(), expected_accepted_count);
 
-    assert_eq!(magic_context.scheduled_base_intents.len(), 0);
-    assert_eq!(scheduled_actions.len(), expected_scheduled_actions);
+    for intent in &accepted_intents {
+        let expected = OutboxIntentBundle::accepted(intent.clone());
+        let actual = processed_accepted
+            .iter()
+            .filter(|acc| acc.owner() == &crate::id() && acc.ephemeral())
+            .filter_map(|acc| {
+                OutboxIntentBundle::try_from_bytes(acc.data()).ok()
+            })
+            .find(|bundle| bundle.inner.id == intent.id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "outbox PDA for intent {} not found in processed_accepted",
+                    intent.id
+                )
+            });
+        assert_eq!(actual, expected);
+    }
 
-    scheduled_actions
+    accepted_intents
+}
+
+/// Pre-populates uninitialized outbox intent PDA accounts into `account_data`.
+/// The accept instruction creates these accounts via CPI (`CreateEphemeralAccount`),
+/// which requires them to be present in the transaction context as uninitialized
+/// system-owned entries — exactly what `validate_new_ephemeral` expects.
+/// The first 4 accounts (validator, program, magic_context, vault) are already
+/// in `account_data`, so we skip them.
+fn ensure_outbox_pda_accounts_exist(
+    account_data: &mut HashMap<Pubkey, AccountSharedData>,
+    accept_ix: &Instruction,
+) {
+    for acc_meta in accept_ix.accounts.iter().skip(4) {
+        account_data.entry(acc_meta.pubkey).or_insert_with(|| {
+            AccountSharedData::new(0, 0, &system_program::id())
+        });
+    }
 }
 
 fn extend_transaction_accounts_from_ix(
@@ -347,11 +379,8 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_actions(
-                &processed_scheduled,
-                &payer.pubkey(),
-                1,
-            );
+            let magic_context_acc =
+                assert_non_accepted_actions(&processed_scheduled, 1);
 
             (processed_scheduled.clone(), magic_context_acc.clone())
         };
@@ -363,12 +392,17 @@ mod tests {
                     &payer, program, committee,
                 );
 
-            let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id);
-            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
+            let intent_ids =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                intent_ids.into_iter(),
+            );
+            ensure_outbox_pda_accounts_exist(&mut account_data, &ix);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
                 &magic_context_acc,
@@ -386,7 +420,7 @@ mod tests {
             // At this point the intended commits were accepted and moved to the global
             let scheduled_intents = assert_accepted_actions(
                 &processed_accepted,
-                &payer.pubkey(),
+                &magic_context_acc,
                 1,
             );
 
@@ -479,11 +513,8 @@ mod tests {
             Ok(()),
         );
 
-        let magic_context_acc = assert_non_accepted_actions(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
+        let magic_context_acc =
+            assert_non_accepted_actions(&processed_scheduled, 1);
         let magic_context =
             bincode::deserialize::<MagicContext>(magic_context_acc.data())
                 .unwrap();
@@ -540,11 +571,8 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_actions(
-                &processed_scheduled,
-                &payer.pubkey(),
-                1,
-            );
+            let magic_context_acc =
+                assert_non_accepted_actions(&processed_scheduled, 1);
 
             (processed_scheduled.clone(), magic_context_acc.clone())
         };
@@ -556,12 +584,17 @@ mod tests {
                     &payer, program, committee,
                 );
 
-            let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id);
-            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
+            let intent_ids =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                intent_ids.into_iter(),
+            );
+            ensure_outbox_pda_accounts_exist(&mut account_data, &ix);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
                 &magic_context_acc,
@@ -579,7 +612,7 @@ mod tests {
             // At this point the intended commits were accepted and moved to the global
             let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
-                &payer.pubkey(),
+                &magic_context_acc,
                 1,
             );
 
@@ -640,25 +673,26 @@ mod tests {
         );
 
         // Extract magic context and then accept scheduled commits
-        let magic_context_acc = assert_non_accepted_actions(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
+        let magic_context_acc =
+            assert_non_accepted_actions(&processed_scheduled, 1);
 
-        let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
-            .unwrap()
-            .scheduled_base_intents
-            .into_iter()
-            .map(|i| i.id);
-        let ix_accept =
-            InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
+        let intent_ids =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap()
+                .scheduled_base_intents
+                .into_iter()
+                .map(|i| i.id)
+                .collect::<Vec<_>>();
+        let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
+            intent_ids.into_iter(),
+        );
         let (mut account_data2, mut transaction_accounts2) =
             prepare_transaction_with_single_committee(
                 &payer,
                 Pubkey::new_unique(),
                 ata_pubkey,
             );
+        ensure_outbox_pda_accounts_exist(&mut account_data2, &ix_accept);
         extend_transaction_accounts_from_ix_adding_magic_context(
             &ix_accept,
             magic_context_acc,
@@ -673,7 +707,7 @@ mod tests {
         );
 
         let scheduled =
-            assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
+            assert_accepted_actions(&processed_accepted, magic_context_acc, 1);
         // Verify the committed pubkey remapped to eATA
         assert_eq!(
             scheduled[0].intent_bundle.get_all_committed_pubkeys(),
@@ -728,11 +762,8 @@ mod tests {
             ix.accounts,
             Ok(()),
         );
-        let magic_context_acc = assert_non_accepted_actions(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
+        let magic_context_acc =
+            assert_non_accepted_actions(&processed_scheduled, 1);
         let magic_context =
             bincode::deserialize::<MagicContext>(magic_context_acc.data())
                 .unwrap();
@@ -791,25 +822,26 @@ mod tests {
         );
 
         // Extract magic context and then accept scheduled commits
-        let magic_context_acc = assert_non_accepted_actions(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
+        let magic_context_acc =
+            assert_non_accepted_actions(&processed_scheduled, 1);
 
-        let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
-            .unwrap()
-            .scheduled_base_intents
-            .into_iter()
-            .map(|i| i.id);
-        let ix_accept =
-            InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
+        let intent_ids =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap()
+                .scheduled_base_intents
+                .into_iter()
+                .map(|i| i.id)
+                .collect::<Vec<_>>();
+        let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
+            intent_ids.into_iter(),
+        );
         let (mut account_data2, mut transaction_accounts2) =
             prepare_transaction_with_single_committee(
                 &payer,
                 Pubkey::new_unique(),
                 ata_pubkey,
             );
+        ensure_outbox_pda_accounts_exist(&mut account_data2, &ix_accept);
         extend_transaction_accounts_from_ix_adding_magic_context(
             &ix_accept,
             magic_context_acc,
@@ -824,7 +856,7 @@ mod tests {
         );
 
         let scheduled =
-            assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
+            assert_accepted_actions(&processed_accepted, magic_context_acc, 1);
         // Verify the committed pubkey remapped to eATA
         assert_eq!(
             scheduled[0].intent_bundle.get_all_committed_pubkeys(),
@@ -885,11 +917,8 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_actions(
-                &processed_scheduled,
-                &payer.pubkey(),
-                1,
-            );
+            let magic_context_acc =
+                assert_non_accepted_actions(&processed_scheduled, 1);
 
             (
                 processed_scheduled.clone(),
@@ -913,12 +942,17 @@ mod tests {
                 (true, true, true),
             );
 
-            let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id);
-            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
+            let intent_ids =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                intent_ids.into_iter(),
+            );
+            ensure_outbox_pda_accounts_exist(&mut accounts_data, &ix);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
                 &magic_context_acc,
@@ -936,7 +970,7 @@ mod tests {
             // At this point the intended commits were accepted and moved to the global
             let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
-                &payer.pubkey(),
+                &magic_context_acc,
                 1,
             );
 
@@ -1005,11 +1039,8 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_actions(
-                &processed_scheduled,
-                &payer.pubkey(),
-                1,
-            );
+            let magic_context_acc =
+                assert_non_accepted_actions(&processed_scheduled, 1);
 
             (
                 processed_scheduled.clone(),
@@ -1033,12 +1064,17 @@ mod tests {
                 (true, true, true),
             );
 
-            let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id);
-            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
+            let intent_ids =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                intent_ids.into_iter(),
+            );
+            ensure_outbox_pda_accounts_exist(&mut accounts_data, &ix);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
                 &magic_context_acc,
@@ -1056,7 +1092,7 @@ mod tests {
             // At this point the intended commits were accepted and moved to the global
             let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
-                &payer.pubkey(),
+                &magic_context_acc,
                 1,
             );
 
