@@ -1,8 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-};
+use std::{cell::RefCell, collections::VecDeque, sync::Arc};
 
 /// DB for storing intents that overflow committor channel
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
@@ -11,9 +7,7 @@ use magicblock_metrics::metrics;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::ReadableAccount;
 
-const POISONED_MUTEX_MSG: &str = "Dummy db mutex poisoned";
-
-pub trait DB: Send + 'static {
+pub trait BacklogDB: Send + 'static {
     fn store_intent_bundle(
         &self,
         intent_bundle: OutboxIntentBundle,
@@ -28,60 +22,12 @@ pub trait DB: Send + 'static {
     fn is_empty(&self) -> bool;
 }
 
-pub(crate) struct DummyDB {
-    db: Mutex<VecDeque<OutboxIntentBundle>>,
-}
-
-impl DummyDB {
-    pub fn new() -> Self {
-        Self {
-            db: Mutex::new(VecDeque::new()),
-        }
-    }
-}
-
-impl DB for DummyDB {
-    fn store_intent_bundle(
-        &self,
-        intent_bundle: OutboxIntentBundle,
-    ) -> DBResult<()> {
-        let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
-        db.push_back(intent_bundle);
-
-        metrics::set_committor_intents_backlog_count(db.len() as i64);
-        Ok(())
-    }
-
-    fn store_intent_bundles(
-        &self,
-        intent_bundles: Vec<OutboxIntentBundle>,
-    ) -> DBResult<()> {
-        let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
-        db.extend(intent_bundles);
-
-        metrics::set_committor_intents_backlog_count(db.len() as i64);
-        Ok(())
-    }
-
-    fn pop_intent_bundle(&self) -> DBResult<Option<OutboxIntentBundle>> {
-        let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
-        let res = db.pop_front();
-
-        metrics::set_committor_intents_backlog_count(db.len() as i64);
-        Ok(res)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.db.lock().expect(POISONED_MUTEX_MSG).is_empty()
-    }
-}
-
-pub struct DumberDB {
+pub struct DummyIntentBacklog {
     accounts_db: Arc<AccountsDb>,
     queue: RefCell<VecDeque<u64>>,
 }
 
-impl DumberDB {
+impl DummyIntentBacklog {
     pub fn new(accounts_db: Arc<AccountsDb>) -> Self {
         Self {
             accounts_db,
@@ -90,7 +36,7 @@ impl DumberDB {
     }
 }
 
-impl DB for DumberDB {
+impl BacklogDB for DummyIntentBacklog {
     fn store_intent_bundle(
         &self,
         intent_bundle: OutboxIntentBundle,
@@ -133,6 +79,47 @@ impl DB for DumberDB {
 
     fn is_empty(&self) -> bool {
         self.queue.borrow().is_empty()
+    }
+}
+
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+pub struct DummyDB {
+    db: std::sync::Mutex<VecDeque<OutboxIntentBundle>>,
+}
+
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+impl DummyDB {
+    pub fn new() -> Self {
+        Self {
+            db: std::sync::Mutex::new(VecDeque::new()),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+impl BacklogDB for DummyDB {
+    fn store_intent_bundle(
+        &self,
+        intent_bundle: OutboxIntentBundle,
+    ) -> DBResult<()> {
+        self.db.lock().unwrap().push_back(intent_bundle);
+        Ok(())
+    }
+
+    fn store_intent_bundles(
+        &self,
+        intent_bundles: Vec<OutboxIntentBundle>,
+    ) -> DBResult<()> {
+        self.db.lock().unwrap().extend(intent_bundles);
+        Ok(())
+    }
+
+    fn pop_intent_bundle(&self) -> DBResult<Option<OutboxIntentBundle>> {
+        Ok(self.db.lock().unwrap().pop_front())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.db.lock().unwrap().is_empty()
     }
 }
 

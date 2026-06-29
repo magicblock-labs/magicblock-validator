@@ -4,6 +4,7 @@ use borsh::to_vec;
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
+    intent_engine::db::DummyDB,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
     tasks::{
         commit_task::CommitDelivery, task_strategist::TransactionStrategy,
@@ -351,6 +352,7 @@ async fn commit_single_account(
         validator_auth.insecure_clone(),
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
         None,
+        DummyDB::new(),
         Arc::new(common::MockOutboxClient),
         common::MockActionsCallbackExecutor::default(),
     ));
@@ -432,6 +434,7 @@ async fn commit_book_order_account(
         validator_auth.insecure_clone(),
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
         None,
+        DummyDB::new(),
         Arc::new(common::MockOutboxClient),
         common::MockActionsCallbackExecutor::default(),
     ));
@@ -904,6 +907,7 @@ async fn commit_multiple_accounts(
         validator_auth.insecure_clone(),
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
         None,
+        DummyDB::new(),
         Arc::new(common::MockOutboxClient),
         common::MockActionsCallbackExecutor::default(),
     ));
@@ -972,6 +976,7 @@ async fn execute_intent_bundle(
         validator_auth.insecure_clone(),
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
         None,
+        DummyDB::new(),
         Arc::new(common::MockOutboxClient),
         common::MockActionsCallbackExecutor::default(),
     ));
@@ -1045,7 +1050,7 @@ async fn execute_intent_bundle(
 // Test Executor
 // -----------------
 async fn ix_commit_local(
-    processor: Arc<CommittorProcessor>,
+    processor: Arc<CommittorProcessor<DummyDB>>,
     intent_bundles: Vec<ScheduledIntentBundle>,
     expected_strategies: ExpectedStrategies,
     program_id: Pubkey,

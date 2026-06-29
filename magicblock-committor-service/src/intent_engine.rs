@@ -1,4 +1,4 @@
-pub(crate) mod db;
+pub mod db;
 pub mod intent_channerl;
 mod intent_execution_engine;
 pub mod intent_scheduler;
@@ -14,7 +14,7 @@ use tokio::sync::broadcast;
 
 use crate::{
     intent_engine::{
-        db::DB,
+        db::BacklogDB,
         intent_channerl::{channel, IntentScheduleError, IntentScheduleHandle},
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
@@ -26,12 +26,12 @@ use crate::{
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
 };
 
-pub struct IntentEngineHandle<D: DB> {
+pub struct IntentEngineHandle<D> {
     intent_schedule_handle: IntentScheduleHandle<D>,
     result_subscriber: ResultSubscriber,
 }
 
-impl<D: DB> IntentEngineHandle<D> {
+impl<D: BacklogDB> IntentEngineHandle<D> {
     pub fn new<A, O>(
         rpc_client: MagicblockRpcClient,
         db: D,

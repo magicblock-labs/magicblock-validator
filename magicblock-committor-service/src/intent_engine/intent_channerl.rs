@@ -13,7 +13,7 @@ use tokio::sync::{
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream};
 
-use crate::intent_engine::{db, db::DB};
+use crate::intent_engine::{db, db::BacklogDB};
 
 const POISONED_MSG: &str = "Dummy DB mutex poisoned";
 
@@ -23,7 +23,7 @@ pub struct IntentScheduleHandle<D> {
     sender: Sender<OutboxIntentBundle>,
 }
 
-impl<D: DB> IntentScheduleHandle<D> {
+impl<D: BacklogDB> IntentScheduleHandle<D> {
     pub fn new(db: Arc<Mutex<D>>, sender: Sender<OutboxIntentBundle>) -> Self {
         Self { db, sender }
     }
@@ -71,7 +71,7 @@ pub struct IntentStream<D> {
     stream: ReceiverStream<OutboxIntentBundle>,
 }
 
-impl<D: DB> IntentStream<D> {
+impl<D: BacklogDB> IntentStream<D> {
     pub fn new(
         db: Arc<Mutex<D>>,
         receiver: Receiver<OutboxIntentBundle>,
@@ -83,7 +83,7 @@ impl<D: DB> IntentStream<D> {
     }
 }
 
-impl<D: DB> Stream for IntentStream<D> {
+impl<D: BacklogDB> Stream for IntentStream<D> {
     type Item = Result<OutboxIntentBundle, db::Error>;
 
     fn poll_next(
@@ -105,7 +105,7 @@ impl<D: DB> Stream for IntentStream<D> {
     }
 }
 
-pub(crate) fn channel<D: DB>(
+pub(crate) fn channel<D: BacklogDB>(
     db: &Arc<Mutex<D>>,
     buffer: usize,
 ) -> (IntentScheduleHandle<D>, IntentStream<D>) {

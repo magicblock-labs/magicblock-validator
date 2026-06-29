@@ -20,6 +20,7 @@ use magicblock_chainlink::{
 };
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor, config::ChainConfig,
+    intent_engine::db::DummyIntentBacklog,
     outbox::outbox_client::InternalOutboxClient,
     service::IntentExecutionService, ComputeBudgetConfig,
     DEFAULT_ACTIONS_TIMEOUT,
@@ -98,8 +99,12 @@ type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
-type IntentExecutionServiceImpl =
-    IntentExecutionService<InternalOutboxClient<LatestBlock>>;
+type CommittorProcessorImpl = CommittorProcessor<DummyIntentBacklog>;
+
+type IntentExecutionServiceImpl = IntentExecutionService<
+    InternalOutboxClient<LatestBlock>,
+    DummyIntentBacklog,
+>;
 
 // -----------------
 // MagicValidator
@@ -245,6 +250,7 @@ impl MagicValidator {
             let processor = Self::init_committor_processor(
                 &config,
                 ledger.latest_block(),
+                &accountsdb,
                 &outbox_client,
                 &shared_chain_slot,
             );
@@ -476,9 +482,10 @@ impl MagicValidator {
     pub fn init_committor_processor(
         config: &ValidatorParams,
         latest_block: &LatestBlock,
+        accounts_db: &Arc<AccountsDb>,
         outbox_client: &Arc<InternalOutboxClient<LatestBlock>>,
         shared_chain_slot: &Option<Arc<AtomicU64>>,
-    ) -> CommittorProcessor {
+    ) -> CommittorProcessorImpl {
         let authority = config.validator.keypair.insecure_clone();
         let base_chain_config = ChainConfig {
             rpc_uri: config.rpc_url().to_owned(),
@@ -503,6 +510,7 @@ impl MagicValidator {
             authority,
             base_chain_config,
             shared_chain_slot.clone(),
+            DummyIntentBacklog::new(accounts_db.clone()),
             outbox_client.clone(),
             actions_callback_executor,
         )

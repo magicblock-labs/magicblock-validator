@@ -17,6 +17,7 @@ use tracing::error;
 use crate::{
     committor_processor::CommittorProcessor,
     error::CommittorServiceResult,
+    intent_engine::db::BacklogDB,
     intent_executor::error::IntentExecutorError,
     outbox::{
         outbox_client::InternalOutboxClientError,
@@ -30,14 +31,14 @@ use crate::{
 pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
-pub enum IntentExecutionService<O> {
-    Created(ServiceInner<O>),
+pub enum IntentExecutionService<O, D> {
+    Created(ServiceInner<O, D>),
     Started(JoinHandle<()>),
     Stopped,
     Error,
 }
 
-impl<O> IntentExecutionService<O>
+impl<O, D: BacklogDB> IntentExecutionService<O, D>
 where
     O: OutboxClient,
     // OutboxClient errors should be convertible to Service errors
@@ -51,7 +52,7 @@ where
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
         intent_client: Arc<O>,
-        processor: Arc<CommittorProcessor>,
+        processor: Arc<CommittorProcessor<D>>,
         slot_interval: Duration,
         cancellation_token: CancellationToken,
     ) -> Self {
@@ -93,20 +94,20 @@ where
     }
 }
 
-pub struct ServiceInner<O> {
+pub struct ServiceInner<O, D> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
     /// ER client specific for Intent needs. Could be switched to RpcClient
     outbox_client: Arc<O>,
     /// Processor of accepted intents
-    processor: Arc<CommittorProcessor>,
+    processor: Arc<CommittorProcessor<D>>,
     /// Time interval to scrape MagicContext(ER slot interval)
     // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
     slot_interval: Duration,
     cancellation_token: CancellationToken,
 }
 
-impl<O> ServiceInner<O>
+impl<O, D: BacklogDB> ServiceInner<O, D>
 where
     O: OutboxClient,
     // OutboxClient errors should be convertible to Service errors
@@ -120,7 +121,7 @@ where
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
         outbox_client: Arc<O>,
-        processor: Arc<CommittorProcessor>,
+        processor: Arc<CommittorProcessor<D>>,
         slot_interval: Duration,
         cancellation_token: CancellationToken,
     ) -> Self {

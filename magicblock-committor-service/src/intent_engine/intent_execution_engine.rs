@@ -21,7 +21,7 @@ use tracing::{error, info, instrument, trace, warn};
 use crate::tasks::task_strategist::TransactionStrategy;
 use crate::{
     intent_engine::{
-        db::DB,
+        db::BacklogDB,
         intent_channerl::{IntentScheduleError, IntentStream},
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
     },
@@ -104,7 +104,7 @@ pub(crate) struct IntentExecutionEngine<D, F, T> {
 
 impl<D, F, T> IntentExecutionEngine<D, F, T>
 where
-    D: DB,
+    D: BacklogDB,
     T: TransactionPreparator,
     F: IntentExecutorBuilder<T> + Send + Sync + 'static,
 {
@@ -359,7 +359,7 @@ mod tests {
     use super::*;
     use crate::{
         intent_engine::{
-            db::{DummyDB, DB},
+            db::{BacklogDB, DummyDB},
             intent_channerl::{channel, IntentScheduleHandle},
             intent_scheduler::{create_test_intent, create_test_intent_bundle},
         },

@@ -18,7 +18,7 @@ use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
     intent_engine::{
-        db::DummyDB, BroadcastedIntentExecutionResult, IntentEngineHandle,
+        db::BacklogDB, BroadcastedIntentExecutionResult, IntentEngineHandle,
     },
     intent_executor::{
         error::IntentExecutorError, intent_executor_factory::ExecutorConfig,
@@ -35,18 +35,19 @@ const POISONED_MUTEX_MSG: &str =
 
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
-pub struct CommittorProcessor {
+pub struct CommittorProcessor<D> {
     _table_mania: TableMania,
-    commits_scheduler: IntentEngineHandle<DummyDB>,
+    commits_scheduler: IntentEngineHandle<D>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
 }
 
-impl CommittorProcessor {
+impl<D: BacklogDB> CommittorProcessor<D> {
     pub fn new<A, O>(
         authority: Keypair,
         chain_config: ChainConfig,
         chain_slot: Option<Arc<AtomicU64>>,
+        db: D,
         outbox_client: Arc<O>,
         actions_callback_executor: A,
     ) -> Self
@@ -92,8 +93,7 @@ impl CommittorProcessor {
         ));
         let commits_scheduler = IntentEngineHandle::new(
             magic_block_rpc_client.clone(),
-            // TODO(edwin): use DumberDb
-            DummyDB::new(),
+            db,
             task_info_fetcher.clone(),
             outbox_client,
             table_mania.clone(),
