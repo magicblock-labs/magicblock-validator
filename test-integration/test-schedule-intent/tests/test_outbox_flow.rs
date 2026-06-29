@@ -19,7 +19,7 @@ use magicblock_committor_service::{
         ExecutionOutput, IntentExecutionReport, IntentExecutor, IntentExecutorCtx,
     },
     outbox::{
-        outbox_client::{InternalOutboxClientError, OutboxClient},
+        outbox_client::InternalOutboxClientError,
         outbox_intent_bundles_reader::OutboxIntentBundlesReader,
     },
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
@@ -69,7 +69,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use magicblock_committor_service::outbox::ScheduledBaseIntentMeta;
+use magicblock_committor_service::outbox::{OutboxClient, ScheduledBaseIntentMeta};
 
 type CallbackRecord =
     (Vec<BaseActionCallback>, Option<Signature>, ActionResult);

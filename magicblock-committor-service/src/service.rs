@@ -19,10 +19,11 @@ use crate::{
     error::CommittorServiceResult,
     intent_executor::error::IntentExecutorError,
     outbox::{
-        outbox_client::{InternalOutboxClientError, OutboxClient},
+        outbox_client::InternalOutboxClientError,
         outbox_intent_bundles_reader::{
             OutboxIntentBundlesReader, OutboxIntentBundlesReaderError,
         },
+        OutboxClient,
     },
 };
 

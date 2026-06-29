@@ -22,7 +22,7 @@ use crate::{
         error::IntentExecutorError,
         intent_executor_factory::{ExecutorConfig, IntentExecutorBuilderImpl},
     },
-    outbox::outbox_client::OutboxClient,
+    outbox::OutboxClient,
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
 };
 

@@ -13,7 +13,7 @@ use magicblock_committor_service::{
         intent_execution_client::IntentExecutionClient, IntentExecutorCtx,
     },
     outbox::{
-        outbox_client::{InternalOutboxClientError, OutboxClient},
+        outbox_client::InternalOutboxClientError,
         outbox_intent_bundles_reader::OutboxIntentBundlesReader,
     },
     tasks::{
@@ -47,6 +47,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use magicblock_committor_service::outbox::OutboxClient;
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {

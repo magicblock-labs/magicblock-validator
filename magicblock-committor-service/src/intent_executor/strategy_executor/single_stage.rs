@@ -20,7 +20,7 @@ use crate::{
         },
         IntentExecutionReport,
     },
-    outbox::outbox_client::OutboxClient,
+    outbox::OutboxClient,
     tasks::{
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         task_strategist::TransactionStrategy,

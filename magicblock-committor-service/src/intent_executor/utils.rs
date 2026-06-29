@@ -20,7 +20,7 @@ use crate::{
         },
         ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
     },
-    outbox::{outbox_client::OutboxClient, ScheduledBaseIntentMeta},
+    outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
         task_builder::{TaskBuilderImpl, TasksBuilder},
         task_info_fetcher::TaskInfoFetcher,
