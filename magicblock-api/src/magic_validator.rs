@@ -242,7 +242,7 @@ impl MagicValidator {
                 &config,
                 &accountsdb,
                 &dispatch.transaction_scheduler,
-                &ledger.latest_block(),
+                ledger.latest_block(),
             );
             Arc::new(val)
         };

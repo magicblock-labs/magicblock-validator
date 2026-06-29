@@ -301,6 +301,6 @@ pub enum IntentExecutionServiceError {
     IntentRpcClientError(#[from] InternalOutboxClientError),
     #[error("OutboxReaderError")]
     OutboxReaderError(#[from] OutboxIntentBundlesReaderError),
-    #[error("asd")]
-    ASdError(#[from] IntentExecutorError),
+    #[error("IntentExecutorError: {0}")]
+    IntentExecutorError(#[from] Box<IntentExecutorError>),
 }
