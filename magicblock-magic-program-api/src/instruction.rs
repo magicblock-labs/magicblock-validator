@@ -68,8 +68,7 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.**   `[SIGNER]` Validator Authority
     /// - **1.**   `[WRITE]`  Magic Context Account containing the initially scheduled commits
-    /// - **2..n** `[WRITE]`  Outbox intent PDAs, one per accepted intent,
-    ///            seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    /// - **2..n** `[WRITE]`  Outbox intent PDAs, one per accepted intent, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     AcceptScheduleCommits,
 
     /// Records the attempt to realize a scheduled commit on chain.

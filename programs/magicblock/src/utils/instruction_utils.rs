@@ -161,7 +161,7 @@ impl InstructionUtils {
         // Add outbox intent accounts
         let outbox_intent_metas = intent_ids
             .into_iter()
-            .map(|intent_id| outbox_intent_pda(intent_id))
+            .map(outbox_intent_pda)
             .map(|intent_pda| AccountMeta::new(intent_pda, false));
         account_metas.extend(outbox_intent_metas);
 

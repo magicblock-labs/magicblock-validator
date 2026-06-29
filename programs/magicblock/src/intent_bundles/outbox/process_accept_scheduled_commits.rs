@@ -94,7 +94,7 @@ fn validate(
     }
 
     // Validate authority is a signer
-    if !signers.contains(&validator_auth) {
+    if !signers.contains(validator_auth) {
         ic_msg!(
             invoke_context,
             "AcceptScheduledCommits ERR: validator authority pubkey {} not in signers",

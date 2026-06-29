@@ -363,7 +363,12 @@ mod tests {
                     &payer, program, committee,
                 );
 
-            let ix = InstructionUtils::accept_scheduled_commits_instruction();
+            let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap()
+                .scheduled_base_intents
+                .into_iter()
+                .map(|i| i.id);
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
                 &magic_context_acc,
@@ -551,7 +556,12 @@ mod tests {
                     &payer, program, committee,
                 );
 
-            let ix = InstructionUtils::accept_scheduled_commits_instruction();
+            let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap()
+                .scheduled_base_intents
+                .into_iter()
+                .map(|i| i.id);
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
                 &magic_context_acc,
@@ -636,8 +646,13 @@ mod tests {
             1,
         );
 
+        let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
+            .unwrap()
+            .scheduled_base_intents
+            .into_iter()
+            .map(|i| i.id);
         let ix_accept =
-            InstructionUtils::accept_scheduled_commits_instruction();
+            InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
         let (mut account_data2, mut transaction_accounts2) =
             prepare_transaction_with_single_committee(
                 &payer,
@@ -782,8 +797,13 @@ mod tests {
             1,
         );
 
+        let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
+            .unwrap()
+            .scheduled_base_intents
+            .into_iter()
+            .map(|i| i.id);
         let ix_accept =
-            InstructionUtils::accept_scheduled_commits_instruction();
+            InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
         let (mut account_data2, mut transaction_accounts2) =
             prepare_transaction_with_single_committee(
                 &payer,
@@ -893,7 +913,12 @@ mod tests {
                 (true, true, true),
             );
 
-            let ix = InstructionUtils::accept_scheduled_commits_instruction();
+            let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap()
+                .scheduled_base_intents
+                .into_iter()
+                .map(|i| i.id);
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
                 &magic_context_acc,
@@ -1008,7 +1033,12 @@ mod tests {
                 (true, true, true),
             );
 
-            let ix = InstructionUtils::accept_scheduled_commits_instruction();
+            let intent_ids = bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap()
+                .scheduled_base_intents
+                .into_iter()
+                .map(|i| i.id);
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
                 &magic_context_acc,

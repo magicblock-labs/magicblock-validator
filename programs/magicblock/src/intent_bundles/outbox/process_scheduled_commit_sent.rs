@@ -377,8 +377,6 @@ mod tests {
         ensure_started_validator(&mut account_data, None);
 
         let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
-            &crate::id(),
-            &validator::validator_authority_id(),
             commit.message_id,
         );
         ix.accounts[1].is_signer = false;
@@ -413,11 +411,10 @@ mod tests {
         };
         ensure_started_validator(&mut account_data, None);
 
-        let ix = InstructionUtils::scheduled_commit_sent_instruction(
-            &crate::id(),
-            &fake_validator.pubkey(),
+        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
             commit.message_id,
         );
+        ix.accounts[0].pubkey = fake_validator.pubkey();
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
         process_instruction(
@@ -448,11 +445,10 @@ mod tests {
         };
         ensure_started_validator(&mut account_data, None);
 
-        let ix = InstructionUtils::scheduled_commit_sent_instruction(
-            &fake_program.pubkey(),
-            &validator::validator_authority_id(),
+        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
             commit.message_id,
         );
+        ix.accounts[1].pubkey = fake_program.pubkey();
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
 
@@ -478,8 +474,6 @@ mod tests {
         ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::scheduled_commit_sent_instruction(
-            &crate::id(),
-            &validator::validator_authority_id(),
             commit.message_id,
         );
 

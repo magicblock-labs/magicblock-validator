@@ -717,6 +717,7 @@ mod serialization_safety_test {
 
 #[test]
 fn test_close_buffer_limit() {
+    use crate::utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE};
     use solana_compute_budget_interface::ComputeBudgetInstruction;
     use solana_keypair::Keypair;
     use solana_signer::Signer;
