@@ -1,8 +1,7 @@
 use std::time::Duration;
 
-use cleanass::assert_eq;
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_task_scheduler::SchedulerDatabase;
+use magicblock_task_scheduler::{crank_pubkey, CRANKER_REWARD};
 use program_flexi_counter::{
     instruction::{create_cancel_task_ix, create_schedule_task_ix},
     state::FlexiCounter,
@@ -12,17 +11,16 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use test_task_scheduler::{
-    create_delegated_counter, setup_validator, wait_for_incremented_counter,
+    create_delegated_counter, setup_validator, wait_for_hydra_crank,
+    wait_for_hydra_crank_closed,
 };
-use tokio::runtime::Runtime;
 
 #[test]
 fn test_schedule_task() {
-    let (temp_dir, mut validator, ctx) = setup_validator();
-    let db_path = SchedulerDatabase::path(temp_dir.path());
+    let (_temp_dir, mut validator, ctx) = setup_validator();
 
     let payer = Keypair::new();
-    let (counter_pda, _) = FlexiCounter::pda(&payer.pubkey());
+    let (_counter_pda, _) = FlexiCounter::pda(&payer.pubkey());
 
     expect!(
         ctx.airdrop_chain(&payer.pubkey(), 10 * LAMPORTS_PER_SOL),
@@ -67,50 +65,16 @@ fn test_schedule_task() {
         validator
     );
 
-    // Wait for the task to be scheduled and executed
-    // Check that the counter was incremented
-    wait_for_incremented_counter(
+    // The crank is created by hydra and funded for every iteration.
+    let crank_pda = crank_pubkey(&payer.pubkey(), task_id);
+    let expected_lamports = iterations as u64 * CRANKER_REWARD;
+    wait_for_hydra_crank(
         &ctx,
-        &counter_pda,
-        iterations as u64,
+        &crank_pda,
+        expected_lamports,
         Duration::from_secs(10),
         &mut validator,
     );
-
-    // Check that the completed task was removed from the database
-    let db = expect!(SchedulerDatabase::new(db_path), validator);
-    let runtime = expect!(Runtime::new(), validator);
-
-    let failed_scheduling =
-        expect!(runtime.block_on(db.get_failed_schedulings()), validator);
-    assert_eq!(
-        failed_scheduling.len(),
-        0,
-        cleanup(&mut validator),
-        "failed_scheduling: {:?}",
-        failed_scheduling,
-    );
-
-    let failed_tasks =
-        expect!(runtime.block_on(db.get_failed_tasks()), validator);
-    assert_eq!(
-        failed_tasks.len(),
-        0,
-        cleanup(&mut validator),
-        "failed_tasks: {:?}",
-        failed_tasks
-    );
-
-    let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
-    assert_eq!(
-        tasks.len(),
-        0,
-        cleanup(&mut validator),
-        "tasks: {:?}",
-        tasks
-    );
-    let task = expect!(runtime.block_on(db.get_task(task_id)), validator);
-    assert_eq!(task, None, cleanup(&mut validator));
 
     // Cancel the task
     let sig = expect!(
@@ -135,11 +99,13 @@ fn test_schedule_task() {
         validator
     );
 
-    expect!(ctx.wait_for_delta_slot_ephem(5), validator);
-
-    // Check that the task was cancelled
-    let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
-    assert_eq!(tasks.len(), 0, cleanup(&mut validator));
+    // Cancelling closes the hydra crank.
+    wait_for_hydra_crank_closed(
+        &ctx,
+        &crank_pda,
+        Duration::from_secs(10),
+        &mut validator,
+    );
 
     cleanup(&mut validator);
 }

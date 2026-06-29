@@ -413,7 +413,6 @@ impl MagicValidator {
         let step_start = Instant::now();
         let task_scheduler = TaskSchedulerService::new(
             &task_scheduler_db_path,
-            &config.task_scheduler,
             config.aperture.listen.http(),
             dispatch
                 .tasks_service
