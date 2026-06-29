@@ -18,7 +18,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::remote_account_provider::{
-    chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
+    chain_pubsub_client::{
+        ChainPubsubClient, ReconnectableClient,
+        SubscriptionReconciliationSnapshot,
+    },
     errors::RemoteAccountProviderResult,
     pubsub_common::SubscriptionUpdate,
 };
@@ -1128,7 +1131,7 @@ where
 
     fn subscriptions_union(&self) -> HashSet<Pubkey> {
         let mut union = HashSet::new();
-        for client in self.clients_snapshot() {
+        for client in self.connected_clients_snapshot() {
             let subs = client.subscriptions_union();
             union.extend(subs);
         }
@@ -1137,7 +1140,7 @@ where
 
     fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
         let sets: Vec<HashSet<Pubkey>> = self
-            .clients_snapshot()
+            .connected_clients_snapshot()
             .iter()
             .map(|c| c.subscriptions_intersection())
             .collect();
@@ -1159,6 +1162,51 @@ where
             .collect()
     }
 
+    fn subscription_reconciliation_snapshot(
+        &self,
+    ) -> Option<SubscriptionReconciliationSnapshot> {
+        let connected_clients = self.connected_clients_snapshot();
+        if connected_clients.is_empty() {
+            return None;
+        }
+
+        let mut union = HashSet::new();
+        let mut intersection_sets = Vec::with_capacity(connected_clients.len());
+        for client in connected_clients {
+            let snapshot = match client.subscription_reconciliation_snapshot() {
+                Some(snapshot) => snapshot,
+                None => continue,
+            };
+            union.extend(snapshot.union);
+            intersection_sets.push(snapshot.intersection);
+        }
+
+        if intersection_sets.is_empty() {
+            return None;
+        }
+
+        // Find the smallest set to iterate over, then check membership
+        // in all others — no intermediate cloning/collecting.
+        // SAFETY: we return above if the set is empty, so unwrap is safe here.
+        let smallest =
+            intersection_sets.iter().min_by_key(|s| s.len()).unwrap();
+        let intersection = smallest
+            .iter()
+            .filter(|pk| {
+                intersection_sets
+                    .iter()
+                    .filter(|s| !std::ptr::eq(*s, smallest))
+                    .all(|s| s.contains(pk))
+            })
+            .copied()
+            .collect();
+
+        Some(SubscriptionReconciliationSnapshot {
+            union,
+            intersection,
+        })
+    }
+
     /// Returns true if any inner client subscribes immediately
     fn subs_immediately(&self) -> bool {
         self.clients_snapshot().iter().any(|c| c.subs_immediately())
@@ -1171,12 +1219,17 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use solana_account::Account;
     use tokio::sync::mpsc;
 
     use super::*;
     use crate::{
-        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        remote_account_provider::{
+            chain_pubsub_client::mock::ChainPubsubClientMock,
+            subscription_reconciler::reconcile_subscriptions, AccountsLruCache,
+        },
         submux::subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker,
         testing::{init_logger, utils::sleep_ms},
     };
@@ -1244,6 +1297,26 @@ mod tests {
             SubMuxClient::new(client_tuples, tracker, dedupe_window_millis),
             abort_senders,
         )
+    }
+
+    async fn wait_for_connected_clients(
+        mux: &SubMuxClient<ChainPubsubClientMock>,
+        expected: u16,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let connected = mux.connected_clients.load(Ordering::SeqCst);
+            let snapshot_len = mux.connected_clients_snapshot().len();
+            if connected == expected && snapshot_len == expected as usize {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {expected} connected clients; \
+                 connected_clients={connected}, snapshot_len={snapshot_len}"
+            );
+            sleep_ms(10).await;
+        }
     }
 
     // -----------------
@@ -2067,6 +2140,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_reconciliation_snapshots_ignore_reconnecting_clients() {
+        init_logger();
+
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let (tx3, rx3) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+        let client3 = Arc::new(ChainPubsubClientMock::new(tx3, rx3));
+
+        let shared_pk = Pubkey::new_unique();
+        let reconnecting_only_pk = Pubkey::new_unique();
+        let (mux, aborts) = new_submux_with_abort(
+            vec![client1.clone(), client2.clone(), client3.clone()],
+            vec![shared_pk],
+            Some(100),
+        );
+
+        mux.subscribe(shared_pk, None).await.unwrap();
+        assert!(client1.subscriptions_union().contains(&shared_pk));
+        assert!(client2.subscriptions_union().contains(&shared_pk));
+        assert!(client3.subscriptions_union().contains(&shared_pk));
+
+        client3.disable_reconnect();
+        client3.simulate_disconnect();
+        client3.insert_subscription(reconnecting_only_pk);
+        aborts[2].send(()).await.expect("abort send");
+        wait_for_connected_clients(&mux, 2).await;
+
+        assert_eq!(mux.connected_clients.load(Ordering::SeqCst), 2);
+        assert_eq!(mux.connected_clients_snapshot().len(), 2);
+
+        let intersection = mux.subscriptions_intersection();
+        assert!(
+            intersection.contains(&shared_pk),
+            "connected clients still agree on the shared subscription"
+        );
+        assert!(
+            !intersection.contains(&reconnecting_only_pk),
+            "reconnecting-only subscriptions must not affect intersection"
+        );
+
+        let union = mux.subscriptions_union();
+        assert!(
+            union.contains(&shared_pk),
+            "connected-client union should include shared subscriptions"
+        );
+        assert!(
+            !union.contains(&reconnecting_only_pk),
+            "reconnecting-only subscriptions must not affect union"
+        );
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_skips_repair_when_no_submux_clients_connected() {
+        init_logger();
+
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+
+        let pk = Pubkey::new_unique();
+        let (mux, aborts) = new_submux_with_abort(
+            vec![client1.clone(), client2.clone()],
+            vec![pk],
+            Some(100),
+        );
+
+        mux.subscribe(pk, None).await.unwrap();
+
+        client1.disable_reconnect();
+        client2.disable_reconnect();
+        client1.simulate_disconnect();
+        client2.simulate_disconnect();
+        aborts[0].send(()).await.expect("abort send 1");
+        aborts[1].send(()).await.expect("abort send 2");
+        wait_for_connected_clients(&mux, 0).await;
+
+        assert_eq!(mux.connected_clients.load(Ordering::SeqCst), 0);
+        assert!(mux.subscription_reconciliation_snapshot().is_none());
+
+        let before_client1_attempts = client1.subscribe_attempts();
+        let before_client2_attempts = client2.subscribe_attempts();
+
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        lru.add(pk);
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+
+        let count =
+            reconcile_subscriptions(&lru, &mux, &[], &removed_tx, None).await;
+
+        assert_eq!(count, 1);
+        assert_eq!(client1.subscribe_attempts(), before_client1_attempts);
+        assert_eq!(client2.subscribe_attempts(), before_client2_attempts);
+        assert!(removed_rx.try_recv().is_err());
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn test_subscribe_skips_disconnected_client_during_reconnect() {
         init_logger();
 
@@ -2087,7 +2263,7 @@ mod tests {
         client1.disable_reconnect();
         client1.simulate_disconnect();
         aborts[0].send(()).await.expect("abort send");
-        sleep_ms(100).await;
+        wait_for_connected_clients(&mux, 1).await;
 
         assert_eq!(mux.connected_clients.load(Ordering::SeqCst), 1);
         let client1_attempts = client1.subscribe_attempts();
