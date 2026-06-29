@@ -151,8 +151,14 @@ impl IntentExecutionReport {
         self.patched_errors.push(value);
     }
 
-    pub fn patched_errors(&self) -> &Vec<TransactionStrategyExecutionError> {
+    pub fn patched_errors(&self) -> &[TransactionStrategyExecutionError] {
         &self.patched_errors
+    }
+
+    pub fn callbacks_report(
+        &self,
+    ) -> &[Result<Signature, CallbackScheduleError>] {
+        &self.callbacks_report
     }
 
     pub fn add_callback_report(

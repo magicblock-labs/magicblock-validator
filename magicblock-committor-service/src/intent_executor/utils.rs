@@ -20,7 +20,7 @@ use crate::{
         },
         ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
     },
-    outbox::outbox_client::OutboxClient,
+    outbox::{outbox_client::OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
         task_builder::{TaskBuilderImpl, TasksBuilder},
         task_info_fetcher::TaskInfoFetcher,
@@ -61,6 +61,7 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
+    let meta = ScheduledBaseIntentMeta::new(&intent_bundle);
     let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
 
     let mut single_stage_executor = SingleStageStrategyExecutor::new(
@@ -107,7 +108,12 @@ where
                 transaction_strategy.clone(),
             );
             execution_report.dispose(transaction_strategy);
-            return res.map(ExecutionOutput::SingleStage);
+            let output = res.map(ExecutionOutput::SingleStage);
+            ctx.outbox_client
+                .notify_commit_sent(meta, &output, execution_report)
+                .await
+                .map_err(Into::into)?;
+            return output;
         }
     };
 
@@ -150,6 +156,7 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
+    let meta = ScheduledBaseIntentMeta::new(&intent_bundle);
     let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
     let mut executor = TwoStageStrategyExecutor::new(
         state,
@@ -183,8 +190,13 @@ where
     .await?;
 
     let finalized_stage = finalize_executor.done(finalize_signature);
-    Ok(ExecutionOutput::TwoStage {
+    let output = ExecutionOutput::TwoStage {
         commit_signature: finalized_stage.commit_signature,
         finalize_signature: finalized_stage.finalize_signature,
-    })
+    };
+    ctx.outbox_client
+        .notify_commit_sent(meta, &Ok(output), execution_report)
+        .await
+        .map_err(Into::into)?;
+    Ok(output)
 }

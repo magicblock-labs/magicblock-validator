@@ -14,8 +14,9 @@ use magicblock_committor_service::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
         build_stage_intent_executor,
-        intent_execution_client::IntentExecutionClient, ExecutionOutput,
-        IntentExecutor, IntentExecutorCtx,
+        error::IntentExecutorResult,
+        intent_execution_client::IntentExecutionClient,
+        ExecutionOutput, IntentExecutionReport, IntentExecutor, IntentExecutorCtx,
     },
     outbox::{
         outbox_client::{InternalOutboxClientError, OutboxClient},
@@ -46,7 +47,7 @@ use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox_intent_bundles::{OutboxIntentBundle, OutboxIntentBundleStatus},
     validator::init_validator_authority,
-    MagicContext, SentCommit,
+    MagicContext,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -68,6 +69,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use magicblock_committor_service::outbox::ScheduledBaseIntentMeta;
 
 type CallbackRecord =
     (Vec<BaseActionCallback>, Option<Signature>, ActionResult);
@@ -1008,8 +1010,9 @@ impl OutboxClient for TestOutboxClient {
 
     async fn notify_commit_sent(
         &self,
-        _sent_tx: Transaction,
-        _sent_commit: SentCommit,
+        _meta: ScheduledBaseIntentMeta,
+        _result: &IntentExecutorResult<ExecutionOutput>,
+        _execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

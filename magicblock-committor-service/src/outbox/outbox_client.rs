@@ -13,8 +13,7 @@ use magicblock_core::{
 use magicblock_program::{
     instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    register_scheduled_commit_sent, MagicContext, Pubkey, SentCommit,
-    MAGIC_CONTEXT_PUBKEY,
+    register_scheduled_commit_sent, MagicContext, Pubkey, MAGIC_CONTEXT_PUBKEY,
 };
 use solana_account::{Account, ReadableAccount};
 use solana_rpc_client::{
@@ -23,12 +22,20 @@ use solana_rpc_client::{
 use solana_rpc_client_api::{
     client_error, client_error::ErrorKind as RpcClientErrorKind,
 };
-use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tracing::{debug, error};
 
-use crate::outbox::outbox_intent_bundles_reader::{
-    InternalOutboxIntentBundlesReader, OutboxIntentBundlesReader,
+use crate::{
+    intent_executor::{
+        error::IntentExecutorResult, ExecutionOutput, IntentExecutionReport,
+    },
+    outbox::{
+        outbox_intent_bundles_reader::{
+            InternalOutboxIntentBundlesReader, OutboxIntentBundlesReader,
+        },
+        utils::build_sent_commit,
+        ScheduledBaseIntentMeta,
+    },
 };
 
 #[async_trait]
@@ -58,8 +65,9 @@ pub trait OutboxClient: Send + Sync + 'static {
     /// Processes intent results, submitting them on chain(ER)
     async fn notify_commit_sent(
         &self,
-        sent_tx: Transaction,
-        sent_commit: SentCommit,
+        meta: ScheduledBaseIntentMeta,
+        result: &IntentExecutorResult<ExecutionOutput>,
+        execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error>;
 
     /// Returns reader capable of reading IntentBundles from Outbox
@@ -216,9 +224,12 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
 
     async fn notify_commit_sent(
         &self,
-        sent_tx: Transaction,
-        sent_commit: SentCommit,
+        meta: ScheduledBaseIntentMeta,
+        result: &IntentExecutorResult<ExecutionOutput>,
+        execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
+        let (sent_tx, sent_commit) =
+            build_sent_commit(meta, result, execution_report);
         // TODO(edwin): is using handle directly here ok? This could require Chainlink mechanics
         register_scheduled_commit_sent(sent_commit);
         let txn = with_encoded(sent_tx).inspect_err(|err| {
