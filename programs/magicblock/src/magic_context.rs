@@ -66,7 +66,6 @@ impl MagicContext {
         const ID_OFFSET: usize = 0;
         const ID_END: usize = mem::size_of::<u64>();
 
-        // TODO(edwin): should exist, return Option and cast to error
         let Some(raw_id) = data.get(ID_OFFSET..ID_END) else {
             return 0;
         };

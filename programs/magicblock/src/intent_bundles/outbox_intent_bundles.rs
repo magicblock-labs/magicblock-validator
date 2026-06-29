@@ -87,7 +87,6 @@ impl OutboxIntentBundleStatus {
         ))
     }
 
-    // TODO(edwin): split into is_valid_transition and apply_transaction
     fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,

@@ -74,10 +74,23 @@ fn validate(
         MAGIC_CONTEXT_IDX,
     )?;
 
-    // Validate authority
     let transaction_context = &*invoke_context.transaction_context;
-    // TODO(edwin): add check for magic-program
 
+    // Assert magic program account
+    let magic_program_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, MAGIC_PROGRAM_ID)?;
+    if *magic_program_pubkey != crate::id() {
+        ic_msg!(
+            invoke_context,
+            "AcceptScheduledCommits ERR: account at idx {} is {}, expected magic program {}",
+            MAGIC_PROGRAM_ID,
+            magic_program_pubkey,
+            crate::id()
+        );
+        return Err(InstructionError::IncorrectProgramId);
+    }
+
+    // Assert validator authority
     let provided_validator_auth = get_instruction_pubkey_with_idx(
         transaction_context,
         VALIDATOR_AUTHORITY_IDX,
@@ -110,7 +123,6 @@ fn verify_intent_pda(
     intent_id: u64,
     pda_idx: u16,
 ) -> Result<Pubkey, InstructionError> {
-    // TODO(edwin): add check that acount doesn't exist?
     let transaction_context = &*invoke_context.transaction_context;
     let provided =
         get_instruction_pubkey_with_idx(transaction_context, pda_idx)?;
@@ -206,10 +218,9 @@ fn create_outbox_account_cpi(
         invoke_context,
         validator_auth,
         pda,
-        data.len() as u32, // TODO(edwin): fix cast
+        data.len() as u32,
     )?;
 
-    // TODO(edwin): simplify/
     // Move intent data in new account
     let transaction_context = &*invoke_context.transaction_context;
     let tx_idx = transaction_context
