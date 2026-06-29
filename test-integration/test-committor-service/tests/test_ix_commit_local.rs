@@ -49,6 +49,7 @@ mod utils;
 // -----------------
 type ExpectedStrategies = HashMap<CommitStrategy, u8>;
 
+#[allow(unused)]
 pub struct AccountCommitInfo {
     data: Vec<u8>,
     commit_nonce: u64,

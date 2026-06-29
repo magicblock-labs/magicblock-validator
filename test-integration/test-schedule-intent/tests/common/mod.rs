@@ -104,11 +104,13 @@ pub fn add_to_counter(
     )
 }
 
+#[allow(unused)]
 pub struct ExpectedCounter {
     pub pda: Pubkey,
     pub expected: u64,
 }
 
+#[allow(unused)]
 pub fn assert_counters(
     ctx: &IntegrationTestContext,
     expected_counters: &[ExpectedCounter],
@@ -132,6 +134,7 @@ pub fn assert_counters(
     }
 }
 
+#[allow(unused)]
 pub fn verify_undelegation_in_ephem_via_owner(
     pubkeys: &[Pubkey],
     ctx: &IntegrationTestContext,

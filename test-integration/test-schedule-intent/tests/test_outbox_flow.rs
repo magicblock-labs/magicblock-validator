@@ -330,13 +330,11 @@ async fn test_pickup_executed_intent() {
     let ExecutionOutput::SingleStage(signature) = result.inner.unwrap() else {
         panic!("Unexpected execution strategy");
     };
-    assert!(
-        matches!(
-            outbox_bundle.status,
-            OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
-                signature
-            ))
-        ),
+    assert_eq!(
+        outbox_bundle.status,
+        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
+            signature
+        )),
         "Invalid outbox state"
     );
     // Builder executor
@@ -920,10 +918,6 @@ impl TestOutboxClient {
 
     fn with_set_execution_stage_sleep(&mut self, value: Duration) {
         self.set_execution_stage_sleep = Some(value);
-    }
-
-    fn with_fail_committing(&mut self, value: bool) {
-        self.fail_committing = value;
     }
 
     fn with_fail_finalizing(&mut self, value: bool) {
