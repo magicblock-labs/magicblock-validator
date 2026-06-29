@@ -117,7 +117,7 @@ where
                 MAX_EXECUTORS as usize,
             )),
             inner: Arc::new(Mutex::new(IntentScheduler::new())),
-            _phantom_data: PhantomData::default(),
+            _phantom_data: PhantomData,
         }
     }
 

@@ -46,6 +46,7 @@ pub(in crate::intent_executor) struct ExecutionState<'a> {
     pub execution_report: &'a mut IntentExecutionReport,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
     authority: &Keypair,
     intent_client: &IntentExecutionClient,
@@ -145,7 +146,7 @@ pub async fn prepare_transaction<T: TransactionPreparator>(
     transaction_strategy: &mut TransactionStrategy,
 ) -> Result<VersionedTransaction, TransactionPreparatorError> {
     let mut prepared_message = transaction_preparator
-        .prepare_for_strategy(&authority, transaction_strategy)
+        .prepare_for_strategy(authority, transaction_strategy)
         .await?;
 
     // Get latest blockhash(Part of preparation I guess)
@@ -176,7 +177,7 @@ pub(in crate::intent_executor) async fn check_pending_signature(
         .await
         .map_err(IntentExecutorError::GetPendingSignatureStatusError)?;
 
-    match statuses.get(0) {
+    match statuses.first() {
         Some(Some(Ok(()))) => Ok(ControlFlow::Break(())),
         None => {
             // well, that is bizarre one

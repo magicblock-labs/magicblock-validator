@@ -49,6 +49,7 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         authority: Keypair,
         intent_id: u64,

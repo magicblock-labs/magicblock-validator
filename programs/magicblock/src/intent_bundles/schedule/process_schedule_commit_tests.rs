@@ -158,10 +158,10 @@ fn find_magic_context_account(
         .find(|acc| acc.owner() == &crate::id() && acc.lamports() == u64::MAX)
 }
 
-fn assert_non_accepted_actions<'a>(
-    processed_scheduled: &'a [AccountSharedData],
+fn assert_non_accepted_actions(
+    processed_scheduled: &[AccountSharedData],
     expected_non_accepted_commits: usize,
-) -> &'a AccountSharedData {
+) -> &AccountSharedData {
     let magic_context_acc = find_magic_context_account(processed_scheduled)
         .expect("magic context account not found");
     let magic_context =

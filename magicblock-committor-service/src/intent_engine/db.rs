@@ -88,11 +88,18 @@ pub struct DummyDB {
 }
 
 #[cfg(any(test, feature = "dev-context-only-utils"))]
-impl DummyDB {
-    pub fn new() -> Self {
+impl Default for DummyDB {
+    fn default() -> Self {
         Self {
             db: std::sync::Mutex::new(VecDeque::new()),
         }
+    }
+}
+
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+impl DummyDB {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

@@ -37,9 +37,9 @@ pub(in crate::intent_executor) async fn build_commit_finalize_tasks<
     task_info_fetcher: &Arc<F>,
 ) -> IntentExecutorResult<(Vec<BaseTaskImpl>, Vec<BaseTaskImpl>)> {
     let commit_tasks_fut =
-        TaskBuilderImpl::commit_tasks(&task_info_fetcher, &intent_bundle);
+        TaskBuilderImpl::commit_tasks(task_info_fetcher, intent_bundle);
     let finalize_tasks_fut =
-        TaskBuilderImpl::finalize_tasks(&task_info_fetcher, &intent_bundle);
+        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent_bundle);
     let (commit_tasks, finalize_tasks) =
         join(commit_tasks_fut, finalize_tasks_fut).await;
 
