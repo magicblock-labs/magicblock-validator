@@ -19,7 +19,8 @@ use magicblock_core::token_programs::{
     try_derive_supported_ata_pubkeys, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{
-    self, AccountFetchOrigin, ChainlinkCloneIntent, ChainlinkCloneOutcome,
+    self, AccountFetchOrigin, ChainlinkCloneIntent,
+    ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
     ChainlinkCloneRemoteResult,
 };
 use parking_lot::Mutex as PlMutex;
@@ -595,6 +596,49 @@ where
         }
     }
 
+    fn record_account_materialization(
+        &self,
+        request: &AccountCloneRequest,
+        fetch_origin: AccountFetchOrigin,
+    ) {
+        let remote_result = Self::clone_remote_result_for_request(request);
+        let outcome = if self.local_account_satisfies_clone_request(
+            &request.pubkey,
+            &request.account,
+        ) {
+            ChainlinkCloneMaterializationOutcome::ObservedInBankAfterEnsure
+        } else {
+            ChainlinkCloneMaterializationOutcome::StillMissingAfterEnsure
+        };
+        metrics::inc_chainlink_clone_materialization_accounts_total(
+            fetch_origin,
+            remote_result,
+            outcome,
+        );
+    }
+
+    fn record_program_materialization(
+        &self,
+        program_id: &Pubkey,
+        remote_slot: u64,
+        fetch_origin: AccountFetchOrigin,
+    ) {
+        let outcome = if self
+            .accounts_bank
+            .get_account(program_id)
+            .is_some_and(|account| account.remote_slot() >= remote_slot)
+        {
+            ChainlinkCloneMaterializationOutcome::ObservedInBankAfterEnsure
+        } else {
+            ChainlinkCloneMaterializationOutcome::StillMissingAfterEnsure
+        };
+        metrics::inc_chainlink_clone_materialization_accounts_total(
+            fetch_origin,
+            ChainlinkCloneRemoteResult::Found,
+            outcome,
+        );
+    }
+
     /// Submits a clone request through ownership coordination.
     /// Only one account clone per pubkey is submitted at a time. Waiters
     /// retry local freshness checks after a successful owner so a newer
@@ -638,20 +682,20 @@ where
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
                     );
-                    let result = self
-                        .cloner
-                        .clone_account(
-                            request
-                                .take()
-                                .expect("owner must still have request"),
-                        )
-                        .await;
+                    let owned_request =
+                        request.take().expect("owner must still have request");
+                    let materialization_request = owned_request.clone();
+                    let result = self.cloner.clone_account(owned_request).await;
                     if result.is_ok() {
                         metrics::inc_chainlink_clone_accounts_total(
                             fetch_origin,
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::CloneSucceeded,
+                        );
+                        self.record_account_materialization(
+                            &materialization_request,
+                            fetch_origin,
                         );
                     } else {
                         metrics::inc_chainlink_clone_accounts_total(
@@ -758,6 +802,11 @@ where
                                 remote_result,
                                 clone_intent,
                                 ChainlinkCloneOutcome::CloneSucceeded,
+                            );
+                            self.record_program_materialization(
+                                &program_id,
+                                remote_slot,
+                                fetch_origin,
                             );
                         } else {
                             metrics::inc_chainlink_clone_accounts_total(
@@ -945,6 +994,7 @@ where
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
                     );
+                    let materialization_request = owned_request.clone();
                     let result = self.cloner.clone_account(owned_request).await;
                     if result.is_ok() {
                         metrics::inc_chainlink_clone_accounts_total(
@@ -952,6 +1002,10 @@ where
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::CloneSucceeded,
+                        );
+                        self.record_account_materialization(
+                            &materialization_request,
+                            fetch_origin,
                         );
                     } else {
                         metrics::inc_chainlink_clone_accounts_total(
