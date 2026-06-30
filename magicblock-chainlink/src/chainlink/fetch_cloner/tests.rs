@@ -66,6 +66,13 @@ type TestFetchClonerResult = (
     Arc<ClonerStub>,
 );
 
+type TestFetchCloner = FetchCloner<
+    ChainRpcClientMock,
+    ChainPubsubClientMock,
+    AccountsBankStub,
+    ClonerStub,
+>;
+
 macro_rules! _cloned_account {
     ($bank:expr,
      $account_pubkey:expr,
@@ -260,6 +267,90 @@ fn create_non_raw_eata_owned_account(
         wallet_owner,
         mint,
     )
+}
+
+fn account_clone_request(account: AccountSharedData) -> AccountCloneRequest {
+    AccountCloneRequest {
+        pubkey: random_pubkey(),
+        account,
+        commit_frequency_ms: None,
+        delegation_actions: DelegationActions::default(),
+        delegated_to_other: None,
+        needs_undelegation: false,
+    }
+}
+
+fn non_empty_account() -> AccountSharedData {
+    AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    })
+}
+
+#[test]
+fn clone_classification_treats_empty_placeholder_as_not_found() {
+    let request = account_clone_request(AccountSharedData::default());
+
+    assert!(TestFetchCloner::is_empty_placeholder_account(
+        &request.account
+    ));
+    assert_eq!(
+        TestFetchCloner::clone_remote_result_for_request(&request),
+        ChainlinkCloneRemoteResult::NotFound
+    );
+    assert_eq!(
+        TestFetchCloner::clone_intent_for_request(&request),
+        ChainlinkCloneIntent::EmptyPlaceholder
+    );
+}
+
+#[test]
+fn clone_classification_treats_normal_account_as_found() {
+    let request = account_clone_request(non_empty_account());
+
+    assert!(!TestFetchCloner::is_empty_placeholder_account(
+        &request.account
+    ));
+    assert_eq!(
+        TestFetchCloner::clone_remote_result_for_request(&request),
+        ChainlinkCloneRemoteResult::Found
+    );
+    assert_eq!(
+        TestFetchCloner::clone_intent_for_request(&request),
+        ChainlinkCloneIntent::NormalAccount
+    );
+}
+
+#[test]
+fn clone_classification_treats_delegated_account_as_delegation_record() {
+    let mut account = non_empty_account();
+    account.set_delegated(true);
+    let request = account_clone_request(account);
+
+    assert_eq!(
+        TestFetchCloner::clone_intent_for_request(&request),
+        ChainlinkCloneIntent::DelegationRecord
+    );
+}
+
+#[test]
+fn clone_classification_treats_action_dependency_as_action_dependency() {
+    let mut request = account_clone_request(non_empty_account());
+    request.delegation_actions =
+        DelegationActions::from(vec![Instruction::new_with_bytes(
+            system_program::id(),
+            &[1],
+            vec![],
+        )]);
+
+    assert!(!request.account.delegated());
+    assert_eq!(
+        TestFetchCloner::clone_intent_for_request(&request),
+        ChainlinkCloneIntent::ActionDependency
+    );
 }
 
 fn add_delegation_record_with_slot_for(

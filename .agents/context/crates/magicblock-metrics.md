@@ -419,7 +419,7 @@ Preserve these invariants when editing this crate:
 4. **Labels must be bounded and low-cardinality.** Never use signatures, pubkeys, account addresses, transaction IDs, raw errors, endpoint URLs with secrets, or user input as labels unless a bounded cardinality design is documented.
 5. **Hot-path metrics must be cheap.** Avoid allocations, formatting, locks beyond Prometheus collector internals, and repeated label lookup in tight loops when a batch/outer operation metric is sufficient.
 6. **Gauge wrappers must preserve set-vs-delta semantics.** Some wrappers set absolute counts; others increment/decrement. Do not mix these up.
-7. **Increment/decrement gauges must be balanced on all control-flow paths.** This is especially important for pending clone request metrics.
+7. **Increment/decrement gauges must be balanced on all control-flow paths.** Do not reintroduce the removed pending-clone gauge; clone observability now comes from the lifecycle counters above.
 8. **Histograms must use seconds and meaningful buckets.** Bucket choices should match expected latency ranges.
 9. **Scrape handling must not mutate validator state.** `/metrics` observes registry values only.
 10. **Metrics service shutdown must remain cancellation-token driven.** Do not introduce shutdown paths that can block validator shutdown indefinitely.
@@ -463,7 +463,7 @@ Inspect:
 
 If a metric is obsolete, prefer a staged approach when possible: keep the old metric while adding the replacement, or document the exact replacement and update all repository references.
 
-The eviction-vs-get metrics plan intentionally removes stale clone-cache/pending-clone gauges before adding replacement lifecycle counters, so no replacement lifecycle metric is introduced in that removal step.
+The eviction-vs-get metrics plan intentionally removed the stale clone-cache/pending-clone gauges and replaced them with the clone lifecycle, clone materialization, and empty-placeholder counters documented above. Treat that as an operator-visible migration path rather than reintroducing the old gauges.
 
 ### Adding or changing labels
 
