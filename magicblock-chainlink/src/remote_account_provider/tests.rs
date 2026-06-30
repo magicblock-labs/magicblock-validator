@@ -1733,6 +1733,81 @@ async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
 }
 
 #[tokio::test]
+async fn test_capacity_eviction_missing_pubsub_subscription_completes_cleanup()
+{
+    init_logger();
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let pubkeys = &[pubkey1, pubkey2];
+
+    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
+
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider.pubsub_client().remove_subscription(&pubkey1);
+
+    let evicted_before = registration_metric_value(
+        SubscriptionRegistrationOrigin::Internal,
+        SubscriptionReasonLabel::DirectAccount,
+        SubscriptionRegistrationOutcome::EvictedCandidate,
+    );
+    let error_before = registration_metric_value(
+        SubscriptionRegistrationOrigin::Internal,
+        SubscriptionReasonLabel::DirectAccount,
+        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
+    );
+    let cleanup_before = cleanup_metric_value(
+        SubscriptionCleanupSource::CapacityEviction,
+        SubscriptionCleanupOutcome::AlreadyAbsent,
+    );
+
+    provider
+        .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    let evicted_after = registration_metric_value(
+        SubscriptionRegistrationOrigin::Internal,
+        SubscriptionReasonLabel::DirectAccount,
+        SubscriptionRegistrationOutcome::EvictedCandidate,
+    );
+    let error_after = registration_metric_value(
+        SubscriptionRegistrationOrigin::Internal,
+        SubscriptionReasonLabel::DirectAccount,
+        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
+    );
+    let cleanup_after = cleanup_metric_value(
+        SubscriptionCleanupSource::CapacityEviction,
+        SubscriptionCleanupOutcome::AlreadyAbsent,
+    );
+    assert_eq!(evicted_after - evicted_before, 1);
+    assert_eq!(error_after - error_before, 0);
+    assert_eq!(cleanup_after - cleanup_before, 1);
+
+    assert!(!provider.is_watching(&pubkey1));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(!provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey1));
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey2));
+    assert!(!provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey1));
+
+    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
+    assert_eq!(removed_accounts, [pubkey1]);
+}
+
+#[tokio::test]
 async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribing_protected(
 ) {
     init_logger();

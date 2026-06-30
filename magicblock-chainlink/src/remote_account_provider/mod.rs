@@ -1634,44 +1634,45 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 // ownership intact until pubsub confirms the subscription is
                 // gone so a failed unsubscribe cannot leave ownership state
                 // inconsistent with the active subscription.
-                if let Err(err) = self.pubsub_client.unsubscribe(evicted).await
-                {
-                    if matches!(
-                        err,
-                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                            _
-                        )
-                    ) {
-                        debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
-                        inc_chainlink_subscription_cleanup_accounts(
-                            SubscriptionCleanupSource::CapacityEviction,
-                            SubscriptionCleanupOutcome::AlreadyAbsent,
-                        );
-                    } else {
-                        // Should we retry here?
-                        warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
-                        inc_chainlink_subscription_cleanup_accounts(
-                            SubscriptionCleanupSource::CapacityEviction,
-                            SubscriptionCleanupOutcome::UnsubscribeFailed,
-                        );
-                    }
-                    self.subscription_ownership
-                        .lock()
-                        .await
-                        .entry(*pubkey)
-                        .or_default()
-                        .acquire(reason);
-                    inc_chainlink_subscription_registration_accounts(
-                        origin,
-                        reason.into(),
-                        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-                    );
-                    return Err(err);
-                }
+                let cleanup_outcome =
+                    match self.pubsub_client.unsubscribe(evicted).await {
+                        Ok(()) => SubscriptionCleanupOutcome::Unsubscribed,
+                        Err(err)
+                            if matches!(
+                                err,
+                                RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                                    _
+                                )
+                            ) =>
+                        {
+                            debug!(evicted = %evicted, error = ?err, "Evicted pubsub subscription was already absent");
+                            SubscriptionCleanupOutcome::AlreadyAbsent
+                        }
+                        Err(err) => {
+                            // Should we retry here?
+                            warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                            inc_chainlink_subscription_cleanup_accounts(
+                                SubscriptionCleanupSource::CapacityEviction,
+                                SubscriptionCleanupOutcome::UnsubscribeFailed,
+                            );
+                            self.subscription_ownership
+                                .lock()
+                                .await
+                                .entry(*pubkey)
+                                .or_default()
+                                .acquire(reason);
+                            inc_chainlink_subscription_registration_accounts(
+                                origin,
+                                reason.into(),
+                                SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
+                            );
+                            return Err(err);
+                        }
+                    };
 
                 inc_chainlink_subscription_cleanup_accounts(
                     SubscriptionCleanupSource::CapacityEviction,
-                    SubscriptionCleanupOutcome::Unsubscribed,
+                    cleanup_outcome,
                 );
                 inc_chainlink_subscription_registration_accounts(
                     origin,
