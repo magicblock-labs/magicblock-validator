@@ -68,10 +68,13 @@ use magicblock_metrics::{
     metrics::{
         inc_account_fetches_failed, inc_account_fetches_found,
         inc_account_fetches_not_found, inc_account_fetches_success,
+        inc_chainlink_subscription_cleanup_accounts,
         inc_chainlink_subscription_registration_accounts,
+        inc_chainlink_subscription_release_accounts,
         set_monitored_accounts_count, AccountFetchOrigin,
+        SubscriptionCleanupOutcome, SubscriptionCleanupSource,
         SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
-        SubscriptionRegistrationOutcome,
+        SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
     },
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
@@ -1640,9 +1643,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         )
                     ) {
                         debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                        inc_chainlink_subscription_cleanup_accounts(
+                            SubscriptionCleanupSource::CapacityEviction,
+                            SubscriptionCleanupOutcome::AlreadyAbsent,
+                        );
                     } else {
                         // Should we retry here?
                         warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                        inc_chainlink_subscription_cleanup_accounts(
+                            SubscriptionCleanupSource::CapacityEviction,
+                            SubscriptionCleanupOutcome::UnsubscribeFailed,
+                        );
                     }
                     self.subscription_ownership
                         .lock()
@@ -1658,6 +1669,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     return Err(err);
                 }
 
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::CapacityEviction,
+                    SubscriptionCleanupOutcome::Unsubscribed,
+                );
                 inc_chainlink_subscription_registration_accounts(
                     origin,
                     reason.into(),
@@ -1675,17 +1690,40 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             AddAccountOutcome::NoEvictableCandidate => {
                 if let Err(err) = self.pubsub_client.unsubscribe(*pubkey).await
                 {
-                    debug!(
-                        pubkey = %pubkey,
-                        error = ?err,
-                        "Failed to unsubscribe new subscription after all LRU candidates were protected"
+                    if matches!(
+                        err,
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                            _
+                        )
+                    ) {
+                        // Nothing to roll back on pubsub; continue with the
+                        // local cleanup/removal for the rejected pubkey.
+                        inc_chainlink_subscription_cleanup_accounts(
+                            SubscriptionCleanupSource::RejectedNewSubscription,
+                            SubscriptionCleanupOutcome::AlreadyAbsent,
+                        );
+                    } else {
+                        debug!(
+                            pubkey = %pubkey,
+                            error = ?err,
+                            "Failed to unsubscribe new subscription after all LRU candidates were protected"
+                        );
+                        inc_chainlink_subscription_cleanup_accounts(
+                            SubscriptionCleanupSource::RejectedNewSubscription,
+                            SubscriptionCleanupOutcome::UnsubscribeFailed,
+                        );
+                        inc_chainlink_subscription_registration_accounts(
+                            origin,
+                            reason.into(),
+                            SubscriptionRegistrationOutcome::UnsubscribeRejectedError,
+                        );
+                        return Err(err);
+                    }
+                } else {
+                    inc_chainlink_subscription_cleanup_accounts(
+                        SubscriptionCleanupSource::RejectedNewSubscription,
+                        SubscriptionCleanupOutcome::Unsubscribed,
                     );
-                    inc_chainlink_subscription_registration_accounts(
-                        origin,
-                        reason.into(),
-                        SubscriptionRegistrationOutcome::UnsubscribeRejectedError,
-                    );
-                    return Err(err);
                 }
                 self.subscription_ownership.lock().await.remove(pubkey);
                 self.lrucache_subscribed_accounts.remove(pubkey);
@@ -1849,6 +1887,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let _subscription_guard = subscription_key_lock.lock().await;
 
         if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
+            inc_chainlink_subscription_release_accounts(
+                reason.into(),
+                SubscriptionReleaseOutcome::RetainedIntentionally,
+            );
             return Ok(false);
         }
 
@@ -1867,9 +1909,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     };
                     (existing.is_empty(), released_count)
                 }
-                None => return Ok(false),
+                None => {
+                    inc_chainlink_subscription_release_accounts(
+                        reason.into(),
+                        SubscriptionReleaseOutcome::AlreadyAbsent,
+                    );
+                    return Ok(false);
+                }
             };
             if !is_empty {
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::RetainedOtherReasons,
+                );
                 return Ok(false);
             }
             ownership.remove(pubkey);
@@ -1880,12 +1932,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             *pubkey,
             &self.pubsub_client,
             &self.removed_account_tx,
+            SubscriptionCleanupSource::NormalRelease,
         )
         .await;
 
         if success {
+            inc_chainlink_subscription_release_accounts(
+                reason.into(),
+                SubscriptionReleaseOutcome::Unsubscribed,
+            );
             self.lrucache_subscribed_accounts.remove(pubkey);
         } else {
+            inc_chainlink_subscription_release_accounts(
+                reason.into(),
+                SubscriptionReleaseOutcome::UnsubscribeFailed,
+            );
             let mut ownership = self.subscription_ownership.lock().await;
             if ownership
                 .get(pubkey)
@@ -1926,14 +1987,40 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     };
                     (existing.is_empty(), released_count)
                 }
-                None => return Ok(false),
+                None => {
+                    inc_chainlink_subscription_release_accounts(
+                        reason.into(),
+                        SubscriptionReleaseOutcome::AlreadyAbsent,
+                    );
+                    inc_chainlink_subscription_cleanup_accounts(
+                        SubscriptionCleanupSource::DelegatedAccountSilent,
+                        SubscriptionCleanupOutcome::AlreadyAbsent,
+                    );
+                    return Ok(false);
+                }
             };
 
             if released_count == 0 {
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::AlreadyAbsent,
+                );
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::DelegatedAccountSilent,
+                    SubscriptionCleanupOutcome::AlreadyAbsent,
+                );
                 return Ok(false);
             }
 
             if !is_empty {
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::RetainedOtherReasons,
+                );
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::DelegatedAccountSilent,
+                    SubscriptionCleanupOutcome::RetainedIntentionally,
+                );
                 trace!(
                     pubkey = %pubkey,
                     ?reason,
@@ -1950,6 +2037,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         match self.pubsub_client.unsubscribe(*pubkey).await {
             Ok(()) => {
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::Unsubscribed,
+                );
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::DelegatedAccountSilent,
+                    SubscriptionCleanupOutcome::Unsubscribed,
+                );
                 self.lrucache_subscribed_accounts.remove(pubkey);
                 trace!(
                     pubkey = %pubkey,
@@ -1966,6 +2061,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         _
                     )
                 ) {
+                    inc_chainlink_subscription_release_accounts(
+                        reason.into(),
+                        SubscriptionReleaseOutcome::AlreadyAbsent,
+                    );
+                    inc_chainlink_subscription_cleanup_accounts(
+                        SubscriptionCleanupSource::DelegatedAccountSilent,
+                        SubscriptionCleanupOutcome::AlreadyAbsent,
+                    );
                     self.lrucache_subscribed_accounts.remove(pubkey);
                     trace!(
                         pubkey = %pubkey,
@@ -1975,6 +2078,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     return Ok(false);
                 }
 
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::UnsubscribeFailed,
+                );
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::DelegatedAccountSilent,
+                    SubscriptionCleanupOutcome::UnsubscribeFailed,
+                );
                 let mut ownership = self.subscription_ownership.lock().await;
                 if ownership
                     .get(pubkey)
@@ -2013,11 +2124,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
             warn!(pubkey = %pubkey, "Tried to unsubscribe from account that should never be evicted");
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::ManualUnsubscribe,
+                SubscriptionCleanupOutcome::RetainedIntentionally,
+            );
             return Ok(());
         }
 
         if !self.lrucache_subscribed_accounts.contains(pubkey) {
             trace!(pubkey = %pubkey, "Already unsubscribed from LRU");
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::ManualUnsubscribe,
+                SubscriptionCleanupOutcome::AlreadyAbsent,
+            );
             return Ok(());
         }
 
@@ -2025,6 +2144,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             *pubkey,
             &self.pubsub_client,
             &self.removed_account_tx,
+            SubscriptionCleanupSource::ManualUnsubscribe,
         )
         .await;
 
