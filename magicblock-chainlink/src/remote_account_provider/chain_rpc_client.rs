@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use solana_account::Account;
@@ -7,7 +7,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error,
-    config::RpcAccountInfoConfig,
+    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     response::{Response, RpcResult},
 };
 
@@ -31,6 +31,12 @@ pub trait ChainRpcClient: Send + Sync + Clone + 'static {
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>>;
+
+    async fn get_program_accounts_with_config(
+        &self,
+        pubkey: &Pubkey,
+        config: RpcProgramAccountsConfig,
+    ) -> client_error::Result<Vec<(Pubkey, Account)>>;
 }
 
 // -----------------
@@ -96,5 +102,40 @@ impl ChainRpcClient for ChainRpcClientImpl {
                 .map(|opt| opt.and_then(|ui| ui.to_account()))
                 .collect(),
         })
+    }
+
+    async fn get_program_accounts_with_config(
+        &self,
+        pubkey: &Pubkey,
+        config: RpcProgramAccountsConfig,
+    ) -> client_error::Result<Vec<(Pubkey, Account)>> {
+        self.rpc_client
+            .get_program_ui_accounts_with_config(pubkey, config)
+            .await?
+            .into_iter()
+            .map(|(pubkey, account)| {
+                let data = account.data.decode().ok_or_else(|| {
+                    client_error::ErrorKind::Custom(format!(
+                        "failed to decode program account {pubkey} data"
+                    ))
+                })?;
+                let owner =
+                    Pubkey::from_str(&account.owner).map_err(|err| {
+                        client_error::ErrorKind::Custom(format!(
+                        "failed to decode program account {pubkey} owner: {err}"
+                    ))
+                    })?;
+                Ok((
+                    pubkey,
+                    Account {
+                        lamports: account.lamports,
+                        data,
+                        owner,
+                        executable: account.executable,
+                        rent_epoch: account.rent_epoch,
+                    },
+                ))
+            })
+            .collect()
     }
 }
