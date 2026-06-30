@@ -228,6 +228,18 @@ Important caveats:
 - `chainlink_pending_fetch_waiters_gauge` is incremented only for waiter joins, not for owner calls awaiting their own operation. It must be decremented on success, failure, cancellation, timeout, and waiter-drop paths.
 - Pending-fetch labels are low-cardinality enum/static labels only: `origin` uses `AccountFetchOrigin`, `layer` uses `fetch_cloner` or `remote_account_provider`, and `outcome` uses exactly `owned`, `joined_existing`, `owner_succeeded`, `owner_failed`, `owner_cancelled`, `resolved_by_subscription_update`, or `rpc_fetch_completed_after_update`.
 
+Useful PromQL examples for the pending-fetch contract use scraped `mbv_` names:
+
+```promql
+sum by (origin, layer) (rate(mbv_chainlink_pending_fetch_waiters_total[5m]))
+/
+sum by (origin, layer) (rate(mbv_chainlink_pending_fetch_accounts_total{outcome="owned"}[5m]))
+```
+
+```promql
+sum by (origin, layer, outcome) (rate(mbv_chainlink_pending_fetch_accounts_total[5m]))
+```
+
 ### RPC and aperture
 
 | Wrapper/collector | Meaning |
