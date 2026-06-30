@@ -1431,6 +1431,7 @@ where
             == self.validator_pubkey
             || deleg_record.authority == Pubkey::default();
         if !is_delegated_to_us {
+            metrics::inc_discovered_dlp_update_delegated_elsewhere();
             trace!(
                 pubkey = %pubkey,
                 authority = %deleg_record.authority,
