@@ -5934,6 +5934,7 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("native token clone should be normalized");
@@ -5996,6 +5997,7 @@ async fn test_delegated_malformed_ata_clone_is_rejected() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect_err("malformed delegated ATA clone should be rejected");
@@ -6052,6 +6054,7 @@ async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("non-ATA native token clone should be preserved");
@@ -6103,6 +6106,7 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("plain native token clone should be preserved");
