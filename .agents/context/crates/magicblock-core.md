@@ -146,7 +146,9 @@ Use `CoordinationMode::current()`, `needs_validator_signer()`, `should_schedule_
 - ATA derivation: `derive_ata`, `derive_ata_with_token_program`, `try_derive_supported_ata_pubkeys`.
 - eATA derivation: `derive_eata`, `try_derive_eata_address_and_bump`.
 - ATA detection/remapping: `is_ata`, `try_remap_ata_to_eata`.
-- eATA projection: `MaybeIntoAta<AccountSharedData>` and `EphemeralAta` conversion/projection helpers.
+- eATA projection: `EphemeralAta` projection helpers require a real base ATA layout and do not synthesize legacy SPL Token accounts from raw eATA data.
+- Native-token local projection: `normalize_native_token_account_for_local_clone` strips `is_native` and claimable lamports only for canonical delegated ATA clones, and supports both legacy SPL Token native mint and Token-2022 native mint while preserving Token-2022 account layout/extensions.
+- Projected ATA local safety: `normalize_projected_token_account_for_local_clone` makes virtual projected ATAs uncloseable with `close_authority = Some(Pubkey::default())`; closure/materialization belongs in settlement, not local projection.
 
 ## Runtime flows
 
@@ -241,6 +243,8 @@ Keep these types serializable and stable enough for persistence and cross-crate 
 ### Token and eATA helpers are protocol-sensitive
 
 `try_remap_ata_to_eata` only remaps delegated token accounts whose pubkey matches the derived ATA for their owner/mint/token program. `EphemeralAta::try_from_account_data` supports both `EPHEMERAL_ATA_LEN` and `LEGACY_EPHEMERAL_ATA_LEN`. Changes here can affect cloning, post-delegation token transfer tests, commit account payloads, and chainlink blacklisting/ATA projection.
+
+Native-token projection is intentionally limited to local ATA/eATA projection semantics. Do not turn arbitrary delegated wrapped-SOL token accounts into non-native accounts or strip their lamports unless the surrounding caller has proved the account is a canonical ATA that will remap to eATA on settlement.
 
 ### Logging initialization is process-global
 

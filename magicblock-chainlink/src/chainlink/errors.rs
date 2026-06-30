@@ -25,6 +25,9 @@ pub enum ChainlinkError {
     #[error("Delegation actions could not be decoded: {0} ({1})")]
     InvalidDelegationActions(Pubkey, String),
 
+    #[error("Token account could not be decoded while cloning: {0} ({1})")]
+    InvalidTokenAccount(Pubkey, String),
+
     #[error("Failed to resolve one or more accounts {0} when getting delegation records")]
     DelegatedAccountResolutionsFailed(String),
 

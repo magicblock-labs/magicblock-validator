@@ -12,6 +12,7 @@ use magicblock_chainlink::{
 use solana_account::ReadableAccount;
 use solana_pubkey::{pubkey, Pubkey};
 use solana_sdk::{
+    program_option::COption,
     program_pack::Pack,
     signature::{Keypair, Signer},
 };
@@ -71,7 +72,10 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     assert_eq!(spl_token_account.mint, mint);
     assert_eq!(spl_token_account.amount, amount);
     assert_eq!(spl_token_account.owner, wallet_owner);
-    assert!(spl_token_account.close_authority.is_none());
+    assert_eq!(
+        spl_token_account.close_authority,
+        COption::Some(Pubkey::default())
+    );
     assert_eq!(spl_token_account.state, AccountState::Initialized);
     assert_eq!(spl_token_account.delegated_amount, 0);
     assert!(spl_token_account.is_native.is_none());
