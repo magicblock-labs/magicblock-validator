@@ -150,6 +150,7 @@ pub enum BankPrecheckReason {
     Absent,
     NonUndelegatingPresent,
     UndelegatingStillValid,
+    UndelegatingCheckTimeout,
     UndelegatingRefresh,
     ForcedRefresh,
 }
@@ -160,6 +161,7 @@ impl BankPrecheckReason {
             Self::Absent => "absent",
             Self::NonUndelegatingPresent => "non_undelegating_present",
             Self::UndelegatingStillValid => "undelegating_still_valid",
+            Self::UndelegatingCheckTimeout => "undelegating_check_timeout",
             Self::UndelegatingRefresh => "undelegating_refresh",
             Self::ForcedRefresh => "forced_refresh",
         }

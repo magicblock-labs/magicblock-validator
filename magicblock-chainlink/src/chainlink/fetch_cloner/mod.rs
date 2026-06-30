@@ -2539,6 +2539,7 @@ where
         let mut extra_mark_empty = vec![];
         let mut bank_hit_no_fetch_non_undelegating_count = 0_u64;
         let mut bank_hit_no_fetch_undelegating_still_valid_count = 0_u64;
+        let mut bank_hit_no_fetch_undelegating_timeout_count = 0_u64;
         let mut bank_hit_undelegating_refresh_required_count = 0_u64;
         let mut bank_miss_remote_required_count = 0_u64;
         let mut forced_refresh_remote_required_count = 0_u64;
@@ -2605,30 +2606,33 @@ where
                                 pubkey = %pubkey,
                                 "Timeout checking if account is still undelegating after 5 seconds"
                             );
-                            RefreshDecision::No
+                            return (pubkey, None);
                         }
                     };
-                    (pubkey, decision)
+                    (pubkey, Some(decision))
                 });
             }
 
             for (pubkey, decision) in join_set.join_all().await {
                 match decision {
-                    RefreshDecision::Yes
-                    | RefreshDecision::YesAndMarkEmptyIfNotFound => {
+                    Some(
+                        RefreshDecision::Yes
+                        | RefreshDecision::YesAndMarkEmptyIfNotFound,
+                    ) => {
                         debug!(
                             pubkey = %pubkey,
                             "Account completed undelegation which was missed and is fetched again"
                         );
                         bank_hit_undelegating_refresh_required_count += 1;
                         metrics::inc_unstuck_undelegation_count();
-                        if let RefreshDecision::YesAndMarkEmptyIfNotFound =
-                            decision
+                        if let Some(
+                            RefreshDecision::YesAndMarkEmptyIfNotFound,
+                        ) = decision
                         {
                             extra_mark_empty.push(pubkey);
                         }
                     }
-                    RefreshDecision::No => {
+                    Some(RefreshDecision::No) => {
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
                                 pubkey = %pubkey,
@@ -2636,6 +2640,10 @@ where
                             );
                         }
                         bank_hit_no_fetch_undelegating_still_valid_count += 1;
+                        in_bank.insert(pubkey);
+                    }
+                    None => {
+                        bank_hit_no_fetch_undelegating_timeout_count += 1;
                         in_bank.insert(pubkey);
                     }
                 }
@@ -2652,6 +2660,12 @@ where
             BankPrecheckOutcome::BankHitNoFetch,
             BankPrecheckReason::UndelegatingStillValid,
             bank_hit_no_fetch_undelegating_still_valid_count,
+        );
+        metrics::inc_chainlink_bank_precheck_accounts(
+            fetch_origin,
+            BankPrecheckOutcome::BankHitNoFetch,
+            BankPrecheckReason::UndelegatingCheckTimeout,
+            bank_hit_no_fetch_undelegating_timeout_count,
         );
         metrics::inc_chainlink_bank_precheck_accounts(
             fetch_origin,
