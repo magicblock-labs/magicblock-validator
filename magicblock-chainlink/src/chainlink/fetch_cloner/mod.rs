@@ -16,6 +16,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
+    is_ata, normalize_native_token_account_for_local_clone,
     try_derive_supported_ata_pubkeys, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{
@@ -700,6 +701,17 @@ where
         &self,
         mut request: AccountCloneRequest,
     ) -> ChainlinkResult<Signature> {
+        if request.account.delegated()
+            && is_ata(&request.pubkey, &request.account).is_some()
+            && !normalize_native_token_account_for_local_clone(
+                &mut request.account,
+            )
+        {
+            return Err(ChainlinkError::InvalidTokenAccount(
+                request.pubkey,
+                "delegated ATA token data is malformed".to_string(),
+            ));
+        }
         self.normalize_unresolved_dlp_clone_request(&mut request)?;
 
         if request.account.delegated()
