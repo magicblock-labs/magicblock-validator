@@ -56,7 +56,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
-use magicblock_replicator::{nats::Broker, ReplicationService};
+use magicblock_replicator::{nats::Broker, BrokerSource, ReplicationService};
 use magicblock_services::actions_callback_service::ActionsCallbackService;
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_validator_admin::claim_fees::{claim_fees, ClaimFeesTask};
@@ -183,11 +183,14 @@ impl MagicValidator {
         let broker = if let Some(conf) =
             config.validator.replication_mode.config()
         {
-            let step_start = Instant::now();
-            let mut broker = Broker::connect(conf.url, conf.secret).await?;
             let is_fresh_start = accountsdb.slot() == 0;
-            // Fetch snapshot from primary if starting fresh
-            if is_fresh_start {
+            // A fresh node must fetch the bootstrap snapshot before ledger
+            // replay, so it connects synchronously here. Otherwise the connect
+            // (and producer-lock acquisition) is deferred to the replication
+            // service thread
+            let source = if is_fresh_start {
+                let step_start = Instant::now();
+                let mut broker = Broker::connect(conf.url, conf.secret).await?;
                 info!(
                     "accountsdb is not initialized, trying to fetch snapshot"
                 );
@@ -204,9 +207,15 @@ impl MagicValidator {
                 } else {
                     warn!("no snapshot is found in replication stream");
                 }
-            }
-            log_timing("startup", "replication broker init", step_start);
-            Some((broker, is_fresh_start))
+                log_timing("startup", "replication broker init", step_start);
+                BrokerSource::Connected(broker)
+            } else {
+                BrokerSource::Pending {
+                    url: conf.url,
+                    secret: conf.secret,
+                }
+            };
+            Some((source, is_fresh_start))
         } else {
             None
         };
@@ -256,12 +265,15 @@ impl MagicValidator {
         )));
 
         let replication_service =
-            if let Some((broker, is_fresh_start)) = broker {
-                let messages_rx = dispatch.replication_messages.take().expect(
-                    "replication channel should always exist after init",
-                );
-                ReplicationService::new(
-                    broker,
+            if let Some((broker_source, is_fresh_start)) = broker {
+                let messages_rx =
+                    dispatch.replication_messages.take().ok_or_else(|| {
+                        ApiError::FailedToSendModeSwitch(
+                            "replication channel missing after init".to_owned(),
+                        )
+                    })?;
+                Some(ReplicationService::new(
+                    broker_source,
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
@@ -269,10 +281,9 @@ impl MagicValidator {
                     messages_rx,
                     token.clone(),
                     is_fresh_start,
-                    &config.validator.replication_mode,
+                    config.validator.replication_mode.clone(),
                     validator_pubkey,
-                )
-                .await?
+                ))
             } else {
                 None
             };

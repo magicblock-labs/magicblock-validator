@@ -1971,6 +1971,7 @@ dependencies = [
  "solana-pubkey 3.0.0",
  "solana-system-interface 2.0.0",
  "solana-sysvar 3.1.1",
+ "spl-associated-token-account-interface 1.0.0",
 ]
 
 [[package]]
@@ -2506,10 +2507,10 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "bincode",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "serde",
  "solana-program 3.0.0",
 ]
@@ -3496,14 +3497,14 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "async-trait",
  "bincode",
  "magicblock-chainlink",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "magicblock-program",
  "rand 0.9.4",
  "solana-account 3.4.0",
@@ -3523,7 +3524,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "async-trait",
  "magicblock-committor-service",
@@ -3536,12 +3537,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "flate2",
  "lmdb-rkv",
  "magicblock-config",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "memmap2 0.9.10",
  "parking_lot",
  "reflink-copy",
@@ -3556,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3572,7 +3573,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "agave-feature-set",
  "agave-geyser-plugin-interface",
@@ -3618,7 +3619,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "agave-feature-set",
  "anyhow",
@@ -3635,7 +3636,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program-api 0.3.0",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -3681,7 +3682,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -3696,7 +3697,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program-api 0.3.0",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "magicblock-metrics",
  "parking_lot",
  "scc",
@@ -3737,7 +3738,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "borsh 1.7.0",
  "paste",
@@ -3752,7 +3753,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3796,7 +3797,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "clap",
  "derive_more",
@@ -3814,12 +3815,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "bincode",
  "bytes",
  "flume",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "serde",
  "solana-account 3.4.0",
  "solana-account-decoder",
@@ -3882,6 +3883,7 @@ dependencies = [
  "borsh 1.7.0",
  "bytemuck",
  "const-crypto",
+ "libsodium-rs",
  "num_enum",
  "pinocchio 0.10.2",
  "pinocchio-log",
@@ -3894,6 +3896,7 @@ dependencies = [
  "solana-loader-v3-interface 6.1.1",
  "solana-program 3.0.0",
  "solana-pubkey 2.4.0",
+ "solana-sdk",
  "solana-sdk-ids 3.1.0",
  "solana-sha256-hasher 3.1.0",
  "solana-system-interface 2.0.0",
@@ -3904,7 +3907,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -3955,7 +3958,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "bincode",
  "const-crypto",
@@ -3966,7 +3969,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -3981,7 +3984,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -4027,13 +4030,13 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core",
  "magicblock-delegation-program-api 0.3.0",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -4063,7 +4066,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "async-nats",
  "bincode",
@@ -4088,7 +4091,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "futures-util",
  "magicblock-metrics",
@@ -4114,12 +4117,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "bincode",
  "futures-util",
  "magicblock-core",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "solana-instruction 3.3.0",
  "solana-keypair",
  "solana-message 3.1.0",
@@ -4135,7 +4138,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -4162,7 +4165,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "bincode",
  "chrono",
@@ -4188,7 +4191,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "magicblock-delegation-program-api 0.3.0",
  "magicblock-program",
@@ -4205,7 +4208,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "agave-feature-set",
  "git-version",
@@ -5018,7 +5021,7 @@ dependencies = [
  "bincode",
  "borsh 1.7.0",
  "ephemeral-rollups-sdk",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "serde",
  "solana-program 3.0.0",
  "solana-system-interface 3.1.0",
@@ -5040,7 +5043,7 @@ dependencies = [
  "borsh 1.7.0",
  "ephemeral-rollups-sdk",
  "magicblock-delegation-program-api 0.3.0",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "rkyv 0.7.46",
  "solana-program 3.0.0",
  "solana-system-interface 3.1.0",
@@ -5978,7 +5981,7 @@ dependencies = [
  "integration-test-tools",
  "magicblock-core",
  "magicblock-delegation-program-api 0.3.0",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "magicblock-program",
  "program-schedulecommit",
  "rand 0.8.6",
@@ -5999,7 +6002,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "magicblock-delegation-program-api 0.3.0",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
@@ -8681,7 +8684,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "bincode",
  "bs58",
@@ -9089,7 +9092,7 @@ dependencies = [
  "solana-transaction-error 3.1.0",
  "solana-transaction-status-client-types",
  "solana-vote-interface 5.1.1",
- "spl-associated-token-account-interface",
+ "spl-associated-token-account-interface 2.0.0",
  "spl-memo-interface",
  "spl-token-2022-interface",
  "spl-token-group-interface",
@@ -9375,6 +9378,16 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "spl-associated-token-account-interface"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e6bbe0794e532ac08428d3abf5bf8ae75bd81dfddd785c388e326c00c92c6f5"
+dependencies = [
+ "solana-instruction 2.3.3",
+ "solana-pubkey 2.4.0",
 ]
 
 [[package]]
@@ -9759,12 +9772,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-aml"
+version = "0.0.0"
+dependencies = [
+ "cleanass",
+ "ephemeral-rollups-sdk",
+ "integration-test-tools",
+ "magicblock-config",
+ "magicblock-core",
+ "magicblock-delegation-program-api 0.3.0",
+ "program-flexi-counter",
+ "program-mini",
+ "solana-loader-v4-interface 3.1.0",
+ "solana-sdk",
+ "solana-system-interface 3.1.0",
+ "spl-associated-token-account-interface 2.0.0",
+ "spl-memo-interface",
+ "spl-token-interface",
+ "tempfile",
+ "test-chainlink",
+ "test-kit",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "test-chainlink"
 version = "0.0.0"
 dependencies = [
  "bincode",
+ "borsh 1.7.0",
  "futures",
  "integration-test-tools",
+ "magicblock-aml",
  "magicblock-chainlink",
  "magicblock-config",
  "magicblock-delegation-program-api 0.3.0",
@@ -9782,6 +9822,7 @@ dependencies = [
  "solana-sdk-ids 3.1.0",
  "solana-system-interface 3.1.0",
  "spl-token-interface",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -9798,7 +9839,7 @@ dependencies = [
  "solana-loader-v4-interface 3.1.0",
  "solana-sdk",
  "solana-system-interface 3.1.0",
- "spl-associated-token-account-interface",
+ "spl-associated-token-account-interface 2.0.0",
  "spl-memo-interface",
  "spl-token-interface",
  "test-chainlink",
@@ -9828,7 +9869,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.13.0"
+version = "0.13.2"
 dependencies = [
  "guinea",
  "magicblock-accounts-db",
@@ -9921,6 +9962,7 @@ dependencies = [
  "ctrlc",
  "integration-test-tools",
  "teepee",
+ "tempfile",
 ]
 
 [[package]]
@@ -9931,7 +9973,7 @@ dependencies = [
  "integration-test-tools",
  "log",
  "magicblock-delegation-program-api 0.3.0",
- "magicblock-magic-program-api 0.13.0",
+ "magicblock-magic-program-api 0.13.2",
  "program-flexi-counter",
  "solana-rpc-client-api",
  "solana-sdk",

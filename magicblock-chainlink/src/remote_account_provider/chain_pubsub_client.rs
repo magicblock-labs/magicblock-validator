@@ -22,6 +22,12 @@ use super::{
 
 const MAX_RESUB_DELAY_MS: u64 = 800;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubscriptionReconciliationSnapshot {
+    pub union: HashSet<Pubkey>,
+    pub intersection: HashSet<Pubkey>,
+}
+
 // -----------------
 // Trait
 // -----------------
@@ -56,6 +62,24 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     /// that every client is subscribed to.
     fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
         self.subscriptions_union()
+    }
+
+    /// Returns an atomic reconciliation snapshot. `None` means no live
+    /// subscription client is available to inspect or repair.
+    ///
+    /// Default single-client implementations are always inspectable and derive
+    /// both snapshot sets from one `subscriptions_union()` call. Implementers
+    /// with connection availability state, such as `SubMuxClient`, must override
+    /// this method and decide availability from the same state snapshot used to
+    /// build the returned sets.
+    fn subscription_reconciliation_snapshot(
+        &self,
+    ) -> Option<SubscriptionReconciliationSnapshot> {
+        let union = self.subscriptions_union();
+        Some(SubscriptionReconciliationSnapshot {
+            intersection: union.clone(),
+            union,
+        })
     }
 
     fn subs_immediately(&self) -> bool;

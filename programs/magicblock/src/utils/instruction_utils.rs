@@ -59,7 +59,6 @@ impl InstructionUtils {
     // -----------------
     // Schedule Commit and Undelegate
     // -----------------
-    #[cfg(test)]
     pub fn schedule_commit_and_undelegate(
         payer: &Keypair,
         pubkeys: Vec<Pubkey>,
@@ -72,8 +71,7 @@ impl InstructionUtils {
         Self::into_transaction(payer, ix, recent_blockhash)
     }
 
-    #[cfg(test)]
-    pub(crate) fn schedule_commit_and_undelegate_instruction(
+    pub fn schedule_commit_and_undelegate_instruction(
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Instruction {
@@ -449,6 +447,7 @@ impl InstructionUtils {
         data: Vec<u8>,
         is_last: bool,
         actions: Vec<Instruction>,
+        needs_undelegation: bool,
     ) -> Instruction {
         let mut account_metas = vec![
             AccountMeta::new(validator_authority_id(), true),
@@ -464,6 +463,7 @@ impl InstructionUtils {
                 data,
                 is_last,
                 actions,
+                needs_undelegation,
             },
             account_metas,
         )
@@ -489,6 +489,26 @@ impl InstructionUtils {
                 actions,
             },
             account_metas,
+        )
+    }
+
+    pub fn schedule_cloned_account_undelegation_instruction(
+        cloned_account_pubkey: Pubkey,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
+            &PostDelegationActionExecutorInstruction::ScheduleUndelegation {
+                cloned_account_pubkey,
+            },
+            vec![
+                AccountMeta::new_readonly(validator_authority_id(), true),
+                AccountMeta::new(cloned_account_pubkey, false),
+                AccountMeta::new_readonly(
+                    solana_sdk_ids::sysvar::instructions::id(),
+                    false,
+                ),
+                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            ],
         )
     }
 

@@ -4242,6 +4242,164 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
 }
 
 #[tokio::test]
+async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let mut app_data = vec![0; DelegationRecord::size_with_discriminator()];
+    app_data[..8].copy_from_slice(&100u64.to_le_bytes());
+    assert!(
+        crate::remote_account_provider::pubsub_common::is_internal_dlp_account_data(
+            &app_data
+        )
+    );
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: app_data.clone(),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                delegated_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        while !accounts_bank.get_account(&account_pubkey).is_some_and(
+            |account| {
+                account.delegated()
+                    && account.owner() == &account_owner
+                    && account.remote_slot() == CURRENT_SLOT
+            },
+        ) {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for masquerading delegated account clone");
+
+    let cloned_account = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be greedily cloned from program update");
+    assert_eq!(cloned_account.data(), app_data.as_slice());
+}
+
+#[tokio::test]
+async fn test_internal_dlp_pda_program_update_is_filtered_after_discovery_miss()
+{
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let delegated_account = random_pubkey();
+    let account_owner = random_pubkey();
+    let delegation_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &delegated_account,
+        );
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegation_record = DelegationRecord {
+        authority: validator_pubkey,
+        owner: account_owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    let delegation_record_account = Account {
+        lamports: 1_000_000,
+        data: delegation_record_to_vec(&delegation_record),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        subscription_tx,
+        fetch_cloner,
+        cloner,
+        ..
+    } = setup(
+        [(delegation_record_pubkey, delegation_record_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair,
+    )
+    .await;
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: delegation_record_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                delegation_record_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+    drop(subscription_tx);
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while Arc::strong_count(&fetch_cloner) > 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for internal DLP update to be filtered");
+
+    assert!(accounts_bank
+        .get_account(&delegation_record_pubkey)
+        .is_none());
+    assert_eq!(cloner.clone_request_count(), 0);
+}
+
+#[tokio::test]
 async fn test_same_slot_delegated_subscription_update_overrides_plain_bank_account(
 ) {
     init_logger();
@@ -5467,6 +5625,7 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 commit_frequency_ms: None,
                 delegation_actions: actions,
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -5518,6 +5677,7 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 commit_frequency_ms: None,
                 delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -5569,6 +5729,7 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 commit_frequency_ms: None,
                 delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -5656,6 +5817,7 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 commit_frequency_ms: None,
                 delegation_actions: actions,
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await
@@ -5731,6 +5893,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                     commit_frequency_ms: None,
                     delegation_actions: actions.clone(),
                     delegated_to_other: None,
+                    needs_undelegation: false,
                 },
             )
             .await
@@ -5751,6 +5914,63 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
         !target_requests[0].delegation_actions.is_empty(),
         "the first clone remains the only action-bearing clone"
     );
+}
+
+#[tokio::test]
+async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let target_pubkey = random_pubkey();
+    let mut target_account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    target_account.set_remote_slot(CURRENT_SLOT);
+    target_account.set_delegated(true);
+
+    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
+        target_pubkey,
+        &[1],
+        vec![],
+    )]);
+
+    cloner.set_fail_next_clone(true);
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: target_pubkey,
+                account: target_account,
+                commit_frequency_ms: None,
+                delegation_actions: actions,
+                delegated_to_other: None,
+                needs_undelegation: false,
+            },
+        )
+        .await
+        .expect(
+            "failed action must be rescued by cloning and scheduling undelegation",
+        );
+
+    let clone_requests = cloner.clone_requests();
+    assert_eq!(clone_requests.len(), 2);
+    assert_eq!(cloner.undelegation_requests(), vec![target_pubkey]);
 }
 
 #[tokio::test]
@@ -5801,6 +6021,7 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 commit_frequency_ms: None,
                 delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
+                needs_undelegation: false,
             },
         )
         .await

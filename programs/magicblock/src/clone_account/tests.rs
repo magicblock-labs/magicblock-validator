@@ -87,6 +87,21 @@ fn test_post_delegation_executor_target_is_writable_only_for_writable_action() {
     assert!(writable_target.is_writable);
 }
 
+#[test]
+fn test_schedule_undelegation_marks_cloned_account_writable() {
+    crate::validator::generate_validator_authority_if_needed();
+    let pubkey = Pubkey::new_unique();
+    let ix = InstructionUtils::schedule_cloned_account_undelegation_instruction(
+        pubkey,
+    );
+    let target = ix
+        .accounts
+        .iter()
+        .find(|account| account.pubkey == pubkey)
+        .expect("cloned account must be present in the instruction");
+    assert!(target.is_writable);
+}
+
 fn instructions_sysvar_data(
     instructions: &[Instruction],
     current_index: u16,
@@ -662,6 +677,7 @@ fn test_clone_continue_writes_at_offset() {
         vec![5, 6, 7],
         false,
         Vec::new(),
+        false,
     );
     let mut result = process_instruction(
         &ix.data,
@@ -694,6 +710,7 @@ fn test_clone_continue_completes_clone() {
         vec![8, 9, 10],
         true,
         Vec::new(),
+        false,
     );
     let mut result = process_instruction(
         &ix.data,
@@ -733,6 +750,7 @@ fn test_clone_continue_with_actions_waits_for_executor_to_clear_pending() {
         vec![8, 9, 10],
         true,
         actions.clone(),
+        false,
     );
     let executor_ix =
         InstructionUtils::post_delegation_action_executor_instruction(
@@ -782,6 +800,7 @@ fn test_clone_continue_rejects_actions_before_final_chunk() {
         vec![5, 6, 7],
         false,
         vec![schedule_task_action(payer)],
+        false,
     );
 
     process_instruction(
@@ -847,6 +866,7 @@ fn test_clone_continue_rejects_without_init() {
         vec![1],
         true,
         Vec::new(),
+        false,
     );
     process_instruction(
         &ix.data,
@@ -870,6 +890,7 @@ fn test_clone_continue_rejects_offset_overflow() {
         vec![1],
         true,
         Vec::new(),
+        false,
     );
     process_instruction(
         &ix.data,

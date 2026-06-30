@@ -38,6 +38,8 @@ pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
 
+pub(crate) const SUBSCRIPTION_UPDATE_LIMIT: usize = 5_000;
+
 /// Production Chainlink stack with configurable cloner implementation.
 pub type ProdInnerChainlink<C> = InnerChainlink<
     ChainRpcClientImpl,
@@ -221,7 +223,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         accounts_bank,
         cloner,
         config,
-        chainlink_config
+        chainlink_config,
     ))]
     pub async fn try_new_from_endpoints(
         endpoints: &Endpoints,
@@ -243,7 +245,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     > {
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
-        let (tx, rx) = tokio::sync::mpsc::channel(5_000);
+        let (tx, rx) = tokio::sync::mpsc::channel(SUBSCRIPTION_UPDATE_LIMIT);
         let account_provider = RemoteAccountProvider::try_from_urls_and_config(
             endpoints,
             commitment,
