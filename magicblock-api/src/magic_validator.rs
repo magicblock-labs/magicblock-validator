@@ -335,6 +335,7 @@ impl MagicValidator {
                 dispatch.transaction_scheduler.clone(),
                 identity_keypair.insecure_clone(),
                 ledger.latest_block().clone(),
+                config.chainlink.undelegation_request_poll_interval,
             ))
         });
 

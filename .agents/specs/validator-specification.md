@@ -267,6 +267,13 @@ account's owner program and `DelegationMetadata.rent_payer`; it derives the
 request PDA for those instruction metas and does not need to fetch or decode
 `UndelegationRequest` during task construction.
 
+The validator observes owner-program `UndelegationRequest` PDAs through
+Chainlink and `magicblock-accounts`. Live request-account subscription updates
+are the low-latency path. A background backfill loop also scans DLP-owned
+accounts with a filtered `getProgramAccounts` every configured interval
+(`chainlink.undelegation-request-poll-interval`, default `5m`) and feeds the
+decoded requests into the same `ScheduleCommitAndUndelegate` scheduling path.
+
 If DLP sees `OwnerProgram` requester during a successful finalize path, it
 finalizes the committed state and undelegates/closes the delegation/request PDAs
 in the same instruction flow. An explicit undelegate instruction later in the
