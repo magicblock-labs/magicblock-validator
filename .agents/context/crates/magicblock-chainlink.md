@@ -141,6 +141,8 @@ Clone lifecycle metrics are emitted through `chainlink_clone_accounts_total` usi
 
 Post-clone materialization metrics are emitted through `chainlink_clone_materialization_accounts_total` only after successful owner account/program clone calls. The check is a single local `AccountsBank::get_account` read: account clones compare the local account against the clone request, and program clones require the local program account's remote slot to be at least the cloned program slot. `still_missing_after_ensure` means the cloner returned success but the expected account/program version was not visible in the bank immediately afterward. This check is intentionally cheap and must not perform remote fetches, retries, sleeps, or expensive scans.
 
+Empty placeholders are created in `RemoteAccountProvider::try_get_multi` when RPC returns `None` and the pubkey is included in `mark_empty_if_not_found`; the provider converts the missing account into a zero-lamport, default-owner, empty-data account and emits `converted_to_empty`. Placeholder clone stages (`clone_submitted`, `clone_submit_failed`, `observed_in_bank_after_ensure`, and `still_missing_after_ensure`) are emitted only when the account clone request has that exact empty-placeholder shape. The `later_refetched` stage is deliberately not emitted yet because detecting repeated same-pubkey placeholders with retained pubkey state would add unbounded memory/cardinality risk; use group 7 sketches or sampled logs for repeated-same-pubkey detection instead.
+
 ### Remote fetch
 
 `RemoteAccountProvider::try_get_multi` subscribes before fetching so subscription updates that arrive during the fetch can win over stale RPC data. It:

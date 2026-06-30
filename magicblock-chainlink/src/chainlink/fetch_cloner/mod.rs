@@ -21,7 +21,7 @@ use magicblock_core::token_programs::{
 use magicblock_metrics::metrics::{
     self, AccountFetchOrigin, ChainlinkCloneIntent,
     ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
-    ChainlinkCloneRemoteResult,
+    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage, Outcome,
 };
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
@@ -600,7 +600,7 @@ where
         &self,
         request: &AccountCloneRequest,
         fetch_origin: AccountFetchOrigin,
-    ) {
+    ) -> ChainlinkCloneMaterializationOutcome {
         let remote_result = Self::clone_remote_result_for_request(request);
         let outcome = if self.local_account_satisfies_clone_request(
             &request.pubkey,
@@ -613,6 +613,46 @@ where
         metrics::inc_chainlink_clone_materialization_accounts_total(
             fetch_origin,
             remote_result,
+            outcome,
+        );
+        outcome
+    }
+
+    fn record_empty_placeholder_stage(
+        request: &AccountCloneRequest,
+        fetch_origin: AccountFetchOrigin,
+        stage: ChainlinkEmptyPlaceholderStage,
+        outcome: Outcome,
+    ) {
+        if Self::is_empty_placeholder_account(&request.account) {
+            metrics::inc_chainlink_empty_placeholder_accounts_total(
+                fetch_origin,
+                stage,
+                outcome,
+            );
+        }
+    }
+
+    fn record_empty_placeholder_materialization_stage(
+        request: &AccountCloneRequest,
+        fetch_origin: AccountFetchOrigin,
+        materialization_outcome: ChainlinkCloneMaterializationOutcome,
+    ) {
+        let (stage, outcome) = match materialization_outcome {
+            ChainlinkCloneMaterializationOutcome::ObservedInBankAfterEnsure => (
+                ChainlinkEmptyPlaceholderStage::ObservedInBankAfterEnsure,
+                Outcome::Success,
+            ),
+            ChainlinkCloneMaterializationOutcome::StillMissingAfterEnsure
+            | ChainlinkCloneMaterializationOutcome::RemovedAfterMaterialization => (
+                ChainlinkEmptyPlaceholderStage::StillMissingAfterEnsure,
+                Outcome::Error,
+            ),
+        };
+        Self::record_empty_placeholder_stage(
+            request,
+            fetch_origin,
+            stage,
             outcome,
         );
     }
@@ -684,6 +724,12 @@ where
                     );
                     let owned_request =
                         request.take().expect("owner must still have request");
+                    Self::record_empty_placeholder_stage(
+                        &owned_request,
+                        fetch_origin,
+                        ChainlinkEmptyPlaceholderStage::CloneSubmitted,
+                        Outcome::Success,
+                    );
                     let materialization_request = owned_request.clone();
                     let result = self.cloner.clone_account(owned_request).await;
                     if result.is_ok() {
@@ -693,9 +739,15 @@ where
                             clone_intent,
                             ChainlinkCloneOutcome::CloneSucceeded,
                         );
-                        self.record_account_materialization(
+                        let materialization_outcome = self
+                            .record_account_materialization(
+                                &materialization_request,
+                                fetch_origin,
+                            );
+                        Self::record_empty_placeholder_materialization_stage(
                             &materialization_request,
                             fetch_origin,
+                            materialization_outcome,
                         );
                     } else {
                         metrics::inc_chainlink_clone_accounts_total(
@@ -709,6 +761,12 @@ where
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::SubmitFailed,
+                        );
+                        Self::record_empty_placeholder_stage(
+                            &materialization_request,
+                            fetch_origin,
+                            ChainlinkEmptyPlaceholderStage::CloneSubmitFailed,
+                            Outcome::Error,
                         );
                     }
                     let completion = if result.is_ok() {
@@ -994,6 +1052,12 @@ where
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
                     );
+                    Self::record_empty_placeholder_stage(
+                        &owned_request,
+                        fetch_origin,
+                        ChainlinkEmptyPlaceholderStage::CloneSubmitted,
+                        Outcome::Success,
+                    );
                     let materialization_request = owned_request.clone();
                     let result = self.cloner.clone_account(owned_request).await;
                     if result.is_ok() {
@@ -1003,9 +1067,15 @@ where
                             clone_intent,
                             ChainlinkCloneOutcome::CloneSucceeded,
                         );
-                        self.record_account_materialization(
+                        let materialization_outcome = self
+                            .record_account_materialization(
+                                &materialization_request,
+                                fetch_origin,
+                            );
+                        Self::record_empty_placeholder_materialization_stage(
                             &materialization_request,
                             fetch_origin,
+                            materialization_outcome,
                         );
                     } else {
                         metrics::inc_chainlink_clone_accounts_total(
@@ -1019,6 +1089,12 @@ where
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::SubmitFailed,
+                        );
+                        Self::record_empty_placeholder_stage(
+                            &materialization_request,
+                            fetch_origin,
+                            ChainlinkEmptyPlaceholderStage::CloneSubmitFailed,
+                            Outcome::Error,
                         );
                     }
                     let completion = if result.is_ok() {

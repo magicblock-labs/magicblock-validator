@@ -226,6 +226,7 @@ pub enum ChainlinkEmptyPlaceholderStage {
     CloneSubmitFailed,
     ObservedInBankAfterEnsure,
     StillMissingAfterEnsure,
+    /// Reserved for a future sampled/sketch implementation; current code does not retain per-pubkey state.
     LaterRefetched,
 }
 
