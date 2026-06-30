@@ -137,6 +137,8 @@ Only the first caller for a pubkey owns the fetch/clone operation. Later callers
 
 There is a second dedup layer for actual clone transactions: `pending_clones` is keyed by `(pubkey, remote_slot)`, so concurrent fetch and subscription paths do not submit duplicate local clone operations for the same account version.
 
+Clone lifecycle metrics are emitted through `chainlink_clone_accounts_total` using bounded enum labels only. Clone owners record submitted and clone success/failure outcomes; pending-clone waiters do not record submitted/succeeded/failed because they did not submit clone work. Local account/program fast-path skips and program-allowlist skips record `outcome=skipped`. If the remote fetch fails before a concrete clone request exists, Chainlink records one skipped lifecycle event per requested pubkey with `remote_result=failed` and `clone_intent=unknown`. These counters must never use pubkeys, signatures, owner pubkeys, raw errors, or other unbounded/user-controlled values as labels.
+
 ### Remote fetch
 
 `RemoteAccountProvider::try_get_multi` subscribes before fetching so subscription updates that arrive during the fetch can win over stale RPC data. It:

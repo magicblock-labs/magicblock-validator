@@ -3617,7 +3617,12 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
         let fetch_cloner = fetch_cloner.clone();
         let program = program.clone();
         tokio::spawn(async move {
-            fetch_cloner.clone_program_with_ownership(program).await
+            fetch_cloner
+                .clone_program_with_ownership(
+                    program,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
         })
     };
     cloner.wait_for_program_clone_count(1).await;
@@ -3625,7 +3630,12 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
     let second_task = {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
-            fetch_cloner.clone_program_with_ownership(program).await
+            fetch_cloner
+                .clone_program_with_ownership(
+                    program,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
         })
     };
     wait_for_pending_clone_waiter_count(&fetch_cloner, program_id, 1).await;
@@ -3680,7 +3690,12 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
     let old_task = {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
-            fetch_cloner.clone_program_with_ownership(old_program).await
+            fetch_cloner
+                .clone_program_with_ownership(
+                    old_program,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
         })
     };
     cloner.wait_for_program_clone_count(1).await;
@@ -3688,7 +3703,12 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
     let new_task = {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
-            fetch_cloner.clone_program_with_ownership(new_program).await
+            fetch_cloner
+                .clone_program_with_ownership(
+                    new_program,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
         })
     };
     wait_for_pending_clone_waiter_count(&fetch_cloner, program_id, 1).await;
@@ -5627,6 +5647,7 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect_err("actions on non-delegated target must be rejected");
@@ -5679,6 +5700,7 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("DLP-owned normal clone should be normalized, not rejected");
@@ -5731,6 +5753,7 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("DLP-owned magic fee vault should remain delegated");
@@ -5819,6 +5842,7 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect(
@@ -5895,6 +5919,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                     delegated_to_other: None,
                     needs_undelegation: false,
                 },
+                AccountFetchOrigin::GetAccount,
             )
             .await
             .expect("action-bearing clone should not fail");
@@ -5962,6 +5987,7 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect(
@@ -6023,6 +6049,7 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("active delegated targets should be skipped without failing");
