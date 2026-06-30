@@ -169,6 +169,7 @@ Most structs use `rename_all = "kebab-case"`; environment variables are upper sn
 - `ledger.block-time` -> `MBV_LEDGER__BLOCK_TIME`
 - `task-scheduler.failed-task-cleanup-interval` -> `MBV_TASK_SCHEDULER__FAILED_TASK_CLEANUP_INTERVAL`
 - `chainlink.risk.request-timeout` -> `MBV_CHAINLINK__RISK__REQUEST_TIMEOUT`
+- `chainlink.undelegation-request-poll-interval` -> `MBV_CHAINLINK__UNDELEGATION_REQUEST_POLL_INTERVAL`
 
 Do not introduce aliases casually. Operator docs, `config.example.toml`, integration tooling, and deployment configs depend on stable keys.
 
@@ -182,7 +183,7 @@ Most config structs use `deny_unknown_fields`. This catches typos and stale conf
 
 ### Defaults are operational behavior
 
-Defaults are not merely test conveniences. They set devnet remotes, local storage, development validator keypair, base fee, commit compute unit price, account DB size, ledger timing, metrics cadence, Chainlink monitoring capacity, Range risk defaults, task scheduler timings, and gRPC stream limits. Changing defaults can affect local developer flows, integration tests, startup performance, storage usage, and network traffic.
+Defaults are not merely test conveniences. They set devnet remotes, local storage, development validator keypair, base fee, commit compute unit price, account DB size, ledger timing, metrics cadence, Chainlink monitoring capacity, DLP undelegation-request polling cadence, Range risk defaults, task scheduler timings, and gRPC stream limits. Changing defaults can affect local developer flows, integration tests, startup performance, storage usage, and network traffic.
 
 ### Config example is tested
 
@@ -277,12 +278,14 @@ Inspect first:
 - `magicblock-config/src/config/chain.rs` and `grpc.rs`;
 - `magicblock-api/src/magic_validator.rs::init_chainlink`;
 - `magicblock-chainlink/src/remote_account_provider/`;
+- `magicblock-services/src/undelegation_request_service.rs` for DLP undelegation-request polling;
 - `magicblock-aml` Range risk usage;
 - allowed-program filtering tests in Chainlink.
 
 Risks:
 
 - subscription limits and resubscription delay affect account sync throughput and provider load;
+- undelegation-request polling adds periodic base-layer RPC load and should stay disabled with `0s` only when subscription backfill is not needed;
 - allowed-program semantics treat `None` and `Some(vec![])` as unrestricted in current Chainlink code;
 - risk config may add external I/O and should remain explicitly disabled by default.
 

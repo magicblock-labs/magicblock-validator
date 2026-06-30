@@ -136,8 +136,9 @@ Caveats:
 5. Standalone/primary nodes reset the bank and, for primaries, send a replication `Message::Reset`.
 6. The intent execution service starts only after replay/reset and handles pending commit intent recovery before its normal accept loop.
 7. Standalone nodes switch the scheduler to `SchedulerMode::Primary`; primary/replica modes spawn the replication service instead.
-8. Standalone ephemeral nodes start background base-layer setup: funding check, magic fee vault init/delegation, optional startup fee claim, and optional domain registration.
-9. The undelegation request service, claim-fees periodic task, intent execution service, ledger truncator, and primary-only task scheduler are started.
+8. Non-replica validators start `UndelegationRequestService`; it consumes Chainlink observed requests and the configured polling backfill. Replicas keep Chainlink disabled and do not scan DLP requests.
+9. Standalone ephemeral nodes start background base-layer setup: funding check, magic fee vault init/delegation, optional startup fee claim, and optional domain registration.
+10. Claim-fees periodic task, intent execution service, ledger truncator, and primary-only task scheduler are started.
 
 ### Scheduled intent service flow
 
@@ -219,9 +220,10 @@ The ledger stores a validator keypair file beside the blockstore parent. With `v
 5. Ephemeral vault initialization must preserve the ephemeral flag and Magic Program owner.
 6. Validator identity must remain privileged in local AccountsDb.
 7. Committor service wiring must stay available before Magic Program execution can fetch commit nonces or schedule settlement work.
-8. Do not add blocking RPC, slow I/O, or expensive serialization to scheduler/executor hot paths from this crate; keep such work in startup/background services where possible.
-9. Shutdown must cancel/stop services before flushing AccountsDb and ledger.
-10. Operator-facing config keys and base-layer registration/fee-vault behavior are compatibility-sensitive.
+8. Owner-program DLP undelegation request polling must stay in the background processor path, not the slot ticker or transaction-execution hot path.
+9. Do not add blocking RPC, slow I/O, or expensive serialization to scheduler/executor hot paths from this crate; keep such work in startup/background services where possible.
+10. Shutdown must cancel/stop services before flushing AccountsDb and ledger.
+11. Operator-facing config keys and base-layer registration/fee-vault behavior are compatibility-sensitive.
 
 ## Common change areas and what to inspect
 
