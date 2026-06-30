@@ -81,16 +81,27 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     removed_account_tx: &mpsc::Sender<Pubkey>,
     subscription_key_locks: Option<&SubscriptionKeyLocks>,
 ) -> usize {
-    let pubsub_union = pubsub_client.subscriptions_union();
-    let pubsub_intersection = pubsub_client.subscriptions_intersection();
     let lru_pubkeys = subscribed_accounts.pubkeys();
     let lru_count = lru_pubkeys.len();
 
-    let ensured_subs_without_never_evict: HashSet<_> = pubsub_intersection
+    let Some(pubsub_snapshot) =
+        pubsub_client.subscription_reconciliation_snapshot()
+    else {
+        debug!(
+            lru_count = lru_count,
+            never_evicted_count = never_evicted.len(),
+            "Skipping subscription reconciliation because no connected pubsub client is available"
+        );
+        return lru_count + never_evicted.len();
+    };
+
+    let ensured_subs_without_never_evict: HashSet<_> = pubsub_snapshot
+        .intersection
         .into_iter()
         .filter(|pk| !never_evicted.contains(pk))
         .collect();
-    let partial_subs_without_never_evict: HashSet<_> = pubsub_union
+    let partial_subs_without_never_evict: HashSet<_> = pubsub_snapshot
+        .union
         .into_iter()
         .filter(|pk| !never_evicted.contains(pk))
         .collect();
@@ -147,7 +158,17 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 continue;
             }
 
-            if pubsub_client.subscriptions_intersection().contains(&pubkey) {
+            let Some(pubsub_snapshot) =
+                pubsub_client.subscription_reconciliation_snapshot()
+            else {
+                trace!(
+                    pubkey = %pubkey,
+                    "Skipping resubscribe because no connected pubsub client is available after reconciliation snapshot"
+                );
+                continue;
+            };
+
+            if pubsub_snapshot.intersection.contains(&pubkey) {
                 trace!(
                     pubkey = %pubkey,
                     "Skipping resubscribe because pubkey is already ensured after reconciliation snapshot"
@@ -185,7 +206,17 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 continue;
             }
 
-            if !pubsub_client.subscriptions_union().contains(&pubkey) {
+            let Some(pubsub_snapshot) =
+                pubsub_client.subscription_reconciliation_snapshot()
+            else {
+                trace!(
+                    pubkey = %pubkey,
+                    "Skipping stale unsubscribe because no connected pubsub client is available after reconciliation snapshot"
+                );
+                continue;
+            };
+
+            if !pubsub_snapshot.union.contains(&pubkey) {
                 trace!(
                     pubkey = %pubkey,
                     "Skipping stale unsubscribe because pubkey left pubsub after reconciliation snapshot"
