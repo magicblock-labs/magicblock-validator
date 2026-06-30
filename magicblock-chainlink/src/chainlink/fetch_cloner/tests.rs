@@ -8058,6 +8058,8 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         1,
         1,
         owner_budget,
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Created(handles) => handles,
         PendingClaim::Joined(_) => panic!("expected owner to create pending"),
@@ -8071,6 +8073,8 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         2,
         2,
         joiner_budget,
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Joined(handles) => handles,
         PendingClaim::Created(_) => {
