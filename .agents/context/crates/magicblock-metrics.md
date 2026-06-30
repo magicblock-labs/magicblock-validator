@@ -31,7 +31,7 @@ Update this file for changes to:
 - validation commands or dashboard/scrape guidance relevant to this crate,
 - performance characteristics of metrics used in hot paths.
 
-If a change adds, removes, or renames a metric that operators may scrape or alert on, call that out explicitly in the handoff/PR notes. Metric names are an external observability contract.
+If a change adds, removes, or renames a metric that operators may scrape or alert on, call that out explicitly in the handoff/PR notes. Metric names are an external observability contract. For metric-related PRs, include at least one practical Prometheus/PromQL query in the PR Details section so reviewers and operators can immediately validate or dashboard the metric change.
 
 For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
