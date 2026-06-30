@@ -209,7 +209,7 @@ impl CommittorActor {
             }
             GetPendingIntentBundles { respond_to } => {
                 let pending_intents =
-                    self.processor.pending_intent_bundles().await;
+                    self.processor.load_recovery_intent_bundles().await;
                 if let Err(e) = respond_to.send(pending_intents) {
                     error!(message_type = "GetPendingIntentBundles", error = ?e, "Failed to send response");
                 }
