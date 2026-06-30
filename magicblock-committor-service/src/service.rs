@@ -9,15 +9,15 @@ use std::{
 };
 
 use futures_util::future::join_all;
-use intent_client::{ERIntentClient, InternalIntentClientError};
+use intent_client::{
+    ERIntentClient, InternalIntentClientError, ScheduledBaseIntentMeta,
+};
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle, Pubkey, SentCommit,
+    magic_scheduled_base_intent::ScheduledIntentBundle, Pubkey,
 };
-use solana_hash::Hash;
-use solana_transaction::Transaction;
 use tokio::{
     sync::broadcast,
     task,
@@ -29,7 +29,6 @@ use tracing::{error, info, instrument, warn};
 use crate::{
     committor_processor::CommittorProcessor, error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
-    intent_executor::ExecutionOutput,
 };
 
 const POISONED_MUTEX_MSG: &str = "ServiceInner intents_meta_map mutex poisoned";
@@ -350,10 +349,8 @@ where
         execution_result: BroadcastedIntentExecutionResult,
         intents_meta_map: &Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
     ) -> Result<(), R::Error> {
-        // Create IntentMeta
         let intent_id = execution_result.id;
-        // Remove intent from metas
-        let Some(mut intent_meta) = intents_meta_map
+        let Some(intent_meta) = intents_meta_map
             .lock()
             .expect(POISONED_MUTEX_MSG)
             .remove(&intent_id)
@@ -365,88 +362,11 @@ where
             return Ok(());
         };
 
-        let sent_transaction =
-            mem::take(&mut intent_meta.intent_sent_transaction);
-        let sent_commit = ServiceInner::<R>::build_sent_commit(
-            intent_id,
-            intent_meta,
-            execution_result,
-        );
         intent_client
-            .notify_commit_sent(sent_transaction, sent_commit)
+            .notify_commit_sent(intent_meta, execution_result)
             .await?;
 
         Ok(())
-    }
-
-    fn build_sent_commit(
-        intent_id: u64,
-        intent_meta: ScheduledBaseIntentMeta,
-        result: BroadcastedIntentExecutionResult,
-    ) -> SentCommit {
-        let error_message =
-            result.as_ref().err().map(|err| format!("{:?}", err));
-        let chain_signatures = match result.inner {
-            Ok(value) => match value {
-                ExecutionOutput::SingleStage(signature) => vec![signature],
-                ExecutionOutput::TwoStage {
-                    commit_signature,
-                    finalize_signature,
-                } => vec![commit_signature, finalize_signature],
-            },
-            Err(err) => {
-                error!(
-                    "Failed to commit intent: {}, slot: {}, blockhash: {}. {:?}",
-                    intent_id, intent_meta.slot, intent_meta.blockhash, err
-                );
-                err.signatures()
-                    .map(|(commit, finalize)| {
-                        finalize
-                            .map(|finalize| vec![commit, finalize])
-                            .unwrap_or(vec![commit])
-                    })
-                    .unwrap_or_default()
-            }
-        };
-        let patched_errors = result
-            .patched_errors
-            .iter()
-            .map(|err| {
-                info!("Patched intent: {}. error was: {}", intent_id, err);
-                err.to_string()
-            })
-            .collect();
-
-        let callbacks_report = result
-            .callbacks_report
-            .iter()
-            .map(|r| match r {
-                Ok(sig) => {
-                    format!("OK: {sig}")
-                }
-                Err(err) => {
-                    error!(
-                        "Callback failed to schedule: {}. error: {}",
-                        intent_id, err
-                    );
-                    format!("ERR: {err}")
-                }
-            })
-            .collect();
-
-        SentCommit {
-            message_id: intent_id,
-            slot: intent_meta.slot,
-            blockhash: intent_meta.blockhash,
-            payer: intent_meta.payer,
-            chain_signatures,
-            included_pubkeys: intent_meta.included_pubkeys,
-            excluded_pubkeys: vec![],
-            requested_undelegation: intent_meta.requested_undelegation,
-            error_message,
-            patched_errors,
-            callbacks_scheduling_results: callbacks_report,
-        }
     }
 
     /// Retains bundles whose accounts are still delegated
@@ -493,28 +413,6 @@ where
                 }
             }
         });
-    }
-}
-
-struct ScheduledBaseIntentMeta {
-    slot: u64,
-    blockhash: Hash,
-    payer: Pubkey,
-    included_pubkeys: Vec<Pubkey>,
-    intent_sent_transaction: Transaction,
-    requested_undelegation: bool,
-}
-
-impl ScheduledBaseIntentMeta {
-    fn new(intent: &ScheduledIntentBundle) -> Self {
-        Self {
-            slot: intent.slot,
-            blockhash: intent.blockhash,
-            payer: intent.payer,
-            included_pubkeys: intent.get_all_committed_pubkeys(),
-            intent_sent_transaction: intent.sent_transaction.clone(),
-            requested_undelegation: intent.has_undelegate_intent(),
-        }
     }
 }
 

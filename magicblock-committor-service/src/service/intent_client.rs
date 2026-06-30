@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{mem, sync::Arc};
 
 use async_trait::async_trait;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
@@ -13,9 +13,59 @@ use magicblock_program::{
     TransactionScheduler, MAGIC_CONTEXT_PUBKEY,
 };
 use solana_account::ReadableAccount;
+use solana_hash::Hash;
+use solana_pubkey::Pubkey;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
+
+use crate::{
+    intent_execution_manager::BroadcastedIntentExecutionResult,
+    intent_executor::ExecutionOutput,
+};
+
+/// Tracks the `ScheduledCommitSent` transaction for an in-flight intent.
+///
+/// Bundles recovered from persistence have no pre-built transaction: the
+/// original blockhash is likely expired by restart time. `Recovered` signals
+/// that the transaction must be constructed at notification time using a
+/// fresh ER blockhash.
+#[derive(Default)]
+pub enum IntentSentTransaction {
+    Known(Transaction),
+    #[default]
+    Recovered,
+}
+
+pub struct ScheduledBaseIntentMeta {
+    slot: u64,
+    blockhash: Hash,
+    payer: Pubkey,
+    included_pubkeys: Vec<Pubkey>,
+    pub(crate) intent_sent_transaction: IntentSentTransaction,
+    requested_undelegation: bool,
+}
+
+impl ScheduledBaseIntentMeta {
+    pub fn new(intent: &ScheduledIntentBundle) -> Self {
+        Self {
+            slot: intent.slot,
+            blockhash: intent.blockhash,
+            payer: intent.payer,
+            included_pubkeys: intent.get_all_committed_pubkeys(),
+            intent_sent_transaction: if intent
+                .sent_transaction
+                .signatures
+                .is_empty()
+            {
+                IntentSentTransaction::Recovered
+            } else {
+                IntentSentTransaction::Known(intent.sent_transaction.clone())
+            },
+            requested_undelegation: intent.has_undelegate_intent(),
+        }
+    }
+}
 
 #[async_trait]
 pub trait ERIntentClient: Send + Sync + 'static {
@@ -29,8 +79,8 @@ pub trait ERIntentClient: Send + Sync + 'static {
     /// Processes intent results, submitting them on chain(ER)
     async fn notify_commit_sent(
         &self,
-        sent_tx: Transaction,
-        sent_commit: SentCommit,
+        meta: ScheduledBaseIntentMeta,
+        result: BroadcastedIntentExecutionResult,
     ) -> Result<(), Self::Error>;
 
     // TODO(edwin): probably more proper place to load pending intent
@@ -103,11 +153,20 @@ impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
 
     async fn notify_commit_sent(
         &self,
-        sent_tx: Transaction,
-        sent_commit: SentCommit,
+        mut meta: ScheduledBaseIntentMeta,
+        result: BroadcastedIntentExecutionResult,
     ) -> Result<(), Self::Error> {
+        let intent_id = result.id;
+        let tx = match mem::take(&mut meta.intent_sent_transaction) {
+            IntentSentTransaction::Known(tx) => tx,
+            IntentSentTransaction::Recovered => {
+                let blockhash = self.latest_block_provider.blockhash();
+                InstructionUtils::scheduled_commit_sent(intent_id, blockhash)
+            }
+        };
+        let sent_commit = build_sent_commit(meta, &result);
         register_scheduled_commit_sent(sent_commit);
-        let txn = with_encoded(sent_tx).inspect_err(|err| {
+        let txn = with_encoded(tx).inspect_err(|err| {
             // Unreachable case, all intent transactions are smaller than 64KB by construction
             error!(error = ?err, "Failed to bincode intent transaction");
         })?;
@@ -120,6 +179,75 @@ impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
             )?;
 
         Ok(())
+    }
+}
+
+fn build_sent_commit(
+    meta: ScheduledBaseIntentMeta,
+    result: &BroadcastedIntentExecutionResult,
+) -> SentCommit {
+    let intent_id = result.id;
+    let error_message = result.as_ref().err().map(|err| format!("{:?}", err));
+    let chain_signatures = match &result.inner {
+        Ok(value) => match value {
+            ExecutionOutput::SingleStage(signature) => vec![*signature],
+            ExecutionOutput::TwoStage {
+                commit_signature,
+                finalize_signature,
+            } => vec![*commit_signature, *finalize_signature],
+        },
+        Err(err) => {
+            error!(
+                "Failed to commit intent: {}, slot: {}, blockhash: {}. {:?}",
+                intent_id, meta.slot, meta.blockhash, err
+            );
+            err.signatures()
+                .map(|(commit, finalize)| {
+                    finalize
+                        .map(|finalize| vec![commit, finalize])
+                        .unwrap_or(vec![commit])
+                })
+                .unwrap_or_default()
+        }
+    };
+    let patched_errors = result
+        .patched_errors
+        .iter()
+        .map(|err| {
+            info!("Patched intent: {}. error was: {}", intent_id, err);
+            err.to_string()
+        })
+        .collect();
+
+    let callbacks_report = result
+        .callbacks_report
+        .iter()
+        .map(|r| match r {
+            Ok(sig) => {
+                format!("OK: {sig}")
+            }
+            Err(err) => {
+                error!(
+                    "Callback failed to schedule: {}. error: {}",
+                    intent_id, err
+                );
+                format!("ERR: {err}")
+            }
+        })
+        .collect();
+
+    SentCommit {
+        message_id: intent_id,
+        slot: meta.slot,
+        blockhash: meta.blockhash,
+        payer: meta.payer,
+        chain_signatures,
+        included_pubkeys: meta.included_pubkeys,
+        excluded_pubkeys: vec![],
+        requested_undelegation: meta.requested_undelegation,
+        error_message,
+        patched_errors,
+        callbacks_scheduling_results: callbacks_report,
     }
 }
 

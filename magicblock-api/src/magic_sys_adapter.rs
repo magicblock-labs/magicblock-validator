@@ -48,8 +48,7 @@ impl MagicSysAdapter {
 
         // This is required to switch from TransactionExecutor runtime
         // blocking on it would cause a panic
-        let _guard = self.handle.enter();
-        tokio::spawn(async move {
+        self.handle.spawn(async move {
             let result = committor_processor
                 .fetch_current_commit_nonces(&pubkeys, min_context_slot)
                 .await;
@@ -57,7 +56,6 @@ impl MagicSysAdapter {
                 error!(error = ?err, "Failed to send result back");
             }
         });
-        drop(_guard);
 
         receiver
     }
