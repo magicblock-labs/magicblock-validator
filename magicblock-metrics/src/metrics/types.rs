@@ -175,7 +175,6 @@ pub enum SubscriptionRegistrationOutcome {
     AlreadyPresent,
     AddedBelowCapacity,
     EvictedCandidate,
-    NoEvictableCandidate,
     SubscribeError,
     UnsubscribeEvictedError,
     RejectedAndUnsubscribed,
@@ -188,7 +187,6 @@ impl SubscriptionRegistrationOutcome {
             Self::AlreadyPresent => "already_present",
             Self::AddedBelowCapacity => "added_below_capacity",
             Self::EvictedCandidate => "evicted_candidate",
-            Self::NoEvictableCandidate => "no_evictable_candidate",
             Self::SubscribeError => "subscribe_error",
             Self::UnsubscribeEvictedError => "unsubscribe_evicted_error",
             Self::RejectedAndUnsubscribed => "rejected_and_unsubscribed",
@@ -417,10 +415,6 @@ mod tests {
             (
                 SubscriptionRegistrationOutcome::EvictedCandidate,
                 "evicted_candidate",
-            ),
-            (
-                SubscriptionRegistrationOutcome::NoEvictableCandidate,
-                "no_evictable_candidate",
             ),
             (
                 SubscriptionRegistrationOutcome::SubscribeError,
