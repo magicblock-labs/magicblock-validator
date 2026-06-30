@@ -209,6 +209,9 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 | `inc_account_fetches_failed(count)` | Failed network account fetch count. |
 | `inc_account_fetches_found(origin, count)` | Network fetches that found accounts, labelled by `AccountFetchOrigin`. |
 | `inc_account_fetches_not_found(origin, count)` | Network fetches that did not find accounts, labelled by `AccountFetchOrigin`. |
+| `inc_chainlink_clone_accounts_total(origin, remote_result, clone_intent, outcome)` | Chainlink clone lifecycle attempts and outcomes, labelled by bounded enum-like origin, remote-result, clone-intent, and outcome values. |
+| `inc_chainlink_clone_materialization_accounts_total(origin, remote_result, outcome)` | Post-clone bank materialization checks, labelled by bounded enum-like origin, remote-result, and materialization-outcome values. |
+| `inc_chainlink_empty_placeholder_accounts_total(origin, stage, outcome)` | Empty-placeholder lifecycle events, labelled by bounded enum-like origin, placeholder-stage, and binary outcome values. |
 | `inc_undelegation_requested()` | Chainlink observed an undelegation request. |
 | `inc_undelegation_completed()` | Chainlink detected undelegation completion. |
 | `inc_unstuck_undelegation_count()` | Undelegating account was already undelegated on chain. |
@@ -217,6 +220,9 @@ Important caveats:
 
 - `MONITORED_ACCOUNTS_GAUGE` is set to an absolute count. Do not call it with a delta.
 - Account fetch found/not-found counters include an `origin` label. Keep origin cardinality low and stable.
+- Clone lifecycle counters use only bounded enum-like labels. Do not include pubkeys, signatures, raw errors, endpoints, request parameters, or other unbounded/user-controlled values in these labels.
+- `remote_result=failed` is reserved for fetch failures before a clone request is built. Emit it only with `clone_intent=unknown` and `outcome=skipped` unless a later implementation has a concrete clone request to classify.
+- The clone lifecycle counters replace the stale clone-cache and pending-clone gauges removed by the eviction-vs-get metrics cleanup; use the counters for clone observability rather than reintroducing those gauges.
 - `AccountFetchOrigin::SendTransaction(Signature)` intentionally labels as only `send_transaction`; the signature is available through `signature()` for logging/correlation but must not become a Prometheus label.
 
 ### RPC and aperture
@@ -327,6 +333,7 @@ It is implemented for:
 - `String`,
 - `Result<T, E>` where both sides implement `LabelValue`,
 - `AccountFetchOrigin`,
+- Chainlink clone lifecycle label enums (`ChainlinkCloneRemoteResult`, `ChainlinkCloneIntent`, `ChainlinkCloneOutcome`, `ChainlinkCloneMaterializationOutcome`, `ChainlinkEmptyPlaceholderStage`),
 - downstream consumer types such as committor execution outputs and errors.
 
 Use `LabelValue` when a metric needs a label derived from an enum-like type. New implementations should return stable, low-cardinality strings. Avoid allocating strings on hot paths where a static `&str` would work.

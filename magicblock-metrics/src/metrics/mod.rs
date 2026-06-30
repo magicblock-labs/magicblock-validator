@@ -5,7 +5,12 @@ use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
     IntGauge, IntGaugeVec, Opts, Registry,
 };
-pub use types::{AccountCommit, AccountFetchOrigin, LabelValue, Outcome};
+pub use types::{
+    AccountCommit, AccountFetchOrigin, ChainlinkCloneIntent,
+    ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
+    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage, LabelValue,
+    Outcome,
+};
 
 mod types;
 
@@ -278,6 +283,35 @@ lazy_static::lazy_static! {
     )
     .unwrap();
 
+    pub static ref CHAINLINK_CLONE_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_clone_accounts_total",
+                "Total number of Chainlink clone attempts and outcomes",
+            ),
+            &["origin", "remote_result", "clone_intent", "outcome"],
+        )
+        .unwrap();
+
+    pub static ref CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_clone_materialization_accounts_total",
+                "Total number of post-clone bank materialization checks",
+            ),
+            &["origin", "remote_result", "outcome"],
+        )
+        .unwrap();
+
+    pub static ref CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_empty_placeholder_accounts_total",
+                "Total number of Chainlink empty-placeholder lifecycle events",
+            ),
+            &["origin", "stage", "outcome"],
+        )
+        .unwrap();
 
     pub static ref PER_PROGRAM_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
@@ -615,6 +649,9 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
+        register!(CHAINLINK_CLONE_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL);
         register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
@@ -832,6 +869,46 @@ pub fn inc_account_fetches_not_found(
     ACCOUNT_FETCHES_NOT_FOUND_COUNT
         .with_label_values(&[fetch_origin.value()])
         .inc_by(count);
+}
+
+pub fn inc_chainlink_clone_accounts_total(
+    origin: AccountFetchOrigin,
+    remote_result: ChainlinkCloneRemoteResult,
+    clone_intent: ChainlinkCloneIntent,
+    outcome: ChainlinkCloneOutcome,
+) {
+    CHAINLINK_CLONE_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            origin.value(),
+            remote_result.value(),
+            clone_intent.value(),
+            outcome.value(),
+        ])
+        .inc();
+}
+
+pub fn inc_chainlink_clone_materialization_accounts_total(
+    origin: AccountFetchOrigin,
+    remote_result: ChainlinkCloneRemoteResult,
+    outcome: ChainlinkCloneMaterializationOutcome,
+) {
+    CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            origin.value(),
+            remote_result.value(),
+            outcome.value(),
+        ])
+        .inc();
+}
+
+pub fn inc_chainlink_empty_placeholder_accounts_total(
+    origin: AccountFetchOrigin,
+    stage: ChainlinkEmptyPlaceholderStage,
+    outcome: Outcome,
+) {
+    CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL
+        .with_label_values(&[origin.value(), stage.value(), outcome.value()])
+        .inc();
 }
 
 pub fn inc_program_subscription_account_updates_count(
