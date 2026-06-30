@@ -7,6 +7,9 @@ use prometheus::{
 };
 pub use types::{
     AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
+    SubscriptionCleanupOutcome, SubscriptionCleanupSource,
+    SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
+    SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
 };
 
 mod types;
@@ -171,6 +174,36 @@ lazy_static::lazy_static! {
     static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
+
+    static ref CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_subscription_registration_accounts_total",
+                "Account subscription registration attempts by origin, reason, and terminal outcome",
+            ),
+            &["origin", "subscription_reason", "outcome"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_subscription_release_accounts_total",
+                "Account subscription release attempts by reason and terminal outcome",
+            ),
+            &["reason", "outcome"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_subscription_cleanup_accounts_total",
+                "Account subscription cleanup actions by cleanup source and terminal outcome",
+            ),
+            &["cleanup_source", "outcome"],
+        )
+        .unwrap();
 
     static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
@@ -608,6 +641,9 @@ pub(crate) fn register() {
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
+        register!(CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT);
@@ -779,6 +815,79 @@ pub fn set_monitored_accounts_count(count: usize) {
 }
 pub fn inc_evicted_accounts_count() {
     EVICTED_ACCOUNTS_COUNT.inc();
+}
+
+pub fn inc_chainlink_subscription_registration_accounts(
+    origin: SubscriptionRegistrationOrigin,
+    subscription_reason: SubscriptionReasonLabel,
+    outcome: SubscriptionRegistrationOutcome,
+) {
+    CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            origin.value(),
+            subscription_reason.value(),
+            outcome.value(),
+        ])
+        .inc();
+}
+
+pub fn inc_chainlink_subscription_release_accounts(
+    reason: SubscriptionReasonLabel,
+    outcome: SubscriptionReleaseOutcome,
+) {
+    CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL
+        .with_label_values(&[reason.value(), outcome.value()])
+        .inc();
+}
+
+pub fn inc_chainlink_subscription_cleanup_accounts(
+    cleanup_source: SubscriptionCleanupSource,
+    outcome: SubscriptionCleanupOutcome,
+) {
+    CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL
+        .with_label_values(&[cleanup_source.value(), outcome.value()])
+        .inc();
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_subscription_registration_accounts_value(
+    origin: SubscriptionRegistrationOrigin,
+    subscription_reason: SubscriptionReasonLabel,
+    outcome: SubscriptionRegistrationOutcome,
+) -> u64 {
+    CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL
+        .get_metric_with_label_values(&[
+            origin.value(),
+            subscription_reason.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_subscription_release_accounts_value(
+    reason: SubscriptionReasonLabel,
+    outcome: SubscriptionReleaseOutcome,
+) -> u64 {
+    CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL
+        .get_metric_with_label_values(&[reason.value(), outcome.value()])
+        .map(|m| m.get())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_subscription_cleanup_accounts_value(
+    cleanup_source: SubscriptionCleanupSource,
+    outcome: SubscriptionCleanupOutcome,
+) -> u64 {
+    CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL
+        .get_metric_with_label_values(&[
+            cleanup_source.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get())
+        .unwrap_or(0)
 }
 
 pub fn inc_committor_intents_count() {

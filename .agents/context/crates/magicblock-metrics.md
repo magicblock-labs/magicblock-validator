@@ -207,6 +207,9 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 | `inc_pending_clone_requests()` / `dec_pending_clone_requests()` | In-memory pending account clone request gauge. Must remain balanced. |
 | `set_monitored_accounts_count(count)` | Absolute count of monitored accounts; callers must pass total count, not delta. |
 | `inc_evicted_accounts_count()` | Cumulative count of monitored accounts forcefully removed from monitor list/database. |
+| `inc_chainlink_subscription_registration_accounts(origin, subscription_reason, outcome)` | `chainlink_subscription_registration_accounts_total` (`mbv_chainlink_subscription_registration_accounts_total`) classifies Chainlink account subscription registration attempts by `{origin,subscription_reason,outcome}`. Origin is `AccountFetchOrigin` label values plus `internal`; subscription reasons are `direct_account`, `delegation_record`, `program_data`, `undelegation_tracking`, `ata_projection`; outcomes are `already_present`, `added_below_capacity`, `evicted_candidate`, `no_evictable_candidate`, `subscribe_error`, `unsubscribe_evicted_error`, `rejected_and_unsubscribed`, `unsubscribe_rejected_error`. |
+| `inc_chainlink_subscription_release_accounts(reason, outcome)` | `chainlink_subscription_release_accounts_total` (`mbv_chainlink_subscription_release_accounts_total`) classifies Chainlink account subscription release attempts by `{reason,outcome}` with the same five reason values and outcomes `unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`. |
+| `inc_chainlink_subscription_cleanup_accounts(cleanup_source, outcome)` | `chainlink_subscription_cleanup_accounts_total` (`mbv_chainlink_subscription_cleanup_accounts_total`) classifies Chainlink account subscription cleanup actions by `{cleanup_source,outcome}`; cleanup sources are `normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`; outcomes are `unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`. |
 | `inc_account_fetches_success(count)` | Successful network account fetch count. |
 | `inc_account_fetches_failed(count)` | Failed network account fetch count. |
 | `inc_account_fetches_found(origin, count)` | Network fetches that found accounts, labelled by `AccountFetchOrigin`. |
@@ -220,6 +223,7 @@ Important caveats:
 - `PENDING_ACCOUNT_CLONES_GAUGE` is a gauge. Every increment must have a matching decrement on all success, error, cancellation, and timeout paths.
 - `MONITORED_ACCOUNTS_GAUGE` is set to an absolute count. Do not call it with a delta.
 - Account fetch found/not-found counters include an `origin` label. Keep origin cardinality low and stable.
+- Subscription lifecycle counters are for Chainlink registration, release, and cleanup outcome classification. Call sites must use the provided enum/static labels only; do not add pubkey, signature, raw error, endpoint URL, or other free-form labels.
 - `AccountFetchOrigin::SendTransaction(Signature)` intentionally labels as only `send_transaction`; the signature is available through `signature()` for logging/correlation but must not become a Prometheus label.
 
 ### RPC and aperture
@@ -330,6 +334,7 @@ It is implemented for:
 - `String`,
 - `Result<T, E>` where both sides implement `LabelValue`,
 - `AccountFetchOrigin`,
+- subscription lifecycle label enums (`SubscriptionRegistrationOrigin`, `SubscriptionReasonLabel`, `SubscriptionRegistrationOutcome`, `SubscriptionReleaseOutcome`, `SubscriptionCleanupSource`, `SubscriptionCleanupOutcome`),
 - downstream consumer types such as committor execution outputs and errors.
 
 Use `LabelValue` when a metric needs a label derived from an enum-like type. New implementations should return stable, low-cardinality strings. Avoid allocating strings on hot paths where a static `&str` would work.
