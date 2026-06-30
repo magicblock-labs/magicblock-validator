@@ -85,7 +85,8 @@ use crate::{
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
     fund_account::{
-        fund_ephemeral_vault, fund_magic_context, init_validator_identity,
+        ensure_faucet_delegated_on_chain, fund_ephemeral_vault,
+        fund_magic_context, init_validator_identity,
     },
     genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
     ledger::{
@@ -116,6 +117,9 @@ pub struct MagicValidator {
     scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
+    /// Faucet keypair used by the task scheduler to pay for hydra cranks.
+    /// Delegated on startup so its lamports are real (base-chain backed).
+    faucet_keypair: Keypair,
     transaction_scheduler: TransactionSchedulerHandle,
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
@@ -165,6 +169,12 @@ impl MagicValidator {
             config.ledger.verify_keypair,
         )?;
         log_timing("startup", "sync_validator_keypair", step_start);
+
+        // The task scheduler pays for hydra cranks from a configured faucet
+        // account (delegated on startup) rather than the validator identity,
+        // which is not a delegated account.
+        let faucet_keypair =
+            config.task_scheduler.faucet_keypair.insecure_clone();
 
         let latest_block = ledger.latest_block().load();
         let mut accountsdb =
@@ -425,6 +435,7 @@ impl MagicValidator {
         let task_scheduler = TaskSchedulerService::new(
             &task_scheduler_db_path,
             config.aperture.listen.http(),
+            faucet_keypair.insecure_clone(),
             dispatch
                 .tasks_service
                 .take()
@@ -451,6 +462,7 @@ impl MagicValidator {
             claim_fees_task: ClaimFeesTask::new(),
             rpc_handle,
             identity: validator_pubkey,
+            faucet_keypair,
             transaction_scheduler: dispatch.transaction_scheduler,
             task_scheduler: Some(task_scheduler),
             transaction_execution,
@@ -869,6 +881,7 @@ impl MagicValidator {
     fn spawn_primary_onchain_setup(&self) {
         let rpc_url = self.config.rpc_url().to_owned();
         let identity = self.identity;
+        let faucet_keypair = self.faucet_keypair.insecure_clone();
         let chain_operation_config = self.config.chain_operation.clone();
         let block_time_ms = self.config.ledger.block_time_ms();
         let base_fee = self.config.validator.basefee;
@@ -911,6 +924,26 @@ impl MagicValidator {
                 error!("Exiting process");
                 std::process::exit(1);
             }
+
+            let step_start = Instant::now();
+            let result = ensure_faucet_delegated_on_chain(
+                rpc_url.clone(),
+                &faucet_keypair,
+            )
+            .await;
+            log_timing(
+                "startup_background",
+                "ensure_faucet_delegated_on_chain",
+                step_start,
+            );
+            // Without the faucet being funded and delegated the task scheduler
+            // cannot pay for hydra cranks.
+            if let Err(err) = result {
+                error!(error = ?err, "Task scheduler faucet setup failed");
+                error!("Exiting process");
+                std::process::exit(1);
+            }
+
             if let Some(ref config) = chain_operation_config {
                 if !config.claim_fees_frequency.is_zero() {
                     let step_start = Instant::now();

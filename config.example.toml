@@ -312,6 +312,17 @@ fqdn = "https://validator.example.com"
 claim-fees-frequency = "24h"
 
 # ==============================================================================
+# Internal Task Scheduler
+# ==============================================================================
+[task-scheduler]
+# Keypair (Base58) the task scheduler uses to pay for hydra cranks. It is
+# delegated to this validator on startup and must be funded separately (the
+# validator does not fund it). Use a dedicated account, not the validator
+# identity.
+# Env: MBV_TASK_SCHEDULER__FAUCET_KEYPAIR
+faucet-keypair = "4SkhwWzaUdkXS5RQZHNFtmaTjvPRNKEZjLRiYPm3y7MGQTWBYYzrwAcvK1vMDwrTHrAy2aGqMJn2s7qbjfxqDLU9"
+
+# ==============================================================================
 # Pre-loaded Programs
 # ==============================================================================
 # You can specify multiple programs to load at startup.

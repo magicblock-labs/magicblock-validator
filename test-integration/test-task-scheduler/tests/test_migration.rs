@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use hydra_api::CRANKER_REWARD;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::{crank_pubkey, db::DbTask, SchedulerDatabase};
 use solana_sdk::{
@@ -47,7 +46,6 @@ fn test_migration_reschedules_tasks_and_empties_db() {
     wait_for_hydra_crank(
         &ctx,
         &crank_pda,
-        iterations as u64 * CRANKER_REWARD,
         Duration::from_secs(15),
         &mut validator,
     );

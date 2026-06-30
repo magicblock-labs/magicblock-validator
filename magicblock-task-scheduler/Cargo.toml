@@ -17,13 +17,16 @@ magicblock-config = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-program = { workspace = true }
 rusqlite = { workspace = true }
+solana-account = { workspace = true }
 solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
 solana-message = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-signature = { workspace = true }
+solana-signer = { workspace = true }
 solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }

@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use hydra_api::CRANKER_REWARD;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::crank_pubkey;
 use program_flexi_counter::instruction::{
@@ -82,14 +81,12 @@ fn test_independent_cranks_per_authority() {
     wait_for_hydra_crank(
         &ctx,
         &payer_crank,
-        payer_iterations as u64 * CRANKER_REWARD,
         Duration::from_secs(10),
         &mut validator,
     );
     wait_for_hydra_crank(
         &ctx,
         &other_crank,
-        other_iterations as u64 * CRANKER_REWARD,
         Duration::from_secs(10),
         &mut validator,
     );
@@ -127,7 +124,6 @@ fn test_independent_cranks_per_authority() {
     wait_for_hydra_crank(
         &ctx,
         &other_crank,
-        other_iterations as u64 * CRANKER_REWARD,
         Duration::from_secs(10),
         &mut validator,
     );

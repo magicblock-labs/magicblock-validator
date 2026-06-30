@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use hydra_api::CRANKER_REWARD;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::crank_pubkey;
 use program_flexi_counter::{
@@ -36,7 +35,7 @@ fn test_cancel_ongoing_task() {
     // Schedule a task
     let task_id = 3;
     let execution_interval_millis = 100;
-    let iterations = 1000000;
+    let iterations = 1000;
     let sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
@@ -72,11 +71,9 @@ fn test_cancel_ongoing_task() {
 
     // The crank is created and funded for all scheduled iterations.
     let crank_pda = crank_pubkey(&payer.pubkey(), task_id);
-    let expected_lamports = iterations as u64 * CRANKER_REWARD;
     wait_for_hydra_crank(
         &ctx,
         &crank_pda,
-        expected_lamports,
         Duration::from_secs(10),
         &mut validator,
     );

@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc, time::Duration as StdDuration};
 
 use hydra_api::{
-    consts::CRANKER_REWARD,
+    consts::{CRANKER_REWARD, CRANK_HEADER_SIZE, SERIALIZED_META_SIZE},
     ephemeral::ID as EPHEMERAL_PROGRAM_ID,
     instruction::{ephemeral, CreateArgs, SchedMeta, ScheduledIx},
 };
@@ -10,12 +10,15 @@ use magicblock_ledger::LatestBlock;
 use magicblock_program::{
     args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest},
     validator::{validator_authority, validator_authority_id},
+    EPHEMERAL_RENT_PER_BYTE,
 };
+use solana_account::AccountSharedData;
 use solana_instruction::Instruction;
-use solana_message::Message;
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signature::Signature;
+use solana_signer::Signer;
 use solana_transaction::Transaction;
 use tokio::{
     select,
@@ -34,6 +37,10 @@ use crate::{
 /// before giving up.
 const BLOCK_READY_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long the scheduler waits for the faucet to be delegated and funded in
+/// the ephemeral rollup before it starts paying for cranks.
+const FAUCET_READY_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// The task scheduler migrates any tasks persisted by the legacy
 /// (validator-funded) scheduler onto the hydra crank program at startup, then
 /// serves runtime schedule/cancel requests by sending hydra transactions. The
@@ -45,6 +52,10 @@ pub struct TaskSchedulerService {
     db: SchedulerDatabase,
     /// RPC client used to send hydra transactions.
     rpc_client: Arc<RpcClient>,
+    /// Delegated faucet keypair used to pay for (sponsor, fund, sign, and
+    /// cancel) hydra cranks. Used instead of the validator identity, which is
+    /// not a delegated account.
+    faucet: Keypair,
     /// Used to receive scheduled tasks from the transaction executor.
     scheduled_tasks: ScheduledTasksRx,
     /// Provides latest blockhash and slot for building transactions.
@@ -65,6 +76,7 @@ impl TaskSchedulerService {
     pub fn new(
         path: &Path,
         rpc_url: String,
+        faucet: Keypair,
         scheduled_tasks: ScheduledTasksRx,
         block: LatestBlock,
         slot_interval: Duration,
@@ -74,6 +86,7 @@ impl TaskSchedulerService {
         Ok(Self {
             db,
             rpc_client: Arc::new(RpcClient::new(rpc_url)),
+            faucet,
             scheduled_tasks,
             block,
             token,
@@ -93,6 +106,10 @@ impl TaskSchedulerService {
         if let Err(e) = self.migrate_persisted_tasks().await {
             error!("Task migration failed: {}", e);
         }
+
+        // Ensure the faucet is funded before serving runtime requests so the
+        // first scheduled task is not dropped for lack of a payer.
+        self.wait_for_faucet_ready().await?;
 
         loop {
             select! {
@@ -139,12 +156,16 @@ impl TaskSchedulerService {
             return Ok(());
         }
 
-        // Sending a crank create needs a usable blockhash, which is only
-        // available once the validator has produced a block.
+        // Sending a crank create needs a usable blockhash and a funded faucet
+        // (delegated and cloned into the ephemeral rollup) to pay with.
         self.wait_for_block_ready().await;
+        info!("Migration: block ready");
+        self.wait_for_faucet_ready().await?;
+        info!("Migration: faucet ready");
 
         for task in valid {
-            if let Err(e) = self
+            info!("Migration: creating crank for task {}", task.id);
+            match self
                 .schedule_crank(
                     &task.authority,
                     task.id,
@@ -154,13 +175,43 @@ impl TaskSchedulerService {
                 )
                 .await
             {
-                warn!("Failed to migrate task {} onto hydra: {}", task.id, e);
+                Ok(()) => {
+                    info!("Migration: created crank for task {}", task.id)
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to migrate task {} onto hydra: {}",
+                        task.id, e
+                    )
+                }
             }
             self.db.remove_task(task.id).await?;
         }
 
         info!("Task migration complete; database emptied");
         Ok(())
+    }
+
+    /// Waits until the faucet has a non-zero balance in the ephemeral rollup
+    /// (i.e. it has been delegated on the base chain and cloned in), or the
+    /// scheduler is cancelled, or [`FAUCET_READY_TIMEOUT`] elapses.
+    async fn wait_for_faucet_ready(&self) -> TaskSchedulerResult<()> {
+        let faucet = self.faucet.pubkey();
+        let start = Instant::now();
+        while start.elapsed() < FAUCET_READY_TIMEOUT {
+            if self.token.is_cancelled() {
+                return Ok(());
+            }
+            if matches!(
+                self.rpc_client.get_account(&faucet).await,
+                Ok(account) if account.lamports > 0
+            ) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        warn!(%faucet, "Timed out waiting for faucet to be delegated before paying cranks");
+        Err(TaskSchedulerError::FaucetNotReady)
     }
 
     /// Waits until the validator has a usable blockhash, or the scheduler is
@@ -246,7 +297,7 @@ impl TaskSchedulerService {
     ) -> TaskSchedulerResult<()> {
         let crank = crank_pubkey(authority, task_id);
 
-        self.send_create_and_fund(
+        self.send_create(
             authority,
             task_id,
             interval_millis,
@@ -267,8 +318,8 @@ impl TaskSchedulerService {
     }
 
     /// Builds and sends the transaction that creates and funds a hydra crank.
-    /// It cancels the crank if it already exists.
-    async fn send_create_and_fund(
+    /// It cancels the crank first if it already exists.
+    async fn send_create(
         &self,
         authority: &Pubkey,
         task_id: i64,
@@ -287,7 +338,9 @@ impl TaskSchedulerService {
             interval_slots(interval_millis, self.slot_interval);
         let iterations = iterations.max(0) as u64;
 
+        let faucet_pubkey = self.faucet.pubkey();
         let create_ix = build_create_ix(
+            &faucet_pubkey,
             authority,
             task_id,
             crank,
@@ -296,49 +349,57 @@ impl TaskSchedulerService {
             iterations,
             instructions,
         );
-
-        // Fund the crank so the external cranker can execute every iteration.
-        let funding = iterations.saturating_mul(CRANKER_REWARD);
-        let transfer_ix = solana_system_interface::instruction::transfer(
-            &validator_authority_id(),
+        let reward_pool = iterations.saturating_mul(CRANKER_REWARD);
+        let funding =
+            reward_pool.saturating_add(crank_rent_floor(instructions));
+        let fund_ix = solana_system_interface::instruction::transfer(
+            &faucet_pubkey,
             &crank,
             funding,
         );
 
+        let validator = validator_authority();
         let ixs = if crank_exists {
-            let cancel_ix = ephemeral::cancel(validator_authority_id(), crank);
-            vec![cancel_ix, create_ix, transfer_ix]
+            let cancel_ix =
+                ephemeral::cancel(faucet_pubkey, crank, faucet_pubkey);
+            vec![cancel_ix, create_ix, fund_ix]
         } else {
-            vec![create_ix, transfer_ix]
+            vec![create_ix, fund_ix]
         };
-
-        let tx = Transaction::new(
-            &[validator_authority()],
-            Message::new(&ixs, Some(&validator_authority_id())),
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&validator_authority_id()),
+            &[&validator, &self.faucet],
             blockhash,
         );
 
+        // Confirm before returning so successive cranks (all sponsored by the
+        // same faucet) don't race on the faucet's delegated account state.
         self.rpc_client
-            .send_transaction(&tx)
+            .send_and_confirm_transaction(&tx)
             .await
             .map_err(Box::new)
             .map_err(TaskSchedulerError::from)
     }
 
-    /// Sends a crank cancellation (fire-and-forget).
+    /// Sends and confirms a crank cancellation. The crank's remaining lamports
+    /// are returned to the faucet (the cancel recipient).
     async fn send_cancel(
         &self,
         crank: Pubkey,
     ) -> TaskSchedulerResult<Signature> {
+        let faucet_pubkey = self.faucet.pubkey();
         let blockhash = self.block.load().blockhash;
-        let cancel_ix = ephemeral::cancel(validator_authority_id(), crank);
-        let tx = Transaction::new(
-            &[validator_authority()],
-            Message::new(&[cancel_ix], Some(&validator_authority_id())),
+        let cancel_ix = ephemeral::cancel(faucet_pubkey, crank, faucet_pubkey);
+        let validator = validator_authority();
+        let tx = Transaction::new_signed_with_payer(
+            &[cancel_ix],
+            Some(&validator_authority_id()),
+            &[&validator, &self.faucet],
             blockhash,
         );
         self.rpc_client
-            .send_transaction(&tx)
+            .send_and_confirm_transaction(&tx)
             .await
             .map_err(Box::new)
             .map_err(TaskSchedulerError::from)
@@ -362,7 +423,29 @@ pub fn crank_pubkey(authority: &Pubkey, task_id: i64) -> Pubkey {
 /// Builds the hydra `Create` instruction embedding the task's instructions as
 /// the scheduled crank payload. Account signer flags are intentionally dropped:
 /// hydra rejects scheduled instructions that declare signers.
+/// Rent-exempt minimum for the crank account hydra will allocate for these
+/// scheduled instructions. Mirrors hydra's on-chain size accounting
+/// (`CRANK_HEADER_SIZE + region_len`, where each scheduled ix serializes to
+/// `2 + metas + program_id + 2 + data`).
+fn crank_rent_floor(instructions: &[Instruction]) -> u64 {
+    let region_len: usize = instructions
+        .iter()
+        .map(|ix| {
+            2 + ix.accounts.len() * SERIALIZED_META_SIZE
+                + 32
+                + 2
+                + ix.data.len()
+        })
+        .sum::<usize>()
+        + CRANK_HEADER_SIZE;
+    let total_size =
+        (region_len + AccountSharedData::ACCOUNT_STATIC_SIZE as usize) as u64;
+    total_size * EPHEMERAL_RENT_PER_BYTE
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_create_ix(
+    faucet: &Pubkey,
     authority: &Pubkey,
     task_id: i64,
     crank: Pubkey,
@@ -402,8 +485,8 @@ fn build_create_ix(
 
     let args = CreateArgs {
         seed,
-        // The validator authority is the cancel authority for the crank.
-        authority: validator_authority_id().to_bytes(),
+        // The faucet is the sponsor and the cancel authority for the crank.
+        authority: faucet.to_bytes(),
         start_slot,
         interval_slots,
         remaining: iterations,
@@ -412,7 +495,7 @@ fn build_create_ix(
         scheduled: scheduled.as_slice(),
     };
 
-    ephemeral::create(validator_authority_id(), crank, &args)
+    ephemeral::create(*faucet, crank, &args)
 }
 
 fn is_valid_task_interval(interval: i64) -> bool {
@@ -446,6 +529,7 @@ mod tests {
             rpc_client: Arc::new(RpcClient::new(
                 "http://localhost:8899".to_string(),
             )),
+            faucet: Keypair::new(),
             block: LatestBlock::default(),
             token: CancellationToken::new(),
             slot_interval: Duration::from_millis(1000),

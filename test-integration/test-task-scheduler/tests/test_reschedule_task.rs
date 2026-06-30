@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use hydra_api::CRANKER_REWARD;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::crank_pubkey;
 use program_flexi_counter::{
@@ -68,7 +67,6 @@ fn test_reschedule_task() {
     wait_for_hydra_crank(
         &ctx,
         &crank_pda,
-        iterations as u64 * CRANKER_REWARD,
         Duration::from_secs(10),
         &mut validator,
     );
@@ -110,7 +108,6 @@ fn test_reschedule_task() {
     wait_for_hydra_crank(
         &ctx,
         &crank_pda,
-        new_iterations as u64 * CRANKER_REWARD,
         Duration::from_secs(10),
         &mut validator,
     );

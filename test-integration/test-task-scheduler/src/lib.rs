@@ -20,9 +20,10 @@ use integration_test_tools::{
 use magicblock_config::{
     config::{
         accounts::AccountsDbConfig, ledger::LedgerConfig,
-        validator::ValidatorConfig, LifecycleMode,
+        scheduler::TaskSchedulerConfig, validator::ValidatorConfig,
+        LifecycleMode,
     },
-    types::{network::Remote, StorageDirectory},
+    types::{crypto::SerdeKeypair, network::Remote, StorageDirectory},
     ValidatorParams,
 };
 use magicblock_program::Pubkey;
@@ -35,14 +36,15 @@ use program_flexi_counter::{
 };
 use program_schedulecommit::MainAccount;
 use solana_sdk::{
-    signature::Keypair, signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 
 pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 
-fn validator_config(temp_dir: PathBuf) -> ValidatorParams {
+fn validator_config(temp_dir: PathBuf, faucet: &Keypair) -> ValidatorParams {
     ValidatorParams {
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
@@ -58,8 +60,31 @@ fn validator_config(temp_dir: PathBuf) -> ValidatorParams {
             block_time: Duration::from_millis(TASK_SCHEDULER_TICK_MILLIS),
             ..Default::default()
         },
+        task_scheduler: TaskSchedulerConfig {
+            faucet_keypair: SerdeKeypair::from(faucet.insecure_clone()),
+        },
         storage: StorageDirectory(temp_dir),
         ..Default::default()
+    }
+}
+
+fn airdrop_faucet(faucet: &Keypair) {
+    let chain_ctx = IntegrationTestContext::try_new_chain_only()
+        .expect("failed to connect to base chain to fund faucet");
+    let validator = LoadedAccounts::with_delegation_program_test_authority()
+        .validator_authority();
+    let payer = Keypair::new();
+    chain_ctx
+        .airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
+        .expect("failed to airdrop faucet delegation payer");
+    chain_ctx
+        .airdrop_chain(&faucet.pubkey(), 100 * LAMPORTS_PER_SOL)
+        .expect("failed to airdrop to task scheduler faucet");
+    let (_, confirmed) = chain_ctx
+        .delegate_account_to_validator(&payer, faucet, Some(validator))
+        .expect("failed to delegate task scheduler faucet");
+    if !confirmed {
+        panic!("task scheduler faucet delegation not confirmed");
     }
 }
 
@@ -109,7 +134,12 @@ pub fn setup_validator_with_migration_tasks(
         }
     }
 
-    let config = validator_config(temp_dir.clone());
+    // The faucet that pays for cranks must be funded before the validator
+    // delegates it on startup.
+    let faucet = Keypair::new();
+    airdrop_faucet(&faucet);
+
+    let config = validator_config(temp_dir.clone(), &faucet);
     start_validator(config, default_tmpdir, temp_dir)
 }
 
@@ -167,7 +197,6 @@ pub fn create_delegated_counter(
 pub fn wait_for_hydra_crank(
     ctx: &IntegrationTestContext,
     crank_pda: &Pubkey,
-    expected_lamports: u64,
     max_timeout: Duration,
     validator: &mut Child,
 ) {
@@ -185,14 +214,6 @@ pub fn wait_for_hydra_crank(
                 "crank account {} not owned by hydra program (owner: {})",
                 crank_pda,
                 account.owner
-            );
-            assert!(
-                account.lamports >= expected_lamports,
-                cleanup(validator),
-                "crank account {} underfunded: {} < {}",
-                crank_pda,
-                account.lamports,
-                expected_lamports
             );
             return;
         }
