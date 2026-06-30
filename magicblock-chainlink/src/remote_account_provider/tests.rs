@@ -4,6 +4,12 @@ use std::{
     time::Duration,
 };
 
+use magicblock_metrics::metrics::{
+    chainlink_pending_fetch_accounts_value,
+    chainlink_pending_fetch_waiters_gauge_value,
+    chainlink_pending_fetch_waiters_value, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome,
+};
 use solana_account::Account;
 use solana_system_interface::program as system_program;
 use tokio::sync::mpsc;
@@ -74,6 +80,95 @@ async fn setup_provider_with_lru_capacity(
         rpc_client,
         pubsub_client,
         _forward_rx: forward_rx,
+    }
+}
+
+fn pending_accounts_value(
+    origin: AccountFetchOrigin,
+    outcome: ChainlinkPendingFetchOutcome,
+) -> u64 {
+    chainlink_pending_fetch_accounts_value(
+        origin,
+        ChainlinkPendingFetchLayer::RemoteAccountProvider,
+        outcome,
+    )
+}
+
+fn pending_waiters_value(origin: AccountFetchOrigin) -> u64 {
+    chainlink_pending_fetch_waiters_value(
+        origin,
+        ChainlinkPendingFetchLayer::RemoteAccountProvider,
+    )
+}
+
+fn pending_waiters_gauge_value() -> i64 {
+    chainlink_pending_fetch_waiters_gauge_value(
+        ChainlinkPendingFetchLayer::RemoteAccountProvider,
+    )
+}
+
+async fn wait_for_fetching_waiter_count(
+    provider: &RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    pubkey: Pubkey,
+    expected: usize,
+) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    loop {
+        let waiter_count = {
+            let fetching = provider.fetching_accounts.lock().unwrap();
+            fetching.get(&pubkey).map(|s| s.waiters.len()).unwrap_or(0)
+        };
+        if waiter_count == expected {
+            break;
+        }
+        assert!(
+            start.elapsed() < timeout,
+            "fetching_accounts waiter count for {pubkey} should be \
+             {expected} within {timeout:?}; got {waiter_count}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+async fn wait_for_direct_subscription(
+    pubsub_client: &ChainPubsubClientMock,
+    pubkey: Pubkey,
+) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    loop {
+        if pubsub_client.subscriptions_union().contains(&pubkey) {
+            break;
+        }
+        assert!(
+            start.elapsed() < timeout,
+            "direct subscription for {pubkey} should be registered within {timeout:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+async fn wait_for_pending_account_delta(
+    outcome: ChainlinkPendingFetchOutcome,
+    baseline: u64,
+    expected_delta: u64,
+) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    loop {
+        let delta =
+            pending_accounts_value(AccountFetchOrigin::GetAccount, outcome)
+                - baseline;
+        if delta == expected_delta {
+            break;
+        }
+        assert!(
+            start.elapsed() < timeout,
+            "pending account metric delta for {outcome} should be \
+             {expected_delta} within {timeout:?}; got {delta}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
@@ -1020,6 +1115,220 @@ async fn test_try_get_multi_owner_success_cleans_up_pending_entry() {
         .expect("fetch should succeed");
     assert_eq!(result.len(), 1);
     assert!(!provider.is_pending(&pubkey));
+}
+
+#[tokio::test]
+async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        rpc_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+
+    let owned_baseline = pending_accounts_value(
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchOutcome::Owned,
+    );
+    let joined_baseline = pending_accounts_value(
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchOutcome::JoinedExisting,
+    );
+    let waiters_baseline =
+        pending_waiters_value(AccountFetchOrigin::GetAccount);
+    let waiter_gauge_baseline = pending_waiters_gauge_value();
+
+    rpc_client.block_fetches();
+
+    let owner_task = tokio::spawn({
+        let provider = provider.clone();
+        async move {
+            provider
+                .try_get_multi(
+                    &[pubkey],
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        }
+    });
+
+    wait_for_fetching_waiter_count(&provider, pubkey, 1).await;
+
+    let waiter_task = tokio::spawn({
+        let provider = provider.clone();
+        async move {
+            provider
+                .try_get_multi(
+                    &[pubkey],
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        }
+    });
+
+    wait_for_fetching_waiter_count(&provider, pubkey, 2).await;
+    assert_eq!(
+        pending_waiters_gauge_value() - waiter_gauge_baseline,
+        1,
+        "remote provider waiter gauge should count only the joined waiter"
+    );
+
+    rpc_client.allow_fetches();
+
+    tokio::time::timeout(Duration::from_secs(2), owner_task)
+        .await
+        .expect("owner task should complete")
+        .expect("owner task should not panic")
+        .expect("owner fetch should succeed");
+    tokio::time::timeout(Duration::from_secs(2), waiter_task)
+        .await
+        .expect("waiter task should complete")
+        .expect("waiter task should not panic")
+        .expect("waiter fetch should succeed");
+
+    assert_eq!(
+        pending_accounts_value(
+            AccountFetchOrigin::GetAccount,
+            ChainlinkPendingFetchOutcome::Owned,
+        ) - owned_baseline,
+        1
+    );
+    assert_eq!(
+        pending_accounts_value(
+            AccountFetchOrigin::GetAccount,
+            ChainlinkPendingFetchOutcome::JoinedExisting,
+        ) - joined_baseline,
+        1
+    );
+    assert_eq!(
+        pending_waiters_value(AccountFetchOrigin::GetAccount)
+            - waiters_baseline,
+        1
+    );
+    assert_eq!(pending_waiters_gauge_value(), waiter_gauge_baseline);
+}
+
+#[tokio::test]
+async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_late_rpc(
+) {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    const CURRENT_SLOT: u64 = 100;
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let subscription_account = Account {
+        lamports: 2_000_000,
+        ..account.clone()
+    };
+
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(CURRENT_SLOT)
+        .clock_sysvar_for_slot(CURRENT_SLOT)
+        .account(pubkey, account)
+        .build();
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+    let (forward_tx, _forward_rx) = mpsc::channel(1_000);
+    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client.clone(),
+            pubsub_client.clone(),
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(Arc::<AtomicU64>::default()),
+        )
+        .await
+        .unwrap(),
+    );
+
+    let resolved_baseline = pending_accounts_value(
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
+    );
+    let late_rpc_baseline = pending_accounts_value(
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
+    );
+
+    rpc_client.block_fetches();
+
+    let task_handle = tokio::spawn({
+        let provider = provider.clone();
+        async move {
+            provider
+                .try_get_multi(
+                    &[pubkey],
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        }
+    });
+
+    wait_for_direct_subscription(&pubsub_client, pubkey).await;
+    let fetch_start_slot = {
+        let fetching = provider.fetching_accounts.lock().unwrap();
+        fetching
+            .get(&pubkey)
+            .map(|state| state.fetch_start_slot)
+            .expect("fetching account state should exist")
+    };
+
+    pubsub_client
+        .send_account_update(pubkey, fetch_start_slot, &subscription_account)
+        .await;
+
+    let remote_accounts =
+        tokio::time::timeout(Duration::from_secs(2), task_handle)
+            .await
+            .expect("subscription-resolved task should complete")
+            .expect("subscription-resolved task should not panic")
+            .expect("subscription-resolved fetch should succeed");
+    assert_eq!(remote_accounts.len(), 1);
+    assert_eq!(
+        remote_accounts[0].source(),
+        Some(RemoteAccountUpdateSource::Subscription)
+    );
+    assert_eq!(
+        pending_accounts_value(
+            AccountFetchOrigin::GetAccount,
+            ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
+        ) - resolved_baseline,
+        1
+    );
+
+    rpc_client.allow_fetches();
+    wait_for_pending_account_delta(
+        ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
+        late_rpc_baseline,
+        1,
+    )
+    .await;
 }
 
 #[tokio::test]

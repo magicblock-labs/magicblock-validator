@@ -61,4 +61,4 @@ magicblock-chainlink = { path = ".", features = ["dev-context"] }
 
 [features]
 default = []
-dev-context = []
+dev-context = ["magicblock-metrics/dev-context"]
