@@ -1,5 +1,10 @@
 use std::{path::Path, sync::Arc, time::Duration as StdDuration};
 
+use hydra_api::{
+    consts::CRANKER_REWARD,
+    ephemeral::ID as EPHEMERAL_PROGRAM_ID,
+    instruction::{ephemeral, CreateArgs, SchedMeta, ScheduledIx},
+};
 use magicblock_core::link::transactions::ScheduledTasksRx;
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
@@ -23,10 +28,6 @@ use tracing::*;
 use crate::{
     db::{DbTask, SchedulerDatabase},
     errors::{TaskSchedulerError, TaskSchedulerResult},
-    hydra::{
-        ephemeral, CreateArgs, SchedMeta, ScheduledIx, CRANKER_REWARD,
-        EPHEMERAL_PROGRAM_ID,
-    },
 };
 
 /// How long migration waits for the validator to produce a usable blockhash

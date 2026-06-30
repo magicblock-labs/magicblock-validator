@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use hydra_api::CRANKER_REWARD;
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_task_scheduler::{crank_pubkey, CRANKER_REWARD};
+use magicblock_task_scheduler::crank_pubkey;
 use program_flexi_counter::instruction::{
     create_cancel_task_ix, create_schedule_task_ix,
 };

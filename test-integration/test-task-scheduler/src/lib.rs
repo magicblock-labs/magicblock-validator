@@ -6,6 +6,7 @@ use std::{
 };
 
 use cleanass::assert;
+use hydra_api::ephemeral::ID as HYDRA_EPHEMERAL_PROGRAM_ID;
 use integration_test_tools::{
     expect,
     loaded_accounts::LoadedAccounts,
@@ -25,9 +26,7 @@ use magicblock_config::{
     ValidatorParams,
 };
 use magicblock_program::Pubkey;
-use magicblock_task_scheduler::{
-    db::DbTask, SchedulerDatabase, HYDRA_EPHEMERAL_PROGRAM_ID,
-};
+use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
 use program_flexi_counter::{
     instruction::{
         create_delegate_ix_with_commit_frequency_ms, create_init_ix,

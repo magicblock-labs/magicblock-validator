@@ -41,6 +41,7 @@ ephemeral-rollups-sdk = { version = "0.14", default-features = false, features =
     "modular-sdk",
 ] }
 futures = "0.3.31"
+hydra-api = { git = "https://github.com/magicblock-labs/hydra.git", rev = "4f9e3c44e9e2e4feab66e6e7903099e095c74db3" }
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"

@@ -11,7 +11,7 @@ edition.workspace = true
 bincode = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
-tracing = { workspace = true }
+hydra-api = { workspace = true, features = ["client"] }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-ledger = { workspace = true }
@@ -30,6 +30,7 @@ solana-transaction-error = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["time"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }

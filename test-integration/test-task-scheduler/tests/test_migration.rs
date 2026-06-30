@@ -1,9 +1,8 @@
 use std::time::Duration;
 
+use hydra_api::CRANKER_REWARD;
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_task_scheduler::{
-    crank_pubkey, db::DbTask, SchedulerDatabase, CRANKER_REWARD,
-};
+use magicblock_task_scheduler::{crank_pubkey, db::DbTask, SchedulerDatabase};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
