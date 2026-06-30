@@ -1490,6 +1490,9 @@ fn cleanup_metric_value(
     chainlink_subscription_cleanup_accounts_value(source, outcome)
 }
 
+static SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn test_add_accounts_up_to_limit_no_eviction() {
     // Higher level version (including removed_rx) from
@@ -1615,6 +1618,7 @@ async fn test_multiple_evictions_in_sequence() {
 #[tokio::test]
 async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey1 = Pubkey::new_unique();
     let pubkey2 = Pubkey::new_unique();
@@ -1670,6 +1674,7 @@ async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
 #[tokio::test]
 async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey1 = Pubkey::new_unique();
     let pubkey2 = Pubkey::new_unique();
@@ -1736,6 +1741,7 @@ async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
 async fn test_capacity_eviction_missing_pubsub_subscription_completes_cleanup()
 {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey1 = Pubkey::new_unique();
     let pubkey2 = Pubkey::new_unique();
@@ -1811,6 +1817,7 @@ async fn test_capacity_eviction_missing_pubsub_subscription_completes_cleanup()
 async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribing_protected(
 ) {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey1 = Pubkey::new_unique();
     let pubkey2 = Pubkey::new_unique();
@@ -1889,6 +1896,7 @@ async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribin
 #[tokio::test]
 async fn test_registration_metric_added_below_capacity() {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -1921,6 +1929,7 @@ async fn test_registration_metric_added_below_capacity() {
 #[tokio::test]
 async fn test_registration_metric_already_present_on_duplicate_acquire() {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -1958,6 +1967,7 @@ async fn test_registration_metric_already_present_on_duplicate_acquire() {
 #[tokio::test]
 async fn test_registration_metric_preserves_fetch_origin() {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -1990,6 +2000,7 @@ async fn test_registration_metric_preserves_fetch_origin() {
 #[tokio::test]
 async fn test_release_and_cleanup_metrics_on_successful_release() {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -2035,6 +2046,7 @@ async fn test_release_and_cleanup_metrics_on_successful_release() {
 #[tokio::test]
 async fn test_release_metric_already_absent() {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -2071,6 +2083,7 @@ async fn test_release_metric_already_absent() {
 #[tokio::test]
 async fn test_cleanup_metric_on_manual_unsubscribe() {
     init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
