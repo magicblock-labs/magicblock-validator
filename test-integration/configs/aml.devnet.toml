@@ -1,0 +1,28 @@
+lifecycle = "offline"
+remotes = ["devnet"]
+
+[aperture]
+listen = "0.0.0.0:7799"
+
+[ledger]
+reset = true
+block-time = "50ms"
+
+[[programs]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[[programs]]
+id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
+path = "../schedulecommit/elfs/mdp.so"
+
+[[programs]]
+id = "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2"
+path = "../programs/ephemeral-token/ephemeral_token_program.so"
+
+[[programs]]
+id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
+path = "../target/deploy/program_flexi_counter.so"
+
+[metrics]
+address = "0.0.0.0:9000"

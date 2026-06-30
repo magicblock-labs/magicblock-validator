@@ -28,7 +28,7 @@ use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Semaphore},
     task,
     task::JoinSet,
 };
@@ -132,10 +132,26 @@ where
         Mutex<hash_map::HashMap<Pubkey, Vec<oneshot::Sender<CloneCompletion>>>>,
     >,
 
+    pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
+
     pending_operation_timeout_ms: Arc<AtomicU64>,
 
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
+}
+
+struct PendingUndelegationGuard {
+    pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
+    pubkey: Pubkey,
+}
+
+impl Drop for PendingUndelegationGuard {
+    fn drop(&mut self) {
+        if let Ok(mut pending_undelegations) = self.pending_undelegations.lock()
+        {
+            pending_undelegations.remove(&self.pubkey);
+        }
+    }
 }
 
 /// Negative-cache capacity for known-empty eATAs.
@@ -181,6 +197,7 @@ where
             programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
             pending_clones: self.pending_clones.clone(),
+            pending_undelegations: self.pending_undelegations.clone(),
             pending_operation_timeout_ms: self
                 .pending_operation_timeout_ms
                 .clone(),
@@ -229,6 +246,7 @@ where
                 KNOWN_EMPTY_EATAS_CAPACITY,
             ))),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
+            pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
@@ -700,14 +718,145 @@ where
             ));
         }
 
-        self.ensure_delegation_action_dependencies(
-            request.pubkey,
-            request.account.remote_slot(),
-            &request.delegation_actions,
-        )
-        .await?;
+        let result = async {
+            self.ensure_delegation_action_dependencies(
+                request.pubkey,
+                request.account.remote_slot(),
+                &request.delegation_actions,
+            )
+            .await?;
 
-        Ok(self.clone_account_with_ownership(request).await?)
+            Ok(self.clone_account_with_ownership(request.clone()).await?)
+        }
+        .await;
+
+        match result {
+            Ok(signature) => Ok(signature),
+            Err(err) => {
+                let pubkey = request.pubkey;
+                if self
+                    .accounts_bank
+                    .get_account(&pubkey)
+                    .is_some_and(|account| account.undelegating())
+                {
+                    return Err(err);
+                }
+
+                let Some(_guard) = self.claim_undelegation(pubkey) else {
+                    return Err(err);
+                };
+
+                // The post-delegation actions could not be satisfied (e.g. a
+                // high-risk signer or a missing dependency): the account is
+                // still cloned, but flagged so it gets automatically
+                // undelegated back to chain.
+                match self
+                    .clone_account_and_schedule_undelegation_with_ownership(
+                        request,
+                    )
+                    .await
+                {
+                    Ok(signature) => Ok(signature),
+                    Err(undelegation_err) => {
+                        warn!(
+                            pubkey = %pubkey,
+                            error = ?err,
+                            undelegation_error = ?undelegation_err,
+                            "Failed to schedule undelegation after post-delegation action clone failure"
+                        );
+                        Err(err)
+                    }
+                }
+            }
+        }
+    }
+
+    async fn clone_account_and_schedule_undelegation_with_ownership(
+        &self,
+        mut request: AccountCloneRequest,
+    ) -> ClonerResult<Signature> {
+        let pubkey = request.pubkey;
+        request.needs_undelegation = true;
+        let mut request = Some(request);
+
+        loop {
+            if self
+                .accounts_bank
+                .get_account(&pubkey)
+                .is_some_and(|account| account.undelegating())
+            {
+                return Ok(Signature::default());
+            }
+
+            match self.claim_pending_clone(pubkey) {
+                CloneClaim::Owner => {
+                    let mut guard = PendingCloneGuard::new(
+                        Arc::clone(&self.pending_clones),
+                        pubkey,
+                    );
+                    let Some(owned_request) = request.take() else {
+                        let err = ClonerError::CommittorServiceError(
+                            "owner missing request for undelegation clone"
+                                .to_string(),
+                        );
+                        self.finish_pending_clone(
+                            pubkey,
+                            CloneCompletion::Failed,
+                        );
+                        guard.dismiss();
+                        return Err(
+                            ClonerError::FailedToCloneAndScheduleUndelegation(
+                                pubkey,
+                                Box::new(err),
+                            ),
+                        );
+                    };
+                    let result = self.cloner.clone_account(owned_request).await;
+                    let completion = if result.is_ok() {
+                        CloneCompletion::Success
+                    } else {
+                        CloneCompletion::Failed
+                    };
+                    self.finish_pending_clone(pubkey, completion);
+                    guard.dismiss();
+                    return result;
+                }
+                CloneClaim::Waiter(rx) => match rx.await {
+                    Ok(CloneCompletion::Success) => continue,
+                    Ok(CloneCompletion::Failed) => {
+                        return Err(ClonerError::FailedToCloneRegularAccount(
+                            pubkey,
+                            Box::new(ClonerError::CommittorServiceError(
+                                "Clone owner failed".to_string(),
+                            )),
+                        ));
+                    }
+                    Err(_) => {
+                        return Err(ClonerError::FailedToCloneRegularAccount(
+                            pubkey,
+                            Box::new(ClonerError::CommittorServiceError(
+                                "Clone owner dropped".to_string(),
+                            )),
+                        ));
+                    }
+                },
+            }
+        }
+    }
+
+    fn claim_undelegation(
+        &self,
+        pubkey: Pubkey,
+    ) -> Option<PendingUndelegationGuard> {
+        let mut pending_undelegations =
+            self.pending_undelegations.lock().ok()?;
+        if !pending_undelegations.insert(pubkey) {
+            return None;
+        }
+        Some(PendingUndelegationGuard {
+            pending_undelegations: Arc::clone(&self.pending_undelegations),
+            pubkey,
+        })
     }
 
     fn normalize_unresolved_dlp_clone_request(
@@ -747,77 +896,58 @@ where
             .is_some_and(|account| account.delegated())
     }
 
-    /// Start listening to subscription updates.
-    /// Uses a JoinSet-based loop with try_recv/select! for backpressure
-    /// and task lifecycle management instead of unbounded tokio::spawn.
     pub fn start_subscription_listener(
         self: Arc<Self>,
         mut subscription_updates: mpsc::Receiver<ForwardedSubscriptionUpdate>,
     ) {
         tokio::spawn(async move {
+            let semaphore =
+                Arc::new(Semaphore::new(super::SUBSCRIPTION_UPDATE_LIMIT));
             let mut pending_tasks: JoinSet<()> = JoinSet::new();
 
             loop {
-                match subscription_updates.try_recv() {
-                    Ok(update) => {
+                while let Some(result) = pending_tasks.try_join_next() {
+                    if let Err(err) = result {
+                        warn!(error = ?err, "Subscription update task panicked");
+                    }
+                }
+
+                // INVARIANT: The semaphore is created locally and never closed,
+                // so acquire_owned() cannot fail with AcquireError.
+                let permit = Arc::clone(&semaphore)
+                    .acquire_owned()
+                    .await
+                    .expect("subscription update semaphore never closed");
+
+                match subscription_updates.recv().await {
+                    Some(update) => {
                         let pubkey = update.pubkey;
                         trace!(
                             pubkey = %pubkey,
                             "FetchCloner received subscription update"
                         );
-
                         let this = Arc::clone(&self);
+                        metrics::inc_inflight_subscription_updates();
                         pending_tasks.spawn(async move {
+                            struct InflightSubscriptionUpdateGuard;
+                            impl Drop for InflightSubscriptionUpdateGuard {
+                                fn drop(&mut self) {
+                                    metrics::dec_inflight_subscription_updates(
+                                    );
+                                }
+                            }
+                            let _inflight_guard =
+                                InflightSubscriptionUpdateGuard;
+
                             Self::process_subscription_update(
                                 &this, pubkey, update,
                             )
                             .await;
+                            drop(permit);
                         });
-
-                        while let Some(result) = pending_tasks.try_join_next() {
-                            if let Err(err) = result {
-                                warn!(
-                                    error = ?err,
-                                    "Subscription update task panicked"
-                                );
-                            }
-                        }
                     }
-                    Err(mpsc::error::TryRecvError::Empty) => {
-                        tokio::select! {
-                            maybe_update =
-                                subscription_updates.recv() =>
-                            {
-                                let Some(update) = maybe_update else {
-                                    while pending_tasks
-                                        .join_next()
-                                        .await
-                                        .is_some()
-                                    {}
-                                    break;
-                                };
-                                let pubkey = update.pubkey;
-                                let this = Arc::clone(&self);
-                                pending_tasks.spawn(async move {
-                                    Self::process_subscription_update(
-                                        &this, pubkey, update,
-                                    )
-                                    .await;
-                                });
-                            }
-                            Some(result) = pending_tasks.join_next(),
-                                if !pending_tasks.is_empty() =>
-                            {
-                                if let Err(err) = result {
-                                    error!(
-                                        error = ?err,
-                                        "Subscription update task panicked"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Err(mpsc::error::TryRecvError::Disconnected) => {
+                    None => {
+                        drop(permit);
                         while pending_tasks.join_next().await.is_some() {}
                         break;
                     }
@@ -835,6 +965,19 @@ where
             .maybe_greedily_clone_discovered_delegated_account(pubkey, &update)
             .await
         {
+            return;
+        }
+
+        if matches!(update.source, SubscriptionSource::Program)
+            && update.account.is_owned_by_delegation_program()
+            && update.account.fresh_account().is_some_and(|account| {
+                is_internal_dlp_account_data(account.data())
+            })
+        {
+            trace!(
+                pubkey = %pubkey,
+                "Dropping internal DLP program subscription update after discovery miss"
+            );
             return;
         }
 
@@ -1071,6 +1214,7 @@ where
                         commit_frequency_ms,
                         delegation_actions: raw_delegation_actions,
                         delegated_to_other,
+                        needs_undelegation: false,
                     },
                 )
                 .await
@@ -2835,6 +2979,7 @@ where
                 commit_frequency_ms: None,
                 delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
+                needs_undelegation: false,
             })
             .await?;
         Ok(())

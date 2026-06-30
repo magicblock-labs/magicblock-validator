@@ -59,6 +59,9 @@ pub struct AccountCloneRequest {
     /// this contains that validator's pubkey. None if account is not
     /// delegated to another validator.
     pub delegated_to_other: Option<Pubkey>,
+    /// Account that need to be undelegated (e.g. due to AML risk) after cloning.
+    /// Is only true if there are actions with risky signers.
+    pub needs_undelegation: bool,
 }
 
 #[async_trait]

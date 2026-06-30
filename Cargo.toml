@@ -34,7 +34,7 @@ members = [
     "tools/genx",
     "tools/keypair-base58",
     "tools/ledger-stats",
-    "tools/magicblock-tui-client"
+    "tools/magicblock-tui-client",
 ]
 
 # This prevents a Travis CI error when building for Windows.
@@ -47,7 +47,7 @@ edition = "2021"
 homepage = "https://www.magicblock.xyz"
 license = "Business Source License 1.1"
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
-version = "0.13.0"
+version = "0.13.2"
 
 [workspace.dependencies]
 agave-geyser-plugin-interface = { version = "4.0" }
@@ -108,9 +108,11 @@ magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-aml = { path = "./magicblock-aml" }
 magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-api = { path = "./magicblock-api" }
-magicblock-chainlink = { path = "./magicblock-chainlink", features = ["dev-context"] }
+magicblock-chainlink = { path = "./magicblock-chainlink", features = [
+    "dev-context",
+] }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
-    "no-entrypoint"
+    "no-entrypoint",
 ] }
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
@@ -147,7 +149,9 @@ solana-transaction-context = { git = "https://github.com/magicblock-labs/magicbl
 solana-transaction-error = { version = "3.0" }
 solana-transaction-status = { version = "4.0" }
 solana-transaction-status-client-types = "4.0"
-solana-zk-elgamal-proof-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-zk-elgamal-proof-program = { version = "=4.0.0", features = [
+    "agave-unstable-api",
+] }
 static_assertions = "1.1.0"
 tempfile = "3.10.1"
 test-kit = { path = "./test-kit" }
@@ -161,7 +165,10 @@ tonic-prost-build = "0.14"
 tracing = "0.1"
 tracing-log = { version = "0.2", features = ["log-tracer"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-twox-hash = { version = "2.1", default-features = false, features = ["alloc", "xxhash3_64"] }
+twox-hash = { version = "2.1", default-features = false, features = [
+    "alloc",
+    "xxhash3_64",
+] }
 url = "2.5.0"
 
 # SPL Token crates used across the workspace
@@ -178,7 +185,10 @@ rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "
 rusqlite = { version = "0.37.0", features = ["bundled"] } # bundled sqlite 3.44
 rustc-hash = "2.1"
 rustc_version = "0.4"
-rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+rustls = { version = "0.23", default-features = false, features = [
+    "aws_lc_rs",
+    "std",
+] }
 scc = "2.4"
 semver = "1.0.22"
 serde = "1.0.217"
@@ -191,14 +201,22 @@ solana-account-decoder = { version = "4.0" }
 solana-account-decoder-client-types = { version = "4.0" }
 solana-account-info = { version = "3.1" }
 solana-address-lookup-table-interface = { version = "3.0" }
-solana-bpf-loader-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-bpf-loader-program = { version = "=4.0.0", features = [
+    "agave-unstable-api",
+] }
 solana-clock = { version = "3.0" }
 solana-cluster-type = { version = "3.1" }
 solana-commitment-config = { version = "3.1" }
-solana-compute-budget = { version = "=4.0.0", features = ["agave-unstable-api"] }
-solana-compute-budget-instruction = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-compute-budget = { version = "=4.0.0", features = [
+    "agave-unstable-api",
+] }
+solana-compute-budget-instruction = { version = "=4.0.0", features = [
+    "agave-unstable-api",
+] }
 solana-compute-budget-interface = { version = "3.0" }
-solana-compute-budget-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-compute-budget-program = { version = "=4.0.0", features = [
+    "agave-unstable-api",
+] }
 solana-cpi = { version = "3.1" }
 solana-feature-gate-interface = { version = "3.1" }
 solana-feature-set = { package = "agave-feature-set", version = "4.0" }
@@ -212,12 +230,14 @@ solana-instructions-sysvar = { version = "3.0" }
 solana-keypair = { version = "=3.1.0" }
 solana-loader-v3-interface = { version = "6.1.0" }
 solana-loader-v4-interface = { version = "3.1" }
-solana-loader-v4-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-loader-v4-program = { version = "=4.0.0", features = [
+    "agave-unstable-api",
+] }
 solana-log-collector = { package = "solana-svm-log-collector", version = "=4.0.0", features = [
-    "agave-unstable-api"
+    "agave-unstable-api",
 ] }
 solana-measure = { package = "solana-svm-measure", version = "=4.0.0", features = [
-    "agave-unstable-api"
+    "agave-unstable-api",
 ] }
 solana-message = { version = "3.0" }
 solana-metrics = { version = "4.0", features = ["agave-unstable-api"] }
@@ -243,13 +263,17 @@ solana-signer = { version = "3.0" }
 solana-slot-hashes = { version = "3.0" }
 solana-storage-proto = { path = "storage-proto" }
 solana-svm-callback = { version = "=4.0.0", features = ["agave-unstable-api"] }
-solana-svm-transaction = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-svm-transaction = { version = "=4.0.0", features = [
+    "agave-unstable-api",
+] }
 solana-system-interface = { version = "3.1" }
-solana-system-program = { version = "=4.0.0", features = ["agave-unstable-api"] }
+solana-system-program = { version = "=4.0.0", features = [
+    "agave-unstable-api",
+] }
 solana-system-transaction = { version = "3.0" }
 solana-sysvar = { version = "3.0" }
 solana-timings = { package = "solana-svm-timings", version = "=4.0.0", features = [
-    "agave-unstable-api"
+    "agave-unstable-api",
 ] }
 solana-transaction = { version = "3.0" }
 

@@ -36,9 +36,8 @@ use super::{
 };
 use crate::remote_account_provider::{
     pubsub_common::{
-        is_internal_dlp_account_data, AccountSubscription,
-        ChainPubsubActorMessage, PubsubClientConfig, SubscriptionSource,
-        SubscriptionUpdate, MESSAGE_CHANNEL_SIZE,
+        AccountSubscription, ChainPubsubActorMessage, PubsubClientConfig,
+        SubscriptionSource, SubscriptionUpdate, MESSAGE_CHANNEL_SIZE,
         SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     pubsub_connection::PubsubConnectionImpl,
@@ -915,13 +914,7 @@ impl ChainPubsubActor {
                                     );
                                 let should_forward = is_directly_subscribed
                                     || program_pubkey.eq(&dlp_api::id())
-                                        && sub_update.account.as_ref().is_some_and(
-                                            |account| {
-                                                !is_internal_dlp_account_data(
-                                                    &account.data,
-                                                )
-                                            },
-                                        );
+                                        && sub_update.account.is_some();
 
                                 if should_forward {
                                     if acc_pubkey != clock::ID {

@@ -162,6 +162,12 @@ lazy_static::lazy_static! {
         "monitored_accounts_gauge", "number of undelegated accounts, being monitored via websocket",
     ).unwrap();
 
+    static ref INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE: IntGauge = IntGauge::new(
+        "inflight_subscription_updates_gauge", "Number of subscription-update tasks currently being processed",
+    ).unwrap_or_else(|err| {
+        panic!("failed to create inflight_subscription_updates_gauge: {err}")
+    });
+
     static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
@@ -608,6 +614,7 @@ pub(crate) fn register() {
         register!(ACCOUNTS_COUNT_GAUGE);
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
+        register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
@@ -758,6 +765,14 @@ pub fn inc_pending_clone_requests() {
 
 pub fn dec_pending_clone_requests() {
     PENDING_ACCOUNT_CLONES_GAUGE.dec()
+}
+
+pub fn inc_inflight_subscription_updates() {
+    INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE.inc()
+}
+
+pub fn dec_inflight_subscription_updates() {
+    INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE.dec()
 }
 
 pub fn ensure_accounts_end(timer: HistogramTimer) {

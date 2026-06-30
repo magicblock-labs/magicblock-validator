@@ -1,4 +1,5 @@
 mod process_add_action_callback;
+mod process_schedule_cloned_undelegation;
 mod process_schedule_commit;
 #[cfg(test)]
 mod process_schedule_commit_tests;
@@ -12,6 +13,7 @@ use magicblock_magic_program_api::{
     pda::CALLBACK_SIGNER, MAGIC_CONTEXT_PUBKEY,
 };
 pub(crate) use process_add_action_callback::process_add_action_callback;
+pub(crate) use process_schedule_cloned_undelegation::process_schedule_cloned_account_undelegation;
 pub(crate) use process_schedule_commit::*;
 pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
 use solana_clock::Clock;

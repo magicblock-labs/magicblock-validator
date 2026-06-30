@@ -15,6 +15,7 @@ pub use intent_bundles::{
     magic_scheduled_base_intent, outbox_intent_bundles,
     schedule as schedule_transactions,
 };
+pub use clone_account::is_pending_clone;
 pub use magic_sys::init_magic_sys;
 pub use magicblock_magic_program_api::*;
 pub use schedule_transactions::{

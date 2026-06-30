@@ -234,6 +234,7 @@ pub enum MagicBlockInstruction {
         data: Vec<u8>,
         is_last: bool,
         actions: Vec<Instruction>,
+        needs_undelegation: bool,
     },
 
     /// Cleanup a partial clone on failure. Removes from PENDING_CLONES
@@ -389,4 +390,14 @@ pub enum PostDelegationActionExecutorInstruction {
         cloned_account_pubkey: Pubkey,
         actions: Vec<Instruction>,
     },
+
+    /// Schedules undelegation immediately after a matching delegated clone
+    /// instruction in the same transaction.
+    ///
+    /// # Account references
+    /// - **0.**   `[SIGNER]`  Validator authority
+    /// - **1.**   `[]`        Delegated clone target
+    /// - **2.**   `[]`        Instructions sysvar
+    /// - **3.**   `[WRITE]`   Magic Context account
+    ScheduleUndelegation { cloned_account_pubkey: Pubkey },
 }

@@ -21,4 +21,4 @@ pub mod watcher;
 mod tests;
 
 pub use error::{Error, Result};
-pub use service::Service as ReplicationService;
+pub use service::{BrokerSource, Service as ReplicationService};
