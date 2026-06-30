@@ -5,9 +5,7 @@ use prometheus::{
     Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
     IntGauge, IntGaugeVec, Opts, Registry,
 };
-pub use types::{
-    AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
-};
+pub use types::{AccountCommit, AccountFetchOrigin, LabelValue, Outcome};
 
 mod types;
 
@@ -43,12 +41,6 @@ lazy_static::lazy_static! {
     static ref CHAIN_SLOT_GAUGE: IntGauge = IntGauge::new(
         "chain_slot_gauge", "Chain Slot Gauge",
     ).unwrap();
-
-    static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
-        "magicblock_account_cloner_cached_outputs_count",
-        "Number of cloned accounts in the RemoteAccountClonerWorker"
-    )
-    .unwrap();
 
     // -----------------
     // Ledger
@@ -151,11 +143,6 @@ lazy_static::lazy_static! {
 
     static ref ACCOUNTS_COUNT_GAUGE: IntGauge = IntGauge::new(
         "accounts_count_gauge", "Number of accounts currently in the database",
-    ).unwrap();
-
-
-    static ref PENDING_ACCOUNT_CLONES_GAUGE: IntGauge = IntGauge::new(
-        "pending_account_clones_gauge", "Total number of account clone requests still in memory",
     ).unwrap();
 
     static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
@@ -585,7 +572,6 @@ pub(crate) fn register() {
         }
         register!(SLOT_GAUGE);
         register!(CHAIN_SLOT_GAUGE);
-        register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
         register!(LEDGER_BLOCK_TIMES_GAUGE);
         register!(LEDGER_BLOCKHASHES_GAUGE);
@@ -604,7 +590,6 @@ pub(crate) fn register() {
         register!(LEDGER_SHUTDOWN_TIME);
         register!(ACCOUNTS_SIZE_GAUGE);
         register!(ACCOUNTS_COUNT_GAUGE);
-        register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
@@ -669,10 +654,6 @@ pub fn set_slot(slot: u64) {
 
 pub fn set_chain_slot(value: u64) {
     CHAIN_SLOT_GAUGE.set(value as i64);
-}
-
-pub fn set_cached_clone_outputs_count(count: usize) {
-    CACHED_CLONE_OUTPUTS_COUNT.set(count as i64);
 }
 
 pub fn set_ledger_size(size: u64) {
@@ -748,14 +729,6 @@ pub fn set_accounts_size(value: i64) {
 
 pub fn set_accounts_count(value: i64) {
     ACCOUNTS_COUNT_GAUGE.set(value)
-}
-
-pub fn inc_pending_clone_requests() {
-    PENDING_ACCOUNT_CLONES_GAUGE.inc()
-}
-
-pub fn dec_pending_clone_requests() {
-    PENDING_ACCOUNT_CLONES_GAUGE.dec()
 }
 
 pub fn inc_inflight_subscription_updates() {

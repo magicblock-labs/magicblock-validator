@@ -176,13 +176,12 @@ Several histograms use custom buckets when their expected durations are longer, 
 
 When adding a histogram, choose buckets around the expected latency distribution. Do not blindly reuse short microsecond/millisecond buckets for operations that normally take seconds or minutes, and do not use only large buckets for hot-path microsecond work.
 
-### Slot and clone cache
+### Slot
 
 | Wrapper/collector | Meaning |
 |---|---|
 | `set_slot(slot)` / `SLOT_GAUGE` | Local validator slot. Updated by the processor scheduler. |
 | `set_chain_slot(value)` / `CHAIN_SLOT_GAUGE` | Observed base-chain slot. Updated by Chainlink's chain-slot wrapper. |
-| `set_cached_clone_outputs_count(count)` / `CACHED_CLONE_OUTPUTS_COUNT` | Number of cached clone outputs in the remote account cloner worker. |
 
 ### Ledger and storage
 
@@ -204,7 +203,6 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 |---|---|
 | `set_accounts_size(value)` | Persisted account storage size in bytes. |
 | `set_accounts_count(value)` | Number of accounts in `AccountsDb`. |
-| `inc_pending_clone_requests()` / `dec_pending_clone_requests()` | In-memory pending account clone request gauge. Must remain balanced. |
 | `set_monitored_accounts_count(count)` | Absolute count of monitored accounts; callers must pass total count, not delta. |
 | `inc_evicted_accounts_count()` | Cumulative count of monitored accounts forcefully removed from monitor list/database. |
 | `inc_account_fetches_success(count)` | Successful network account fetch count. |
@@ -217,7 +215,6 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 
 Important caveats:
 
-- `PENDING_ACCOUNT_CLONES_GAUGE` is a gauge. Every increment must have a matching decrement on all success, error, cancellation, and timeout paths.
 - `MONITORED_ACCOUNTS_GAUGE` is set to an absolute count. Do not call it with a delta.
 - Account fetch found/not-found counters include an `origin` label. Keep origin cardinality low and stable.
 - `AccountFetchOrigin::SendTransaction(Signature)` intentionally labels as only `send_transaction`; the signature is available through `signature()` for logging/correlation but must not become a Prometheus label.
@@ -354,9 +351,9 @@ Use `Outcome::from_success(bool)` for binary success/error label values. Do not 
 
 The `SendTransaction` signature is intentionally not part of the label. Use `signature()` for tracing/log correlation only.
 
-### `AccountClone` and `AccountCommit`
+### `AccountCommit`
 
-`AccountClone<'a>` and `AccountCommit<'a>` describe account-clone and account-commit shapes, including fee payer, undelegated, delegated, program, commit-only, and commit-and-undelegate variants. They are currently defined in `types.rs` for shared metric modelling but are not broadly used by the current wrappers. If you wire them into live metrics, update this guide with their metric names and label behavior.
+`AccountCommit<'a>` describes account-commit shapes, including commit-only and commit-and-undelegate variants. It is currently defined in `types.rs` for shared metric modelling but is not broadly used by the current wrappers. If you wire it into live metrics, update this guide with its metric names and label behavior.
 
 ## Runtime flows
 
@@ -457,6 +454,8 @@ Inspect:
 - integration tests or scripts that scrape metrics, such as subscription-limit tests.
 
 If a metric is obsolete, prefer a staged approach when possible: keep the old metric while adding the replacement, or document the exact replacement and update all repository references.
+
+The eviction-vs-get metrics plan intentionally removes stale clone-cache/pending-clone gauges before adding replacement lifecycle counters, so no replacement lifecycle metric is introduced in that removal step.
 
 ### Adding or changing labels
 
