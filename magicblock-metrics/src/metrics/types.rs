@@ -110,6 +110,74 @@ impl LabelValue for AccountFetchOrigin {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BankPrecheckOutcome {
+    BankHitNoFetch,
+    BankHitUndelegatingRefreshRequired,
+    BankMissRemoteRequired,
+    ForcedRefreshRemoteRequired,
+}
+
+impl BankPrecheckOutcome {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::BankHitNoFetch => "bank_hit_no_fetch",
+            Self::BankHitUndelegatingRefreshRequired => {
+                "bank_hit_undelegating_refresh_required"
+            }
+            Self::BankMissRemoteRequired => "bank_miss_remote_required",
+            Self::ForcedRefreshRemoteRequired => {
+                "forced_refresh_remote_required"
+            }
+        }
+    }
+}
+
+impl fmt::Display for BankPrecheckOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for BankPrecheckOutcome {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BankPrecheckReason {
+    Absent,
+    NonUndelegatingPresent,
+    UndelegatingStillValid,
+    UndelegatingRefresh,
+    ForcedRefresh,
+}
+
+impl BankPrecheckReason {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Absent => "absent",
+            Self::NonUndelegatingPresent => "non_undelegating_present",
+            Self::UndelegatingStillValid => "undelegating_still_valid",
+            Self::UndelegatingRefresh => "undelegating_refresh",
+            Self::ForcedRefresh => "forced_refresh",
+        }
+    }
+}
+
+impl fmt::Display for BankPrecheckReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for BankPrecheckReason {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
 pub trait LabelValue {
     fn value(&self) -> &str;
 }

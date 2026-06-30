@@ -6,7 +6,8 @@ use prometheus::{
     IntGauge, IntGaugeVec, Opts, Registry,
 };
 pub use types::{
-    AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
+    AccountClone, AccountCommit, AccountFetchOrigin, BankPrecheckOutcome,
+    BankPrecheckReason, LabelValue, Outcome,
 };
 
 mod types;
@@ -171,6 +172,16 @@ lazy_static::lazy_static! {
     static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
+
+    static ref CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_bank_precheck_accounts_total",
+                "Account entries by FetchCloner bank precheck outcome before remote fetch",
+            ),
+            &["origin", "outcome", "reason"],
+        )
+        .unwrap();
 
     static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
@@ -608,6 +619,7 @@ pub(crate) fn register() {
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
+        register!(CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT);
@@ -779,6 +791,24 @@ pub fn set_monitored_accounts_count(count: usize) {
 }
 pub fn inc_evicted_accounts_count() {
     EVICTED_ACCOUNTS_COUNT.inc();
+}
+
+pub fn inc_chainlink_bank_precheck_accounts(
+    fetch_origin: AccountFetchOrigin,
+    outcome: BankPrecheckOutcome,
+    reason: BankPrecheckReason,
+    count: u64,
+) {
+    if count == 0 {
+        return;
+    }
+    CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            fetch_origin.value(),
+            outcome.value(),
+            reason.value(),
+        ])
+        .inc_by(count);
 }
 
 pub fn inc_committor_intents_count() {

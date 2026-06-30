@@ -207,6 +207,7 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 | `inc_pending_clone_requests()` / `dec_pending_clone_requests()` | In-memory pending account clone request gauge. Must remain balanced. |
 | `set_monitored_accounts_count(count)` | Absolute count of monitored accounts; callers must pass total count, not delta. |
 | `inc_evicted_accounts_count()` | Cumulative count of monitored accounts forcefully removed from monitor list/database. |
+| `inc_chainlink_bank_precheck_accounts(origin, outcome, reason, count)` / `chainlink_bank_precheck_accounts_total{origin,outcome,reason}` (exported as `mbv_chainlink_bank_precheck_accounts_total`) | Classifies `FetchCloner` account entries before remote provider fetch; call sites should aggregate per label bucket where practical and must not add pubkey labels. |
 | `inc_account_fetches_success(count)` | Successful network account fetch count. |
 | `inc_account_fetches_failed(count)` | Failed network account fetch count. |
 | `inc_account_fetches_found(origin, count)` | Network fetches that found accounts, labelled by `AccountFetchOrigin`. |
