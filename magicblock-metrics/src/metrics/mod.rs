@@ -182,6 +182,9 @@ lazy_static::lazy_static! {
             &["origin", "outcome", "reason"],
         )
         .unwrap();
+    static ref PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT: IntCounter = IntCounter::new(
+        "program_subscription_discovered_dlp_update_delegated_elsewhere_count", "DLP-owned subscription updates that, after fetching the delegation record, were found delegated to another validator and dropped",
+    ).unwrap();
 
     static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
@@ -620,6 +623,7 @@ pub(crate) fn register() {
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
         register!(CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL);
+        register!(PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT);
@@ -809,6 +813,10 @@ pub fn inc_chainlink_bank_precheck_accounts(
             reason.value(),
         ])
         .inc_by(count);
+}
+
+pub fn inc_discovered_dlp_update_delegated_elsewhere() {
+    PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT.inc();
 }
 
 pub fn inc_committor_intents_count() {
