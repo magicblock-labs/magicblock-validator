@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use dlp_api::state::DelegationRecord;
+use dlp_api::{
+    pda::undelegation_request_pda_from_delegated_account,
+    state::{DelegationRecord, UndelegationRequest},
+};
 use magicblock_metrics::metrics::{
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
@@ -217,6 +220,46 @@ where
         fetch_cloner,
         subscription_tx,
         cloner,
+    }
+}
+
+fn undelegation_request_data(
+    delegated_account: Pubkey,
+    owner_program: Pubkey,
+    rent_payer: Pubkey,
+    created_slot: u64,
+    expires_at_slot: u64,
+    last_commit_id_at_request: u64,
+) -> Vec<u8> {
+    let (_, bump) = Pubkey::find_program_address(
+        &[
+            dlp_api::pda::UNDELEGATION_REQUEST_TAG,
+            delegated_account.as_ref(),
+        ],
+        &dlp_api::id(),
+    );
+    let request = UndelegationRequest {
+        delegated_account,
+        owner_program,
+        rent_payer,
+        created_slot,
+        expires_at_slot,
+        last_commit_id_at_request,
+        bump,
+        _padding: [0; 7],
+    };
+    let mut data = vec![0; UndelegationRequest::size_with_discriminator()];
+    request.to_bytes_with_discriminator(&mut data).unwrap();
+    data
+}
+
+fn dlp_account(data: Vec<u8>) -> Account {
+    Account {
+        lamports: 1_000_000,
+        data,
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
     }
 }
 
@@ -575,6 +618,65 @@ fn pending_waiters_gauge_value() -> i64 {
     chainlink_pending_fetch_waiters_gauge_value(
         ChainlinkPendingFetchLayer::FetchCloner,
     )
+}
+
+#[tokio::test]
+async fn fetch_undelegation_requests_scans_filtered_dlp_accounts() {
+    let delegated_account = random_pubkey();
+    let owner_program = random_pubkey();
+    let rent_payer = random_pubkey();
+    let request_pda =
+        undelegation_request_pda_from_delegated_account(&delegated_account);
+    let request_data = undelegation_request_data(
+        delegated_account,
+        owner_program,
+        rent_payer,
+        10,
+        20,
+        30,
+    );
+
+    let ctx = setup(
+        vec![
+            (request_pda, dlp_account(request_data.clone())),
+            (
+                random_pubkey(),
+                dlp_account(vec![
+                    0;
+                    UndelegationRequest::size_with_discriminator()
+                ]),
+            ),
+            (
+                random_pubkey(),
+                Account {
+                    owner: system_program::id(),
+                    data: request_data,
+                    ..Default::default()
+                },
+            ),
+        ],
+        42,
+        Keypair::new(),
+    )
+    .await;
+
+    let requests = ctx
+        .fetch_cloner
+        .fetch_undelegation_requests()
+        .await
+        .unwrap();
+
+    assert_eq!(ctx.rpc_client.program_account_fetches(), 1);
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(request.request_pda, request_pda);
+    assert_eq!(request.delegated_account, delegated_account);
+    assert_eq!(request.owner_program, owner_program);
+    assert_eq!(request.rent_payer, rent_payer);
+    assert_eq!(request.created_slot, 10);
+    assert_eq!(request.expires_at_slot, 20);
+    assert_eq!(request.last_commit_id_at_request, 30);
+    assert_eq!(request.observed_slot, 42);
 }
 
 // -----------------

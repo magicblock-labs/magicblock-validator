@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
@@ -24,7 +24,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
-use tokio::sync::broadcast;
+use tokio::{sync::broadcast, time::MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -93,6 +93,7 @@ pub struct ScheduledCommitsProcessorImpl {
     validator_authority: Arc<Keypair>,
     latest_block_reader: Arc<dyn LatestBlockReader>,
     observed_undelegation_requests: Arc<Mutex<ObservedUndelegationRequests>>,
+    undelegation_request_poll_interval: Duration,
 }
 
 trait LatestBlockReader: Send + Sync {
@@ -114,6 +115,7 @@ impl ScheduledCommitsProcessorImpl {
         internal_transaction_scheduler: TransactionSchedulerHandle,
         validator_authority: Keypair,
         latest_block: impl LatestBlockProvider,
+        undelegation_request_poll_interval: Duration,
     ) -> Self {
         Self {
             chainlink,
@@ -122,6 +124,7 @@ impl ScheduledCommitsProcessorImpl {
             validator_authority: Arc::new(validator_authority),
             latest_block_reader: Arc::new(latest_block.clone()),
             observed_undelegation_requests: Arc::new(Mutex::default()),
+            undelegation_request_poll_interval,
         }
     }
 
@@ -169,6 +172,75 @@ impl ScheduledCommitsProcessorImpl {
                 &cancellation_token,
             )
             .await;
+        }
+    }
+
+    async fn undelegation_request_poll_processor(
+        poll_interval: Duration,
+        cancellation_token: CancellationToken,
+        chainlink: Arc<ChainlinkImpl>,
+        internal_transaction_scheduler: TransactionSchedulerHandle,
+        validator_authority: Arc<Keypair>,
+        latest_block: Arc<dyn LatestBlockReader>,
+        observed_requests: Arc<Mutex<ObservedUndelegationRequests>>,
+    ) {
+        if poll_interval.is_zero() {
+            debug!(
+                "DLP undelegation request polling is disabled by configuration"
+            );
+            return;
+        }
+
+        let mut interval = tokio::time::interval(poll_interval);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancellation_token.cancelled() => {
+                    info!("Shutting down undelegation request poll processor");
+                    return;
+                }
+                _ = interval.tick() => {}
+            }
+
+            let requests = match chainlink.fetch_undelegation_requests().await {
+                Ok(requests) => requests,
+                Err(err) => {
+                    error!(
+                        error = ?err,
+                        "Failed to scan DLP undelegation requests"
+                    );
+                    continue;
+                }
+            };
+            let live_request_pdas = requests
+                .iter()
+                .map(|request| request.request_pda)
+                .collect::<HashSet<_>>();
+
+            for request in requests {
+                Self::process_observed_undelegation_request_with_retries(
+                    request,
+                    &chainlink,
+                    &internal_transaction_scheduler,
+                    validator_authority.as_ref(),
+                    latest_block.as_ref(),
+                    &observed_requests,
+                    &cancellation_token,
+                )
+                .await;
+            }
+
+            if let Err(err) = Self::retain_observed_requests(
+                &observed_requests,
+                &live_request_pdas,
+            ) {
+                error!(
+                    error = %err,
+                    "Failed to prune stale observed undelegation requests"
+                );
+            }
         }
     }
 
@@ -380,6 +452,15 @@ impl ScheduledCommitsProcessorImpl {
         Ok(())
     }
 
+    fn retain_observed_requests(
+        observed_requests: &Arc<Mutex<ObservedUndelegationRequests>>,
+        live_request_pdas: &HashSet<Pubkey>,
+    ) -> Result<(), ObservedUndelegationRequestError> {
+        Self::lock_observed_requests(observed_requests)?
+            .retain(|request_pda, _| live_request_pdas.contains(request_pda));
+        Ok(())
+    }
+
     fn schedule_commit_and_undelegate_instruction(
         payer: &Pubkey,
         delegated_account: Pubkey,
@@ -398,6 +479,12 @@ impl ScheduledCommitsProcessorImpl {
     pub fn spawn_undelegation_request_processor(self: &Arc<Self>) {
         let Some(requests) = self.chainlink.subscribe_undelegation_requests()
         else {
+            if !self.undelegation_request_poll_interval.is_zero() {
+                warn!(
+                    "Cannot subscribe to DLP undelegation requests; falling back to polling only"
+                );
+            }
+            self.spawn_undelegation_request_poll_processor();
             return;
         };
         tokio::spawn(Self::undelegation_request_processor(
@@ -409,9 +496,68 @@ impl ScheduledCommitsProcessorImpl {
             self.latest_block_reader.clone(),
             self.observed_undelegation_requests.clone(),
         ));
+        self.spawn_undelegation_request_poll_processor();
+    }
+
+    fn spawn_undelegation_request_poll_processor(self: &Arc<Self>) {
+        if self.undelegation_request_poll_interval.is_zero() {
+            debug!("Skipping DLP undelegation request poll processor");
+            return;
+        }
+        tokio::spawn(Self::undelegation_request_poll_processor(
+            self.undelegation_request_poll_interval,
+            self.cancellation_token.clone(),
+            self.chainlink.clone(),
+            self.internal_transaction_scheduler.clone(),
+            self.validator_authority.clone(),
+            self.latest_block_reader.clone(),
+            self.observed_undelegation_requests.clone(),
+        ));
     }
 
     pub fn stop(&self) {
         self.cancellation_token.cancel();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retain_observed_requests_prunes_missing_scan_results() {
+        let keep = Pubkey::new_unique();
+        let prune = Pubkey::new_unique();
+        let observed_requests: Arc<Mutex<ObservedUndelegationRequests>> =
+            Arc::new(Mutex::new(HashMap::from([
+                (
+                    keep,
+                    ObservedUndelegationRequestIdentity {
+                        created_slot: 1,
+                        expires_at_slot: 2,
+                        last_commit_id_at_request: 3,
+                        rent_payer: Pubkey::new_unique(),
+                    },
+                ),
+                (
+                    prune,
+                    ObservedUndelegationRequestIdentity {
+                        created_slot: 4,
+                        expires_at_slot: 5,
+                        last_commit_id_at_request: 6,
+                        rent_payer: Pubkey::new_unique(),
+                    },
+                ),
+            ])));
+
+        ScheduledCommitsProcessorImpl::retain_observed_requests(
+            &observed_requests,
+            &HashSet::from([keep]),
+        )
+        .unwrap();
+
+        let observed = observed_requests.lock().unwrap();
+        assert!(observed.contains_key(&keep));
+        assert!(!observed.contains_key(&prune));
     }
 }

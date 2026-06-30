@@ -10,7 +10,10 @@ use std::{
 
 use dlp_api::{
     pda::delegation_record_pda_from_delegated_account,
-    state::{DelegationRecord, UndelegationRequest},
+    state::{
+        discriminator::AccountDiscriminator, DelegationRecord,
+        UndelegationRequest,
+    },
 };
 use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
@@ -30,8 +33,13 @@ use magicblock_metrics::metrics::{
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
 use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::{
+    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    filter::{Memcmp, RpcFilterType},
+};
 use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_signer::Signer;
@@ -332,6 +340,62 @@ where
             .remote_account_provider
             .try_get_multi(pubkeys, None, fetch_origin, None)
             .await?)
+    }
+
+    pub async fn fetch_undelegation_requests(
+        &self,
+    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
+        let observed_slot = self.remote_account_provider.get_slot().await?;
+        let config = RpcProgramAccountsConfig {
+            filters: Some(vec![
+                RpcFilterType::DataSize(
+                    UndelegationRequest::size_with_discriminator() as u64,
+                ),
+                RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                    0,
+                    AccountDiscriminator::UndelegationRequest
+                        .to_bytes()
+                        .to_vec(),
+                )),
+            ]),
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(UiAccountEncoding::Base64Zstd),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let accounts = self
+            .remote_account_provider
+            .get_program_accounts_with_config(&dlp_api::id(), config)
+            .await?;
+
+        let mut requests = Vec::with_capacity(accounts.len());
+        for (request_pda, account) in accounts {
+            let Ok(request) =
+                UndelegationRequest::try_from_bytes_with_discriminator(
+                    &account.data,
+                )
+            else {
+                warn!(
+                    request_pda = %request_pda,
+                    data_len = account.data.len(),
+                    "Skipping malformed DLP undelegation request account"
+                );
+                continue;
+            };
+            requests.push(ObservedUndelegationRequest {
+                request_pda,
+                delegated_account: request.delegated_account,
+                owner_program: request.owner_program,
+                rent_payer: request.rent_payer,
+                created_slot: request.created_slot,
+                expires_at_slot: request.expires_at_slot,
+                last_commit_id_at_request: request.last_commit_id_at_request,
+                observed_slot,
+            });
+        }
+
+        Ok(requests)
     }
 
     pub fn cloner(&self) -> &Arc<C> {
