@@ -725,8 +725,20 @@ where
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
                     );
-                    let owned_request =
-                        request.take().expect("owner must still have request");
+                    let Some(owned_request) = request.take() else {
+                        let err = ClonerError::CommittorServiceError(
+                            "owner missing request for clone".to_string(),
+                        );
+                        self.finish_pending_clone(
+                            pubkey,
+                            CloneCompletion::Failed,
+                        );
+                        guard.dismiss();
+                        return Err(ClonerError::FailedToCloneRegularAccount(
+                            pubkey,
+                            Box::new(err),
+                        ));
+                    };
                     let is_empty_placeholder =
                         Self::is_empty_placeholder_account(
                             &owned_request.account,
