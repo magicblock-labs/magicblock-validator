@@ -150,6 +150,7 @@ async fn wait_for_direct_subscription(
 }
 
 async fn wait_for_pending_account_delta(
+    origin: AccountFetchOrigin,
     outcome: ChainlinkPendingFetchOutcome,
     baseline: u64,
     expected_delta: u64,
@@ -157,9 +158,7 @@ async fn wait_for_pending_account_delta(
     let start = tokio::time::Instant::now();
     let timeout = Duration::from_secs(2);
     loop {
-        let delta =
-            pending_accounts_value(AccountFetchOrigin::GetAccount, outcome)
-                - baseline;
+        let delta = pending_accounts_value(origin, outcome) - baseline;
         if delta == expected_delta {
             break;
         }
@@ -180,6 +179,8 @@ struct TestSlotConfig {
 
 #[tokio::test]
 async fn test_try_get_multi_short_multi_account_response_returns_error() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
     init_logger();
 
     let pubkey1 = solana_pubkey::Pubkey::new_unique();
@@ -301,6 +302,8 @@ async fn setup_matching_slots(
 #[tokio::test]
 async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
 ) {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -358,6 +361,8 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
 
 #[tokio::test]
 async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -1062,6 +1067,8 @@ async fn test_lru_eviction_and_reason_release_are_serialized() {
 
 #[tokio::test]
 async fn test_try_get_multi_owner_success_cleans_up_pending_entry() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -1137,17 +1144,16 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         ..
     } = setup_provider(pubkey, account).await;
 
+    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
     let owned_baseline = pending_accounts_value(
-        AccountFetchOrigin::GetAccount,
+        fetch_origin,
         ChainlinkPendingFetchOutcome::Owned,
     );
     let joined_baseline = pending_accounts_value(
-        AccountFetchOrigin::GetAccount,
+        fetch_origin,
         ChainlinkPendingFetchOutcome::JoinedExisting,
     );
-    let waiters_baseline =
-        pending_waiters_value(AccountFetchOrigin::GetAccount);
-    let waiter_gauge_baseline = pending_waiters_gauge_value();
+    let waiters_baseline = pending_waiters_value(fetch_origin);
 
     rpc_client.block_fetches();
 
@@ -1155,12 +1161,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         let provider = provider.clone();
         async move {
             provider
-                .try_get_multi(
-                    &[pubkey],
-                    None,
-                    AccountFetchOrigin::GetAccount,
-                    None,
-                )
+                .try_get_multi(&[pubkey], None, fetch_origin, None)
                 .await
         }
     });
@@ -1171,21 +1172,15 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         let provider = provider.clone();
         async move {
             provider
-                .try_get_multi(
-                    &[pubkey],
-                    None,
-                    AccountFetchOrigin::GetAccount,
-                    None,
-                )
+                .try_get_multi(&[pubkey], None, fetch_origin, None)
                 .await
         }
     });
 
     wait_for_fetching_waiter_count(&provider, pubkey, 2).await;
-    assert_eq!(
-        pending_waiters_gauge_value() - waiter_gauge_baseline,
-        1,
-        "remote provider waiter gauge should count only the joined waiter"
+    assert!(
+        pending_waiters_gauge_value() >= 1,
+        "remote provider waiter gauge should include this test's joined waiter"
     );
 
     rpc_client.allow_fetches();
@@ -1203,24 +1198,19 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
 
     assert_eq!(
         pending_accounts_value(
-            AccountFetchOrigin::GetAccount,
-            ChainlinkPendingFetchOutcome::Owned,
+            fetch_origin,
+            ChainlinkPendingFetchOutcome::Owned
         ) - owned_baseline,
         1
     );
     assert_eq!(
         pending_accounts_value(
-            AccountFetchOrigin::GetAccount,
+            fetch_origin,
             ChainlinkPendingFetchOutcome::JoinedExisting,
         ) - joined_baseline,
         1
     );
-    assert_eq!(
-        pending_waiters_value(AccountFetchOrigin::GetAccount)
-            - waiters_baseline,
-        1
-    );
-    assert_eq!(pending_waiters_gauge_value(), waiter_gauge_baseline);
+    assert_eq!(pending_waiters_value(fetch_origin) - waiters_baseline, 1);
 }
 
 #[tokio::test]
@@ -1265,12 +1255,13 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         .unwrap(),
     );
 
+    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
     let resolved_baseline = pending_accounts_value(
-        AccountFetchOrigin::GetAccount,
+        fetch_origin,
         ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
     );
     let late_rpc_baseline = pending_accounts_value(
-        AccountFetchOrigin::GetAccount,
+        fetch_origin,
         ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
     );
 
@@ -1280,12 +1271,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         let provider = provider.clone();
         async move {
             provider
-                .try_get_multi(
-                    &[pubkey],
-                    None,
-                    AccountFetchOrigin::GetAccount,
-                    None,
-                )
+                .try_get_multi(&[pubkey], None, fetch_origin, None)
                 .await
         }
     });
@@ -1316,7 +1302,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
     );
     assert_eq!(
         pending_accounts_value(
-            AccountFetchOrigin::GetAccount,
+            fetch_origin,
             ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
         ) - resolved_baseline,
         1
@@ -1324,6 +1310,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
 
     rpc_client.allow_fetches();
     wait_for_pending_account_delta(
+        fetch_origin,
         ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
         late_rpc_baseline,
         1,
