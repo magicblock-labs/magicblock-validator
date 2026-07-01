@@ -19,8 +19,8 @@ use magicblock_committor_service::{
     },
     outbox::{
         outbox_client::InternalOutboxClientError,
-        outbox_intent_bundles_reader::OutboxIntentBundlesReader, OutboxClient,
-        ScheduledBaseIntentMeta,
+        outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+        IntentSentTransaction, OutboxClient, ScheduledBaseIntentMeta,
     },
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     transaction_preparator::TransactionPreparatorImpl,
@@ -259,7 +259,7 @@ fn steal_schedule_accept_intent(
     loop {
         let intent_id = read_next_intent_id(ctx);
         schedule(ctx);
-        let result = steal_accept_intent(&ctx, intent_id);
+        let result = steal_accept_intent(ctx, intent_id);
         match result {
             Ok(()) => return intent_id,
             Err(err) => {
@@ -280,7 +280,7 @@ fn schedule_and_accept(
 ) -> OutboxIntentBundle {
     ctx.wait_for_next_slot_ephem().unwrap();
 
-    let intent_id = steal_schedule_accept_intent(&ctx, schedule);
+    let intent_id = steal_schedule_accept_intent(ctx, schedule);
     let pda = outbox_intent_pda(intent_id);
     let data = ctx.fetch_ephem_account_data(pda).unwrap();
     OutboxIntentBundle::try_from_bytes(&data).unwrap()
@@ -668,13 +668,15 @@ async fn test_pickup_after_committing() {
     cleanup_handle.clean().await.expect("cleanup after failure");
 
     // Commit stage was recorded; outbox is TwoStage::Committing
-    let calls = stage_calls.lock().unwrap();
-    assert_eq!(calls.len(), 1, "Only the commit stage should be recorded");
-    let commit_sig = match &calls[0].1 {
-        ExecutionStage::TwoStage(TwoStageProgress::Committing(sig)) => *sig,
-        other => panic!("Expected Committing stage, got {:?}", other),
+    let commit_sig = {
+        let calls = stage_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "Only the commit stage should be recorded");
+        let commit_sig = match &calls[0].1 {
+            ExecutionStage::TwoStage(TwoStageProgress::Committing(sig)) => *sig,
+            other => panic!("Expected Committing stage, got {:?}", other),
+        };
+        commit_sig
     };
-    drop(calls);
 
     // Re-fetch outbox and confirm it reflects TwoStage::Committing
     let outbox_bundle = test_env
@@ -1011,9 +1013,13 @@ impl OutboxClient for TestOutboxClient {
         result: &IntentExecutorResult<ExecutionOutput>,
         _execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
+        let IntentSentTransaction::Known(ref tx) = meta.intent_sent_transaction
+        else {
+            panic!("should be known");
+        };
         let succeeded = result.is_ok();
         self.ephem_rpc
-            .send_and_confirm_transaction(&meta.intent_sent_transaction)
+            .send_and_confirm_transaction(tx)
             .await
             .map_err(InternalOutboxClientError::RpcClientError)?;
         self.sent_commits.lock().unwrap().push((meta.id, succeeded));
