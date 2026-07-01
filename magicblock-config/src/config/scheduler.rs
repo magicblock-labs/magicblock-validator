@@ -14,15 +14,15 @@ use crate::{consts, types::SerdeKeypair};
 pub struct TaskSchedulerConfig {
     /// Keypair the task scheduler uses to pay for hydra cranks, encoded in
     /// Base58.
-    pub faucet_keypair: SerdeKeypair,
+    pub faucet_keypair: Option<SerdeKeypair>,
 }
 
 impl Default for TaskSchedulerConfig {
     fn default() -> Self {
         Self {
-            faucet_keypair: SerdeKeypair::from(Keypair::from_base58_string(
+            faucet_keypair: Some(SerdeKeypair(Keypair::from_base58_string(
                 consts::DEFAULT_TASK_SCHEDULER_FAUCET_KEYPAIR,
-            )),
+            ))),
         }
     }
 }

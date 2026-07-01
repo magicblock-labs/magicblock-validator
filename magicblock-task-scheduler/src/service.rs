@@ -76,12 +76,16 @@ impl TaskSchedulerService {
     pub fn new(
         path: &Path,
         rpc_url: String,
-        faucet: Keypair,
+        faucet: Option<Keypair>,
         scheduled_tasks: ScheduledTasksRx,
         block: LatestBlock,
         slot_interval: Duration,
         token: CancellationToken,
     ) -> TaskSchedulerResult<Self> {
+        let Some(faucet) = faucet else {
+            warn!("No faucet keypair configured, skipping task scheduler");
+            return Err(TaskSchedulerError::FaucetNotReady);
+        };
         let db = SchedulerDatabase::new(path)?;
         Ok(Self {
             db,

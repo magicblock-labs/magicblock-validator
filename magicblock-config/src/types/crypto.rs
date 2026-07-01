@@ -32,12 +32,6 @@ impl Clone for SerdeKeypair {
     }
 }
 
-impl From<Keypair> for SerdeKeypair {
-    fn from(keypair: Keypair) -> Self {
-        Self(keypair)
-    }
-}
-
 impl FromStr for SerdeKeypair {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

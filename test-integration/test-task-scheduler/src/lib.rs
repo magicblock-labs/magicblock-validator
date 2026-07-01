@@ -61,7 +61,9 @@ fn validator_config(temp_dir: PathBuf, faucet: &Keypair) -> ValidatorParams {
             ..Default::default()
         },
         task_scheduler: TaskSchedulerConfig {
-            faucet_keypair: SerdeKeypair::from(faucet.insecure_clone()),
+            faucet_keypair: Some(
+                SerdeKeypair::from_str(&faucet.to_base58_string()).unwrap(),
+            ),
         },
         storage: StorageDirectory(temp_dir),
         ..Default::default()
