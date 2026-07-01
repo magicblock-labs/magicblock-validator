@@ -229,3 +229,93 @@ fn is_matching_existing_projected_ata(
         eata.owner == *wallet_owner && eata.mint == *mint
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+    use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+    use solana_instruction::{AccountMeta, Instruction};
+    use solana_sdk_ids::{native_loader, system_program};
+
+    use super::*;
+    use crate::test_utils::process_instruction;
+
+    fn spl_mint_account() -> AccountSharedData {
+        let mint_state = SplMint {
+            mint_authority: COption::None,
+            supply: 0,
+            decimals: 6,
+            is_initialized: true,
+            freeze_authority: COption::None,
+        };
+        let mut account =
+            AccountSharedData::new(1_000_000, SplMint::LEN, &TOKEN_PROGRAM_ID);
+        SplMint::pack(mint_state, account.data_as_mut_slice()).unwrap();
+        account
+    }
+
+    #[test]
+    fn create_rent_pending_ata_initializes_local_token_account_shape() {
+        let payer = Pubkey::new_unique();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata_with_token_program(
+            &wallet_owner,
+            &mint,
+            &TOKEN_PROGRAM_ID,
+        );
+
+        let ix = Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CreateRentPendingAta {
+                wallet_owner,
+                mint,
+                token_program: TOKEN_PROGRAM_ID,
+            },
+            vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new(ata, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            ],
+        );
+        let accounts = process_instruction(
+            &ix.data,
+            vec![
+                (
+                    payer,
+                    AccountSharedData::new(1_000_000, 0, &system_program::id()),
+                ),
+                (ata, AccountSharedData::new(0, 0, &system_program::id())),
+                (mint, spl_mint_account()),
+                (
+                    TOKEN_PROGRAM_ID,
+                    AccountSharedData::new(1, 0, &native_loader::id()),
+                ),
+            ],
+            ix.accounts,
+            Ok(()),
+        );
+
+        let ata_after = &accounts[1];
+        assert_eq!(ata_after.owner(), &TOKEN_PROGRAM_ID);
+        assert!(ata_after.delegated());
+        assert!(!ata_after.ephemeral());
+        assert!(!ata_after.confined());
+        assert!(!ata_after.undelegating());
+        assert_eq!(ata_after.remote_slot(), 0);
+
+        let token_account = SplAccount::unpack(ata_after.data()).unwrap();
+        assert_eq!(token_account.mint, mint);
+        assert_eq!(token_account.owner, wallet_owner);
+        assert_eq!(token_account.amount, 0);
+        assert_eq!(token_account.delegate, COption::None);
+        assert_eq!(token_account.state, SplAccountState::Initialized);
+        assert_eq!(token_account.is_native, COption::None);
+        assert_eq!(token_account.delegated_amount, 0);
+        assert_eq!(
+            token_account.close_authority,
+            COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
+        );
+    }
+}
