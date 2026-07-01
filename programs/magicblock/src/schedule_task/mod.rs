@@ -22,7 +22,7 @@ pub(crate) fn validate_cranks_instructions(
             if account.is_signer {
                 ic_msg!(
                     invoke_context,
-                    "Crank ERR: only the crank signer PDA can be a signer in cranks (invalid signer: '{}')",
+                   "Crank ERR: scheduled crank instructions cannot include signer accounts (invalid signer: '{}')",
                     account.pubkey,
                 );
                 return Err(InstructionError::MissingRequiredSignature);
