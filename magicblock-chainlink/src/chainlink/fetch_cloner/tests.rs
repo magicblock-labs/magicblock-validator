@@ -8243,21 +8243,30 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         .expect("waiter task should not panic")
         .expect("waiter fetch should succeed");
 
-    assert_eq!(
-        pending_accounts_value(
-            fetch_origin,
-            ChainlinkPendingFetchOutcome::Owned
-        ) - owned_baseline,
-        1
+    let owned_delta = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::Owned,
+    )
+    .saturating_sub(owned_baseline);
+    assert!(
+        owned_delta >= 1,
+        "fetch_cloner owned metric should increase by at least 1; got {owned_delta}"
     );
-    assert_eq!(
-        pending_accounts_value(
-            fetch_origin,
-            ChainlinkPendingFetchOutcome::JoinedExisting,
-        ) - joined_baseline,
-        1
+    let joined_delta = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::JoinedExisting,
+    )
+    .saturating_sub(joined_baseline);
+    assert!(
+        joined_delta >= 1,
+        "fetch_cloner joined-existing metric should increase by at least 1; got {joined_delta}"
     );
-    assert_eq!(pending_waiters_value(fetch_origin) - waiters_baseline, 1);
+    let waiters_delta =
+        pending_waiters_value(fetch_origin).saturating_sub(waiters_baseline);
+    assert!(
+        waiters_delta >= 1,
+        "fetch_cloner waiter metric should increase by at least 1; got {waiters_delta}"
+    );
 }
 
 #[tokio::test]

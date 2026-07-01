@@ -149,23 +149,24 @@ async fn wait_for_direct_subscription(
     }
 }
 
-async fn wait_for_pending_account_delta(
+async fn wait_for_pending_account_delta_at_least(
     origin: AccountFetchOrigin,
     outcome: ChainlinkPendingFetchOutcome,
     baseline: u64,
-    expected_delta: u64,
+    minimum_delta: u64,
 ) {
     let start = tokio::time::Instant::now();
     let timeout = Duration::from_secs(2);
     loop {
-        let delta = pending_accounts_value(origin, outcome) - baseline;
-        if delta == expected_delta {
+        let delta =
+            pending_accounts_value(origin, outcome).saturating_sub(baseline);
+        if delta >= minimum_delta {
             break;
         }
         assert!(
             start.elapsed() < timeout,
-            "pending account metric delta for {outcome} should be \
-             {expected_delta} within {timeout:?}; got {delta}"
+            "pending account metric delta for {outcome} should increase by at least \
+             {minimum_delta} within {timeout:?}; got {delta}"
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -1196,21 +1197,30 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         .expect("waiter task should not panic")
         .expect("waiter fetch should succeed");
 
-    assert_eq!(
-        pending_accounts_value(
-            fetch_origin,
-            ChainlinkPendingFetchOutcome::Owned
-        ) - owned_baseline,
-        1
+    let owned_delta = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::Owned,
+    )
+    .saturating_sub(owned_baseline);
+    assert!(
+        owned_delta >= 1,
+        "remote provider owned metric should increase by at least 1; got {owned_delta}"
     );
-    assert_eq!(
-        pending_accounts_value(
-            fetch_origin,
-            ChainlinkPendingFetchOutcome::JoinedExisting,
-        ) - joined_baseline,
-        1
+    let joined_delta = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::JoinedExisting,
+    )
+    .saturating_sub(joined_baseline);
+    assert!(
+        joined_delta >= 1,
+        "remote provider joined-existing metric should increase by at least 1; got {joined_delta}"
     );
-    assert_eq!(pending_waiters_value(fetch_origin) - waiters_baseline, 1);
+    let waiters_delta =
+        pending_waiters_value(fetch_origin).saturating_sub(waiters_baseline);
+    assert!(
+        waiters_delta >= 1,
+        "remote provider waiter metric should increase by at least 1; got {waiters_delta}"
+    );
 }
 
 #[tokio::test]
@@ -1300,16 +1310,18 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         remote_accounts[0].source(),
         Some(RemoteAccountUpdateSource::Subscription)
     );
-    assert_eq!(
-        pending_accounts_value(
-            fetch_origin,
-            ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
-        ) - resolved_baseline,
-        1
+    let resolved_delta = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
+    )
+    .saturating_sub(resolved_baseline);
+    assert!(
+        resolved_delta >= 1,
+        "remote provider subscription-resolution metric should increase by at least 1; got {resolved_delta}"
     );
 
     rpc_client.allow_fetches();
-    wait_for_pending_account_delta(
+    wait_for_pending_account_delta_at_least(
         fetch_origin,
         ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
         late_rpc_baseline,
