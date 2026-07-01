@@ -5,12 +5,14 @@
 
 mod process_close;
 mod process_create;
+mod process_create_rent_pending_ata;
 mod process_resize;
 mod validation;
 
 use magicblock_magic_program_api::EPHEMERAL_RENT_PER_BYTE;
 pub(crate) use process_close::process_close_ephemeral_account;
 pub(crate) use process_create::process_create_ephemeral_account;
+pub(crate) use process_create_rent_pending_ata::process_create_rent_pending_ata;
 pub(crate) use process_resize::process_resize_ephemeral_account;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_instruction::error::InstructionError;

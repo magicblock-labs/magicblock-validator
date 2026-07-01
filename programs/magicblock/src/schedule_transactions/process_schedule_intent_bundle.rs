@@ -9,7 +9,8 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
-        CommitType, ConstructionContext, ScheduledIntentBundle,
+        calculate_rent_pending_ata_materialization_fee, CommitType,
+        ConstructionContext, ScheduledIntentBundle,
     },
     magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
@@ -81,6 +82,27 @@ pub(crate) fn process_schedule_intent_bundle(
     // Get next intent id
     let intent_id = context.next_intent_id();
 
+    let rent_pending_materialization_accounts = {
+        let transaction_context = &*invoke_context.transaction_context;
+        let fee_vault = try_get_fee_vault(
+            transaction_context,
+            invoke_context,
+            PAYER_IDX,
+            MAGIC_CONTEXT_IDX + 1,
+        )?;
+        if fee_vault.is_some() {
+            Some((
+                payer_pubkey,
+                *get_instruction_pubkey_with_idx(
+                    transaction_context,
+                    MAGIC_CONTEXT_IDX + 1,
+                )?,
+            ))
+        } else {
+            None
+        }
+    };
+
     // Determine id and slot
     let (undelegated_pubkeys, scheduled_intent) = {
         let construction_context = ConstructionContext::new(
@@ -88,6 +110,7 @@ pub(crate) fn process_schedule_intent_bundle(
             &signers,
             invoke_context,
             secure,
+            rent_pending_materialization_accounts,
         );
 
         // Collect all undelegated account refs.
@@ -143,9 +166,30 @@ pub(crate) fn process_schedule_intent_bundle(
         MAGIC_CONTEXT_IDX + 1,
     )?;
     if let Some(magic_fee_vault) = magic_fee_vault {
-        let chargable_accounts = scheduled_intent.get_all_committed_accounts();
-        let nonces = fetch_current_commit_nonces(&chargable_accounts)?;
-        let fee = scheduled_intent.calculate_fee(&nonces)?;
+        let rent_pending_pubkeys = scheduled_intent
+            .intent_bundle
+            .rent_pending_ata_materializations
+            .iter()
+            .map(|materialization| materialization.eata_pubkey)
+            .collect::<HashSet<_>>();
+        let chargable_accounts = scheduled_intent
+            .get_all_committed_accounts()
+            .into_iter()
+            .filter(|account| !rent_pending_pubkeys.contains(&account.pubkey))
+            .collect::<Vec<_>>();
+        let mut nonces = fetch_current_commit_nonces(&chargable_accounts)?;
+        for pubkey in rent_pending_pubkeys {
+            nonces.insert(pubkey, 0);
+        }
+        let fee = scheduled_intent
+            .calculate_fee(&nonces)?
+            .checked_add(calculate_rent_pending_ata_materialization_fee(
+                scheduled_intent
+                    .intent_bundle
+                    .rent_pending_ata_materializations
+                    .len(),
+            )?)
+            .ok_or(InstructionError::ArithmeticOverflow)?;
         charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
     } else if let Some(commit_accounts) =
         scheduled_intent.get_commit_intent_accounts()

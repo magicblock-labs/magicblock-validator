@@ -184,12 +184,18 @@ pub enum MagicBlockInstruction {
     /// - **2.** `[WRITE]` Vault account (source of rent refund)
     CloseEphemeralAccount,
 
-    /// Unsed instruction slot.
-    /// -- can be repurposed --
-    /// This variant was originally used for `ScheduleCommitFinalize`, but that
-    /// instruction was removed. It is intentionally left unused so the wire
-    /// discriminant can be repurposed in a future protocol update.
-    Unused,
+    /// Creates or verifies a local rent-pending projected ATA.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Payer/sponsor
+    /// - **1.** `[WRITE]`  Canonical ATA PDA
+    /// - **2.** `[]`       Mint
+    /// - **3.** `[]`       Token program
+    CreateRentPendingAta {
+        wallet_owner: Pubkey,
+        mint: Pubkey,
+        token_program: Pubkey,
+    },
 
     /// Clone a single account that fits in one transaction (<63KB data).
     ///

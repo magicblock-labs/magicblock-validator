@@ -1,4 +1,12 @@
-use dlp_api::{args::CallHandlerArgs, AccountSizeClass};
+use dlp_api::{
+    args::CallHandlerArgs,
+    pda::{
+        delegate_buffer_pda_from_delegated_account_and_owner_program,
+        delegation_metadata_pda_from_delegated_account,
+        delegation_record_pda_from_delegated_account,
+    },
+    AccountSizeClass,
+};
 use magicblock_committor_program::{
     instruction_builder::{
         close_buffer::{create_close_ix, CreateCloseIxArgs},
@@ -10,11 +18,15 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
-use magicblock_core::intent::BaseActionCallback;
+use magicblock_core::{
+    intent::BaseActionCallback,
+    token_programs::{RentPendingAtaMaterialization, EATA_PROGRAM_ID},
+};
 use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::BaseAction;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
 
 pub mod commit_finalize_task;
 pub mod commit_task;
@@ -45,6 +57,8 @@ pub enum TaskStrategy {
 
 #[derive(Clone, Debug)]
 pub enum BaseTaskImpl {
+    InitializeRentPendingAta(RentPendingAtaTask),
+    DelegateRentPendingAta(RentPendingAtaTask),
     Commit(CommitTask),
     CommitFinalize(CommitFinalizeTask),
     Finalize(FinalizeTask),
@@ -54,11 +68,25 @@ pub enum BaseTaskImpl {
 
 impl BaseTask for BaseTaskImpl {
     fn program_id(&self) -> Pubkey {
-        dlp_api::id()
+        match self {
+            Self::InitializeRentPendingAta(value)
+            | Self::DelegateRentPendingAta(value) => value.program_id(),
+            Self::Commit(value) => value.program_id(),
+            Self::CommitFinalize(value) => value.program_id(),
+            Self::Finalize(_) | Self::Undelegate(_) | Self::BaseAction(_) => {
+                dlp_api::id()
+            }
+        }
     }
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
+            Self::InitializeRentPendingAta(value) => {
+                value.initialize_instruction(validator)
+            }
+            Self::DelegateRentPendingAta(value) => {
+                value.delegate_instruction(validator)
+            }
             Self::Commit(value) => value.instruction(validator),
             Self::CommitFinalize(value) => value.instruction(validator),
             Self::Finalize(value) => value.instruction(validator),
@@ -79,6 +107,8 @@ impl BaseTask for BaseTaskImpl {
         match self {
             Self::Commit(value) => value.compute_units(),
             Self::CommitFinalize(value) => value.compute_units(),
+            Self::InitializeRentPendingAta(_) => 80_000,
+            Self::DelegateRentPendingAta(_) => 120_000,
             Self::BaseAction(value) => value.compute_units(),
             Self::Finalize(_) => 120_000,
             Self::Undelegate(_) => 120_000,
@@ -89,6 +119,8 @@ impl BaseTask for BaseTaskImpl {
         match self {
             Self::Commit(value) => value.accounts_size_budget(),
             Self::CommitFinalize(value) => value.accounts_size_budget(),
+            Self::InitializeRentPendingAta(_)
+            | Self::DelegateRentPendingAta(_) => 0,
             Self::BaseAction(value) => value.accounts_size_budget(),
             Self::Finalize(_) => {
                 dlp_api::instruction_builder::finalize_size_budget(
@@ -107,6 +139,8 @@ impl BaseTask for BaseTaskImpl {
 impl BaseTaskImpl {
     pub fn strategy(&self) -> TaskStrategy {
         match self {
+            Self::InitializeRentPendingAta(_)
+            | Self::DelegateRentPendingAta(_) => TaskStrategy::Args,
             Self::Commit(task) if task.is_buffer() => TaskStrategy::Buffer,
             Self::CommitFinalize(task) if task.is_buffer() => {
                 TaskStrategy::Buffer
@@ -119,6 +153,10 @@ impl BaseTaskImpl {
 impl LabelValue for BaseTaskImpl {
     fn value(&self) -> &str {
         match self {
+            Self::InitializeRentPendingAta(_) => {
+                "args_initialize_rent_pending_ata"
+            }
+            Self::DelegateRentPendingAta(_) => "args_delegate_rent_pending_ata",
             Self::Commit(task) => {
                 if task.is_buffer() {
                     "buffer_commit"
@@ -137,6 +175,70 @@ impl LabelValue for BaseTaskImpl {
             Self::Undelegate(_) => "args_undelegate",
             Self::BaseAction(BaseActionTask::V1(_)) => "args_action",
             Self::BaseAction(BaseActionTask::V2(_)) => "args_action_v2",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RentPendingAtaTask {
+    pub materialization: RentPendingAtaMaterialization,
+}
+
+impl RentPendingAtaTask {
+    const INITIALIZE_EPHEMERAL_ATA_IX: u8 = 0;
+    const DELEGATE_EPHEMERAL_ATA_IX: u8 = 4;
+
+    fn program_id(&self) -> Pubkey {
+        EATA_PROGRAM_ID
+    }
+
+    fn initialize_instruction(&self, validator: &Pubkey) -> Instruction {
+        let materialization = &self.materialization;
+        Instruction {
+            program_id: EATA_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(materialization.eata_pubkey, false),
+                AccountMeta::new(*validator, true),
+                AccountMeta::new_readonly(materialization.wallet_owner, false),
+                AccountMeta::new_readonly(materialization.mint, false),
+                AccountMeta::new_readonly(system_program::id(), false),
+            ],
+            data: vec![Self::INITIALIZE_EPHEMERAL_ATA_IX],
+        }
+    }
+
+    fn delegate_instruction(&self, validator: &Pubkey) -> Instruction {
+        let materialization = &self.materialization;
+        let buffer_pda =
+            delegate_buffer_pda_from_delegated_account_and_owner_program(
+                &materialization.eata_pubkey,
+                &EATA_PROGRAM_ID,
+            );
+        let delegation_record_pda =
+            delegation_record_pda_from_delegated_account(
+                &materialization.eata_pubkey,
+            );
+        let delegation_metadata_pda =
+            delegation_metadata_pda_from_delegated_account(
+                &materialization.eata_pubkey,
+            );
+        let mut data = Vec::with_capacity(33);
+        data.push(Self::DELEGATE_EPHEMERAL_ATA_IX);
+        data.extend_from_slice(validator.as_ref());
+
+        Instruction {
+            program_id: EATA_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new(*validator, true),
+                AccountMeta::new(materialization.eata_pubkey, false),
+                AccountMeta::new_readonly(EATA_PROGRAM_ID, false),
+                AccountMeta::new(buffer_pda, false),
+                AccountMeta::new(delegation_record_pda, false),
+                AccountMeta::new(delegation_metadata_pda, false),
+                AccountMeta::new_readonly(dlp_api::id(), false),
+                AccountMeta::new_readonly(system_program::id(), false),
+            ],
+            data,
         }
     }
 }
