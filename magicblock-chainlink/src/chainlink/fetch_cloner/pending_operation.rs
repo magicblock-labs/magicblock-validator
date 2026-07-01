@@ -48,12 +48,6 @@ impl PendingFailure {
     }
 }
 
-#[derive(Clone, Copy)]
-struct PendingFetchMetricLabels {
-    origin: AccountFetchOrigin,
-    layer: ChainlinkPendingFetchLayer,
-}
-
 pub(super) struct PendingWaiter {
     pending: Arc<HashMap<Pubkey, Pending>>,
     pubkey: Pubkey,
@@ -61,7 +55,6 @@ pub(super) struct PendingWaiter {
     waiter_id: WaiterId,
     receiver: oneshot::Receiver<PendingTerminal>,
     completed: bool,
-    origin: AccountFetchOrigin,
     layer: ChainlinkPendingFetchLayer,
     active_waiter_gauge: bool,
 }
@@ -73,7 +66,7 @@ impl PendingWaiter {
         generation: PendingGeneration,
         waiter_id: WaiterId,
         receiver: oneshot::Receiver<PendingTerminal>,
-        labels: PendingFetchMetricLabels,
+        layer: ChainlinkPendingFetchLayer,
         active_waiter_gauge: bool,
     ) -> Self {
         Self {
@@ -83,8 +76,7 @@ impl PendingWaiter {
             waiter_id,
             receiver,
             completed: false,
-            origin: labels.origin,
-            layer: labels.layer,
+            layer,
             active_waiter_gauge,
         }
     }
@@ -98,7 +90,6 @@ impl PendingWaiter {
     }
 
     fn finish_active_waiter(&mut self) {
-        let _origin = self.origin;
         if self.active_waiter_gauge {
             metrics::dec_chainlink_pending_fetch_waiters_gauge(self.layer);
             self.active_waiter_gauge = false;
@@ -228,7 +219,6 @@ pub(super) fn claim_or_join_pending(
     layer: ChainlinkPendingFetchLayer,
 ) -> PendingClaim {
     let (tx, rx) = oneshot::channel();
-    let labels = PendingFetchMetricLabels { origin, layer };
 
     let claim = match pending.entry(pubkey) {
         scc::hash_map::Entry::Vacant(entry) => {
@@ -253,7 +243,7 @@ pub(super) fn claim_or_join_pending(
                     generation,
                     waiter_id,
                     rx,
-                    labels,
+                    layer,
                     false,
                 ),
                 deadline,
@@ -287,7 +277,7 @@ pub(super) fn claim_or_join_pending(
                     generation,
                     waiter_id,
                     rx,
-                    labels,
+                    layer,
                     true,
                 ),
                 deadline,
