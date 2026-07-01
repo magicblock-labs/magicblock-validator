@@ -1,5 +1,4 @@
 use magicblock_program::SentCommit;
-use solana_transaction::Transaction;
 use tracing::{error, info};
 
 use crate::{
@@ -13,7 +12,7 @@ pub(crate) fn build_sent_commit(
     meta: ScheduledBaseIntentMeta,
     result: &IntentExecutorResult<ExecutionOutput>,
     execution_report: &IntentExecutionReport,
-) -> (Transaction, SentCommit) {
+) -> SentCommit {
     let error_message = result.as_ref().err().map(|err| format!("{:?}", err));
 
     let chain_signatures = match result {
@@ -75,5 +74,5 @@ pub(crate) fn build_sent_commit(
         callbacks_scheduling_results,
     };
 
-    (meta.intent_sent_transaction, sent_commit)
+    sent_commit
 }

@@ -59,7 +59,7 @@ pub struct ScheduledBaseIntentMeta {
     pub blockhash: Hash,
     pub payer: Pubkey,
     pub included_pubkeys: Vec<Pubkey>,
-    pub intent_sent_transaction: Transaction,
+    pub intent_sent_transaction: IntentSentTransaction,
     pub requested_undelegation: bool,
 }
 
@@ -71,8 +71,28 @@ impl ScheduledBaseIntentMeta {
             blockhash: intent.blockhash,
             payer: intent.payer,
             included_pubkeys: intent.get_all_committed_pubkeys(),
-            intent_sent_transaction: intent.sent_transaction.clone(),
+            intent_sent_transaction: if intent
+                .sent_transaction
+                .signatures
+                .is_empty()
+            {
+                IntentSentTransaction::Recovered
+            } else {
+                IntentSentTransaction::Known(intent.sent_transaction.clone())
+            },
             requested_undelegation: intent.has_undelegate_intent(),
         }
     }
+}
+
+/// Tracks the `ScheduledCommitSent` transaction for an in-flight intent.
+///
+/// Bundles recovered from the on-chain outbox have a stale `sent_transaction`
+/// (original blockhash is expired by restart time). `Recovered` signals that
+/// the transaction must be rebuilt at notification time with a fresh ER blockhash.
+#[derive(Default)]
+pub enum IntentSentTransaction {
+    Known(Transaction),
+    #[default]
+    Recovered,
 }

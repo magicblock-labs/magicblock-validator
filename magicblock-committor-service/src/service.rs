@@ -7,6 +7,7 @@ use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
 use magicblock_metrics::metrics::{self};
 use magicblock_program::{outbox_intent_bundles::OutboxIntentBundle, Pubkey};
+use solana_transaction::Transaction;
 use tokio::{
     task,
     task::{JoinError, JoinHandle},
@@ -183,10 +184,15 @@ where
         let mut outbox_bundles_reader = self.outbox_client.outbox_reader();
         loop {
             // Read by chunks in order not to overload `IntentExecutionEngine`
-            let intent_bundles_chunk = outbox_bundles_reader
+            let mut intent_bundles_chunk = outbox_bundles_reader
                 .read(RESCHEDULE_CHUNK_SIZE.get())
                 .await
                 .map_err(Into::into)?;
+            // Original blockhash is stale after restart; signal recovery so
+            // notify_commit_sent rebuilds the tx with a fresh ER blockhash.
+            intent_bundles_chunk.iter_mut().for_each(|b| {
+                b.inner.sent_transaction = Transaction::default()
+            });
             if intent_bundles_chunk.is_empty() {
                 return Ok(());
             }

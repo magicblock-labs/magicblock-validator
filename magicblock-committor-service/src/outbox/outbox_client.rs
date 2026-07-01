@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, sync::Arc, time::Duration};
+use std::{mem, num::NonZeroUsize, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use backoff::{future::retry, ExponentialBackoff};
@@ -31,7 +31,8 @@ use crate::{
     },
     outbox::{
         outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader,
-        utils::build_sent_commit, OutboxClient, ScheduledBaseIntentMeta,
+        utils::build_sent_commit, IntentSentTransaction, OutboxClient,
+        ScheduledBaseIntentMeta,
     },
 };
 
@@ -184,15 +185,21 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
 
     async fn notify_commit_sent(
         &self,
-        meta: ScheduledBaseIntentMeta,
+        mut meta: ScheduledBaseIntentMeta,
         result: &IntentExecutorResult<ExecutionOutput>,
         execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
-        let (sent_tx, sent_commit) =
-            build_sent_commit(meta, result, execution_report);
+        let tx = match mem::take(&mut meta.intent_sent_transaction) {
+            IntentSentTransaction::Known(tx) => tx,
+            IntentSentTransaction::Recovered => {
+                let blockhash = self.latest_block_provider.blockhash();
+                InstructionUtils::scheduled_commit_sent(meta.id, blockhash)
+            }
+        };
+        let sent_commit = build_sent_commit(meta, result, execution_report);
         // TODO(edwin): is using handle directly here ok? This could require Chainlink mechanics
         register_scheduled_commit_sent(sent_commit);
-        let txn = with_encoded(sent_tx).inspect_err(|err| {
+        let txn = with_encoded(tx).inspect_err(|err| {
             // Unreachable case, all intent transactions are smaller than 64KB by construction
             error!(error = ?err, "Failed to bincode intent transaction");
         })?;
