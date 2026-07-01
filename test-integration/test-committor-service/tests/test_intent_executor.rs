@@ -834,6 +834,7 @@ async fn test_cpi_limits_error_recovery() {
             &fixture.authority,
             &to_cleanup.optimized_tasks,
             &to_cleanup.lookup_tables_keys,
+            true,
         )
     });
     assert!(try_join_all(cleanup_futs).await.is_ok());
@@ -981,6 +982,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
             &fixture.authority,
             &to_cleanup.optimized_tasks,
             &to_cleanup.lookup_tables_keys,
+            true,
         )
     });
     assert!(try_join_all(cleanup_futs).await.is_ok());

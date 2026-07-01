@@ -1,12 +1,12 @@
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
 };
-use solana_program::{
-    program_error::ProgramError, program_option::COption, program_pack::Pack,
-    rent::Rent,
-};
+use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
 use solana_pubkey::{pubkey, Pubkey};
-use spl_token::state::{Account as SplAccount, AccountState};
+use spl_token::state::Account as SplAccount;
+use spl_token_2022::{
+    extension::StateWithExtensionsMut, state::Account as Token2022Account,
+};
 
 // Shared program IDs and helper functions for SPL Token, Associated Token, and eATA programs.
 
@@ -28,6 +28,142 @@ pub const EATA_PROGRAM_ID: Pubkey =
 
 pub const EPHEMERAL_ATA_LEN: usize = 80;
 const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
+
+/// Private WSOL is represented locally by the token amount that maps to eATA,
+/// not by claimable lamports on the projected ATA.
+/// Returns false when token-program data is malformed and a caller that already
+/// rewrote projected token data should reject the clone.
+pub fn normalize_native_token_account_for_local_clone(
+    account: &mut AccountSharedData,
+) -> bool {
+    let normalized = if account.owner() == &TOKEN_PROGRAM_ID {
+        normalize_legacy_native_token_account(account)
+    } else if account.owner() == &TOKEN_2022_PROGRAM_ID {
+        normalize_token_2022_native_token_account(account)
+    } else {
+        NativeTokenNormalization::NotNative
+    };
+
+    match normalized {
+        NativeTokenNormalization::NotNative => true,
+        NativeTokenNormalization::Invalid => false,
+        NativeTokenNormalization::Normalized(rent_exempt_reserve) => {
+            account.set_lamports(rent_exempt_reserve);
+            true
+        }
+    }
+}
+
+/// Projected ATAs are virtual views over eATA state. They must not be locally
+/// closeable; settlement owns materialization and closure on the base layer.
+pub fn normalize_projected_token_account_for_local_clone(
+    account: &mut AccountSharedData,
+) -> bool {
+    if account.owner() == &TOKEN_PROGRAM_ID {
+        normalize_legacy_projected_token_account(account)
+    } else if account.owner() == &TOKEN_2022_PROGRAM_ID {
+        normalize_token_2022_projected_token_account(account)
+    } else {
+        true
+    }
+}
+
+enum NativeTokenNormalization {
+    NotNative,
+    Normalized(u64),
+    Invalid,
+}
+
+fn normalize_legacy_native_token_account(
+    account: &mut AccountSharedData,
+) -> NativeTokenNormalization {
+    let Ok(mut token_account) = SplAccount::unpack(account.data()) else {
+        return NativeTokenNormalization::Invalid;
+    };
+    if token_account.mint != spl_token::native_mint::id() {
+        return NativeTokenNormalization::NotNative;
+    }
+
+    let COption::Some(rent_exempt_reserve) = token_account.is_native else {
+        return NativeTokenNormalization::NotNative;
+    };
+
+    token_account.is_native = COption::None;
+    token_account.close_authority = COption::Some(Pubkey::default());
+    if SplAccount::pack(token_account, account.data_as_mut_slice()).is_err() {
+        return NativeTokenNormalization::Invalid;
+    }
+    NativeTokenNormalization::Normalized(rent_exempt_reserve)
+}
+
+fn normalize_legacy_projected_token_account(
+    account: &mut AccountSharedData,
+) -> bool {
+    let Ok(mut token_account) = SplAccount::unpack(account.data()) else {
+        return false;
+    };
+    if token_account.mint == spl_token::native_mint::id() {
+        if let COption::Some(rent_exempt_reserve) = token_account.is_native {
+            token_account.is_native = COption::None;
+            account.set_lamports(rent_exempt_reserve);
+        }
+    }
+    token_account.close_authority = COption::Some(Pubkey::default());
+    SplAccount::pack(token_account, account.data_as_mut_slice()).is_ok()
+}
+
+fn normalize_token_2022_native_token_account(
+    account: &mut AccountSharedData,
+) -> NativeTokenNormalization {
+    let Ok(mut state) = StateWithExtensionsMut::<Token2022Account>::unpack(
+        account.data_as_mut_slice(),
+    ) else {
+        return NativeTokenNormalization::Invalid;
+    };
+    if state.base.mint != spl_token_2022::native_mint::id() {
+        return NativeTokenNormalization::NotNative;
+    }
+
+    let COption::Some(rent_exempt_reserve) = state.base.is_native else {
+        return NativeTokenNormalization::NotNative;
+    };
+
+    state.base.is_native = COption::None;
+    state.base.close_authority = COption::Some(Pubkey::default());
+    state.pack_base();
+    NativeTokenNormalization::Normalized(rent_exempt_reserve)
+}
+
+fn normalize_token_2022_projected_token_account(
+    account: &mut AccountSharedData,
+) -> bool {
+    let rent_exempt_reserve = {
+        let Ok(mut state) = StateWithExtensionsMut::<Token2022Account>::unpack(
+            account.data_as_mut_slice(),
+        ) else {
+            return false;
+        };
+        let rent_exempt_reserve =
+            if state.base.mint == spl_token_2022::native_mint::id() {
+                match state.base.is_native {
+                    COption::Some(rent_exempt_reserve) => {
+                        state.base.is_native = COption::None;
+                        Some(rent_exempt_reserve)
+                    }
+                    COption::None => None,
+                }
+            } else {
+                None
+            };
+        state.base.close_authority = COption::Some(Pubkey::default());
+        state.pack_base();
+        rent_exempt_reserve
+    };
+    if let Some(rent_exempt_reserve) = rent_exempt_reserve {
+        account.set_lamports(rent_exempt_reserve);
+    }
+    true
+}
 
 /// Derives the standard Associated Token Account (ATA) address for the given wallet owner and token mint.
 ///
@@ -255,16 +391,6 @@ pub fn try_remap_ata_to_eata(
 
 // ---------------- eATA -> ATA projection helpers ----------------
 
-/// Try to convert an eATA account data buffer into a concrete SPL Token
-/// ATA account (AccountSharedData) when the owning program matches the
-/// expected eATA program. This is an extension trait implemented for
-/// AccountSharedData.
-pub trait MaybeIntoAta<T> {
-    /// Attempts to convert `self` to an ATA form if `owner_program` equals
-    /// the eATA program id. Returns None if not an eATA or parsing fails.
-    fn maybe_into_ata(&self, owner_program: Pubkey) -> Option<T>;
-}
-
 /// Minimal ephemeral representation of an SPL token account used to build
 /// a real AccountSharedData with correct layout and rent.
 #[repr(C)]
@@ -327,39 +453,10 @@ impl EphemeralAta {
         let mut projected = ata_account.clone();
         projected.data_as_mut_slice()[64..72]
             .copy_from_slice(&self.amount.to_le_bytes());
+        if !normalize_projected_token_account_for_local_clone(&mut projected) {
+            return None;
+        }
         Some(projected)
-    }
-}
-
-impl TryFrom<EphemeralAta> for AccountSharedData {
-    type Error = ProgramError;
-
-    fn try_from(val: EphemeralAta) -> Result<Self, Self::Error> {
-        let token_account = SplAccount {
-            mint: val.mint,
-            owner: val.owner,
-            amount: val.amount,
-            delegate: COption::None,
-            state: AccountState::Initialized,
-            is_native: COption::None,
-            delegated_amount: 0,
-            close_authority: COption::None,
-        };
-
-        let mut data = vec![0u8; SplAccount::LEN];
-        SplAccount::pack(token_account, &mut data)?;
-
-        let lamports = Rent::default().minimum_balance(data.len());
-
-        let account = Account {
-            owner: spl_token::id(),
-            data,
-            lamports,
-            executable: false,
-            ..Default::default()
-        };
-
-        Ok(AccountSharedData::from(account))
     }
 }
 
@@ -382,16 +479,163 @@ impl From<EphemeralAta> for Account {
     }
 }
 
-impl MaybeIntoAta<AccountSharedData> for AccountSharedData {
-    fn maybe_into_ata(
-        &self,
-        owner_program: Pubkey,
-    ) -> Option<AccountSharedData> {
-        if owner_program != EATA_PROGRAM_ID {
-            return None;
-        }
+#[cfg(test)]
+mod tests {
+    use spl_token::state::AccountState;
 
-        let eata = EphemeralAta::try_from_account_data(self.data())?;
-        eata.try_into().ok()
+    use super::*;
+
+    #[test]
+    fn project_non_native_ata_is_uncloseable() {
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let close_authority = Pubkey::new_unique();
+        let amount = 100_000_000;
+        let rent_exempt_reserve =
+            Rent::default().minimum_balance(SplAccount::LEN);
+        let token_account = SplAccount {
+            mint,
+            owner: wallet_owner,
+            amount: 0,
+            delegate: COption::None,
+            state: AccountState::Initialized,
+            is_native: COption::None,
+            delegated_amount: 0,
+            close_authority: COption::Some(close_authority),
+        };
+
+        let mut data = vec![0u8; SplAccount::LEN];
+        SplAccount::pack(token_account, &mut data).unwrap();
+        let base_ata = AccountSharedData::from(Account {
+            owner: TOKEN_PROGRAM_ID,
+            data,
+            lamports: rent_exempt_reserve,
+            executable: false,
+            ..Default::default()
+        });
+
+        let eata = EphemeralAta {
+            owner: wallet_owner,
+            mint,
+            amount,
+            bump: 0,
+        };
+
+        let projected = eata
+            .project_into_ata_account(&base_ata)
+            .expect("ATA should project");
+        assert_eq!(projected.lamports(), rent_exempt_reserve);
+
+        let projected_token =
+            SplAccount::unpack(projected.data()).expect("unpack projected");
+        assert_eq!(projected_token.amount, amount);
+        assert_eq!(projected_token.is_native, COption::None);
+        assert_eq!(
+            projected_token.close_authority,
+            COption::Some(Pubkey::default())
+        );
+    }
+
+    #[test]
+    fn project_native_ata_uses_data_only_local_amount() {
+        let wallet_owner = Pubkey::new_unique();
+        let mint = spl_token::native_mint::id();
+        let amount = 100_000_000;
+        let rent_exempt_reserve =
+            Rent::default().minimum_balance(SplAccount::LEN);
+        let token_account = SplAccount {
+            mint,
+            owner: wallet_owner,
+            amount: 0,
+            delegate: COption::None,
+            state: AccountState::Initialized,
+            is_native: COption::Some(rent_exempt_reserve),
+            delegated_amount: 0,
+            close_authority: COption::None,
+        };
+
+        let mut data = vec![0u8; SplAccount::LEN];
+        SplAccount::pack(token_account, &mut data).unwrap();
+        let base_ata = AccountSharedData::from(Account {
+            owner: TOKEN_PROGRAM_ID,
+            data,
+            lamports: rent_exempt_reserve,
+            executable: false,
+            ..Default::default()
+        });
+
+        let eata = EphemeralAta {
+            owner: wallet_owner,
+            mint,
+            amount,
+            bump: 0,
+        };
+
+        let projected = eata
+            .project_into_ata_account(&base_ata)
+            .expect("native ATA should project");
+        assert_eq!(projected.lamports(), rent_exempt_reserve);
+
+        let projected_token =
+            SplAccount::unpack(projected.data()).expect("unpack projected");
+        assert_eq!(projected_token.amount, amount);
+        assert_eq!(projected_token.is_native, COption::None);
+        assert_eq!(
+            projected_token.close_authority,
+            COption::Some(Pubkey::default())
+        );
+    }
+
+    #[test]
+    fn project_token_2022_non_native_ata_is_uncloseable() {
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let close_authority = Pubkey::new_unique();
+        let amount = 100_000_000;
+        let rent_exempt_reserve =
+            Rent::default().minimum_balance(Token2022Account::LEN);
+        let token_account = Token2022Account {
+            mint,
+            owner: wallet_owner,
+            amount: 0,
+            delegate: COption::None,
+            state: spl_token_2022::state::AccountState::Initialized,
+            is_native: COption::None,
+            delegated_amount: 0,
+            close_authority: COption::Some(close_authority),
+        };
+
+        let mut data = vec![0u8; Token2022Account::LEN];
+        Token2022Account::pack(token_account, &mut data).unwrap();
+        let base_ata = AccountSharedData::from(Account {
+            owner: TOKEN_2022_PROGRAM_ID,
+            data,
+            lamports: rent_exempt_reserve,
+            executable: false,
+            ..Default::default()
+        });
+
+        let eata = EphemeralAta {
+            owner: wallet_owner,
+            mint,
+            amount,
+            bump: 0,
+        };
+
+        let projected = eata
+            .project_into_ata_account(&base_ata)
+            .expect("Token-2022 ATA should project");
+        assert_eq!(projected.owner(), &TOKEN_2022_PROGRAM_ID);
+        assert_eq!(projected.lamports(), rent_exempt_reserve);
+        assert_eq!(projected.data().len(), Token2022Account::LEN);
+
+        let projected_token = Token2022Account::unpack(projected.data())
+            .expect("unpack projected Token-2022 ATA");
+        assert_eq!(projected_token.amount, amount);
+        assert_eq!(projected_token.is_native, COption::None);
+        assert_eq!(
+            projected_token.close_authority,
+            COption::Some(Pubkey::default())
+        );
     }
 }

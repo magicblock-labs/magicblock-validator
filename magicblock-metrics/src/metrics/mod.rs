@@ -172,6 +172,10 @@ lazy_static::lazy_static! {
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
 
+    static ref PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT: IntCounter = IntCounter::new(
+        "program_subscription_discovered_dlp_update_delegated_elsewhere_count", "DLP-owned subscription updates that, after fetching the delegation record, were found delegated to another validator and dropped",
+    ).unwrap();
+
     static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
@@ -447,6 +451,14 @@ lazy_static::lazy_static! {
         ),
     ).unwrap();
 
+    static ref COMMITTOR_INTENT_ALT_COUNT: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_intent_alt_count",
+            "Number of address lookup tables used per intent transaction (only recorded when ALTs are present)"
+        )
+        .buckets(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0])
+    ).unwrap();
+
     static ref COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME: Histogram = Histogram::with_opts(
         HistogramOpts::new(
             "committor_fetch_commit_nonces_wait_time_second",
@@ -608,6 +620,7 @@ pub(crate) fn register() {
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
+        register!(PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT);
@@ -619,6 +632,7 @@ pub(crate) fn register() {
         register!(COMMITTOR_INTENT_CU_USAGE);
         register!(COMMITTOR_INTENT_TASK_PREPARATION_TIME);
         register!(COMMITTOR_INTENT_ALT_PREPARATION_TIME);
+        register!(COMMITTOR_INTENT_ALT_COUNT);
         register!(COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME);
         register!(ENSURE_ACCOUNTS_TIME);
         register!(RPC_REQUEST_HANDLING_TIME);
@@ -781,6 +795,10 @@ pub fn inc_evicted_accounts_count() {
     EVICTED_ACCOUNTS_COUNT.inc();
 }
 
+pub fn inc_discovered_dlp_update_delegated_elsewhere() {
+    PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT.inc();
+}
+
 pub fn inc_committor_intents_count() {
     COMMITTOR_INTENTS_COUNT.inc()
 }
@@ -832,6 +850,10 @@ pub fn observe_committor_intent_task_preparation_time<
 
 pub fn observe_committor_intent_alt_preparation_time() -> HistogramTimer {
     COMMITTOR_INTENT_ALT_PREPARATION_TIME.start_timer()
+}
+
+pub fn observe_committor_intent_alt_count(count: usize) {
+    COMMITTOR_INTENT_ALT_COUNT.observe(count as f64);
 }
 
 pub fn start_fetch_commit_nonces_wait_timer() -> HistogramTimer {

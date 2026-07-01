@@ -1,4 +1,5 @@
 use magicblock_accounts_db::error::AccountsDbError;
+use magicblock_committor_service::service::IntentExecutionServiceError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
@@ -14,9 +15,6 @@ pub enum ApiError {
 
     #[error("Accounts error: {0}")]
     AccountsError(Box<magicblock_accounts::errors::AccountsError>),
-
-    #[error("AccountCloner error: {0}")]
-    AccountClonerError(Box<magicblock_account_cloner::AccountClonerError>),
 
     #[error("Ledger error: {0}")]
     LedgerError(Box<magicblock_ledger::errors::LedgerError>),
@@ -43,6 +41,9 @@ pub enum ApiError {
     CommittorServiceError(
         Box<magicblock_committor_service::error::CommittorServiceError>,
     ),
+
+    #[error("IntentExecutionServiceError: {0}")]
+    IntentExecutionServiceError(#[from] IntentExecutionServiceError),
 
     #[error("Failed to load programs into bank: {0}")]
     FailedToLoadProgramsIntoBank(String),
@@ -109,12 +110,6 @@ pub enum ApiError {
 impl From<magicblock_accounts::errors::AccountsError> for ApiError {
     fn from(e: magicblock_accounts::errors::AccountsError) -> Self {
         Self::AccountsError(Box::new(e))
-    }
-}
-
-impl From<magicblock_account_cloner::AccountClonerError> for ApiError {
-    fn from(e: magicblock_account_cloner::AccountClonerError) -> Self {
-        Self::AccountClonerError(Box::new(e))
     }
 }
 

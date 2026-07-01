@@ -9,10 +9,6 @@ use std::{
 };
 
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_accounts::{
-    scheduled_commits_processor::ScheduledCommitsProcessorImpl,
-    ScheduledCommitsProcessor,
-};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
     initialize_aperture,
@@ -23,7 +19,9 @@ use magicblock_chainlink::{
     ProdInnerChainlink,
 };
 use magicblock_committor_service::{
-    config::ChainConfig, BaseIntentCommittor, CommittorService,
+    committor_processor::CommittorProcessor,
+    config::ChainConfig,
+    service::{intent_client::InternalIntentRpcClient, IntentExecutionService},
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{
@@ -94,12 +92,15 @@ use crate::{
         write_validator_keypair_to_ledger,
     },
     magic_sys_adapter::MagicSysAdapter,
-    tickers::{init_slot_ticker, init_system_metrics_ticker},
+    tickers::init_system_metrics_ticker,
 };
 
 type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
+
+type IntentExecutionServiceImpl =
+    IntentExecutionService<InternalIntentRpcClient<LatestBlock>>;
 
 // -----------------
 // MagicValidator
@@ -111,10 +112,8 @@ pub struct MagicValidator {
     accountsdb: Arc<AccountsDb>,
     ledger: Arc<Ledger>,
     ledger_truncator: LedgerTruncator,
-    slot_ticker: Option<tokio::task::JoinHandle<()>>,
-    committor_service: Option<Arc<CommittorService>>,
+    intent_execution_service: IntentExecutionServiceImpl,
     replication_service: Option<ReplicationService>,
-    scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     faucet_keypair: Option<Keypair>,
@@ -236,18 +235,6 @@ impl MagicValidator {
             .then(Arc::<AtomicU64>::default);
 
         let step_start = Instant::now();
-        let committor_service = Self::init_committor_service(
-            &config,
-            ledger.latest_block(),
-            shared_chain_slot.clone(),
-        )
-        .await?;
-        log_timing("startup", "committor_service_init", step_start);
-        init_magic_sys(Arc::new(MagicSysAdapter::new(
-            committor_service.clone(),
-        )));
-
-        let step_start = Instant::now();
         let chainlink = Arc::new(
             Self::init_chainlink(
                 &config,
@@ -259,6 +246,30 @@ impl MagicValidator {
             .await?,
         );
         log_timing("startup", "chainlink_init", step_start);
+
+        let step_start = Instant::now();
+        let committor_processor = {
+            let processor = Self::init_committor_processor(
+                &config,
+                ledger.latest_block(),
+                &shared_chain_slot,
+            )?;
+            Arc::new(processor)
+        };
+        let intent_execution_service = Self::init_intent_execution_service(
+            &accountsdb,
+            &chainlink,
+            &dispatch.transaction_scheduler,
+            ledger.latest_block(),
+            &committor_processor,
+            config.ledger.block_time,
+            &token,
+        );
+        log_timing("startup", "committor_service_init", step_start);
+        init_magic_sys(Arc::new(MagicSysAdapter::new(
+            tokio::runtime::Handle::current(),
+            committor_processor.clone(),
+        )));
 
         let replication_service =
             if let Some((broker_source, is_fresh_start)) = broker {
@@ -318,16 +329,6 @@ impl MagicValidator {
             token.clone(),
         );
         log_timing("startup", "system_metrics_ticker_start", step_start);
-
-        let scheduled_commits_processor =
-            committor_service.as_ref().map(|committor_service| {
-                Arc::new(ScheduledCommitsProcessorImpl::new(
-                    committor_service.clone(),
-                    chainlink.clone(),
-                    dispatch.transaction_scheduler.clone(),
-                    ledger.latest_block().clone(),
-                ))
-            });
 
         let step_start = Instant::now();
         load_upgradeable_programs(
@@ -452,11 +453,8 @@ impl MagicValidator {
             config,
             exit,
             _metrics: (metrics_service, system_metrics_ticker),
-            // NOTE: set during [Self::start]
-            slot_ticker: None,
-            committor_service,
+            intent_execution_service,
             replication_service,
-            scheduled_commits_processor,
             token,
             ledger,
             ledger_truncator,
@@ -475,41 +473,64 @@ impl MagicValidator {
         })
     }
 
-    #[instrument(skip(config, latest_block))]
-    async fn init_committor_service(
+    pub fn init_committor_processor(
         config: &ValidatorParams,
         latest_block: &LatestBlock,
-        chain_slot: Option<Arc<AtomicU64>>,
-    ) -> ApiResult<Option<Arc<CommittorService>>> {
+        shared_chain_slot: &Option<Arc<AtomicU64>>,
+    ) -> ApiResult<CommittorProcessor> {
+        let authority = config.validator.keypair.insecure_clone();
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
-        debug!(path = %committor_persist_path.display(), "Initializing committor service");
+        let base_chain_config = ChainConfig {
+            rpc_uri: config.rpc_url().to_owned(),
+            commitment: CommitmentConfig::confirmed(),
+            websocket_uri: config
+                .websocket_urls()
+                .next()
+                .map(ToOwned::to_owned),
+            compute_budget_config: ComputeBudgetConfig::new(
+                config.commit.compute_unit_price,
+            ),
+            actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
+        };
+
         // TODO(thlorenz): if startup roles change, revisit whether this service is needed for that role.
         let actions_callback_executor = ActionsCallbackService::new(
             Arc::new(RpcClient::new(config.aperture.listen.http())),
             config.validator.keypair.insecure_clone(),
             latest_block.clone(),
         );
-        let committor_service = Some(Arc::new(CommittorService::try_start(
-            config.validator.keypair.insecure_clone(),
+        Ok(CommittorProcessor::try_new(
+            authority,
             committor_persist_path,
-            ChainConfig {
-                rpc_uri: config.rpc_url().to_owned(),
-                websocket_uri: config
-                    .websocket_urls()
-                    .next()
-                    .map(ToOwned::to_owned),
-                commitment: CommitmentConfig::confirmed(),
-                compute_budget_config: ComputeBudgetConfig::new(
-                    config.commit.compute_unit_price,
-                ),
-                actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
-            },
-            chain_slot,
+            base_chain_config,
+            shared_chain_slot.clone(),
             actions_callback_executor,
-        )?));
+        )?)
+    }
 
-        Ok(committor_service)
+    fn init_intent_execution_service(
+        accounts_db: &Arc<AccountsDb>,
+        chainlink: &Arc<ChainlinkImpl>,
+        transaction_scheduler: &TransactionSchedulerHandle,
+        latest_block: &LatestBlock,
+        committor_processor: &Arc<CommittorProcessor>,
+        slot_interval: Duration,
+        cancellation_token: &CancellationToken,
+    ) -> IntentExecutionServiceImpl {
+        let intent_client = InternalIntentRpcClient::new(
+            accounts_db.clone(),
+            transaction_scheduler.clone(),
+            latest_block.clone(),
+        );
+
+        IntentExecutionServiceImpl::new(
+            chainlink.clone(),
+            intent_client,
+            committor_processor.clone(),
+            slot_interval,
+            cancellation_token.clone(),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1027,11 +1048,6 @@ impl MagicValidator {
                         ))
                     })?;
             }
-            // Recovery of persisted pending commit intents reads the local accounts
-            // bank for delegation checks, so it must run only after replay + reset.
-            if let Some(processor) = self.scheduled_commits_processor.as_ref() {
-                processor.spawn_pending_intents_recovery();
-            }
         }
 
         // Notify the scheduler that ledger replay and bank cleanup is complete.
@@ -1075,6 +1091,10 @@ impl MagicValidator {
                 .start(frequency, self.config.rpc_url().to_owned());
             log_timing("startup", "claim_fees_task_start", step_start);
         }
+
+        let step_start = Instant::now();
+        self.intent_execution_service.start()?;
+        log_timing("startup", "intent_execution_service_start", step_start);
 
         let step_start = Instant::now();
         self.ledger_truncator.start();
@@ -1127,16 +1147,6 @@ impl MagicValidator {
                     }
                 }
             });
-            let step_start = Instant::now();
-            self.slot_ticker = Some(init_slot_ticker(
-                self.accountsdb.clone(),
-                &self.scheduled_commits_processor,
-                self.ledger.latest_block().clone(),
-                self.config.ledger.block_time,
-                self.transaction_scheduler.clone(),
-                self.exit.clone(),
-            ));
-            log_timing("startup", "slot_ticker_start", step_start);
         }
 
         Ok(())
@@ -1151,22 +1161,12 @@ impl MagicValidator {
         // Ordering is important here
         // Commitor service shall be stopped last
         self.token.cancel();
-        if let Some(ref scheduled_commits_processor) =
-            self.scheduled_commits_processor
-        {
-            let step_start = Instant::now();
-            scheduled_commits_processor.stop();
-            log_timing(
-                "shutdown",
-                "scheduled_commits_processor_stop",
-                step_start,
-            );
+
+        let step_start = Instant::now();
+        if let Err(err) = self.intent_execution_service.stop().await {
+            error!(error =? err, "Failure during stopping Intent Execution Service")
         }
-        if let Some(ref committor_service) = self.committor_service {
-            let step_start = Instant::now();
-            committor_service.stop();
-            log_timing("shutdown", "committor_service_stop", step_start);
-        }
+        log_timing("shutdown", "intent_execution_service_stop", step_start);
 
         let step_start = Instant::now();
         self.claim_fees_task.stop().await;
@@ -1175,11 +1175,6 @@ impl MagicValidator {
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
-        if let Some(handle) = self.slot_ticker {
-            let step_start = Instant::now();
-            let _ = handle.await;
-            log_timing("shutdown", "slot_ticker_join", step_start);
-        }
         let step_start = Instant::now();
         if let Err(err) = self.ledger_truncator.join() {
             error!(error = ?err, "Ledger truncator did not gracefully exit");
