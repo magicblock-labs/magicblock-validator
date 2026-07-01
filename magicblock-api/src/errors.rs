@@ -36,7 +36,7 @@ pub enum ApiError {
     #[error("Failed to delegate magic fee vault for validator '{0}': {1}")]
     FailedToDelegateMagicFeeVault(Pubkey, String),
 
-    #[error("Failed to fund and delegate task scheduler faucet '{0}': {1}")]
+    #[error("Failed to delegate task scheduler faucet '{0}': {1}")]
     FailedToDelegateFaucet(Pubkey, String),
 
     #[error("CommittorServiceError")]
