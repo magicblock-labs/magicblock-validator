@@ -528,6 +528,7 @@ mod tests {
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
             standalone_actions: vec![],
+            rent_pending_ata_materializations: vec![],
         }
     }
 
@@ -541,6 +542,7 @@ mod tests {
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
             standalone_actions: vec![],
+            rent_pending_ata_materializations: vec![],
         }
     }
 
@@ -554,6 +556,7 @@ mod tests {
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
             standalone_actions: vec![],
+            rent_pending_ata_materializations: vec![],
         }
     }
 
@@ -564,6 +567,7 @@ mod tests {
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
             standalone_actions: vec![],
+            rent_pending_ata_materializations: vec![],
         }
     }
 

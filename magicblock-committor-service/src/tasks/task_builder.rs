@@ -20,7 +20,7 @@ use crate::{
     tasks::{
         commit_task::{CommitDelivery, CommitTask},
         BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
-        CommitFinalizeTask, FinalizeTask, UndelegateTask,
+        CommitFinalizeTask, FinalizeTask, RentPendingAtaTask, UndelegateTask,
     },
 };
 
@@ -143,7 +143,17 @@ impl TaskBuilderImpl {
         persister: &Option<P>,
     ) -> TaskBuilderResult<CommitStageTaskInfo> {
         // Fetch necessary data for BaseTasks creation
-        let all_committed_accounts = intent_bundle.get_all_committed_accounts();
+        let rent_pending_pubkeys = intent_bundle
+            .intent_bundle
+            .rent_pending_ata_materializations
+            .iter()
+            .map(|materialization| materialization.eata_pubkey)
+            .collect::<std::collections::HashSet<_>>();
+        let all_committed_accounts = intent_bundle
+            .get_all_committed_accounts()
+            .into_iter()
+            .filter(|account| !rent_pending_pubkeys.contains(&account.pubkey))
+            .collect::<Vec<_>>();
         // Get commit nonces and base accounts
         let min_context_slot = all_committed_accounts
             .iter()
@@ -162,8 +172,14 @@ impl TaskBuilderImpl {
                 min_context_slot
             )
         );
-        let commit_nonces =
+        let mut commit_nonces =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
+        for materialization in &intent_bundle
+            .intent_bundle
+            .rent_pending_ata_materializations
+        {
+            commit_nonces.insert(materialization.eata_pubkey, 1);
+        }
         let base_accounts = base_accounts.unwrap_or_else(|err| {
             tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
             Default::default()
@@ -236,6 +252,22 @@ impl TasksBuilder for TaskBuilderImpl {
             persister,
         )
         .await?;
+
+        tasks.extend(
+            intent_bundle
+                .intent_bundle
+                .rent_pending_ata_materializations
+                .iter()
+                .flat_map(|materialization| {
+                    let task = RentPendingAtaTask {
+                        materialization: materialization.clone(),
+                    };
+                    [
+                        BaseTaskImpl::InitializeRentPendingAta(task.clone()),
+                        BaseTaskImpl::DelegateRentPendingAta(task),
+                    ]
+                }),
+        );
 
         // Create tasks per intent type
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
@@ -541,3 +573,219 @@ impl TaskBuilderError {
 }
 
 pub type TaskBuilderResult<T, E = TaskBuilderError> = Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use magicblock_core::token_programs::{
+        EphemeralAta, RentPendingAtaMaterialization, EATA_PROGRAM_ID,
+        TOKEN_PROGRAM_ID,
+    };
+    use magicblock_program::magic_scheduled_base_intent::{
+        MagicIntentBundle, ScheduledIntentBundle,
+    };
+    use solana_hash::Hash;
+    use solana_transaction::Transaction;
+
+    use super::*;
+    use crate::tasks::BaseTask;
+
+    struct EmptyFetcher;
+
+    #[async_trait]
+    impl TaskInfoFetcher for EmptyFetcher {
+        async fn fetch_next_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _min_context_slot: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            assert!(pubkeys.is_empty());
+            Ok(HashMap::new())
+        }
+
+        async fn fetch_current_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _min_context_slot: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            assert!(pubkeys.is_empty());
+            Ok(HashMap::new())
+        }
+
+        async fn fetch_rent_reimbursements(
+            &self,
+            _pubkeys: &[Pubkey],
+            _min_context_slot: u64,
+        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_base_accounts(
+            &self,
+            pubkeys: &[Pubkey],
+            _min_context_slot: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+            assert!(pubkeys.is_empty());
+            Ok(HashMap::new())
+        }
+    }
+
+    fn rent_pending_intent(
+        commit_and_undelegate: bool,
+    ) -> (ScheduledIntentBundle, Pubkey) {
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let eata_pubkey = Pubkey::new_unique();
+        let validator = Pubkey::new_unique();
+        let eata = EphemeralAta {
+            owner: wallet_owner,
+            mint,
+            amount: 7,
+            bump: 255,
+        };
+        let committed_account = CommittedAccount {
+            pubkey: eata_pubkey,
+            account: eata.into(),
+            remote_slot: 0,
+        };
+        let materialization = RentPendingAtaMaterialization {
+            ata_pubkey: Pubkey::new_unique(),
+            eata_pubkey,
+            token_program: TOKEN_PROGRAM_ID,
+            wallet_owner,
+            mint,
+            token_account_data_len: 165,
+            validator,
+            delegated_payer: Pubkey::new_unique(),
+            delegated_vault: Pubkey::new_unique(),
+        };
+        let intent_bundle = if commit_and_undelegate {
+            MagicIntentBundle {
+                commit_and_undelegate: Some(CommitAndUndelegate {
+                    commit_action: CommitType::Standalone(vec![
+                        committed_account,
+                    ]),
+                    undelegate_action: UndelegateType::Standalone,
+                }),
+                rent_pending_ata_materializations: vec![materialization],
+                ..Default::default()
+            }
+        } else {
+            MagicIntentBundle {
+                commit: Some(CommitType::Standalone(vec![committed_account])),
+                rent_pending_ata_materializations: vec![materialization],
+                ..Default::default()
+            }
+        };
+
+        (
+            ScheduledIntentBundle {
+                id: 42,
+                slot: 0,
+                blockhash: Hash::default(),
+                sent_transaction: Transaction::default(),
+                payer: Pubkey::new_unique(),
+                intent_bundle,
+            },
+            validator,
+        )
+    }
+
+    #[tokio::test]
+    async fn rent_pending_commit_prepends_eata_materialization() {
+        let fetcher = Arc::new(EmptyFetcher);
+        let (intent, validator) = rent_pending_intent(false);
+
+        let tasks = TaskBuilderImpl::commit_tasks(
+            &fetcher,
+            &intent,
+            &None::<crate::persist::IntentPersisterImpl>,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            tasks.as_slice(),
+            [
+                BaseTaskImpl::InitializeRentPendingAta(_),
+                BaseTaskImpl::DelegateRentPendingAta(_),
+                BaseTaskImpl::Commit(_)
+            ]
+        ));
+        let delegate_ix = tasks[1].instruction(&validator);
+        assert_eq!(delegate_ix.program_id, EATA_PROGRAM_ID);
+        assert_eq!(delegate_ix.data[0], 4);
+        assert_eq!(&delegate_ix.data[1..], validator.as_ref());
+        let BaseTaskImpl::Commit(commit) = &tasks[2] else {
+            panic!("expected commit task");
+        };
+        assert_eq!(commit.commit_id, 1);
+    }
+
+    #[tokio::test]
+    async fn rent_pending_undelegation_prepends_validator_specific_eata_delegate(
+    ) {
+        let fetcher = Arc::new(EmptyFetcher);
+        let (intent, validator) = rent_pending_intent(true);
+
+        let tasks = TaskBuilderImpl::commit_tasks(
+            &fetcher,
+            &intent,
+            &None::<crate::persist::IntentPersisterImpl>,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            tasks.as_slice(),
+            [
+                BaseTaskImpl::InitializeRentPendingAta(_),
+                BaseTaskImpl::DelegateRentPendingAta(_),
+                BaseTaskImpl::Commit(_)
+            ]
+        ));
+        let delegate_ix = tasks[1].instruction(&validator);
+        assert_eq!(delegate_ix.data[0], 4);
+        assert_eq!(&delegate_ix.data[1..], validator.as_ref());
+    }
+
+    #[tokio::test]
+    async fn rent_pending_conflicting_base_delegation_is_gated_by_eata_delegate(
+    ) {
+        let fetcher = Arc::new(EmptyFetcher);
+
+        for commit_and_undelegate in [false, true] {
+            let (intent, validator) =
+                rent_pending_intent(commit_and_undelegate);
+            let eata_pubkey =
+                intent.intent_bundle.rent_pending_ata_materializations[0]
+                    .eata_pubkey;
+
+            let tasks = TaskBuilderImpl::commit_tasks(
+                &fetcher,
+                &intent,
+                &None::<crate::persist::IntentPersisterImpl>,
+            )
+            .await
+            .unwrap();
+
+            // If base creates and delegates the eATA to another validator after
+            // local rent-pending creation, e-token delegation is the failing
+            // validator-mismatch gate and must precede DLP commit work.
+            assert!(matches!(
+                tasks.as_slice(),
+                [
+                    BaseTaskImpl::InitializeRentPendingAta(_),
+                    BaseTaskImpl::DelegateRentPendingAta(_),
+                    BaseTaskImpl::Commit(_)
+                ]
+            ));
+            let delegate_ix = tasks[1].instruction(&validator);
+            assert_eq!(delegate_ix.program_id, EATA_PROGRAM_ID);
+            assert_eq!(delegate_ix.accounts[0].pubkey, validator);
+            assert!(delegate_ix.accounts[0].is_signer);
+            assert_eq!(delegate_ix.accounts[1].pubkey, eata_pubkey);
+            assert_eq!(delegate_ix.data[0], 4);
+            assert_eq!(&delegate_ix.data[1..], validator.as_ref());
+        }
+    }
+}
