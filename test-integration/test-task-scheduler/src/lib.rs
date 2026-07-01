@@ -73,21 +73,9 @@ fn validator_config(temp_dir: PathBuf, faucet: &Keypair) -> ValidatorParams {
 fn airdrop_faucet(faucet: &Keypair) {
     let chain_ctx = IntegrationTestContext::try_new_chain_only()
         .expect("failed to connect to base chain to fund faucet");
-    let validator = LoadedAccounts::with_delegation_program_test_authority()
-        .validator_authority();
-    let payer = Keypair::new();
-    chain_ctx
-        .airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
-        .expect("failed to airdrop faucet delegation payer");
     chain_ctx
         .airdrop_chain(&faucet.pubkey(), 100 * LAMPORTS_PER_SOL)
         .expect("failed to airdrop to task scheduler faucet");
-    let (_, confirmed) = chain_ctx
-        .delegate_account_to_validator(&payer, faucet, Some(validator))
-        .expect("failed to delegate task scheduler faucet");
-    if !confirmed {
-        panic!("task scheduler faucet delegation not confirmed");
-    }
 }
 
 fn start_validator(

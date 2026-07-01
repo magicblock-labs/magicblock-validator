@@ -879,7 +879,9 @@ impl MagicValidator {
         Ok(())
     }
 
-    fn spawn_primary_onchain_setup(&self) {
+    fn spawn_primary_onchain_setup(
+        &self,
+    ) -> Option<tokio::task::JoinHandle<()>> {
         let rpc_url = self.config.rpc_url().to_owned();
         let identity = self.identity;
         let chain_operation_config = self.config.chain_operation.clone();
@@ -892,7 +894,7 @@ impl MagicValidator {
         if let Some(faucet_keypair) =
             self.faucet_keypair.as_ref().map(|k| k.insecure_clone())
         {
-            tokio::spawn(async move {
+            Some(tokio::spawn(async move {
                 let step_start = Instant::now();
                 let result = MagicValidator::ensure_validator_funded_on_chain(
                     rpc_url.clone(),
@@ -984,7 +986,9 @@ impl MagicValidator {
                         step_start,
                     );
                 }
-            });
+            }))
+        } else {
+            None
         }
     }
 
@@ -1036,6 +1040,8 @@ impl MagicValidator {
             }
         }
 
+        let mut primary_onchain_setup = None;
+
         // Notify the scheduler that ledger replay and bank cleanup is complete.
         if self.is_standalone {
             self.mode_tx
@@ -1047,7 +1053,7 @@ impl MagicValidator {
                     ))
                 })?;
             if matches!(self.config.lifecycle, LifecycleMode::Ephemeral) {
-                self.spawn_primary_onchain_setup();
+                primary_onchain_setup = self.spawn_primary_onchain_setup();
             }
         } else if let Some(replicator) = self.replication_service.take() {
             self.replication_handle.replace(replicator.spawn());
@@ -1055,7 +1061,7 @@ impl MagicValidator {
                 &self.config.validator.replication_mode,
             ) && matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
             {
-                self.spawn_primary_onchain_setup();
+                primary_onchain_setup = self.spawn_primary_onchain_setup();
             }
         }
 
@@ -1105,6 +1111,17 @@ impl MagicValidator {
         };
         if is_primary_mode {
             tokio::spawn(async move {
+                if let Some(primary_onchain_setup) = primary_onchain_setup {
+                    if let Err(err) = primary_onchain_setup.await {
+                        error!(
+                            error = ?err,
+                            "Primary on-chain setup task failed before task scheduler start"
+                        );
+                        error!("Exiting process");
+                        std::process::exit(1);
+                    }
+                }
+
                 let step_start = Instant::now();
                 let join_handle = match task_scheduler.start().await {
                     Ok(join_handle) => join_handle,
