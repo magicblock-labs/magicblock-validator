@@ -182,7 +182,8 @@ impl TaskSchedulerService {
                 .await
             {
                 Ok(()) => {
-                    info!("Migration: created crank for task {}", task.id)
+                    self.db.remove_task(task.id).await?;
+                    debug!("Migration: created crank for task {}", task.id)
                 }
                 Err(e) => {
                     warn!(
@@ -191,10 +192,9 @@ impl TaskSchedulerService {
                     )
                 }
             }
-            self.db.remove_task(task.id).await?;
         }
 
-        info!("Task migration complete; database emptied");
+        info!("Task migration complete");
         Ok(())
     }
 
