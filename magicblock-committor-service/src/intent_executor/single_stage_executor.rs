@@ -22,7 +22,10 @@ use crate::{
         IntentExecutionReport,
     },
     persist::{IntentPersister, IntentPersisterImpl},
-    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
+    tasks::{
+        task_builder::TaskBuilderError, task_strategist::TransactionStrategy,
+        BaseTaskImpl, FinalizeTask,
+    },
     transaction_preparator::TransactionPreparator,
 };
 
@@ -215,22 +218,36 @@ where
             ) => {
                 let optimized_tasks =
                     self.transaction_strategy.optimized_tasks.as_slice();
-                if let Some(delegated_account) = err
+                if let Some((
+                    delegated_account,
+                    owner_program,
+                    min_context_slot,
+                    rent_reimbursement,
+                )) = err
                     .task_index()
                     .and_then(|index| optimized_tasks.get(index as usize))
                     .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        BaseTaskImpl::CommitFinalize(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
+                        BaseTaskImpl::Commit(task) => Some((
+                            task.committed_account.pubkey,
+                            task.committed_account.account.owner,
+                            task.committed_account.remote_slot,
+                            None,
+                        )),
+                        BaseTaskImpl::CommitFinalize(task) => Some((
+                            task.committed_account.pubkey,
+                            task.committed_account.account.owner,
+                            task.committed_account.remote_slot,
+                            Some(task.rent_reimbursement),
+                        )),
                         _ => None,
                     })
                 {
                     self.handle_unfinalized_account_error(
                         signature,
                         delegated_account,
+                        owner_program,
+                        min_context_slot,
+                        rent_reimbursement,
                         transaction_preparator,
                     )
                     .await
@@ -273,10 +290,34 @@ where
         &self,
         failed_signature: &Option<Signature>,
         delegated_account: Pubkey,
+        owner_program: Pubkey,
+        min_context_slot: u64,
+        rent_reimbursement: Option<Pubkey>,
         transaction_preparator: &T,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl =
-            FinalizeTask { delegated_account }.into();
+        let rent_reimbursement =
+            if let Some(rent_reimbursement) = rent_reimbursement {
+                rent_reimbursement
+            } else {
+                self.task_info_fetcher
+                    .fetch_delegation_metadata(
+                        &[delegated_account],
+                        min_context_slot,
+                    )
+                    .await
+                    .map_err(TaskBuilderError::FinalizedTasksBuildError)?
+                    .get(&delegated_account)
+                    .map(|metadata| metadata.rent_payer)
+                    .ok_or(TaskBuilderError::MissingDelegationMetadata(
+                        delegated_account,
+                    ))?
+            };
+        let finalize_task: BaseTaskImpl = FinalizeTask {
+            delegated_account,
+            owner_program,
+            rent_reimbursement,
+        }
+        .into();
         prepare_and_execute_strategy(
             &self.intent_client,
             &self.authority,

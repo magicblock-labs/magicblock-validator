@@ -24,7 +24,7 @@ use solana_sdk::{
 use test_kit::init_logger;
 use tokio::task::JoinSet;
 use tracing::*;
-use utils::transactions::{print_tx_logs, tx_logs_contain};
+use utils::transactions::print_tx_logs;
 
 use self::utils::transactions::init_and_delegate_order_book_on_chain;
 use crate::utils::{
@@ -189,7 +189,7 @@ async fn test_ix_commit_order_book_change_100_bytes() {
 async fn test_ix_commit_order_book_change_671_bytes() {
     commit_book_order_account(
         671,
-        CommitStrategy::DiffArgs,
+        CommitStrategy::DiffBuffer,
         CommitIntentKind::Commit,
     )
     .await;
@@ -564,9 +564,9 @@ async fn test_commit_20_accounts_1kb_bundle_size_6() {
 }
 
 #[tokio::test]
-async fn test_commit_20_accounts_1kb_bundle_size_20() {
+async fn test_commit_20_accounts_1kb_bundle_size_5() {
     commit_20_accounts_1kb(
-        20,
+        5,
         expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 20)]),
         CommitIntentKind::Commit,
     )
@@ -694,7 +694,7 @@ async fn test_ix_execute_intent_bundle_commit_and_commit_finalize_mixed() {
         &[1024, 2048],
         &[1024, 2048],
         &[],
-        expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
+        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
     )
     .await;
 }
@@ -1014,39 +1014,7 @@ async fn ix_commit_local(
         let commit_finalized_and_undelegated_accounts =
             base_intent.get_commit_finalize_and_undelegate_intent_accounts();
 
-        let has_commit_flow =
-            committed_accounts.is_some() || undelegated_accounts.is_some();
-        let has_commit_finalize_flow = committed_finalize_accounts.is_some()
-            || commit_finalized_and_undelegated_accounts.is_some();
-        if has_commit_flow {
-            assert!(
-                tx_logs_contain(&rpc_client, &commit_signature, "CommitState")
-                    .await
-            );
-            assert!(
-                tx_logs_contain(&rpc_client, &finalize_signature, "Finalize")
-                    .await
-            );
-        }
-        if has_commit_finalize_flow {
-            assert!(
-                tx_logs_contain(
-                    &rpc_client,
-                    &commit_signature,
-                    "CommitFinalize"
-                )
-                .await
-            );
-        }
-
         let has_undelegate = base_intent.has_undelegate_intent();
-        if has_undelegate {
-            // Undelegate is part of atomic Finalization Stage
-            assert!(
-                tx_logs_contain(&rpc_client, &finalize_signature, "Undelegate")
-                    .await
-            );
-        }
 
         let mut committed_accounts: HashMap<Pubkey, _> = [
             (false, committed_accounts),

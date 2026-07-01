@@ -9,7 +9,8 @@ use std::{
 };
 
 use dlp_api::{
-    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+    pda::delegation_record_pda_from_delegated_account,
+    state::{DelegationRecord, UndelegationRequest},
 };
 use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
@@ -29,7 +30,7 @@ use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
-    sync::{mpsc, oneshot, Semaphore},
+    sync::{broadcast, mpsc, oneshot, Semaphore},
     task,
     task::JoinSet,
 };
@@ -70,6 +71,7 @@ use crate::{
         blacklisted_accounts::{
             blacklisted_accounts, programs_not_to_subscribe,
         },
+        ObservedUndelegationRequest,
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
@@ -139,6 +141,8 @@ where
 
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
+
+    undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
 }
 
 struct PendingUndelegationGuard {
@@ -203,6 +207,9 @@ where
                 .pending_operation_timeout_ms
                 .clone(),
             risk_service: self.risk_service.clone(),
+            undelegation_request_sender: self
+                .undelegation_request_sender
+                .clone(),
         }
     }
 }
@@ -224,6 +231,33 @@ where
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
+    ) -> Arc<Self> {
+        let (undelegation_request_sender, _) = broadcast::channel(1024);
+        Self::new_with_undelegation_request_sender(
+            remote_account_provider,
+            accounts_bank,
+            cloner,
+            validator_keypair,
+            subscription_updates_rx,
+            allowed_programs,
+            risk_service,
+            undelegation_request_sender,
+        )
+    }
+
+    /// Create FetchCloner with subscription updates and request notifications connected.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_undelegation_request_sender(
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        accounts_bank: &Arc<V>,
+        cloner: &Arc<C>,
+        validator_keypair: Keypair,
+        subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
+        allowed_programs: Option<Vec<AllowedProgram>>,
+        risk_service: Option<Arc<RiskService>>,
+        undelegation_request_sender: broadcast::Sender<
+            ObservedUndelegationRequest,
+        >,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts = blacklisted_accounts(&validator_pubkey);
@@ -252,6 +286,7 @@ where
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
             risk_service,
+            undelegation_request_sender,
         });
 
         let accounts_bank_for_eviction = accounts_bank.clone();
@@ -1799,6 +1834,45 @@ where
                                 // use, etc.
                                 (None, None, DelegationActions::default())
                             }
+                        } else if let Ok(request) =
+                            UndelegationRequest::try_from_bytes_with_discriminator(
+                                account.data(),
+                            )
+                        {
+                            let observed = ObservedUndelegationRequest {
+                                request_pda: pubkey,
+                                delegated_account: request.delegated_account,
+                                owner_program: request.owner_program,
+                                rent_payer: request.rent_payer,
+                                created_slot: request.created_slot,
+                                expires_at_slot: request.expires_at_slot,
+                                last_commit_id_at_request: request
+                                    .last_commit_id_at_request,
+                                observed_slot: account.remote_slot(),
+                            };
+                            trace!(
+                                request_pda = %observed.request_pda,
+                                delegated_account = %observed.delegated_account,
+                                owner_program = %observed.owner_program,
+                                rent_payer = %observed.rent_payer,
+                                expires_at_slot = observed.expires_at_slot,
+                                "Observed DLP undelegation request"
+                            );
+                            if let Err(broadcast::error::SendError(observed)) =
+                                self.undelegation_request_sender.send(observed)
+                            {
+                                warn!(
+                                    request_pda = %observed.request_pda,
+                                    delegated_account = %observed.delegated_account,
+                                    owner_program = %observed.owner_program,
+                                    "Dropped observed DLP undelegation request because no subscribers are active"
+                                );
+                            }
+                            (
+                                Some(account.into_account_shared_data()),
+                                None,
+                                DelegationActions::default(),
+                            )
                         } else if is_internal_dlp_account_data(account.data()) {
                             (
                                 Some(account.into_account_shared_data()),

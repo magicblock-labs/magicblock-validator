@@ -8,7 +8,9 @@ use std::{
 
 use async_trait::async_trait;
 use dlp_api::{
-    delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
+    delegation_metadata_seeds_from_delegated_account,
+    pda::undelegation_request_pda_from_delegated_account,
+    state::{DelegationMetadata, UndelegationRequest},
 };
 use lru::LruCache;
 use magicblock_metrics::metrics;
@@ -52,6 +54,20 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
+
+    /// Fetches delegation metadata keyed by delegated account pubkey.
+    async fn fetch_delegation_metadata(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>;
+
+    /// Fetches request-undelegation accounts keyed by delegated account pubkey.
+    async fn fetch_undelegation_requests(
+        &self,
+        delegated_accounts: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, UndelegationRequest>>;
 
     async fn get_base_accounts(
         &self,
@@ -172,6 +188,57 @@ impl RpcTaskInfoFetcher {
         }
     }
 
+    pub async fn fetch_optional_accounts_with_retries(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        max_retries: NonZeroUsize,
+    ) -> TaskInfoFetcherResult<Vec<Option<Account>>> {
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut i = 0;
+        loop {
+            i += 1;
+            let err = match Self::fetch_optional_accounts(
+                rpc_client,
+                pubkeys,
+                min_context_slot,
+            )
+            .await
+            {
+                Ok(value) => break Ok(value),
+                Err(err) => err,
+            };
+
+            match err {
+                TaskInfoFetcherError::MinContextSlotNotReachedError(_, _) => {
+                    info!(
+                        min_context_slot,
+                        attempt = i,
+                        "Min context slot not reached"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                TaskInfoFetcherError::MagicBlockRpcClientError(ref err) => {
+                    warn!(error = ?err, attempt = i, "Fetch optional account error");
+                }
+                TaskInfoFetcherError::AccountNotFoundError(_)
+                | TaskInfoFetcherError::InvalidAccountDataError(_) => {
+                    error!(error = ?err, "Unexpected error");
+                    break Err(err);
+                }
+            }
+
+            if i >= max_retries.get() {
+                break Err(err);
+            }
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
     /// Fetches specified list of accounts
     pub async fn fetch_accounts(
         rpc_client: &MagicblockRpcClient,
@@ -221,6 +288,34 @@ impl RpcTaskInfoFetcher {
 
         Ok(accounts)
     }
+
+    pub async fn fetch_optional_accounts(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<Vec<Option<Account>>> {
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        metrics::inc_task_info_fetcher_a_count();
+        let commitment = rpc_client.commitment();
+        rpc_client
+            .get_multiple_accounts_with_config(
+                pubkeys,
+                RpcAccountInfoConfig {
+                    encoding: Some(UiAccountEncoding::Base64Zstd),
+                    commitment: Some(commitment),
+                    data_slice: None,
+                    min_context_slot: Some(min_context_slot),
+                },
+                None,
+            )
+            .await
+            .map_err(|err| {
+                TaskInfoFetcherError::map_client_error(min_context_slot, err)
+            })
+    }
 }
 
 #[async_trait]
@@ -241,7 +336,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         )
         .await?
         .into_iter()
-        .map(|m| m.last_update_nonce + 1);
+        .map(|m| m.last_commit_id + 1);
         Ok(pubkeys.iter().copied().zip(nonces).collect())
     }
 
@@ -261,7 +356,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         )
         .await?
         .into_iter()
-        .map(|m| m.last_update_nonce);
+        .map(|m| m.last_commit_id);
         Ok(pubkeys.iter().copied().zip(nonces).collect())
     }
 
@@ -280,6 +375,78 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         .into_iter()
         .map(|m| m.rent_payer)
         .collect())
+    }
+
+    async fn fetch_delegation_metadata(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        Ok(pubkeys
+            .iter()
+            .copied()
+            .zip(
+                Self::fetch_metadata_with_retries(
+                    &self.rpc_client,
+                    pubkeys,
+                    min_context_slot,
+                    NUM_FETCH_RETRIES,
+                )
+                .await?,
+            )
+            .collect())
+    }
+
+    async fn fetch_undelegation_requests(
+        &self,
+        delegated_accounts: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, UndelegationRequest>> {
+        if delegated_accounts.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let request_pdas = delegated_accounts
+            .iter()
+            .map(undelegation_request_pda_from_delegated_account)
+            .collect::<Vec<_>>();
+
+        let accounts = Self::fetch_optional_accounts_with_retries(
+            &self.rpc_client,
+            &request_pdas,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?;
+
+        let mut requests = HashMap::new();
+        for ((delegated_account, request_pda), account) in delegated_accounts
+            .iter()
+            .copied()
+            .zip(request_pdas)
+            .zip(accounts.into_iter())
+        {
+            let Some(account) = account else {
+                continue;
+            };
+            let request =
+                *UndelegationRequest::try_from_bytes_with_discriminator(
+                    &account.data,
+                )
+                .map_err(|_| {
+                    TaskInfoFetcherError::InvalidAccountDataError(request_pda)
+                })?;
+
+            if request.delegated_account != delegated_account {
+                return Err(TaskInfoFetcherError::InvalidAccountDataError(
+                    request_pda,
+                ));
+            }
+
+            requests.insert(delegated_account, request);
+        }
+
+        Ok(requests)
     }
 
     async fn get_base_accounts(
@@ -620,6 +787,26 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
         self.inner
             .fetch_rent_reimbursements(pubkeys, min_context_slot)
+            .await
+    }
+
+    async fn fetch_delegation_metadata(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        self.inner
+            .fetch_delegation_metadata(pubkeys, min_context_slot)
+            .await
+    }
+
+    async fn fetch_undelegation_requests(
+        &self,
+        delegated_accounts: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, UndelegationRequest>> {
+        self.inner
+            .fetch_undelegation_requests(delegated_accounts, min_context_slot)
             .await
     }
 
@@ -1013,6 +1200,38 @@ mod tests {
             _: u64,
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
             unimplemented!()
+        }
+
+        async fn fetch_delegation_metadata(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
+        {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (
+                        *pubkey,
+                        DelegationMetadata {
+                            last_commit_id: 0,
+                            undelegation_requester:
+                                dlp_api::state::UndelegationRequester::None,
+                            seeds: vec![],
+                            rent_payer: *pubkey,
+                        },
+                    )
+                })
+                .collect())
+        }
+
+        async fn fetch_undelegation_requests(
+            &self,
+            _delegated_accounts: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, UndelegationRequest>>
+        {
+            Ok(HashMap::new())
         }
 
         async fn get_base_accounts(

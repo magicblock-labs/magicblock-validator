@@ -74,6 +74,14 @@ pub async fn fetch_tx_logs(
     rpc_client: &RpcClient,
     signature: &Signature,
 ) -> Vec<String> {
+    try_fetch_tx_logs(rpc_client, signature).await.unwrap()
+}
+
+#[allow(dead_code)]
+pub async fn try_fetch_tx_logs(
+    rpc_client: &RpcClient,
+    signature: &Signature,
+) -> Result<Vec<String>, String> {
     // NOTE: we encountered the following error a few times which makes tests fail for the
     //       wrong reason:
     //       Error {
@@ -103,10 +111,10 @@ pub async fn fetch_tx_logs(
                 tracing::error!("Failed to get transaction: {}", err);
                 retries -= 1;
                 if retries == 0 {
-                    panic!(
+                    return Err(format!(
                         "Failed to get transaction after {} retries",
                         MAX_RETRIES
-                    );
+                    ));
                 }
                 tokio::time::sleep(tokio::time::Duration::from_millis(100))
                     .await;
@@ -116,15 +124,18 @@ pub async fn fetch_tx_logs(
     tx.transaction
         .meta
         .as_ref()
-        .unwrap()
+        .ok_or_else(|| "Transaction metadata is missing".to_string())?
         .log_messages
         .clone()
-        .unwrap_or_else(Vec::new)
+        .ok_or_else(|| "Transaction log messages are missing".to_string())
 }
 
 #[allow(dead_code)]
 pub async fn print_tx_logs(rpc_client: &RpcClient, signature: &Signature) {
-    println!("logs: {:#?}", fetch_tx_logs(rpc_client, signature).await);
+    match try_fetch_tx_logs(rpc_client, signature).await {
+        Ok(logs) => println!("logs: {logs:#?}"),
+        Err(err) => println!("Unable to fetch logs for {signature}: {err}"),
+    }
 }
 
 async fn airdrop_and_confirm(
