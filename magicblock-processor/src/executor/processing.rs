@@ -11,6 +11,7 @@ use magicblock_core::{
         },
     },
     tls::ExecutionTlsStash,
+    token_programs::try_get_rent_pending_ata_info,
 };
 use magicblock_metrics::metrics::{
     FAILED_TRANSACTIONS_COUNT, TRANSACTION_COUNT,
@@ -454,6 +455,41 @@ impl super::TransactionExecutor {
                     Err(TransactionError::UnbalancedTransaction);
                 logs.push(format!(
                     "Confined account {pubkey} has been illegally modified"
+                ));
+                break;
+            }
+        }
+
+        if executed.execution_details.status.is_err() {
+            return;
+        }
+
+        while let Some(pubkey) =
+            ExecutionTlsStash::next_created_rent_pending_ata()
+        {
+            let Some((_, acc)) =
+                txn.accounts.iter().find(|(key, _)| key == &pubkey)
+            else {
+                executed.execution_details.status =
+                    Err(TransactionError::UnbalancedTransaction);
+                logs.push(format!(
+                    "Rent-pending ATA {pubkey} was not available after creation"
+                ));
+                break;
+            };
+            let Some(info) = try_get_rent_pending_ata_info(&pubkey, acc) else {
+                executed.execution_details.status =
+                    Err(TransactionError::UnbalancedTransaction);
+                logs.push(format!(
+                    "Rent-pending ATA {pubkey} has invalid post-creation state"
+                ));
+                break;
+            };
+            if info.amount == 0 {
+                executed.execution_details.status =
+                    Err(TransactionError::UnbalancedTransaction);
+                logs.push(format!(
+                    "Rent-pending ATA {pubkey} must end creation transaction with positive token amount"
                 ));
                 break;
             }

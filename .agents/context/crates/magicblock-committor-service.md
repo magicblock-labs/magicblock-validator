@@ -205,6 +205,15 @@ IntentExecutorImpl::execute
 
 For committed accounts with `data.len() > COMMIT_STATE_SIZE_THRESHOLD` (`256`), the task builder fetches the base account and may use diff-in-args delivery. If the base-account fetch fails, it falls back to full state args and logs a warning. This can increase transaction size and trigger buffer/ALT strategy later.
 
+Rent-pending ATA materialization metadata is handled before normal DLP commit
+tasks. For each metadata entry, `TaskBuilderImpl::commit_tasks` prepends an
+e-token initialize-eATA task and a delegate-eATA-to-this-validator task, skips
+base nonce/base-account fetches for the newly materialized eATA, and uses
+synthetic commit nonce `1` for the following DLP commit. If an eATA already
+exists and is delegated to another validator, the e-token delegate task is the
+expected validator-mismatch failure gate before any DLP commit/undelegation
+task is allowed to succeed.
+
 ### Delivery preparation and cleanup flow
 
 `TransactionPreparatorImpl::prepare_for_strategy` first compiles against dummy lookup tables to fail early if the message cannot fit. It then calls `DeliveryPreparator::prepare_for_delivery`:

@@ -1,13 +1,21 @@
 use guinea::GuineaInstruction;
 use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_core::token_programs::{derive_ata, TOKEN_PROGRAM_ID};
 use magicblock_magic_program_api::{
     instruction::MagicBlockInstruction, EPHEMERAL_RENT_PER_BYTE,
     EPHEMERAL_VAULT_PUBKEY, ID as MAGIC_PROGRAM_ID,
 };
-use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+use solana_account::{
+    Account, AccountSharedData, ReadableAccount, WritableAccount,
+};
 use solana_keypair::Keypair;
-use solana_program::instruction::{AccountMeta, Instruction};
+use solana_program::{
+    instruction::{AccountMeta, Instruction},
+    program_option::COption,
+    program_pack::Pack,
+};
 use solana_pubkey::Pubkey;
+use spl_token::state::Mint as SplMint;
 use test_kit::{ExecutionTestEnv, Signer};
 
 /// Calculates rent for an ephemeral account (same logic as magic program)
@@ -103,6 +111,49 @@ fn create_ephemeral_account_ix(
     )
 }
 
+fn init_spl_mint(env: &ExecutionTestEnv, mint: Pubkey) {
+    let mint_state = SplMint {
+        mint_authority: COption::None,
+        supply: 0,
+        decimals: 6,
+        is_initialized: true,
+        freeze_authority: COption::None,
+    };
+    let mut data = vec![0; SplMint::LEN];
+    SplMint::pack(mint_state, &mut data).unwrap();
+    let mut account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data,
+        owner: TOKEN_PROGRAM_ID,
+        executable: false,
+        rent_epoch: 0,
+    });
+    account.set_delegated(true);
+    env.accountsdb.insert_account(&mint, &account).unwrap();
+}
+
+fn create_rent_pending_ata_ix(
+    payer: Pubkey,
+    wallet_owner: Pubkey,
+    mint: Pubkey,
+) -> Instruction {
+    let ata = derive_ata(&wallet_owner, &mint);
+    Instruction::new_with_bincode(
+        MAGIC_PROGRAM_ID,
+        &MagicBlockInstruction::CreateRentPendingAta {
+            wallet_owner,
+            mint,
+            token_program: TOKEN_PROGRAM_ID,
+        },
+        vec![
+            AccountMeta::new(payer, true),
+            AccountMeta::new(ata, false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+        ],
+    )
+}
+
 /// Helper to create an instruction that calls guinea to resize an ephemeral account
 fn resize_ephemeral_account_ix(
     magic_program: Pubkey,
@@ -140,6 +191,29 @@ fn close_ephemeral_account_ix(
             AccountMeta::new(vault, false),
         ],
     )
+}
+
+#[tokio::test]
+async fn test_create_rent_pending_ata_zero_balance_rolls_back() {
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let payer = env.get_payer().pubkey;
+    let wallet_owner = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let ata = derive_ata(&wallet_owner, &mint);
+
+    init_spl_mint(&env, mint);
+    env.fund_account(ata, 0);
+
+    let ix = create_rent_pending_ata_ix(payer, wallet_owner, mint);
+    let err = execute_instruction(&env, ix).await.unwrap_err();
+
+    assert!(matches!(
+        err,
+        solana_transaction_error::TransactionError::UnbalancedTransaction
+    ));
+    let ata_after = env.get_account(ata);
+    assert_eq!(ata_after.owner(), &Pubkey::default());
+    assert!(ata_after.data().is_empty());
 }
 
 #[tokio::test]

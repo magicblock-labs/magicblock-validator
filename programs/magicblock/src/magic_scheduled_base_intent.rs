@@ -1,8 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+};
 
 use magicblock_core::{
     intent::{BaseActionCallback, CommittedAccount},
     token_programs::{
+        try_get_rent_pending_ata_info, RentPendingAtaMaterialization,
         EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
     },
     Slot,
@@ -38,6 +42,9 @@ pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
 /// Fixed fee per commit.
 /// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
 pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
+/// Fixed V1 fee per rent-pending eATA materialization.
+pub const RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS: u64 =
+    COMMIT_FEE_LAMPORTS;
 /// Price per compute unit for a BaseAction executed on Solana base chain,
 /// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
 pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
@@ -51,6 +58,8 @@ pub struct ConstructionContext<'a, 'ic, 'ix_data> {
     /// to the delegation program. Legacy `ScheduleBaseIntent` sets this to
     /// `false` for backward compatibility with old deployed contracts.
     pub secure: bool,
+    pub rent_pending_materialization_accounts: Option<(Pubkey, Pubkey)>,
+    rent_pending_materializations: RefCell<Vec<RentPendingAtaMaterialization>>,
 }
 
 impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
@@ -59,17 +68,57 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
         signers: &'a HashSet<Pubkey>,
         invoke_context: &'a mut InvokeContext<'ic, 'ix_data>,
         secure: bool,
+        rent_pending_materialization_accounts: Option<(Pubkey, Pubkey)>,
     ) -> Self {
         Self {
             parent_program_id,
             signers,
             invoke_context,
             secure,
+            rent_pending_materialization_accounts,
+            rent_pending_materializations: RefCell::new(Vec::new()),
         }
     }
 
     pub fn transaction_context(&self) -> &TransactionContext<'ix_data> {
         &*self.invoke_context.transaction_context
+    }
+
+    fn record_rent_pending_materializations(
+        &self,
+        accounts: &[CommitAccountRef<'_, '_>],
+    ) -> Result<(), InstructionError> {
+        let mut materializations =
+            self.rent_pending_materializations.borrow_mut();
+        for (pubkey, account) in accounts {
+            let account = account.to_account_shared_data()?;
+            let Some(info) = try_get_rent_pending_ata_info(pubkey, &account)
+            else {
+                continue;
+            };
+            let Some((delegated_payer, delegated_vault)) =
+                self.rent_pending_materialization_accounts
+            else {
+                ic_msg!(
+                    self.invoke_context,
+                    "ScheduleCommit ERR: rent-pending ATA {} requires delegated payer fee vault",
+                    pubkey
+                );
+                return Err(InstructionError::IllegalOwner);
+            };
+            materializations.push(RentPendingAtaMaterialization {
+                ata_pubkey: info.ata_pubkey,
+                eata_pubkey: info.eata_pubkey,
+                token_program: info.token_program,
+                wallet_owner: info.wallet_owner,
+                mint: info.mint,
+                token_account_data_len: info.token_account_data_len,
+                validator: effective_validator_authority_id(),
+                delegated_payer,
+                delegated_vault,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -218,6 +267,7 @@ pub struct MagicIntentBundle {
     pub commit_finalize: Option<CommitType>,
     pub commit_finalize_and_undelegate: Option<CommitAndUndelegate>,
     pub standalone_actions: Vec<BaseAction>,
+    pub rent_pending_ata_materializations: Vec<RentPendingAtaMaterialization>,
 }
 
 impl From<MagicBaseIntent> for MagicIntentBundle {
@@ -282,6 +332,10 @@ impl MagicIntentBundle {
             commit_finalize,
             commit_finalize_and_undelegate,
             standalone_actions: actions,
+            rent_pending_ata_materializations: context
+                .rent_pending_materializations
+                .borrow()
+                .clone(),
         };
         this.post_validation(context)?;
 
@@ -989,6 +1043,9 @@ impl CommitType {
                     context.transaction_context(),
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;
+                context.record_rent_pending_materializations(
+                    &committed_accounts_ref,
+                )?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
@@ -1012,6 +1069,9 @@ impl CommitType {
                     context.transaction_context(),
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;
+                context.record_rent_pending_materializations(
+                    &committed_accounts_ref,
+                )?;
 
                 let base_actions = base_actions
                     .into_iter()
@@ -1243,6 +1303,14 @@ pub(crate) fn calculate_commit_fee(
     })
 }
 
+pub(crate) fn calculate_rent_pending_ata_materialization_fee(
+    count: usize,
+) -> Result<u64, InstructionError> {
+    (count as u64)
+        .checked_mul(RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS)
+        .ok_or(InstructionError::ArithmeticOverflow)
+}
+
 fn calculate_actions_fee(actions: &[BaseAction]) -> u64 {
     const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
     let micro_lamports = actions.iter().fold(0u64, |acc, action| {
@@ -1397,6 +1465,7 @@ mod tests {
                 commit_finalize: None,
                 commit_finalize_and_undelegate: None,
                 standalone_actions: vec![make_base_action(50_000)],
+                rent_pending_ata_materializations: vec![],
             },
         };
 
