@@ -80,6 +80,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::{
+    crank_faucet::ensure_faucet_delegated_on_chain,
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
     fund_account::{
@@ -115,6 +116,7 @@ pub struct MagicValidator {
     replication_service: Option<ReplicationService>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
+    faucet_keypair: Option<Keypair>,
     transaction_scheduler: TransactionSchedulerHandle,
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
@@ -164,6 +166,11 @@ impl MagicValidator {
             config.ledger.verify_keypair,
         )?;
         log_timing("startup", "sync_validator_keypair", step_start);
+
+        // The task scheduler pays for hydra cranks from a configured faucet
+        // account (delegated on startup) rather than the validator identity,
+        // which is not a delegated account.
+        let faucet_keypair = config.task_scheduler.faucet_keypair.clone();
 
         let latest_block = ledger.latest_block().load();
         let mut accountsdb =
@@ -425,8 +432,8 @@ impl MagicValidator {
         let step_start = Instant::now();
         let task_scheduler = TaskSchedulerService::new(
             &task_scheduler_db_path,
-            &config.task_scheduler,
             config.aperture.listen.http(),
+            faucet_keypair.clone().map(|k| k.insecure_clone()),
             dispatch
                 .tasks_service
                 .take()
@@ -434,7 +441,11 @@ impl MagicValidator {
             ledger.latest_block().clone(),
             Duration::from_millis(config.ledger.block_time_ms()),
             token.clone(),
-        )?;
+        )
+        .inspect_err(
+            |e| error!(error = ?e, "Failed to initialize task scheduler"),
+        )
+        .ok();
         log_timing("startup", "task_scheduler_init", step_start);
 
         Ok(Self {
@@ -450,8 +461,9 @@ impl MagicValidator {
             claim_fees_task: ClaimFeesTask::new(),
             rpc_handle,
             identity: validator_pubkey,
+            faucet_keypair: faucet_keypair.map(|k| k.insecure_clone()),
             transaction_scheduler: dispatch.transaction_scheduler,
-            task_scheduler: Some(task_scheduler),
+            task_scheduler,
             transaction_execution,
             replication_handle: None,
             mode_tx,
@@ -894,6 +906,8 @@ impl MagicValidator {
         let chain_operation_config = self.config.chain_operation.clone();
         let block_time_ms = self.config.ledger.block_time_ms();
         let base_fee = self.config.validator.basefee;
+        let faucet_keypair =
+            self.faucet_keypair.as_ref().map(|k| k.insecure_clone());
 
         // Ephemeral mode does a non-blocking startup balance check.
         // Intentionally fire-and-forget: the task itself exits the process on failure.
@@ -933,6 +947,28 @@ impl MagicValidator {
                 error!("Exiting process");
                 std::process::exit(1);
             }
+
+            if let Some(faucet_keypair) = faucet_keypair {
+                let step_start = Instant::now();
+                let result = ensure_faucet_delegated_on_chain(
+                    rpc_url.clone(),
+                    &faucet_keypair,
+                )
+                .await;
+                log_timing(
+                    "startup_background",
+                    "ensure_faucet_delegated_on_chain",
+                    step_start,
+                );
+                // Without the faucet being funded and delegated the task scheduler
+                // cannot pay for hydra cranks.
+                if let Err(err) = result {
+                    error!(error = ?err, "Task scheduler faucet setup failed");
+                    error!("Exiting process");
+                    std::process::exit(1);
+                }
+            }
+
             if let Some(ref config) = chain_operation_config {
                 if !config.claim_fees_frequency.is_zero() {
                     let step_start = Instant::now();

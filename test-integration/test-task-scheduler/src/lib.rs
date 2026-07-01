@@ -1,10 +1,12 @@
 use std::{
+    path::PathBuf,
     process::Child,
     str::FromStr,
     time::{Duration, Instant},
 };
 
 use cleanass::assert;
+use hydra_api::ephemeral::ID as HYDRA_EPHEMERAL_PROGRAM_ID;
 use integration_test_tools::{
     expect,
     loaded_accounts::LoadedAccounts,
@@ -21,10 +23,11 @@ use magicblock_config::{
         scheduler::TaskSchedulerConfig, validator::ValidatorConfig,
         LifecycleMode,
     },
-    types::{network::Remote, StorageDirectory},
+    types::{crypto::SerdeKeypair, network::Remote, StorageDirectory},
     ValidatorParams,
 };
 use magicblock_program::Pubkey;
+use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
 use program_flexi_counter::{
     instruction::{
         create_delegate_ix_with_commit_frequency_ms, create_init_ix,
@@ -33,26 +36,22 @@ use program_flexi_counter::{
 };
 use program_schedulecommit::MainAccount;
 use solana_sdk::{
-    signature::Keypair, signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use tempfile::TempDir;
+use tokio::runtime::Runtime;
 
 pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 
-pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
-    let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
-
-    let config = ValidatorParams {
+fn validator_config(temp_dir: PathBuf, faucet: &Keypair) -> ValidatorParams {
+    ValidatorParams {
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
             Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
             Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
         accountsdb: AccountsDbConfig::default(),
-        task_scheduler: TaskSchedulerConfig {
-            reset: true,
-            ..Default::default()
-        },
         validator: ValidatorConfig {
             ..Default::default()
         },
@@ -61,9 +60,34 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
             block_time: Duration::from_millis(TASK_SCHEDULER_TICK_MILLIS),
             ..Default::default()
         },
-        storage: StorageDirectory(temp_dir.clone()),
+        task_scheduler: TaskSchedulerConfig {
+            faucet_keypair: Some(
+                SerdeKeypair::from_str(&faucet.to_base58_string()).unwrap(),
+            ),
+        },
+        storage: StorageDirectory(temp_dir),
         ..Default::default()
-    };
+    }
+}
+
+fn airdrop_faucet(faucet: &Keypair) {
+    let chain_ctx = IntegrationTestContext::try_new_chain_only()
+        .expect("failed to connect to base chain to fund faucet");
+    chain_ctx
+        .airdrop_chain(&faucet.pubkey(), 100 * LAMPORTS_PER_SOL)
+        .expect("failed to airdrop to task scheduler faucet");
+}
+
+fn start_validator(
+    config: ValidatorParams,
+    default_tmpdir: TempDir,
+    temp_dir: PathBuf,
+) -> (TempDir, Child, IntegrationTestContext, Option<Keypair>) {
+    let faucet_keypair = config
+        .task_scheduler
+        .faucet_keypair
+        .clone()
+        .map(|k| k.insecure_clone());
     let (default_tmpdir_config, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct_and_temp_dir(
             config,
@@ -79,7 +103,40 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
         IntegrationTestContext::try_new_with_ephem_port(port),
         validator
     );
-    (default_tmpdir_config, validator, ctx)
+    (default_tmpdir_config, validator, ctx, faucet_keypair)
+}
+
+pub fn setup_validator(
+) -> (TempDir, Child, IntegrationTestContext, Option<Keypair>) {
+    setup_validator_with_migration_tasks(&[])
+}
+
+pub fn setup_validator_with_migration_tasks(
+    tasks: &[DbTask],
+) -> (TempDir, Child, IntegrationTestContext, Option<Keypair>) {
+    let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
+
+    // Seed the migration database before the validator opens it. The handle is
+    // dropped (flushing the WAL) before startup.
+    {
+        let db_path = SchedulerDatabase::path(&temp_dir);
+        let db = SchedulerDatabase::new(&db_path)
+            .expect("failed to open seed database");
+        let runtime = Runtime::new().expect("failed to create runtime");
+        for task in tasks {
+            runtime
+                .block_on(db.insert_task(task))
+                .expect("failed to seed task");
+        }
+    }
+
+    // The faucet that pays for cranks must be funded before the validator
+    // delegates it on startup.
+    let faucet = Keypair::new();
+    airdrop_faucet(&faucet);
+
+    let config = validator_config(temp_dir.clone(), &faucet);
+    start_validator(config, default_tmpdir, temp_dir)
 }
 
 pub fn create_delegated_counter(
@@ -131,6 +188,89 @@ pub fn create_delegated_counter(
 
     // Wait for account to be delegated
     expect!(ctx.wait_for_delta_slot_ephem(10), validator);
+}
+
+pub fn wait_for_hydra_crank(
+    ctx: &IntegrationTestContext,
+    crank_pda: &Pubkey,
+    max_timeout: Duration,
+    validator: &mut Child,
+) {
+    let now = Instant::now();
+    while now.elapsed() < max_timeout {
+        let maybe_account = ctx
+            .try_ephem_client()
+            .ok()
+            .and_then(|client| client.get_account(crank_pda).ok());
+        if let Some(account) = maybe_account {
+            assert!(
+                account.owner.to_bytes()
+                    == HYDRA_EPHEMERAL_PROGRAM_ID.to_bytes(),
+                cleanup(validator),
+                "crank account {} not owned by hydra program (owner: {})",
+                crank_pda,
+                account.owner
+            );
+            return;
+        }
+        expect!(ctx.wait_for_next_slot_ephem(), validator);
+    }
+    assert!(
+        false,
+        cleanup(validator),
+        "hydra crank account {} was not created before timeout", crank_pda
+    );
+}
+
+pub fn wait_for_hydra_crank_closed(
+    ctx: &IntegrationTestContext,
+    crank_pda: &Pubkey,
+    max_timeout: Duration,
+    validator: &mut Child,
+) {
+    let now = Instant::now();
+    while now.elapsed() < max_timeout {
+        let closed = match ctx
+            .try_ephem_client()
+            .ok()
+            .and_then(|client| client.get_account(crank_pda).ok())
+        {
+            // Account fully removed.
+            None => true,
+            // Closed ephemeral accounts are drained to zero lamports.
+            Some(account) => account.lamports == 0,
+        };
+        if closed {
+            return;
+        }
+        expect!(ctx.wait_for_next_slot_ephem(), validator);
+    }
+    assert!(
+        false,
+        cleanup(validator),
+        "hydra crank account {} was not closed before timeout", crank_pda
+    );
+}
+
+pub fn wait_for_empty_db(
+    runtime: &Runtime,
+    db: &SchedulerDatabase,
+    max_timeout: Duration,
+    validator: &mut Child,
+) {
+    let now = Instant::now();
+    while now.elapsed() < max_timeout {
+        let ids = expect!(runtime.block_on(db.get_task_ids()), validator);
+        if ids.is_empty() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        false,
+        cleanup(validator),
+        "migration database was not emptied before timeout"
+    );
 }
 
 pub fn wait_for_incremented_counter(

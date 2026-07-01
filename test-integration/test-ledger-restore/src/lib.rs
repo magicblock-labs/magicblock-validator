@@ -19,8 +19,7 @@ use integration_test_tools::{
 use magicblock_config::{
     config::{
         accounts::AccountsDbConfig, ledger::LedgerConfig,
-        scheduler::TaskSchedulerConfig, validator::ValidatorConfig,
-        LifecycleMode, LoadableProgram,
+        validator::ValidatorConfig, LifecycleMode, LoadableProgram,
     },
     consts::DEFAULT_LEDGER_BLOCK_TIME_MS,
     types::{crypto::SerdePubkey, network::Remote, StorageDirectory},
@@ -146,10 +145,6 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
         },
         accountsdb: accountsdb_config.clone(),
         programs,
-        task_scheduler: TaskSchedulerConfig {
-            reset: reset_ledger,
-            ..Default::default()
-        },
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
             Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),

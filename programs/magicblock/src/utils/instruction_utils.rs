@@ -9,9 +9,7 @@ use magicblock_magic_program_api::{
         AccountModification, AccountModificationForInstruction,
         MagicBlockInstruction, PostDelegationActionExecutorInstruction,
     },
-    pda::crank_signer_pda,
-    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY,
-    POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
+    MAGIC_CONTEXT_PUBKEY, POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
@@ -251,47 +249,6 @@ impl InstructionUtils {
             &MagicBlockInstruction::CancelTask { task_id },
             account_metas,
         )
-    }
-
-    // -----------------
-    // Execute Crank
-    // -----------------
-    pub fn execute_task_instruction(
-        authority: Pubkey,
-        instructions: Vec<Instruction>,
-    ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new_readonly(validator_authority_id(), true),
-            AccountMeta::new_readonly(crank_signer_pda(&authority), false),
-        ];
-        for instruction in &instructions {
-            account_metas
-                .push(AccountMeta::new_readonly(instruction.program_id, false));
-            account_metas.extend(instruction.accounts.iter().map(|account| {
-                AccountMeta {
-                    pubkey: account.pubkey,
-                    is_signer: false,
-                    is_writable: account.is_writable,
-                }
-            }));
-        }
-        Instruction::new_with_bincode(
-            CRANK_PROGRAM_ID,
-            &MagicBlockInstruction::ExecuteCrank {
-                authority,
-                instructions,
-            },
-            account_metas,
-        )
-    }
-
-    pub fn execute_task(
-        authority: Pubkey,
-        instructions: Vec<Instruction>,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let ix = Self::execute_task_instruction(authority, instructions);
-        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
     // -----------------

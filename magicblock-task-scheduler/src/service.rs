@@ -1,266 +1,125 @@
-use std::{
-    collections::HashMap,
-    path::Path,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
+use std::{path::Path, sync::Arc, time::Duration as StdDuration};
 
-use futures_util::{future::poll_fn, FutureExt, StreamExt};
-use magicblock_config::config::TaskSchedulerConfig;
+use chrono::Utc;
+use hydra_api::{
+    consts::{CRANKER_REWARD, CRANK_HEADER_SIZE, SERIALIZED_META_SIZE},
+    ephemeral::ID as EPHEMERAL_PROGRAM_ID,
+    instruction::{ephemeral, CreateArgs, SchedMeta, ScheduledIx},
+};
 use magicblock_core::link::transactions::ScheduledTasksRx;
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
     args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest},
-    instruction_utils::InstructionUtils,
     validator::{validator_authority, validator_authority_id},
+    EPHEMERAL_RENT_PER_BYTE,
 };
-use solana_message::Message;
+use solana_account::AccountSharedData;
+use solana_instruction::Instruction;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signature::Signature;
+use solana_signer::Signer;
 use solana_transaction::Transaction;
 use tokio::{
     select,
-    sync::mpsc,
-    task::{JoinHandle, JoinSet},
-    time::{interval, Duration, MissedTickBehavior},
+    task::JoinHandle,
+    time::{Duration, Instant},
 };
-use tokio_util::{
-    sync::CancellationToken,
-    time::{delay_queue::Key, DelayQueue},
-};
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::{
-    db::{
-        CrankFailedMove, CrankRetryCheck, CrankSuccessRemoval,
-        CrankSuccessUpdate, DbTask, SchedulerDatabase,
-    },
+    db::{DbTask, SchedulerDatabase},
     errors::{TaskSchedulerError, TaskSchedulerResult},
 };
 
-const MAX_TASK_EXECUTION_RETRIES: u32 = 10;
-const TASK_EXECUTION_RETRY_BASE_DELAY: Duration = Duration::from_millis(100);
-const TASK_EXECUTION_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
+/// How long migration waits for the validator to produce a usable blockhash
+/// before giving up.
+const BLOCK_READY_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long the scheduler waits for the faucet to be delegated and funded in
+/// the ephemeral rollup before it starts paying for cranks.
+const FAUCET_READY_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The task scheduler migrates any tasks persisted by the legacy
+/// (validator-funded) scheduler onto the hydra crank program at startup, then
+/// serves runtime schedule/cancel requests by sending hydra transactions. The
+/// SQLite database is used solely for that one-time migration; the runtime path
+/// is stateless and derives each task's crank PDA deterministically from
+/// `(authority, task_id)`.
 pub struct TaskSchedulerService {
-    /// Database for persisting tasks
+    /// Migration-only database of legacy tasks.
     db: SchedulerDatabase,
-    /// RPC client used to send transactions
+    /// RPC client used to send hydra transactions.
     rpc_client: Arc<RpcClient>,
-    /// Used to receive scheduled tasks from the transaction executor
+    /// Delegated faucet keypair used to pay for (sponsor, fund, sign, and
+    /// cancel) hydra cranks. Used instead of the validator identity, which is
+    /// not a delegated account.
+    faucet: Keypair,
+    /// Used to receive scheduled tasks from the transaction executor.
     scheduled_tasks: ScheduledTasksRx,
-    /// Provides latest blockhash for signing transactions
+    /// Provides latest blockhash and slot for building transactions.
     block: LatestBlock,
-    /// Queue of tasks to execute
-    task_queue: DelayQueue<DbTask>,
-    /// Map of task IDs to their corresponding keys in the task queue
-    task_queue_keys: HashMap<i64, Key>,
-    /// Latest in-memory instance version for queued or in-flight tasks
-    task_versions: HashMap<i64, i64>,
-    /// Number of consecutive failed execution attempts for each task
-    task_execution_retries: HashMap<i64, u32>,
-    /// Token used to cancel the task scheduler
+    /// Token used to cancel the task scheduler.
     token: CancellationToken,
-    /// Minimum interval between task executions
-    min_interval: Duration,
-    /// How long failed task and scheduling records are retained.
-    failed_task_retention: Duration,
-    /// How often failed task and scheduling records are cleaned up.
-    failed_task_cleanup_interval: Duration,
-    /// Slot interval of the validator
+    /// Slot interval of the validator, used to convert millisecond intervals
+    /// into the slot-based cadence hydra expects.
     slot_interval: Duration,
-    /// Shared counter for noop instructions (unique crank transactions).
-    tx_counter: Arc<AtomicU64>,
 }
 
-enum ProcessingOutcome {
-    Success,
-    Recoverable(Box<TaskSchedulerError>),
-}
-
-// SAFETY: TaskSchedulerService is moved into a single Tokio task in `start()` and never cloned.
-// It runs exclusively on that task's thread. All fields (SchedulerDatabase, TransactionSchedulerHandle,
-// ScheduledTasksRx, LatestBlock, DelayQueue, HashMap, AtomicU64, CancellationToken) are Send+Sync,
-// and the service maintains exclusive ownership throughout its lifetime.
+// SAFETY: TaskSchedulerService is moved into a single Tokio task in `start()`
+// and never cloned. It runs exclusively on that task. All fields are Send+Sync.
 unsafe impl Send for TaskSchedulerService {}
 unsafe impl Sync for TaskSchedulerService {}
 impl TaskSchedulerService {
-    /// Creates a new `TaskSchedulerService` with the given configuration.
+    /// Creates a new `TaskSchedulerService`.
     pub fn new(
         path: &Path,
-        config: &TaskSchedulerConfig,
         rpc_url: String,
+        faucet: Option<Keypair>,
         scheduled_tasks: ScheduledTasksRx,
         block: LatestBlock,
         slot_interval: Duration,
         token: CancellationToken,
     ) -> TaskSchedulerResult<Self> {
-        if config.min_interval.as_millis() > u32::MAX as u128 {
-            return Err(TaskSchedulerError::InvalidConfiguration(format!(
-                "min_interval must be less than or equal to u32::MAX: {}",
-                config.min_interval.as_millis()
-            )));
-        }
-        if config.reset {
-            match std::fs::remove_file(path) {
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    debug!("Database file not found, skip resetting");
-                }
-                Err(e) => {
-                    warn!("Failed to remove database file: {}", e);
-                    return Err(TaskSchedulerError::Io(e));
-                }
-            }
-        }
-
-        // Reschedule all persisted tasks
+        let Some(faucet) = faucet else {
+            warn!("No faucet keypair configured, skipping task scheduler");
+            return Err(TaskSchedulerError::FaucetNotReady);
+        };
         let db = SchedulerDatabase::new(path)?;
         Ok(Self {
             db,
             rpc_client: Arc::new(RpcClient::new(rpc_url)),
+            faucet,
             scheduled_tasks,
             block,
-            task_queue: DelayQueue::new(),
-            task_queue_keys: HashMap::new(),
-            task_versions: HashMap::new(),
-            task_execution_retries: HashMap::new(),
-            tx_counter: Arc::new(AtomicU64::default()),
             token,
-            min_interval: config.min_interval,
-            failed_task_retention: config.failed_task_retention,
-            failed_task_cleanup_interval: config.failed_task_cleanup_interval,
             slot_interval,
         })
     }
 
     /// Starts the `TaskSchedulerService` and returns a handle to the task.
     pub async fn start(
-        mut self,
+        self,
     ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
-        self.load_persisted_tasks().await?;
         Ok(tokio::spawn(self.run()))
     }
 
-    async fn load_persisted_tasks(&mut self) -> TaskSchedulerResult<()> {
-        self.task_queue.clear();
-        self.task_queue_keys.clear();
-        self.task_execution_retries.clear();
-
-        // Reschedule all tasks that are due
-        let tasks = self.db.get_tasks().await?;
-        let now = chrono::Utc::now().timestamp_millis();
-        debug!(
-            "Task scheduler starting at {} with {} tasks",
-            now,
-            tasks.len()
-        );
-        for task in tasks {
-            if !is_valid_task_interval(task.execution_interval_millis)
-                || task.executions_left <= 0
-            {
-                warn!(
-                    "Task {} has an invalid parameters: (interval={}, executions_left={}). Skipping.",
-                    task.id, task.execution_interval_millis, task.executions_left
-                );
-                self.db.remove_task(task.id).await?;
-                continue;
-            }
-
-            let next_execution =
-                task.last_execution_millis + task.execution_interval_millis;
-            // Earliest reschedule time is 2 slot interval.
-            // This avoids, scheduling before the first blockhash is produced on restart.
-            let timeout = Duration::from_millis(
-                next_execution
-                    .saturating_sub(now)
-                    .max(2 * self.slot_interval.as_millis() as i64)
-                    as u64,
-            );
-            let task_id = task.id;
-            self.task_versions.insert(task_id, task.updated_at);
-            let key = self.task_queue.insert(task, timeout);
-            self.task_queue_keys.insert(task_id, key);
+    /// Main loop: migrate persisted tasks once, then serve runtime requests.
+    async fn run(mut self) -> TaskSchedulerResult<()> {
+        if let Err(e) = self.migrate_persisted_tasks().await {
+            error!("Task migration failed: {}", e);
         }
 
-        Ok(())
-    }
-
-    /// Main loop of the task scheduler.
-    async fn run(mut self) -> TaskSchedulerResult<()> {
-        let mut failed_task_cleanup = interval(
-            self.failed_task_cleanup_interval
-                .max(Duration::from_millis(1)),
-        );
-        failed_task_cleanup.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        let (crank_tx, mut crank_rx) = mpsc::unbounded_channel();
+        // Ensure the faucet is funded before serving runtime requests so the
+        // first scheduled task is not dropped for lack of a payer.
+        self.wait_for_faucet_ready().await?;
 
         loop {
             select! {
-                Some(expired) = self.task_queue.next() => {
-                    // A task expired, batch all expired tasks
-                    let first = expired.into_inner();
-                    self.task_queue_keys.remove(&first.id);
-                    let mut batch = vec![first];
-                    while let Some(expired) = poll_fn(|cx| self.task_queue.poll_expired(cx))
-                        .now_or_never()
-                        .flatten()
-                    {
-                        let task = expired.into_inner();
-                        self.task_queue_keys.remove(&task.id);
-                        batch.push(task);
-                    }
-
-                    let rpc_client = self.rpc_client.clone();
-                    let block = self.block.clone();
-                    let tx_counter = self.tx_counter.clone();
-                    let crank_tx = crank_tx.clone();
-
-                    tokio::spawn(async move {
-                        let result =
-                            Self::send_crank_batch(rpc_client, &block, tx_counter, &batch).await;
-                        let _ = crank_tx.send((batch, result));
-                    });
-                }
-                Some((batch, result)) = crank_rx.recv() => {
-                    // The batch has been sent, updates queue and db
-                    self.on_crank_batch_completed(batch, result).await?;
-                }
-                Some(task) = self.scheduled_tasks.recv() => {
-                    // Received a new request from the transaction executor
-                    let id = task.id();
-                    match self.process_request(task).await {
-                        Ok(ProcessingOutcome::Success) => {}
-                        Ok(ProcessingOutcome::Recoverable(e)) => {
-                            warn!("Failed to process request ID={}: {e:?}", id);
-                        }
-                        Err(e) => {
-                            error!("Failed to process request: {}", e);
-                            return Err(e);
-                        }
-                    }
-                }
-                _ = failed_task_cleanup.tick() => {
-                    let cutoff = chrono::Utc::now().timestamp_millis().saturating_sub(
-                        self.failed_task_retention.as_millis().min(i64::MAX as u128) as i64,
-                    );
-                    let deleted =  match self.db.delete_failed_records_older_than(cutoff).await {
-                        Ok(deleted) => deleted,
-                        Err(e) => {
-                            error!("Failed to cleanup old failed task records: {}", e);
-                            continue;
-                        }
-                    };
-                    if deleted > 0 {
-                        debug!(
-                            deleted,
-                            cutoff_timestamp_millis = cutoff,
-                            "Cleaned up old failed task records"
-                        );
-                    }
+                Some(request) = self.scheduled_tasks.recv() => {
+                    self.process_request(request).await;
                 }
                 _ = self.token.cancelled() => {
                     break;
@@ -269,515 +128,437 @@ impl TaskSchedulerService {
         }
 
         info!("TaskSchedulerService shutdown!");
-        drop(crank_tx);
-        while let Some((batch, result)) = crank_rx.recv().await {
-            self.on_crank_batch_completed(batch, result).await?;
-        }
-
         Ok(())
     }
 
-    /// Processes [TaskRequest] provided by the transaction executor.
-    async fn process_request(
-        &mut self,
-        request: TaskRequest,
-    ) -> TaskSchedulerResult<ProcessingOutcome> {
-        let task_id = request.id();
-        match request {
-            TaskRequest::Schedule(schedule_request) => {
-                if let Err(e) =
-                    self.process_schedule_request(schedule_request).await
-                {
-                    self.db
-                        .insert_failed_scheduling(task_id, format!("{:?}", e))
-                        .await?;
-                    error!(
-                        "Failed to process schedule request {}: {}",
-                        task_id, e
-                    );
+    /// Migrates every task persisted by the legacy scheduler onto hydra, then
+    /// empties the database. Invalid tasks are dropped without rescheduling.
+    /// Migration is best-effort: a task is removed from the database whether or
+    /// not its hydra crank could be created, so the database always empties.
+    async fn migrate_persisted_tasks(&self) -> TaskSchedulerResult<()> {
+        let tasks = self.db.get_tasks().await?;
+        if tasks.is_empty() {
+            return Ok(());
+        }
+        info!("Migrating {} persisted task(s) onto hydra", tasks.len());
 
-                    return Ok(ProcessingOutcome::Recoverable(Box::new(e)));
+        // Drop tasks that can no longer correspond to a live crank without
+        // touching the network.
+        let (valid, invalid): (Vec<DbTask>, Vec<DbTask>) =
+            tasks.into_iter().partition(|task| {
+                is_valid_task_interval(task.execution_interval_millis)
+                    && task.executions_left > 0
+            });
+        for task in invalid {
+            warn!(
+                "Dropping invalid task {} during migration (interval={}, executions_left={})",
+                task.id, task.execution_interval_millis, task.executions_left
+            );
+            self.db.remove_task(task.id).await?;
+        }
+
+        if valid.is_empty() {
+            return Ok(());
+        }
+
+        // Sending a crank create needs a usable blockhash and a funded faucet
+        // (delegated and cloned into the ephemeral rollup) to pay with.
+        self.wait_for_block_ready().await;
+        info!("Migration: block ready");
+        self.wait_for_faucet_ready().await?;
+        info!("Migration: faucet ready");
+
+        for task in valid {
+            info!("Migration: creating crank for task {}", task.id);
+            match self
+                .schedule_crank(
+                    &task.authority,
+                    task.id,
+                    task.execution_interval_millis,
+                    task.executions_left,
+                    &task.instructions,
+                    Some(task.last_execution_millis),
+                )
+                .await
+            {
+                Ok(()) => {
+                    self.db.remove_task(task.id).await?;
+                    debug!("Migration: created crank for task {}", task.id)
                 }
+                Err(e) => {
+                    warn!(
+                        "Failed to migrate task {} onto hydra: {}",
+                        task.id, e
+                    )
+                }
+            }
+        }
+
+        info!("Task migration complete");
+        Ok(())
+    }
+
+    /// Waits until the faucet has a non-zero balance in the ephemeral rollup
+    /// (i.e. it has been delegated on the base chain and cloned in), or the
+    /// scheduler is cancelled, or [`FAUCET_READY_TIMEOUT`] elapses.
+    async fn wait_for_faucet_ready(&self) -> TaskSchedulerResult<()> {
+        let faucet = self.faucet.pubkey();
+        let start = Instant::now();
+        while start.elapsed() < FAUCET_READY_TIMEOUT {
+            if self.token.is_cancelled() {
+                return Ok(());
+            }
+            if matches!(
+                self.rpc_client.get_account(&faucet).await,
+                Ok(account) if account.lamports > 0
+            ) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        warn!(%faucet, "Timed out waiting for faucet to be delegated before paying cranks");
+        Err(TaskSchedulerError::FaucetNotReady)
+    }
+
+    /// Waits until the validator has a usable blockhash, or the scheduler is
+    /// cancelled, or [`BLOCK_READY_TIMEOUT`] elapses.
+    async fn wait_for_block_ready(&self) {
+        let start = Instant::now();
+        while start.elapsed() < BLOCK_READY_TIMEOUT {
+            if self.token.is_cancelled()
+                || self.block.load().blockhash != Default::default()
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        warn!("Timed out waiting for a usable blockhash before migration");
+    }
+
+    /// Processes a [TaskRequest] from the transaction executor.
+    async fn process_request(&self, request: TaskRequest) {
+        let task_id = request.id();
+        let result = match request {
+            TaskRequest::Schedule(schedule_request) => {
+                self.process_schedule_request(schedule_request).await
             }
             TaskRequest::Cancel(cancel_request) => {
-                if let Err(e) =
-                    self.process_cancel_request(&cancel_request).await
-                {
-                    self.db
-                        .insert_failed_scheduling(task_id, format!("{:?}", e))
-                        .await?;
-                    error!(
-                        "Failed to process cancel request for task {}: {}",
-                        task_id, e
-                    );
-
-                    return Ok(ProcessingOutcome::Recoverable(Box::new(e)));
-                }
+                self.process_cancel_request(&cancel_request).await
             }
         };
-
-        Ok(ProcessingOutcome::Success)
+        if let Err(e) = result {
+            error!("Failed to process task request {}: {}", task_id, e);
+        }
     }
 
-    /// Processes [ScheduleTaskRequest] provided by the transaction executor.
+    /// Schedules a task: creates and funds its hydra crank.
     async fn process_schedule_request(
-        &mut self,
-        mut task: ScheduleTaskRequest,
+        &self,
+        task: ScheduleTaskRequest,
     ) -> TaskSchedulerResult<()> {
         if !is_valid_task_interval(task.execution_interval_millis) {
-            // If the interval is too large or zero, we don't schedule the task
+            // Too large or zero: ignore.
             return Ok(());
         }
+        let interval_millis =
+            task.execution_interval_millis.clamp(1, u32::MAX as i64);
 
-        task.execution_interval_millis = task
-            .execution_interval_millis
-            .clamp(self.min_interval.as_millis() as i64, u32::MAX as i64);
-
-        let mut task = DbTask::from(task);
-        let task_id = task.id;
-
-        // Check if the task already exists in the database
-        if let Some(db_task) = self.db.get_task(task_id).await? {
-            if db_task.authority != task.authority {
-                return Err(TaskSchedulerError::UnauthorizedReplacing(
-                    task_id,
-                    db_task.authority.to_string(),
-                    task.authority.to_string(),
-                ));
-            }
-        }
-
-        task.updated_at = self.db.insert_task(&task).await?;
-        self.remove_task_from_queue(task_id);
-        self.task_execution_retries.remove(&task_id);
-        self.task_versions.insert(task_id, task.updated_at);
-        let key = self.task_queue.insert(task, Duration::from_millis(0));
-        self.task_queue_keys.insert(task_id, key);
-        debug!("Registered task {} from context", task_id);
-
+        self.schedule_crank(
+            &task.authority,
+            task.id,
+            interval_millis,
+            task.iterations,
+            &task.instructions,
+            None,
+        )
+        .await?;
+        debug!("Created hydra crank for task {}", task.id);
         Ok(())
     }
 
-    /// Processes [CancelTaskRequest] provided by the transaction executor.
+    /// Cancels a task's hydra crank, if one exists for `(authority, task_id)`.
     async fn process_cancel_request(
-        &mut self,
+        &self,
         cancel_request: &CancelTaskRequest,
     ) -> TaskSchedulerResult<()> {
-        let Some(task) = self.db.get_task(cancel_request.task_id).await? else {
-            // Task not found in the database, cleanup the queue
-            self.remove_task_from_queue(cancel_request.task_id);
-            self.task_execution_retries.remove(&cancel_request.task_id);
-            return Ok(());
-        };
+        let crank =
+            crank_pubkey(&cancel_request.authority, cancel_request.task_id);
 
-        // Check if the task authority is the same as the cancel request authority
-        if task.authority != cancel_request.authority {
-            error!(
-                "Task authority {} does not match cancel request authority {}",
-                task.authority, cancel_request.authority
-            );
-            return Ok(());
-        }
-
-        // Remove task from queue and database
-        self.remove_task_runtime_state(task.id);
-        self.task_execution_retries.remove(&task.id);
-        self.db.remove_task(task.id).await?;
-        debug!("Removed task {} from database", task.id);
+        // Does not check if the crank exists, so it will fail if it does not exist
+        self.send_cancel(crank).await?;
+        debug!("Cancelled hydra crank for task {}", cancel_request.task_id);
 
         Ok(())
     }
 
-    /// Sends a batch of crank transactions to the RPC client.
-    async fn send_crank_batch(
-        rpc_client: Arc<RpcClient>,
-        block: &LatestBlock,
-        tx_counter: Arc<AtomicU64>,
-        tasks: &[DbTask],
-    ) -> TaskSchedulerResult<Vec<(DbTask, TaskSchedulerResult<Signature>)>>
-    {
-        let mut join_set: JoinSet<(DbTask, TaskSchedulerResult<Signature>)> =
-            JoinSet::new();
-        let blockhash = block.load().blockhash;
-        for task in tasks {
-            let rpc_client = rpc_client.clone();
-            let tx_counter = tx_counter.clone();
-            let task = task.clone();
-            join_set.spawn(async move {
-                let ixs = vec![
-                    InstructionUtils::noop_instruction(
-                        tx_counter.fetch_add(1, Ordering::Relaxed),
-                    ),
-                    InstructionUtils::execute_task_instruction(
-                        task.authority,
-                        task.instructions.clone(),
-                    ),
-                ];
-                let tx = Transaction::new(
-                    &[validator_authority()],
-                    Message::new(&ixs, Some(&validator_authority_id())),
-                    blockhash,
-                );
-                let res = rpc_client
-                    .send_transaction(&tx)
-                    .await
-                    .map_err(Box::new)
-                    .map_err(TaskSchedulerError::from);
-                (task, res)
-            });
-        }
-        Ok(join_set.join_all().await)
-    }
-
-    /// Called when a crank batch is completed.
-    async fn on_crank_batch_completed(
-        &mut self,
-        batch: Vec<DbTask>,
-        result: TaskSchedulerResult<
-            Vec<(DbTask, TaskSchedulerResult<Signature>)>,
-        >,
-    ) -> TaskSchedulerResult<()> {
-        let now_millis = chrono::Utc::now().timestamp_millis();
-        let mut success_updates: Vec<CrankSuccessUpdate> = Vec::new();
-        let mut success_removals: Vec<CrankSuccessRemoval> = Vec::new();
-        let mut failed_records: Vec<CrankFailedMove> = Vec::new();
-        let mut retry_checks: Vec<CrankRetryCheck> = Vec::new();
-
-        // Decide what must happen to cranks
-        match result {
-            Ok(ref result) => {
-                // Batch completed, update individual crank based on tx status
-                for (task, res) in result {
-                    if let Err(e) = res {
-                        self.prepare_crank_failure_outcome(
-                            task,
-                            e,
-                            &mut failed_records,
-                            &mut retry_checks,
-                        )?;
-                    } else {
-                        self.prepare_crank_success_outcome(
-                            task,
-                            now_millis,
-                            &mut success_updates,
-                            &mut success_removals,
-                        )?;
-                    }
-                }
-            }
-            Err(ref e) => {
-                // Whole batch failed, fail all cranks
-                for task in &batch {
-                    self.prepare_crank_failure_outcome(
-                        task,
-                        e,
-                        &mut failed_records,
-                        &mut retry_checks,
-                    )?;
-                }
-            }
-        }
-
-        // Apply db updates for the whole batch
-        let completion = self
-            .db
-            .apply_crank_batch_completion(
-                &success_updates,
-                &success_removals,
-                &failed_records,
-                &retry_checks,
-            )
-            .await?;
-
-        // Update queue, retries and versions based on decisions
-        match result {
-            Ok(result) => {
-                for (task, res) in &result {
-                    if let Err(e) = res {
-                        if completion.failed_moves.get(&task.id).is_some_and(
-                            |m| m.expected_updated_at == task.updated_at,
-                        ) || completion
-                            .retry_checks
-                            .get(&task.id)
-                            .is_some_and(|c| {
-                                c.current_updated_at == task.updated_at
-                            })
-                        {
-                            self.apply_crank_failure_outcome(task, e)?;
-                        }
-                    } else if let Some(update) =
-                        completion.success_updates.get(&task.id)
-                    {
-                        if update.expected_updated_at == task.updated_at {
-                            self.apply_crank_success_outcome(
-                                task,
-                                now_millis,
-                                Some(update.new_updated_at),
-                            )?;
-                        }
-                    } else if completion
-                        .success_removals
-                        .get(&task.id)
-                        .is_some_and(|r| {
-                            r.expected_updated_at == task.updated_at
-                        })
-                    {
-                        self.apply_crank_success_outcome(
-                            task, now_millis, None,
-                        )?;
-                    }
-                }
-            }
-            Err(ref e) => {
-                for task in &batch {
-                    if completion.failed_moves.get(&task.id).is_some_and(|m| {
-                        m.expected_updated_at == task.updated_at
-                    }) || completion.retry_checks.get(&task.id).is_some_and(
-                        |c| c.current_updated_at == task.updated_at,
-                    ) {
-                        self.apply_crank_failure_outcome(task, e)?;
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Either:
-    /// - reschedules crank with remaining iterations
-    /// - remove exhausted cranks
-    fn prepare_crank_success_outcome(
+    /// Creates and funds the hydra crank for a task. If a crank already exists
+    /// at the deterministic PDA (a reschedule), it is closed first so the new
+    /// schedule can recreate it.
+    async fn schedule_crank(
         &self,
-        task: &DbTask,
-        now_millis: i64,
-        success_updates: &mut Vec<CrankSuccessUpdate>,
-        success_removals: &mut Vec<CrankSuccessRemoval>,
+        authority: &Pubkey,
+        task_id: i64,
+        interval_millis: i64,
+        iterations: i64,
+        instructions: &[Instruction],
+        last_execution_millis: Option<i64>,
     ) -> TaskSchedulerResult<()> {
-        let executed_at = next_execution_millis(
-            task.last_execution_millis,
-            task.execution_interval_millis,
-            now_millis,
-        );
-
-        if task.executions_left > 1 {
-            success_updates.push(CrankSuccessUpdate {
-                task_id: task.id,
-                last_execution_millis: executed_at,
-                expected_updated_at: task.updated_at,
-            });
-        } else {
-            success_removals.push(CrankSuccessRemoval {
-                task_id: task.id,
-                expected_updated_at: task.updated_at,
-            });
+        if iterations <= 0 {
+            return Ok(());
         }
-
+        self.send_create(
+            authority,
+            task_id,
+            interval_millis,
+            iterations,
+            instructions,
+            last_execution_millis,
+        )
+        .await?;
         Ok(())
     }
 
-    /// Either:
-    /// - re-queues for retry
-    /// - queues a permanent failure for SQLite along with clearing retry counters and stale queue keys.
-    fn prepare_crank_failure_outcome(
+    /// Returns whether a hydra-owned crank account currently exists at `crank`.
+    async fn crank_exists(&self, crank: &Pubkey) -> bool {
+        matches!(
+            self.rpc_client.get_account(crank).await,
+            Ok(account) if account.owner == EPHEMERAL_PROGRAM_ID
+        )
+    }
+
+    /// Builds and sends the transaction that creates and funds a hydra crank.
+    /// It cancels the crank first if it already exists.
+    async fn send_create(
         &self,
-        task: &DbTask,
-        error: &TaskSchedulerError,
-        failed_records: &mut Vec<CrankFailedMove>,
-        retry_checks: &mut Vec<CrankRetryCheck>,
-    ) -> TaskSchedulerResult<()> {
-        debug!("Failed to execute task {}: {}", task.id, error);
+        authority: &Pubkey,
+        task_id: i64,
+        interval_millis: i64,
+        iterations: i64,
+        instructions: &[Instruction],
+        last_execution_millis: Option<i64>,
+    ) -> TaskSchedulerResult<Signature> {
+        let crank = crank_pubkey(authority, task_id);
+        let crank_exists = self.crank_exists(&crank).await;
 
-        if !is_retryable_task_execution_error(error) {
-            // Unretryable crank are moved to failed cranks
-            failed_records.push(CrankFailedMove {
-                task_id: task.id,
-                expected_updated_at: task.updated_at,
-                error: error.to_string(),
-            });
-            return Ok(());
-        }
+        let snapshot = self.block.load();
+        let start_slot = last_execution_millis
+            .map(|last_execution_millis| {
+                legacy_start_slot(
+                    last_execution_millis,
+                    interval_millis,
+                    Utc::now().timestamp_millis(),
+                    snapshot.slot,
+                    self.slot_interval,
+                )
+            })
+            .unwrap_or(snapshot.slot);
+        let blockhash = snapshot.blockhash;
 
-        let retries = *self.task_execution_retries.get(&task.id).unwrap_or(&0);
-        if retries >= MAX_TASK_EXECUTION_RETRIES {
-            // Crank exhausted retries, fail it
-            failed_records.push(CrankFailedMove {
-                task_id: task.id,
-                expected_updated_at: task.updated_at,
-                error: error.to_string(),
-            });
-            return Ok(());
-        }
+        let interval_slots =
+            interval_slots(interval_millis, self.slot_interval);
+        let iterations = iterations as u64;
 
-        // Schedule for retry
-        retry_checks.push(CrankRetryCheck {
-            task_id: task.id,
-            expected_updated_at: task.updated_at,
-        });
-
-        Ok(())
-    }
-
-    /// Updates the delay queue for the next firing after SQLite confirms the same task instance.
-    fn apply_crank_success_outcome(
-        &mut self,
-        task: &DbTask,
-        now_millis: i64,
-        updated_at: Option<i64>,
-    ) -> TaskSchedulerResult<()> {
-        if !self.task_version_matches(task) {
-            debug!(
-                task_id = task.id,
-                expected_updated_at = task.updated_at,
-                "Skipping stale successful crank completion"
-            );
-            return Ok(());
-        }
-
-        let executed_at = next_execution_millis(
-            task.last_execution_millis,
-            task.execution_interval_millis,
-            now_millis,
+        let faucet_pubkey = self.faucet.pubkey();
+        let create_ix = build_create_ix(
+            &faucet_pubkey,
+            authority,
+            task_id,
+            crank,
+            start_slot,
+            interval_slots,
+            iterations,
+            instructions,
+        );
+        let reward_pool = iterations.saturating_mul(CRANKER_REWARD);
+        let funding =
+            reward_pool.saturating_add(crank_rent_floor(instructions));
+        let fund_ix = solana_system_interface::instruction::transfer(
+            &faucet_pubkey,
+            &crank,
+            funding,
         );
 
-        if let Some(updated_at) = updated_at {
-            let next_execution = executed_at + task.execution_interval_millis;
-            let delay = delay_until_millis(next_execution, now_millis);
-            let new_task = DbTask {
-                executions_left: task.executions_left - 1,
-                last_execution_millis: executed_at,
-                updated_at,
-                ..task.clone()
-            };
-            let key = self.task_queue.insert(new_task, delay);
-            self.task_queue_keys.insert(task.id, key);
-            self.task_versions.insert(task.id, updated_at);
+        let validator = validator_authority();
+        let ixs = if crank_exists {
+            let cancel_ix =
+                ephemeral::cancel(faucet_pubkey, crank, faucet_pubkey);
+            vec![cancel_ix, create_ix, fund_ix]
         } else {
-            self.remove_task_runtime_state(task.id);
-        }
-
-        self.task_execution_retries.remove(&task.id);
-        Ok(())
-    }
-
-    /// Either:
-    /// - re-queues for retry
-    /// - records a permanent failure in runtime state after SQLite confirms the same task instance.
-    fn apply_crank_failure_outcome(
-        &mut self,
-        task: &DbTask,
-        error: &TaskSchedulerError,
-    ) -> TaskSchedulerResult<()> {
-        if !self.task_version_matches(task) {
-            debug!(
-                task_id = task.id,
-                expected_updated_at = task.updated_at,
-                "Skipping stale failed crank completion"
-            );
-            return Ok(());
-        }
-
-        if !is_retryable_task_execution_error(error) {
-            self.task_execution_retries.remove(&task.id);
-            self.remove_task_runtime_state(task.id);
-            return Ok(());
-        }
-
-        let Some(retries) = ({
-            let retries =
-                self.task_execution_retries.entry(task.id).or_default();
-            if *retries >= MAX_TASK_EXECUTION_RETRIES {
-                None
-            } else {
-                *retries += 1;
-                Some(*retries)
-            }
-        }) else {
-            self.task_execution_retries.remove(&task.id);
-            self.remove_task_runtime_state(task.id);
-            return Ok(());
+            vec![create_ix, fund_ix]
         };
-
-        let delay = self.task_execution_retry_delay(retries);
-        debug!(
-            task_id = task.id,
-            retry = retries,
-            max_retries = MAX_TASK_EXECUTION_RETRIES,
-            delay_ms = delay.as_millis(),
-            error = %error,
-            "Retrying failed task execution"
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&validator_authority_id()),
+            &[&validator, &self.faucet],
+            blockhash,
         );
 
-        let key = self.task_queue.insert(task.clone(), delay);
-        self.task_queue_keys.insert(task.id, key);
-        self.task_versions.insert(task.id, task.updated_at);
-
-        Ok(())
+        // Confirm before returning so successive cranks (all sponsored by the
+        // same faucet) don't race on the faucet's delegated account state.
+        self.rpc_client
+            .send_and_confirm_transaction(&tx)
+            .await
+            .map_err(Box::new)
+            .map_err(TaskSchedulerError::from)
     }
 
-    fn task_version_matches(&self, task: &DbTask) -> bool {
-        self.task_versions.get(&task.id) == Some(&task.updated_at)
+    /// Sends and confirms a crank cancellation. The crank's remaining lamports
+    /// are returned to the faucet (the cancel recipient).
+    async fn send_cancel(
+        &self,
+        crank: Pubkey,
+    ) -> TaskSchedulerResult<Signature> {
+        let faucet_pubkey = self.faucet.pubkey();
+        let blockhash = self.block.load().blockhash;
+        let cancel_ix = ephemeral::cancel(faucet_pubkey, crank, faucet_pubkey);
+        let validator = validator_authority();
+        let tx = Transaction::new_signed_with_payer(
+            &[cancel_ix],
+            Some(&validator_authority_id()),
+            &[&validator, &self.faucet],
+            blockhash,
+        );
+        self.rpc_client
+            .send_and_confirm_transaction(&tx)
+            .await
+            .map_err(Box::new)
+            .map_err(TaskSchedulerError::from)
     }
+}
 
-    /// Removes a task from the queue.
-    fn remove_task_from_queue(&mut self, task_id: i64) {
-        if let Some(key) = self.task_queue_keys.remove(&task_id) {
-            self.task_queue.remove(&key);
-        }
-    }
+/// Derives the deterministic hydra crank account address for a task.
+///
+/// The seed is `hash(authority, task_id)`, so each authority gets its own crank
+/// namespace: a different authority scheduling the same `task_id` gets an
+/// independent crank, and cancel/reschedule need no database lookup.
+pub fn crank_pubkey(authority: &Pubkey, task_id: i64) -> Pubkey {
+    let seed = solana_sha256_hasher::hashv(&[
+        authority.as_ref(),
+        &task_id.to_le_bytes(),
+    ])
+    .to_bytes();
+    ephemeral::find_crank_pda(&seed).0
+}
 
-    fn remove_task_runtime_state(&mut self, task_id: i64) {
-        self.remove_task_from_queue(task_id);
-        self.task_versions.remove(&task_id);
-    }
+/// Builds the hydra `Create` instruction embedding the task's instructions as
+/// the scheduled crank payload. Account signer flags are intentionally dropped:
+/// hydra rejects scheduled instructions that declare signers.
+/// Rent-exempt minimum for the crank account hydra will allocate for these
+/// scheduled instructions. Mirrors hydra's on-chain size accounting
+/// (`CRANK_HEADER_SIZE + region_len`, where each scheduled ix serializes to
+/// `2 + metas + program_id + 2 + data`).
+fn crank_rent_floor(instructions: &[Instruction]) -> u64 {
+    let region_len: usize = instructions
+        .iter()
+        .map(|ix| {
+            2 + ix.accounts.len() * SERIALIZED_META_SIZE
+                + 32
+                + 2
+                + ix.data.len()
+        })
+        .sum::<usize>()
+        + CRANK_HEADER_SIZE;
+    let total_size =
+        (region_len + AccountSharedData::ACCOUNT_STATIC_SIZE as usize) as u64;
+    total_size * EPHEMERAL_RENT_PER_BYTE
+}
 
-    /// Calculates the retry delay for the next task execution.
-    fn task_execution_retry_delay(&self, retry: u32) -> Duration {
-        let multiplier = 1u32
-            .checked_shl(retry.saturating_sub(1))
-            .unwrap_or(u32::MAX);
-        self.slot_interval
-            .max(TASK_EXECUTION_RETRY_BASE_DELAY)
-            .checked_mul(multiplier)
-            .unwrap_or(TASK_EXECUTION_RETRY_MAX_DELAY)
-            .min(TASK_EXECUTION_RETRY_MAX_DELAY)
-    }
+#[allow(clippy::too_many_arguments)]
+fn build_create_ix(
+    faucet: &Pubkey,
+    authority: &Pubkey,
+    task_id: i64,
+    crank: Pubkey,
+    start_slot: u64,
+    interval_slots: u64,
+    iterations: u64,
+    instructions: &[Instruction],
+) -> Instruction {
+    let seed = solana_sha256_hasher::hashv(&[
+        authority.as_ref(),
+        &task_id.to_le_bytes(),
+    ])
+    .to_bytes();
+
+    let metas_per_ix: Vec<Vec<SchedMeta>> = instructions
+        .iter()
+        .map(|ix| {
+            ix.accounts
+                .iter()
+                .map(|acc| SchedMeta {
+                    pubkey: acc.pubkey.to_bytes(),
+                    is_writable: acc.is_writable,
+                })
+                .collect()
+        })
+        .collect();
+
+    let scheduled: Vec<ScheduledIx> = instructions
+        .iter()
+        .zip(metas_per_ix.iter())
+        .map(|(ix, metas)| ScheduledIx {
+            program_id: ix.program_id.to_bytes(),
+            metas: metas.as_slice(),
+            data: ix.data.as_slice(),
+        })
+        .collect();
+
+    let args = CreateArgs {
+        seed,
+        // The faucet is the sponsor and the cancel authority for the crank.
+        authority: faucet.to_bytes(),
+        start_slot,
+        interval_slots,
+        remaining: iterations,
+        priority_tip: 0,
+        cu_limit: 0,
+        scheduled: scheduled.as_slice(),
+    };
+
+    ephemeral::create(*faucet, crank, &args)
 }
 
 fn is_valid_task_interval(interval: i64) -> bool {
     interval > 0 && interval < u32::MAX as i64
 }
 
-fn next_execution_millis(
+/// Computes the hydra start slot for a task migrated from the legacy scheduler.
+/// If the legacy task is overdue or has never run, it remains due immediately.
+fn legacy_start_slot(
     last_execution_millis: i64,
-    execution_interval_millis: i64,
-    now: i64,
-) -> i64 {
-    if last_execution_millis == 0 {
-        now
-    } else {
-        last_execution_millis + execution_interval_millis
+    interval_millis: i64,
+    current_millis: i64,
+    current_slot: u64,
+    slot_interval: StdDuration,
+) -> u64 {
+    if last_execution_millis <= 0 {
+        return current_slot;
     }
+
+    let next_execution_millis =
+        last_execution_millis.saturating_add(interval_millis.max(0));
+    let remaining_millis = next_execution_millis.saturating_sub(current_millis);
+    if remaining_millis == 0 {
+        return current_slot;
+    }
+
+    current_slot.saturating_add(interval_slots(remaining_millis, slot_interval))
 }
 
-fn delay_until_millis(execution_millis: i64, now: i64) -> Duration {
-    Duration::from_millis(execution_millis.saturating_sub(now).max(0) as u64)
-}
-
-fn is_retryable_task_execution_error(error: &TaskSchedulerError) -> bool {
-    // `send_crank_batch` maps Solana send and verification failures to Rpc.
-    matches!(error, TaskSchedulerError::Rpc(_))
+/// Converts a millisecond execution interval into a slot count (rounding up,
+/// with a one-slot minimum) for hydra's slot-based cadence.
+fn interval_slots(interval_millis: i64, slot_interval: StdDuration) -> u64 {
+    let slot_millis = (slot_interval.as_millis() as i64).max(1);
+    let interval_millis = interval_millis.max(0);
+    // Ceiling division without the unstable `i64::div_ceil`.
+    let slots = (interval_millis + slot_millis - 1) / slot_millis;
+    slots.max(1) as u64
 }
 
 #[cfg(test)]
 mod tests {
     use magicblock_core::coordination_mode::switch_to_primary_mode;
-    use magicblock_program::{
-        args::ScheduleTaskRequest,
-        validator::generate_validator_authority_if_needed,
-    };
     use serial_test::serial;
-    use solana_pubkey::Pubkey;
     use tokio::{sync::mpsc, time::timeout};
 
     use super::*;
@@ -791,16 +572,9 @@ mod tests {
             rpc_client: Arc::new(RpcClient::new(
                 "http://localhost:8899".to_string(),
             )),
+            faucet: Keypair::new(),
             block: LatestBlock::default(),
-            task_queue: DelayQueue::new(),
-            task_queue_keys: HashMap::new(),
-            task_versions: HashMap::new(),
-            task_execution_retries: HashMap::new(),
-            tx_counter: Arc::new(AtomicU64::default()),
             token: CancellationToken::new(),
-            min_interval: Duration::from_millis(1000),
-            failed_task_retention: Duration::from_secs(60),
-            failed_task_cleanup_interval: Duration::from_secs(60),
             slot_interval: Duration::from_millis(1000),
             scheduled_tasks,
         }
@@ -808,270 +582,93 @@ mod tests {
 
     #[serial]
     #[test]
-    fn test_first_execution_anchors_cadence_at_now() {
-        assert_eq!(next_execution_millis(0, 50, 1_000), 1_000);
+    fn test_interval_millis_rounds_up_to_slots() {
+        let slot = StdDuration::from_millis(50);
+        assert_eq!(interval_slots(1, slot), 1);
+        assert_eq!(interval_slots(50, slot), 1);
+        assert_eq!(interval_slots(51, slot), 2);
+        assert_eq!(interval_slots(100, slot), 2);
     }
 
     #[serial]
     #[test]
-    fn test_recurring_execution_preserves_fixed_rate_cadence() {
-        let executed_at = next_execution_millis(1_000, 50, 1_090);
-        assert_eq!(executed_at, 1_050);
+    fn test_legacy_start_slot_preserves_remaining_delay() {
+        let slot_interval = StdDuration::from_millis(1_000);
 
-        let delay = delay_until_millis(executed_at + 50, 1_090);
-        assert_eq!(delay, Duration::from_millis(10));
+        assert_eq!(
+            legacy_start_slot(10_000, 30_000, 25_000, 100, slot_interval),
+            115
+        );
+        assert_eq!(
+            legacy_start_slot(10_000, 30_000, 40_000, 100, slot_interval),
+            100
+        );
+        assert_eq!(
+            legacy_start_slot(0, 30_000, 25_000, 100, slot_interval),
+            100
+        );
     }
 
     #[serial]
     #[test]
-    fn test_overdue_execution_is_rescheduled_immediately() {
-        assert_eq!(delay_until_millis(1_100, 1_150), Duration::from_millis(0));
+    fn test_crank_pubkey_namespaced_by_authority_and_id() {
+        let a = Pubkey::new_unique();
+        let b = Pubkey::new_unique();
+        // Deterministic.
+        assert_eq!(crank_pubkey(&a, 1), crank_pubkey(&a, 1));
+        // Different task id -> different crank.
+        assert_ne!(crank_pubkey(&a, 1), crank_pubkey(&a, 2));
+        // Different authority, same id -> different crank (per-authority namespace).
+        assert_ne!(crank_pubkey(&a, 1), crank_pubkey(&b, 1));
     }
 
     #[serial]
     #[tokio::test]
-    async fn test_schedule_invalid_tasks() {
-        magicblock_core::logger::init_for_tests();
-        switch_to_primary_mode();
-        generate_validator_authority_if_needed();
-
-        let (tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
-
-        let service = test_service(db.clone(), rx);
-
-        let handle = service.start().await.unwrap();
-
-        // Invalid task interval
-        tx.send(TaskRequest::Schedule(ScheduleTaskRequest {
-            id: 1,
-            authority: Pubkey::new_unique(),
-            execution_interval_millis: u32::MAX as i64,
-            iterations: 1,
-            instructions: vec![],
-        }))
-        .unwrap();
-        // Valid task interval
-        tx.send(TaskRequest::Schedule(ScheduleTaskRequest {
-            id: 1,
-            authority: Pubkey::new_unique(),
-            execution_interval_millis: u32::MAX as i64 - 1,
-            iterations: 1,
-            instructions: vec![],
-        }))
-        .unwrap();
-
-        // After processing the requests, only one task stays in the DB
-        timeout(Duration::from_secs(1), async move {
-            loop {
-                let tasks = db.get_tasks().await.unwrap();
-                if tasks.len() > 1 {
-                    return Err::<(), String>(format!(
-                        "Tasks should be 1, got {}",
-                        tasks.len()
-                    ));
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        })
-        .await
-        .unwrap_err();
-
-        handle.abort();
-    }
-
-    #[serial]
-    #[tokio::test]
-    async fn test_remove_invalid_tasks_on_startup() {
+    async fn test_migration_drops_invalid_tasks_and_empties_db() {
         magicblock_core::logger::init_for_tests();
         switch_to_primary_mode();
 
         let (_tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
-        // Invalid task interval
+        // Invalid interval.
         db.insert_task(&DbTask {
             id: 1,
             authority: Pubkey::new_unique(),
             execution_interval_millis: u32::MAX as i64,
             executions_left: 1,
-            last_execution_millis: chrono::Utc::now().timestamp_millis(),
-            updated_at: 0,
+            last_execution_millis: 0,
             instructions: vec![],
         })
         .await
         .unwrap();
-        // Valid task interval
+        // Exhausted (no executions left).
         db.insert_task(&DbTask {
             id: 2,
-            authority: Pubkey::new_unique(),
-            execution_interval_millis: u32::MAX as i64 - 1,
-            executions_left: 1,
-            last_execution_millis: chrono::Utc::now().timestamp_millis(),
-            updated_at: 0,
-            instructions: vec![],
-        })
-        .await
-        .unwrap();
-        let service = test_service(db.clone(), rx);
-
-        let handle = service.start().await.unwrap();
-
-        // After starting, only one task should be in the database
-        timeout(Duration::from_secs(1), async move {
-            loop {
-                let tasks = db.get_tasks().await?;
-                if tasks.len() == 1 {
-                    return Ok::<_, TaskSchedulerError>(());
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        })
-        .await
-        .unwrap()
-        .unwrap();
-        handle.abort();
-    }
-
-    #[serial]
-    #[tokio::test]
-    async fn test_completed_tasks_are_removed_on_startup() {
-        magicblock_core::logger::init_for_tests();
-        switch_to_primary_mode();
-
-        let (_tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
-        db.insert_task(&DbTask {
-            id: 1,
             authority: Pubkey::new_unique(),
             execution_interval_millis: 50,
             executions_left: 0,
-            last_execution_millis: chrono::Utc::now().timestamp_millis(),
-            updated_at: 0,
-            instructions: vec![],
-        })
-        .await
-        .unwrap();
-        db.insert_task(&DbTask {
-            id: 2,
-            authority: Pubkey::new_unique(),
-            execution_interval_millis: 50,
-            executions_left: 1,
-            last_execution_millis: chrono::Utc::now().timestamp_millis(),
-            updated_at: 0,
-            instructions: vec![],
-        })
-        .await
-        .unwrap();
-
-        let mut service = test_service(db.clone(), rx);
-        service.min_interval = Duration::from_millis(10);
-
-        let handle = service.start().await.unwrap();
-
-        timeout(Duration::from_secs(1), async move {
-            loop {
-                let tasks = db.get_task_ids().await?;
-                if tasks == vec![2] {
-                    return Ok::<_, TaskSchedulerError>(());
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        })
-        .await
-        .unwrap()
-        .unwrap();
-        handle.abort();
-    }
-
-    #[serial]
-    #[tokio::test]
-    async fn test_stale_crank_completion_does_not_mutate_replaced_task() {
-        magicblock_core::logger::init_for_tests();
-        switch_to_primary_mode();
-
-        let (_tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
-        let authority = Pubkey::new_unique();
-        let mut old_task = DbTask {
-            id: 1,
-            authority,
-            execution_interval_millis: 50,
-            executions_left: 2,
             last_execution_millis: 0,
-            updated_at: 0,
             instructions: vec![],
-        };
-        old_task.updated_at = db.insert_task(&old_task).await.unwrap();
+        })
+        .await
+        .unwrap();
 
-        let mut service = test_service(db.clone(), rx);
-
-        let mut replacement = DbTask {
-            executions_left: 5,
-            ..old_task.clone()
-        };
-        replacement.updated_at = db.insert_task(&replacement).await.unwrap();
-        let key = service
-            .task_queue
-            .insert(replacement.clone(), Duration::from_secs(10));
-        service.task_queue_keys.insert(replacement.id, key);
-        service
-            .task_versions
-            .insert(replacement.id, replacement.updated_at);
-
-        service
-            .on_crank_batch_completed(
-                vec![old_task.clone()],
-                Ok(vec![(old_task, Ok(Signature::new_unique()))]),
-            )
-            .await
-            .unwrap();
-
-        let persisted = db.get_task(replacement.id).await.unwrap().unwrap();
-        assert_eq!(persisted.executions_left, replacement.executions_left);
-        assert_eq!(persisted.updated_at, replacement.updated_at);
-
-        let key = service.task_queue_keys.remove(&replacement.id).unwrap();
-        let queued = service.task_queue.remove(&key).into_inner();
-        assert_eq!(queued.updated_at, replacement.updated_at);
-        assert_eq!(queued.executions_left, replacement.executions_left);
-    }
-
-    #[serial]
-    #[tokio::test]
-    async fn test_failed_records_are_cleaned_up_periodically() {
-        magicblock_core::logger::init_for_tests();
-        switch_to_primary_mode();
-
-        let (_tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
-
-        db.insert_failed_scheduling(1, "schedule failed".to_string())
-            .await
-            .unwrap();
-        db.insert_failed_task(2, "task failed".to_string())
-            .await
-            .unwrap();
-        tokio::time::sleep(Duration::from_millis(2)).await;
-
-        let mut service = test_service(db.clone(), rx);
-        service.failed_task_retention = Duration::from_millis(1);
-        service.failed_task_cleanup_interval = Duration::from_millis(5);
-
+        let service = test_service(db.clone(), rx);
         let handle = service.start().await.unwrap();
 
-        timeout(Duration::from_secs(1), async move {
+        // Migration drops both invalid tasks without any network access, so the
+        // database empties promptly.
+        timeout(Duration::from_secs(2), async move {
             loop {
-                if db.get_failed_schedulings().await?.is_empty()
-                    && db.get_failed_tasks().await?.is_empty()
-                {
-                    return Ok::<_, TaskSchedulerError>(());
+                if db.get_task_ids().await.unwrap().is_empty() {
+                    return;
                 }
-                tokio::time::sleep(Duration::from_millis(5)).await;
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
         .await
-        .unwrap()
-        .unwrap();
+        .expect("database should empty after migration");
+
         handle.abort();
     }
 }

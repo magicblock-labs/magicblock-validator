@@ -14,6 +14,13 @@ pub const DEFAULT_STORAGE_DIRECTORY: &str = "magicblock-test-storage/";
 pub const DEFAULT_VALIDATOR_KEYPAIR: &str =
      "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ";
 
+/// Keypair the task scheduler uses to pay for hydra cranks. It is delegated on
+/// startup and must be funded (the validator does not fund it).
+/// WARNING: This keypair is for development/testing only.
+/// Production deployments MUST provide their own faucet keypair via config.
+pub const DEFAULT_TASK_SCHEDULER_FAUCET_KEYPAIR: &str =
+    "4SkhwWzaUdkXS5RQZHNFtmaTjvPRNKEZjLRiYPm3y7MGQTWBYYzrwAcvK1vMDwrTHrAy2aGqMJn2s7qbjfxqDLU9";
+
 /// Default base fee in lamports for transactions
 pub const DEFAULT_BASE_FEE: u64 = 0;
 
@@ -63,13 +70,6 @@ pub const DEFAULT_METRICS_ADDR: &str = "0.0.0.0:9000";
 
 /// Default frequency of metrics collection in seconds
 pub const DEFAULT_METRICS_COLLECT_FREQUENCY_SEC: u64 = 30;
-
-// Task Scheduler Defaults
-pub const DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS: u64 = 10;
-pub const DEFAULT_TASK_SCHEDULER_FAILED_TASK_RETENTION_SECS: u64 =
-    14 * 24 * 60 * 60; // 14 days
-pub const DEFAULT_TASK_SCHEDULER_FAILED_TASK_CLEANUP_INTERVAL_SECS: u64 =
-    60 * 60; // 1 hour
 
 // ChainLink Defaults
 /// Default delay in milliseconds between resubscribing to accounts after a pubsub reconnection

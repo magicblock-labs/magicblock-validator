@@ -1,3 +1,4 @@
+mod crank_faucet;
 pub mod domain_registry_manager;
 pub mod errors;
 mod fund_account;

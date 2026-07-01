@@ -24,4 +24,7 @@ pub enum TaskSchedulerError {
 
     #[error("Batch size mismatch: expected {0}, got {1}")]
     SizeMismatch(usize, usize),
+
+    #[error("Faucet not ready")]
+    FaucetNotReady,
 }

@@ -30,5 +30,9 @@ path = "../../target/deploy/magicblock_committor_program.so"
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
 path = "../target/deploy/program_schedulecommit.so"
 
+[[programs]]
+id = "eHyd5BU8QffvHi4GnXwxrK4WpS7pM2x9UGKHBWii7mf"
+path = "../programs/hydra/hydra.so"
+
 [metrics]
 address = "0.0.0.0:9000"

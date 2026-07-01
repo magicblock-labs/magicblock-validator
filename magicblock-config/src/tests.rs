@@ -388,16 +388,6 @@ fn test_cli_ledger_reset_overrides_toml() {
 }
 
 #[test]
-#[serial]
-fn test_task_scheduler_bool_env() {
-    // Verify standard boolean parsing from Env vars work on nested fields
-    let _guard = EnvVarGuard::new("MBV_TASK_SCHEDULER__RESET", "true");
-
-    let config = run_cli(vec![]);
-    assert!(config.task_scheduler.reset);
-}
-
-#[test]
 #[parallel]
 fn test_example_config_full_coverage() {
     // 1. Locate the config.example.toml in the workspace root
@@ -503,21 +493,6 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // 11. Optional Sections
     // ========================================================================
-    // Task scheduler reset should be false
-    assert!(!config.task_scheduler.reset);
-    assert_eq!(
-        config.task_scheduler.min_interval,
-        Duration::from_millis(10)
-    );
-    assert_eq!(
-        config.task_scheduler.failed_task_retention,
-        Duration::from_secs(14 * 24 * 60 * 60)
-    );
-    assert_eq!(
-        config.task_scheduler.failed_task_cleanup_interval,
-        Duration::from_secs(60 * 60)
-    );
-
     // The example file has the programs section with 2 entries
     assert_eq!(
         config.programs.len(),
@@ -597,14 +572,6 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_CHAINLINK__RISK__CACHE_TTL", "45m"),
         EnvVarGuard::new("MBV_CHAINLINK__RISK__REQUEST_TIMEOUT", "3s"),
         EnvVarGuard::new("MBV_CHAINLINK__RISK__RISK_SCORE_THRESHOLD", "8"),
-        // --- Task Scheduler ---
-        EnvVarGuard::new("MBV_TASK_SCHEDULER__RESET", "true"),
-        EnvVarGuard::new("MBV_TASK_SCHEDULER__MIN_INTERVAL", "99ms"),
-        EnvVarGuard::new("MBV_TASK_SCHEDULER__FAILED_TASK_RETENTION", "2h"),
-        EnvVarGuard::new(
-            "MBV_TASK_SCHEDULER__FAILED_TASK_CLEANUP_INTERVAL",
-            "3m",
-        ),
         // --- Chain Operation (Optional Section) ---
         // Figment can instantiate optional structs if their fields are present
         EnvVarGuard::new("MBV_CHAIN_OPERATION__COUNTRY_CODE", "DE"),
@@ -680,21 +647,6 @@ fn test_env_vars_full_coverage() {
         Duration::from_secs(3)
     );
     assert_eq!(config.chainlink.risk.risk_score_threshold, 8);
-
-    // Task Scheduler
-    assert!(config.task_scheduler.reset);
-    assert_eq!(
-        config.task_scheduler.min_interval,
-        Duration::from_millis(99)
-    );
-    assert_eq!(
-        config.task_scheduler.failed_task_retention,
-        Duration::from_secs(2 * 60 * 60)
-    );
-    assert_eq!(
-        config.task_scheduler.failed_task_cleanup_interval,
-        Duration::from_secs(3 * 60)
-    );
 
     // Chain Operation
     // Verify the optional struct was created and populated

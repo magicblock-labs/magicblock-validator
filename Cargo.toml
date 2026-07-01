@@ -84,6 +84,7 @@ guinea = { path = "./programs/guinea" }
 helius-laserstream = { git = "https://github.com/magicblock-labs/laserstream-sdk.git", branch = "mbv-4.0+conn-fix" }
 http-body-util = "0.1.3"
 humantime = { version = "1.1", package = "humantime-serde" }
+hydra-api = { git = "https://github.com/magicblock-labs/hydra.git", rev = "449532ee0ee792e9a3809b16fd9d289c2024341a" }
 hyper = "1.6.0"
 hyper-util = "0.1.15"
 isocountry = "0.3.2"
@@ -139,9 +140,8 @@ parking_lot = "0.12"
 paste = "1.0"
 prometheus = "0.13.4"
 # Keep in sync with `solana-storage-proto` codegen.
-
-
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82", features = [
+# TODO: Update to latest version is merged
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a", features = [
     "dev-context-only-utils",
 ] }
 solana-transaction-error = { version = "3.0" }
@@ -194,7 +194,8 @@ serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+# TODO: Update to latest version is merged
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
 solana-account-decoder = { version = "4.0" }
 solana-account-decoder-client-types = { version = "4.0" }
 solana-account-info = { version = "3.1" }
@@ -246,7 +247,8 @@ solana-program = "3.0"
 solana-program-error = { version = "3.0" }
 solana-program-option = { version = "3.0" }
 solana-program-pack = { version = "3.0" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+# TODO: Update to latest version is merged
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
 solana-pubkey = { version = "4.1" }
 solana-pubsub-client = { version = "4.0" }
 solana-rent = { version = "3.0" }
@@ -278,14 +280,19 @@ solana-transaction = { version = "3.0" }
 [workspace.dependencies.solana-svm]
 features = ["dev-context-only-utils"]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "b275f82"
+# TODO: Update to latest version is merged
+rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a"
 
 [patch.crates-io]
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+# TODO: Update to latest version is merged
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
+# TODO: Update to latest version is merged
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
 solana-storage-proto = { path = "storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+# TODO: Update to latest version is merged
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
+# TODO: Update to latest version is merged
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
 # Fork is used to enable `disable_manual_compaction` usage
 # Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
 # without patching update isn't possible due to conflict with solana deps

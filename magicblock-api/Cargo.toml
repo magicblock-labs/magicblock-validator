@@ -53,6 +53,7 @@ solana-sdk-ids = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
+solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-system-program = { workspace = true }
 solana-sysvar = { workspace = true }
 solana-transaction = { workspace = true }
