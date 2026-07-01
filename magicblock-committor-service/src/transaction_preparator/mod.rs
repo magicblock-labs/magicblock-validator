@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
@@ -34,12 +35,14 @@ pub trait TransactionPreparator: Send + Sync + 'static {
         intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 
-    /// Cleans up after strategy
+    /// Cleans up after strategy.
+    /// `close_buffers`: if false, only ALT reservations are released.
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
         tasks: &[BaseTaskImpl],
         lookup_table_keys: &[Pubkey],
+        close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError>;
 }
 
@@ -98,6 +101,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .delivery_preparator
             .prepare_for_delivery(authority, tx_strategy, intent_persister)
             .await?;
+        metrics::observe_committor_intent_alt_count(lookup_tables.len());
 
         let message =
             TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
@@ -118,6 +122,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         authority: &Keypair,
         tasks: &[BaseTaskImpl],
         lookup_table_keys: &[Pubkey],
+        close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let cleanup_tasks: Vec<_> = tasks
             .iter()
@@ -136,7 +141,12 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             })
             .collect();
         self.delivery_preparator
-            .cleanup(authority, &cleanup_tasks, lookup_table_keys)
+            .cleanup(
+                authority,
+                &cleanup_tasks,
+                lookup_table_keys,
+                close_buffers,
+            )
             .await
     }
 }

@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 
-use magicblock_account_cloner::AccountClonerError;
 use magicblock_committor_service::{
-    error::CommittorServiceError, service_ext::CommittorServiceExtError,
-    ChangesetMeta,
+    error::CommittorServiceError, ChangesetMeta,
 };
 use solana_pubkey::Pubkey;
 use solana_transaction_error::TransactionError;
@@ -23,14 +21,8 @@ pub enum AccountsError {
     #[error("CommittorSerivceError: {0}")]
     CommittorSerivceError(#[from] CommittorServiceError),
 
-    #[error("CommittorServiceExtError: {0}")]
-    CommittorServiceExtError(#[from] CommittorServiceExtError),
-
     #[error("TokioOneshotRecvError")]
     TokioOneshotRecvError(#[from] Box<tokio::sync::oneshot::error::RecvError>),
-
-    #[error("AccountClonerError")]
-    AccountClonerError(#[from] AccountClonerError),
 
     #[error("InvalidRpcUrl '{0}'")]
     InvalidRpcUrl(String),
