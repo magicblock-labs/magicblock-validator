@@ -1,0 +1,1762 @@
+use std::collections::HashMap;
+
+use assert_matches::assert_matches;
+use magicblock_magic_program_api::{
+    args::{
+        ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
+    },
+    instruction::MagicBlockInstruction,
+    MAGIC_CONTEXT_PUBKEY,
+};
+use solana_account::{
+    create_account_shared_data_for_test, AccountSharedData, ReadableAccount,
+};
+use solana_clock::Clock;
+use solana_fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
+use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::{system_program, sysvar::clock};
+use solana_signer::Signer;
+
+use crate::{
+    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
+    magic_context::MagicContext,
+    magic_scheduled_base_intent::{
+        ScheduledIntentBundle, ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
+    },
+    magic_sys::COMMIT_LIMIT,
+    schedule_transactions::magic_fee_vault_pubkey,
+    test_utils::{
+        ensure_started_validator, process_instruction,
+        process_instruction_with_logs, StubNonces,
+    },
+    utils::DELEGATION_PROGRAM_ID,
+};
+
+// For the scheduling itself and the debit to fund the scheduled transaction
+const REQUIRED_TX_COST: u64 = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE * 2;
+
+fn get_clock() -> Clock {
+    Clock {
+        slot: 100,
+        unix_timestamp: 1_000,
+        epoch_start_timestamp: 0,
+        epoch: 10,
+        leader_schedule_epoch: 10,
+    }
+}
+
+fn prepare_transaction_with_single_committee(
+    payer: &Keypair,
+    program: Pubkey,
+    committee: Pubkey,
+) -> (
+    HashMap<Pubkey, AccountSharedData>,
+    Vec<(Pubkey, AccountSharedData)>,
+) {
+    let mut account_data = {
+        let mut map = HashMap::new();
+        map.insert(
+            payer.pubkey(),
+            AccountSharedData::new(REQUIRED_TX_COST, 0, &system_program::id()),
+        );
+        // NOTE: the magic context is initialized with these properties at
+        // validator startup
+        map.insert(
+            MAGIC_CONTEXT_PUBKEY,
+            AccountSharedData::new(u64::MAX, MagicContext::SIZE, &crate::id()),
+        );
+
+        let mut committee_account = AccountSharedData::new(0, 0, &program);
+        committee_account.set_delegated(true);
+
+        map.insert(committee, committee_account);
+        map
+    };
+    ensure_started_validator(&mut account_data, None);
+
+    let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
+        clock::id(),
+        create_account_shared_data_for_test(&get_clock()),
+    )];
+
+    (account_data, transaction_accounts)
+}
+
+struct PreparedTransactionThreeCommittees {
+    program: Pubkey,
+    accounts_data: HashMap<Pubkey, AccountSharedData>,
+    committee_uno: Pubkey,
+    committee_dos: Pubkey,
+    committee_tres: Pubkey,
+    transaction_accounts: Vec<(Pubkey, AccountSharedData)>,
+}
+
+fn prepare_transaction_with_three_committees(
+    payer: &Keypair,
+    committees: Option<(Pubkey, Pubkey, Pubkey)>,
+    is_delegated: (bool, bool, bool),
+) -> PreparedTransactionThreeCommittees {
+    let program = Pubkey::new_unique();
+    let (committee_uno, committee_dos, committee_tres) =
+        committees.unwrap_or((
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        ));
+
+    let mut accounts_data = {
+        let mut map = HashMap::new();
+        map.insert(
+            payer.pubkey(),
+            AccountSharedData::new(REQUIRED_TX_COST, 0, &system_program::id()),
+        );
+        map.insert(
+            MAGIC_CONTEXT_PUBKEY,
+            AccountSharedData::new(u64::MAX, MagicContext::SIZE, &crate::id()),
+        );
+        {
+            let mut acc = AccountSharedData::new(0, 0, &program);
+            acc.set_delegated(is_delegated.0);
+            map.insert(committee_uno, acc);
+        }
+        {
+            let mut acc = AccountSharedData::new(0, 0, &program);
+            acc.set_delegated(is_delegated.1);
+            map.insert(committee_dos, acc);
+        }
+        {
+            let mut acc = AccountSharedData::new(0, 0, &program);
+            acc.set_delegated(is_delegated.2);
+            map.insert(committee_tres, acc);
+        }
+        map
+    };
+    ensure_started_validator(&mut accounts_data, None);
+
+    let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
+        clock::id(),
+        create_account_shared_data_for_test(&get_clock()),
+    )];
+
+    PreparedTransactionThreeCommittees {
+        program,
+        accounts_data,
+        committee_uno,
+        committee_dos,
+        committee_tres,
+        transaction_accounts,
+    }
+}
+
+fn find_magic_context_account(
+    accounts: &[AccountSharedData],
+) -> Option<&AccountSharedData> {
+    accounts
+        .iter()
+        .find(|acc| acc.owner() == &crate::id() && acc.lamports() == u64::MAX)
+}
+
+fn assert_non_accepted_actions(
+    processed_scheduled: &[AccountSharedData],
+    expected_non_accepted_commits: usize,
+) -> &AccountSharedData {
+    let magic_context_acc = find_magic_context_account(processed_scheduled)
+        .expect("magic context account not found");
+    let magic_context =
+        bincode::deserialize::<MagicContext>(magic_context_acc.data()).unwrap();
+
+    assert_eq!(
+        magic_context.scheduled_base_intents.len(),
+        expected_non_accepted_commits
+    );
+
+    magic_context_acc
+}
+
+fn assert_accepted_actions(
+    processed_accepted: &[AccountSharedData],
+    pre_accept_magic_context: &AccountSharedData,
+    expected_accepted_count: usize,
+) -> Vec<ScheduledIntentBundle> {
+    let post_magic_context_acc = find_magic_context_account(processed_accepted)
+        .expect("magic context account not found");
+    let post_magic_context =
+        bincode::deserialize::<MagicContext>(post_magic_context_acc.data())
+            .unwrap();
+    assert_eq!(post_magic_context.scheduled_base_intents.len(), 0);
+
+    let pre_magic_context =
+        bincode::deserialize::<MagicContext>(pre_accept_magic_context.data())
+            .unwrap();
+    let accepted_intents = pre_magic_context.scheduled_base_intents;
+    assert_eq!(accepted_intents.len(), expected_accepted_count);
+
+    for intent in &accepted_intents {
+        let expected = OutboxIntentBundle::accepted(intent.clone());
+        let actual = processed_accepted
+            .iter()
+            .filter(|acc| acc.owner() == &crate::id() && acc.ephemeral())
+            .filter_map(|acc| {
+                OutboxIntentBundle::try_from_bytes(acc.data()).ok()
+            })
+            .find(|bundle| bundle.inner.id == intent.id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "outbox PDA for intent {} not found in processed_accepted",
+                    intent.id
+                )
+            });
+        assert_eq!(actual, expected);
+    }
+
+    accepted_intents
+}
+
+/// Pre-populates uninitialized outbox intent PDA accounts into `account_data`.
+/// The accept instruction creates these accounts via CPI (`CreateEphemeralAccount`),
+/// which requires them to be present in the transaction context as uninitialized
+/// system-owned entries — exactly what `validate_new_ephemeral` expects.
+/// The first 4 accounts (validator, program, magic_context, vault) are already
+/// in `account_data`, so we skip them.
+fn ensure_outbox_pda_accounts_exist(
+    account_data: &mut HashMap<Pubkey, AccountSharedData>,
+    accept_ix: &Instruction,
+) {
+    for acc_meta in accept_ix.accounts.iter().skip(4) {
+        account_data.entry(acc_meta.pubkey).or_insert_with(|| {
+            AccountSharedData::new(0, 0, &system_program::id())
+        });
+    }
+}
+
+fn extend_transaction_accounts_from_ix(
+    ix: &Instruction,
+    account_data: &mut HashMap<Pubkey, AccountSharedData>,
+    transaction_accounts: &mut Vec<(Pubkey, AccountSharedData)>,
+) {
+    transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+        account_data
+            .remove(&acc.pubkey)
+            .map(|shared_data| (acc.pubkey, shared_data))
+    }));
+}
+
+fn extend_transaction_accounts_from_ix_adding_magic_context(
+    ix: &Instruction,
+    magic_context_acc: &AccountSharedData,
+    account_data: &mut HashMap<Pubkey, AccountSharedData>,
+    transaction_accounts: &mut Vec<(Pubkey, AccountSharedData)>,
+) {
+    transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+        account_data.remove(&acc.pubkey).map(|shared_data| {
+            let shared_data = if acc.pubkey == MAGIC_CONTEXT_PUBKEY {
+                magic_context_acc.clone()
+            } else {
+                shared_data
+            };
+            (acc.pubkey, shared_data)
+        })
+    }));
+}
+
+fn assert_first_commit(
+    scheduled_base_intents: &[ScheduledIntentBundle],
+    payer: &Pubkey,
+    committees: &[Pubkey],
+    expected_request_undelegation: bool,
+) {
+    let scheduled_base_intent = &scheduled_base_intents[0];
+    let test_clock = get_clock();
+    assert_matches!(
+        scheduled_base_intent,
+        ScheduledIntentBundle {
+            id,
+            slot,
+            payer: actual_payer,
+            blockhash: _,
+            sent_transaction: _,
+            intent_bundle,
+        } => {
+            assert!(id >= &0);
+            assert_eq!(slot, &test_clock.slot);
+            assert_eq!(actual_payer, payer);
+            assert_eq!(intent_bundle.get_all_committed_pubkeys().as_slice(), committees);
+            assert!(intent_bundle.commit.is_none());
+            assert!(intent_bundle.commit_and_undelegate.is_none());
+            if expected_request_undelegation {
+                assert!(intent_bundle.commit_finalize.is_none());
+                assert!(intent_bundle.commit_finalize_and_undelegate.is_some());
+            } else {
+                assert!(intent_bundle.commit_finalize.is_some());
+                assert!(intent_bundle.commit_finalize_and_undelegate.is_none());
+            }
+            let _instruction = MagicBlockInstruction::ScheduledCommitSent(*id);
+            // TODO(edwin) @@@ this fails in CI only with the similar to the below
+            //   left: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0]
+            //  right: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            // See: https://github.com/magicblock-labs/magicblock-validator/actions/runs/18565403532/job/52924982063#step:6:1063
+            // assert_eq!(action_sent_transaction.data(0), instruction.try_to_vec().unwrap());
+            assert_eq!(intent_bundle.has_undelegate_intent(), expected_request_undelegation);
+        }
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    // ---------- Helpers for ATA/eATA remapping tests ----------
+    // Use shared SPL/ATA/eATA constants and helpers
+    // Reuse test helper to create proper SPL ATA account data
+    use magicblock_chainlink::testing::eatas::{
+        create_ata_account, create_token_2022_ata_account,
+    };
+    use magicblock_core::token_programs::{
+        derive_ata, derive_ata_with_token_program, derive_eata,
+        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+    };
+    use serial_test::serial;
+    use solana_seed_derivable::SeedDerivable;
+    use test_kit::init_logger;
+
+    use super::*;
+    use crate::{utils::instruction_utils::InstructionUtils, validator};
+
+    fn make_delegated_spl_ata_account(
+        owner: &Pubkey,
+        mint: &Pubkey,
+    ) -> AccountSharedData {
+        let ata_account = create_ata_account(owner, mint);
+        let mut acc = AccountSharedData::from(ata_account);
+        acc.set_delegated(true);
+        acc
+    }
+
+    fn make_delegated_token_2022_ata_account(
+        owner: &Pubkey,
+        mint: &Pubkey,
+    ) -> AccountSharedData {
+        let ata_account = create_token_2022_ata_account(owner, mint);
+        let mut acc = AccountSharedData::from(ata_account);
+        acc.set_delegated(true);
+        acc
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_single_account_success() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"schedule_commit_single_account_success")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (processed_scheduled, magic_context_acc) = {
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
+
+            let ix = InstructionUtils::schedule_commit_instruction(
+                &payer.pubkey(),
+                vec![committee],
+            );
+
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_scheduled = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts.clone(),
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc =
+                assert_non_accepted_actions(&processed_scheduled, 1);
+
+            (processed_scheduled.clone(), magic_context_acc.clone())
+        };
+
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
+
+            let intent_ids =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                intent_ids.into_iter(),
+            );
+            ensure_outbox_pda_accounts_exist(&mut account_data, &ix);
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_accepted = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let scheduled_intents = assert_accepted_actions(
+                &processed_accepted,
+                &magic_context_acc,
+                1,
+            );
+
+            assert_first_commit(
+                &scheduled_intents,
+                &payer.pubkey(),
+                &[committee],
+                false,
+            );
+        }
+        let committed_account = processed_scheduled.last().unwrap();
+        assert_eq!(*committed_account.owner(), program);
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_intent_bundle_action_only_with_two_accounts() {
+        init_logger!();
+
+        let payer = Keypair::from_seed(
+            b"schedule_intent_bundle_action_only_two_accounts",
+        )
+        .unwrap();
+        let action_account = Pubkey::new_unique();
+        let destination_program = Pubkey::new_unique();
+
+        let mut accounts_data = {
+            let mut map = HashMap::new();
+            map.insert(
+                payer.pubkey(),
+                AccountSharedData::new(
+                    REQUIRED_TX_COST,
+                    0,
+                    &system_program::id(),
+                ),
+            );
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
+            );
+            map
+        };
+        ensure_started_validator(&mut accounts_data, None);
+
+        let mut transaction_accounts: Vec<(Pubkey, AccountSharedData)> =
+            vec![(
+                clock::id(),
+                create_account_shared_data_for_test(&get_clock()),
+            )];
+
+        let args = MagicIntentBundleArgs {
+            commit: None,
+            commit_and_undelegate: None,
+            commit_finalize: None,
+            commit_finalize_and_undelegate: None,
+            standalone_actions: vec![BaseActionArgs {
+                args: ActionArgs::new(vec![1, 2, 3]).with_escrow_index(0),
+                compute_units: 100_000,
+                escrow_authority: 0,
+                destination_program,
+                accounts: vec![ShortAccountMeta {
+                    pubkey: action_account,
+                    is_writable: true,
+                }],
+            }],
+        };
+        let ix = Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleIntentBundle(args),
+            vec![
+                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            ],
+        );
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        let magic_context_acc =
+            assert_non_accepted_actions(&processed_scheduled, 1);
+        let magic_context =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap();
+        let scheduled = &magic_context.scheduled_base_intents[0];
+        let actions = scheduled.standalone_actions();
+
+        assert!(scheduled.get_all_committed_pubkeys().is_empty());
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].escrow_authority, payer.pubkey());
+        assert_eq!(actions[0].destination_program, destination_program);
+        assert_eq!(actions[0].account_metas_per_program.len(), 1);
+        assert_eq!(
+            actions[0].account_metas_per_program[0].pubkey,
+            action_account
+        );
+        assert!(actions[0].source_program.is_some());
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_single_account_and_request_undelegate_success() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"single_account_with_undelegate_success")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (processed_scheduled, magic_context_acc) = {
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
+
+            let ix =
+                InstructionUtils::schedule_commit_and_undelegate_instruction(
+                    &payer.pubkey(),
+                    vec![committee],
+                );
+
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_scheduled = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts.clone(),
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc =
+                assert_non_accepted_actions(&processed_scheduled, 1);
+
+            (processed_scheduled.clone(), magic_context_acc.clone())
+        };
+
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
+
+            let intent_ids =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                intent_ids.into_iter(),
+            );
+            ensure_outbox_pda_accounts_exist(&mut account_data, &ix);
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_accepted = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let scheduled_commits = assert_accepted_actions(
+                &processed_accepted,
+                &magic_context_acc,
+                1,
+            );
+
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &[committee],
+                true,
+            );
+        }
+        let committed_account = processed_scheduled.last().unwrap();
+        assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_remaps_delegated_ata_to_eata() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_remap_ata_to_eata").unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata_pubkey = derive_ata(&wallet_owner, &mint);
+        let eata_pubkey = derive_eata(&wallet_owner, &mint);
+
+        // 1) Prepare transaction with our ATA as the only committee
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+
+        // Replace the committee account with a delegated SPL-Token ATA layout
+        account_data.insert(
+            ata_pubkey,
+            make_delegated_spl_ata_account(&wallet_owner, &mint),
+        );
+
+        // Build ScheduleCommit instruction using the ATA pubkey
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![ata_pubkey],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        // Execute scheduling
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        // Extract magic context and then accept scheduled commits
+        let magic_context_acc =
+            assert_non_accepted_actions(&processed_scheduled, 1);
+
+        let intent_ids =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap()
+                .scheduled_base_intents
+                .into_iter()
+                .map(|i| i.id)
+                .collect::<Vec<_>>();
+        let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
+            intent_ids.into_iter(),
+        );
+        let (mut account_data2, mut transaction_accounts2) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+        ensure_outbox_pda_accounts_exist(&mut account_data2, &ix_accept);
+        extend_transaction_accounts_from_ix_adding_magic_context(
+            &ix_accept,
+            magic_context_acc,
+            &mut account_data2,
+            &mut transaction_accounts2,
+        );
+        let processed_accepted = process_instruction(
+            ix_accept.data.as_slice(),
+            transaction_accounts2,
+            ix_accept.accounts,
+            Ok(()),
+        );
+
+        let scheduled =
+            assert_accepted_actions(&processed_accepted, magic_context_acc, 1);
+        // Verify the committed pubkey remapped to eATA
+        assert_eq!(
+            scheduled[0].intent_bundle.get_all_committed_pubkeys(),
+            vec![eata_pubkey]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_allows_token_2022_ata_from_eata_parent() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_token_2022_ata_eata_parent")
+                .unwrap();
+        let eata_parent_owned_committee = Pubkey::new_unique();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata_pubkey = derive_ata_with_token_program(
+            &wallet_owner,
+            &mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+        let eata_pubkey = derive_eata(&wallet_owner, &mint);
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                EATA_PROGRAM_ID,
+                eata_parent_owned_committee,
+            );
+        account_data.insert(
+            ata_pubkey,
+            make_delegated_token_2022_ata_account(&wallet_owner, &mint),
+        );
+
+        let ix = instruction_from_account_metas(vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new_readonly(eata_parent_owned_committee, false),
+            AccountMeta::new_readonly(ata_pubkey, false),
+        ]);
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+        let magic_context_acc =
+            assert_non_accepted_actions(&processed_scheduled, 1);
+        let magic_context =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap();
+        let scheduled = &magic_context.scheduled_base_intents[0];
+
+        assert_eq!(
+            scheduled.get_all_committed_pubkeys(),
+            vec![eata_parent_owned_committee, eata_pubkey]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_and_undelegate_remaps_delegated_ata_to_eata() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_undelegate_remap_ata_eata")
+                .unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata_pubkey = derive_ata(&wallet_owner, &mint);
+        let eata_pubkey = derive_eata(&wallet_owner, &mint);
+
+        // 1) Prepare transaction with our ATA as the only committee
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+
+        // Replace the committee account with a delegated SPL-Token ATA layout
+        account_data.insert(
+            ata_pubkey,
+            make_delegated_spl_ata_account(&wallet_owner, &mint),
+        );
+
+        // Build ScheduleCommitAndUndelegate instruction using the ATA pubkey (writable)
+        let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
+            &payer.pubkey(),
+            vec![ata_pubkey],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        // Execute scheduling
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        // Extract magic context and then accept scheduled commits
+        let magic_context_acc =
+            assert_non_accepted_actions(&processed_scheduled, 1);
+
+        let intent_ids =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap()
+                .scheduled_base_intents
+                .into_iter()
+                .map(|i| i.id)
+                .collect::<Vec<_>>();
+        let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
+            intent_ids.into_iter(),
+        );
+        let (mut account_data2, mut transaction_accounts2) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+        ensure_outbox_pda_accounts_exist(&mut account_data2, &ix_accept);
+        extend_transaction_accounts_from_ix_adding_magic_context(
+            &ix_accept,
+            magic_context_acc,
+            &mut account_data2,
+            &mut transaction_accounts2,
+        );
+        let processed_accepted = process_instruction(
+            ix_accept.data.as_slice(),
+            transaction_accounts2,
+            ix_accept.accounts,
+            Ok(()),
+        );
+
+        let scheduled =
+            assert_accepted_actions(&processed_accepted, magic_context_acc, 1);
+        // Verify the committed pubkey remapped to eATA
+        assert_eq!(
+            scheduled[0].intent_bundle.get_all_committed_pubkeys(),
+            vec![eata_pubkey]
+        );
+        // And the intent contains undelegation
+        assert!(scheduled[0].intent_bundle.has_undelegate_intent());
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_three_accounts_success() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_three_accounts_success")
+                .unwrap();
+
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (
+            mut processed_scheduled,
+            magic_context_acc,
+            program,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+        ) = {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+                mut transaction_accounts,
+                program,
+                ..
+            } = prepare_transaction_with_three_committees(
+                &payer,
+                None,
+                (true, true, true),
+            );
+
+            let ix = InstructionUtils::schedule_commit_instruction(
+                &payer.pubkey(),
+                vec![committee_uno, committee_dos, committee_tres],
+            );
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_scheduled = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc =
+                assert_non_accepted_actions(&processed_scheduled, 1);
+
+            (
+                processed_scheduled.clone(),
+                magic_context_acc.clone(),
+                program,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+            )
+        };
+
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                mut transaction_accounts,
+                ..
+            } = prepare_transaction_with_three_committees(
+                &payer,
+                Some((committee_uno, committee_dos, committee_tres)),
+                (true, true, true),
+            );
+
+            let intent_ids =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                intent_ids.into_iter(),
+            );
+            ensure_outbox_pda_accounts_exist(&mut accounts_data, &ix);
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_accepted = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let scheduled_commits = assert_accepted_actions(
+                &processed_accepted,
+                &magic_context_acc,
+                1,
+            );
+
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &[committee_uno, committee_dos, committee_tres],
+                false,
+            );
+            for _ in &[committee_uno, committee_dos, committee_tres] {
+                let committed_account = processed_scheduled.pop().unwrap();
+                assert_eq!(*committed_account.owner(), program);
+            }
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
+        let payer = Keypair::from_seed(
+            b"three_accounts_and_request_undelegate_success",
+        )
+        .unwrap();
+
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (
+            mut processed_scheduled,
+            magic_context_acc,
+            _program,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+        ) = {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+                mut transaction_accounts,
+                program,
+                ..
+            } = prepare_transaction_with_three_committees(
+                &payer,
+                None,
+                (true, true, true),
+            );
+
+            let ix =
+                InstructionUtils::schedule_commit_and_undelegate_instruction(
+                    &payer.pubkey(),
+                    vec![committee_uno, committee_dos, committee_tres],
+                );
+
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_scheduled = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc =
+                assert_non_accepted_actions(&processed_scheduled, 1);
+
+            (
+                processed_scheduled.clone(),
+                magic_context_acc.clone(),
+                program,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+            )
+        };
+
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                mut transaction_accounts,
+                ..
+            } = prepare_transaction_with_three_committees(
+                &payer,
+                Some((committee_uno, committee_dos, committee_tres)),
+                (true, true, true),
+            );
+
+            let intent_ids =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                intent_ids.into_iter(),
+            );
+            ensure_outbox_pda_accounts_exist(&mut accounts_data, &ix);
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_accepted = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let scheduled_commits = assert_accepted_actions(
+                &processed_accepted,
+                &magic_context_acc,
+                1,
+            );
+
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &[committee_uno, committee_dos, committee_tres],
+                true,
+            );
+            for _ in &[committee_uno, committee_dos, committee_tres] {
+                let committed_account = processed_scheduled.pop().unwrap();
+                assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
+            }
+        }
+    }
+
+    // -----------------
+    // Failure Cases
+    // ----------------
+    fn get_account_metas_for_schedule_commit(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Vec<AccountMeta> {
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+        account_metas
+    }
+
+    fn account_metas_last_committee_not_signer(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Vec<AccountMeta> {
+        let mut account_metas =
+            get_account_metas_for_schedule_commit(payer, pdas);
+        let last = account_metas.pop().unwrap();
+        account_metas.push(AccountMeta::new_readonly(last.pubkey, false));
+        account_metas
+    }
+
+    fn instruction_from_account_metas(
+        account_metas: Vec<AccountMeta>,
+    ) -> solana_instruction::Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCommit,
+            account_metas,
+        )
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_no_pdas_provided_to_ix() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_no_pdas_provided_to_ix")
+                .unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            mut transaction_accounts,
+            ..
+        } = prepare_transaction_with_three_committees(
+            &payer,
+            None,
+            (true, true, true),
+        );
+
+        let ix = instruction_from_account_metas(
+            get_account_metas_for_schedule_commit(&payer.pubkey(), vec![]),
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::MissingAccount),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_undelegate_with_readonly() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_undelegate_with_readonly")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        // Create ScheduleCommitAndUndelegate with committee as readonly account
+        let ix = {
+            let mut account_metas = vec![
+                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            ];
+            account_metas.push(AccountMeta::new_readonly(committee, true));
+            Instruction::new_with_bincode(
+                crate::id(),
+                &MagicBlockInstruction::ScheduleCommitAndUndelegate,
+                account_metas,
+            )
+        };
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts,
+            Err(InstructionError::ReadonlyDataModified),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_with_non_delegated_account() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_with_non_delegated_account")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        // Prepare single accounts for tx, set committee as non delegated
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+        account_data
+            .get_mut(&committee)
+            .unwrap()
+            .set_delegated(false);
+
+        // Create ScheduleCommit instruction with non-delegated committee
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts,
+            Err(InstructionError::IllegalOwner),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer(
+    ) {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
+                .unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+            mut transaction_accounts,
+            ..
+        } = prepare_transaction_with_three_committees(
+            &payer,
+            None,
+            (true, true, true),
+        );
+
+        let mut dos_shared =
+            AccountSharedData::new(0, 0, &Pubkey::new_unique());
+        dos_shared.set_delegated(true);
+        accounts_data.insert(committee_dos, dos_shared);
+
+        let ix = instruction_from_account_metas(
+            account_metas_last_committee_not_signer(
+                &payer.pubkey(),
+                vec![committee_uno, committee_tres, committee_dos],
+            ),
+        );
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::InvalidAccountOwner),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_with_confined_account() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_with_confined_account")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        // Prepare single accounts for tx, set committee as confined
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+        account_data.get_mut(&committee).unwrap().set_confined(true);
+
+        let committee_account = account_data.get(&committee).unwrap();
+        assert!(committee_account.confined());
+        assert!(
+            committee_account.delegated(),
+            "Confined account should remain delegated"
+        );
+
+        // Create ScheduleCommit instruction with confined committee
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts,
+            Err(InstructionError::InvalidAccountData),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_fails_when_commit_limit_exceeded() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_limit_exceeded____").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        // Override stub to return nonce at the commit limit
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(COMMIT_LIMIT)),
+        );
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_logs_commit_limit_resolution() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_limit_log_msg___").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(COMMIT_LIMIT)),
+        );
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let (_, logs) = process_instruction_with_logs(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
+        );
+
+        let expected_log = format!(
+            "ScheduleCommit ERR: sponsored commit limit exceeded for account {}: current commit nonce {} reached the limit of {}. Undelegate and re-delegate the account or use a delegated account as the payer",
+            committee, COMMIT_LIMIT, COMMIT_LIMIT
+        );
+        assert!(
+            logs.iter().any(|log| log == &expected_log),
+            "expected commit-limit log not found in {:?}",
+            logs
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_and_undelegate_succeeds_when_commit_limit_exceeded()
+    {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"undelegate_succeeds_limit_exceeded").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        // Override stub to return nonce at the commit limit
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(COMMIT_LIMIT)),
+        );
+
+        let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_three_accounts_one_confined() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"three_accounts_one_confined_______").unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+            mut transaction_accounts,
+            ..
+        } = prepare_transaction_with_three_committees(
+            &payer,
+            None,
+            (true, true, true),
+        );
+
+        // Make the second committee confined
+        accounts_data
+            .get_mut(&committee_dos)
+            .unwrap()
+            .set_confined(true);
+        // Assert that the confined account remains delegated
+        let committee_dos_account = accounts_data.get(&committee_dos).unwrap();
+        assert!(
+            committee_dos_account.confined(),
+            "Confined account should remain confined"
+        );
+        assert!(
+            committee_dos_account.delegated(),
+            "Confined account should remain delegated"
+        );
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee_uno, committee_dos, committee_tres],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::InvalidAccountData),
+        );
+    }
+
+    /// Helper: builds transaction accounts for a delegated-payer commit.
+    /// Payer is delegated+writable; fee vault is delegated+writable.
+    fn prepare_delegated_payer_transaction(
+        payer: &Keypair,
+        program: Pubkey,
+        committees: &[Pubkey],
+        nonces: StubNonces,
+    ) -> (
+        HashMap<Pubkey, AccountSharedData>,
+        Vec<(Pubkey, AccountSharedData)>,
+    ) {
+        validator::generate_validator_authority_if_needed();
+        let fee_vault_pubkey = magic_fee_vault_pubkey();
+
+        let mut account_data = {
+            let mut map = HashMap::new();
+
+            let mut payer_acc =
+                AccountSharedData::new(1_000_000, 0, &system_program::id());
+            payer_acc.set_delegated(true);
+            map.insert(payer.pubkey(), payer_acc);
+
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
+            );
+
+            let mut vault_acc =
+                AccountSharedData::new(0, 0, &system_program::id());
+            vault_acc.set_delegated(true);
+            map.insert(fee_vault_pubkey, vault_acc);
+
+            for committee in committees {
+                let mut acc = AccountSharedData::new(0, 0, &program);
+                acc.set_delegated(true);
+                map.insert(*committee, acc);
+            }
+
+            map
+        };
+
+        ensure_started_validator(&mut account_data, Some(nonces));
+
+        let transaction_accounts = vec![(
+            clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        )];
+
+        (account_data, transaction_accounts)
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_delegated_payer_charges_fee_vault() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"delegated_payer_charges_fee_vault").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let nonce = ACTUAL_COMMIT_LIMIT;
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction(
+                &payer,
+                program,
+                &[committee],
+                StubNonces::Global(nonce),
+            );
+
+        let ix =
+            InstructionUtils::schedule_commit_with_delegated_payer_instruction(
+                &payer.pubkey(),
+                vec![committee],
+            );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        // Fee vault must have received exactly COMMIT_FEE_LAMPORTS
+        accounts
+            .iter()
+            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
+            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
+
+        // Payer must have been debited
+        accounts
+            .iter()
+            .find(|a| {
+                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
+            })
+            .expect("payer should have been debited");
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_delegated_payer_only_charges_above_limit() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"delegated_payer_only_above_limit_").unwrap();
+        let program = Pubkey::new_unique();
+        let committee_above = Pubkey::new_unique(); // nonce == limit → charged
+        let committee_at = Pubkey::new_unique(); // nonce < limit → free
+
+        let mut per_account = HashMap::new();
+        per_account.insert(committee_above, ACTUAL_COMMIT_LIMIT);
+        per_account.insert(committee_at, ACTUAL_COMMIT_LIMIT - 1);
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction(
+                &payer,
+                program,
+                &[committee_above, committee_at],
+                StubNonces::PerAccount(per_account),
+            );
+
+        let ix =
+            InstructionUtils::schedule_commit_with_delegated_payer_instruction(
+                &payer.pubkey(),
+                vec![committee_above, committee_at],
+            );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        // Only committee_above is charged → vault receives exactly one fee
+        let vault = accounts
+            .iter()
+            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
+            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
+        assert_eq!(vault.lamports(), COMMIT_FEE_LAMPORTS);
+
+        // Payer debited by exactly one fee
+        assert!(accounts
+            .iter()
+            .any(|a| a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
+                && a.delegated()));
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_delegated_payer_without_vault_errors() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"delegated_payer_no_vault_________").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        // Build account map with a delegated payer but NO fee vault entry
+        let mut account_data = {
+            let mut map = HashMap::new();
+            let mut payer_acc =
+                AccountSharedData::new(1_000_000, 0, &system_program::id());
+            payer_acc.set_delegated(true);
+            map.insert(payer.pubkey(), payer_acc);
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
+            );
+            let mut acc = AccountSharedData::new(0, 0, &program);
+            acc.set_delegated(true);
+            map.insert(committee, acc);
+            map
+        };
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(0)),
+        );
+
+        let mut transaction_accounts = vec![(
+            clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        )];
+
+        // Use the plain schedule_commit_instruction — no vault account included
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::MissingAccount),
+        );
+    }
+}

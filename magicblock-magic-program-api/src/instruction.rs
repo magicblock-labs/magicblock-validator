@@ -8,6 +8,7 @@ use crate::{
         ScheduleTaskArgs,
     },
     compat::Instruction,
+    outbox::ExecutionStage,
     Pubkey,
 };
 
@@ -57,27 +58,31 @@ pub enum MagicBlockInstruction {
     /// - **2..n** `[]`              Accounts to be committed and undelegated
     ScheduleCommitAndUndelegate,
 
-    /// Moves the scheduled commit from the MagicContext to the global scheduled commits
-    /// map. This is the second part of scheduling a commit.
+    /// Pops up to N intents from the front of `MagicContext.scheduled_base_intents`
+    /// and for each creates an outbox intent ephemeral account (`MagicIntentAccount`)
+    /// with `status = Accepted`. This is the second part of scheduling a commit.
     ///
-    /// It is run at the start of the slot to update the global scheduled commits map just
-    /// in time for the validator to realize the commits right after.
+    /// N is determined by the number of writable PDA accounts provided beyond
+    /// the two fixed accounts. It is run at the start of the slot.
     ///
     /// # Account references
-    /// - **0.**  `[SIGNER]` Validator Authority
-    /// - **1.**  `[WRITE]`  Magic Context Account containing the initially scheduled commits
+    /// - **0.**   `[SIGNER]` Validator Authority
+    /// - **1.**   `[WRITE]`  Magic Context Account containing the initially scheduled commits
+    /// - **2..n** `[WRITE]`  Outbox intent PDAs, one per accepted intent, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     AcceptScheduleCommits,
 
     /// Records the attempt to realize a scheduled commit on chain.
+    /// Closes the associated outbox intent PDA account.
     ///
     /// The signature of this transaction can be pre-calculated since we pass the
     /// ID of the scheduled commit and retrieve the signature from a globally
-    /// stored hashmap.
+    /// stored hashmap. Transaction uniqueness is guaranteed by the per-intent PDA.
     ///
-    /// We implement it this way so we can log the signature of this transaction
-    /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
-    /// Args: (intent_id, bump) - bump is needed in order to guarantee unique transactions
-    ScheduledCommitSent((u64, u64)),
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
+    /// - **1.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    /// - **2.** `[WRITE]`         Ephemeral vault
+    ScheduledCommitSent(u64),
 
     /// Schedules execution of a single *base intent*.
     ///
@@ -310,6 +315,17 @@ pub enum MagicBlockInstruction {
     ExecuteCrank {
         authority: Pubkey,
         instructions: Vec<Instruction>,
+    },
+
+    /// Sets or advances the execution stage of an outbox intent.
+    /// Must be called before sending the L1 transaction.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]`  Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    SetIntentExecutionStage {
+        intent_id: u64,
+        stage: ExecutionStage,
     },
 }
 

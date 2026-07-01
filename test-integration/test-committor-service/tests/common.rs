@@ -9,13 +9,23 @@ use std::{
 use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
+        accepted_intent_executor::AcceptedIntentExecutor,
+        error::IntentExecutorResult,
+        intent_execution_client::IntentExecutionClient, ExecutionOutput,
+        IntentExecutionReport, IntentExecutorCtx,
+    },
+    outbox::{
+        outbox_client::InternalOutboxClientError,
+        outbox_intent_bundles_reader::OutboxIntentBundlesReader, OutboxClient,
+        ScheduledBaseIntentMeta,
+    },
+    tasks::{
+        commit_task::{CommitDelivery, CommitTask},
         task_info_fetcher::{
             CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
             TaskInfoFetcherResult,
         },
-        IntentExecutorImpl,
     },
-    tasks::commit_task::{CommitDelivery, CommitTask},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -24,6 +34,10 @@ use magicblock_committor_service::{
 use magicblock_core::{
     intent::{BaseActionCallback, CommittedAccount},
     traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
+};
+use magicblock_program::{
+    magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
+    outbox_intent_bundles::OutboxIntentBundle,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -108,18 +122,23 @@ impl TestFixture {
     #[allow(dead_code)]
     pub fn create_intent_executor(
         &self,
-    ) -> IntentExecutorImpl<
+    ) -> AcceptedIntentExecutor<
         TransactionPreparatorImpl,
         MockTaskInfoFetcher,
         MockActionsCallbackExecutor,
+        MockOutboxClient,
     > {
-        let transaction_preparator = self.create_transaction_preparator();
-
-        IntentExecutorImpl::new(
-            self.rpc_client.clone(),
-            transaction_preparator,
-            self.create_task_info_fetcher(),
-            MockActionsCallbackExecutor::default(),
+        AcceptedIntentExecutor::new(
+            IntentExecutorCtx {
+                intent_client: IntentExecutionClient::new(
+                    self.rpc_client.clone(),
+                ),
+                transaction_preparator: self.create_transaction_preparator(),
+                task_info_fetcher: self.create_task_info_fetcher(),
+                outbox_client: Arc::new(MockOutboxClient),
+                actions_callback_executor: MockActionsCallbackExecutor::default(
+                ),
+            },
             DEFAULT_ACTIONS_TIMEOUT,
         )
     }
@@ -131,6 +150,66 @@ impl TestFixture {
         Arc::new(CacheTaskInfoFetcher::new(MockTaskInfoFetcher(
             self.rpc_client.clone(),
         )))
+    }
+}
+
+pub struct MockOutboxReader;
+
+#[async_trait]
+impl OutboxIntentBundlesReader for MockOutboxReader {
+    type Error = std::convert::Infallible;
+
+    async fn read(
+        &mut self,
+        _n: usize,
+    ) -> Result<Vec<OutboxIntentBundle>, Self::Error> {
+        Ok(vec![])
+    }
+
+    async fn fetch_outbox_intent(
+        &self,
+        _intent_id: u64,
+    ) -> Result<Option<OutboxIntentBundle>, Self::Error> {
+        Ok(None)
+    }
+}
+
+#[derive(Clone)]
+pub struct MockOutboxClient;
+
+#[async_trait]
+impl OutboxClient for MockOutboxClient {
+    type Error = InternalOutboxClientError;
+    type OutboxReader = MockOutboxReader;
+
+    async fn accept_scheduled_intents(
+        &self,
+    ) -> Result<
+        Vec<ScheduledIntentBundle>,
+        (Vec<ScheduledIntentBundle>, Self::Error),
+    > {
+        Ok(vec![])
+    }
+
+    async fn set_intent_execution_stage(
+        &self,
+        _intent_id: u64,
+        _stage: ExecutionStage,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn notify_commit_sent(
+        &self,
+        _meta: ScheduledBaseIntentMeta,
+        _result: &IntentExecutorResult<ExecutionOutput>,
+        _execution_report: &IntentExecutionReport,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn outbox_reader(&self) -> Self::OutboxReader {
+        MockOutboxReader
     }
 }
 

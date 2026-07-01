@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
 
+pub mod outbox;
+
 use crate::token_programs::try_remap_ata_to_eata;
 
 pub type CommittedAccountRef = (Pubkey, AccountSharedData);

@@ -1,12 +1,9 @@
 use borsh::BorshDeserialize;
 use magicblock_committor_program::Chunks;
-use magicblock_committor_service::{
-    persist::IntentPersisterImpl,
-    tasks::{
-        commit_task::{CommitBufferStage, CommitDelivery},
-        task_strategist::{TaskStrategist, TransactionStrategy},
-        BaseTaskImpl,
-    },
+use magicblock_committor_service::tasks::{
+    commit_task::{CommitBufferStage, CommitDelivery},
+    task_strategist::{TaskStrategist, TransactionStrategy},
+    BaseTaskImpl,
 };
 use solana_sdk::signer::Signer;
 
@@ -31,11 +28,7 @@ async fn test_prepare_10kb_buffer() {
 
     // Test preparation
     let result = preparator
-        .prepare_for_delivery(
-            &fixture.authority,
-            &mut strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_delivery(&fixture.authority, &mut strategy)
         .await;
 
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
@@ -101,11 +94,7 @@ async fn test_prepare_multiple_buffers() {
 
     // Test preparation
     let result = preparator
-        .prepare_for_delivery(
-            &fixture.authority,
-            &mut strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_delivery(&fixture.authority, &mut strategy)
         .await;
 
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
@@ -184,11 +173,7 @@ async fn test_lookup_tables() {
     };
 
     let result = preparator
-        .prepare_for_delivery(
-            &fixture.authority,
-            &mut strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_delivery(&fixture.authority, &mut strategy)
         .await;
     assert!(result.is_ok(), "Failed to prepare lookup tables");
 
@@ -221,11 +206,7 @@ async fn test_already_initialized_error_handled() {
 
     // Test preparation
     let result = preparator
-        .prepare_for_delivery(
-            &fixture.authority,
-            &mut strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_delivery(&fixture.authority, &mut strategy)
         .await;
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
@@ -263,11 +244,7 @@ async fn test_already_initialized_error_handled() {
 
     // Test preparation
     let result = preparator
-        .prepare_for_delivery(
-            &fixture.authority,
-            &mut strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_delivery(&fixture.authority, &mut strategy)
         .await;
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
@@ -321,11 +298,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
 
     // --- Step 1: initial prepare ---
     let res = preparator
-        .prepare_for_delivery(
-            &fixture.authority,
-            &mut strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_delivery(&fixture.authority, &mut strategy)
         .await;
     assert!(res.is_ok(), "Initial prepare failed: {:?}", res.err());
 
@@ -424,11 +397,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     };
 
     let res2 = preparator
-        .prepare_for_delivery(
-            &fixture.authority,
-            &mut strategy2,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_delivery(&fixture.authority, &mut strategy2)
         .await;
     assert!(
         res2.is_ok(),

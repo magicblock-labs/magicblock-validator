@@ -57,6 +57,7 @@ pub fn send_transaction(
 ) -> Result<Signature, client_error::Error> {
     let blockhash = rpc_client.get_latest_blockhash()?;
     tx.try_sign(signers, blockhash)?;
+    println!("trtr: {}", tx.signatures[0]);
     let sig = rpc_client.send_transaction_with_config(
         tx,
         RpcSendTransactionConfig {

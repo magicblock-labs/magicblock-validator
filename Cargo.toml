@@ -54,6 +54,7 @@ agave-geyser-plugin-interface = { version = "4.0" }
 agave-precompiles = { version = "4.0", features = ["agave-unstable-api"] }
 agave-syscalls = { version = "=4.0.0", features = ["agave-unstable-api"] }
 anyhow = "1.0.86"
+backoff = { version = "0.4", features = ["tokio"] }
 arc-swap = { version = "1.7" }
 assert_matches = "1.5.0"
 async-nats = "0.46"
@@ -137,12 +138,13 @@ num-traits = "0.2"
 num_cpus = "1.16.0"
 parking_lot = "0.12"
 paste = "1.0"
+pin-project = "1.1.13"
 prometheus = "0.13.4"
 # Keep in sync with `solana-storage-proto` codegen.
 
 
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82", features = [
-    "dev-context-only-utils",
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "782e0b00", features = [
+    "dev-context-only-utils"
 ] }
 solana-transaction-error = { version = "3.0" }
 solana-transaction-status = { version = "4.0" }
@@ -194,7 +196,7 @@ serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "782e0b00" }
 solana-account-decoder = { version = "4.0" }
 solana-account-decoder-client-types = { version = "4.0" }
 solana-account-info = { version = "3.1" }
@@ -246,7 +248,7 @@ solana-program = "3.0"
 solana-program-error = { version = "3.0" }
 solana-program-option = { version = "3.0" }
 solana-program-pack = { version = "3.0" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "782e0b00" }
 solana-pubkey = { version = "4.1" }
 solana-pubsub-client = { version = "4.0" }
 solana-rent = { version = "3.0" }
@@ -278,14 +280,15 @@ solana-transaction = { version = "3.0" }
 [workspace.dependencies.solana-svm]
 features = ["dev-context-only-utils"]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "b275f82"
+rev = "782e0b00"
 
 [patch.crates-io]
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "782e0b00" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "782e0b00" }
 solana-storage-proto = { path = "storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "b275f82" }
+ solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "782e0b00" }
+#solana-svm = { path = "../magicblock-svm/svm" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "782e0b00" }
 # Fork is used to enable `disable_manual_compaction` usage
 # Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
 # without patching update isn't possible due to conflict with solana deps

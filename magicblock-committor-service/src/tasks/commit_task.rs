@@ -10,8 +10,8 @@ use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{BaseTask, BaseTaskImpl, CleanupTask, PreparationTask},
+    utils::MAX_WRITE_CHUNK_SIZE,
 };
 
 /// Lifecycle stage of a buffer used for commit delivery.

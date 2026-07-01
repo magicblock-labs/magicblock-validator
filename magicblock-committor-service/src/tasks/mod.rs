@@ -19,6 +19,7 @@ use solana_pubkey::Pubkey;
 pub mod commit_finalize_task;
 pub mod commit_task;
 pub mod task_builder;
+pub mod task_info_fetcher;
 pub mod task_strategist;
 pub mod utils;
 
@@ -724,9 +725,7 @@ fn test_close_buffer_limit() {
 
     use crate::{
         test_utils,
-        transactions::{
-            serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
-        },
+        utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
     };
 
     test_utils::init_test_logger();

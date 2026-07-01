@@ -1,423 +1,202 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
-use magicblock_core::traits::{
-    ActionError, ActionResult, ActionsCallbackScheduler,
-};
+use futures_util::future::join;
+use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
-use solana_pubkey::Pubkey;
-use solana_signature::Signature;
-use tokio::time::timeout;
-use tracing::info;
+use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
-        error::{IntentExecutorResult, TransactionStrategyExecutionError},
-        intent_execution_client::IntentExecutionClient,
-        single_stage_executor::SingleStageExecutor,
-        task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
-        two_stage_executor::{Committed, Initialized, TwoStageExecutor},
-        IntentExecutionReport,
+        error::{IntentExecutorError, IntentExecutorResult},
+        strategy_executor::{
+            single_stage::SingleStageStrategyExecutor,
+            two_stage,
+            two_stage::TwoStageStrategyExecutor,
+            utils::{
+                execute_with_timeout, handle_cpi_limit_error, CommitStage,
+                FinalizeStage, SingleStage,
+            },
+        },
+        ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
     },
-    persist::IntentPersister,
+    outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
-        task_builder::TaskBuilderError,
-        task_strategist::{TaskStrategist, TransactionStrategy},
+        task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_info_fetcher::TaskInfoFetcher,
+        task_strategist::TransactionStrategy,
         BaseTaskImpl,
     },
-    transaction_preparator::{
-        error::TransactionPreparatorError, TransactionPreparator,
-    },
+    transaction_preparator::TransactionPreparator,
 };
 
-pub async fn prepare_and_execute_strategy<P, T>(
-    client: &IntentExecutionClient,
+pub(in crate::intent_executor) async fn build_commit_finalize_tasks<
+    F: TaskInfoFetcher,
+>(
+    intent_bundle: &ScheduledIntentBundle,
+    task_info_fetcher: &Arc<F>,
+) -> IntentExecutorResult<(Vec<BaseTaskImpl>, Vec<BaseTaskImpl>)> {
+    let commit_tasks_fut =
+        TaskBuilderImpl::commit_tasks(task_info_fetcher, intent_bundle);
+    let finalize_tasks_fut =
+        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent_bundle);
+    let (commit_tasks, finalize_tasks) =
+        join(commit_tasks_fut, finalize_tasks_fut).await;
+
+    Ok((commit_tasks?, finalize_tasks?))
+}
+
+pub(in crate::intent_executor) async fn execute_single_stage_flow<T, F, A, O>(
+    ctx: &IntentExecutorCtx<T, F, A, O>,
     authority: &Keypair,
-    transaction_preparator: &T,
-    transaction_strategy: &mut TransactionStrategy,
-    persister: &Option<P>,
-) -> IntentExecutorResult<
-    IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
-    TransactionPreparatorError,
->
-where
-    T: TransactionPreparator,
-    P: IntentPersister,
-{
-    let prepared_message = transaction_preparator
-        .prepare_for_strategy(authority, transaction_strategy, persister)
-        .await?;
-
-    let execution_result = client
-        .execute_message_with_retries(
-            authority,
-            prepared_message,
-            &transaction_strategy.optimized_tasks,
-        )
-        .await;
-
-    Ok(execution_result)
-}
-
-/// Handles out of sync commit id error, fixes current strategy
-/// Returns strategy to be cleaned up
-/// TODO(edwin): TransactionStrategy -> CleanupStrategy or something, naming is confusing for something that is cleaned up
-pub(in crate::intent_executor) async fn handle_commit_id_error<
-    T: TaskInfoFetcher,
->(
-    authority: &Pubkey,
-    task_info_fetcher: &CacheTaskInfoFetcher<T>,
-    committed_pubkeys: &[Pubkey],
-    strategy: &mut TransactionStrategy,
-) -> Result<TransactionStrategy, TaskBuilderError> {
-    let min_context_slot = strategy
-        .optimized_tasks
-        .iter()
-        .filter_map(|task| match task {
-            BaseTaskImpl::Commit(task) => {
-                Some(task.committed_account.remote_slot)
-            }
-            BaseTaskImpl::CommitFinalize(task) => {
-                Some(task.committed_account.remote_slot)
-            }
-            _ => None,
-        })
-        .max()
-        .unwrap_or_default();
-
-    // We reset TaskInfoFetcher for all committed accounts
-    // We re-fetch them to fix out of sync tasks
-    task_info_fetcher.reset(ResetType::Specific(committed_pubkeys));
-    let commit_ids = task_info_fetcher
-        .fetch_next_commit_nonces(committed_pubkeys, min_context_slot)
-        .await
-        .map_err(TaskBuilderError::CommitTasksBuildError)?;
-
-    // Here we find the broken tasks and reset them
-    // Broken tasks are prepared incorrectly so they have to be cleaned up
-    let mut to_cleanup = Vec::new();
-    for task in &mut strategy.optimized_tasks {
-        match task {
-            BaseTaskImpl::Commit(task) => {
-                let Some(commit_id) =
-                    commit_ids.get(&task.committed_account.pubkey)
-                else {
-                    continue;
-                };
-                if commit_id == &task.commit_id {
-                    continue;
-                }
-
-                // Handle invalid tasks
-                to_cleanup.push(BaseTaskImpl::Commit(task.clone()));
-                task.reset_commit_id(*commit_id);
-            }
-            BaseTaskImpl::CommitFinalize(task) => {
-                let Some(commit_id) =
-                    commit_ids.get(&task.committed_account.pubkey)
-                else {
-                    continue;
-                };
-                if commit_id == &task.commit_id {
-                    continue;
-                }
-
-                // Handle invalid tasks
-                to_cleanup.push(BaseTaskImpl::CommitFinalize(task.clone()));
-                task.reset_commit_id(*commit_id);
-            }
-            _ => {}
-        }
-    }
-
-    let old_alts = strategy.dummy_revaluate_alts(authority);
-    Ok(TransactionStrategy {
-        optimized_tasks: to_cleanup,
-        lookup_tables_keys: old_alts,
-        standalone_action_nonce: None,
-    })
-}
-
-/// Handle CPI limit error, splits single strategy flow into 2
-/// Returns Commit stage strategy, Finalize stage strategy and strategy to clean up
-pub(in crate::intent_executor) fn handle_cpi_limit_error(
-    authority: &Pubkey,
-    strategy: TransactionStrategy,
-) -> (
-    TransactionStrategy,
-    TransactionStrategy,
-    TransactionStrategy,
-) {
-    // We encountered error "Max instruction trace length exceeded"
-    // All the tasks a prepared to be executed at this point
-    // We attempt Two stages commit flow, need to split tasks up
-    let last_commit_ind = strategy.optimized_tasks.iter().rposition(|el| {
-        matches!(
-            el,
-            BaseTaskImpl::Commit(_) | BaseTaskImpl::CommitFinalize(_)
-        )
-    });
-    let (mut commit_stage_tasks, mut finalize_stage_tasks) = (vec![], vec![]);
-    for (i, el) in strategy.optimized_tasks.into_iter().enumerate() {
-        if Some(i) <= last_commit_ind {
-            commit_stage_tasks.push(el);
-        } else {
-            finalize_stage_tasks.push(el);
-        }
-    }
-
-    let commit_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
-        vec![]
-    } else {
-        TaskStrategist::collect_lookup_table_keys(
-            authority,
-            &commit_stage_tasks,
-        )
-    };
-    let commit_strategy = TransactionStrategy {
-        optimized_tasks: commit_stage_tasks,
-        lookup_tables_keys: commit_alt_pubkeys,
-        standalone_action_nonce: None,
-    };
-
-    let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
-        vec![]
-    } else {
-        TaskStrategist::collect_lookup_table_keys(
-            authority,
-            &finalize_stage_tasks,
-        )
-    };
-    let finalize_strategy = TransactionStrategy {
-        optimized_tasks: finalize_stage_tasks,
-        lookup_tables_keys: finalize_alt_pubkeys,
-        standalone_action_nonce: None,
-    };
-
-    // We clean up only ALTs
-    let to_cleanup = TransactionStrategy {
-        optimized_tasks: vec![],
-        lookup_tables_keys: strategy.lookup_tables_keys,
-        standalone_action_nonce: None,
-    };
-
-    (commit_strategy, finalize_strategy, to_cleanup)
-}
-
-/// Handles undelegation error, stripping away actions
-/// Returns [`TransactionStrategy`] to be cleaned up
-pub(in crate::intent_executor) fn handle_undelegation_error(
-    authority: &Pubkey,
-    strategy: &mut TransactionStrategy,
-) -> TransactionStrategy {
-    let position = strategy
-        .optimized_tasks
-        .iter()
-        .position(|el| matches!(el, BaseTaskImpl::Undelegate(_)));
-
-    if let Some(position) = position {
-        // Remove everything after undelegation including post undelegation actions
-        let removed_task = strategy.optimized_tasks.drain(position..).collect();
-        let old_alts = strategy.dummy_revaluate_alts(authority);
-        TransactionStrategy {
-            optimized_tasks: removed_task,
-            lookup_tables_keys: old_alts,
-            standalone_action_nonce: None,
-        }
-    } else {
-        TransactionStrategy {
-            optimized_tasks: vec![],
-            lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
-        }
-    }
-}
-
-pub(in crate::intent_executor) fn handle_actions_result<A>(
-    authority: &Pubkey,
-    callback_scheduler: &A,
+    intent_bundle: ScheduledIntentBundle,
+    transaction_strategy: TransactionStrategy,
     execution_report: &mut IntentExecutionReport,
-    transaction_strategy: &mut TransactionStrategy,
-    signature: Option<Signature>,
-    result: ActionResult,
-) -> TransactionStrategy
+    time_left: impl Fn() -> Option<Duration>,
+) -> IntentExecutorResult<ExecutionOutput>
 where
+    T: TransactionPreparator,
+    F: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
+    O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
-    let (callbacks, junk) = if result.is_ok() {
-        let callbacks = transaction_strategy.extract_action_callbacks();
-        (callbacks, TransactionStrategy::default())
-    } else {
-        let mut removed_actions =
-            transaction_strategy.remove_actions(authority);
-        let callbacks = removed_actions.extract_action_callbacks();
-        (callbacks, removed_actions)
-    };
-    if !callbacks.is_empty() {
-        let result = callback_scheduler.schedule(callbacks, signature, result);
-        execution_report.add_callback_report(result);
-    }
+    let meta = ScheduledBaseIntentMeta::new(&intent_bundle);
+    let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
 
-    junk
-}
-
-pub(in crate::intent_executor) async fn execute_with_timeout<
-    P: IntentPersister,
->(
-    time_left: Option<Duration>,
-    mut executor: impl StageExecutor,
-    persister: &Option<P>,
-) -> IntentExecutorResult<Signature> {
-    if executor.has_callbacks() {
-        if let Some(time_left) = time_left {
-            match timeout(time_left, executor.execute(persister)).await {
-                Ok(res) => return res,
-                Err(_) => {
-                    // The race between callback and intent txn is handled
-                    // on the user smart contract side via TimeoutError.
-                    // We must respect the timeout contract.
-                    info!("Intent execution timed out, cleaning up actions");
-                    executor.execute_callbacks(
-                        None,
-                        Err(ActionError::TimeoutError),
-                    );
-                }
-            }
-        } else {
-            // Already timed out; see comment above.
-            executor.execute_callbacks(None, Err(ActionError::TimeoutError));
-        }
-    }
-
-    executor.execute(persister).await
-}
-
-#[async_trait]
-pub(in crate::intent_executor) trait StageExecutor {
-    fn has_callbacks(&self) -> bool;
-    async fn execute<P: IntentPersister>(
-        &mut self,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature>;
-    fn execute_callbacks(
-        &mut self,
-        signature: Option<Signature>,
-        result: ActionResult,
+    let mut single_stage_executor = SingleStageStrategyExecutor::new(
+        authority.insecure_clone(),
+        intent_bundle.id,
+        ctx.intent_client.clone(),
+        ctx.task_info_fetcher.clone(),
+        ctx.outbox_client.clone(),
+        transaction_strategy,
+        ctx.actions_callback_executor.clone(),
+        execution_report,
     );
+    let res = execute_with_timeout(
+        time_left(),
+        SingleStage {
+            inner: &mut single_stage_executor,
+            transaction_preparator: &ctx.transaction_preparator,
+            committed_pubkeys: &committed_pubkeys,
+        },
+    )
+    .await;
+
+    // Here we continue only IF the error is a limit-type execution error
+    // We can recover that Error by splitting execution
+    // in 2 stages - commit & finalize
+    // Otherwise we return error
+    let execution_err = match res {
+        Err(IntentExecutorError::FailedToFinalizeError {
+            err,
+            commit_signature: _,
+            finalize_signature: _,
+        }) if !committed_pubkeys.is_empty()
+            && err.is_recoverable_by_two_stage() =>
+        {
+            err
+        }
+        res => {
+            let signature = res.as_ref().ok().copied();
+            single_stage_executor
+                .execute_callbacks(signature, res.as_ref().map(|_| ()));
+            let transaction_strategy = single_stage_executor.consume_strategy();
+            #[cfg(feature = "dev-context-only-utils")]
+            execution_report.add_succeeded_transaction_strategy(
+                transaction_strategy.clone(),
+            );
+            execution_report.dispose(transaction_strategy);
+            let output = res.map(ExecutionOutput::SingleStage);
+            ctx.outbox_client
+                .notify_commit_sent(meta, &output, execution_report)
+                .await
+                .map_err(Into::into)?;
+            return output;
+        }
+    };
+
+    // With actions, we can't predict num of CPIs
+    // If we get here we will try to switch from Single stage to Two Stage commit
+    // Note that this not necessarily will pass at the end due to the same reason
+    let strategy = single_stage_executor.consume_strategy();
+    let (commit_strategy, finalize_strategy, cleanup) =
+        handle_cpi_limit_error(&authority.pubkey(), strategy);
+    execution_report.dispose(cleanup);
+    execution_report.add_patched_error(execution_err);
+
+    // Create state for two stage flow
+    // Pending signature set to None as if we're here tx failed
+    let state = two_stage::Initialized::new(commit_strategy, finalize_strategy);
+
+    execute_two_stage_flow(
+        ctx,
+        state,
+        authority,
+        intent_bundle,
+        execution_report,
+        time_left,
+    )
+    .await
 }
 
-pub(in crate::intent_executor) struct SingleStage<'a, 'e, A, T, F> {
-    pub(in crate::intent_executor) inner: &'a mut SingleStageExecutor<'e, F, A>,
-    pub(in crate::intent_executor) transaction_preparator: &'a T,
-    pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
-}
-
-#[async_trait]
-impl<'a, 'e, A, T, F> StageExecutor for SingleStage<'a, 'e, A, T, F>
+pub(in crate::intent_executor) async fn execute_two_stage_flow<T, F, A, O>(
+    ctx: &IntentExecutorCtx<T, F, A, O>,
+    state: two_stage::Initialized,
+    authority: &Keypair,
+    intent_bundle: ScheduledIntentBundle,
+    execution_report: &mut IntentExecutionReport,
+    time_left: impl Fn() -> Option<Duration>,
+) -> IntentExecutorResult<ExecutionOutput>
 where
-    A: ActionsCallbackScheduler,
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-{
-    fn has_callbacks(&self) -> bool {
-        self.inner.has_callbacks()
-    }
-
-    async fn execute<P: IntentPersister>(
-        &mut self,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
-        self.inner
-            .execute(
-                self.committed_pubkeys,
-                self.transaction_preparator,
-                persister,
-            )
-            .await
-    }
-
-    fn execute_callbacks(
-        &mut self,
-        signature: Option<Signature>,
-        result: ActionResult,
-    ) {
-        self.inner.execute_callbacks(signature, result)
-    }
-}
-
-pub(in crate::intent_executor) struct CommitStage<'a, 'e, A, T, F> {
-    pub(in crate::intent_executor) inner:
-        &'a mut TwoStageExecutor<'e, A, Initialized>,
-    pub(in crate::intent_executor) transaction_preparator: &'a T,
-    pub(in crate::intent_executor) task_info_fetcher:
-        &'a CacheTaskInfoFetcher<F>,
-    pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
-}
-
-#[async_trait]
-impl<'a, 'e, A, T, F> StageExecutor for CommitStage<'a, 'e, A, T, F>
-where
     A: ActionsCallbackScheduler,
-    T: TransactionPreparator,
-    F: TaskInfoFetcher,
+    O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
-    fn has_callbacks(&self) -> bool {
-        self.inner.has_callbacks()
-    }
+    let meta = ScheduledBaseIntentMeta::new(&intent_bundle);
+    let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
+    let mut executor = TwoStageStrategyExecutor::new(
+        state,
+        authority.insecure_clone(),
+        intent_bundle.id,
+        ctx.intent_client.clone(),
+        ctx.outbox_client.clone(),
+        ctx.actions_callback_executor.clone(),
+        execution_report,
+    );
 
-    async fn execute<P: IntentPersister>(
-        &mut self,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
-        self.inner
-            .commit(
-                self.committed_pubkeys,
-                self.transaction_preparator,
-                self.task_info_fetcher,
-                persister,
-            )
-            .await
-    }
+    let commit_signature = execute_with_timeout(
+        time_left(),
+        CommitStage {
+            inner: &mut executor,
+            transaction_preparator: &ctx.transaction_preparator,
+            task_info_fetcher: &ctx.task_info_fetcher,
+            committed_pubkeys: &committed_pubkeys,
+        },
+    )
+    .await?;
 
-    fn execute_callbacks(
-        &mut self,
-        signature: Option<Signature>,
-        result: ActionResult,
-    ) {
-        self.inner.execute_callbacks(signature, result)
-    }
-}
+    let mut finalize_executor = executor.done(commit_signature);
+    let finalize_signature = execute_with_timeout(
+        time_left(),
+        FinalizeStage {
+            inner: &mut finalize_executor,
+            transaction_preparator: &ctx.transaction_preparator,
+        },
+    )
+    .await?;
 
-pub(in crate::intent_executor) struct FinalizeStage<'a, 'e, A, T> {
-    pub(in crate::intent_executor) inner:
-        &'a mut TwoStageExecutor<'e, A, Committed>,
-    pub(in crate::intent_executor) transaction_preparator: &'a T,
-}
-
-#[async_trait]
-impl<'a, 'e, A, T> StageExecutor for FinalizeStage<'a, 'e, A, T>
-where
-    A: ActionsCallbackScheduler,
-    T: TransactionPreparator,
-{
-    fn has_callbacks(&self) -> bool {
-        self.inner.has_callbacks()
-    }
-
-    async fn execute<P: IntentPersister>(
-        &mut self,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<Signature> {
-        self.inner
-            .finalize(self.transaction_preparator, persister)
-            .await
-    }
-
-    fn execute_callbacks(
-        &mut self,
-        signature: Option<Signature>,
-        result: ActionResult,
-    ) {
-        self.inner.execute_callbacks(signature, result)
-    }
+    let finalized_stage = finalize_executor.done(finalize_signature);
+    let output = ExecutionOutput::TwoStage {
+        commit_signature: finalized_stage.commit_signature,
+        finalize_signature: finalized_stage.finalize_signature,
+    };
+    ctx.outbox_client
+        .notify_commit_sent(meta, &Ok(output), execution_report)
+        .await
+        .map_err(Into::into)?;
+    Ok(output)
 }

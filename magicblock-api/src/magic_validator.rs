@@ -19,10 +19,11 @@ use magicblock_chainlink::{
     ProdInnerChainlink,
 };
 use magicblock_committor_service::{
-    committor_processor::CommittorProcessor,
-    config::ChainConfig,
-    service::{intent_client::InternalIntentRpcClient, IntentExecutionService},
-    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
+    committor_processor::CommittorProcessor, config::ChainConfig,
+    intent_engine::db::DummyIntentBacklog,
+    outbox::outbox_client::InternalOutboxClient,
+    service::IntentExecutionService, ComputeBudgetConfig,
+    DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{
     config::{
@@ -98,8 +99,12 @@ type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
-type IntentExecutionServiceImpl =
-    IntentExecutionService<InternalIntentRpcClient<LatestBlock>>;
+type CommittorProcessorImpl = CommittorProcessor<DummyIntentBacklog>;
+
+type IntentExecutionServiceImpl = IntentExecutionService<
+    InternalOutboxClient<LatestBlock>,
+    DummyIntentBacklog,
+>;
 
 // -----------------
 // MagicValidator
@@ -241,22 +246,31 @@ impl MagicValidator {
         log_timing("startup", "chainlink_init", step_start);
 
         let step_start = Instant::now();
+        let outbox_client = {
+            let val = Self::init_outbox_client(
+                &config,
+                &accountsdb,
+                &dispatch.transaction_scheduler,
+                ledger.latest_block(),
+            );
+            Arc::new(val)
+        };
         let committor_processor = {
             let processor = Self::init_committor_processor(
                 &config,
                 ledger.latest_block(),
+                &accountsdb,
+                &outbox_client,
                 &shared_chain_slot,
-            )?;
+            );
             Arc::new(processor)
         };
-        let intent_execution_service = Self::init_intent_execution_service(
-            &accountsdb,
-            &chainlink,
-            &dispatch.transaction_scheduler,
-            ledger.latest_block(),
-            &committor_processor,
+        let intent_execution_service = IntentExecutionServiceImpl::new(
+            chainlink.clone(),
+            outbox_client.clone(),
+            committor_processor.clone(),
             config.ledger.block_time,
-            &token,
+            token.clone(),
         );
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
@@ -461,14 +475,29 @@ impl MagicValidator {
         })
     }
 
+    fn init_outbox_client(
+        config: &ValidatorParams,
+        accounts_db: &Arc<AccountsDb>,
+        transaction_scheduler: &TransactionSchedulerHandle,
+        latest_block: &LatestBlock,
+    ) -> InternalOutboxClient<LatestBlock> {
+        let rpc_client = RpcClient::new(config.aperture.listen.http());
+        InternalOutboxClient::new(
+            accounts_db.clone(),
+            Arc::new(rpc_client),
+            transaction_scheduler.clone(),
+            latest_block.clone(),
+        )
+    }
+
     pub fn init_committor_processor(
         config: &ValidatorParams,
         latest_block: &LatestBlock,
+        accounts_db: &Arc<AccountsDb>,
+        outbox_client: &Arc<InternalOutboxClient<LatestBlock>>,
         shared_chain_slot: &Option<Arc<AtomicU64>>,
-    ) -> ApiResult<CommittorProcessor> {
+    ) -> CommittorProcessorImpl {
         let authority = config.validator.keypair.insecure_clone();
-        let committor_persist_path =
-            config.storage.join("committor_service.sqlite");
         let base_chain_config = ChainConfig {
             rpc_uri: config.rpc_url().to_owned(),
             commitment: CommitmentConfig::confirmed(),
@@ -488,36 +517,13 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             latest_block.clone(),
         );
-        Ok(CommittorProcessor::try_new(
+        CommittorProcessor::new(
             authority,
-            committor_persist_path,
             base_chain_config,
             shared_chain_slot.clone(),
+            DummyIntentBacklog::new(accounts_db.clone()),
+            outbox_client.clone(),
             actions_callback_executor,
-        )?)
-    }
-
-    fn init_intent_execution_service(
-        accounts_db: &Arc<AccountsDb>,
-        chainlink: &Arc<ChainlinkImpl>,
-        transaction_scheduler: &TransactionSchedulerHandle,
-        latest_block: &LatestBlock,
-        committor_processor: &Arc<CommittorProcessor>,
-        slot_interval: Duration,
-        cancellation_token: &CancellationToken,
-    ) -> IntentExecutionServiceImpl {
-        let intent_client = InternalIntentRpcClient::new(
-            accounts_db.clone(),
-            transaction_scheduler.clone(),
-            latest_block.clone(),
-        );
-
-        IntentExecutionServiceImpl::new(
-            chainlink.clone(),
-            intent_client,
-            committor_processor.clone(),
-            slot_interval,
-            cancellation_token.clone(),
         )
     }
 
