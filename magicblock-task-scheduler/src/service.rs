@@ -303,6 +303,9 @@ impl TaskSchedulerService {
         instructions: &[Instruction],
         last_execution_millis: Option<i64>,
     ) -> TaskSchedulerResult<()> {
+        if iterations <= 0 {
+            return Ok(());
+        }
         self.send_create(
             authority,
             task_id,
@@ -353,7 +356,7 @@ impl TaskSchedulerService {
 
         let interval_slots =
             interval_slots(interval_millis, self.slot_interval);
-        let iterations = iterations.max(0) as u64;
+        let iterations = iterations as u64;
 
         let faucet_pubkey = self.faucet.pubkey();
         let create_ix = build_create_ix(
