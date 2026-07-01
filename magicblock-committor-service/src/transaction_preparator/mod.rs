@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
@@ -100,6 +101,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .delivery_preparator
             .prepare_for_delivery(authority, tx_strategy, intent_persister)
             .await?;
+        metrics::observe_committor_intent_alt_count(lookup_tables.len());
 
         let message =
             TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
