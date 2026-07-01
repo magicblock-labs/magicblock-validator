@@ -57,6 +57,8 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 
 [dev-dependencies]
+solana-address-lookup-table-interface = { workspace = true }
+solana-sdk-ids = { workspace = true }
 solana-signature = { workspace = true, features = ["rand"] }
 rand = { workspace = true }
 tempfile = { workspace = true }

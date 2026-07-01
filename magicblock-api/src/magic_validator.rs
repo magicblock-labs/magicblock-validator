@@ -330,12 +330,12 @@ impl MagicValidator {
             ReplicationMode::Replica { .. }
         ))
         .then(|| {
-                Arc::new(ScheduledCommitsProcessorImpl::new(
-                    chainlink.clone(),
-                    dispatch.transaction_scheduler.clone(),
-                    identity_keypair.insecure_clone(),
-                    ledger.latest_block().clone(),
-                ))
+            Arc::new(ScheduledCommitsProcessorImpl::new(
+                chainlink.clone(),
+                dispatch.transaction_scheduler.clone(),
+                identity_keypair.insecure_clone(),
+                ledger.latest_block().clone(),
+            ))
         });
 
         let step_start = Instant::now();
