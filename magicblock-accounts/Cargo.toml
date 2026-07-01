@@ -9,26 +9,10 @@ edition.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-tracing = { workspace = true }
 
-magicblock-account-cloner = { workspace = true }
-magicblock-accounts-db = { workspace = true }
-magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
-magicblock-core = { workspace = true }
-magicblock-metrics = { workspace = true }
-magicblock-program = { workspace = true }
-solana-hash = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-transaction-error = { workspace = true }
-solana-transaction = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-
-[dev-dependencies]
-magicblock-committor-service = { workspace = true, features = [
-  "dev-context-only-utils",
-] }
-tokio-util = { workspace = true }

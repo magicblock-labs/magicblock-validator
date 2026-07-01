@@ -534,6 +534,12 @@ pub mod mock {
         pub fn insert_subscription(&self, pubkey: Pubkey) {
             self.subscribed_pubkeys.lock().insert(pubkey);
         }
+
+        /// Directly remove a subscription without going through unsubscribe().
+        /// Useful for testing already-missing cleanup scenarios.
+        pub fn remove_subscription(&self, pubkey: &Pubkey) {
+            self.subscribed_pubkeys.lock().remove(pubkey);
+        }
     }
 
     #[async_trait]
@@ -647,8 +653,15 @@ pub mod mock {
             }
 
             let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
-            subscribed_pubkeys.remove(&pubkey);
-            Ok(())
+            if subscribed_pubkeys.remove(&pubkey) {
+                Ok(())
+            } else {
+                Err(
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                        pubkey.to_string(),
+                    ),
+                )
+            }
         }
 
         async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
