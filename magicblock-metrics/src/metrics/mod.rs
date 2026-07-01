@@ -451,6 +451,14 @@ lazy_static::lazy_static! {
         ),
     ).unwrap();
 
+    static ref COMMITTOR_INTENT_ALT_COUNT: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_intent_alt_count",
+            "Number of address lookup tables used per intent transaction (only recorded when ALTs are present)"
+        )
+        .buckets(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0])
+    ).unwrap();
+
     static ref COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME: Histogram = Histogram::with_opts(
         HistogramOpts::new(
             "committor_fetch_commit_nonces_wait_time_second",
@@ -624,6 +632,7 @@ pub(crate) fn register() {
         register!(COMMITTOR_INTENT_CU_USAGE);
         register!(COMMITTOR_INTENT_TASK_PREPARATION_TIME);
         register!(COMMITTOR_INTENT_ALT_PREPARATION_TIME);
+        register!(COMMITTOR_INTENT_ALT_COUNT);
         register!(COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME);
         register!(ENSURE_ACCOUNTS_TIME);
         register!(RPC_REQUEST_HANDLING_TIME);
@@ -841,6 +850,10 @@ pub fn observe_committor_intent_task_preparation_time<
 
 pub fn observe_committor_intent_alt_preparation_time() -> HistogramTimer {
     COMMITTOR_INTENT_ALT_PREPARATION_TIME.start_timer()
+}
+
+pub fn observe_committor_intent_alt_count(count: usize) {
+    COMMITTOR_INTENT_ALT_COUNT.observe(count as f64);
 }
 
 pub fn start_fetch_commit_nonces_wait_timer() -> HistogramTimer {
