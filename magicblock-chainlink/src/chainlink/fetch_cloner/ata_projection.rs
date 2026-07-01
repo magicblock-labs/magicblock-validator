@@ -5,7 +5,7 @@ use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
     is_ata, try_derive_eata_address_and_bump, try_derive_supported_ata_pubkeys,
-    AtaInfo, EphemeralAta, MaybeIntoAta, EATA_PROGRAM_ID,
+    AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -185,8 +185,10 @@ where
         if let Some(candidate_account) =
             this.accounts_bank.get_account(&candidate_pubkey)
         {
-            base_ata = Some((candidate_pubkey, candidate_account));
-            break;
+            if is_ata(&candidate_pubkey, &candidate_account).is_some() {
+                base_ata = Some((candidate_pubkey, candidate_account));
+                break;
+            }
         }
     }
     let (ata_pubkey, base_ata) = match base_ata {
@@ -399,9 +401,7 @@ where
         None
     };
 
-    let mut projected_ata = match projected_from_base_ata
-        .or_else(|| eata_account.maybe_into_ata(deleg_record.owner))
-    {
+    let mut projected_ata = match projected_from_base_ata {
         Some(projected_ata) => projected_ata,
         None => {
             return None;
