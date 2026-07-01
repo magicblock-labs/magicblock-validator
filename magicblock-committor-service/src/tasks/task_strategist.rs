@@ -19,6 +19,7 @@ use crate::{
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,
+    // TODO(edwin): remove this
     pub standalone_action_nonce: Option<u64>,
 }
 

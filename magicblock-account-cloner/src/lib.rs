@@ -67,10 +67,8 @@ use tracing::*;
 pub const MAX_INLINE_DATA_SIZE: usize = 63 * 1024;
 const MAX_INLINE_TRANSACTION_SIZE: usize = u16::MAX as usize;
 
-mod account_cloner;
 mod util;
 
-pub use account_cloner::*;
 pub use util::derive_buffer_pubkey;
 
 pub struct ChainlinkCloner {

@@ -192,7 +192,7 @@ impl DeliveryPreparator {
         let preparation_task = preparation_task.clone();
         let cleanup_task = preparation_task.cleanup_task();
 
-        self.cleanup(authority, &[cleanup_task], &[]).await?;
+        self.cleanup_buffers(authority, &[cleanup_task]).await?;
         self.rpc_client.invalidate_cached_blockhash().await;
 
         // Restore preparation stage for retry
@@ -439,20 +439,35 @@ impl DeliveryPreparator {
         Ok(alts)
     }
 
-    /// Releases pubkeys from TableMania and
-    /// cleans up after buffer tasks
+    /// Releases pubkeys from TableMania and cleans up after buffer tasks.
+    //
+    // Cleaning buffers on failure isn't safe due to potential race condition:
+    // Assume pubkey set A being committed
+    // Intent1 fails and cleans up, another Intent2 with set A executes right away
+    // That could lead for Intent2 init of buffers executing prior of Intent1 buffer cleanup
+    // With same set A buffers will have same address
+    //
+    // To avoid this race on buffers we cleanup only succesfully executed intents
+    // With intent retries all buffers will be eventually closed once intent succeeds
     pub async fn cleanup(
         &self,
         authority: &Keypair,
         cleanup_tasks: &[CleanupTask],
         lookup_table_keys: &[Pubkey],
+        close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
-        let fut1 = self.cleanup_buffers(authority, cleanup_tasks);
         let alt_set = HashSet::from_iter(lookup_table_keys.iter().cloned());
         let fut2 = self.table_mania.release_pubkeys(&alt_set);
 
-        let (res, ()) = join(fut1, fut2).await;
-        res
+        if close_buffers {
+            let (res, ()) =
+                join(self.cleanup_buffers(authority, cleanup_tasks), fut2)
+                    .await;
+            res
+        } else {
+            fut2.await;
+            Ok(())
+        }
     }
 
     async fn cleanup_buffers(

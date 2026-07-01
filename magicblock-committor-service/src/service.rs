@@ -1,630 +1,427 @@
+pub mod intent_client;
+
 use std::{
-    collections::HashMap,
-    path::Path,
-    sync::{atomic::AtomicU64, Arc},
-    time::Instant,
+    collections::{HashMap, HashSet},
+    future::Future,
+    mem,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
-use magicblock_core::traits::ActionsCallbackScheduler;
-use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
-use solana_keypair::Keypair;
-use solana_pubkey::Pubkey;
-use solana_signature::Signature;
-use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
-use tokio::{
-    select,
-    sync::{
-        broadcast,
-        mpsc::{self, error::TrySendError},
-        oneshot,
-    },
+use futures_util::future::join_all;
+use intent_client::{
+    ERIntentClient, InternalIntentClientError, ScheduledBaseIntentMeta,
 };
-use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
-use tracing::*;
+use magicblock_account_cloner::ChainlinkCloner;
+use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
+use magicblock_metrics::metrics::{self, AccountFetchOrigin};
+use magicblock_program::{
+    magic_scheduled_base_intent::ScheduledIntentBundle, Pubkey,
+};
+use tokio::{
+    sync::broadcast,
+    task,
+    task::{JoinError, JoinHandle},
+};
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, instrument, warn};
 
 use crate::{
-    committor_processor::CommittorProcessor,
-    config::ChainConfig,
-    error::{CommittorServiceError, CommittorServiceResult},
+    committor_processor::CommittorProcessor, error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
-    persist::{CommitStatusRow, MessageSignatures},
-    pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
 };
 
-#[derive(Debug)]
-pub struct LookupTables {
-    pub active: Vec<Pubkey>,
-    pub released: Vec<Pubkey>,
+const POISONED_MUTEX_MSG: &str = "ServiceInner intents_meta_map mutex poisoned";
+
+pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
+pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
+
+pub enum IntentExecutionService<R> {
+    Created(ServiceInner<R>),
+    Started(JoinHandle<()>),
+    Stopped,
+    Error,
 }
 
-#[derive(Debug)]
-pub enum CommittorMessage {
-    ReservePubkeysForCommittee {
-        /// When the request was initiated
-        initiated: Instant,
-        /// Called once the pubkeys have been reserved and includes that timestamp
-        /// at which the request was initiated
-        respond_to: oneshot::Sender<CommittorServiceResult<Instant>>,
-        /// The committee whose pubkeys to reserve in a lookup table
-        /// These pubkeys are used to process/finalize the commit
-        committee: Pubkey,
-        /// The owner program of the committee
-        owner: Pubkey,
-    },
-    ReserveCommonPubkeys {
-        /// Called once the pubkeys have been reserved
-        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
-    },
-    ReleaseCommonPubkeys {
-        /// Called once the pubkeys have been released
-        respond_to: oneshot::Sender<()>,
-    },
-    ScheduleIntentBundle {
-        /// The [`ScheduleIntentBundle`]s to commit
-        intent_bundles: Vec<ScheduledIntentBundle>,
-        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
-    },
-    GetPendingIntentBundles {
-        respond_to:
-            oneshot::Sender<CommittorServiceResult<Vec<ScheduledIntentBundle>>>,
-    },
-    ScheduleRecoveredIntentBundle {
-        /// Recovered [`ScheduleIntentBundle`]s to commit without re-persisting rows.
-        intent_bundles: Vec<ScheduledIntentBundle>,
-        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
-    },
-    GetCommitStatuses {
-        respond_to:
-            oneshot::Sender<CommittorServiceResult<Vec<CommitStatusRow>>>,
-        message_id: u64,
-    },
-    GetCommitSignatures {
-        respond_to:
-            oneshot::Sender<CommittorServiceResult<Option<MessageSignatures>>>,
-        commit_id: u64,
-        pubkey: Pubkey,
-    },
-    GetLookupTables {
-        respond_to: oneshot::Sender<LookupTables>,
-    },
-    GetTransaction {
-        respond_to: oneshot::Sender<
-            CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
-        >,
-        signature: Signature,
-    },
-    SubscribeForResults {
-        respond_to: oneshot::Sender<
-            broadcast::Receiver<BroadcastedIntentExecutionResult>,
-        >,
-    },
-    FetchCurrentCommitNonces {
-        respond_to:
-            oneshot::Sender<CommittorServiceResult<HashMap<Pubkey, u64>>>,
-        pubkeys: Vec<Pubkey>,
-        min_context_slot: u64,
-    },
-    FetchCurrentCommitNoncesSync {
-        respond_to: std::sync::mpsc::Sender<
-            CommittorServiceResult<HashMap<Pubkey, u64>>,
-        >,
-        pubkeys: Vec<Pubkey>,
-        min_context_slot: u64,
-    },
-}
-
-// -----------------
-// CommittorActor
-// -----------------
-struct CommittorActor {
-    receiver: mpsc::Receiver<CommittorMessage>,
-    processor: Arc<CommittorProcessor>,
-}
-
-impl CommittorActor {
-    pub fn try_new<P, A>(
-        receiver: mpsc::Receiver<CommittorMessage>,
-        authority: Keypair,
-        persist_file: P,
-        chain_config: ChainConfig,
-        chain_slot: Option<Arc<AtomicU64>>,
-        actions_callback_executor: A,
-    ) -> CommittorServiceResult<Self>
-    where
-        P: AsRef<Path>,
-        A: ActionsCallbackScheduler,
-    {
-        let processor = Arc::new(CommittorProcessor::try_new(
-            authority,
-            persist_file,
-            chain_config,
-            chain_slot,
-            actions_callback_executor,
-        )?);
-
-        Ok(Self {
-            receiver,
+impl<R> IntentExecutionService<R>
+where
+    R: ERIntentClient,
+    R::Error: Into<IntentExecutionServiceError>,
+{
+    pub fn new(
+        chainlink: Arc<ChainlinkImpl>,
+        intent_rpc_client: R,
+        processor: Arc<CommittorProcessor>,
+        slot_interval: Duration,
+        cancellation_token: CancellationToken,
+    ) -> Self {
+        Self::Created(ServiceInner::new(
+            chainlink,
+            intent_rpc_client,
             processor,
-        })
+            slot_interval,
+            cancellation_token,
+        ))
     }
 
-    #[instrument(skip(self))]
-    async fn handle_msg(&self, msg: CommittorMessage) {
-        use CommittorMessage::*;
-        match msg {
-            ReservePubkeysForCommittee {
-                initiated,
-                respond_to,
-                committee,
-                owner,
-            } => {
-                let processor = self.processor.clone();
-                tokio::task::spawn(async move {
-                    let pubkeys =
-                        provide_committee_pubkeys(&committee, Some(&owner));
-                    // NOTE: we wait here until the reservation is done which causes the
-                    // cloning of a particular account to be blocked.
-                    // This leads to larger delays on the first clone of an account, but also
-                    // ensures that the account could be committed via a lookup table later.
-                    let result = processor
-                        .reserve_pubkeys(pubkeys)
-                        .await
-                        .map(|_| initiated);
-                    if let Err(e) = respond_to.send(result) {
-                        error!(message_type = "ReservePubkeysForCommittee", error = ?e, "Failed to send response");
-                    }
-                });
-            }
-            ReserveCommonPubkeys { respond_to } => {
-                let processor = self.processor.clone();
-                tokio::task::spawn(async move {
-                    let pubkeys =
-                        provide_common_pubkeys(&processor.auth_pubkey());
-                    let reqid = processor.reserve_pubkeys(pubkeys).await;
-                    if let Err(e) = respond_to.send(reqid) {
-                        error!(message_type = "ReserveCommonPubkeys", error = ?e, "Failed to send response");
-                    }
-                });
-            }
-            ReleaseCommonPubkeys { respond_to } => {
-                let processor = self.processor.clone();
-                tokio::task::spawn(async move {
-                    let pubkeys =
-                        provide_common_pubkeys(&processor.auth_pubkey());
-                    processor.release_pubkeys(pubkeys).await;
-                    if let Err(e) = respond_to.send(()) {
-                        error!(message_type = "ReleaseCommonPubkeys", error = ?e, "Failed to send response");
-                    }
-                });
-            }
-            ScheduleIntentBundle {
-                intent_bundles,
-                respond_to,
-            } => {
-                let result =
-                    self.processor.schedule_intent_bundle(intent_bundles).await;
-                if let Err(e) = respond_to.send(result) {
-                    error!(message_type = "ScheduleBaseIntents", error = ?e, "Failed to send response");
-                }
-            }
-            GetPendingIntentBundles { respond_to } => {
-                let pending_intents =
-                    self.processor.pending_intent_bundles().await;
-                if let Err(e) = respond_to.send(pending_intents) {
-                    error!(message_type = "GetPendingIntentBundles", error = ?e, "Failed to send response");
-                }
-            }
-            ScheduleRecoveredIntentBundle {
-                intent_bundles,
-                respond_to,
-            } => {
-                let result = self
-                    .processor
-                    .schedule_recovered_intent_bundles(intent_bundles)
-                    .await;
-                if let Err(e) = respond_to.send(result) {
-                    error!(message_type = "ScheduleRecoveredIntentBundle", error = ?e, "Failed to send response");
-                }
-            }
-            GetCommitStatuses {
-                message_id,
-                respond_to,
-            } => {
-                let commit_statuses =
-                    self.processor.get_commit_statuses(message_id);
-                if let Err(e) = respond_to.send(commit_statuses) {
-                    error!(message_type = "GetCommitStatuses", error = ?e, "Failed to send response");
-                }
-            }
-            GetCommitSignatures {
-                commit_id,
-                respond_to,
-                pubkey,
-            } => {
-                let sig =
-                    self.processor.get_commit_signature(commit_id, pubkey);
-                if let Err(e) = respond_to.send(sig) {
-                    error!(message_type = "GetCommitSignatures", error = ?e, "Failed to send response");
-                }
-            }
-            GetTransaction {
-                signature,
-                respond_to,
-            } => {
-                let processor = self.processor.clone();
-                tokio::task::spawn(async move {
-                    let res = processor
-                        .magicblock_rpc_client
-                        .get_transaction(&signature, None)
-                        .await
-                        .map_err(Into::into);
-                    if let Err(err) = respond_to.send(res) {
-                        error!(message_type = "GetTransaction", error = ?err, "Failed to send response");
-                    }
-                });
-            }
-            GetLookupTables { respond_to } => {
-                let active_tables = self.processor.active_lookup_tables().await;
-                let released_tables =
-                    self.processor.released_lookup_tables().await;
-                if let Err(e) = respond_to.send(LookupTables {
-                    active: active_tables,
-                    released: released_tables,
-                }) {
-                    error!(message_type = "GetLookupTables", error = ?e, "Failed to send response");
-                }
-            }
-            SubscribeForResults { respond_to } => {
-                let subscription = self.processor.subscribe_for_results();
-                if let Err(err) = respond_to.send(subscription) {
-                    error!(message_type = "SubscribeForResults", error = ?err, "Failed to send response");
-                }
-            }
-            FetchCurrentCommitNonces {
-                respond_to,
-                pubkeys,
-                min_context_slot,
-            } => {
-                let processor = self.processor.clone();
-                tokio::spawn(async move {
-                    let result = processor
-                        .fetch_current_commit_nonces(&pubkeys, min_context_slot)
-                        .await;
-                    if let Err(err) = respond_to
-                        .send(result.map_err(CommittorServiceError::from))
-                    {
-                        error!(message_type = "FetchCurrentCommitNonces", error = ?err, "Failed to send response");
-                    }
-                });
-            }
-            FetchCurrentCommitNoncesSync {
-                respond_to,
-                pubkeys,
-                min_context_slot,
-            } => {
-                let processor = self.processor.clone();
-                tokio::spawn(async move {
-                    let result = processor
-                        .fetch_current_commit_nonces(&pubkeys, min_context_slot)
-                        .await;
-                    if let Err(err) = respond_to
-                        .send(result.map_err(CommittorServiceError::from))
-                    {
-                        error!(message_type = "FetchCurrentCommitNoncesSync", error = ?err, "Failed to send response");
-                    }
-                });
-            }
+    fn take(&mut self) -> Self {
+        mem::replace(self, Self::Error)
+    }
+
+    pub fn start(&mut self) -> Result<(), IntentExecutionServiceError> {
+        let Self::Created(service) = self.take() else {
+            return Err(IntentExecutionServiceError::InvalidState(
+                "service must be in Created state to start".into(),
+            ));
+        };
+
+        let handle = service.start();
+        *self = Self::Started(handle);
+        Ok(())
+    }
+
+    pub async fn stop(&mut self) -> Result<(), IntentExecutionServiceError> {
+        let Self::Started(handle) = self.take() else {
+            return Err(IntentExecutionServiceError::InvalidState(
+                "service must be in Started state to stop".into(),
+            ));
+        };
+
+        handle.await?;
+        *self = Self::Stopped;
+        Ok(())
+    }
+}
+
+pub struct ServiceInner<R> {
+    /// Chainlink for notifying of undelegations
+    chainlink: Arc<ChainlinkImpl>,
+    /// ER client specific for Intent needs. Could be switched to RpcClient
+    intent_rpc_client: Arc<R>,
+    /// Processor of accepted intents
+    processor: Arc<CommittorProcessor>,
+    /// Time interval to scrape MagicContext(ER slot interval)
+    // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
+    slot_interval: Duration,
+    cancellation_token: CancellationToken,
+    /// Meta for ongoing executing intents
+    intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+}
+
+impl<R> ServiceInner<R>
+where
+    R: ERIntentClient,
+    R::Error: Into<IntentExecutionServiceError>,
+{
+    pub fn new(
+        chainlink: Arc<ChainlinkImpl>,
+        intent_rpc_client: R,
+        processor: Arc<CommittorProcessor>,
+        slot_interval: Duration,
+        cancellation_token: CancellationToken,
+    ) -> Self {
+        Self {
+            chainlink,
+            intent_rpc_client: Arc::new(intent_rpc_client),
+            processor,
+            slot_interval,
+            cancellation_token,
+            intents_meta_map: Arc::new(Mutex::default()),
         }
     }
 
-    #[instrument(skip(self, cancel_token))]
-    pub async fn run(&mut self, cancel_token: CancellationToken) {
+    /// Starts 2 workers: one accepting intents, another awaiting and handling results
+    fn start(self) -> JoinHandle<()> {
+        let result_subscriber = self.processor.subscribe_for_results();
+        let cancellation_token = self.cancellation_token.clone();
+        tokio::spawn(Self::result_processor(
+            result_subscriber,
+            cancellation_token,
+            self.intents_meta_map.clone(),
+            self.intent_rpc_client.clone(),
+        ));
+
+        tokio::task::spawn(self.accept_worker())
+    }
+
+    async fn accept_worker(self) {
+        if let Err(err) = self.reschedule_pending_bundles().await {
+            error!(error = ?err, "Failed to reschedule pending bundles")
+        }
+
+        let mut interval = tokio::time::interval(self.slot_interval);
         loop {
-            select! {
-                msg = self.receiver.recv() => {
-                    if let Some(msg) = msg {
-                        self.handle_msg(msg).await;
-                    } else {
-                        break;
-                    }
-                }
-                _ = cancel_token.cancelled() => {
+            tokio::select! {
+                biased;
+                _ = self.cancellation_token.cancelled() => {
                     break;
                 }
+                _ = interval.tick() => {
+                    let accept_result = self
+                        .intent_rpc_client
+                        .accept_scheduled_intents()
+                        .await;
+                    let intent_bundles = match accept_result {
+                        Ok(value) => value,
+                        Err(err) => {
+                            error!("Failed to accept intents: {}", err);
+                            continue;
+                        }
+                    };
+
+                    if let Err(err) = self.schedule_intent_execution(intent_bundles).await {
+                        error!("Failed to schedule intent execution: {}", err);
+                    }
+                }
             }
         }
-
-        info!("Actor shutdown");
     }
-}
 
-// -----------------
-// CommittorService
-// -----------------
-pub struct CommittorService {
-    sender: mpsc::Sender<CommittorMessage>,
-    cancel_token: CancellationToken,
-}
+    async fn reschedule_pending_bundles(&self) -> CommittorServiceResult<()> {
+        // Fetch pending bundles from DB
+        let mut bundles =
+            self.processor.pending_intent_bundles().await.inspect_err(|err| {
+                error!(error = ?err, "Failed to load pending intent bundles for recovery");
+            })?;
+        if bundles.is_empty() {
+            return Ok(());
+        }
 
-impl CommittorService {
-    pub fn try_start<P, A>(
-        authority: Keypair,
-        persist_file: P,
-        chain_config: ChainConfig,
-        chain_slot: Option<Arc<AtomicU64>>,
-        actions_callback_executor: A,
-    ) -> CommittorServiceResult<Self>
+        // Retain only recoverable bundles
+        self.retain_recoverable_intent_bundles(&mut bundles).await;
+
+        // Schedule  without initial persisitance as bundle already exists in db
+        self.process_intent_bundles(bundles, |bundles| {
+            self.processor.schedule_recovered_intent_bundles(bundles)
+        })
+        .await
+    }
+
+    async fn schedule_intent_execution(
+        &self,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+    ) -> CommittorServiceResult<()> {
+        if intent_bundles.is_empty() {
+            return Ok(());
+        }
+
+        metrics::inc_committor_intents_count_by(intent_bundles.len() as u64);
+
+        self.process_intent_bundles(intent_bundles, |bundles| {
+            self.processor.schedule_intent_bundles(bundles)
+        })
+        .await
+    }
+
+    async fn process_intent_bundles<F, Fut>(
+        &self,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+        schedule: F,
+    ) -> CommittorServiceResult<()>
     where
-        P: AsRef<Path>,
-        A: ActionsCallbackScheduler,
+        F: FnOnce(Vec<ScheduledIntentBundle>) -> Fut,
+        Fut: Future<Output = CommittorServiceResult<()>>,
     {
-        debug!("Starting committor service");
-        let (sender, receiver) = mpsc::channel(1_000);
-        let cancel_token = CancellationToken::new();
-        {
-            let cancel_token = cancel_token.clone();
-            let mut actor = CommittorActor::try_new(
-                receiver,
-                authority,
-                persist_file,
-                chain_config,
-                chain_slot,
-                actions_callback_executor,
-            )?;
-            tokio::spawn(async move {
-                actor.run(cancel_token).await;
+        if intent_bundles.is_empty() {
+            return Ok(());
+        }
+
+        // Add metas for intent we schedule
+        let intent_ids: Vec<u64>;
+        let pubkeys_being_undelegated = {
+            let mut intent_metas =
+                self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
+            let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
+            intent_bundles.iter().for_each(|intent| {
+                intent_metas
+                    .insert(intent.id, ScheduledBaseIntentMeta::new(intent));
+                if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
+                {
+                    pubkeys_being_undelegated.extend(undelegate);
+                }
+            });
+            intent_ids = intent_bundles.iter().map(|b| b.id).collect();
+            pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
+        };
+
+        self.process_undelegation_requests(pubkeys_being_undelegated)
+            .await;
+
+        let result = schedule(intent_bundles).await;
+        // If scheduling failed remove from map
+        if result.is_err() {
+            let mut intent_metas =
+                self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
+            intent_ids.iter().for_each(|id| {
+                intent_metas.remove(id);
             });
         }
-        Ok(Self {
-            sender,
-            cancel_token,
-        })
+        result
     }
 
-    pub fn reserve_common_pubkeys(
-        &self,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::ReserveCommonPubkeys {
-            respond_to: tx,
-        });
-        rx
+    async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
+        let mut join_set = task::JoinSet::new();
+        for pubkey in pubkeys.into_iter() {
+            let chainlink = self.chainlink.clone();
+            join_set.spawn(async move {
+                (pubkey, chainlink.undelegation_requested(pubkey).await)
+            });
+        }
+        let sub_errors = join_set
+            .join_all()
+            .await
+            .into_iter()
+            .filter_map(|(pubkey, inner_result)| {
+                if let Err(err) = inner_result {
+                    Some(format!(
+                        "Subscribing to account {} failed: {}",
+                        pubkey, err
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if !sub_errors.is_empty() {
+            // Instead of aborting the entire commit we log an error here, however
+            // this means that the undelegated accounts stay in a problematic state
+            // in the validator and are not synced from chain.
+            // We could implement a retry mechanism inside of chainlink in the future.
+            error!(
+                error_count = sub_errors.len(),
+                "Failed to subscribe to accounts being undelegated"
+            );
+        }
     }
 
-    pub fn release_common_pubkeys(&self) -> oneshot::Receiver<()> {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::ReleaseCommonPubkeys {
-            respond_to: tx,
-        });
-        rx
-    }
+    #[instrument(skip(
+        result_subscription,
+        cancellation_token,
+        intents_meta_map,
+        intent_client
+    ))]
+    async fn result_processor(
+        mut result_subscription: broadcast::Receiver<
+            BroadcastedIntentExecutionResult,
+        >,
+        cancellation_token: CancellationToken,
+        intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+        intent_client: Arc<R>,
+    ) {
+        loop {
+            let execution_result = tokio::select! {
+                biased;
+                _ = cancellation_token.cancelled() => {
+                    info!("Shutting down");
+                    return;
+                }
+                execution_result = result_subscription.recv() => {
+                    match execution_result {
+                        Ok(result) => result,
+                        Err(broadcast::error::RecvError::Closed) => {
+                            info!("Intent execution service shut down");
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            // SAFETY: This shouldn't happen as our tx execution is faster than Intent execution on Base layer
+                            // If this ever happens it requires investigation
+                            error!(skipped_count = skipped, "Lagging behind intent execution");
+                            continue;
+                        }
+                    }
+                }
+            };
 
-    pub fn get_pending_intent_bundles(
-        &self,
-    ) -> oneshot::Receiver<CommittorServiceResult<Vec<ScheduledIntentBundle>>>
-    {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetPendingIntentBundles {
-            respond_to: tx,
-        });
-        rx
-    }
-
-    pub fn schedule_recovered_intent_bundles(
-        &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::ScheduleRecoveredIntentBundle {
-            intent_bundles,
-            respond_to: tx,
-        });
-        rx
-    }
-
-    pub fn get_commit_signatures(
-        &self,
-        commit_id: u64,
-        pubkey: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
-    {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetCommitSignatures {
-            respond_to: tx,
-            commit_id,
-            pubkey,
-        });
-        rx
-    }
-
-    pub fn get_lookup_tables(&self) -> oneshot::Receiver<LookupTables> {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetLookupTables { respond_to: tx });
-        rx
-    }
-
-    pub fn fetch_current_commit_nonces_sync(
-        &self,
-        pubkeys: &[Pubkey],
-        min_context_slot: u64,
-    ) -> std::sync::mpsc::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>>
-    {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.try_send(CommittorMessage::FetchCurrentCommitNoncesSync {
-            respond_to: tx,
-            pubkeys: pubkeys.to_vec(),
-            min_context_slot,
-        });
-        rx
-    }
-
-    fn try_send(&self, msg: CommittorMessage) {
-        if let Err(e) = self.sender.try_send(msg) {
-            match e {
-                TrySendError::Full(msg) => error!(
-                    "Channel full, failed to send commit message {:?}",
-                    msg
-                ),
-                TrySendError::Closed(msg) => error!(
-                    "Channel closed, failed to send commit message {:?}",
-                    msg
-                ),
+            if let Err(err) = ServiceInner::<R>::process_execution_result(
+                &intent_client,
+                execution_result,
+                &intents_meta_map,
+            )
+            .await
+            {
+                error!(error = ?err, "Failed process intent execution results");
             }
         }
     }
-}
 
-impl BaseIntentCommittor for CommittorService {
-    fn reserve_pubkeys_for_committee(
+    async fn process_execution_result(
+        intent_client: &Arc<R>,
+        execution_result: BroadcastedIntentExecutionResult,
+        intents_meta_map: &Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+    ) -> Result<(), R::Error> {
+        let intent_id = execution_result.id;
+        let Some(intent_meta) = intents_meta_map
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .remove(&intent_id)
+        else {
+            // Possible if we have duplicate Intents
+            // First one will remove id from map and second could fail.
+            // This should not happen and needs investigation!
+            error!(intent_id, "Failed to find intent metadata");
+            return Ok(());
+        };
+
+        intent_client
+            .notify_commit_sent(intent_meta, execution_result)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Retains bundles whose accounts are still delegated
+    async fn retain_recoverable_intent_bundles(
         &self,
-        committee: Pubkey,
-        owner: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::ReservePubkeysForCommittee {
-            initiated: Instant::now(),
-            respond_to: tx,
-            committee,
-            owner,
+        bundles: &mut Vec<ScheduledIntentBundle>,
+    ) {
+        let results = join_all(
+            bundles.iter().map(|b| b.get_all_committed_pubkeys()).map(
+                |pubkeys| async move {
+                    self.chainlink
+                        .accounts_delegated_on_base_and_er(
+                            &pubkeys,
+                            AccountFetchOrigin::GetAccount,
+                        )
+                        .await
+                },
+            ),
+        )
+        .await;
+
+        let mut results_iter = results.into_iter();
+        bundles.retain(|bundle| {
+            let Some(result) = results_iter.next() else {
+                error!("Results and bundles must have equal length");
+                return false;
+            };
+            match result {
+                Ok(delegated) if delegated.iter().all(|d| *d) => true,
+                Ok(_) => {
+                    warn!(
+                        intent_id = bundle.id,
+                        "Skipping recovered commit intent because not all accounts are delegated on base and ER"
+                    );
+                    false
+                }
+                Err(err) => {
+                    error!(
+                        intent_id = bundle.id,
+                        error = ?err,
+                        "Failed to verify recovered commit intent accounts"
+                    );
+                    false
+                }
+            }
         });
-        rx
-    }
-
-    fn schedule_intent_bundles(
-        &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::ScheduleIntentBundle {
-            intent_bundles,
-            respond_to: tx,
-        });
-        rx
-    }
-
-    fn get_commit_statuses(
-        &self,
-        message_id: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetCommitStatuses {
-            respond_to: tx,
-            message_id,
-        });
-        rx
-    }
-
-    fn get_commit_signatures(
-        &self,
-        commit_id: u64,
-        pubkey: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
-    {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetCommitSignatures {
-            respond_to: tx,
-            commit_id,
-            pubkey,
-        });
-        rx
-    }
-
-    fn subscribe_for_results(
-        &self,
-    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>
-    {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::SubscribeForResults { respond_to: tx });
-        rx
-    }
-
-    fn get_transaction(
-        &self,
-        signature: &Signature,
-    ) -> oneshot::Receiver<
-        CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
-    > {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetTransaction {
-            respond_to: tx,
-            signature: *signature,
-        });
-
-        rx
-    }
-
-    fn fetch_current_commit_nonces(
-        &self,
-        pubkeys: &[Pubkey],
-        min_context_slot: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>> {
-        let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::FetchCurrentCommitNonces {
-            respond_to: tx,
-            pubkeys: pubkeys.to_vec(),
-            min_context_slot,
-        });
-
-        rx
-    }
-
-    fn stop(&self) {
-        self.cancel_token.cancel();
-    }
-
-    fn stopped(&self) -> WaitForCancellationFutureOwned {
-        self.cancel_token.clone().cancelled_owned()
     }
 }
 
-pub trait BaseIntentCommittor: Send + Sync + 'static {
-    /// Reserves pubkeys used in most commits in a lookup table
-    fn reserve_pubkeys_for_committee(
-        &self,
-        committee: Pubkey,
-        owner: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<Instant>>;
-
-    /// Commits the changeset and returns
-    fn schedule_intent_bundles(
-        &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>>;
-
-    /// Subscribes for results of BaseIntent execution
-    fn subscribe_for_results(
-        &self,
-    ) -> oneshot::Receiver<broadcast::Receiver<BroadcastedIntentExecutionResult>>;
-
-    /// Gets statuses of accounts that were committed as part of a request with provided message_id
-    fn get_commit_statuses(
-        &self,
-        message_id: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>>;
-
-    /// Gets signatures for commit of particular accounts
-    fn get_commit_signatures(
-        &self,
-        commit_id: u64,
-        pubkey: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>;
-
-    fn get_transaction(
-        &self,
-        signature: &Signature,
-    ) -> oneshot::Receiver<
-        CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
-    >;
-
-    fn fetch_current_commit_nonces(
-        &self,
-        pubkeys: &[Pubkey],
-        min_context_slot: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>>;
-
-    /// Stops Committor service
-    fn stop(&self);
-
-    /// Returns future which resolves once committor `stop` got called
-    fn stopped(&self) -> WaitForCancellationFutureOwned;
+#[derive(thiserror::Error, Debug)]
+pub enum IntentExecutionServiceError {
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
+    #[error("JoinError: {0}")]
+    JoinError(#[from] JoinError),
+    #[error("IntentRpcClientError: {0}")]
+    IntentRpcClientError(#[from] InternalIntentClientError),
 }

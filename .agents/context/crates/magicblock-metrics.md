@@ -205,6 +205,9 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 | `set_accounts_count(value)` | Number of accounts in `AccountsDb`. |
 | `set_monitored_accounts_count(count)` | Absolute count of monitored accounts; callers must pass total count, not delta. |
 | `inc_evicted_accounts_count()` | Cumulative count of monitored accounts forcefully removed from monitor list/database. |
+| `inc_chainlink_subscription_registration_accounts(origin, subscription_reason, outcome)` | `chainlink_subscription_registration_accounts_total` (`mbv_chainlink_subscription_registration_accounts_total`) classifies Chainlink account subscription registration attempts by `{origin,subscription_reason,outcome}`. Origin is `AccountFetchOrigin` label values plus `internal`; subscription reasons are `direct_account`, `delegation_record`, `program_data`, `undelegation_tracking`, `ata_projection`; outcomes are `already_present`, `added_below_capacity`, `evicted_candidate`, `subscribe_error`, `unsubscribe_evicted_error`, `rejected_and_unsubscribed`, `unsubscribe_rejected_error`. |
+| `inc_chainlink_subscription_release_accounts(reason, outcome)` | `chainlink_subscription_release_accounts_total` (`mbv_chainlink_subscription_release_accounts_total`) classifies Chainlink account subscription release attempts by `{reason,outcome}` with the same five reason values and outcomes `unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`. |
+| `inc_chainlink_subscription_cleanup_accounts(cleanup_source, outcome)` | `chainlink_subscription_cleanup_accounts_total` (`mbv_chainlink_subscription_cleanup_accounts_total`) classifies Chainlink account subscription cleanup actions by `{cleanup_source,outcome}`; cleanup sources are `normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`; outcomes are `unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`. |
 | `inc_account_fetches_success(count)` | Successful network account fetch count. |
 | `inc_account_fetches_failed(count)` | Failed network account fetch count. |
 | `inc_account_fetches_found(origin, count)` | Network fetches that found accounts, labelled by `AccountFetchOrigin`. |
@@ -224,6 +227,7 @@ Important caveats:
 - `remote_result=failed` is reserved for fetch failures before a clone request is built. Emit it only with `clone_intent=unknown` and `outcome=skipped` unless a later implementation has a concrete clone request to classify.
 - The clone lifecycle counters replace the stale clone-cache and pending-clone gauges removed by the eviction-vs-get metrics cleanup; use the counters for clone observability rather than reintroducing those gauges.
 - Empty-placeholder stages are bounded enum labels: `converted_to_empty` when Chainlink converts a remote `None` into the zero-lamport/default-owner/empty-data placeholder, `clone_submitted` after a placeholder clone is submitted, `clone_submit_failed` if that clone submission fails, `observed_in_bank_after_ensure` when the post-clone materialization check sees the placeholder in bank, and `still_missing_after_ensure` when the cloner returned success but the placeholder is still not visible. `later_refetched` is reserved for a future sampled/sketch implementation and is not emitted by the current code because retaining per-pubkey state would create unbounded memory/cardinality risk.
+- Subscription lifecycle counters are for Chainlink registration, release, and cleanup outcome classification. Call sites must use the provided enum/static labels only; do not add pubkey, signature, raw error, endpoint URL, or other free-form labels.
 - `AccountFetchOrigin::SendTransaction(Signature)` intentionally labels as only `send_transaction`; the signature is available through `signature()` for logging/correlation but must not become a Prometheus label.
 
 ### RPC and aperture
@@ -335,6 +339,7 @@ It is implemented for:
 - `Result<T, E>` where both sides implement `LabelValue`,
 - `AccountFetchOrigin`,
 - Chainlink clone lifecycle label enums (`ChainlinkCloneRemoteResult`, `ChainlinkCloneIntent`, `ChainlinkCloneOutcome`, `ChainlinkCloneMaterializationOutcome`, `ChainlinkEmptyPlaceholderStage`),
+- subscription lifecycle label enums (`SubscriptionRegistrationOrigin`, `SubscriptionReasonLabel`, `SubscriptionRegistrationOutcome`, `SubscriptionReleaseOutcome`, `SubscriptionCleanupSource`, `SubscriptionCleanupOutcome`),
 - downstream consumer types such as committor execution outputs and errors.
 
 Use `LabelValue` when a metric needs a label derived from an enum-like type. New implementations should return stable, low-cardinality strings. Avoid allocating strings on hot paths where a static `&str` would work.

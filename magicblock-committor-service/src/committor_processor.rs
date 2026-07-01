@@ -1,31 +1,25 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
     path::Path,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{atomic::AtomicU64, Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use magicblock_core::{
-    intent::CommittedAccount, traits::ActionsCallbackScheduler,
-};
-use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType, MagicIntentBundle, ScheduledIntentBundle,
-    UndelegateType,
-};
+use futures_util::future::join_all;
+use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
-use solana_account::Account;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
-use solana_transaction::Transaction;
-use tokio::sync::broadcast;
-use tracing::{error, info, instrument, warn};
+use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
+use tracing::{error, info, instrument};
 
 use crate::{
     config::ChainConfig,
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
@@ -37,20 +31,24 @@ use crate::{
         },
     },
     persist::{
-        CommitStatusRow, CommitType as PersistCommitType, IntentPersister,
-        IntentPersisterImpl, MessageSignatures,
+        CommitStatusRow, IntentPersister, IntentPersisterImpl,
+        MessageSignatures,
     },
 };
+const POISONED_MUTEX_MSG: &str =
+    "CommittorProcessor pending messages mutex poisoned!";
+pub(crate) const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;
 
-const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;
+type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
-pub(crate) struct CommittorProcessor {
-    pub(crate) magicblock_rpc_client: MagicblockRpcClient,
-    pub(crate) table_mania: TableMania,
-    pub(crate) authority: Keypair,
+pub struct CommittorProcessor {
+    authority: Keypair,
+    _table_mania: TableMania,
+    magic_rpc_client: MagicblockRpcClient,
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
+    pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
 }
 
 impl CommittorProcessor {
@@ -118,40 +116,22 @@ impl CommittorProcessor {
             actions_callback_executor,
         );
 
+        let result_subscription = commits_scheduler.subscribe_for_results();
+        let pending_result_listeners = Arc::new(Mutex::new(HashMap::new()));
+        tokio::spawn(Self::dispatcher(
+            result_subscription,
+            pending_result_listeners.clone(),
+        ));
+
         Ok(Self {
             authority,
-            magicblock_rpc_client: magic_block_rpc_client,
-            table_mania,
+            _table_mania: table_mania,
+            magic_rpc_client: magic_block_rpc_client,
             commits_scheduler,
             persister,
             task_info_fetcher,
+            pending_result_listeners,
         })
-    }
-
-    pub async fn active_lookup_tables(&self) -> Vec<Pubkey> {
-        self.table_mania.active_table_addresses().await
-    }
-
-    pub async fn released_lookup_tables(&self) -> Vec<Pubkey> {
-        self.table_mania.released_table_addresses().await
-    }
-
-    pub fn auth_pubkey(&self) -> Pubkey {
-        self.authority.pubkey()
-    }
-
-    pub(crate) async fn reserve_pubkeys(
-        &self,
-        pubkeys: HashSet<Pubkey>,
-    ) -> CommittorServiceResult<()> {
-        Ok(self
-            .table_mania
-            .reserve_pubkeys(&self.authority, &pubkeys)
-            .await?)
-    }
-
-    pub(crate) async fn release_pubkeys(&self, pubkeys: HashSet<Pubkey>) {
-        self.table_mania.release_pubkeys(&pubkeys).await
     }
 
     pub fn get_commit_statuses(
@@ -174,25 +154,25 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
+    /// Fetches pending bundles from DB
     pub async fn pending_intent_bundles(
         &self,
     ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
-        let recovery_time = unix_timestamp();
-        let rows = self.persister.get_pending_commit_statuses(
-            recovery_time.saturating_sub(RECOVERY_MAX_AGE_SECS),
+        // Extract pending bundles satisfying predicate
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut bundles = self.persister.pending_intent_bundles(
+            now.saturating_sub(RECOVERY_MAX_AGE_SECS),
         )?;
-        if rows.is_empty() {
-            return Ok(Vec::new());
+
+        if bundles.is_empty() {
+            return Ok(bundles);
         }
 
-        let recovery_base_slot = self.magicblock_rpc_client.get_slot().await?;
-        let bundles = pending_rows_to_scheduled_intent_bundles(
-            rows,
-            self.auth_pubkey(),
-            recovery_base_slot,
-            recovery_time,
-        );
-        if !bundles.is_empty() {
+        // Log info about extracted bundles
+        {
             let accounts_count: usize = bundles
                 .iter()
                 .map(|bundle| bundle.get_all_committed_pubkeys().len())
@@ -204,11 +184,45 @@ impl CommittorProcessor {
             );
         }
 
+        // Extracted bundles are out of data and missing some of the info
+        self.refresh_intent_bundles(&mut bundles).await?;
+
         Ok(bundles)
     }
 
+    async fn refresh_intent_bundles(
+        &self,
+        intent_bundles: &mut [ScheduledIntentBundle],
+    ) -> CommittorServiceResult<()> {
+        let payer = self.authority.pubkey();
+        let slot = self.magic_rpc_client.get_slot().await?;
+
+        macro_rules! set_remote_slot {
+            ($field:expr, $slot:expr) => {
+                if let Some(ref mut v) = $field {
+                    v.get_committed_accounts_mut()
+                        .iter_mut()
+                        .for_each(|a| a.remote_slot = slot);
+                }
+            };
+        }
+
+        intent_bundles.iter_mut().for_each(|b| {
+            b.payer = payer;
+            set_remote_slot!(b.intent_bundle.commit, slot);
+            set_remote_slot!(b.intent_bundle.commit_finalize, slot);
+            set_remote_slot!(b.intent_bundle.commit_and_undelegate, slot);
+            set_remote_slot!(
+                b.intent_bundle.commit_finalize_and_undelegate,
+                slot
+            );
+        });
+
+        Ok(())
+    }
+
     #[instrument(skip(self, intent_bundles))]
-    pub async fn schedule_intent_bundle(
+    pub async fn schedule_intent_bundles(
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
@@ -227,6 +241,62 @@ impl CommittorProcessor {
             })?;
 
         Ok(())
+    }
+
+    pub async fn execute_intent_bundles(
+        &self,
+        intent_bundles: Vec<ScheduledIntentBundle>,
+    ) -> CommittorServiceResult<Vec<BroadcastedIntentExecutionResult>> {
+        // Critical section
+        let (receivers, inserted_ids) = {
+            let mut result_listeners = self
+                .pending_result_listeners
+                .lock()
+                .expect(POISONED_MUTEX_MSG);
+
+            let mut receivers = Vec::with_capacity(intent_bundles.len());
+            let mut inserted_ids = Vec::with_capacity(intent_bundles.len());
+
+            for intent in &intent_bundles {
+                let (sender, receiver) = oneshot::channel();
+                match result_listeners.entry(intent.id) {
+                    Entry::Vacant(vacant) => {
+                        vacant.insert(sender);
+                        inserted_ids.push(intent.id);
+                        receivers.push(receiver);
+                    }
+                    Entry::Occupied(_) => {
+                        for id in &inserted_ids {
+                            result_listeners.remove(id);
+                        }
+                        return Err(
+                            CommittorServiceError::RepeatingMessageError(
+                                intent.id,
+                            ),
+                        );
+                    }
+                }
+            }
+            (receivers, inserted_ids)
+        };
+
+        if let Err(err) = self.schedule_intent_bundles(intent_bundles).await {
+            let mut result_listeners = self
+                .pending_result_listeners
+                .lock()
+                .expect(POISONED_MUTEX_MSG);
+            for id in &inserted_ids {
+                result_listeners.remove(id);
+            }
+            return Err(err);
+        }
+
+        let results = join_all(receivers.into_iter())
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, RecvError>>()?;
+
+        Ok(results)
     }
 
     #[instrument(skip(self, intent_bundles))]
@@ -261,276 +331,48 @@ impl CommittorProcessor {
             .fetch_current_commit_nonces(pubkeys, min_context_slot)
             .await
     }
-}
 
-fn pending_rows_to_scheduled_intent_bundles(
-    rows: Vec<CommitStatusRow>,
-    payer: Pubkey,
-    recovery_base_slot: u64,
-    recovery_time: u64,
-) -> Vec<ScheduledIntentBundle> {
-    let mut grouped_rows = BTreeMap::<u64, Vec<CommitStatusRow>>::new();
-    for row in rows {
-        grouped_rows.entry(row.message_id).or_default().push(row);
-    }
-
-    grouped_rows
-        .into_iter()
-        .filter_map(|(message_id, rows)| {
-            if rows.iter().any(|row| {
-                !pending_row_is_in_recovery_window(row, recovery_time)
-            })
-            {
-                warn!(
-                    intent_id = message_id,
-                    "Skipping pending commit intent outside recovery window"
-                );
-                return None;
-            }
-
-            let first = rows.first()?;
-            let slot = first.slot;
-            let blockhash = first.ephemeral_blockhash;
-            if rows.iter().any(|r| {
-                r.slot != slot || r.ephemeral_blockhash != blockhash
-            }) {
-                warn!(
-                    intent_id = message_id,
-                    "Skipping pending commit intent: rows disagree on slot or ephemeral_blockhash"
-                );
-                return None;
-            }
-            let mut commit_finalize_accounts = Vec::new();
-            let mut commit_finalize_and_undelegate_accounts = Vec::new();
-
-            for row in rows {
-                let Some((account, undelegate)) =
-                    committed_account_from_pending_row(row, recovery_base_slot)
-                else {
-                    continue;
-                };
-                if undelegate {
-                    commit_finalize_and_undelegate_accounts.push(account);
-                } else {
-                    commit_finalize_accounts.push(account);
+    /// Dispatch worker
+    #[instrument(skip(pending_result_listeners, results_subscription))]
+    async fn dispatcher(
+        mut results_subscription: broadcast::Receiver<
+            BroadcastedIntentExecutionResult,
+        >,
+        pending_result_listeners: Arc<
+            Mutex<HashMap<u64, BundleResultListener>>,
+        >,
+    ) {
+        loop {
+            let execution_result = match results_subscription.recv().await {
+                Ok(result) => result,
+                Err(broadcast::error::RecvError::Closed) => {
+                    info!("Intent execution shutdown");
+                    break;
                 }
-            }
-
-            let mut intent_bundle = MagicIntentBundle::default();
-            if !commit_finalize_accounts.is_empty() {
-                intent_bundle.commit_finalize =
-                    Some(CommitType::Standalone(commit_finalize_accounts));
-            }
-            if !commit_finalize_and_undelegate_accounts.is_empty() {
-                intent_bundle.commit_finalize_and_undelegate =
-                    Some(CommitAndUndelegate {
-                        commit_action: CommitType::Standalone(
-                            commit_finalize_and_undelegate_accounts,
-                        ),
-                        undelegate_action: UndelegateType::Standalone,
-                    });
-            }
-            if intent_bundle.is_empty() {
-                return None;
-            }
-
-            Some(ScheduledIntentBundle {
-                id: message_id,
-                slot,
-                blockhash,
-                sent_transaction: Transaction::default(),
-                payer,
-                intent_bundle,
-            })
-        })
-        .collect()
-}
-
-fn pending_row_is_in_recovery_window(
-    row: &CommitStatusRow,
-    recovery_time: u64,
-) -> bool {
-    recovery_time.saturating_sub(row.created_at) <= RECOVERY_MAX_AGE_SECS
-}
-
-fn unix_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-fn committed_account_from_pending_row(
-    row: CommitStatusRow,
-    recovery_base_slot: u64,
-) -> Option<(CommittedAccount, bool)> {
-    if row.commit_type == PersistCommitType::DataAccount && row.data.is_none() {
-        warn!(
-            intent_id = row.message_id,
-            pubkey = %row.pubkey,
-            "Skipping pending data-account commit row without account data"
-        );
-        return None;
-    }
-
-    Some((
-        CommittedAccount {
-            pubkey: row.pubkey,
-            account: Account {
-                lamports: row.lamports,
-                data: row.data.unwrap_or_default(),
-                owner: row.delegated_account_owner,
-                executable: false,
-                rent_epoch: 0,
-            },
-            remote_slot: recovery_base_slot,
-        },
-        row.undelegate,
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use solana_hash::Hash;
-
-    use super::*;
-    use crate::persist::CommitStatus;
-
-    fn pending_row(
-        message_id: u64,
-        pubkey: Pubkey,
-        owner: Pubkey,
-        blockhash: Hash,
-        undelegate: bool,
-        data: Option<Vec<u8>>,
-    ) -> CommitStatusRow {
-        let commit_type =
-            if data.as_ref().map(|data| data.is_empty()) == Some(false) {
-                PersistCommitType::DataAccount
-            } else {
-                PersistCommitType::EmptyAccount
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    // SAFETY: not really feasible to happen as this function is way faster than Intent execution
+                    // requires investigation if ever happens!
+                    error!(skipped, "Dispatcher lag detected");
+                    continue;
+                }
             };
 
-        CommitStatusRow {
-            message_id,
-            pubkey,
-            commit_id: 0,
-            delegated_account_owner: owner,
-            slot: 42,
-            ephemeral_blockhash: blockhash,
-            undelegate,
-            lamports: 1_000,
-            data,
-            commit_type,
-            created_at: 1,
-            commit_status: CommitStatus::Pending,
-            commit_strategy: Default::default(),
-            last_retried_at: 1,
-            retries_count: 0,
+            let sender = if let Some(sender) = pending_result_listeners
+                .lock()
+                .expect(POISONED_MUTEX_MSG)
+                .remove(&execution_result.id)
+            {
+                sender
+            } else {
+                continue;
+            };
+
+            if let Err(execution_result) = sender.send(execution_result) {
+                error!(
+                    intent_id = execution_result.id,
+                    "Failed to send execution result"
+                );
+            }
         }
-    }
-
-    fn pending_row_with_timestamps(
-        message_id: u64,
-        created_at: u64,
-        last_retried_at: u64,
-    ) -> CommitStatusRow {
-        let mut row = pending_row(
-            message_id,
-            Pubkey::new_unique(),
-            Pubkey::new_unique(),
-            Hash::new_unique(),
-            false,
-            Some(vec![1]),
-        );
-        row.created_at = created_at;
-        row.last_retried_at = last_retried_at;
-        row
-    }
-
-    #[test]
-    fn pending_rows_reconstruct_commit_finalize_bundle() {
-        let payer = Pubkey::new_unique();
-        let owner = Pubkey::new_unique();
-        let blockhash = Hash::new_unique();
-        let commit_pubkey = Pubkey::new_unique();
-        let undelegate_pubkey = Pubkey::new_unique();
-
-        let bundles = pending_rows_to_scheduled_intent_bundles(
-            vec![
-                pending_row(
-                    9,
-                    commit_pubkey,
-                    owner,
-                    blockhash,
-                    false,
-                    Some(vec![1, 2, 3]),
-                ),
-                pending_row(9, undelegate_pubkey, owner, blockhash, true, None),
-            ],
-            payer,
-            7,
-            2,
-        );
-
-        assert_eq!(bundles.len(), 1);
-        let bundle = &bundles[0];
-        assert_eq!(bundle.id, 9);
-        assert_eq!(bundle.slot, 42);
-        assert_eq!(bundle.blockhash, blockhash);
-        assert_eq!(bundle.payer, payer);
-
-        let commit_accounts =
-            bundle.get_commit_finalize_intent_accounts().unwrap();
-        assert_eq!(commit_accounts.len(), 1);
-        assert_eq!(commit_accounts[0].pubkey, commit_pubkey);
-        assert_eq!(commit_accounts[0].account.data, vec![1, 2, 3]);
-        assert_eq!(commit_accounts[0].remote_slot, 7);
-
-        let undelegate_accounts = bundle
-            .get_commit_finalize_and_undelegate_intent_accounts()
-            .unwrap();
-        assert_eq!(undelegate_accounts.len(), 1);
-        assert_eq!(undelegate_accounts[0].pubkey, undelegate_pubkey);
-        assert_eq!(undelegate_accounts[0].account.owner, owner);
-        assert!(bundle.has_undelegate_intent());
-    }
-
-    #[test]
-    fn pending_rows_skip_intents_older_than_recovery_window() {
-        let payer = Pubkey::new_unique();
-        let recovery_time = RECOVERY_MAX_AGE_SECS + 1;
-
-        let recoverable = pending_rows_to_scheduled_intent_bundles(
-            vec![pending_row_with_timestamps(
-                1,
-                recovery_time - RECOVERY_MAX_AGE_SECS,
-                recovery_time,
-            )],
-            payer,
-            7,
-            recovery_time,
-        );
-        assert_eq!(recoverable.len(), 1);
-
-        let recent = pending_rows_to_scheduled_intent_bundles(
-            vec![pending_row_with_timestamps(2, recovery_time, recovery_time)],
-            payer,
-            7,
-            recovery_time,
-        );
-        assert_eq!(recent.len(), 1);
-
-        let too_old = pending_rows_to_scheduled_intent_bundles(
-            vec![pending_row_with_timestamps(
-                3,
-                recovery_time - RECOVERY_MAX_AGE_SECS - 1,
-                recovery_time - RECOVERY_MAX_AGE_SECS - 1,
-            )],
-            payer,
-            7,
-            recovery_time,
-        );
-        assert!(too_old.is_empty());
     }
 }
