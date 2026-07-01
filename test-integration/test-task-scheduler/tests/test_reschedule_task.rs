@@ -17,7 +17,7 @@ use test_task_scheduler::{
 
 #[test]
 fn test_reschedule_task() {
-    let (_temp_dir, mut validator, ctx) = setup_validator();
+    let (_temp_dir, mut validator, ctx, _) = setup_validator();
 
     let payer = Keypair::new();
     let (_counter_pda, _) = FlexiCounter::pda(&payer.pubkey());

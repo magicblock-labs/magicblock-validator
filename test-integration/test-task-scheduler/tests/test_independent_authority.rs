@@ -16,7 +16,7 @@ use test_task_scheduler::{
 
 #[test]
 fn test_independent_cranks_per_authority() {
-    let (_temp_dir, mut validator, ctx) = setup_validator();
+    let (_temp_dir, mut validator, ctx, _) = setup_validator();
 
     let payer = Keypair::new();
     let other = Keypair::new();

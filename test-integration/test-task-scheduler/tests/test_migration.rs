@@ -38,7 +38,7 @@ fn test_migration_reschedules_tasks_and_empties_db() {
         instructions,
     };
 
-    let (temp_dir, mut validator, ctx) =
+    let (temp_dir, mut validator, ctx, _) =
         setup_validator_with_migration_tasks(&[task]);
 
     // Migration creates a funded hydra crank for the persisted task...

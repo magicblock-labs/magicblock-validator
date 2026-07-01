@@ -94,7 +94,12 @@ fn start_validator(
     config: ValidatorParams,
     default_tmpdir: TempDir,
     temp_dir: PathBuf,
-) -> (TempDir, Child, IntegrationTestContext) {
+) -> (TempDir, Child, IntegrationTestContext, Option<Keypair>) {
+    let faucet_keypair = config
+        .task_scheduler
+        .faucet_keypair
+        .clone()
+        .map(|k| k.insecure_clone());
     let (default_tmpdir_config, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct_and_temp_dir(
             config,
@@ -110,16 +115,17 @@ fn start_validator(
         IntegrationTestContext::try_new_with_ephem_port(port),
         validator
     );
-    (default_tmpdir_config, validator, ctx)
+    (default_tmpdir_config, validator, ctx, faucet_keypair)
 }
 
-pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
+pub fn setup_validator(
+) -> (TempDir, Child, IntegrationTestContext, Option<Keypair>) {
     setup_validator_with_migration_tasks(&[])
 }
 
 pub fn setup_validator_with_migration_tasks(
     tasks: &[DbTask],
-) -> (TempDir, Child, IntegrationTestContext) {
+) -> (TempDir, Child, IntegrationTestContext, Option<Keypair>) {
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
 
     // Seed the migration database before the validator opens it. The handle is
