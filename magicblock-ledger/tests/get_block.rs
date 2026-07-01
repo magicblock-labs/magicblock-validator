@@ -45,6 +45,39 @@ fn test_get_block_meta() {
 }
 
 #[test]
+fn test_write_block_stores_parent_blockhash() {
+    init_logger!();
+    let ledger = setup();
+
+    let slot_0_hash = Hash::new_unique();
+    ledger
+        .write_block(LatestBlockInner::new(0, slot_0_hash, 1))
+        .unwrap();
+    assert_eq!(
+        ledger.latest_block().load().parent_blockhash,
+        Hash::default()
+    );
+
+    let slot_1_hash = Hash::new_unique();
+    ledger
+        .write_block(LatestBlockInner::new_with_parent(
+            1,
+            slot_1_hash,
+            2,
+            slot_0_hash,
+        ))
+        .unwrap();
+
+    let latest = ledger.latest_block().load();
+    assert_eq!(latest.slot, 1);
+    assert_eq!(latest.blockhash, slot_1_hash);
+    assert_eq!(latest.parent_blockhash, slot_0_hash);
+
+    let slot_1_block = get_block(&ledger, 1);
+    assert_eq!(slot_1_block.previous_blockhash, slot_0_hash.to_string());
+}
+
+#[test]
 fn test_get_block_transactions() {
     init_logger!();
     let ledger = setup();

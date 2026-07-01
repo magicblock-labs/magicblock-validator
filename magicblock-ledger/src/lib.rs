@@ -15,6 +15,7 @@ pub struct LatestBlockInner {
     pub slot: u64,
     pub blockhash: Hash,
     pub clock: Clock,
+    pub parent_blockhash: Hash,
 }
 
 /// Atomically updated, shared, latest block information
@@ -45,6 +46,26 @@ impl LatestBlockInner {
             slot,
             blockhash,
             clock,
+            parent_blockhash: Hash::default(),
+        }
+    }
+
+    pub fn new_with_parent(
+        slot: u64,
+        blockhash: Hash,
+        timestamp: i64,
+        parent_blockhash: Hash,
+    ) -> Self {
+        let clock = Clock {
+            slot: slot + 1,
+            unix_timestamp: timestamp,
+            ..Default::default()
+        };
+        Self {
+            slot,
+            blockhash,
+            clock,
+            parent_blockhash,
         }
     }
 }

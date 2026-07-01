@@ -154,6 +154,7 @@ impl GeyserPluginManager {
     ) -> Result<(), GeyserPluginError> {
         check_if_enabled!(self);
         let blockhash = block.blockhash.to_string();
+        let parent_blockhash = block.parent_blockhash.to_string();
         let rewards = solana_transaction_status::RewardsAndNumPartitions {
             rewards: Vec::new(),
             num_partitions: None,
@@ -165,8 +166,7 @@ impl GeyserPluginManager {
             block_height: Some(block.slot),
             rewards: &rewards,
             block_time: Some(block.clock.unix_timestamp),
-            // TODO(bmuddha): register proper values with the new ledger
-            parent_blockhash: "11111111111111111111111111111111",
+            parent_blockhash: &parent_blockhash,
             executed_transaction_count: 0,
             entry_count: 0,
         };
