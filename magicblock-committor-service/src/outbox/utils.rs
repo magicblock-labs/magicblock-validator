@@ -60,7 +60,7 @@ pub(crate) fn build_sent_commit(
         })
         .collect();
 
-    let sent_commit = SentCommit {
+    SentCommit {
         message_id: meta.id,
         slot: meta.slot,
         blockhash: meta.blockhash,
@@ -72,7 +72,5 @@ pub(crate) fn build_sent_commit(
         error_message,
         patched_errors,
         callbacks_scheduling_results,
-    };
-
-    sent_commit
+    }
 }
