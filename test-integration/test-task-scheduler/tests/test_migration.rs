@@ -35,6 +35,7 @@ fn test_migration_reschedules_tasks_and_empties_db() {
         authority,
         execution_interval_millis: 100,
         executions_left: iterations,
+        last_execution_millis: 0,
         instructions,
     };
 

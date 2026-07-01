@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc, time::Duration as StdDuration};
 
+use chrono::Utc;
 use hydra_api::{
     consts::{CRANKER_REWARD, CRANK_HEADER_SIZE, SERIALIZED_META_SIZE},
     ephemeral::ID as EPHEMERAL_PROGRAM_ID,
@@ -176,6 +177,7 @@ impl TaskSchedulerService {
                     task.execution_interval_millis,
                     task.executions_left,
                     &task.instructions,
+                    Some(task.last_execution_millis),
                 )
                 .await
             {
@@ -267,6 +269,7 @@ impl TaskSchedulerService {
             interval_millis,
             task.iterations,
             &task.instructions,
+            None,
         )
         .await?;
         debug!("Created hydra crank for task {}", task.id);
@@ -298,16 +301,15 @@ impl TaskSchedulerService {
         interval_millis: i64,
         iterations: i64,
         instructions: &[Instruction],
+        last_execution_millis: Option<i64>,
     ) -> TaskSchedulerResult<()> {
-        let crank = crank_pubkey(authority, task_id);
-
         self.send_create(
             authority,
             task_id,
             interval_millis,
             iterations,
             instructions,
-            crank,
+            last_execution_millis,
         )
         .await?;
         Ok(())
@@ -330,12 +332,23 @@ impl TaskSchedulerService {
         interval_millis: i64,
         iterations: i64,
         instructions: &[Instruction],
-        crank: Pubkey,
+        last_execution_millis: Option<i64>,
     ) -> TaskSchedulerResult<Signature> {
+        let crank = crank_pubkey(authority, task_id);
         let crank_exists = self.crank_exists(&crank).await;
 
         let snapshot = self.block.load();
-        let start_slot = snapshot.slot;
+        let start_slot = last_execution_millis
+            .map(|last_execution_millis| {
+                legacy_start_slot(
+                    last_execution_millis,
+                    interval_millis,
+                    Utc::now().timestamp_millis(),
+                    snapshot.slot,
+                    self.slot_interval,
+                )
+            })
+            .unwrap_or(snapshot.slot);
         let blockhash = snapshot.blockhash;
 
         let interval_slots =
@@ -506,6 +519,29 @@ fn is_valid_task_interval(interval: i64) -> bool {
     interval > 0 && interval < u32::MAX as i64
 }
 
+/// Computes the hydra start slot for a task migrated from the legacy scheduler.
+/// If the legacy task is overdue or has never run, it remains due immediately.
+fn legacy_start_slot(
+    last_execution_millis: i64,
+    interval_millis: i64,
+    current_millis: i64,
+    current_slot: u64,
+    slot_interval: StdDuration,
+) -> u64 {
+    if last_execution_millis <= 0 {
+        return current_slot;
+    }
+
+    let next_execution_millis =
+        last_execution_millis.saturating_add(interval_millis.max(0));
+    let remaining_millis = next_execution_millis.saturating_sub(current_millis);
+    if remaining_millis == 0 {
+        return current_slot;
+    }
+
+    current_slot.saturating_add(interval_slots(remaining_millis, slot_interval))
+}
+
 /// Converts a millisecond execution interval into a slot count (rounding up,
 /// with a one-slot minimum) for hydra's slot-based cadence.
 fn interval_slots(interval_millis: i64, slot_interval: StdDuration) -> u64 {
@@ -553,6 +589,25 @@ mod tests {
 
     #[serial]
     #[test]
+    fn test_legacy_start_slot_preserves_remaining_delay() {
+        let slot_interval = StdDuration::from_millis(1_000);
+
+        assert_eq!(
+            legacy_start_slot(10_000, 30_000, 25_000, 100, slot_interval),
+            115
+        );
+        assert_eq!(
+            legacy_start_slot(10_000, 30_000, 40_000, 100, slot_interval),
+            100
+        );
+        assert_eq!(
+            legacy_start_slot(0, 30_000, 25_000, 100, slot_interval),
+            100
+        );
+    }
+
+    #[serial]
+    #[test]
     fn test_crank_pubkey_namespaced_by_authority_and_id() {
         let a = Pubkey::new_unique();
         let b = Pubkey::new_unique();
@@ -578,6 +633,7 @@ mod tests {
             authority: Pubkey::new_unique(),
             execution_interval_millis: u32::MAX as i64,
             executions_left: 1,
+            last_execution_millis: 0,
             instructions: vec![],
         })
         .await
@@ -588,6 +644,7 @@ mod tests {
             authority: Pubkey::new_unique(),
             execution_interval_millis: 50,
             executions_left: 0,
+            last_execution_millis: 0,
             instructions: vec![],
         })
         .await

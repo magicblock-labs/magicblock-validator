@@ -26,6 +26,8 @@ pub struct DbTask {
     pub execution_interval_millis: i64,
     /// Number of times this task still needs to be executed.
     pub executions_left: i64,
+    /// Legacy scheduler timestamp of the last successful execution.
+    pub last_execution_millis: i64,
 }
 
 impl From<ScheduleTaskRequest> for DbTask {
@@ -36,6 +38,7 @@ impl From<ScheduleTaskRequest> for DbTask {
             authority: task.authority,
             execution_interval_millis: task.execution_interval_millis,
             executions_left: task.iterations,
+            last_execution_millis: 0,
         }
     }
 }
@@ -62,8 +65,8 @@ impl SchedulerDatabase {
         )?;
 
         // Mirrors the legacy schema so existing databases can be read. The
-        // timestamp columns are retained for compatibility but are not used by
-        // migration.
+        // last execution timestamp is used to preserve cadence when migrating
+        // legacy rows onto hydra cranks.
         conn.execute(
             "CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY,
@@ -92,13 +95,14 @@ impl SchedulerDatabase {
         self.conn.lock().await.execute(
             "INSERT OR REPLACE INTO tasks
              (id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 task.id,
                 instructions_bin,
                 authority_str,
                 task.execution_interval_millis,
                 task.executions_left,
+                task.last_execution_millis,
                 now,
                 now,
             ],
@@ -110,7 +114,7 @@ impl SchedulerDatabase {
     pub async fn get_tasks(&self) -> TaskSchedulerResult<Vec<DbTask>> {
         let db = self.conn.lock().await;
         let mut stmt = db.prepare(
-            "SELECT id, instructions, authority, execution_interval_millis, executions_left
+            "SELECT id, instructions, authority, execution_interval_millis, executions_left, last_execution_millis
              FROM tasks",
         )?;
 
@@ -137,6 +141,7 @@ impl SchedulerDatabase {
                 authority,
                 execution_interval_millis: row.get(3)?,
                 executions_left: row.get(4)?,
+                last_execution_millis: row.get(5)?,
             })
         })?;
 
