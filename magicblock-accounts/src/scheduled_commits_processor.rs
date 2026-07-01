@@ -11,8 +11,7 @@ use magicblock_chainlink::{
     ObservedUndelegationRequest, ProdChainlink, ProdInnerChainlink,
 };
 use magicblock_core::{
-    link::transactions::TransactionSchedulerHandle,
-    traits::LatestBlockProvider,
+    link::transactions::TransactionSchedulerHandle, traits::LatestBlockProvider,
 };
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use magicblock_program::{
