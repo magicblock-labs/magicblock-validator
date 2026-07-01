@@ -34,12 +34,14 @@ pub trait TransactionPreparator: Send + Sync + 'static {
         intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 
-    /// Cleans up after strategy
+    /// Cleans up after strategy.
+    /// `close_buffers`: if false, only ALT reservations are released.
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
         tasks: &[BaseTaskImpl],
         lookup_table_keys: &[Pubkey],
+        close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError>;
 }
 
@@ -118,6 +120,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         authority: &Keypair,
         tasks: &[BaseTaskImpl],
         lookup_table_keys: &[Pubkey],
+        close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let cleanup_tasks: Vec<_> = tasks
             .iter()
@@ -136,7 +139,12 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             })
             .collect();
         self.delivery_preparator
-            .cleanup(authority, &cleanup_tasks, lookup_table_keys)
+            .cleanup(
+                authority,
+                &cleanup_tasks,
+                lookup_table_keys,
+                close_buffers,
+            )
             .await
     }
 }

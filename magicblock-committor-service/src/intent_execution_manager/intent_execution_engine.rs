@@ -283,7 +283,6 @@ where
 
         // Execute an Intent
         let result = executor.execute(intent.clone(), persister).await;
-        let execution_succeeded = result.inner.is_ok();
         let _ = result.inner.as_ref().inspect_err(|err| {
             error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
         });
@@ -308,24 +307,11 @@ where
             .complete(&intent)
             .expect("Valid completion of previously scheduled message");
 
-        // Cleaning buffers on failure isn't safe due to potential race condition:
-        // Assume pubkey set A being committed
-        // Intent1 fails and cleans up, another Intent2 with set A executes right away
-        // That could lead for Intent2 init of buffers executing prior of Intent1 buffer cleanup
-        // With same set A buffers will have same address
-        //
-        // To avoid this race on buffers we cleanup only succesfully executed intents
-        // With intent retries all buffers will be eventually closed once intent succeeds
-        //
-        // Note: not sure this is safa for TableMania as it susceptible to same race condition
-        // unless it does handle it internally somehow
-        if execution_succeeded {
-            tokio::spawn(async move {
-                if let Err(err) = executor.cleanup().await {
-                    error!(error = ?err, "Failed to cleanup after intent");
-                }
-            });
-        }
+        tokio::spawn(async move {
+            if let Err(err) = executor.cleanup().await {
+                error!(error = ?err, "Failed to cleanup after intent");
+            }
+        });
 
         // Free worker
         drop(execution_permit);
