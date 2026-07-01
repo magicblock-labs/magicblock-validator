@@ -26,6 +26,7 @@ use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::BaseAction;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
 
 pub mod commit_finalize_task;
 pub mod commit_task;
@@ -200,7 +201,7 @@ impl RentPendingAtaTask {
                 AccountMeta::new(*validator, true),
                 AccountMeta::new_readonly(materialization.wallet_owner, false),
                 AccountMeta::new_readonly(materialization.mint, false),
-                AccountMeta::new_readonly(solana_system_program::id(), false),
+                AccountMeta::new_readonly(system_program::id(), false),
             ],
             data: vec![Self::INITIALIZE_EPHEMERAL_ATA_IX],
         }
@@ -235,7 +236,7 @@ impl RentPendingAtaTask {
                 AccountMeta::new(delegation_record_pda, false),
                 AccountMeta::new(delegation_metadata_pda, false),
                 AccountMeta::new_readonly(dlp_api::id(), false),
-                AccountMeta::new_readonly(solana_system_program::id(), false),
+                AccountMeta::new_readonly(system_program::id(), false),
             ],
             data,
         }
