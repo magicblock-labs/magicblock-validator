@@ -3,7 +3,8 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        commit_task::{CommitBufferStage, CommitDelivery},
+        commit_stage_task::CleanupTask,
+        commit_task::CommitDelivery,
         task_strategist::{TaskStrategist, TransactionStrategy},
         BaseTaskImpl,
     },
@@ -45,8 +46,7 @@ async fn test_prepare_10kb_buffer() {
     else {
         panic!("unexpected task type");
     };
-    let Some(CommitBufferStage::Cleanup(cleanup_task)) = commit_task.stage()
-    else {
+    let Some(cleanup_task) = CleanupTask::from_commit(commit_task) else {
         panic!("unexpected CommitStage");
     };
 
@@ -115,11 +115,9 @@ async fn test_prepare_multiple_buffers() {
         .optimized_tasks
         .iter()
         .filter_map(|el| match el {
-            BaseTaskImpl::Commit(commit_task) => commit_task.stage(),
-            _ => None,
-        })
-        .filter_map(|stage| match stage {
-            CommitBufferStage::Cleanup(cleanup_task) => Some(cleanup_task),
+            BaseTaskImpl::Commit(commit_task) => {
+                CleanupTask::from_commit(commit_task)
+            }
             _ => None,
         })
         .collect();
@@ -233,7 +231,7 @@ async fn test_already_initialized_error_handled() {
     let BaseTaskImpl::Commit(ref ct) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
-    let Some(CommitBufferStage::Cleanup(cleanup_task)) = ct.stage() else {
+    let Some(cleanup_task) = CleanupTask::from_commit(ct) else {
         panic!("unexpected CommitStage");
     };
     // Check buffer account exists
@@ -252,9 +250,8 @@ async fn test_already_initialized_error_handled() {
         commit_task.committed_account.account.data.len() - 2,
     );
     commit_task.committed_account.account.data = data.clone();
-    commit_task.delivery_details = CommitDelivery::StateInBuffer {
-        stage: commit_task.state_preparation_stage(),
-    };
+    commit_task.delivery_details =
+        CommitDelivery::StateInBuffer { prepared: false };
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![commit_task.into()],
         lookup_tables_keys: vec![],
@@ -275,7 +272,7 @@ async fn test_already_initialized_error_handled() {
     let BaseTaskImpl::Commit(ref ct) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
-    let Some(CommitBufferStage::Cleanup(cleanup_task)) = ct.stage() else {
+    let Some(cleanup_task) = CleanupTask::from_commit(ct) else {
         panic!("unexpected CommitStage");
     };
 
@@ -334,11 +331,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
         .optimized_tasks
         .iter()
         .filter_map(|t| match t {
-            BaseTaskImpl::Commit(ct) => ct.stage(),
-            _ => None,
-        })
-        .filter_map(|stage| match stage {
-            CommitBufferStage::Cleanup(c) => Some(c),
+            BaseTaskImpl::Commit(ct) => CleanupTask::from_commit(ct),
             _ => None,
         })
         .collect();
@@ -405,12 +398,10 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     }
 
     // Rebuild buffer stages with mutated data
-    commit_a.delivery_details = CommitDelivery::StateInBuffer {
-        stage: commit_a.state_preparation_stage(),
-    };
-    commit_b.delivery_details = CommitDelivery::StateInBuffer {
-        stage: commit_b.state_preparation_stage(),
-    };
+    commit_a.delivery_details =
+        CommitDelivery::StateInBuffer { prepared: false };
+    commit_b.delivery_details =
+        CommitDelivery::StateInBuffer { prepared: false };
 
     // --- Step 4: re-prepare with the same logical tasks (same commit IDs, mutated data) ---
     let mut strategy2 = TransactionStrategy {
@@ -441,11 +432,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
         .optimized_tasks
         .iter()
         .filter_map(|t| match t {
-            BaseTaskImpl::Commit(ct) => ct.stage(),
-            _ => None,
-        })
-        .filter_map(|stage| match stage {
-            CommitBufferStage::Cleanup(c) => Some(c),
+            BaseTaskImpl::Commit(ct) => CleanupTask::from_commit(ct),
             _ => None,
         })
         .collect();
