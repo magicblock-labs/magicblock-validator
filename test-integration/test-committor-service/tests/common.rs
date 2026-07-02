@@ -245,9 +245,8 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
 #[allow(dead_code)]
 pub fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
     let task = create_commit_task(data);
-    let stage = task.state_preparation_stage();
     CommitTask {
-        delivery_details: CommitDelivery::StateInBuffer { stage },
+        delivery_details: CommitDelivery::StateInBuffer { prepared: false },
         ..task
     }
 }
