@@ -116,6 +116,43 @@ impl LabelValue for AccountFetchOrigin {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChainlinkUniquePubkeyWindow {
+    OneMinute,
+    FiveMinutes,
+    OneHour,
+}
+
+impl ChainlinkUniquePubkeyWindow {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OneMinute => "1m",
+            Self::FiveMinutes => "5m",
+            Self::OneHour => "1h",
+        }
+    }
+
+    pub fn minutes(&self) -> u64 {
+        match self {
+            Self::OneMinute => 1,
+            Self::FiveMinutes => 5,
+            Self::OneHour => 60,
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkUniquePubkeyWindow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkUniquePubkeyWindow {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BankPrecheckOutcome {
     BankHitNoFetch,
