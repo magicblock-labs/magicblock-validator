@@ -115,21 +115,12 @@ impl UniquePubkeyEstimator {
 
         let mut series =
             self.series.lock().unwrap_or_else(|err| err.into_inner());
-        if !series.contains_key(origin_label) {
-            series.insert(origin_label.to_string(), HashMap::new());
-        }
-        let stage_series = series
-            .get_mut(origin_label)
-            .expect("origin series was just inserted");
-        if !stage_series.contains_key(stage_label) {
-            stage_series.insert(
-                stage_label.to_string(),
-                UniquePubkeySeries::new(origin_label, stage_label),
-            );
-        }
+        let stage_series = series.entry(origin_label.to_string()).or_default();
         let pubkey_series = stage_series
-            .get_mut(stage_label)
-            .expect("stage series was just inserted");
+            .entry(stage_label.to_string())
+            .or_insert_with(|| {
+                UniquePubkeySeries::new(origin_label, stage_label)
+            });
         pubkey_series.observe_hash(epoch_minute, pubkey_hash);
 
         // Snapshot the estimates while the lock is held, then drop the guard
