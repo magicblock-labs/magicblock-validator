@@ -1,6 +1,10 @@
 use std::{collections::HashSet, sync::atomic::AtomicU16};
 
 use magicblock_core::logger::log_trace_warn;
+use magicblock_metrics::metrics::{
+    inc_chainlink_subscription_cleanup_accounts, SubscriptionCleanupOutcome,
+    SubscriptionCleanupSource,
+};
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 use tracing::*;
@@ -24,11 +28,21 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
     pubkey: Pubkey,
     pubsub_client: &T,
     removed_account_tx: &mpsc::Sender<Pubkey>,
+    cleanup_source: SubscriptionCleanupSource,
 ) -> bool {
     match pubsub_client.unsubscribe(pubkey).await {
         Ok(()) => {
             if let Err(err) = removed_account_tx.send(pubkey).await {
                 warn!(error = ?err, "Failed to send removal update");
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                );
+            } else {
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::Unsubscribed,
+                );
             }
             true
         }
@@ -38,8 +52,16 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
                 RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
             ) {
                 debug!(error = ?err, "Failed to unsubscribe");
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::AlreadyAbsent,
+                );
             } else {
                 warn!(error = ?err, "Failed to unsubscribe");
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::UnsubscribeFailed,
+                );
             }
             false
         }
@@ -228,6 +250,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 pubkey,
                 pubsub_client,
                 removed_account_tx,
+                SubscriptionCleanupSource::Reconciler,
             )
             .await;
         }

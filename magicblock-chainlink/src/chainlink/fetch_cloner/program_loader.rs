@@ -126,7 +126,13 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
             return;
         }
     };
-    if let Err(err) = this.clone_program_with_ownership(loaded_program).await {
+    if let Err(err) = this
+        .clone_program_with_ownership(
+            loaded_program,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+    {
         warn!(pubkey = %pubkey, error = %err, "Failed to clone program into bank");
     }
 

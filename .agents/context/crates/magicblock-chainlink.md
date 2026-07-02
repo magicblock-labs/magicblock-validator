@@ -128,7 +128,9 @@ Before fetching remotely:
 3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed.
 4. Remaining pubkeys enter `pending_requests` ownership coordination.
 
-Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. Pending owners have:
+Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. The upper dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="fetch_cloner"`. Owner-side internal waiters are not counted in the active waiter gauge; only callers that join existing work are counted. Metric labels remain bounded enum/static values and do not include pubkeys, signatures, errors, endpoint URLs, or raw messages.
+
+Pending owners have:
 
 - generation IDs to avoid stale cleanup,
 - cancellation hooks,
@@ -136,6 +138,12 @@ Only the first caller for a pubkey owns the fetch/clone operation. Later callers
 - waiter-specific result filtering so each caller sees only the entries for its pubkey.
 
 There is a second dedup layer for actual clone transactions: `pending_clones` is keyed by `(pubkey, remote_slot)`, so concurrent fetch and subscription paths do not submit duplicate local clone operations for the same account version.
+
+Clone lifecycle metrics are emitted through `chainlink_clone_accounts_total` using bounded enum labels only. Clone owners record submitted and clone success/failure outcomes; pending-clone waiters do not record submitted/succeeded/failed because they did not submit clone work. Local account/program fast-path skips and program-allowlist skips record `outcome=skipped`. If the remote fetch fails before a concrete clone request exists, Chainlink records one skipped lifecycle event per requested pubkey with `remote_result=failed` and `clone_intent=unknown`. These counters must never use pubkeys, signatures, owner pubkeys, raw errors, or other unbounded/user-controlled values as labels.
+
+Post-clone materialization metrics are emitted through `chainlink_clone_materialization_accounts_total` only after successful owner account/program clone calls. The check is a single local `AccountsBank::get_account` read: account clones compare the local account against the clone request, and program clones require the local program account's remote slot to be at least the cloned program slot. `still_missing_after_ensure` means the cloner returned success but the expected account/program version was not visible in the bank immediately afterward. This check is intentionally cheap and must not perform remote fetches, retries, sleeps, or expensive scans.
+
+Empty placeholders are created in `RemoteAccountProvider::try_get_multi` when RPC returns `None` and the pubkey is included in `mark_empty_if_not_found`; the provider converts the missing account into a zero-lamport, default-owner, empty-data account and emits `converted_to_empty`. Placeholder clone stages (`clone_submitted`, `clone_submit_failed`, `observed_in_bank_after_ensure`, and `still_missing_after_ensure`) are emitted only when the account clone request has that exact empty-placeholder shape. The `later_refetched` stage is deliberately not emitted yet because detecting repeated same-pubkey placeholders with retained pubkey state would add unbounded memory/cardinality risk; use group 7 sketches or sampled logs for repeated-same-pubkey detection instead.
 
 ### Remote fetch
 
@@ -146,6 +154,10 @@ There is a second dedup layer for actual clone transactions: `pending_clones` is
 3. Starts an RPC fetch with `min_context_slot` equal to the observed chain slot or requested slot.
 4. Waits for either RPC results or a subscription update that is at least as new as the fetch start slot.
 5. Returns results in input order.
+
+The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="remote_account_provider"`. Claimed pubkeys record `owned`; calls that join existing `fetching_accounts` work record `joined_existing`, waiter total, and active waiter gauge. Subscription-update wins record `resolved_by_subscription_update`, while late RPC completions after such a win or replacement record `rpc_fetch_completed_after_update`. `FetchingAccountState` stores bounded metric metadata (`AccountFetchOrigin` and owner start time) so subscription-update completion uses the original origin without adding pubkey/signature labels.
+
+This pending-fetch instrumentation does not change fetch/clone behavior, dedup ownership, subscription ordering, or remote-fetch retry behavior; it only records counters, gauges, and histograms on existing control-flow edges.
 
 RPC fetches use Base64Zstd encoding, commitment from the RPC client, `min_context_slot`, timeout/retry handling, and metrics for success/found/not-found/failure.
 
@@ -306,6 +318,10 @@ A pubkey can be held for multiple reasons:
 Ownership is reference-counted per reason. Releasing one reason does not unsubscribe while other reasons remain.
 
 `ensure_subscription` differs from `acquire_subscription`: it does not increment an already-held reason. This is used by eATA projection to keep an LRU entry warm without unbounded refcount growth.
+
+Registration outcome metrics (`chainlink_subscription_registration_accounts_total`, exported as `mbv_chainlink_subscription_registration_accounts_total`) are emitted once per claimed subscription attempt by origin, subscription reason, and terminal registration outcome. Waiter-only fetch callers do not independently set up subscriptions and are not counted separately; direct `try_get_multi` owners preserve their `AccountFetchOrigin`, while callers without a fetch origin use `internal`.
+
+Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_total{reason,outcome}` and `chainlink_subscription_cleanup_accounts_total{cleanup_source,outcome}`, exported with the `mbv_` prefix) are emitted only on cold subscription release/cleanup transition paths, never on per-update hot loops. Release metrics classify each explicit `release_subscription_with_mode` / silent delegated-account release result (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`). Cleanup metrics classify the actual unsubscribe/removal action by `cleanup_source` (`normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`) and `outcome` (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`). All labels are static/enum values only; no pubkey, signature, raw error, or endpoint labels are used.
 
 ### LRU and defensive eviction
 

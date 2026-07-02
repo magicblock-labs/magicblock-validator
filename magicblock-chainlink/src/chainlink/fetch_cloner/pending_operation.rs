@@ -1,5 +1,9 @@
 use std::{collections::HashMap as StdHashMap, sync::Arc, time::Duration};
 
+use magicblock_metrics::metrics::{
+    self, AccountFetchOrigin, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome,
+};
 use scc::HashMap;
 use solana_pubkey::Pubkey;
 use tokio::{
@@ -51,6 +55,8 @@ pub(super) struct PendingWaiter {
     waiter_id: WaiterId,
     receiver: oneshot::Receiver<PendingTerminal>,
     completed: bool,
+    layer: ChainlinkPendingFetchLayer,
+    active_waiter_gauge: bool,
 }
 
 impl PendingWaiter {
@@ -60,6 +66,8 @@ impl PendingWaiter {
         generation: PendingGeneration,
         waiter_id: WaiterId,
         receiver: oneshot::Receiver<PendingTerminal>,
+        layer: ChainlinkPendingFetchLayer,
+        active_waiter_gauge: bool,
     ) -> Self {
         Self {
             pending,
@@ -68,6 +76,8 @@ impl PendingWaiter {
             waiter_id,
             receiver,
             completed: false,
+            layer,
+            active_waiter_gauge,
         }
     }
 
@@ -79,6 +89,13 @@ impl PendingWaiter {
         self.generation
     }
 
+    fn finish_active_waiter(&mut self) {
+        if self.active_waiter_gauge {
+            metrics::dec_chainlink_pending_fetch_waiters_gauge(self.layer);
+            self.active_waiter_gauge = false;
+        }
+    }
+
     pub(super) async fn wait(
         mut self,
     ) -> Result<PendingTerminal, ChainlinkError> {
@@ -86,10 +103,12 @@ impl PendingWaiter {
             std::mem::replace(&mut self.receiver, oneshot::channel().1);
         match receiver.await {
             Ok(terminal) => {
+                self.finish_active_waiter();
                 self.completed = true;
                 Ok(terminal)
             }
             Err(err) => {
+                self.finish_active_waiter();
                 self.completed = true;
                 Err(ChainlinkError::PendingRequestOwnerDisappeared(
                     self.pubkey,
@@ -106,6 +125,7 @@ impl Drop for PendingWaiter {
             return;
         }
 
+        self.finish_active_waiter();
         self.pending.update(&self.pubkey, |_, pending| {
             if pending.generation == self.generation {
                 pending.waiters.remove(&self.waiter_id);
@@ -119,6 +139,9 @@ pub(super) struct PendingOwner {
     pubkey: Pubkey,
     generation: PendingGeneration,
     completed: bool,
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    started_at: std::time::Instant,
 }
 
 impl PendingOwner {
@@ -126,16 +149,34 @@ impl PendingOwner {
         pending: Arc<HashMap<Pubkey, Pending>>,
         pubkey: Pubkey,
         generation: PendingGeneration,
+        origin: AccountFetchOrigin,
+        layer: ChainlinkPendingFetchLayer,
     ) -> Self {
         Self {
             pending,
             pubkey,
             generation,
             completed: false,
+            origin,
+            layer,
+            started_at: std::time::Instant::now(),
         }
     }
 
-    pub(super) fn dismiss(&mut self) {
+    pub(super) fn observe(&mut self, outcome: ChainlinkPendingFetchOutcome) {
+        if self.completed {
+            return;
+        }
+        metrics::observe_chainlink_pending_fetch_owner_duration_seconds(
+            self.origin,
+            self.layer,
+            outcome,
+            self.started_at.elapsed().as_secs_f64(),
+        );
+    }
+
+    pub(super) fn finish(&mut self, outcome: ChainlinkPendingFetchOutcome) {
+        self.observe(outcome);
         self.completed = true;
     }
 }
@@ -146,6 +187,7 @@ impl Drop for PendingOwner {
             return;
         }
 
+        self.observe(ChainlinkPendingFetchOutcome::OwnerCancelled);
         let _ = finish_pending_cleanup(
             &self.pending,
             self.pubkey,
@@ -173,6 +215,8 @@ pub(super) fn claim_or_join_pending(
     generation: PendingGeneration,
     waiter_id: WaiterId,
     total_budget: Duration,
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
 ) -> PendingClaim {
     let (tx, rx) = oneshot::channel();
 
@@ -186,6 +230,12 @@ pub(super) fn claim_or_join_pending(
                 waiters: StdHashMap::from([(waiter_id, tx)]),
                 cancel: Arc::clone(&cancel),
             });
+            metrics::inc_chainlink_pending_fetch_accounts(
+                origin,
+                layer,
+                ChainlinkPendingFetchOutcome::Owned,
+                1,
+            );
             PendingClaim::Created(PendingHandles {
                 waiter: PendingWaiter::new(
                     pending.clone(),
@@ -193,6 +243,8 @@ pub(super) fn claim_or_join_pending(
                     generation,
                     waiter_id,
                     rx,
+                    layer,
+                    false,
                 ),
                 deadline,
                 cancel,
@@ -200,6 +252,8 @@ pub(super) fn claim_or_join_pending(
                     pending.clone(),
                     pubkey,
                     generation,
+                    origin,
+                    layer,
                 )),
             })
         }
@@ -208,6 +262,14 @@ pub(super) fn claim_or_join_pending(
             let deadline = entry.get().deadline;
             let cancel = Arc::clone(&entry.get().cancel);
             entry.get_mut().waiters.insert(waiter_id, tx);
+            metrics::inc_chainlink_pending_fetch_accounts(
+                origin,
+                layer,
+                ChainlinkPendingFetchOutcome::JoinedExisting,
+                1,
+            );
+            metrics::inc_chainlink_pending_fetch_waiters(origin, layer, 1);
+            metrics::inc_chainlink_pending_fetch_waiters_gauge(layer);
             PendingClaim::Joined(PendingHandles {
                 waiter: PendingWaiter::new(
                     pending.clone(),
@@ -215,6 +277,8 @@ pub(super) fn claim_or_join_pending(
                     generation,
                     waiter_id,
                     rx,
+                    layer,
+                    true,
                 ),
                 deadline,
                 cancel,

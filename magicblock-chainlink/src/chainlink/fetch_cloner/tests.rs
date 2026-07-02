@@ -1,6 +1,12 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use dlp_api::state::DelegationRecord;
+use magicblock_metrics::metrics::{
+    chainlink_pending_fetch_accounts_value,
+    chainlink_pending_fetch_waiters_gauge_value,
+    chainlink_pending_fetch_waiters_value, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome,
+};
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
 };
@@ -68,6 +74,13 @@ type TestFetchClonerResult = (
     mpsc::Sender<ForwardedSubscriptionUpdate>,
     Arc<ClonerStub>,
 );
+
+type TestFetchCloner = FetchCloner<
+    ChainRpcClientMock,
+    ChainPubsubClientMock,
+    AccountsBankStub,
+    ClonerStub,
+>;
 
 macro_rules! _cloned_account {
     ($bank:expr,
@@ -297,6 +310,90 @@ fn create_non_raw_eata_owned_account(
     )
 }
 
+fn account_clone_request(account: AccountSharedData) -> AccountCloneRequest {
+    AccountCloneRequest {
+        pubkey: random_pubkey(),
+        account,
+        commit_frequency_ms: None,
+        delegation_actions: DelegationActions::default(),
+        delegated_to_other: None,
+        needs_undelegation: false,
+    }
+}
+
+fn non_empty_account() -> AccountSharedData {
+    AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    })
+}
+
+#[test]
+fn clone_classification_treats_empty_placeholder_as_not_found() {
+    let request = account_clone_request(AccountSharedData::default());
+
+    assert!(TestFetchCloner::is_empty_placeholder_account(
+        &request.account
+    ));
+    assert_eq!(
+        TestFetchCloner::clone_remote_result_for_request(&request),
+        ChainlinkCloneRemoteResult::NotFound
+    );
+    assert_eq!(
+        TestFetchCloner::clone_intent_for_request(&request),
+        ChainlinkCloneIntent::EmptyPlaceholder
+    );
+}
+
+#[test]
+fn clone_classification_treats_normal_account_as_found() {
+    let request = account_clone_request(non_empty_account());
+
+    assert!(!TestFetchCloner::is_empty_placeholder_account(
+        &request.account
+    ));
+    assert_eq!(
+        TestFetchCloner::clone_remote_result_for_request(&request),
+        ChainlinkCloneRemoteResult::Found
+    );
+    assert_eq!(
+        TestFetchCloner::clone_intent_for_request(&request),
+        ChainlinkCloneIntent::NormalAccount
+    );
+}
+
+#[test]
+fn clone_classification_treats_delegated_account_as_delegation_record() {
+    let mut account = non_empty_account();
+    account.set_delegated(true);
+    let request = account_clone_request(account);
+
+    assert_eq!(
+        TestFetchCloner::clone_intent_for_request(&request),
+        ChainlinkCloneIntent::DelegationRecord
+    );
+}
+
+#[test]
+fn clone_classification_treats_action_dependency_as_action_dependency() {
+    let mut request = account_clone_request(non_empty_account());
+    request.delegation_actions =
+        DelegationActions::from(vec![Instruction::new_with_bytes(
+            system_program::id(),
+            &[1],
+            vec![],
+        )]);
+
+    assert!(!request.account.delegated());
+    assert_eq!(
+        TestFetchCloner::clone_intent_for_request(&request),
+        ChainlinkCloneIntent::ActionDependency
+    );
+}
+
 fn add_delegation_record_with_slot_for(
     rpc_client: &ChainRpcClientMock,
     pubkey: Pubkey,
@@ -454,6 +551,30 @@ async fn wait_for_rpc_fetch_activity(
             >= expected_minimum,
         "rpc fetch activity should be at least {expected_minimum}"
     );
+}
+
+fn pending_accounts_value(
+    origin: AccountFetchOrigin,
+    outcome: ChainlinkPendingFetchOutcome,
+) -> u64 {
+    chainlink_pending_fetch_accounts_value(
+        origin,
+        ChainlinkPendingFetchLayer::FetchCloner,
+        outcome,
+    )
+}
+
+fn pending_waiters_value(origin: AccountFetchOrigin) -> u64 {
+    chainlink_pending_fetch_waiters_value(
+        origin,
+        ChainlinkPendingFetchLayer::FetchCloner,
+    )
+}
+
+fn pending_waiters_gauge_value() -> i64 {
+    chainlink_pending_fetch_waiters_gauge_value(
+        ChainlinkPendingFetchLayer::FetchCloner,
+    )
 }
 
 // -----------------
@@ -3652,7 +3773,12 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
         let fetch_cloner = fetch_cloner.clone();
         let program = program.clone();
         tokio::spawn(async move {
-            fetch_cloner.clone_program_with_ownership(program).await
+            fetch_cloner
+                .clone_program_with_ownership(
+                    program,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
         })
     };
     cloner.wait_for_program_clone_count(1).await;
@@ -3660,7 +3786,12 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
     let second_task = {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
-            fetch_cloner.clone_program_with_ownership(program).await
+            fetch_cloner
+                .clone_program_with_ownership(
+                    program,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
         })
     };
     wait_for_pending_clone_waiter_count(&fetch_cloner, program_id, 1).await;
@@ -3715,7 +3846,12 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
     let old_task = {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
-            fetch_cloner.clone_program_with_ownership(old_program).await
+            fetch_cloner
+                .clone_program_with_ownership(
+                    old_program,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
         })
     };
     cloner.wait_for_program_clone_count(1).await;
@@ -3723,7 +3859,12 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
     let new_task = {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
-            fetch_cloner.clone_program_with_ownership(new_program).await
+            fetch_cloner
+                .clone_program_with_ownership(
+                    new_program,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
         })
     };
     wait_for_pending_clone_waiter_count(&fetch_cloner, program_id, 1).await;
@@ -5668,6 +5809,7 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect_err("actions on non-delegated target must be rejected");
@@ -5720,6 +5862,7 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("DLP-owned normal clone should be normalized, not rejected");
@@ -5772,6 +5915,7 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("DLP-owned magic fee vault should remain delegated");
@@ -5820,6 +5964,7 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("native token clone should be normalized");
@@ -5882,6 +6027,7 @@ async fn test_delegated_malformed_ata_clone_is_rejected() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect_err("malformed delegated ATA clone should be rejected");
@@ -5938,6 +6084,7 @@ async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("non-ATA native token clone should be preserved");
@@ -5989,6 +6136,7 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("plain native token clone should be preserved");
@@ -6081,6 +6229,7 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect(
@@ -6157,6 +6306,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                     delegated_to_other: None,
                     needs_undelegation: false,
                 },
+                AccountFetchOrigin::GetAccount,
             )
             .await
             .expect("action-bearing clone should not fail");
@@ -6224,6 +6374,7 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect(
@@ -6285,6 +6436,7 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
+            AccountFetchOrigin::GetAccount,
         )
         .await
         .expect("active delegated targets should be skipped without failing");
@@ -8047,6 +8199,8 @@ async fn test_owned_operation_waiters_share_missing_delegation_record_metadata()
 
 #[tokio::test]
 async fn test_pending_deadline_is_not_extended_by_late_joiners() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
     let pending = Arc::new(scc::HashMap::<Pubkey, Pending>::new());
     let pubkey = random_pubkey();
     let owner_budget = Duration::from_millis(200);
@@ -8058,6 +8212,8 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         1,
         1,
         owner_budget,
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Created(handles) => handles,
         PendingClaim::Joined(_) => panic!("expected owner to create pending"),
@@ -8071,6 +8227,8 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         2,
         2,
         joiner_budget,
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Joined(handles) => handles,
         PendingClaim::Created(_) => {
@@ -8113,6 +8271,124 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         joiner_terminal,
         PendingTerminal::Failed(PendingFailure::TimedOut)
     ));
+}
+
+#[tokio::test]
+async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account = Account {
+        lamports: 2_000_000,
+        data: vec![5, 6, 7, 8],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(account_pubkey, account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
+    let owned_baseline = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::Owned,
+    );
+    let joined_baseline = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::JoinedExisting,
+    );
+    let waiters_baseline = pending_waiters_value(fetch_origin);
+
+    rpc_client.block_fetches();
+
+    let owner_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    fetch_origin,
+                )
+                .await
+        })
+    };
+
+    wait_for_pending_request(&fetch_cloner, account_pubkey).await;
+    wait_for_rpc_fetch_activity(&rpc_client, 1).await;
+
+    let waiter_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    fetch_origin,
+                )
+                .await
+        })
+    };
+
+    wait_for_pending_waiter_count(&fetch_cloner, account_pubkey, 2).await;
+    assert!(
+        pending_waiters_gauge_value() >= 1,
+        "fetch_cloner waiter gauge should include this test's joined waiter"
+    );
+
+    rpc_client.allow_fetches();
+
+    tokio::time::timeout(Duration::from_secs(2), owner_task)
+        .await
+        .expect("owner task should complete")
+        .expect("owner task should not panic")
+        .expect("owner fetch should succeed");
+    tokio::time::timeout(Duration::from_secs(2), waiter_task)
+        .await
+        .expect("waiter task should complete")
+        .expect("waiter task should not panic")
+        .expect("waiter fetch should succeed");
+
+    let owned_delta = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::Owned,
+    )
+    .saturating_sub(owned_baseline);
+    assert!(
+        owned_delta >= 1,
+        "fetch_cloner owned metric should increase by at least 1; got {owned_delta}"
+    );
+    let joined_delta = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::JoinedExisting,
+    )
+    .saturating_sub(joined_baseline);
+    assert!(
+        joined_delta >= 1,
+        "fetch_cloner joined-existing metric should increase by at least 1; got {joined_delta}"
+    );
+    let waiters_delta =
+        pending_waiters_value(fetch_origin).saturating_sub(waiters_baseline);
+    assert!(
+        waiters_delta >= 1,
+        "fetch_cloner waiter metric should increase by at least 1; got {waiters_delta}"
+    );
 }
 
 #[tokio::test]

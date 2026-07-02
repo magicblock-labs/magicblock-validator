@@ -17,6 +17,12 @@ borsh = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 lru = { workspace = true }
+# TDOO: should be removed
+magicblock-account-cloner = { workspace = true }
+# TODO: should be removed
+magicblock-accounts-db = { workspace = true }
+# TODO: should be removed, hidden behinf the trait
+magicblock-chainlink = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
@@ -29,7 +35,6 @@ magicblock-table-mania = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
-solana-address-lookup-table-interface = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-compute-budget-interface = { workspace = true }
 solana-hash = { workspace = true }
@@ -43,25 +48,18 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
-solana-system-program = { workspace = true }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
-static_assertions = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
 [dev-dependencies]
 solana-signature = { workspace = true, features = ["rand"] }
-serde_json = { workspace = true }
-lazy_static = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 test-kit = { workspace = true }
-tracing-subscriber = { workspace = true }
-tracing-log = { workspace = true }
 
 [features]
 default = []
-dev-context-only-utils = []
