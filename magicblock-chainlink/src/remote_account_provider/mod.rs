@@ -1887,6 +1887,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 reason.into(),
                 SubscriptionRegistrationOutcome::AlreadyPresent,
             );
+            self.unique_pubkey_estimator.observe(
+                origin,
+                UniquePubkeyStage::SubscriptionAlreadyPresent,
+                pubkey,
+            );
             return Ok(());
         }
         drop(ownership);
