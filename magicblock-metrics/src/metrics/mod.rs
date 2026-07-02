@@ -9,7 +9,8 @@ pub use types::{
     AccountClone, AccountCommit, AccountFetchOrigin, BankPrecheckOutcome,
     BankPrecheckReason, ChainlinkCloneIntent,
     ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
-    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage, LabelValue,
+    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome, LabelValue,
     Outcome, SubscriptionCleanupOutcome, SubscriptionCleanupSource,
     SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
     SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
@@ -236,6 +237,53 @@ lazy_static::lazy_static! {
                 "Number of account subscription activations when subscriptions did not match existing subscriptions",
             ),
             &["client_id"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_pending_fetch_accounts_total",
+                "Account fetch/clone requests by origin, pending-dedup layer, and owner/waiter outcome",
+            ),
+            &["origin", "layer", "outcome"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_PENDING_FETCH_WAITERS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_pending_fetch_waiters_total",
+                "Account fetch/clone requests that joined existing pending work by origin and pending-dedup layer",
+            ),
+            &["origin", "layer"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_PENDING_FETCH_WAITERS_GAUGE: IntGaugeVec =
+        IntGaugeVec::new(
+            Opts::new(
+                "chainlink_pending_fetch_waiters_gauge",
+                "Currently active account fetch/clone waiters by pending-dedup layer",
+            ),
+            &["layer"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_PENDING_FETCH_OWNER_DURATION_SECONDS: HistogramVec =
+        HistogramVec::new(
+            HistogramOpts::new(
+                "chainlink_pending_fetch_owner_duration_seconds",
+                "Time spent by pending fetch/clone owners by origin, pending-dedup layer, and terminal owner outcome",
+            )
+            .buckets(
+                MICROS_100_900.iter().chain(
+                MILLIS_1_9.iter()).chain(
+                MILLIS_10_90.iter()).chain(
+                MILLIS_100_900.iter()).chain(
+                SECONDS_1_9.iter()).cloned().collect()
+            ),
+            &["origin", "layer", "outcome"],
         )
         .unwrap();
 
@@ -688,6 +736,10 @@ pub(crate) fn register() {
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT);
+        register!(CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_PENDING_FETCH_WAITERS_TOTAL);
+        register!(CHAINLINK_PENDING_FETCH_WAITERS_GAUGE);
+        register!(CHAINLINK_PENDING_FETCH_OWNER_DURATION_SECONDS);
         register!(COMMITTOR_INTENTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
@@ -1089,6 +1141,91 @@ pub fn inc_account_subscription_activations_count(client_id: &impl LabelValue) {
     ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT
         .with_label_values(&[client_id.value()])
         .inc();
+}
+
+pub fn inc_chainlink_pending_fetch_accounts(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    outcome: ChainlinkPendingFetchOutcome,
+    count: u64,
+) {
+    CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL
+        .with_label_values(&[origin.value(), layer.value(), outcome.value()])
+        .inc_by(count);
+}
+
+pub fn inc_chainlink_pending_fetch_waiters(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    count: u64,
+) {
+    CHAINLINK_PENDING_FETCH_WAITERS_TOTAL
+        .with_label_values(&[origin.value(), layer.value()])
+        .inc_by(count);
+}
+
+pub fn inc_chainlink_pending_fetch_waiters_gauge(
+    layer: ChainlinkPendingFetchLayer,
+) {
+    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE
+        .with_label_values(&[layer.value()])
+        .inc();
+}
+
+pub fn dec_chainlink_pending_fetch_waiters_gauge(
+    layer: ChainlinkPendingFetchLayer,
+) {
+    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE
+        .with_label_values(&[layer.value()])
+        .dec();
+}
+
+pub fn observe_chainlink_pending_fetch_owner_duration_seconds(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    outcome: ChainlinkPendingFetchOutcome,
+    seconds: f64,
+) {
+    CHAINLINK_PENDING_FETCH_OWNER_DURATION_SECONDS
+        .with_label_values(&[origin.value(), layer.value(), outcome.value()])
+        .observe(seconds);
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_pending_fetch_accounts_value(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    outcome: ChainlinkPendingFetchOutcome,
+) -> u64 {
+    CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL
+        .get_metric_with_label_values(&[
+            origin.value(),
+            layer.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_pending_fetch_waiters_value(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+) -> u64 {
+    CHAINLINK_PENDING_FETCH_WAITERS_TOTAL
+        .get_metric_with_label_values(&[origin.value(), layer.value()])
+        .map(|m| m.get())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_pending_fetch_waiters_gauge_value(
+    layer: ChainlinkPendingFetchLayer,
+) -> i64 {
+    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE
+        .get_metric_with_label_values(&[layer.value()])
+        .map(|m| m.get())
+        .unwrap_or(0)
 }
 
 pub fn inc_per_program_account_updates_count(

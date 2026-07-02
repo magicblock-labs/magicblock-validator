@@ -66,14 +66,20 @@ pub use endpoint::{Endpoint, Endpoints};
 use magicblock_metrics::{
     metrics,
     metrics::{
-        inc_account_fetches_failed, inc_account_fetches_found,
-        inc_account_fetches_not_found, inc_account_fetches_success,
+        dec_chainlink_pending_fetch_waiters_gauge, inc_account_fetches_failed,
+        inc_account_fetches_found, inc_account_fetches_not_found,
+        inc_account_fetches_success,
         inc_chainlink_empty_placeholder_accounts_total,
+        inc_chainlink_pending_fetch_accounts,
+        inc_chainlink_pending_fetch_waiters,
+        inc_chainlink_pending_fetch_waiters_gauge,
         inc_chainlink_subscription_cleanup_accounts,
         inc_chainlink_subscription_registration_accounts,
         inc_chainlink_subscription_release_accounts,
+        observe_chainlink_pending_fetch_owner_duration_seconds,
         set_monitored_accounts_count, AccountFetchOrigin,
-        ChainlinkEmptyPlaceholderStage, Outcome, SubscriptionCleanupOutcome,
+        ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
+        ChainlinkPendingFetchOutcome, Outcome, SubscriptionCleanupOutcome,
         SubscriptionCleanupSource, SubscriptionReasonLabel,
         SubscriptionRegistrationOrigin, SubscriptionRegistrationOutcome,
         SubscriptionReleaseOutcome,
@@ -237,10 +243,46 @@ type FetchingAccountGeneration = u64;
 struct FetchingAccountState {
     generation: FetchingAccountGeneration,
     fetch_start_slot: u64,
+    fetch_origin: AccountFetchOrigin,
+    owner_started_at: std::time::Instant,
     waiters: Vec<oneshot::Sender<FetchResult>>,
 }
 
 type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
+
+struct PendingFetchWaiterGaugeGuard {
+    layer: ChainlinkPendingFetchLayer,
+    active: bool,
+}
+
+impl PendingFetchWaiterGaugeGuard {
+    fn active(layer: ChainlinkPendingFetchLayer) -> Self {
+        Self {
+            layer,
+            active: true,
+        }
+    }
+
+    fn inactive(layer: ChainlinkPendingFetchLayer) -> Self {
+        Self {
+            layer,
+            active: false,
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.active {
+            dec_chainlink_pending_fetch_waiters_gauge(self.layer);
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for PendingFetchWaiterGaugeGuard {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
 
 struct ClaimedSubscriptionSetupGuard {
     fetching_accounts: Arc<FetchingAccounts>,
@@ -284,6 +326,12 @@ impl ClaimedSubscriptionSetupGuard {
                         generation,
                     )
                 {
+                    observe_chainlink_pending_fetch_owner_duration_seconds(
+                        state.fetch_origin,
+                        ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                        ChainlinkPendingFetchOutcome::OwnerFailed,
+                        state.owner_started_at.elapsed().as_secs_f64(),
+                    );
                     for sender in state.waiters {
                         let _ = sender.send(Err(
                             RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
@@ -1028,6 +1076,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 // resolve with the subscription data instead
                                 if slot >= state.fetch_start_slot {
                                     trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Using subscription update instead of fetch");
+                                    metrics::observe_chainlink_pending_fetch_owner_duration_seconds(
+                                        state.fetch_origin,
+                                        ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                                        ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
+                                        state.owner_started_at.elapsed().as_secs_f64(),
+                                    );
+                                    metrics::inc_chainlink_pending_fetch_accounts(
+                                        state.fetch_origin,
+                                        ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                                        ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
+                                        1,
+                                    );
 
                                     // Resolve all pending requests with subscription data
                                     for sender in state.waiters {
@@ -1245,8 +1305,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // pushed into the FetchingAccountState.waiters queue (either
         // because this call inserted the entry, or because it joined an
         // existing in-flight fetch as a waiter).
-        let mut await_receivers: Vec<(Pubkey, oneshot::Receiver<FetchResult>)> =
-            Vec::with_capacity(pubkeys.len());
+        let mut await_receivers: Vec<(
+            Pubkey,
+            oneshot::Receiver<FetchResult>,
+            PendingFetchWaiterGaugeGuard,
+        )> = Vec::with_capacity(pubkeys.len());
 
         // Pubkeys this call actually inserted.
         // Only these pubkeys cause side effects (subscription setup, fetch)
@@ -1263,9 +1326,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             for &pubkey in pubkeys {
                 let (sender, receiver) = oneshot::channel();
                 let mut claimed = false;
+                let layer = ChainlinkPendingFetchLayer::RemoteAccountProvider;
+                let mut waiter_guard =
+                    PendingFetchWaiterGaugeGuard::inactive(layer);
                 match fetching.entry(pubkey) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().waiters.push(sender);
+                        inc_chainlink_pending_fetch_accounts(
+                            fetch_origin,
+                            layer,
+                            ChainlinkPendingFetchOutcome::JoinedExisting,
+                            1,
+                        );
+                        inc_chainlink_pending_fetch_waiters(
+                            fetch_origin,
+                            layer,
+                            1,
+                        );
+                        inc_chainlink_pending_fetch_waiters_gauge(layer);
+                        waiter_guard =
+                            PendingFetchWaiterGaugeGuard::active(layer);
                     }
                     Entry::Vacant(entry) => {
                         let generation =
@@ -1273,8 +1353,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         entry.insert(FetchingAccountState {
                             generation,
                             fetch_start_slot,
+                            fetch_origin,
+                            owner_started_at: std::time::Instant::now(),
                             waiters: vec![sender],
                         });
+                        inc_chainlink_pending_fetch_accounts(
+                            fetch_origin,
+                            layer,
+                            ChainlinkPendingFetchOutcome::Owned,
+                            1,
+                        );
                         claimed_generations.insert(pubkey, generation);
                         claimed = true;
                     }
@@ -1282,7 +1370,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 if claimed {
                     claimed_pubkeys.push(pubkey);
                 }
-                await_receivers.push((pubkey, receiver));
+                await_receivers.push((pubkey, receiver, waiter_guard));
             }
         }
 
@@ -1327,9 +1415,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let mut resolved_accounts = vec![];
         let mut errors = vec![];
 
-        for (idx, (pubkey, receiver)) in await_receivers.into_iter().enumerate()
+        for (idx, (pubkey, receiver, mut waiter_guard)) in
+            await_receivers.into_iter().enumerate()
         {
-            match receiver.await {
+            let receiver_result = receiver.await;
+            waiter_guard.finish();
+            match receiver_result {
                 Ok(result) => match result {
                     Ok(remote_account) => {
                         resolved_accounts.push(remote_account)
@@ -2209,6 +2300,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 generation,
                             )
                         {
+                            observe_chainlink_pending_fetch_owner_duration_seconds(
+                                state.fetch_origin,
+                                ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                                ChainlinkPendingFetchOutcome::OwnerFailed,
+                                state.owner_started_at.elapsed().as_secs_f64(),
+                            );
                             for sender in state.waiters {
                                 let error = RemoteAccountProviderError::AccountResolutionsFailed(
                                     format!("{}: {}", pubkey, error_msg)
@@ -2462,8 +2559,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             generation,
                         )
                     {
+                        observe_chainlink_pending_fetch_owner_duration_seconds(
+                            state.fetch_origin,
+                            ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                            ChainlinkPendingFetchOutcome::OwnerSucceeded,
+                            state.owner_started_at.elapsed().as_secs_f64(),
+                        );
                         state.waiters
                     } else {
+                        inc_chainlink_pending_fetch_accounts(
+                            fetch_origin,
+                            ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                            ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
+                            1,
+                        );
                         // Account was already resolved or replaced, skip.
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
