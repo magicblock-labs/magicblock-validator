@@ -6,7 +6,8 @@ use prometheus::{
     IntGauge, IntGaugeVec, Opts, Registry,
 };
 pub use types::{
-    AccountCommit, AccountFetchOrigin, ChainlinkCloneIntent,
+    AccountClone, AccountCommit, AccountFetchOrigin, BankPrecheckOutcome,
+    BankPrecheckReason, ChainlinkCloneIntent,
     ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
     ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage, LabelValue,
     Outcome, SubscriptionCleanupOutcome, SubscriptionCleanupSource,
@@ -166,6 +167,15 @@ lazy_static::lazy_static! {
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
 
+    static ref CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_bank_precheck_accounts_total",
+                "Account entries by FetchCloner bank precheck outcome before remote fetch",
+            ),
+            &["origin", "outcome", "reason"],
+        )
+        .unwrap();
     static ref CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
@@ -195,7 +205,6 @@ lazy_static::lazy_static! {
             &["cleanup_source", "outcome"],
         )
         .unwrap();
-
     static ref PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT: IntCounter = IntCounter::new(
         "program_subscription_discovered_dlp_update_delegated_elsewhere_count", "DLP-owned subscription updates that, after fetching the delegation record, were found delegated to another validator and dropped",
     ).unwrap();
@@ -671,6 +680,7 @@ pub(crate) fn register() {
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
+        register!(CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL);
@@ -838,6 +848,24 @@ pub fn set_monitored_accounts_count(count: usize) {
 }
 pub fn inc_evicted_accounts_count() {
     EVICTED_ACCOUNTS_COUNT.inc();
+}
+
+pub fn inc_chainlink_bank_precheck_accounts(
+    fetch_origin: AccountFetchOrigin,
+    outcome: BankPrecheckOutcome,
+    reason: BankPrecheckReason,
+    count: u64,
+) {
+    if count == 0 {
+        return;
+    }
+    CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            fetch_origin.value(),
+            outcome.value(),
+            reason.value(),
+        ])
+        .inc_by(count);
 }
 
 pub fn inc_chainlink_subscription_registration_accounts(

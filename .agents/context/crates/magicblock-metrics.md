@@ -31,7 +31,7 @@ Update this file for changes to:
 - validation commands or dashboard/scrape guidance relevant to this crate,
 - performance characteristics of metrics used in hot paths.
 
-If a change adds, removes, or renames a metric that operators may scrape or alert on, call that out explicitly in the handoff/PR notes. Metric names are an external observability contract.
+If a change adds, removes, or renames a metric that operators may scrape or alert on, call that out explicitly in the handoff/PR notes. Metric names are an external observability contract. For metric-related PRs, include at least one practical Prometheus/PromQL query in the PR Details section so reviewers and operators can immediately validate or dashboard the metric change.
 
 For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
@@ -205,6 +205,7 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 | `set_accounts_count(value)` | Number of accounts in `AccountsDb`. |
 | `set_monitored_accounts_count(count)` | Absolute count of monitored accounts; callers must pass total count, not delta. |
 | `inc_evicted_accounts_count()` | Cumulative count of monitored accounts forcefully removed from monitor list/database. |
+| `inc_chainlink_bank_precheck_accounts(origin, outcome, reason, count)` / `chainlink_bank_precheck_accounts_total{origin,outcome,reason}` (exported as `mbv_chainlink_bank_precheck_accounts_total`) | Classifies `FetchCloner` account entries before remote provider fetch; call sites should aggregate per label bucket where practical and must not add pubkey labels. |
 | `inc_chainlink_subscription_registration_accounts(origin, subscription_reason, outcome)` | `chainlink_subscription_registration_accounts_total` (`mbv_chainlink_subscription_registration_accounts_total`) classifies Chainlink account subscription registration attempts by `{origin,subscription_reason,outcome}`. Origin is `AccountFetchOrigin` label values plus `internal`; subscription reasons are `direct_account`, `delegation_record`, `program_data`, `undelegation_tracking`, `ata_projection`; outcomes are `already_present`, `added_below_capacity`, `evicted_candidate`, `subscribe_error`, `unsubscribe_evicted_error`, `rejected_and_unsubscribed`, `unsubscribe_rejected_error`. |
 | `inc_chainlink_subscription_release_accounts(reason, outcome)` | `chainlink_subscription_release_accounts_total` (`mbv_chainlink_subscription_release_accounts_total`) classifies Chainlink account subscription release attempts by `{reason,outcome}` with the same five reason values and outcomes `unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`. |
 | `inc_chainlink_subscription_cleanup_accounts(cleanup_source, outcome)` | `chainlink_subscription_cleanup_accounts_total` (`mbv_chainlink_subscription_cleanup_accounts_total`) classifies Chainlink account subscription cleanup actions by `{cleanup_source,outcome}`; cleanup sources are `normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`; outcomes are `unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`. |
