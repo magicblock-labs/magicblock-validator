@@ -132,8 +132,15 @@ impl UniquePubkeyEstimator {
             .expect("stage series was just inserted");
         pubkey_series.observe_hash(epoch_minute, pubkey_hash);
 
-        if should_export {
-            export_series(&series, epoch_minute);
+        // Snapshot the estimates while the lock is held, then drop the guard
+        // before performing Prometheus writes so exports never block other
+        // observe/observe_many callers across origin/stage pairs.
+        let export_estimates = should_export
+            .then(|| collect_series_estimates(&series, epoch_minute));
+        drop(series);
+
+        if let Some(estimates) = export_estimates {
+            write_series_estimates(estimates);
         }
     }
 
@@ -276,25 +283,58 @@ impl HllSketch {
     }
 }
 
-fn export_series(
+struct SeriesEstimate {
+    origin_label: String,
+    stage_label: String,
+    window: ChainlinkUniquePubkeyWindow,
+    estimate: u64,
+}
+
+/// Computes the per-window estimates for every series. This is the only part of
+/// the export that reads shared series state, so it is meant to run while the
+/// `series` lock is held; the returned snapshot can then be written to
+/// Prometheus without the guard.
+fn collect_series_estimates(
     series: &HashMap<String, HashMap<String, UniquePubkeySeries>>,
     now_epoch_minute: u64,
-) {
+) -> Vec<SeriesEstimate> {
+    let mut estimates = Vec::new();
     for stage_series in series.values() {
         for pubkey_series in stage_series.values() {
             for window in WINDOWS {
                 let estimate = pubkey_series
                     .estimate_window(now_epoch_minute, window.minutes())
                     .round() as u64;
-                metrics::set_chainlink_unique_pubkeys_estimate(
-                    &pubkey_series.origin_label,
-                    &pubkey_series.stage_label,
+                estimates.push(SeriesEstimate {
+                    origin_label: pubkey_series.origin_label.clone(),
+                    stage_label: pubkey_series.stage_label.clone(),
                     window,
                     estimate,
-                );
+                });
             }
         }
     }
+    estimates
+}
+
+/// Writes a previously collected snapshot to Prometheus. This does not touch the
+/// shared series state, so it must be called after the `series` lock is dropped.
+fn write_series_estimates(estimates: Vec<SeriesEstimate>) {
+    for estimate in estimates {
+        metrics::set_chainlink_unique_pubkeys_estimate(
+            &estimate.origin_label,
+            &estimate.stage_label,
+            estimate.window,
+            estimate.estimate,
+        );
+    }
+}
+
+fn export_series(
+    series: &HashMap<String, HashMap<String, UniquePubkeySeries>>,
+    now_epoch_minute: u64,
+) {
+    write_series_estimates(collect_series_estimates(series, now_epoch_minute));
 }
 
 fn debug_assert_unique_stage_labels() {
