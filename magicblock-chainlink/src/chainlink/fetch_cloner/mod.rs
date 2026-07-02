@@ -939,6 +939,11 @@ where
                                 clone_intent,
                                 ChainlinkCloneOutcome::CloneFailed,
                             );
+                            self.unique_pubkey_estimator().observe(
+                                fetch_origin,
+                                ChainlinkCloneOutcome::CloneFailed,
+                                &program_id,
+                            );
                             metrics::inc_chainlink_clone_accounts_total(
                                 fetch_origin,
                                 remote_result,
@@ -1166,6 +1171,11 @@ where
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::CloneFailed,
+                        );
+                        self.unique_pubkey_estimator().observe(
+                            fetch_origin,
+                            ChainlinkCloneOutcome::CloneFailed,
+                            &pubkey,
                         );
                         metrics::inc_chainlink_clone_accounts_total(
                             fetch_origin,
