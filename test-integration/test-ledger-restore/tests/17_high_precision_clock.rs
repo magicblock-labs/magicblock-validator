@@ -102,7 +102,7 @@ fn read(ledger_path: &Path, payer: &Keypair, expected: &FlexiCounter) -> Child {
     // Record the sysvar again, now on the freshly restarted validator, to prove
     // the HighPrecisionClock keeps advancing (not frozen at the replayed value).
     let ix = create_record_high_precision_clock_ix(payer.pubkey());
-    confirm_tx_with_payer_ephem(ix, &payer, &ctx, &mut validator);
+    confirm_tx_with_payer_ephem(ix, payer, &ctx, &mut validator);
 
     let observed = fetch_counter_ephem(&ctx, &payer.pubkey(), &mut validator);
     debug!(
