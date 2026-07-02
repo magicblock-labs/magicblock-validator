@@ -19,7 +19,9 @@ use magicblock_core::token_programs::{
     is_ata, normalize_native_token_account_for_local_clone,
     try_derive_supported_ata_pubkeys, EATA_PROGRAM_ID,
 };
-use magicblock_metrics::metrics::{self, AccountFetchOrigin};
+use magicblock_metrics::metrics::{
+    self, AccountFetchOrigin, BankPrecheckOutcome, BankPrecheckReason,
+};
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -2548,6 +2550,12 @@ where
 
         let mut in_bank = HashSet::new();
         let mut extra_mark_empty = vec![];
+        let mut bank_hit_no_fetch_non_undelegating_count = 0_u64;
+        let mut bank_hit_no_fetch_undelegating_still_valid_count = 0_u64;
+        let mut bank_hit_no_fetch_undelegating_timeout_count = 0_u64;
+        let mut bank_hit_undelegating_refresh_required_count = 0_u64;
+        let mut bank_miss_remote_required_count = 0_u64;
+        let mut forced_refresh_remote_required_count = 0_u64;
 
         // Phase 1: Sync bank check — separate undelegating accounts
         // (which need async RPC) from non-undelegating (handled
@@ -2555,6 +2563,7 @@ where
         let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
         for pubkey in pubkeys.iter() {
             if force_refresh_pubkeys.contains(*pubkey) {
+                forced_refresh_remote_required_count += 1;
                 continue;
             }
             if let Some(account_in_bank) =
@@ -2580,8 +2589,11 @@ where
                             "Account found in bank in valid state, no fetch needed"
                         );
                     }
+                    bank_hit_no_fetch_non_undelegating_count += 1;
                     in_bank.insert(**pubkey);
                 }
+            } else {
+                bank_miss_remote_required_count += 1;
             }
         }
 
@@ -2607,40 +2619,85 @@ where
                                 pubkey = %pubkey,
                                 "Timeout checking if account is still undelegating after 5 seconds"
                             );
-                            RefreshDecision::No
+                            return (pubkey, None);
                         }
                     };
-                    (pubkey, decision)
+                    (pubkey, Some(decision))
                 });
             }
 
             for (pubkey, decision) in join_set.join_all().await {
                 match decision {
-                    RefreshDecision::Yes
-                    | RefreshDecision::YesAndMarkEmptyIfNotFound => {
+                    Some(
+                        RefreshDecision::Yes
+                        | RefreshDecision::YesAndMarkEmptyIfNotFound,
+                    ) => {
                         debug!(
                             pubkey = %pubkey,
                             "Account completed undelegation which was missed and is fetched again"
                         );
+                        bank_hit_undelegating_refresh_required_count += 1;
                         metrics::inc_unstuck_undelegation_count();
-                        if let RefreshDecision::YesAndMarkEmptyIfNotFound =
-                            decision
+                        if let Some(
+                            RefreshDecision::YesAndMarkEmptyIfNotFound,
+                        ) = decision
                         {
                             extra_mark_empty.push(pubkey);
                         }
                     }
-                    RefreshDecision::No => {
+                    Some(RefreshDecision::No) => {
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
                                 pubkey = %pubkey,
                                 "Undelegating account still valid, no fetch needed"
                             );
                         }
+                        bank_hit_no_fetch_undelegating_still_valid_count += 1;
+                        in_bank.insert(pubkey);
+                    }
+                    None => {
+                        bank_hit_no_fetch_undelegating_timeout_count += 1;
                         in_bank.insert(pubkey);
                     }
                 }
             }
         }
+        metrics::inc_chainlink_bank_precheck_accounts(
+            fetch_origin,
+            BankPrecheckOutcome::BankHitNoFetch,
+            BankPrecheckReason::NonUndelegatingPresent,
+            bank_hit_no_fetch_non_undelegating_count,
+        );
+        metrics::inc_chainlink_bank_precheck_accounts(
+            fetch_origin,
+            BankPrecheckOutcome::BankHitNoFetch,
+            BankPrecheckReason::UndelegatingStillValid,
+            bank_hit_no_fetch_undelegating_still_valid_count,
+        );
+        metrics::inc_chainlink_bank_precheck_accounts(
+            fetch_origin,
+            BankPrecheckOutcome::BankHitNoFetch,
+            BankPrecheckReason::UndelegatingCheckTimeout,
+            bank_hit_no_fetch_undelegating_timeout_count,
+        );
+        metrics::inc_chainlink_bank_precheck_accounts(
+            fetch_origin,
+            BankPrecheckOutcome::BankHitUndelegatingRefreshRequired,
+            BankPrecheckReason::UndelegatingRefresh,
+            bank_hit_undelegating_refresh_required_count,
+        );
+        metrics::inc_chainlink_bank_precheck_accounts(
+            fetch_origin,
+            BankPrecheckOutcome::BankMissRemoteRequired,
+            BankPrecheckReason::Absent,
+            bank_miss_remote_required_count,
+        );
+        metrics::inc_chainlink_bank_precheck_accounts(
+            fetch_origin,
+            BankPrecheckOutcome::ForcedRefreshRemoteRequired,
+            BankPrecheckReason::ForcedRefresh,
+            forced_refresh_remote_required_count,
+        );
         pubkeys.retain(|p| !in_bank.contains(p));
 
         let mut mark_empty_set = mark_empty_if_not_found
