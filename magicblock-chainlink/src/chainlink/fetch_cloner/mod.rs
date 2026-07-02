@@ -75,7 +75,7 @@ use crate::{
         blacklisted_accounts::{
             blacklisted_accounts, programs_not_to_subscribe,
         },
-        unique_pubkey_estimator::UniquePubkeyStage,
+        unique_pubkey_estimator::{UniquePubkeyEstimator, UniquePubkeyStage},
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
@@ -307,6 +307,12 @@ where
         &self,
     ) -> &Arc<RemoteAccountProvider<T, U>> {
         &self.remote_account_provider
+    }
+
+    pub(crate) fn unique_pubkey_estimator(
+        &self,
+    ) -> &Arc<UniquePubkeyEstimator> {
+        self.remote_account_provider.unique_pubkey_estimator()
     }
 
     #[cfg(test)]
@@ -778,6 +784,11 @@ where
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::CloneFailed,
+                        );
+                        self.unique_pubkey_estimator().observe(
+                            fetch_origin,
+                            ChainlinkCloneOutcome::CloneFailed,
+                            &pubkey,
                         );
                         metrics::inc_chainlink_clone_accounts_total(
                             fetch_origin,

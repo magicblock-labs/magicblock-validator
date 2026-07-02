@@ -9,7 +9,9 @@ use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_metrics::metrics::AccountFetchOrigin;
+use magicblock_metrics::metrics::{
+    AccountFetchOrigin, ChainlinkCloneMaterializationOutcome,
+};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -551,6 +553,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 fetch_origin,
             )
             .await?;
+        let still_missing_after_ensure = pubkeys
+            .iter()
+            .filter(|pubkey| self.accounts_bank.get_account(pubkey).is_none())
+            .collect::<Vec<_>>();
+        fetch_cloner.unique_pubkey_estimator().observe_many(
+            fetch_origin,
+            ChainlinkCloneMaterializationOutcome::StillMissingAfterEnsure,
+            still_missing_after_ensure,
+        );
         trace!("Fetched and cloned accounts");
         Ok(result)
     }

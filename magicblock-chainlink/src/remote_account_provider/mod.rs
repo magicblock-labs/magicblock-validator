@@ -82,7 +82,9 @@ use magicblock_metrics::{
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{
-    chainlink::unique_pubkey_estimator::UniquePubkeyEstimator,
+    chainlink::unique_pubkey_estimator::{
+        UniquePubkeyEstimator, UniquePubkeyStage,
+    },
     errors::ChainlinkResult,
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient,
@@ -1631,12 +1633,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     reason.into(),
                     SubscriptionRegistrationOutcome::AlreadyPresent,
                 );
+                self.unique_pubkey_estimator.observe(
+                    origin,
+                    UniquePubkeyStage::SubscriptionAlreadyPresent,
+                    pubkey,
+                );
             }
             AddAccountOutcome::Added => {
                 inc_chainlink_subscription_registration_accounts(
                     origin,
                     reason.into(),
                     SubscriptionRegistrationOutcome::AddedBelowCapacity,
+                );
+                self.unique_pubkey_estimator.observe(
+                    origin,
+                    UniquePubkeyStage::SubscriptionAdded,
+                    pubkey,
                 );
             }
             AddAccountOutcome::Evicted(evicted) => {
@@ -1690,6 +1702,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     origin,
                     reason.into(),
                     SubscriptionRegistrationOutcome::EvictedCandidate,
+                );
+                self.unique_pubkey_estimator.observe(
+                    origin,
+                    UniquePubkeyStage::SubscriptionEvicted,
+                    &evicted,
+                );
+                self.unique_pubkey_estimator.observe(
+                    origin,
+                    UniquePubkeyStage::SubscriptionAdded,
+                    pubkey,
                 );
                 self.subscription_ownership.lock().await.remove(&evicted);
 
