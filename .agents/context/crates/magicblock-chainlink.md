@@ -313,6 +313,10 @@ Ownership is reference-counted per reason. Releasing one reason does not unsubsc
 
 `ensure_subscription` differs from `acquire_subscription`: it does not increment an already-held reason. This is used by eATA projection to keep an LRU entry warm without unbounded refcount growth.
 
+Registration outcome metrics (`chainlink_subscription_registration_accounts_total`, exported as `mbv_chainlink_subscription_registration_accounts_total`) are emitted once per claimed subscription attempt by origin, subscription reason, and terminal registration outcome. Waiter-only fetch callers do not independently set up subscriptions and are not counted separately; direct `try_get_multi` owners preserve their `AccountFetchOrigin`, while callers without a fetch origin use `internal`.
+
+Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_total{reason,outcome}` and `chainlink_subscription_cleanup_accounts_total{cleanup_source,outcome}`, exported with the `mbv_` prefix) are emitted only on cold subscription release/cleanup transition paths, never on per-update hot loops. Release metrics classify each explicit `release_subscription_with_mode` / silent delegated-account release result (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`). Cleanup metrics classify the actual unsubscribe/removal action by `cleanup_source` (`normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`) and `outcome` (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`). All labels are static/enum values only; no pubkey, signature, raw error, or endpoint labels are used.
+
 ### LRU and defensive eviction
 
 `AccountsLruCache` bounds monitored direct-account subscriptions. On capacity pressure:
