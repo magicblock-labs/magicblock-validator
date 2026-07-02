@@ -42,6 +42,12 @@ impl Outcome {
     }
 }
 
+impl LabelValue for Outcome {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
 // -----------------
 // AccountClone
 // -----------------
@@ -175,6 +181,174 @@ impl fmt::Display for BankPrecheckReason {
 }
 
 impl LabelValue for BankPrecheckReason {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkCloneRemoteResult {
+    Found,
+    NotFound,
+    Failed,
+}
+
+impl ChainlinkCloneRemoteResult {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Found => "found",
+            Self::NotFound => "not_found",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkCloneRemoteResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkCloneRemoteResult {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkCloneIntent {
+    NormalAccount,
+    EmptyPlaceholder,
+    ProgramData,
+    DelegationRecord,
+    Ata,
+    Eata,
+    ActionDependency,
+    Unknown,
+}
+
+impl ChainlinkCloneIntent {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::NormalAccount => "normal_account",
+            Self::EmptyPlaceholder => "empty_placeholder",
+            Self::ProgramData => "program_data",
+            Self::DelegationRecord => "delegation_record",
+            Self::Ata => "ata",
+            Self::Eata => "eata",
+            Self::ActionDependency => "action_dependency",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkCloneIntent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkCloneIntent {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkCloneOutcome {
+    Submitted,
+    SubmitFailed,
+    CloneSucceeded,
+    CloneFailed,
+    Skipped,
+}
+
+impl ChainlinkCloneOutcome {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Submitted => "submitted",
+            Self::SubmitFailed => "submit_failed",
+            Self::CloneSucceeded => "clone_succeeded",
+            Self::CloneFailed => "clone_failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkCloneOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkCloneOutcome {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkCloneMaterializationOutcome {
+    ObservedInBankAfterEnsure,
+    StillMissingAfterEnsure,
+    RemovedAfterMaterialization,
+}
+
+impl ChainlinkCloneMaterializationOutcome {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ObservedInBankAfterEnsure => "observed_in_bank_after_ensure",
+            Self::StillMissingAfterEnsure => "still_missing_after_ensure",
+            Self::RemovedAfterMaterialization => {
+                "removed_after_materialization"
+            }
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkCloneMaterializationOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkCloneMaterializationOutcome {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkEmptyPlaceholderStage {
+    ConvertedToEmpty,
+    CloneSubmitted,
+    CloneSubmitFailed,
+    ObservedInBankAfterEnsure,
+    StillMissingAfterEnsure,
+    /// Reserved for a future sampled/sketch implementation; current code does not retain per-pubkey state.
+    LaterRefetched,
+}
+
+impl ChainlinkEmptyPlaceholderStage {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ConvertedToEmpty => "converted_to_empty",
+            Self::CloneSubmitted => "clone_submitted",
+            Self::CloneSubmitFailed => "clone_submit_failed",
+            Self::ObservedInBankAfterEnsure => "observed_in_bank_after_ensure",
+            Self::StillMissingAfterEnsure => "still_missing_after_ensure",
+            Self::LaterRefetched => "later_refetched",
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkEmptyPlaceholderStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkEmptyPlaceholderStage {
     fn value(&self) -> &str {
         self.as_str()
     }

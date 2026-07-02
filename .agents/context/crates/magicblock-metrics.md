@@ -176,13 +176,12 @@ Several histograms use custom buckets when their expected durations are longer, 
 
 When adding a histogram, choose buckets around the expected latency distribution. Do not blindly reuse short microsecond/millisecond buckets for operations that normally take seconds or minutes, and do not use only large buckets for hot-path microsecond work.
 
-### Slot and clone cache
+### Slot
 
 | Wrapper/collector | Meaning |
 |---|---|
 | `set_slot(slot)` / `SLOT_GAUGE` | Local validator slot. Updated by the processor scheduler. |
 | `set_chain_slot(value)` / `CHAIN_SLOT_GAUGE` | Observed base-chain slot. Updated by Chainlink's chain-slot wrapper. |
-| `set_cached_clone_outputs_count(count)` / `CACHED_CLONE_OUTPUTS_COUNT` | Number of cached clone outputs in the remote account cloner worker. |
 
 ### Ledger and storage
 
@@ -204,7 +203,6 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 |---|---|
 | `set_accounts_size(value)` | Persisted account storage size in bytes. |
 | `set_accounts_count(value)` | Number of accounts in `AccountsDb`. |
-| `inc_pending_clone_requests()` / `dec_pending_clone_requests()` | In-memory pending account clone request gauge. Must remain balanced. |
 | `set_monitored_accounts_count(count)` | Absolute count of monitored accounts; callers must pass total count, not delta. |
 | `inc_evicted_accounts_count()` | Cumulative count of monitored accounts forcefully removed from monitor list/database. |
 | `inc_chainlink_bank_precheck_accounts(origin, outcome, reason, count)` / `chainlink_bank_precheck_accounts_total{origin,outcome,reason}` (exported as `mbv_chainlink_bank_precheck_accounts_total`) | Classifies `FetchCloner` account entries before remote provider fetch; call sites should aggregate per label bucket where practical and must not add pubkey labels. |
@@ -215,15 +213,21 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 | `inc_account_fetches_failed(count)` | Failed network account fetch count. |
 | `inc_account_fetches_found(origin, count)` | Network fetches that found accounts, labelled by `AccountFetchOrigin`. |
 | `inc_account_fetches_not_found(origin, count)` | Network fetches that did not find accounts, labelled by `AccountFetchOrigin`. |
+| `inc_chainlink_clone_accounts_total(origin, remote_result, clone_intent, outcome)` | Chainlink clone lifecycle attempts and outcomes, labelled by bounded enum-like origin, remote-result, clone-intent, and outcome values. |
+| `inc_chainlink_clone_materialization_accounts_total(origin, remote_result, outcome)` | Post-clone bank materialization checks, labelled by bounded enum-like origin, remote-result, and materialization-outcome values. |
+| `inc_chainlink_empty_placeholder_accounts_total(origin, stage, outcome)` | Empty-placeholder lifecycle events, labelled by bounded enum-like origin, placeholder-stage, and binary outcome values. |
 | `inc_undelegation_requested()` | Chainlink observed an undelegation request. |
 | `inc_undelegation_completed()` | Chainlink detected undelegation completion. |
 | `inc_unstuck_undelegation_count()` | Undelegating account was already undelegated on chain. |
 
 Important caveats:
 
-- `PENDING_ACCOUNT_CLONES_GAUGE` is a gauge. Every increment must have a matching decrement on all success, error, cancellation, and timeout paths.
 - `MONITORED_ACCOUNTS_GAUGE` is set to an absolute count. Do not call it with a delta.
 - Account fetch found/not-found counters include an `origin` label. Keep origin cardinality low and stable.
+- Clone lifecycle counters use only bounded enum-like labels. Do not include pubkeys, signatures, raw errors, endpoints, request parameters, or other unbounded/user-controlled values in these labels.
+- `remote_result=failed` is reserved for fetch failures before a clone request is built. Emit it only with `clone_intent=unknown` and `outcome=skipped` unless a later implementation has a concrete clone request to classify.
+- The clone lifecycle counters replace the stale clone-cache and pending-clone gauges removed by the eviction-vs-get metrics cleanup; use the counters for clone observability rather than reintroducing those gauges.
+- Empty-placeholder stages are bounded enum labels: `converted_to_empty` when Chainlink converts a remote `None` into the zero-lamport/default-owner/empty-data placeholder, `clone_submitted` after a placeholder clone is submitted, `clone_submit_failed` if that clone submission fails, `observed_in_bank_after_ensure` when the post-clone materialization check sees the placeholder in bank, and `still_missing_after_ensure` when the cloner returned success but the placeholder is still not visible. `later_refetched` is reserved for a future sampled/sketch implementation and is not emitted by the current code because retaining per-pubkey state would create unbounded memory/cardinality risk.
 - Subscription lifecycle counters are for Chainlink registration, release, and cleanup outcome classification. Call sites must use the provided enum/static labels only; do not add pubkey, signature, raw error, endpoint URL, or other free-form labels.
 - `AccountFetchOrigin::SendTransaction(Signature)` intentionally labels as only `send_transaction`; the signature is available through `signature()` for logging/correlation but must not become a Prometheus label.
 
@@ -335,6 +339,7 @@ It is implemented for:
 - `String`,
 - `Result<T, E>` where both sides implement `LabelValue`,
 - `AccountFetchOrigin`,
+- Chainlink clone lifecycle label enums (`ChainlinkCloneRemoteResult`, `ChainlinkCloneIntent`, `ChainlinkCloneOutcome`, `ChainlinkCloneMaterializationOutcome`, `ChainlinkEmptyPlaceholderStage`),
 - subscription lifecycle label enums (`SubscriptionRegistrationOrigin`, `SubscriptionReasonLabel`, `SubscriptionRegistrationOutcome`, `SubscriptionReleaseOutcome`, `SubscriptionCleanupSource`, `SubscriptionCleanupOutcome`),
 - downstream consumer types such as committor execution outputs and errors.
 
@@ -360,9 +365,9 @@ Use `Outcome::from_success(bool)` for binary success/error label values. Do not 
 
 The `SendTransaction` signature is intentionally not part of the label. Use `signature()` for tracing/log correlation only.
 
-### `AccountClone` and `AccountCommit`
+### `AccountCommit`
 
-`AccountClone<'a>` and `AccountCommit<'a>` describe account-clone and account-commit shapes, including fee payer, undelegated, delegated, program, commit-only, and commit-and-undelegate variants. They are currently defined in `types.rs` for shared metric modelling but are not broadly used by the current wrappers. If you wire them into live metrics, update this guide with their metric names and label behavior.
+`AccountCommit<'a>` describes account-commit shapes, including commit-only and commit-and-undelegate variants. It is currently defined in `types.rs` for shared metric modelling but is not broadly used by the current wrappers. If you wire it into live metrics, update this guide with its metric names and label behavior.
 
 ## Runtime flows
 
@@ -420,7 +425,7 @@ Preserve these invariants when editing this crate:
 4. **Labels must be bounded and low-cardinality.** Never use signatures, pubkeys, account addresses, transaction IDs, raw errors, endpoint URLs with secrets, or user input as labels unless a bounded cardinality design is documented.
 5. **Hot-path metrics must be cheap.** Avoid allocations, formatting, locks beyond Prometheus collector internals, and repeated label lookup in tight loops when a batch/outer operation metric is sufficient.
 6. **Gauge wrappers must preserve set-vs-delta semantics.** Some wrappers set absolute counts; others increment/decrement. Do not mix these up.
-7. **Increment/decrement gauges must be balanced on all control-flow paths.** This is especially important for pending clone request metrics.
+7. **Increment/decrement gauges must be balanced on all control-flow paths.** Do not reintroduce the removed pending-clone gauge; clone observability now comes from the lifecycle counters above.
 8. **Histograms must use seconds and meaningful buckets.** Bucket choices should match expected latency ranges.
 9. **Scrape handling must not mutate validator state.** `/metrics` observes registry values only.
 10. **Metrics service shutdown must remain cancellation-token driven.** Do not introduce shutdown paths that can block validator shutdown indefinitely.
@@ -463,6 +468,8 @@ Inspect:
 - integration tests or scripts that scrape metrics, such as subscription-limit tests.
 
 If a metric is obsolete, prefer a staged approach when possible: keep the old metric while adding the replacement, or document the exact replacement and update all repository references.
+
+The eviction-vs-get metrics plan intentionally removed the stale clone-cache/pending-clone gauges and replaced them with the clone lifecycle, clone materialization, and empty-placeholder counters documented above. Treat that as an operator-visible migration path rather than reintroducing the old gauges.
 
 ### Adding or changing labels
 
