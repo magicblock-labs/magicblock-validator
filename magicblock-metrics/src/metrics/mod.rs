@@ -6,7 +6,14 @@ use prometheus::{
     IntGauge, IntGaugeVec, Opts, Registry,
 };
 pub use types::{
-    AccountClone, AccountCommit, AccountFetchOrigin, LabelValue, Outcome,
+    AccountClone, AccountCommit, AccountFetchOrigin, BankPrecheckOutcome,
+    BankPrecheckReason, ChainlinkCloneIntent,
+    ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
+    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome, LabelValue,
+    Outcome, SubscriptionCleanupOutcome, SubscriptionCleanupSource,
+    SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
+    SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
 };
 
 mod types;
@@ -43,12 +50,6 @@ lazy_static::lazy_static! {
     static ref CHAIN_SLOT_GAUGE: IntGauge = IntGauge::new(
         "chain_slot_gauge", "Chain Slot Gauge",
     ).unwrap();
-
-    static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
-        "magicblock_account_cloner_cached_outputs_count",
-        "Number of cloned accounts in the RemoteAccountClonerWorker"
-    )
-    .unwrap();
 
     // -----------------
     // Ledger
@@ -153,11 +154,6 @@ lazy_static::lazy_static! {
         "accounts_count_gauge", "Number of accounts currently in the database",
     ).unwrap();
 
-
-    static ref PENDING_ACCOUNT_CLONES_GAUGE: IntGauge = IntGauge::new(
-        "pending_account_clones_gauge", "Total number of account clone requests still in memory",
-    ).unwrap();
-
     static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
         "monitored_accounts_gauge", "number of undelegated accounts, being monitored via websocket",
     ).unwrap();
@@ -172,6 +168,44 @@ lazy_static::lazy_static! {
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
 
+    static ref CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_bank_precheck_accounts_total",
+                "Account entries by FetchCloner bank precheck outcome before remote fetch",
+            ),
+            &["origin", "outcome", "reason"],
+        )
+        .unwrap();
+    static ref CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_subscription_registration_accounts_total",
+                "Account subscription registration attempts by origin, reason, and terminal outcome",
+            ),
+            &["origin", "subscription_reason", "outcome"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_subscription_release_accounts_total",
+                "Account subscription release attempts by reason and terminal outcome",
+            ),
+            &["reason", "outcome"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_subscription_cleanup_accounts_total",
+                "Account subscription cleanup actions by cleanup source and terminal outcome",
+            ),
+            &["cleanup_source", "outcome"],
+        )
+        .unwrap();
     static ref PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT: IntCounter = IntCounter::new(
         "program_subscription_discovered_dlp_update_delegated_elsewhere_count", "DLP-owned subscription updates that, after fetching the delegation record, were found delegated to another validator and dropped",
     ).unwrap();
@@ -203,6 +237,53 @@ lazy_static::lazy_static! {
                 "Number of account subscription activations when subscriptions did not match existing subscriptions",
             ),
             &["client_id"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_pending_fetch_accounts_total",
+                "Account fetch/clone requests by origin, pending-dedup layer, and owner/waiter outcome",
+            ),
+            &["origin", "layer", "outcome"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_PENDING_FETCH_WAITERS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_pending_fetch_waiters_total",
+                "Account fetch/clone requests that joined existing pending work by origin and pending-dedup layer",
+            ),
+            &["origin", "layer"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_PENDING_FETCH_WAITERS_GAUGE: IntGaugeVec =
+        IntGaugeVec::new(
+            Opts::new(
+                "chainlink_pending_fetch_waiters_gauge",
+                "Currently active account fetch/clone waiters by pending-dedup layer",
+            ),
+            &["layer"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_PENDING_FETCH_OWNER_DURATION_SECONDS: HistogramVec =
+        HistogramVec::new(
+            HistogramOpts::new(
+                "chainlink_pending_fetch_owner_duration_seconds",
+                "Time spent by pending fetch/clone owners by origin, pending-dedup layer, and terminal owner outcome",
+            )
+            .buckets(
+                MICROS_100_900.iter().chain(
+                MILLIS_1_9.iter()).chain(
+                MILLIS_10_90.iter()).chain(
+                MILLIS_100_900.iter()).chain(
+                SECONDS_1_9.iter()).cloned().collect()
+            ),
+            &["origin", "layer", "outcome"],
         )
         .unwrap();
 
@@ -295,6 +376,35 @@ lazy_static::lazy_static! {
     )
     .unwrap();
 
+    pub static ref CHAINLINK_CLONE_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_clone_accounts_total",
+                "Total number of Chainlink clone attempts and outcomes",
+            ),
+            &["origin", "remote_result", "clone_intent", "outcome"],
+        )
+        .unwrap();
+
+    pub static ref CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_clone_materialization_accounts_total",
+                "Total number of post-clone bank materialization checks",
+            ),
+            &["origin", "remote_result", "outcome"],
+        )
+        .unwrap();
+
+    pub static ref CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_empty_placeholder_accounts_total",
+                "Total number of Chainlink empty-placeholder lifecycle events",
+            ),
+            &["origin", "stage", "outcome"],
+        )
+        .unwrap();
 
     pub static ref PER_PROGRAM_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
@@ -597,7 +707,6 @@ pub(crate) fn register() {
         }
         register!(SLOT_GAUGE);
         register!(CHAIN_SLOT_GAUGE);
-        register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
         register!(LEDGER_BLOCK_TIMES_GAUGE);
         register!(LEDGER_BLOCKHASHES_GAUGE);
@@ -616,14 +725,21 @@ pub(crate) fn register() {
         register!(LEDGER_SHUTDOWN_TIME);
         register!(ACCOUNTS_SIZE_GAUGE);
         register!(ACCOUNTS_COUNT_GAUGE);
-        register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
+        register!(CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL);
         register!(PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT);
+        register!(CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_PENDING_FETCH_WAITERS_TOTAL);
+        register!(CHAINLINK_PENDING_FETCH_WAITERS_GAUGE);
+        register!(CHAINLINK_PENDING_FETCH_OWNER_DURATION_SECONDS);
         register!(COMMITTOR_INTENTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
@@ -644,6 +760,9 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
+        register!(CHAINLINK_CLONE_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL);
         register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
@@ -683,10 +802,6 @@ pub fn set_slot(slot: u64) {
 
 pub fn set_chain_slot(value: u64) {
     CHAIN_SLOT_GAUGE.set(value as i64);
-}
-
-pub fn set_cached_clone_outputs_count(count: usize) {
-    CACHED_CLONE_OUTPUTS_COUNT.set(count as i64);
 }
 
 pub fn set_ledger_size(size: u64) {
@@ -764,14 +879,6 @@ pub fn set_accounts_count(value: i64) {
     ACCOUNTS_COUNT_GAUGE.set(value)
 }
 
-pub fn inc_pending_clone_requests() {
-    PENDING_ACCOUNT_CLONES_GAUGE.inc()
-}
-
-pub fn dec_pending_clone_requests() {
-    PENDING_ACCOUNT_CLONES_GAUGE.dec()
-}
-
 pub fn inc_inflight_subscription_updates() {
     INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE.inc()
 }
@@ -793,6 +900,97 @@ pub fn set_monitored_accounts_count(count: usize) {
 }
 pub fn inc_evicted_accounts_count() {
     EVICTED_ACCOUNTS_COUNT.inc();
+}
+
+pub fn inc_chainlink_bank_precheck_accounts(
+    fetch_origin: AccountFetchOrigin,
+    outcome: BankPrecheckOutcome,
+    reason: BankPrecheckReason,
+    count: u64,
+) {
+    if count == 0 {
+        return;
+    }
+    CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            fetch_origin.value(),
+            outcome.value(),
+            reason.value(),
+        ])
+        .inc_by(count);
+}
+
+pub fn inc_chainlink_subscription_registration_accounts(
+    origin: SubscriptionRegistrationOrigin,
+    subscription_reason: SubscriptionReasonLabel,
+    outcome: SubscriptionRegistrationOutcome,
+) {
+    CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            origin.value(),
+            subscription_reason.value(),
+            outcome.value(),
+        ])
+        .inc();
+}
+
+pub fn inc_chainlink_subscription_release_accounts(
+    reason: SubscriptionReasonLabel,
+    outcome: SubscriptionReleaseOutcome,
+) {
+    CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL
+        .with_label_values(&[reason.value(), outcome.value()])
+        .inc();
+}
+
+pub fn inc_chainlink_subscription_cleanup_accounts(
+    cleanup_source: SubscriptionCleanupSource,
+    outcome: SubscriptionCleanupOutcome,
+) {
+    CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL
+        .with_label_values(&[cleanup_source.value(), outcome.value()])
+        .inc();
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_subscription_registration_accounts_value(
+    origin: SubscriptionRegistrationOrigin,
+    subscription_reason: SubscriptionReasonLabel,
+    outcome: SubscriptionRegistrationOutcome,
+) -> u64 {
+    CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL
+        .get_metric_with_label_values(&[
+            origin.value(),
+            subscription_reason.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_subscription_release_accounts_value(
+    reason: SubscriptionReasonLabel,
+    outcome: SubscriptionReleaseOutcome,
+) -> u64 {
+    CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL
+        .get_metric_with_label_values(&[reason.value(), outcome.value()])
+        .map(|m| m.get())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_subscription_cleanup_accounts_value(
+    cleanup_source: SubscriptionCleanupSource,
+    outcome: SubscriptionCleanupOutcome,
+) -> u64 {
+    CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL
+        .get_metric_with_label_values(&[
+            cleanup_source.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get())
+        .unwrap_or(0)
 }
 
 pub fn inc_discovered_dlp_update_delegated_elsewhere() {
@@ -883,6 +1081,46 @@ pub fn inc_account_fetches_not_found(
         .inc_by(count);
 }
 
+pub fn inc_chainlink_clone_accounts_total(
+    origin: AccountFetchOrigin,
+    remote_result: ChainlinkCloneRemoteResult,
+    clone_intent: ChainlinkCloneIntent,
+    outcome: ChainlinkCloneOutcome,
+) {
+    CHAINLINK_CLONE_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            origin.value(),
+            remote_result.value(),
+            clone_intent.value(),
+            outcome.value(),
+        ])
+        .inc();
+}
+
+pub fn inc_chainlink_clone_materialization_accounts_total(
+    origin: AccountFetchOrigin,
+    remote_result: ChainlinkCloneRemoteResult,
+    outcome: ChainlinkCloneMaterializationOutcome,
+) {
+    CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            origin.value(),
+            remote_result.value(),
+            outcome.value(),
+        ])
+        .inc();
+}
+
+pub fn inc_chainlink_empty_placeholder_accounts_total(
+    origin: AccountFetchOrigin,
+    stage: ChainlinkEmptyPlaceholderStage,
+    outcome: Outcome,
+) {
+    CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL
+        .with_label_values(&[origin.value(), stage.value(), outcome.value()])
+        .inc();
+}
+
 pub fn inc_program_subscription_account_updates_count(
     client_id: &impl LabelValue,
 ) {
@@ -903,6 +1141,91 @@ pub fn inc_account_subscription_activations_count(client_id: &impl LabelValue) {
     ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT
         .with_label_values(&[client_id.value()])
         .inc();
+}
+
+pub fn inc_chainlink_pending_fetch_accounts(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    outcome: ChainlinkPendingFetchOutcome,
+    count: u64,
+) {
+    CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL
+        .with_label_values(&[origin.value(), layer.value(), outcome.value()])
+        .inc_by(count);
+}
+
+pub fn inc_chainlink_pending_fetch_waiters(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    count: u64,
+) {
+    CHAINLINK_PENDING_FETCH_WAITERS_TOTAL
+        .with_label_values(&[origin.value(), layer.value()])
+        .inc_by(count);
+}
+
+pub fn inc_chainlink_pending_fetch_waiters_gauge(
+    layer: ChainlinkPendingFetchLayer,
+) {
+    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE
+        .with_label_values(&[layer.value()])
+        .inc();
+}
+
+pub fn dec_chainlink_pending_fetch_waiters_gauge(
+    layer: ChainlinkPendingFetchLayer,
+) {
+    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE
+        .with_label_values(&[layer.value()])
+        .dec();
+}
+
+pub fn observe_chainlink_pending_fetch_owner_duration_seconds(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    outcome: ChainlinkPendingFetchOutcome,
+    seconds: f64,
+) {
+    CHAINLINK_PENDING_FETCH_OWNER_DURATION_SECONDS
+        .with_label_values(&[origin.value(), layer.value(), outcome.value()])
+        .observe(seconds);
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_pending_fetch_accounts_value(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    outcome: ChainlinkPendingFetchOutcome,
+) -> u64 {
+    CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL
+        .get_metric_with_label_values(&[
+            origin.value(),
+            layer.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_pending_fetch_waiters_value(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+) -> u64 {
+    CHAINLINK_PENDING_FETCH_WAITERS_TOTAL
+        .get_metric_with_label_values(&[origin.value(), layer.value()])
+        .map(|m| m.get())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_pending_fetch_waiters_gauge_value(
+    layer: ChainlinkPendingFetchLayer,
+) -> i64 {
+    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE
+        .get_metric_with_label_values(&[layer.value()])
+        .map(|m| m.get())
+        .unwrap_or(0)
 }
 
 pub fn inc_per_program_account_updates_count(
