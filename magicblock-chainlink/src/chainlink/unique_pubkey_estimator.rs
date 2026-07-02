@@ -71,13 +71,10 @@ pub(crate) struct UniquePubkeyEstimator {
 impl Default for UniquePubkeyEstimator {
     fn default() -> Self {
         debug_assert_unique_stage_labels();
-        let estimator = Self {
+        Self {
             series: Mutex::default(),
             last_export_epoch_seconds: AtomicU64::default(),
-        };
-        #[cfg(feature = "dev-context")]
-        estimator.force_export_for_tests(0);
-        estimator
+        }
     }
 }
 
@@ -159,6 +156,7 @@ impl UniquePubkeyEstimator {
     }
 
     #[cfg(any(test, feature = "dev-context"))]
+    #[cfg_attr(feature = "dev-context", allow(dead_code))]
     pub fn force_export_for_tests(&self, now_epoch_seconds: u64) {
         let epoch_minute = now_epoch_seconds / BUCKET_SECONDS;
         let series = self.series.lock().unwrap_or_else(|err| err.into_inner());
