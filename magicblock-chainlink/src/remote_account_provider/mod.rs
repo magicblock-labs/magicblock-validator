@@ -68,7 +68,8 @@ use magicblock_metrics::{
     metrics::{
         dec_chainlink_pending_fetch_waiters_gauge, inc_account_fetches_failed,
         inc_account_fetches_found, inc_account_fetches_not_found,
-        inc_account_fetches_success, inc_chainlink_pending_fetch_accounts,
+        inc_account_fetches_success, inc_chainlink_empty_placeholder_accounts_total,
+        inc_chainlink_pending_fetch_accounts,
         inc_chainlink_pending_fetch_waiters,
         inc_chainlink_pending_fetch_waiters_gauge,
         inc_chainlink_subscription_cleanup_accounts,
@@ -76,10 +77,11 @@ use magicblock_metrics::{
         inc_chainlink_subscription_release_accounts,
         observe_chainlink_pending_fetch_owner_duration_seconds,
         set_monitored_accounts_count, AccountFetchOrigin,
-        ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
-        SubscriptionCleanupOutcome, SubscriptionCleanupSource,
-        SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
-        SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
+        ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
+        ChainlinkPendingFetchOutcome, Outcome, SubscriptionCleanupOutcome,
+        SubscriptionCleanupSource, SubscriptionReasonLabel,
+        SubscriptionRegistrationOrigin, SubscriptionRegistrationOutcome,
+        SubscriptionReleaseOutcome,
     },
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
@@ -2496,6 +2498,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                     None if mark_empty_if_not_found.contains(pubkey) => {
                         not_found_count += 1;
+                        inc_chainlink_empty_placeholder_accounts_total(
+                            fetch_origin,
+                            ChainlinkEmptyPlaceholderStage::ConvertedToEmpty,
+                            Outcome::Success,
+                        );
                         RemoteAccount::from_fresh_account(
                             Account {
                                 lamports: 0,

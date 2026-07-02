@@ -7,9 +7,11 @@ use prometheus::{
 };
 pub use types::{
     AccountClone, AccountCommit, AccountFetchOrigin, BankPrecheckOutcome,
-    BankPrecheckReason, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome, LabelValue, Outcome,
-    SubscriptionCleanupOutcome, SubscriptionCleanupSource,
+    BankPrecheckReason, ChainlinkCloneIntent,
+    ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
+    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome, LabelValue,
+    Outcome, SubscriptionCleanupOutcome, SubscriptionCleanupSource,
     SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
     SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
 };
@@ -48,12 +50,6 @@ lazy_static::lazy_static! {
     static ref CHAIN_SLOT_GAUGE: IntGauge = IntGauge::new(
         "chain_slot_gauge", "Chain Slot Gauge",
     ).unwrap();
-
-    static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
-        "magicblock_account_cloner_cached_outputs_count",
-        "Number of cloned accounts in the RemoteAccountClonerWorker"
-    )
-    .unwrap();
 
     // -----------------
     // Ledger
@@ -156,11 +152,6 @@ lazy_static::lazy_static! {
 
     static ref ACCOUNTS_COUNT_GAUGE: IntGauge = IntGauge::new(
         "accounts_count_gauge", "Number of accounts currently in the database",
-    ).unwrap();
-
-
-    static ref PENDING_ACCOUNT_CLONES_GAUGE: IntGauge = IntGauge::new(
-        "pending_account_clones_gauge", "Total number of account clone requests still in memory",
     ).unwrap();
 
     static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
@@ -385,6 +376,35 @@ lazy_static::lazy_static! {
     )
     .unwrap();
 
+    pub static ref CHAINLINK_CLONE_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_clone_accounts_total",
+                "Total number of Chainlink clone attempts and outcomes",
+            ),
+            &["origin", "remote_result", "clone_intent", "outcome"],
+        )
+        .unwrap();
+
+    pub static ref CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_clone_materialization_accounts_total",
+                "Total number of post-clone bank materialization checks",
+            ),
+            &["origin", "remote_result", "outcome"],
+        )
+        .unwrap();
+
+    pub static ref CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_empty_placeholder_accounts_total",
+                "Total number of Chainlink empty-placeholder lifecycle events",
+            ),
+            &["origin", "stage", "outcome"],
+        )
+        .unwrap();
 
     pub static ref PER_PROGRAM_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
@@ -687,7 +707,6 @@ pub(crate) fn register() {
         }
         register!(SLOT_GAUGE);
         register!(CHAIN_SLOT_GAUGE);
-        register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
         register!(LEDGER_BLOCK_TIMES_GAUGE);
         register!(LEDGER_BLOCKHASHES_GAUGE);
@@ -706,7 +725,6 @@ pub(crate) fn register() {
         register!(LEDGER_SHUTDOWN_TIME);
         register!(ACCOUNTS_SIZE_GAUGE);
         register!(ACCOUNTS_COUNT_GAUGE);
-        register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
         register!(EVICTED_ACCOUNTS_COUNT);
@@ -742,6 +760,9 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
+        register!(CHAINLINK_CLONE_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL);
         register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
@@ -781,10 +802,6 @@ pub fn set_slot(slot: u64) {
 
 pub fn set_chain_slot(value: u64) {
     CHAIN_SLOT_GAUGE.set(value as i64);
-}
-
-pub fn set_cached_clone_outputs_count(count: usize) {
-    CACHED_CLONE_OUTPUTS_COUNT.set(count as i64);
 }
 
 pub fn set_ledger_size(size: u64) {
@@ -860,14 +877,6 @@ pub fn set_accounts_size(value: i64) {
 
 pub fn set_accounts_count(value: i64) {
     ACCOUNTS_COUNT_GAUGE.set(value)
-}
-
-pub fn inc_pending_clone_requests() {
-    PENDING_ACCOUNT_CLONES_GAUGE.inc()
-}
-
-pub fn dec_pending_clone_requests() {
-    PENDING_ACCOUNT_CLONES_GAUGE.dec()
 }
 
 pub fn inc_inflight_subscription_updates() {
@@ -1070,6 +1079,46 @@ pub fn inc_account_fetches_not_found(
     ACCOUNT_FETCHES_NOT_FOUND_COUNT
         .with_label_values(&[fetch_origin.value()])
         .inc_by(count);
+}
+
+pub fn inc_chainlink_clone_accounts_total(
+    origin: AccountFetchOrigin,
+    remote_result: ChainlinkCloneRemoteResult,
+    clone_intent: ChainlinkCloneIntent,
+    outcome: ChainlinkCloneOutcome,
+) {
+    CHAINLINK_CLONE_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            origin.value(),
+            remote_result.value(),
+            clone_intent.value(),
+            outcome.value(),
+        ])
+        .inc();
+}
+
+pub fn inc_chainlink_clone_materialization_accounts_total(
+    origin: AccountFetchOrigin,
+    remote_result: ChainlinkCloneRemoteResult,
+    outcome: ChainlinkCloneMaterializationOutcome,
+) {
+    CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            origin.value(),
+            remote_result.value(),
+            outcome.value(),
+        ])
+        .inc();
+}
+
+pub fn inc_chainlink_empty_placeholder_accounts_total(
+    origin: AccountFetchOrigin,
+    stage: ChainlinkEmptyPlaceholderStage,
+    outcome: Outcome,
+) {
+    CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL
+        .with_label_values(&[origin.value(), stage.value(), outcome.value()])
+        .inc();
 }
 
 pub fn inc_program_subscription_account_updates_count(
