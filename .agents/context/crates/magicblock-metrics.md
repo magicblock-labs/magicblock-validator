@@ -219,6 +219,10 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 | `inc_undelegation_requested()` | Chainlink observed an undelegation request. |
 | `inc_undelegation_completed()` | Chainlink detected undelegation completion. |
 | `inc_unstuck_undelegation_count()` | Undelegating account was already undelegated on chain. |
+| `inc_chainlink_pending_fetch_accounts(origin, layer, outcome, count)` / `mbv_chainlink_pending_fetch_accounts_total{origin,layer,outcome}` | Account fetch/clone requests by origin, pending-dedup layer, and owner/waiter outcome. |
+| `inc_chainlink_pending_fetch_waiters(origin, layer, count)` / `mbv_chainlink_pending_fetch_waiters_total{origin,layer}` | Account fetch/clone requests that joined existing pending work by origin and pending-dedup layer. |
+| `inc_chainlink_pending_fetch_waiters_gauge(layer)` / `dec_chainlink_pending_fetch_waiters_gauge(layer)` / `mbv_chainlink_pending_fetch_waiters_gauge{layer}` | Currently active account fetch/clone waiters by pending-dedup layer. |
+| `observe_chainlink_pending_fetch_owner_duration_seconds(origin, layer, outcome, seconds)` / `mbv_chainlink_pending_fetch_owner_duration_seconds{origin,layer,outcome}` | Time spent by pending fetch/clone owners by origin, pending-dedup layer, and terminal owner outcome. |
 
 Important caveats:
 
@@ -230,6 +234,20 @@ Important caveats:
 - Empty-placeholder stages are bounded enum labels: `converted_to_empty` when Chainlink converts a remote `None` into the zero-lamport/default-owner/empty-data placeholder, `clone_submitted` after a placeholder clone is submitted, `clone_submit_failed` if that clone submission fails, `observed_in_bank_after_ensure` when the post-clone materialization check sees the placeholder in bank, and `still_missing_after_ensure` when the cloner returned success but the placeholder is still not visible. `later_refetched` is reserved for a future sampled/sketch implementation and is not emitted by the current code because retaining per-pubkey state would create unbounded memory/cardinality risk.
 - Subscription lifecycle counters are for Chainlink registration, release, and cleanup outcome classification. Call sites must use the provided enum/static labels only; do not add pubkey, signature, raw error, endpoint URL, or other free-form labels.
 - `AccountFetchOrigin::SendTransaction(Signature)` intentionally labels as only `send_transaction`; the signature is available through `signature()` for logging/correlation but must not become a Prometheus label.
+- `chainlink_pending_fetch_waiters_gauge` is incremented only for waiter joins, not for owner calls awaiting their own operation. It must be decremented on success, failure, cancellation, timeout, and waiter-drop paths.
+- Pending-fetch labels are low-cardinality enum/static labels only: `origin` uses `AccountFetchOrigin`, `layer` uses `fetch_cloner` or `remote_account_provider`, and `outcome` uses exactly `owned`, `joined_existing`, `owner_succeeded`, `owner_failed`, `owner_cancelled`, `resolved_by_subscription_update`, or `rpc_fetch_completed_after_update`.
+
+Useful PromQL examples for the pending-fetch contract use scraped `mbv_` names:
+
+```promql
+sum by (origin, layer) (rate(mbv_chainlink_pending_fetch_waiters_total[5m]))
+/
+sum by (origin, layer) (rate(mbv_chainlink_pending_fetch_accounts_total{outcome="owned"}[5m]))
+```
+
+```promql
+sum by (origin, layer, outcome) (rate(mbv_chainlink_pending_fetch_accounts_total[5m]))
+```
 
 ### RPC and aperture
 

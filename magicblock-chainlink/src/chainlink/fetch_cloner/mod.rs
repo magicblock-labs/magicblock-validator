@@ -23,7 +23,8 @@ use magicblock_metrics::metrics::{
     self, AccountFetchOrigin, BankPrecheckOutcome, BankPrecheckReason,
     ChainlinkCloneIntent, ChainlinkCloneMaterializationOutcome,
     ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
-    ChainlinkEmptyPlaceholderStage, Outcome,
+    ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome, Outcome,
 };
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
@@ -410,7 +411,11 @@ where
         }
     }
 
-    fn claim_or_join_owned_operation(&self, pubkey: Pubkey) -> PendingClaim {
+    fn claim_or_join_owned_operation(
+        &self,
+        pubkey: Pubkey,
+        fetch_origin: AccountFetchOrigin,
+    ) -> PendingClaim {
         let generation = self.next_pending_request_generation();
         let waiter_id = self.next_pending_waiter_id();
         claim_or_join_pending(
@@ -421,6 +426,8 @@ where
             Duration::from_millis(
                 self.pending_operation_timeout_ms.load(Ordering::Relaxed),
             ),
+            fetch_origin,
+            ChainlinkPendingFetchLayer::FetchCloner,
         )
     }
 
@@ -466,13 +473,21 @@ where
                         } else {
                             PendingFailure::OwnerFailed(owner_msg.clone())
                         };
+                        op.owner.finish(match failure {
+                            PendingFailure::Cancelled => {
+                                ChainlinkPendingFetchOutcome::OwnerCancelled
+                            }
+                            PendingFailure::OwnerFailed(_)
+                            | PendingFailure::TimedOut => {
+                                ChainlinkPendingFetchOutcome::OwnerFailed
+                            }
+                        });
                         finish_pending(
                             &pending,
                             op.pubkey,
                             op.generation,
                             PendingTerminal::Failed(failure),
                         );
-                        op.owner.dismiss();
                     }
                     return;
                 }
@@ -490,6 +505,22 @@ where
                 );
             }
         });
+    }
+
+    fn pending_terminal_owner_outcome(
+        terminal: &PendingTerminal,
+    ) -> ChainlinkPendingFetchOutcome {
+        match terminal {
+            PendingTerminal::Success(_) => {
+                ChainlinkPendingFetchOutcome::OwnerSucceeded
+            }
+            PendingTerminal::Failed(PendingFailure::Cancelled) => {
+                ChainlinkPendingFetchOutcome::OwnerCancelled
+            }
+            PendingTerminal::Failed(_) => {
+                ChainlinkPendingFetchOutcome::OwnerFailed
+            }
+        }
     }
 
     fn spawn_owned_operation(
@@ -536,8 +567,9 @@ where
                     PendingTerminal::Failed(PendingFailure::Cancelled)
                 }
             };
+            let outcome = Self::pending_terminal_owner_outcome(&terminal);
+            owner.finish(outcome);
             finish_pending(&pending, pubkey, generation, terminal);
-            owner.dismiss();
         });
     }
 
@@ -3038,7 +3070,7 @@ where
         let mut waiters: Vec<PendingWaiter> = vec![];
         let mut claimed_ops: Vec<ClaimedOperation> = vec![];
         for pubkey in pubkeys {
-            match self.claim_or_join_owned_operation(*pubkey) {
+            match self.claim_or_join_owned_operation(*pubkey, fetch_origin) {
                 PendingClaim::Created(handles) => {
                     let PendingHandles {
                         waiter,

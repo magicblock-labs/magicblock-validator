@@ -117,6 +117,74 @@ impl LabelValue for AccountFetchOrigin {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkPendingFetchLayer {
+    FetchCloner,
+    RemoteAccountProvider,
+}
+
+impl ChainlinkPendingFetchLayer {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::FetchCloner => "fetch_cloner",
+            Self::RemoteAccountProvider => "remote_account_provider",
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkPendingFetchLayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkPendingFetchLayer {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkPendingFetchOutcome {
+    Owned,
+    JoinedExisting,
+    OwnerSucceeded,
+    OwnerFailed,
+    OwnerCancelled,
+    ResolvedBySubscriptionUpdate,
+    RpcFetchCompletedAfterUpdate,
+}
+
+impl ChainlinkPendingFetchOutcome {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Owned => "owned",
+            Self::JoinedExisting => "joined_existing",
+            Self::OwnerSucceeded => "owner_succeeded",
+            Self::OwnerFailed => "owner_failed",
+            Self::OwnerCancelled => "owner_cancelled",
+            Self::ResolvedBySubscriptionUpdate => {
+                "resolved_by_subscription_update"
+            }
+            Self::RpcFetchCompletedAfterUpdate => {
+                "rpc_fetch_completed_after_update"
+            }
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkPendingFetchOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkPendingFetchOutcome {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BankPrecheckOutcome {
     BankHitNoFetch,
     BankHitUndelegatingRefreshRequired,

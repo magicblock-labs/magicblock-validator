@@ -1,6 +1,12 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use dlp_api::state::DelegationRecord;
+use magicblock_metrics::metrics::{
+    chainlink_pending_fetch_accounts_value,
+    chainlink_pending_fetch_waiters_gauge_value,
+    chainlink_pending_fetch_waiters_value, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome,
+};
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
 };
@@ -545,6 +551,30 @@ async fn wait_for_rpc_fetch_activity(
             >= expected_minimum,
         "rpc fetch activity should be at least {expected_minimum}"
     );
+}
+
+fn pending_accounts_value(
+    origin: AccountFetchOrigin,
+    outcome: ChainlinkPendingFetchOutcome,
+) -> u64 {
+    chainlink_pending_fetch_accounts_value(
+        origin,
+        ChainlinkPendingFetchLayer::FetchCloner,
+        outcome,
+    )
+}
+
+fn pending_waiters_value(origin: AccountFetchOrigin) -> u64 {
+    chainlink_pending_fetch_waiters_value(
+        origin,
+        ChainlinkPendingFetchLayer::FetchCloner,
+    )
+}
+
+fn pending_waiters_gauge_value() -> i64 {
+    chainlink_pending_fetch_waiters_gauge_value(
+        ChainlinkPendingFetchLayer::FetchCloner,
+    )
 }
 
 // -----------------
@@ -8169,6 +8199,8 @@ async fn test_owned_operation_waiters_share_missing_delegation_record_metadata()
 
 #[tokio::test]
 async fn test_pending_deadline_is_not_extended_by_late_joiners() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
     let pending = Arc::new(scc::HashMap::<Pubkey, Pending>::new());
     let pubkey = random_pubkey();
     let owner_budget = Duration::from_millis(200);
@@ -8180,6 +8212,8 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         1,
         1,
         owner_budget,
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Created(handles) => handles,
         PendingClaim::Joined(_) => panic!("expected owner to create pending"),
@@ -8193,6 +8227,8 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         2,
         2,
         joiner_budget,
+        AccountFetchOrigin::GetAccount,
+        ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Joined(handles) => handles,
         PendingClaim::Created(_) => {
@@ -8235,6 +8271,124 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         joiner_terminal,
         PendingTerminal::Failed(PendingFailure::TimedOut)
     ));
+}
+
+#[tokio::test]
+async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account = Account {
+        lamports: 2_000_000,
+        data: vec![5, 6, 7, 8],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(account_pubkey, account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
+    let owned_baseline = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::Owned,
+    );
+    let joined_baseline = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::JoinedExisting,
+    );
+    let waiters_baseline = pending_waiters_value(fetch_origin);
+
+    rpc_client.block_fetches();
+
+    let owner_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    fetch_origin,
+                )
+                .await
+        })
+    };
+
+    wait_for_pending_request(&fetch_cloner, account_pubkey).await;
+    wait_for_rpc_fetch_activity(&rpc_client, 1).await;
+
+    let waiter_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    fetch_origin,
+                )
+                .await
+        })
+    };
+
+    wait_for_pending_waiter_count(&fetch_cloner, account_pubkey, 2).await;
+    assert!(
+        pending_waiters_gauge_value() >= 1,
+        "fetch_cloner waiter gauge should include this test's joined waiter"
+    );
+
+    rpc_client.allow_fetches();
+
+    tokio::time::timeout(Duration::from_secs(2), owner_task)
+        .await
+        .expect("owner task should complete")
+        .expect("owner task should not panic")
+        .expect("owner fetch should succeed");
+    tokio::time::timeout(Duration::from_secs(2), waiter_task)
+        .await
+        .expect("waiter task should complete")
+        .expect("waiter task should not panic")
+        .expect("waiter fetch should succeed");
+
+    let owned_delta = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::Owned,
+    )
+    .saturating_sub(owned_baseline);
+    assert!(
+        owned_delta >= 1,
+        "fetch_cloner owned metric should increase by at least 1; got {owned_delta}"
+    );
+    let joined_delta = pending_accounts_value(
+        fetch_origin,
+        ChainlinkPendingFetchOutcome::JoinedExisting,
+    )
+    .saturating_sub(joined_baseline);
+    assert!(
+        joined_delta >= 1,
+        "fetch_cloner joined-existing metric should increase by at least 1; got {joined_delta}"
+    );
+    let waiters_delta =
+        pending_waiters_value(fetch_origin).saturating_sub(waiters_baseline);
+    assert!(
+        waiters_delta >= 1,
+        "fetch_cloner waiter metric should increase by at least 1; got {waiters_delta}"
+    );
 }
 
 #[tokio::test]
