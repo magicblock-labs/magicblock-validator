@@ -82,6 +82,7 @@ use magicblock_metrics::{
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{
+    chainlink::unique_pubkey_estimator::UniquePubkeyEstimator,
     errors::ChainlinkResult,
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient,
@@ -506,6 +507,8 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
 
     subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
 
+    unique_pubkey_estimator: Arc<UniquePubkeyEstimator>,
+
     /// Task that periodically updates the active subscriptions gauge
     _active_subscriptions_task_handle: Option<task::JoinHandle<()>>,
 }
@@ -704,6 +707,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             lrucache_subscribed_accounts,
             capacity_eviction_protection: Arc::new(RwLock::new(None)),
             subscription_forwarder: Arc::new(subscription_forwarder),
+            unique_pubkey_estimator: Arc::default(),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
             _active_subscriptions_task_handle: active_subscriptions_updater,
@@ -725,6 +729,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 Ok(me)
             }
         }
+    }
+
+    pub(crate) fn unique_pubkey_estimator(
+        &self,
+    ) -> &Arc<UniquePubkeyEstimator> {
+        &self.unique_pubkey_estimator
     }
 
     pub async fn try_new_from_endpoints(

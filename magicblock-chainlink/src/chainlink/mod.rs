@@ -35,6 +35,7 @@ mod blacklisted_accounts;
 pub mod config;
 pub mod errors;
 pub mod fetch_cloner;
+pub(crate) mod unique_pubkey_estimator;
 
 pub use blacklisted_accounts::*;
 
