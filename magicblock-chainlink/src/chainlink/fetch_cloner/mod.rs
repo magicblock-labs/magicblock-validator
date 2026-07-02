@@ -2958,8 +2958,8 @@ where
             for (pubkey, decision) in join_set.join_all().await {
                 match decision {
                     Some(
-                        RefreshDecision::Yes
-                        | RefreshDecision::YesAndMarkEmptyIfNotFound,
+                        decision @ (RefreshDecision::Yes
+                        | RefreshDecision::YesAndMarkEmptyIfNotFound),
                     ) => {
                         debug!(
                             pubkey = %pubkey,
@@ -2967,9 +2967,8 @@ where
                         );
                         bank_hit_undelegating_refresh_required_count += 1;
                         metrics::inc_unstuck_undelegation_count();
-                        if let Some(
-                            RefreshDecision::YesAndMarkEmptyIfNotFound,
-                        ) = decision
+                        if let RefreshDecision::YesAndMarkEmptyIfNotFound =
+                            decision
                         {
                             extra_mark_empty.push(pubkey);
                         }
