@@ -3,6 +3,7 @@ pub mod compat;
 pub mod instruction;
 pub mod pda;
 pub mod response;
+pub mod sysvar;
 
 pub use compat::{declare_id, pubkey, Pubkey};
 

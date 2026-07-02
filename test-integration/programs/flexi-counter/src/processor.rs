@@ -13,6 +13,7 @@ use ephemeral_rollups_sdk::{
 };
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
+    sysvar::HighPrecisionClock,
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -148,7 +149,49 @@ pub fn process(
         TransferActionHandler { amount, fail } => {
             process_transfer_action_handler(accounts, amount, fail)
         }
+        RecordHighPrecisionClock => {
+            process_record_high_precision_clock(accounts)
+        }
     }?;
+    Ok(())
+}
+
+fn process_record_high_precision_clock(
+    accounts: &[AccountInfo],
+) -> ProgramResult {
+    msg!("RecordHighPrecisionClock");
+
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
+        format!(
+            "Invalid Counter PDA {}, should be {}",
+            counter_pda_info.key, counter_pda
+        )
+    })?;
+
+    // Read the sysvar straight from the runtime cache
+    let high_precision_clock = HighPrecisionClock::get()?;
+    msg!(
+        "Observed unix_timestamp={} nanos={}",
+        high_precision_clock.unix_timestamp,
+        high_precision_clock.nanos
+    );
+
+    // Record the observed value into the counter so the test can assert it is
+    // reproduced identically after a ledger replay.
+    let mut counter =
+        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
+    counter.count = high_precision_clock.nanos as u64;
+    counter.updates = high_precision_clock.unix_timestamp as u64;
+
+    let size = counter_pda_info.data_len();
+    let counter_data = to_vec(&counter)?;
+    counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
+
     Ok(())
 }
 

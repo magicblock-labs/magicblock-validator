@@ -19,6 +19,7 @@ use magicblock_core::link::{
     },
 };
 use magicblock_ledger::Ledger;
+use magicblock_program::sysvar::{HighPrecisionClock, HIGH_PRECISION_CLOCK_ID};
 use serde::Serialize;
 use solana_account::AccountSharedData;
 use solana_feature_set::FeatureSet;
@@ -92,6 +93,11 @@ impl TransactionSchedulerState {
 
         // Mutable sysvars (updated on each slot transition)
         self.ensure_sysvar(&sysvar::clock::ID, &block.clock);
+        let high_precision_clock = HighPrecisionClock {
+            unix_timestamp: block.clock.unix_timestamp,
+            nanos: block.nanos,
+        };
+        self.ensure_sysvar(&HIGH_PRECISION_CLOCK_ID, &high_precision_clock);
         let slot_hashes =
             SlotHashes::new(&[(block.slot, block.blockhash); MAX_ENTRIES]);
         self.ensure_sysvar(&sysvar::slot_hashes::ID, &slot_hashes);

@@ -79,6 +79,10 @@ pub struct Block {
     pub hash: Hash,
     /// Unix timestamp (seconds).
     pub timestamp: i64,
+    /// Sub-second component of the timestamp, in nanoseconds
+    /// (`[0, 1_000_000_000)`), preserving the precision discarded when
+    /// rounding down to whole seconds for `timestamp`.
+    pub nanos: u32,
 }
 
 /// Periodic checkpoint for state verification and catch-up.

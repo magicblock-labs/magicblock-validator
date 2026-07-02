@@ -267,6 +267,17 @@ pub enum FlexiCounterInstruction {
         num_commit: u8,
         num_commit_finalize: u8,
     },
+
+    /// Reads the MagicBlock `HighPrecisionClock` sysvar (from the runtime cache
+    /// via `HighPrecisionClock::get()`, no account passed) and records the
+    /// observed value into the counter PDA so it can be verified to survive
+    /// ledger replay deterministically: `count` receives the sub-second `nanos`
+    /// and `updates` receives the whole-second `unix_timestamp`.
+    ///
+    /// Accounts:
+    /// 0. `[signer]` The payer that created the account.
+    /// 1. `[write]`  The counter PDA account that will be updated.
+    RecordHighPrecisionClock,
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -316,6 +327,22 @@ pub fn create_add_ix(payer: Pubkey, count: u8) -> Instruction {
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::Add { count },
+        accounts,
+    )
+}
+
+pub fn create_record_high_precision_clock_ix(payer: Pubkey) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    // No sysvar account is passed: the program reads the HighPrecisionClock
+    // straight from the runtime cache via `HighPrecisionClock::get()`.
+    let accounts = vec![
+        AccountMeta::new_readonly(payer, true),
+        AccountMeta::new(pda, false),
+    ];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::RecordHighPrecisionClock,
         accounts,
     )
 }

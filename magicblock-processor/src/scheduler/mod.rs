@@ -66,6 +66,7 @@ use magicblock_core::{
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
 use magicblock_metrics::metrics;
+use magicblock_program::sysvar::{HighPrecisionClock, HIGH_PRECISION_CLOCK_ID};
 use solana_account::{from_account, to_account};
 use solana_program::{clock::Clock, hash::Hash, slot_hashes::SlotHashes};
 use solana_program_runtime::loaded_programs::ProgramCache;
@@ -391,8 +392,12 @@ impl TransactionScheduler {
             .await
             .map_err(|_| "scheduler semaphore closed".to_string())?;
 
-        let block =
-            LatestBlockInner::new(block.slot, block.hash, block.timestamp);
+        let block = LatestBlockInner::new_with_nanos(
+            block.slot,
+            block.hash,
+            block.timestamp,
+            block.nanos,
+        );
         self.verify_block_as_replica(&block);
         self.ledger
             .write_block(block.clone())
@@ -578,17 +583,21 @@ impl TransactionScheduler {
         // NOTE:
         // As we have a single node network, we have no
         // option but to use the time from host machine
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            // NOTE: since we can tick very frequently, a lot
-            // of blocks might have identical timestamps
-            .as_secs() as i64;
-        let block = LatestBlockInner::new(self.slot, blockhash, timestamp);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        // NOTE: since we can tick very frequently, a lot
+        // of blocks might have identical timestamps
+        let timestamp = now.as_secs() as i64;
+        // The discarded sub-second precision is preserved separately and
+        // exposed via the HighPrecisionClock sysvar.
+        let nanos = now.subsec_nanos();
+        let block = LatestBlockInner::new_with_nanos(
+            self.slot, blockhash, timestamp, nanos,
+        );
         let msg = Message::Block(replication::Block {
             slot: block.slot,
             hash: block.blockhash,
             timestamp: block.clock.unix_timestamp,
+            nanos: block.nanos,
         });
         self.send_replication(msg).await;
         block
@@ -639,6 +648,7 @@ impl TransactionScheduler {
 
         self.update_program_cache(block.slot);
         self.update_clock_sysvar(&block.clock);
+        self.update_high_precision_clock_sysvar(block);
         self.update_slot_hashes_sysvar(block.slot, &block.blockhash);
     }
 
@@ -656,6 +666,22 @@ impl TransactionScheduler {
         if let Some(mut account) = self.accountsdb.get_account(&clock::ID) {
             let _ = account.serialize_data(clock);
             let _ = self.accountsdb.insert_account(&clock::ID, &account);
+        }
+    }
+
+    /// Updates the HighPrecisionClock sysvar account.
+    fn update_high_precision_clock_sysvar(&self, block: &LatestBlockInner) {
+        if let Some(mut account) =
+            self.accountsdb.get_account(&HIGH_PRECISION_CLOCK_ID)
+        {
+            let high_precision_clock = HighPrecisionClock {
+                unix_timestamp: block.clock.unix_timestamp,
+                nanos: block.nanos,
+            };
+            let _ = account.serialize_data(&high_precision_clock);
+            let _ = self
+                .accountsdb
+                .insert_account(&HIGH_PRECISION_CLOCK_ID, &account);
         }
     }
 

@@ -15,6 +15,11 @@ pub struct LatestBlockInner {
     pub slot: u64,
     pub blockhash: Hash,
     pub clock: Clock,
+    /// Sub-second component of the block timestamp, in nanoseconds
+    /// (`[0, 1_000_000_000)`). Together with `clock.unix_timestamp` this forms
+    /// the high-precision timestamp; `clock.unix_timestamp` is that value
+    /// rounded down to the whole second.
+    pub nanos: u32,
 }
 
 /// Atomically updated, shared, latest block information
@@ -45,7 +50,19 @@ impl LatestBlockInner {
             slot,
             blockhash,
             clock,
+            nanos: 0,
         }
+    }
+
+    pub fn new_with_nanos(
+        slot: u64,
+        blockhash: Hash,
+        timestamp: i64,
+        nanos: u32,
+    ) -> Self {
+        let mut inner = Self::new(slot, blockhash, timestamp);
+        inner.nanos = nanos;
+        inner
     }
 }
 

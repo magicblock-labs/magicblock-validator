@@ -17,6 +17,7 @@ use magicblock_core::{
     Slot,
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
+use magicblock_program::sysvar::HighPrecisionClock;
 use solana_feature_set::FeatureSet;
 use solana_program::slot_hashes::SlotHashes;
 use solana_program_runtime::loaded_programs::{
@@ -252,6 +253,10 @@ impl TransactionExecutor {
     fn set_sysvars(&self, block: &LatestBlockInner) {
         let mut cache = self.processor.writable_sysvar_cache().write().unwrap();
         cache.set_sysvar_for_tests(&block.clock);
+        cache.set_sysvar_for_tests(&HighPrecisionClock {
+            unix_timestamp: block.clock.unix_timestamp,
+            nanos: block.nanos,
+        });
 
         if let Ok(hashes) = cache.get_slot_hashes() {
             let mut hashes = SlotHashes::new(hashes.slot_hashes());

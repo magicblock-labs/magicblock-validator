@@ -15,6 +15,8 @@ const ADDRESS_SIGNATURES_CF: &str = "address_signatures";
 const SLOT_SIGNATURES_CF: &str = "slot_signatures";
 /// Column family for Blocktime
 const BLOCKTIME_CF: &str = "blocktime";
+/// Column family for the sub-second (nanosecond) component of the block time
+const BLOCKTIME_NANOS_CF: &str = "blocktime_nanos";
 /// Column family for Blockhash
 const BLOCKHASH_CF: &str = "blockhash";
 /// Column family for Confirmed Transaction
@@ -60,6 +62,17 @@ pub struct SlotSignatures;
 /// * value type: [`UnixTimestamp`]
 pub struct Blocktime;
 
+/// The sub-second component of the block time, in nanoseconds.
+///
+/// Stored separately from [`Blocktime`] (which holds whole seconds) so that the
+/// high-precision timestamp exposed via the `HighPrecisionClock` sysvar can be
+/// reproduced deterministically during ledger replay. Absent for slots written
+/// by older validators, in which case it is treated as `0`.
+///
+/// * index type: `u64` (see [`SlotColumn`])
+/// * value type: `u32`
+pub struct BlocktimeNanos;
+
 /// The block hash column
 ///
 /// * index type: `u64` (see [`SlotColumn`])
@@ -102,6 +115,7 @@ pub fn columns() -> Vec<&'static str> {
         AddressSignatures::NAME,
         SlotSignatures::NAME,
         Blocktime::NAME,
+        BlocktimeNanos::NAME,
         Blockhash::NAME,
         Transaction::NAME,
         TransactionMemos::NAME,
@@ -465,6 +479,17 @@ impl ColumnName for Blocktime {
 }
 impl TypedColumn for Blocktime {
     type Type = solana_clock::UnixTimestamp;
+}
+
+// -----------------
+// BlocktimeNanos
+// -----------------
+impl SlotColumn for BlocktimeNanos {}
+impl ColumnName for BlocktimeNanos {
+    const NAME: &'static str = BLOCKTIME_NANOS_CF;
+}
+impl TypedColumn for BlocktimeNanos {
+    type Type = u32;
 }
 
 // -----------------
