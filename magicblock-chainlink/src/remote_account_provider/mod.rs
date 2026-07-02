@@ -68,7 +68,8 @@ use magicblock_metrics::{
     metrics::{
         dec_chainlink_pending_fetch_waiters_gauge, inc_account_fetches_failed,
         inc_account_fetches_found, inc_account_fetches_not_found,
-        inc_account_fetches_success, inc_chainlink_empty_placeholder_accounts_total,
+        inc_account_fetches_success,
+        inc_chainlink_empty_placeholder_accounts_total,
         inc_chainlink_pending_fetch_accounts,
         inc_chainlink_pending_fetch_waiters,
         inc_chainlink_pending_fetch_waiters_gauge,
