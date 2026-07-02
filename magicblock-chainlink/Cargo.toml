@@ -62,4 +62,4 @@ magicblock-metrics = { workspace = true, features = ["dev-context"] }
 
 [features]
 default = []
-dev-context = []
+dev-context = ["magicblock-metrics/dev-context"]

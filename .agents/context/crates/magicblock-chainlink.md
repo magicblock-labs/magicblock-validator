@@ -128,7 +128,9 @@ Before fetching remotely:
 3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed.
 4. Remaining pubkeys enter `pending_requests` ownership coordination.
 
-Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. Pending owners have:
+Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. The upper dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="fetch_cloner"`. Owner-side internal waiters are not counted in the active waiter gauge; only callers that join existing work are counted. Metric labels remain bounded enum/static values and do not include pubkeys, signatures, errors, endpoint URLs, or raw messages.
+
+Pending owners have:
 
 - generation IDs to avoid stale cleanup,
 - cancellation hooks,
@@ -154,6 +156,10 @@ Unique pubkey estimates are emitted through `chainlink_unique_pubkeys_estimate{o
 3. Starts an RPC fetch with `min_context_slot` equal to the observed chain slot or requested slot.
 4. Waits for either RPC results or a subscription update that is at least as new as the fetch start slot.
 5. Returns results in input order.
+
+The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="remote_account_provider"`. Claimed pubkeys record `owned`; calls that join existing `fetching_accounts` work record `joined_existing`, waiter total, and active waiter gauge. Subscription-update wins record `resolved_by_subscription_update`, while late RPC completions after such a win or replacement record `rpc_fetch_completed_after_update`. `FetchingAccountState` stores bounded metric metadata (`AccountFetchOrigin` and owner start time) so subscription-update completion uses the original origin without adding pubkey/signature labels.
+
+This pending-fetch instrumentation does not change fetch/clone behavior, dedup ownership, subscription ordering, or remote-fetch retry behavior; it only records counters, gauges, and histograms on existing control-flow edges.
 
 RPC fetches use Base64Zstd encoding, commitment from the RPC client, `min_context_slot`, timeout/retry handling, and metrics for success/found/not-found/failure.
 

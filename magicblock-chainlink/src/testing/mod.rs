@@ -16,6 +16,13 @@ pub mod utils;
 #[cfg(any(test, feature = "dev-context"))]
 pub use utils::init_logger;
 
+#[cfg(test)]
+pub fn pending_metric_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> =
+        std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 #[macro_export]
 macro_rules! assert_subscribed {
     ($provider:expr, $pubkeys:expr) => {{
