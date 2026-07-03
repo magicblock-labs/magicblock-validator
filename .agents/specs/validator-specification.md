@@ -356,6 +356,14 @@ already delegated to another validator, the e-token delegation instruction is
 the expected validator-mismatch failure gate; the DLP commit/undelegation must
 not be treated as successful.
 
+For commit-and-undelegate scheduling paths, fee-vault charging and commit-limit
+checks must happen before local accounts are marked undelegating, because the
+local mutation clears the `delegated` flag and the payer can also be one of the
+undelegated accounts. Token-2022 rent-pending ATA initialization must mirror the
+mint's default account state extension; a mint whose `DefaultAccountState` is
+`Frozen` must create a frozen local rent-pending ATA rather than an initialized
+one.
+
 ## RPC and router specification
 
 The MagicBlock Router API implements most standard Solana JSON-RPC methods and adds MagicBlock-specific methods.

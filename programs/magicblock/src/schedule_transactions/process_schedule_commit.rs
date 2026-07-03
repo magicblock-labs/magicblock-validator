@@ -152,6 +152,7 @@ pub(crate) fn process_schedule_commit(
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
     let mut rent_pending_ata_materializations = Vec::new();
+    let mut undelegated_accounts_ref = Vec::new();
     let mut seen_committed_pubkeys: HashSet<Pubkey> = HashSet::new();
     for idx in committees_start..ix_accs_len {
         let acc_pubkey =
@@ -263,25 +264,7 @@ pub(crate) fn process_schedule_commit(
         }
 
         if opts.request_undelegation {
-            // If the account is scheduled to be undelegated then we need to lock it
-            // immediately in order to prevent the following actions:
-            // - writes to the account
-            // - scheduling further commits for this account
-            //
-            // Setting the owner will prevent both, since in both cases the _actual_
-            // owner program needs to sign for the account which is not possible at
-            // that point
-            // NOTE: this owner change only takes effect if the transaction which
-            // includes this instruction succeeds.
-            //
-            // We also set the undelegating flag on the account in order to detect
-            // undelegations for which we miss updates
-            mark_account_as_undelegated(&acc)?;
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit: Marking account {} as undelegating",
-                acc_pubkey
-            );
+            undelegated_accounts_ref.push((*acc_pubkey, acc));
         }
     }
 
@@ -309,6 +292,28 @@ pub(crate) fn process_schedule_commit(
         // We validate commit nonces only for plain commits.
         // If accounts are undelegated we don't want to fail.
         check_commit_limits(&committed_accounts, invoke_context)?;
+    }
+
+    for (acc_pubkey, acc) in undelegated_accounts_ref.iter() {
+        // If the account is scheduled to be undelegated then we need to lock it
+        // immediately in order to prevent the following actions:
+        // - writes to the account
+        // - scheduling further commits for this account
+        //
+        // Setting the owner will prevent both, since in both cases the _actual_
+        // owner program needs to sign for the account which is not possible at
+        // that point
+        // NOTE: this owner change only takes effect if the transaction which
+        // includes this instruction succeeds.
+        //
+        // We also set the undelegating flag on the account in order to detect
+        // undelegations for which we miss updates
+        mark_account_as_undelegated(acc)?;
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit: Marking account {} as undelegating",
+            acc_pubkey
+        );
     }
 
     // NOTE: this is only protected by all the above checks however if the

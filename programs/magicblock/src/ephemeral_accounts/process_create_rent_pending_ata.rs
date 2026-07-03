@@ -19,8 +19,9 @@ use spl_token::state::{
 };
 use spl_token_2022::{
     extension::{
-        BaseStateWithExtensions, BaseStateWithExtensionsMut, ExtensionType,
-        StateWithExtensions, StateWithExtensionsMut,
+        default_account_state::DefaultAccountState, BaseStateWithExtensions,
+        BaseStateWithExtensionsMut, ExtensionType, StateWithExtensions,
+        StateWithExtensionsMut,
     },
     state::{
         Account as Token2022Account, AccountState as Token2022AccountState,
@@ -40,6 +41,7 @@ const TOKEN_PROGRAM_IDX: u16 = 3;
 struct TokenAccountShape {
     len: usize,
     required_extensions: Vec<ExtensionType>,
+    initial_state: Token2022AccountState,
 }
 
 pub(crate) fn process_create_rent_pending_ata(
@@ -125,6 +127,7 @@ pub(crate) fn process_create_rent_pending_ata(
         wallet_owner,
         mint,
         &token_account_shape.required_extensions,
+        token_account_shape.initial_state,
     )?;
     acc.set_remote_slot(0);
     acc.set_delegated(true);
@@ -168,6 +171,7 @@ fn token_account_shape(
         Ok(TokenAccountShape {
             len: SplAccount::LEN,
             required_extensions: Vec::new(),
+            initial_state: Token2022AccountState::Initialized,
         })
     } else {
         let mint = StateWithExtensions::<Token2022Mint>::unpack(mint_data)
@@ -175,6 +179,16 @@ fn token_account_shape(
         let mint_extensions = mint
             .get_extension_types()
             .map_err(|_| InstructionError::InvalidAccountData)?;
+        let initial_state =
+            if mint_extensions.contains(&ExtensionType::DefaultAccountState) {
+                let default_state = mint
+                    .get_extension::<DefaultAccountState>()
+                    .map_err(|_| InstructionError::InvalidAccountData)?;
+                Token2022AccountState::try_from(default_state.state)
+                    .map_err(|_| InstructionError::InvalidAccountData)?
+            } else {
+                Token2022AccountState::Initialized
+            };
         let required_extensions =
             ExtensionType::get_required_init_account_extensions(
                 &mint_extensions,
@@ -186,6 +200,7 @@ fn token_account_shape(
         Ok(TokenAccountShape {
             len,
             required_extensions,
+            initial_state,
         })
     }
 }
@@ -196,6 +211,7 @@ fn initialize_token_data(
     wallet_owner: Pubkey,
     mint: Pubkey,
     required_extensions: &[ExtensionType],
+    initial_state: Token2022AccountState,
 ) -> Result<(), InstructionError> {
     if *token_program == TOKEN_PROGRAM_ID {
         let account = SplAccount {
@@ -226,7 +242,7 @@ fn initialize_token_data(
             owner: wallet_owner,
             amount: 0,
             delegate: COption::None,
-            state: Token2022AccountState::Initialized,
+            state: initial_state,
             is_native: COption::None,
             delegated_amount: 0,
             close_authority: COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY),
@@ -311,6 +327,12 @@ mod tests {
             .unwrap();
         for extension_type in extension_types {
             match extension_type {
+                ExtensionType::DefaultAccountState => {
+                    let extension = state
+                        .init_extension::<DefaultAccountState>(false)
+                        .unwrap();
+                    extension.state = Token2022AccountState::Frozen.into();
+                }
                 ExtensionType::NonTransferable => {
                     state.init_extension::<NonTransferable>(false).unwrap();
                 }
@@ -525,6 +547,62 @@ mod tests {
             token_account.base.close_authority,
             COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
         );
+        assert!(try_get_rent_pending_ata_info(&ata, ata_after).is_some());
+    }
+
+    #[test]
+    fn create_rent_pending_token_2022_ata_honors_default_account_state() {
+        let payer = Pubkey::new_unique();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata_with_token_program(
+            &wallet_owner,
+            &mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+
+        let ix = Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CreateRentPendingAta {
+                wallet_owner,
+                mint,
+                token_program: TOKEN_2022_PROGRAM_ID,
+            },
+            vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new(ata, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false),
+            ],
+        );
+        let accounts = process_instruction(
+            &ix.data,
+            vec![
+                (
+                    payer,
+                    AccountSharedData::new(1_000_000, 0, &system_program::id()),
+                ),
+                (ata, AccountSharedData::new(0, 0, &system_program::id())),
+                (
+                    mint,
+                    token_2022_mint_account(&[
+                        ExtensionType::DefaultAccountState,
+                    ]),
+                ),
+                (
+                    TOKEN_2022_PROGRAM_ID,
+                    AccountSharedData::new(1, 0, &native_loader::id()),
+                ),
+            ],
+            ix.accounts,
+            Ok(()),
+        );
+
+        let ata_after = &accounts[1];
+        let token_account =
+            StateWithExtensions::<Token2022Account>::unpack(ata_after.data())
+                .unwrap();
+        assert_eq!(token_account.base.state, Token2022AccountState::Frozen);
         assert!(try_get_rent_pending_ata_info(&ata, ata_after).is_some());
     }
 }
