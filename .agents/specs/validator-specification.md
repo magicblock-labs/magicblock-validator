@@ -259,13 +259,15 @@ This is a critical lifecycle invariant. Do not allow normal ER transactions to k
 
 Owner-program requested undelegation is recorded by the Delegation Program in
 `DelegationMetadata.undelegation_requester = OwnerProgram` and an
-`UndelegationRequest` PDA. This marker is not a validator-side completion
-signal: the validator must still commit/finalize the latest ER state. For
-commit/finalize, commit-finalize, and commit-finalize-from-buffer paths, the
-committor supplies the DLP auto-undelegation accounts using the delegated
-account's owner program and `DelegationMetadata.rent_payer`; it derives the
-request PDA for those instruction metas and does not need to fetch or decode
-`UndelegationRequest` during task construction.
+`UndelegationRequest` PDA. Validator-requested undelegation is recorded as
+`DelegationMetadata.undelegation_requester = Validator`. These markers are not
+validator-side completion signals: the validator must still commit/finalize the
+latest ER state. For commit/finalize, commit-finalize, and
+commit-finalize-from-buffer paths, the committor supplies the DLP
+auto-undelegation accounts using the delegated account's owner program and
+`DelegationMetadata.rent_payer`; it derives the request PDA for those
+instruction metas and does not need to fetch or decode `UndelegationRequest`
+during task construction.
 
 The validator observes owner-program `UndelegationRequest` PDAs through
 Chainlink and `magicblock-accounts`. Live request-account subscription updates
@@ -274,12 +276,12 @@ accounts with a filtered `getProgramAccounts` every configured interval
 (`chainlink.undelegation-request-poll-interval`, default `5m`) and feeds the
 decoded requests into the same `ScheduleCommitAndUndelegate` scheduling path.
 
-If DLP sees `OwnerProgram` requester during a successful finalize path, it
-finalizes the committed state and undelegates/closes the delegation/request PDAs
-in the same instruction flow. An explicit undelegate instruction later in the
-same transaction may no-op once ownership has already returned to the owner
-program. `AlreadyUndelegated` remains a conflict for validator-requested
-undelegation state, not a reason to drop an owner-program request.
+If DLP sees `OwnerProgram` or `Validator` requester during a successful
+finalize-style path, it finalizes the committed state and undelegates/closes the
+delegation PDAs in the same instruction flow. Owner-program requests also close
+the request PDA and reimburse its rent payer. Validator-requested
+`CommitAndUndelegate` should rely on this auto-undelegation behavior and must
+not append a separate explicit `Undelegate` task for the same account.
 
 ### Callback discriminator
 

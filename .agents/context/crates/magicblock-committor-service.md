@@ -191,7 +191,7 @@ IntentExecutorImpl::execute
   -> TaskBuilderImpl::commit_tasks + finalize_tasks
      -> fetch next commit nonces, delegation metadata, and diffable base accounts using max(remote_slot)
      -> persist commit_id for each committed account
-     -> create commit, commit-finalize, undelegate, finalize, and action tasks
+     -> create commit, commit-finalize, finalize, explicit undelegate, and action tasks
   -> TaskStrategist::build_execution_strategy
      -> try single transaction when total task count <= 22 and it fits
      -> optimize large tasks to buffers when needed
@@ -203,7 +203,7 @@ IntentExecutorImpl::execute
   -> reset nonce cache for all committed pubkeys on errors, or only undelegated pubkeys on successful undelegation
 ```
 
-Task building fetches `DelegationMetadata` for accounts whose base-layer flow may finalize. `FinalizeTask` and `CommitFinalizeTask` include the delegated account owner and `DelegationMetadata.rent_payer` so the Delegation Program can auto-undelegate owner-program requests during finalize, commit-finalize, and commit-finalize-from-buffer. The active task-building path derives the request PDA through the DLP instruction builders and does not fetch or decode `UndelegationRequest`; explicit undelegate tasks still pass `request_rent_payer = None` unless a future path deliberately restores request-account decoding.
+Task building fetches `DelegationMetadata` for accounts whose base-layer flow may finalize. `FinalizeTask` and `CommitFinalizeTask` include the delegated account owner and `DelegationMetadata.rent_payer` so the Delegation Program can auto-undelegate owner-program and validator requests during finalize, commit-finalize, and commit-finalize-from-buffer. Validator-requested `CommitAndUndelegate` no longer emits a trailing `UndelegateTask`; post-undelegate base actions are still scheduled after the finalize task. The active task-building path derives the request PDA through the DLP instruction builders and does not fetch or decode `UndelegationRequest`; explicit undelegate tasks still pass `request_rent_payer = None` unless a future path deliberately restores request-account decoding.
 
 Transaction fit is not only packet size. `TaskStrategist` currently checks whether a single-stage transaction or each two-stage transaction fits the wire size, optionally after switching commits to buffers and adding ALTs, but it does not split a transaction stage by compute units. Each commit, finalize, commit-finalize, and undelegate task currently advertises `120_000` CU, while Agave caps a transaction at `1_400_000` CU. Keep task bundles below that transaction-level cap unless the strategist and executor/output/persistence model are extended to split, record, and confirm multiple transactions for the affected stage.
 

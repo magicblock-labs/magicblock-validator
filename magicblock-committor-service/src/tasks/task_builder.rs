@@ -20,7 +20,7 @@ use crate::{
     tasks::{
         commit_task::{CommitDelivery, CommitTask},
         BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
-        CommitFinalizeTask, FinalizeTask, UndelegateTask,
+        CommitFinalizeTask, FinalizeTask,
     },
 };
 
@@ -172,9 +172,6 @@ impl TaskBuilderImpl {
         [
             intent_bundle.get_commit_intent_pubkeys(),
             intent_bundle.get_undelegate_intent_pubkeys(),
-            intent_bundle
-                .intent_bundle
-                .get_commit_finalize_and_undelegate_intent_pubkeys(),
         ]
         .into_iter()
         .flatten()
@@ -360,21 +357,6 @@ impl TasksBuilder for TaskBuilderImpl {
             .into()
         }
 
-        // Helper to create an undelegate task
-        fn undelegate_task(
-            account: &CommittedAccount,
-            rent_reimbursement: &Pubkey,
-            request_rent_payer: Option<Pubkey>,
-        ) -> BaseTaskImpl {
-            UndelegateTask {
-                delegated_account: account.pubkey,
-                owner_program: account.account.owner,
-                rent_reimbursement: *rent_reimbursement,
-                request_rent_payer,
-            }
-            .into()
-        }
-
         // Helper to process commit types
         fn create_finalize_tasks(
             commit: &CommitType,
@@ -417,29 +399,16 @@ impl TasksBuilder for TaskBuilderImpl {
             }
         }
 
-        fn create_undelegate_tasks(
+        fn create_post_undelegate_action_tasks(
             commit_and_undelegate: &CommitAndUndelegate,
-            delegation_metadata: &HashMap<Pubkey, DelegationMetadata>,
-        ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
-            let accounts = commit_and_undelegate.get_committed_accounts();
-
-            let mut tasks = accounts
-                .iter()
-                .map(|account| {
-                    let rent_reimbursement = rent_reimbursement(
-                        delegation_metadata,
-                        account.pubkey,
-                    )?;
-                    Ok(undelegate_task(account, &rent_reimbursement, None))
-                })
-                .collect::<TaskBuilderResult<Vec<_>>>()?;
-
+        ) -> Vec<BaseTaskImpl> {
             if let UndelegateType::WithBaseActions(actions) =
                 &commit_and_undelegate.undelegate_action
             {
-                tasks.extend(TaskBuilderImpl::create_action_tasks(actions));
+                TaskBuilderImpl::create_action_tasks(actions).collect()
+            } else {
+                Vec::new()
             }
-            Ok(tasks)
         }
 
         let mut tasks = Vec::new();
@@ -470,13 +439,13 @@ impl TasksBuilder for TaskBuilderImpl {
                 &value.commit_action,
                 &delegation_metadata,
             )?);
-            tasks.extend(create_undelegate_tasks(value, &delegation_metadata)?);
+            tasks.extend(create_post_undelegate_action_tasks(value));
         }
 
         if let Some(ref value) =
             intent_bundle.intent_bundle.commit_finalize_and_undelegate
         {
-            tasks.extend(create_undelegate_tasks(value, &delegation_metadata)?);
+            tasks.extend(create_post_undelegate_action_tasks(value));
         }
 
         Ok(tasks)

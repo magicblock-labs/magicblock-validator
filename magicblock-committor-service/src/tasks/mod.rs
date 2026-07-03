@@ -571,7 +571,11 @@ mod serialization_safety_test {
 
     use dlp_api::{
         discriminator::DlpDiscriminator,
-        pda::undelegation_request_pda_from_delegated_account,
+        pda::{
+            fees_vault_pda, undelegate_buffer_pda_from_delegated_account,
+            undelegation_request_pda_from_delegated_account,
+            validator_fees_vault_pda_from_validator,
+        },
     };
     use magicblock_core::intent::CommittedAccount;
     use magicblock_program::{
@@ -714,6 +718,120 @@ mod serialization_safety_test {
         assert_eq!(ix.accounts[13].pubkey, request_rent_payer);
         assert!(ix.accounts[13].is_writable);
         assert!(!ix.accounts[13].is_signer);
+    }
+
+    #[test]
+    fn test_finalize_task_includes_auto_undelegation_accounts() {
+        let validator = Pubkey::new_unique();
+        let delegated_account = Pubkey::new_unique();
+        let owner_program = Pubkey::new_unique();
+        let rent_reimbursement = Pubkey::new_unique();
+
+        let ix = FinalizeTask {
+            delegated_account,
+            owner_program,
+            rent_reimbursement,
+        }
+        .instruction(&validator);
+
+        assert_eq!(ix.program_id, dlp_api::id());
+        assert_eq!(ix.data, DlpDiscriminator::Finalize.to_vec());
+        assert_eq!(ix.accounts.len(), 13);
+        assert_eq!(
+            ix.accounts[6].pubkey,
+            validator_fees_vault_pda_from_validator(&validator)
+        );
+        assert_eq!(ix.accounts[8].pubkey, owner_program);
+        assert_eq!(
+            ix.accounts[9].pubkey,
+            undelegate_buffer_pda_from_delegated_account(&delegated_account)
+        );
+        assert_eq!(ix.accounts[10].pubkey, rent_reimbursement);
+        assert_eq!(ix.accounts[11].pubkey, fees_vault_pda());
+        assert_eq!(
+            ix.accounts[12].pubkey,
+            undelegation_request_pda_from_delegated_account(&delegated_account)
+        );
+    }
+
+    fn make_commit_finalize_task() -> CommitFinalizeTask {
+        let delegated_account = Pubkey::new_unique();
+        let owner_program = Pubkey::new_unique();
+        CommitFinalizeTask {
+            commit_id: 1,
+            allow_undelegation: true,
+            committed_account: CommittedAccount {
+                pubkey: delegated_account,
+                account: Account {
+                    lamports: 1_000,
+                    data: vec![1, 2, 3],
+                    owner: owner_program,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+                remote_slot: Default::default(),
+            },
+            delivery: CommitDelivery::StateInArgs,
+            rent_reimbursement: Pubkey::new_unique(),
+        }
+    }
+
+    #[test]
+    fn test_commit_finalize_task_includes_auto_undelegation_accounts() {
+        let validator = Pubkey::new_unique();
+        let task = make_commit_finalize_task();
+        let delegated_account = task.committed_account.pubkey;
+        let owner_program = task.committed_account.account.owner;
+        let rent_reimbursement = task.rent_reimbursement;
+
+        let ix = task.instruction(&validator);
+
+        assert_eq!(ix.program_id, dlp_api::id());
+        assert!(ix
+            .data
+            .starts_with(&DlpDiscriminator::CommitFinalize.to_vec()));
+        assert_eq!(ix.accounts.len(), 11);
+        assert_eq!(ix.accounts[6].pubkey, owner_program);
+        assert_eq!(
+            ix.accounts[7].pubkey,
+            undelegate_buffer_pda_from_delegated_account(&delegated_account)
+        );
+        assert_eq!(ix.accounts[8].pubkey, rent_reimbursement);
+        assert_eq!(ix.accounts[9].pubkey, fees_vault_pda());
+        assert_eq!(
+            ix.accounts[10].pubkey,
+            undelegation_request_pda_from_delegated_account(&delegated_account)
+        );
+    }
+
+    #[test]
+    fn test_commit_finalize_from_buffer_task_includes_auto_undelegation_accounts(
+    ) {
+        let validator = Pubkey::new_unique();
+        let mut task = make_commit_finalize_task();
+        assert!(task.try_optimize_tx_size());
+        let delegated_account = task.committed_account.pubkey;
+        let owner_program = task.committed_account.account.owner;
+        let rent_reimbursement = task.rent_reimbursement;
+
+        let ix = task.instruction(&validator);
+
+        assert_eq!(ix.program_id, dlp_api::id());
+        assert!(ix
+            .data
+            .starts_with(&DlpDiscriminator::CommitFinalizeFromBuffer.to_vec()));
+        assert_eq!(ix.accounts.len(), 12);
+        assert_eq!(ix.accounts[7].pubkey, owner_program);
+        assert_eq!(
+            ix.accounts[8].pubkey,
+            undelegate_buffer_pda_from_delegated_account(&delegated_account)
+        );
+        assert_eq!(ix.accounts[9].pubkey, rent_reimbursement);
+        assert_eq!(ix.accounts[10].pubkey, fees_vault_pda());
+        assert_eq!(
+            ix.accounts[11].pubkey,
+            undelegation_request_pda_from_delegated_account(&delegated_account)
+        );
     }
 
     fn make_buffer_commit_task(

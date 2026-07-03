@@ -477,7 +477,7 @@ mod tests {
     };
     use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
-        BaseAction, ProgramArgs,
+        BaseAction, ProgramArgs, UndelegateType,
     };
     use solana_account::Account;
     use solana_pubkey::Pubkey;
@@ -901,7 +901,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_finalize_tasks_uses_metadata_rent_payer_for_undelegate() {
+    async fn test_commit_and_undelegate_finalize_stage_auto_undelegates() {
         let delegated_account = Pubkey::new_unique();
         let intent = create_test_intent(0, &[delegated_account], true);
         let info_fetcher = Arc::new(MockInfoFetcher);
@@ -910,18 +910,46 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks.len(), 1);
         let BaseTaskImpl::Finalize(task) = &tasks[0] else {
             panic!("expected finalize task");
         };
         assert_eq!(task.delegated_account, delegated_account);
         assert_eq!(task.rent_reimbursement, delegated_account);
-        let BaseTaskImpl::Undelegate(task) = &tasks[1] else {
-            panic!("expected undelegate task");
-        };
-        assert_eq!(task.delegated_account, delegated_account);
-        assert_eq!(task.rent_reimbursement, delegated_account);
-        assert_eq!(task.request_rent_payer, None);
+    }
+
+    #[tokio::test]
+    async fn test_commit_and_undelegate_finalize_stage_keeps_post_undelegate_actions(
+    ) {
+        let delegated_account = Pubkey::new_unique();
+        let mut intent = create_test_intent(0, &[delegated_account], true);
+        intent
+            .intent_bundle
+            .commit_and_undelegate
+            .as_mut()
+            .unwrap()
+            .undelegate_action =
+            UndelegateType::WithBaseActions(vec![BaseAction {
+                destination_program: Pubkey::new_unique(),
+                source_program: None,
+                escrow_authority: Pubkey::new_unique(),
+                account_metas_per_program: vec![],
+                data_per_program: ProgramArgs {
+                    data: vec![1, 2, 3],
+                    escrow_index: 0,
+                },
+                compute_units: 30_000,
+                callback: None,
+            }]);
+        let info_fetcher = Arc::new(MockInfoFetcher);
+
+        let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
+
+        assert_eq!(tasks.len(), 2);
+        assert!(matches!(tasks[0], BaseTaskImpl::Finalize(_)));
+        assert!(matches!(tasks[1], BaseTaskImpl::BaseAction(_)));
     }
 
     #[tokio::test]
@@ -957,9 +985,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_two_stage_mode_no_alts() {
-        let pubkeys: [_; 3] = std::array::from_fn(|_| Pubkey::new_unique());
-        let intent = create_test_intent(0, &pubkeys, true);
+    async fn test_build_two_stage_mode_when_united_task_limit_is_exceeded() {
+        let pubkeys: [_; 5] = std::array::from_fn(|_| Pubkey::new_unique());
+        let mut intent = create_test_intent(0, &pubkeys, true);
+        let make_action = || BaseAction {
+            destination_program: Pubkey::new_unique(),
+            source_program: None,
+            escrow_authority: Pubkey::new_unique(),
+            account_metas_per_program: vec![],
+            data_per_program: ProgramArgs {
+                data: vec![1],
+                escrow_index: 0,
+            },
+            compute_units: 30_000,
+            callback: None,
+        };
+        intent.intent_bundle.standalone_actions =
+            (0..6).map(|_| make_action()).collect();
+        intent
+            .intent_bundle
+            .commit_and_undelegate
+            .as_mut()
+            .unwrap()
+            .undelegate_action = UndelegateType::WithBaseActions(
+            (0..7).map(|_| make_action()).collect(),
+        );
 
         let info_fetcher = Arc::new(MockInfoFetcher);
         let commit_task = TaskBuilderImpl::commit_tasks(
@@ -989,8 +1039,8 @@ mod tests {
         else {
             panic!("Unexpected execution mode");
         };
-        assert!(!commit_stage.uses_alts());
-        assert!(!finalize_stage.uses_alts());
+        assert_eq!(commit_stage.optimized_tasks.len(), 11);
+        assert_eq!(finalize_stage.optimized_tasks.len(), 12);
     }
 
     #[tokio::test]
