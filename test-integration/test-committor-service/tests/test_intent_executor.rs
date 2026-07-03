@@ -1427,12 +1427,13 @@ async fn create_two_stage_executor<'a>(
     let commit_tasks = TaskBuilderImpl::commit_tasks(
         task_info_fetcher,
         intent,
+        authority,
         &None::<IntentPersisterImpl>,
     )
     .await
     .unwrap();
     let finalize_tasks =
-        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
+        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent, authority)
             .await
             .unwrap();
     let commit_strategy = TaskStrategist::build_strategy(
@@ -1696,12 +1697,13 @@ async fn single_flow_transaction_strategy(
     let mut tasks = TaskBuilderImpl::commit_tasks(
         task_info_fetcher,
         intent,
+        authority,
         &None::<IntentPersisterImpl>,
     )
     .await
     .unwrap();
     let finalize_tasks =
-        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
+        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent, authority)
             .await
             .unwrap();
     tasks.extend(finalize_tasks);
