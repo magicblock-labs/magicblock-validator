@@ -372,7 +372,7 @@ pub struct CacheTaskInfoFetcher<T> {
 
 impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
     pub fn new(inner: T) -> Self {
-        const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
+        const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(10_000).unwrap();
 
         Self {
             inner,
