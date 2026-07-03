@@ -5,6 +5,8 @@ use solana_pubkey::Pubkey;
 
 use crate::token_programs::try_remap_ata_to_eata;
 
+pub mod schedule;
+
 pub type CommittedAccountRef = (Pubkey, AccountSharedData);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
