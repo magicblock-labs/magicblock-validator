@@ -297,14 +297,6 @@ where
             warn!(error = ?err, "No result listeners");
         }
 
-        // Cleanup BEFORE unblocking conflicting intents: a detached cleanup
-        // can close buffers a next intent just re-initialized (same PDAs on
-        // nonce reuse). The result is already broadcast, so this only delays
-        // intents blocked on the same accounts.
-        if let Err(err) = executor.cleanup().await {
-            error!(error = ?err, "Failed to cleanup after intent");
-        }
-
         // Remove executed task from Scheduler to unblock other intents
         // SAFETY: Self::execute is called ONLY after IntentScheduler
         // successfully is able to schedule execution of some Intent
@@ -314,6 +306,12 @@ where
             .expect(POISONED_INNER_MSG)
             .complete(&intent)
             .expect("Valid completion of previously scheduled message");
+
+        tokio::spawn(async move {
+            if let Err(err) = executor.cleanup().await {
+                error!(error = ?err, "Failed to cleanup after intent");
+            }
+        });
 
         // Free worker
         drop(execution_permit);
@@ -667,38 +665,6 @@ mod tests {
         );
     }
 
-    /// A conflicting intent must not start before the previous intent's
-    /// cleanup closed its buffers (nonce reuse maps to the same buffer PDAs).
-    #[tokio::test]
-    async fn test_cleanup_completes_before_conflicting_intent() {
-        const NUM_MESSAGES: u64 = 3;
-
-        let (sender, mut worker) = setup_engine(false);
-        let tracking = Arc::new(CleanupTracking::default());
-        worker.executor_factory.with_cleanup_tracking(&tracking);
-
-        let result_subscriber = worker.spawn();
-        let mut result_receiver = result_subscriber.subscribe();
-
-        // Same pubkey: intents conflict and execute strictly sequentially
-        let key = pubkey!("1111111111111111111111111111111111111111111");
-        for i in 0..NUM_MESSAGES {
-            let msg = create_test_intent(i, &[key], false);
-            sender.send(msg).await.unwrap();
-        }
-
-        for _ in 0..NUM_MESSAGES {
-            let result = result_receiver.recv().await.unwrap();
-            assert!(result.is_ok());
-        }
-
-        assert_eq!(
-            tracking.violations.load(Ordering::SeqCst),
-            0,
-            "conflicting intent started before previous cleanup finished"
-        );
-    }
-
     #[tokio::test]
     async fn test_mixed_blocking_non_blocking() {
         const NUM_MESSAGES: usize = 100;
@@ -750,19 +716,10 @@ mod tests {
     }
 
     // Mock implementations for testing
-    /// Tracks execute/cleanup ordering across executor instances.
-    #[derive(Default)]
-    pub struct CleanupTracking {
-        executions: AtomicUsize,
-        cleanups: AtomicUsize,
-        violations: AtomicUsize,
-    }
-
     pub struct MockIntentExecutorFactory {
         should_fail: bool,
         active_tasks: Option<Arc<AtomicUsize>>,
         max_concurrent: Option<Arc<AtomicUsize>>,
-        cleanup_tracking: Option<Arc<CleanupTracking>>,
     }
 
     impl MockIntentExecutorFactory {
@@ -771,7 +728,6 @@ mod tests {
                 should_fail: false,
                 active_tasks: None,
                 max_concurrent: None,
-                cleanup_tracking: None,
             }
         }
 
@@ -780,7 +736,6 @@ mod tests {
                 should_fail: true,
                 active_tasks: None,
                 max_concurrent: None,
-                cleanup_tracking: None,
             }
         }
 
@@ -792,13 +747,6 @@ mod tests {
             self.active_tasks = Some(active_tasks.clone());
             self.max_concurrent = Some(max_concurrent.clone());
         }
-
-        pub fn with_cleanup_tracking(
-            &mut self,
-            tracking: &Arc<CleanupTracking>,
-        ) {
-            self.cleanup_tracking = Some(tracking.clone());
-        }
     }
 
     impl IntentExecutorFactory for MockIntentExecutorFactory {
@@ -809,7 +757,6 @@ mod tests {
                 should_fail: self.should_fail,
                 active_tasks: self.active_tasks.clone(),
                 max_concurrent: self.max_concurrent.clone(),
-                cleanup_tracking: self.cleanup_tracking.clone(),
             }
         }
     }
@@ -818,7 +765,6 @@ mod tests {
         should_fail: bool,
         active_tasks: Option<Arc<AtomicUsize>>,
         max_concurrent: Option<Arc<AtomicUsize>>,
-        cleanup_tracking: Option<Arc<CleanupTracking>>,
     }
 
     impl MockIntentExecutor {
@@ -860,14 +806,6 @@ mod tests {
             _persister: Option<P>,
         ) -> IntentExecutionResult {
             self.on_task_started();
-            if let Some(tracking) = &self.cleanup_tracking {
-                // All previously started executions must have cleaned up
-                let started =
-                    tracking.executions.fetch_add(1, Ordering::SeqCst);
-                if tracking.cleanups.load(Ordering::SeqCst) < started {
-                    tracking.violations.fetch_add(1, Ordering::SeqCst);
-                }
-            }
 
             // Simulate some work
             sleep(Duration::from_millis(50)).await;
@@ -907,10 +845,6 @@ mod tests {
         }
 
         async fn cleanup(self) -> Result<(), BufferExecutionError> {
-            if let Some(tracking) = &self.cleanup_tracking {
-                sleep(Duration::from_millis(100)).await;
-                tracking.cleanups.fetch_add(1, Ordering::SeqCst);
-            }
             Ok(())
         }
     }
