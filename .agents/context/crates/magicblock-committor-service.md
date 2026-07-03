@@ -200,7 +200,7 @@ IntentExecutorImpl::execute
   -> TransactionPreparator prepares buffers/ALTs and assembles VersionedMessage
   -> SingleStageExecutor or TwoStageExecutor sends base-layer transactions
   -> persist final status/signatures and schedule callbacks
-  -> reset nonce cache on errors or undelegation
+  -> reset nonce cache for all committed pubkeys on errors, or only undelegated pubkeys on successful undelegation
 ```
 
 For committed accounts with `data.len() > COMMIT_STATE_SIZE_THRESHOLD` (`256`), the task builder fetches the base account and may use diff-in-args delivery. If the base-account fetch fails, it falls back to full state args and logs a warning. This can increase transaction size and trigger buffer/ALT strategy later.
@@ -221,7 +221,9 @@ Cleanup closes prepared buffers and releases TableMania pubkeys. `IntentExecutio
 
 ### Commit nonce cache
 
-`CacheTaskInfoFetcher` caches commit nonces in a 1,000-entry LRU. It uses per-pubkey async mutexes acquired in sorted order to avoid A→B / B→A deadlocks, and a `retiring` map to keep evicted locks alive while in-flight requests still hold them. `fetch_next_commit_nonces` increments cached values and reserves the next nonce; `fetch_current_commit_nonces` reads/stores the current value without incrementing. After a failed commit or undelegation, `IntentExecutorImpl` resets the cache for affected pubkeys.
+`CacheTaskInfoFetcher` caches commit nonces in a 10,000-entry LRU. It uses per-pubkey async mutexes acquired in sorted order to avoid A->B / B->A deadlocks, and a `retiring` map to keep evicted locks alive while in-flight requests still hold them. `fetch_next_commit_nonces` increments cached values and reserves the next nonce; `fetch_current_commit_nonces` reads/stores the current value without incrementing.
+
+`IntentExecutorImpl` resets cached nonces according to execution certainty. On any execution error, it resets all committed pubkeys because it cannot know what landed on chain. On successful undelegation paths, it resets only the pubkeys returned by `get_undelegate_intent_pubkeys()` and `get_commit_finalize_and_undelegate_intent_pubkeys()`. Other successfully committed pubkeys keep their incremented cached nonce, which avoids a chain re-fetch racing the just-landed finalize and reusing a stale nonce/buffer PDA.
 
 Do not remove sorted lock acquisition or the retiring map without replacing the deadlock/race prevention. Commit nonce races can cause base-layer commit failures and stuck undelegations.
 
@@ -251,7 +253,7 @@ The public service API uses nonblocking `try_send`. If the service channel is fu
 2. Preserve FIFO blocking semantics across indirectly blocked intents; later intents must not bypass an earlier blocked intent sharing any key.
 3. Do not schedule duplicate intent ids in the same scheduler/execution-extension context.
 4. Commit nonces must be fetched with base-layer freshness (`min_context_slot`) and incremented atomically per account.
-5. A failed or undelegating intent must reset cached nonces for affected accounts.
+5. Execution errors must reset cached nonces for all committed pubkeys; successful undelegation must reset only the undelegated pubkeys and preserve other committed-account cache entries.
 6. Fresh intent scheduling must persist rows before execution when possible; recovered scheduling must not reinsert rows.
 7. Pending-intent recovery must reconstruct only rows inside the recovery window and skip inconsistent or incomplete persisted groups.
 8. Buffer accounts and ALTs must be prepared before transaction assembly uses them, and released/closed only when safe.
