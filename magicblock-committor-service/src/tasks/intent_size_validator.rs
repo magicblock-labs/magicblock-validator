@@ -21,7 +21,7 @@ use crate::{
 
 /// Checks whether an intent could ever fit on the base layer, so intents
 /// that can never succeed can be refused up front instead of failing later
-/// during commit/finalize.
+/// during execution
 ///
 /// The check assumes the smallest possible task representation (buffer-mode
 /// commits for oversized accounts, full address-lookup-table coverage,
@@ -30,6 +30,9 @@ use crate::{
 /// [`TaskBuilderImpl`], this never fetches anything (no commit ids, no
 /// base-layer state): it only needs to know whether a fit is *possible*,
 /// not build the real tasks that will actually be executed.
+/// NOTE: this assumes ALTs are used optimally
+/// where number of ALTs is - pubkeys.div_ceil(256). It is impossible to know in advance
+/// how many ALTs will be used.
 pub struct IntentSizeValidator;
 
 impl IntentSizeValidator {
