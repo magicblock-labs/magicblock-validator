@@ -73,6 +73,12 @@ impl MagicIntentBundle {
         if let Some(ref cau) = self.commit_and_undelegate {
             fee += cau.calculate_fee(commit_nonces)?;
         }
+        if let Some(ref commit_finalize) = self.commit_finalize {
+            fee += commit_finalize.calculate_fee(commit_nonces)?;
+        }
+        if let Some(ref cfau) = self.commit_finalize_and_undelegate {
+            fee += cfau.calculate_fee(commit_nonces)?;
+        }
         fee += calculate_actions_fee(&self.standalone_actions);
         Ok(fee)
     }
@@ -250,12 +256,22 @@ impl MagicIntentBundle {
             .as_ref()
             .map(|el| el.has_callbacks())
             .unwrap_or(false);
+        let cf = self
+            .commit_finalize
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
+        let cfau = self
+            .commit_finalize_and_undelegate
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
         let z = self
             .standalone_actions
             .iter()
             .any(|el| el.callback.is_some());
 
-        x || y || z
+        x || y || cf || cfau || z
     }
 
     pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
@@ -273,6 +289,22 @@ impl MagicIntentBundle {
             let count = cau.action_count();
             if index < offset + count {
                 return cau.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        if let Some(commit_finalize) = self.commit_finalize.as_mut() {
+            let count = commit_finalize.action_count();
+            if index < offset + count {
+                return commit_finalize.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        if let Some(cfau) = self.commit_finalize_and_undelegate.as_mut() {
+            let count = cfau.action_count();
+            if index < offset + count {
+                return cfau.get_action_mut(index - offset);
             }
             offset += count;
         }
@@ -625,8 +657,9 @@ mod tests {
 
     use crate::intent::{
         calculate_actions_fee, calculate_commit_fee, types::CommittedAccount,
-        BaseAction, ProgramArgs, ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
-        MISSING_COMMIT_NONCE_ERR,
+        BaseAction, BaseActionCallback, CommitAndUndelegate, CommitType,
+        MagicIntentBundle, ProgramArgs, UndelegateType, ACTUAL_COMMIT_LIMIT,
+        COMMIT_FEE_LAMPORTS, MISSING_COMMIT_NONCE_ERR,
     };
 
     fn make_committed_account(pubkey: Pubkey) -> CommittedAccount {
@@ -721,5 +754,111 @@ mod tests {
             ]),
             20_000
         );
+    }
+
+    // ---- MagicIntentBundle::calculate_fee / has_callbacks / get_action_mut
+    // must include commit_finalize and commit_finalize_and_undelegate ----
+
+    #[test]
+    fn test_calculate_fee_includes_commit_finalize_variants() {
+        let pk = Pubkey::new_unique();
+        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT)]); // over limit -> charged
+        let expected = COMMIT_FEE_LAMPORTS + 10_000; // + one 200_000 CU action
+
+        let commit_finalize_bundle = MagicIntentBundle {
+            commit_finalize: Some(CommitType::WithBaseActions {
+                committed_accounts: vec![make_committed_account(pk)],
+                base_actions: vec![make_base_action(200_000)],
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            commit_finalize_bundle.calculate_fee(&nonces).unwrap(),
+            expected
+        );
+
+        let commit_finalize_and_undelegate_bundle = MagicIntentBundle {
+            commit_finalize_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![
+                    make_committed_account(pk),
+                ]),
+                undelegate_action: UndelegateType::WithBaseActions(vec![
+                    make_base_action(200_000),
+                ]),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            commit_finalize_and_undelegate_bundle
+                .calculate_fee(&nonces)
+                .unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_has_callbacks_detects_commit_finalize_variants() {
+        fn make_base_action_with_callback() -> BaseAction {
+            let mut action = make_base_action(0);
+            action.callback = Some(BaseActionCallback {
+                destination_program: Pubkey::new_unique(),
+                discriminator: vec![],
+                payload: vec![],
+                compute_units: 0,
+                account_metas_per_program: vec![],
+            });
+            action
+        }
+
+        let commit_finalize_bundle = MagicIntentBundle {
+            commit_finalize: Some(CommitType::WithBaseActions {
+                committed_accounts: vec![],
+                base_actions: vec![make_base_action_with_callback()],
+            }),
+            ..Default::default()
+        };
+        assert!(commit_finalize_bundle.has_callbacks());
+
+        let commit_finalize_and_undelegate_bundle = MagicIntentBundle {
+            commit_finalize_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![]),
+                undelegate_action: UndelegateType::WithBaseActions(vec![
+                    make_base_action_with_callback(),
+                ]),
+            }),
+            ..Default::default()
+        };
+        assert!(commit_finalize_and_undelegate_bundle.has_callbacks());
+
+        // No callbacks anywhere -> false, so the above aren't vacuously true.
+        let no_callbacks_bundle = MagicIntentBundle {
+            commit_finalize: Some(CommitType::WithBaseActions {
+                committed_accounts: vec![],
+                base_actions: vec![make_base_action(0)],
+            }),
+            ..Default::default()
+        };
+        assert!(!no_callbacks_bundle.has_callbacks());
+    }
+
+    #[test]
+    fn test_get_action_mut_indexes_commit_finalize_variants() {
+        let mut bundle = MagicIntentBundle {
+            commit: Some(CommitType::WithBaseActions {
+                committed_accounts: vec![],
+                base_actions: vec![make_base_action(111)],
+            }),
+            commit_finalize: Some(CommitType::WithBaseActions {
+                committed_accounts: vec![],
+                base_actions: vec![make_base_action(222)],
+            }),
+            standalone_actions: vec![make_base_action(333)],
+            ..Default::default()
+        };
+
+        assert_eq!(bundle.get_action_mut(0).unwrap().compute_units, 111);
+        assert_eq!(bundle.get_action_mut(1).unwrap().compute_units, 222);
+        assert_eq!(bundle.get_action_mut(2).unwrap().compute_units, 333);
+        assert!(bundle.get_action_mut(3).is_none());
     }
 }

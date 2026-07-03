@@ -51,6 +51,29 @@ pub fn create_action_tasks(
     })
 }
 
+/// Decides how a commit's data should be delivered based on account size:
+/// accounts larger than `COMMIT_STATE_SIZE_THRESHOLD` diff against
+/// `base_account` (when available), everything else is sent as full state.
+/// Shared by [`create_commit_task`] and [`create_commit_finalize_task`] so
+/// the two never drift apart.
+fn commit_delivery(
+    account: &CommittedAccount,
+    base_account: Option<Account>,
+) -> CommitDelivery {
+    let base_account =
+        if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
+            base_account
+        } else {
+            None
+        };
+
+    if let Some(base_account) = base_account {
+        CommitDelivery::DiffInArgs { base_account }
+    } else {
+        CommitDelivery::StateInArgs
+    }
+}
+
 /// Builds a [`CommitTask`] for `account`, used by both
 /// [`crate::tasks::task_builder::TaskBuilderImpl`] (real task construction,
 /// passing the real base-layer account state to diff against) and
@@ -63,18 +86,7 @@ pub fn create_commit_task(
     account: CommittedAccount,
     base_account: Option<Account>,
 ) -> CommitTask {
-    let base_account =
-        if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
-            base_account
-        } else {
-            None
-        };
-
-    let delivery_details = if let Some(base_account) = base_account {
-        CommitDelivery::DiffInArgs { base_account }
-    } else {
-        CommitDelivery::StateInArgs
-    };
+    let delivery_details = commit_delivery(&account, base_account);
 
     CommitTask {
         commit_id,
@@ -91,18 +103,7 @@ pub fn create_commit_finalize_task(
     account: CommittedAccount,
     base_account: Option<Account>,
 ) -> CommitFinalizeTask {
-    let base_account =
-        if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
-            base_account
-        } else {
-            None
-        };
-
-    let delivery_details = if let Some(base_account) = base_account {
-        CommitDelivery::DiffInArgs { base_account }
-    } else {
-        CommitDelivery::StateInArgs
-    };
+    let delivery_details = commit_delivery(&account, base_account);
 
     CommitFinalizeTask {
         commit_id,
