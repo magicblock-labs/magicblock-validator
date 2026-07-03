@@ -36,15 +36,15 @@ use magicblock_committor_service::{
     DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
-    intent::{BaseActionCallback, CommittedAccount},
+    intent::{
+        types::CommittedAccount, BaseAction, BaseActionCallback,
+        CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
+        ProgramArgs, UndelegateType,
+    },
     traits::ActionError,
 };
 use magicblock_program::{
-    args::ShortAccountMeta,
-    magic_scheduled_base_intent::{
-        BaseAction, CommitAndUndelegate, CommitType, MagicBaseIntent,
-        MagicIntentBundle, ProgramArgs, ScheduledIntentBundle, UndelegateType,
-    },
+    args::ShortAccountMeta, magic_scheduled_base_intent::ScheduledIntentBundle,
     validator::validator_authority_id,
 };
 use magicblock_rpc_client::MagicBlockSendTransactionConfig;

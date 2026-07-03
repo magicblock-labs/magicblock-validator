@@ -8,11 +8,11 @@ use magicblock_committor_service::{
     persist::CommitStrategy,
     ComputeBudgetConfig,
 };
-use magicblock_core::intent::CommittedAccount;
-use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
-    ScheduledIntentBundle, UndelegateType,
+use magicblock_core::intent::{
+    types::CommittedAccount, CommitAndUndelegate, CommitType, MagicBaseIntent,
+    MagicIntentBundle, UndelegateType,
 };
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::{Account, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;

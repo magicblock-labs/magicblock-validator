@@ -1,10 +1,8 @@
 use std::sync::OnceLock;
 
 use integration_test_tools::run_test;
-use magicblock_program::{
-    magic_scheduled_base_intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS},
-    magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR},
-};
+use magicblock_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
+use magicblock_program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
 use program_schedulecommit::{
     api::{
         init_order_book_instruction,

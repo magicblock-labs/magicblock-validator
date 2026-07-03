@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 
 use dlp_api::DLP_PROGRAM_DATA_SIZE_CLASS;
-use magicblock_core::intent::CommittedAccount;
-use magicblock_program::magic_scheduled_base_intent::BaseAction;
+use magicblock_core::intent::{types::CommittedAccount, BaseAction};
 use solana_account::Account;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_hash::Hash;

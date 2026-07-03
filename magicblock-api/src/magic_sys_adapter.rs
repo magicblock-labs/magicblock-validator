@@ -6,7 +6,7 @@ use magicblock_committor_service::{
     tasks::intent_size_validator::IntentSizeValidator,
 };
 use magicblock_core::{
-    intent::{schedule::MagicIntentBundle, CommittedAccount},
+    intent::{types::CommittedAccount, MagicIntentBundle},
     traits::MagicSys,
 };
 use magicblock_metrics::metrics;

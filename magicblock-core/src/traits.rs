@@ -8,9 +8,7 @@ use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 
 use crate::{
-    intent::{
-        schedule::MagicIntentBundle, BaseActionCallback, CommittedAccount,
-    },
+    intent::{types::CommittedAccount, BaseActionCallback, MagicIntentBundle},
     Slot,
 };
 

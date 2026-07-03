@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::intent::{
+    types::CommittedAccount, CommitAndUndelegate, CommitType, MagicBaseIntent,
+    UndelegateType,
+};
 use magicblock_magic_program_api::{
     instruction::MagicBlockInstruction, MAGIC_CONTEXT_PUBKEY,
 };
@@ -12,10 +15,7 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     clone_account::remove_pending_clone,
-    magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, MagicBaseIntent,
-        ScheduledIntentBundle, UndelegateType,
-    },
+    magic_scheduled_base_intent::ScheduledIntentBundle,
     schedule_transactions::get_clock,
     utils::{
         account_actions::mark_account_as_undelegated,

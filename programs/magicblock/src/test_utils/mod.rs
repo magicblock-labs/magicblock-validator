@@ -8,7 +8,7 @@ use std::{
 };
 
 use magicblock_core::{
-    intent::{schedule::MagicIntentBundle, CommittedAccount},
+    intent::{types::CommittedAccount, MagicIntentBundle},
     traits::MagicSys,
 };
 use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};

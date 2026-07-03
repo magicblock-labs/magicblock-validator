@@ -1,6 +1,5 @@
-use magicblock_core::intent::CommittedAccount;
-use magicblock_program::magic_scheduled_base_intent::{
-    CommitType, MagicIntentBundle, UndelegateType,
+use magicblock_core::intent::{
+    types::CommittedAccount, CommitType, MagicIntentBundle, UndelegateType,
 };
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -236,9 +235,7 @@ impl IntentSizeValidator {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_program::magic_scheduled_base_intent::{
-        BaseAction, ProgramArgs,
-    };
+    use magicblock_core::intent::{BaseAction, ProgramArgs};
     use solana_account::Account;
 
     use super::*;

@@ -11,10 +11,8 @@ use magicblock_committor_service::{
     },
     transaction_preparator::TransactionPreparator,
 };
-use magicblock_program::{
-    args::ShortAccountMeta,
-    magic_scheduled_base_intent::{BaseAction, ProgramArgs},
-};
+use magicblock_core::intent::{BaseAction, ProgramArgs};
+use magicblock_program::args::ShortAccountMeta;
 use solana_pubkey::Pubkey;
 use solana_sdk::signer::Signer;
 use solana_sdk_ids::system_program;

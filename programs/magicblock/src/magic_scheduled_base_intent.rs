@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-pub use magicblock_core::intent::schedule::{
+pub use magicblock_core::intent::{
     calculate_commit_fee, BaseAction, CommitAndUndelegate, CommitType,
     MagicBaseIntent, MagicIntentBundle, ProgramArgs, UndelegateType,
     ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
     COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
 };
 use magicblock_core::{
-    intent::CommittedAccount,
+    intent::types::CommittedAccount,
     token_programs::{
         EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
     },
@@ -197,7 +197,7 @@ impl ScheduledIntentBundle {
 
 /// Constructs a type from its wire [`Args`] representation.
 ///
-/// The corresponding data types live in [`magicblock_core::intent::schedule`]
+/// The corresponding data types live in [`magicblock_core::intent::types`]
 /// since they need to be shared with `MagicSys` implementors, but the
 /// construction logic stays here since it depends on [`ConstructionContext`]
 /// (`InvokeContext`, `ic_msg!`, etc.) which only exists on-chain. A local
@@ -253,7 +253,7 @@ impl TryFromArgs<MagicIntentBundleArgs> for MagicIntentBundle {
         validate_intent_size(&this).inspect_err(|_| {
             ic_msg!(
                 context.invoke_context,
-                "ScheduleCommit ERR: intent is too large to ever fit on the base layer",
+                "ScheduleCommit ERR: intent is too large to ever fit into transaction",
             );
         })?;
 
@@ -703,7 +703,7 @@ pub(crate) fn validate_commit_schedule_permissions(
 mod tests {
     use std::collections::HashMap;
 
-    use magicblock_core::intent::CommittedAccount;
+    use magicblock_core::intent::types::CommittedAccount;
     use solana_account::Account;
     use solana_pubkey::Pubkey;
 

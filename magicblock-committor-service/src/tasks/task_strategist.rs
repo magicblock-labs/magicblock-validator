@@ -472,9 +472,8 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use magicblock_core::intent::CommittedAccount;
-    use magicblock_program::magic_scheduled_base_intent::{
-        BaseAction, ProgramArgs,
+    use magicblock_core::intent::{
+        types::CommittedAccount, BaseAction, ProgramArgs,
     };
     use solana_account::Account;
     use solana_pubkey::Pubkey;

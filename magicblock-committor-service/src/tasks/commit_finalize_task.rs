@@ -4,7 +4,7 @@ use dlp_api::{
     instruction_builder::{commit_diff_size_budget, commit_size_budget},
     AccountSizeClass,
 };
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::intent::types::CommittedAccount;
 use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;

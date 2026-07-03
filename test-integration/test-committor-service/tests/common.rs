@@ -22,7 +22,7 @@ use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
-    intent::{BaseActionCallback, CommittedAccount},
+    intent::{types::CommittedAccount, BaseActionCallback},
     traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use magicblock_rpc_client::MagicblockRpcClient;

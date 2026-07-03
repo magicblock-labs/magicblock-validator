@@ -1,7 +1,6 @@
 use dlp_api::{args::CallHandlerArgs, AccountSizeClass};
-use magicblock_core::intent::BaseActionCallback;
+use magicblock_core::intent::{BaseAction, BaseActionCallback};
 use magicblock_metrics::metrics::LabelValue;
-use magicblock_program::magic_scheduled_base_intent::BaseAction;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
@@ -379,10 +378,8 @@ impl From<BaseActionTaskV2> for BaseActionTask {
 #[cfg(test)]
 mod serialization_safety_test {
 
-    use magicblock_core::intent::CommittedAccount;
-    use magicblock_program::{
-        args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
-    };
+    use magicblock_core::intent::{types::CommittedAccount, ProgramArgs};
+    use magicblock_program::args::ShortAccountMeta;
     use solana_account::Account;
 
     use crate::{

@@ -2,10 +2,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use futures_util::future::try_join_all;
-use magicblock_core::intent::CommittedAccount;
-use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType, ScheduledIntentBundle, UndelegateType,
+use magicblock_core::intent::{
+    types::CommittedAccount, CommitAndUndelegate, CommitType, UndelegateType,
 };
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;

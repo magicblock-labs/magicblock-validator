@@ -3,7 +3,7 @@ use dlp_api::{
     diff::compute_diff,
     AccountSizeClass,
 };
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::intent::types::CommittedAccount;
 use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
