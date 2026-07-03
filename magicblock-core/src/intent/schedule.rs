@@ -579,7 +579,7 @@ impl UndelegateType {
     }
 }
 
-pub(crate) fn calculate_commit_fee(
+pub fn calculate_commit_fee(
     accounts: &[CommittedAccount],
     commit_nonces: &HashMap<Pubkey, u64>,
 ) -> Result<u64, InstructionError> {
@@ -604,4 +604,105 @@ fn calculate_actions_fee(actions: &[BaseAction]) -> u64 {
         )
     });
     micro_lamports.div_ceil(MICRO_LAMPORTS_PER_LAMPORT)
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_pubkey::Pubkey;
+
+    use super::*;
+
+    fn make_committed_account(pubkey: Pubkey) -> CommittedAccount {
+        CommittedAccount {
+            pubkey,
+            account: solana_account::Account::default(),
+            remote_slot: 0,
+        }
+    }
+
+    fn make_base_action(compute_units: u32) -> BaseAction {
+        BaseAction {
+            compute_units,
+            destination_program: Pubkey::new_unique(),
+            source_program: None,
+            escrow_authority: Pubkey::new_unique(),
+            data_per_program: ProgramArgs {
+                escrow_index: 0,
+                data: vec![],
+            },
+            account_metas_per_program: vec![],
+            callback: None,
+        }
+    }
+
+    // ---- calculate_commit_fee ----
+
+    #[test]
+    fn test_commit_fee_at_limit_is_zero() {
+        let pk = Pubkey::new_unique();
+        // nonce is commits done so far; nonce+1 is the next commit number.
+        // ACTUAL_COMMIT_LIMIT - 1 means the next commit is exactly at the limit → free.
+        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT - 1)]);
+        let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces)
+            .unwrap();
+        assert_eq!(fee, 0);
+    }
+
+    #[test]
+    fn test_commit_fee_above_limit_charges_per_account() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        let nonces = HashMap::from([
+            (pk1, ACTUAL_COMMIT_LIMIT + 1),
+            (pk2, ACTUAL_COMMIT_LIMIT + 1),
+        ]);
+        let fee = calculate_commit_fee(
+            &[make_committed_account(pk1), make_committed_account(pk2)],
+            &nonces,
+        )
+        .unwrap();
+        assert_eq!(fee, COMMIT_FEE_LAMPORTS * 2);
+    }
+
+    #[test]
+    fn test_commit_fee_mixed_accounts() {
+        let pk_below = Pubkey::new_unique();
+        let pk_above = Pubkey::new_unique();
+        let nonces = HashMap::from([
+            (pk_below, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
+            (pk_above, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
+        ]);
+        let fee = calculate_commit_fee(
+            &[
+                make_committed_account(pk_below),
+                make_committed_account(pk_above),
+            ],
+            &nonces,
+        )
+        .unwrap();
+        assert_eq!(fee, COMMIT_FEE_LAMPORTS);
+    }
+
+    #[test]
+    fn test_commit_fee_missing_nonce_errors() {
+        let pk = Pubkey::new_unique();
+        let err = calculate_commit_fee(
+            &[make_committed_account(pk)],
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err, InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
+    }
+
+    /// two actions of 200_000 CUs each → 20_000 lamports
+    #[test]
+    fn test_actions_fee_multiple_actions() {
+        assert_eq!(
+            calculate_actions_fee(&[
+                make_base_action(200_000),
+                make_base_action(200_000)
+            ]),
+            20_000
+        );
+    }
 }

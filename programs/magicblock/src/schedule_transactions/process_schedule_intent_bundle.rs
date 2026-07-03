@@ -9,7 +9,7 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
-        CommitType, ConstructionContext, ScheduledIntentBundle,
+        extract_commit_accounts, ConstructionContext, ScheduledIntentBundle,
     },
     magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
@@ -99,7 +99,7 @@ pub(crate) fn process_schedule_intent_bundle(
         .flatten()
         .map(|el| el.committed_accounts_indices())
         .try_fold(vec![], |mut acc, indices| {
-            acc.extend(CommitType::extract_commit_accounts(
+            acc.extend(extract_commit_accounts(
                 indices,
                 construction_context.transaction_context(),
             )?);
