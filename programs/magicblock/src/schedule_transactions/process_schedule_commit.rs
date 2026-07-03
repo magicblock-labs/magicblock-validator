@@ -20,9 +20,9 @@ use crate::{
         MagicBaseIntent, MagicIntentBundle, ScheduledIntentBundle,
         UndelegateType,
     },
-    magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
-        self, check_commit_limits, magic_fee_vault_pubkey, try_get_fee_vault,
+        self, check_commit_limits, fetch_commit_nonces_with_missing_as_zero,
+        magic_fee_vault_pubkey, try_get_fee_vault,
     },
     utils::{
         account_actions::{
@@ -273,15 +273,10 @@ pub(crate) fn process_schedule_commit(
             .iter()
             .map(|materialization| materialization.eata_pubkey)
             .collect::<HashSet<_>>();
-        let nonce_accounts = committed_accounts
-            .iter()
-            .filter(|account| !rent_pending_pubkeys.contains(&account.pubkey))
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut nonces = fetch_current_commit_nonces(&nonce_accounts)?;
-        for pubkey in rent_pending_pubkeys {
-            nonces.insert(pubkey, 0);
-        }
+        let nonces = fetch_commit_nonces_with_missing_as_zero(
+            &committed_accounts,
+            &rent_pending_pubkeys,
+        )?;
         let fee = calculate_commit_fee(&committed_accounts, &nonces)?
             .checked_add(calculate_rent_pending_ata_materialization_fee(
                 rent_pending_ata_materializations.len(),

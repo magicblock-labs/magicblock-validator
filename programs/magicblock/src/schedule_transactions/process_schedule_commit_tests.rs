@@ -1743,6 +1743,61 @@ mod tests {
 
     #[test]
     #[serial]
+    fn test_schedule_commit_rent_pending_ata_uses_existing_nonce_fee() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"rent_pending_ata_existing_nonce_").unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet_owner, &mint);
+        let eata = derive_eata(&wallet_owner, &mint);
+        let expected_fee =
+            COMMIT_FEE_LAMPORTS + RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS;
+
+        let mut per_account = HashMap::new();
+        per_account.insert(eata, ACTUAL_COMMIT_LIMIT);
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction(
+                &payer,
+                TOKEN_PROGRAM_ID,
+                &[ata],
+                StubNonces::PerAccount(per_account),
+            );
+        account_data.insert(
+            ata,
+            make_rent_pending_spl_ata_account(&wallet_owner, &mint, 42),
+        );
+
+        let ix =
+            InstructionUtils::schedule_commit_with_delegated_payer_instruction(
+                &payer.pubkey(),
+                vec![ata],
+            );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        processed_scheduled
+            .iter()
+            .find(|a| a.lamports() == expected_fee && a.delegated())
+            .expect("fee vault should receive materialization and commit fees");
+        processed_scheduled
+            .iter()
+            .find(|a| a.lamports() == 1_000_000 - expected_fee && a.delegated())
+            .expect("payer should be charged materialization and commit fees");
+    }
+
+    #[test]
+    #[serial]
     fn test_schedule_commit_delegated_payer_only_charges_above_limit() {
         init_logger!();
         let payer =
