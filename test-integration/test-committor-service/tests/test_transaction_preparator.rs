@@ -5,9 +5,9 @@ use magicblock_committor_service::{
     tasks::{
         commit_stage_task::CleanupTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
-        utils::TransactionUtils,
+        utils::{create_commit_task, TransactionUtils},
         BaseActionTask, BaseActionTaskV1, BaseTaskImpl, FinalizeTask,
-        TaskBuilderImpl, UndelegateTask,
+        UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -36,7 +36,7 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks: Vec<BaseTaskImpl> = vec![
-        TaskBuilderImpl::create_commit_task(
+        create_commit_task(
             1,
             true,
             committed_account.clone(),
@@ -99,7 +99,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     // Create test data
     let tasks: Vec<BaseTaskImpl> = vec![
         // account 1
-        TaskBuilderImpl::create_commit_task(
+        create_commit_task(
             1,
             true,
             committed_account1.clone(),

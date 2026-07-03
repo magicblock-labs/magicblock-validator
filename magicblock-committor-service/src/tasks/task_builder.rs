@@ -4,8 +4,7 @@ use async_trait::async_trait;
 use futures_util::future::try_join_all;
 use magicblock_core::intent::CommittedAccount;
 use magicblock_program::magic_scheduled_base_intent::{
-    BaseAction, CommitAndUndelegate, CommitType, ScheduledIntentBundle,
-    UndelegateType,
+    CommitAndUndelegate, CommitType, ScheduledIntentBundle, UndelegateType,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -18,9 +17,11 @@ use crate::{
     },
     persist::IntentPersister,
     tasks::{
-        commit_task::{CommitDelivery, CommitTask},
-        BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
-        CommitFinalizeTask, FinalizeTask, UndelegateTask,
+        utils::{
+            create_action_tasks, create_commit_finalize_task,
+            create_commit_task, COMMIT_STATE_SIZE_THRESHOLD,
+        },
+        BaseTaskImpl, FinalizeTask, UndelegateTask,
     },
 };
 
@@ -51,59 +52,7 @@ pub struct CommitStageTaskInfo {
 /// Task builder
 pub struct TaskBuilderImpl;
 
-// Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
-// reduce instruction size. Below this threshold, the commit is sent
-// as CommitState. The value (256) is chosen because it is sufficient
-// for small accounts, which typically could hold up to 8 u32 fields or
-// 4 u64 fields. These integers are expected to be on the hot path
-// and updated continuously.
-pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
-
 impl TaskBuilderImpl {
-    pub fn create_commit_task(
-        commit_id: u64,
-        allow_undelegation: bool,
-        account: CommittedAccount,
-        base_account: Option<Account>,
-    ) -> CommitTask {
-        let base_account =
-            if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
-                base_account
-            } else {
-                None
-            };
-
-        let delivery_details = if let Some(base_account) = base_account {
-            CommitDelivery::DiffInArgs { base_account }
-        } else {
-            CommitDelivery::StateInArgs
-        };
-
-        CommitTask {
-            commit_id,
-            allow_undelegation,
-            committed_account: account,
-            delivery_details,
-        }
-    }
-
-    fn create_action_tasks<'a>(
-        actions: &'a [BaseAction],
-    ) -> impl Iterator<Item = BaseTaskImpl> + 'a {
-        actions.iter().map(|action| {
-            let task = match action.source_program {
-                Some(source_program) => BaseActionTask::V2(BaseActionTaskV2 {
-                    action: action.clone(),
-                    source_program,
-                }),
-                None => BaseActionTask::V1(BaseActionTaskV1 {
-                    action: action.clone(),
-                }),
-            };
-            task.into()
-        })
-    }
-
     async fn fetch_commit_nonces<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
         accounts: &[CommittedAccount],
@@ -183,33 +132,6 @@ impl TaskBuilderImpl {
             base_accounts,
         })
     }
-
-    pub fn create_commit_finalize_task(
-        commit_id: u64,
-        allow_undelegation: bool,
-        account: CommittedAccount,
-        base_account: Option<Account>,
-    ) -> CommitFinalizeTask {
-        let base_account =
-            if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
-                base_account
-            } else {
-                None
-            };
-
-        let delivery_details = if let Some(base_account) = base_account {
-            CommitDelivery::DiffInArgs { base_account }
-        } else {
-            CommitDelivery::StateInArgs
-        };
-
-        CommitFinalizeTask {
-            commit_id,
-            allow_undelegation,
-            committed_account: account,
-            delivery: delivery_details,
-        }
-    }
 }
 
 #[async_trait]
@@ -222,7 +144,7 @@ impl TasksBuilder for TaskBuilderImpl {
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
         let mut tasks = Vec::new();
         // Add standalone actions first
-        tasks.extend(Self::create_action_tasks(
+        tasks.extend(create_action_tasks(
             intent_bundle.standalone_actions().as_slice(),
         ));
 
@@ -322,9 +244,7 @@ impl TasksBuilder for TaskBuilderImpl {
                         .iter()
                         .map(finalize_task)
                         .collect::<Vec<_>>();
-                    tasks.extend(TaskBuilderImpl::create_action_tasks(
-                        base_actions,
-                    ));
+                    tasks.extend(create_action_tasks(base_actions));
                     tasks
                 }
             }
@@ -361,7 +281,7 @@ impl TasksBuilder for TaskBuilderImpl {
             if let UndelegateType::WithBaseActions(actions) =
                 &commit_and_undelegate.undelegate_action
             {
-                tasks.extend(TaskBuilderImpl::create_action_tasks(actions));
+                tasks.extend(create_action_tasks(actions));
             }
             Ok(tasks)
         }
@@ -406,13 +326,7 @@ impl<'a> CommitBuilder<'a> {
                 let nonce =
                     take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                TaskBuilderImpl::create_commit_task(
-                    nonce,
-                    false,
-                    account.clone(),
-                    base,
-                )
-                .into()
+                create_commit_task(nonce, false, account.clone(), base).into()
             })
             .collect()
     }
@@ -432,13 +346,7 @@ impl<'a> CommitAndUndelegateBuilder<'a> {
                 let nonce =
                     take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                TaskBuilderImpl::create_commit_task(
-                    nonce,
-                    true,
-                    account.clone(),
-                    base,
-                )
-                .into()
+                create_commit_task(nonce, true, account.clone(), base).into()
             })
             .collect()
     }
@@ -458,20 +366,15 @@ impl<'a> CommitFinalizeBuilder<'a> {
                 let nonce =
                     take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                TaskBuilderImpl::create_commit_finalize_task(
-                    nonce,
-                    false,
-                    account.clone(),
-                    base,
-                )
-                .into()
+                create_commit_finalize_task(nonce, false, account.clone(), base)
+                    .into()
             })
             .collect();
         if let CommitType::WithBaseActions {
             ref base_actions, ..
         } = commit_type
         {
-            tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
+            tasks.extend(create_action_tasks(base_actions));
         }
         tasks
     }
@@ -491,20 +394,15 @@ impl<'a> CommitFinalizeAndUndelegateBuilder<'a> {
                 let nonce =
                     take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                TaskBuilderImpl::create_commit_finalize_task(
-                    nonce,
-                    true,
-                    account.clone(),
-                    base,
-                )
-                .into()
+                create_commit_finalize_task(nonce, true, account.clone(), base)
+                    .into()
             })
             .collect();
         if let CommitType::WithBaseActions {
             ref base_actions, ..
         } = commit_type
         {
-            tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
+            tasks.extend(create_action_tasks(base_actions));
         }
         tasks
     }

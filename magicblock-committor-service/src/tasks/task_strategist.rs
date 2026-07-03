@@ -488,9 +488,8 @@ mod tests {
         persist::IntentPersisterImpl,
         tasks::{
             commit_task::CommitTask,
-            task_builder::{
-                TaskBuilderImpl, TasksBuilder, COMMIT_STATE_SIZE_THRESHOLD,
-            },
+            task_builder::{TaskBuilderImpl, TasksBuilder},
+            utils::{create_commit_task, COMMIT_STATE_SIZE_THRESHOLD},
             BaseActionTask, BaseActionTaskV1, FinalizeTask, TaskStrategy,
             UndelegateTask,
         },
@@ -551,12 +550,7 @@ mod tests {
         };
 
         if diff_len == 0 {
-            TaskBuilderImpl::create_commit_task(
-                commit_id,
-                false,
-                committed_account,
-                None,
-            )
+            create_commit_task(commit_id, false, committed_account, None)
         } else {
             let base_account = {
                 let mut acc = committed_account.account.clone();
@@ -566,7 +560,7 @@ mod tests {
                 }
                 acc
             };
-            TaskBuilderImpl::create_commit_task(
+            create_commit_task(
                 commit_id,
                 false,
                 committed_account,

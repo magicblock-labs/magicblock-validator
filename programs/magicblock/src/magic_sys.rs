@@ -4,7 +4,10 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
+use magicblock_core::{
+    intent::{schedule::MagicIntentBundle, CommittedAccount},
+    traits::MagicSys,
+};
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 
@@ -15,6 +18,9 @@ pub const COMMIT_LIMIT: u64 = 10;
 /// account that has reached [`COMMIT_LIMIT`].
 pub const COMMIT_LIMIT_ERR: u32 = 0xA000_0000;
 pub(crate) const MISSING_COMMIT_NONCE_ERR: u32 = 0xA000_0001;
+/// [`InstructionError::Custom`] code returned when an intent could never fit
+/// on the base layer, no matter how it gets optimized at execution time.
+pub const INTENT_TOO_LARGE_ERR: u32 = 0xA000_0002;
 
 lazy_static! {
     static ref MAGIC_SYS: RwLock<Option<Arc<dyn MagicSys>>> = RwLock::new(None);
@@ -38,4 +44,15 @@ pub(crate) fn fetch_current_commit_nonces(
         .as_ref()
         .ok_or(InstructionError::UninitializedAccount)?
         .fetch_current_commit_nonces(commits)
+}
+
+pub(crate) fn validate_intent_size(
+    intent: &MagicIntentBundle,
+) -> Result<(), InstructionError> {
+    MAGIC_SYS
+        .read()
+        .expect(MAGIC_SYS_POISONED_MSG)
+        .as_ref()
+        .ok_or(InstructionError::UninitializedAccount)?
+        .validate_intent_size(intent)
 }

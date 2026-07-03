@@ -30,6 +30,7 @@ use solana_transaction::Transaction;
 
 use crate::{
     instruction_utils::InstructionUtils,
+    magic_sys::validate_intent_size,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx, InstructionAccount,
@@ -249,6 +250,12 @@ impl TryFromArgs<MagicIntentBundleArgs> for MagicIntentBundle {
             standalone_actions: actions,
         };
         post_validate_magic_intent_bundle(&this, context)?;
+        validate_intent_size(&this).inspect_err(|_| {
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: intent is too large to ever fit on the base layer",
+            );
+        })?;
 
         Ok(this)
     }

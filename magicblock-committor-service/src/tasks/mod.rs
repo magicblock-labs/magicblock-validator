@@ -8,6 +8,7 @@ use solana_pubkey::Pubkey;
 pub mod commit_finalize_task;
 pub mod commit_stage_task;
 pub mod commit_task;
+pub mod intent_size_validator;
 pub mod task_builder;
 pub mod task_strategist;
 pub mod utils;
