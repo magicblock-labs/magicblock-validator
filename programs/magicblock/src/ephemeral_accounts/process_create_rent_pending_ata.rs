@@ -66,6 +66,10 @@ pub(crate) fn process_create_rent_pending_ata(
     if mint_pubkey != mint || token_program_pubkey != token_program {
         return Err(InstructionError::InvalidArgument);
     }
+    // Default owner is reserved as the MagicContext legacy-decode sentinel.
+    if wallet_owner == Pubkey::default() {
+        return Err(InstructionError::InvalidArgument);
+    }
     if token_program != TOKEN_PROGRAM_ID
         && token_program != TOKEN_2022_PROGRAM_ID
     {

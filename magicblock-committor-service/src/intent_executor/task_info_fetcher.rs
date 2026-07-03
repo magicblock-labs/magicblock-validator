@@ -38,14 +38,15 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
-    /// Fetches next commit nonces, using nonce 1 when allowed metadata is
-    /// missing on base. Non-allowed missing metadata remains an error.
+    /// Fetches next commit nonces. For pubkeys in `missing_metadata_as_zero`,
+    /// a missing delegation-metadata account is treated as current nonce 0
+    /// (yielding next nonce 1); any other missing metadata remains an error.
     async fn fetch_next_commit_nonces_with_missing_as_zero(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
         missing_metadata_as_zero: &[Pubkey],
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
+    ) -> TaskInfoFetcherResult<CommitNonceFetchResult>;
 
     /// Fetches current commit nonces for pubkeys
     /// Missing nonces will be fetched from chain
@@ -62,11 +63,65 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
 
+    /// Fetches rent reimbursement addresses, using caller-provided defaults
+    /// when allowed metadata is missing on base.
+    async fn fetch_rent_reimbursements_with_missing_as(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        missing_metadata_as: &HashMap<Pubkey, Pubkey>,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Pubkey>> {
+        let reimbursements = self
+            .fetch_rent_reimbursements(pubkeys, min_context_slot)
+            .await?;
+        let result = pubkeys
+            .iter()
+            .copied()
+            .zip(reimbursements)
+            .collect::<HashMap<_, _>>();
+        if result.len() == pubkeys.len() {
+            return Ok(result);
+        }
+
+        let missing_pubkeys = pubkeys
+            .iter()
+            .copied()
+            .filter(|pubkey| !result.contains_key(pubkey))
+            .collect::<Vec<_>>();
+        let mut result = result;
+        for missing_pubkey in missing_pubkeys {
+            if let Some(default) = missing_metadata_as.get(&missing_pubkey) {
+                result.insert(missing_pubkey, *default);
+            } else {
+                return Err(TaskInfoFetcherError::AccountNotFoundError(
+                    missing_pubkey,
+                ));
+            }
+        }
+        Ok(result)
+    }
+
     async fn get_base_accounts(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>>;
+}
+
+#[derive(Debug, Default)]
+pub struct CommitNonceFetchResult {
+    pub nonces: HashMap<Pubkey, u64>,
+    pub missing_metadata: HashSet<Pubkey>,
+}
+
+impl CommitNonceFetchResult {
+    #[cfg(test)]
+    pub(crate) fn from_nonces(nonces: HashMap<Pubkey, u64>) -> Self {
+        Self {
+            nonces,
+            missing_metadata: HashSet::new(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -133,9 +188,9 @@ impl RpcTaskInfoFetcher {
         min_context_slot: u64,
         max_retries: NonZeroUsize,
         missing_metadata_as_zero: &[Pubkey],
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+    ) -> TaskInfoFetcherResult<CommitNonceFetchResult> {
         if pubkeys.is_empty() {
-            return Ok(HashMap::new());
+            return Ok(CommitNonceFetchResult::default());
         }
 
         let zero_defaults: HashSet<_> =
@@ -162,6 +217,7 @@ impl RpcTaskInfoFetcher {
         .await?;
 
         let mut nonces = HashMap::with_capacity(pubkeys.len());
+        let mut missing_metadata = HashSet::new();
         for ((delegated_pubkey, pda), account) in
             pubkeys.iter().copied().zip(pda_accounts).zip(accounts)
         {
@@ -175,7 +231,10 @@ impl RpcTaskInfoFetcher {
                     })?
                     .last_update_nonce
                 }
-                None if zero_defaults.contains(&delegated_pubkey) => 0,
+                None if zero_defaults.contains(&delegated_pubkey) => {
+                    missing_metadata.insert(delegated_pubkey);
+                    0
+                }
                 None => {
                     return Err(TaskInfoFetcherError::AccountNotFoundError(
                         pda,
@@ -185,7 +244,74 @@ impl RpcTaskInfoFetcher {
             nonces.insert(delegated_pubkey, nonce);
         }
 
-        Ok(nonces)
+        Ok(CommitNonceFetchResult {
+            nonces,
+            missing_metadata,
+        })
+    }
+
+    async fn fetch_rent_reimbursements_map_with_missing_as(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        max_retries: NonZeroUsize,
+        missing_metadata_as: &HashMap<Pubkey, Pubkey>,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Pubkey>> {
+        if pubkeys.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let pda_accounts: Vec<Pubkey> = pubkeys
+            .iter()
+            .map(|delegated_account| {
+                Pubkey::find_program_address(
+                    delegation_metadata_seeds_from_delegated_account!(
+                        delegated_account
+                    ),
+                    &dlp_api::id(),
+                )
+                .0
+            })
+            .collect();
+
+        let accounts = Self::fetch_optional_accounts_with_retries(
+            rpc_client,
+            &pda_accounts,
+            min_context_slot,
+            max_retries,
+        )
+        .await?;
+
+        let mut reimbursements = HashMap::with_capacity(pubkeys.len());
+        for ((delegated_pubkey, pda), account) in
+            pubkeys.iter().copied().zip(pda_accounts).zip(accounts)
+        {
+            let reimbursement = match account {
+                Some(account) => {
+                    DelegationMetadata::try_from_bytes_with_discriminator(
+                        &account.data,
+                    )
+                    .map_err(|_| {
+                        TaskInfoFetcherError::InvalidAccountDataError(pda)
+                    })?
+                    .rent_payer
+                }
+                None => {
+                    if let Some(default) =
+                        missing_metadata_as.get(&delegated_pubkey)
+                    {
+                        *default
+                    } else {
+                        return Err(
+                            TaskInfoFetcherError::AccountNotFoundError(pda),
+                        );
+                    }
+                }
+            };
+            reimbursements.insert(delegated_pubkey, reimbursement);
+        }
+
+        Ok(reimbursements)
     }
 
     /// Fetches [`Account`]s with some num of retries
@@ -400,6 +526,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
             &[],
         )
         .await
+        .map(|result| result.nonces)
     }
 
     async fn fetch_next_commit_nonces_with_missing_as_zero(
@@ -407,12 +534,12 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
         missing_metadata_as_zero: &[Pubkey],
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+    ) -> TaskInfoFetcherResult<CommitNonceFetchResult> {
         if pubkeys.is_empty() {
-            return Ok(HashMap::new());
+            return Ok(CommitNonceFetchResult::default());
         }
 
-        let nonces = Self::fetch_current_commit_nonces_with_missing_as_zero(
+        let result = Self::fetch_current_commit_nonces_with_missing_as_zero(
             &self.rpc_client,
             pubkeys,
             min_context_slot,
@@ -420,10 +547,14 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
             missing_metadata_as_zero,
         )
         .await?;
-        Ok(nonces
-            .into_iter()
-            .map(|(pubkey, nonce)| (pubkey, nonce + 1))
-            .collect())
+        Ok(CommitNonceFetchResult {
+            nonces: result
+                .nonces
+                .into_iter()
+                .map(|(pubkey, nonce)| (pubkey, nonce + 1))
+                .collect(),
+            missing_metadata: result.missing_metadata,
+        })
     }
 
     async fn fetch_current_commit_nonces(
@@ -451,16 +582,41 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        Ok(Self::fetch_metadata_with_retries(
+        let reimbursements =
+            Self::fetch_rent_reimbursements_map_with_missing_as(
+                &self.rpc_client,
+                pubkeys,
+                min_context_slot,
+                NUM_FETCH_RETRIES,
+                &HashMap::new(),
+            )
+            .await?;
+
+        pubkeys
+            .iter()
+            .map(|pubkey| {
+                reimbursements
+                    .get(pubkey)
+                    .copied()
+                    .ok_or(TaskInfoFetcherError::AccountNotFoundError(*pubkey))
+            })
+            .collect()
+    }
+
+    async fn fetch_rent_reimbursements_with_missing_as(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        missing_metadata_as: &HashMap<Pubkey, Pubkey>,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Pubkey>> {
+        Self::fetch_rent_reimbursements_map_with_missing_as(
             &self.rpc_client,
             pubkeys,
             min_context_slot,
             NUM_FETCH_RETRIES,
+            missing_metadata_as,
         )
-        .await?
-        .into_iter()
-        .map(|m| m.rent_payer)
-        .collect())
+        .await
     }
 
     async fn get_base_accounts(
@@ -479,8 +635,23 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct CachedNonce {
+    value: Option<u64>,
+    missing_metadata: bool,
+}
+
+impl CachedNonce {
+    fn new(value: u64, missing_metadata: bool) -> Self {
+        Self {
+            value: Some(value),
+            missing_metadata,
+        }
+    }
+}
+
 /// Per-account async mutex protecting the cached nonce value.
-type NonceLock = Arc<TMutex<u64>>;
+type NonceLock = Arc<TMutex<CachedNonce>>;
 
 /// Split-map cache: `active` is the live LRU window; `retiring` holds locks
 /// evicted from `active` that are still held by in-flight requests.
@@ -510,7 +681,9 @@ impl<'a> CacheInnerGuard<'a> {
     // Acquire per-account locks sequentially in sorted order (see sort above).
     // join_all would poll all futures concurrently, allowing partial acquisition
     // and producing the classic A→B / B→A deadlock across concurrent callers.
-    async fn lock<'s>(&'s self) -> Vec<(&'s Pubkey, MutexGuard<'s, u64>)> {
+    async fn lock<'s>(
+        &'s self,
+    ) -> Vec<(&'s Pubkey, MutexGuard<'s, CachedNonce>)> {
         let mut output = Vec::with_capacity(self.nonce_locks.len());
         for (pubkey, lock) in self.nonce_locks.iter() {
             let guard = lock.lock().await;
@@ -584,9 +757,7 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
             nonce_locks: vec![(*pubkey, lock)],
         };
         let guards = locks_guard.lock().await;
-        let value = *guards[0].1;
-
-        (value != u64::MAX).then_some(value)
+        guards[0].1.value
     }
 
     /// Resets cache for some or all accounts
@@ -627,7 +798,7 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
                         let evicted = inner.active.push(pubkey, val.clone());
                         (val, evicted)
                     } else {
-                        let val = Arc::new(TMutex::new(u64::MAX));
+                        let val = Arc::new(TMutex::new(CachedNonce::default()));
                         let evicted = inner.active.push(pubkey, val.clone());
                         (val, evicted)
                     };
@@ -689,6 +860,7 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
             &[],
         )
         .await
+        .map(|result| result.nonces)
     }
 
     async fn fetch_next_commit_nonces_with_missing_as_zero(
@@ -696,9 +868,9 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
         missing_metadata_as_zero: &[Pubkey],
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+    ) -> TaskInfoFetcherResult<CommitNonceFetchResult> {
         if pubkeys.is_empty() {
-            return Ok(HashMap::new());
+            return Ok(CommitNonceFetchResult::default());
         }
 
         // Acquire locks on requested nonces
@@ -710,25 +882,37 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         let nonce_guards = locks_guard.lock().await;
         let (mut existing, mut missing) = (vec![], vec![]);
         for (pubkey, guard) in nonce_guards {
-            if *guard == u64::MAX {
-                missing.push((pubkey, guard));
+            if guard.value.is_some() {
+                existing.push((pubkey, guard));
             } else {
-                existing.push((pubkey, guard))
+                missing.push((pubkey, guard))
             }
         }
 
+        let zero_defaults: HashSet<_> =
+            missing_metadata_as_zero.iter().copied().collect();
         // If all in cache - great! return
         if missing.is_empty() {
-            let mut result = HashMap::with_capacity(existing.len());
+            let mut nonces = HashMap::with_capacity(existing.len());
+            let mut missing_metadata = HashSet::new();
             for (pubkey, mut guard) in existing {
-                *guard += 1;
-                result.insert(*pubkey, *guard);
+                if let Some(nonce) = guard.value.as_mut() {
+                    *nonce += 1;
+                    nonces.insert(*pubkey, *nonce);
+                    if guard.missing_metadata && zero_defaults.contains(pubkey)
+                    {
+                        missing_metadata.insert(*pubkey);
+                    }
+                }
             }
-            return Ok(result);
+            return Ok(CommitNonceFetchResult {
+                nonces,
+                missing_metadata,
+            });
         }
 
         // Fetch missing nonces in cache
-        let fetched_nonces = {
+        let fetched_result = {
             let missing_pubkeys: Vec<_> =
                 missing.iter().map(|(pubkey, _)| **pubkey).collect();
             self.inner
@@ -741,22 +925,36 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         };
 
         // We don't care if anything changed in between with cache - just update and return our ids.
-        let mut result = HashMap::with_capacity(existing.len());
+        let mut nonces = HashMap::with_capacity(existing.len());
+        let mut missing_metadata = HashSet::new();
         for (pubkey, mut guard) in existing {
-            *guard += 1;
-            result.insert(*pubkey, *guard);
+            if let Some(nonce) = guard.value.as_mut() {
+                *nonce += 1;
+                nonces.insert(*pubkey, *nonce);
+                if guard.missing_metadata && zero_defaults.contains(pubkey) {
+                    missing_metadata.insert(*pubkey);
+                }
+            }
         }
         for (pubkey, mut guard) in missing {
-            if let Some(&nonce) = fetched_nonces.get(pubkey) {
-                *guard = nonce;
-                result.insert(*pubkey, *guard);
+            if let Some(&nonce) = fetched_result.nonces.get(pubkey) {
+                let was_missing =
+                    fetched_result.missing_metadata.contains(pubkey);
+                *guard = CachedNonce::new(nonce, was_missing);
+                nonces.insert(*pubkey, nonce);
+                if was_missing {
+                    missing_metadata.insert(*pubkey);
+                }
                 Ok(())
             } else {
                 Err(TaskInfoFetcherError::AccountNotFoundError(*pubkey))
             }?;
         }
 
-        Ok(result)
+        Ok(CommitNonceFetchResult {
+            nonces,
+            missing_metadata,
+        })
     }
 
     async fn fetch_current_commit_nonces(
@@ -776,10 +974,10 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         let mut missing = vec![];
         let mut result = HashMap::with_capacity(nonce_guards.len());
         for (pubkey, guard) in nonce_guards {
-            if *guard == u64::MAX {
-                missing.push((pubkey, guard));
+            if let Some(nonce) = guard.value {
+                result.insert(*pubkey, nonce);
             } else {
-                result.insert(*pubkey, *guard);
+                missing.push((pubkey, guard))
             }
         }
 
@@ -801,7 +999,7 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         // increment from here correctly.
         for (pubkey, mut guard) in missing {
             if let Some(&nonce) = fetched_nonces.get(pubkey) {
-                *guard = nonce;
+                *guard = CachedNonce::new(nonce, false);
                 result.insert(*pubkey, nonce);
                 Ok(())
             } else {
@@ -819,6 +1017,21 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
         self.inner
             .fetch_rent_reimbursements(pubkeys, min_context_slot)
+            .await
+    }
+
+    async fn fetch_rent_reimbursements_with_missing_as(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        missing_metadata_as: &HashMap<Pubkey, Pubkey>,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Pubkey>> {
+        self.inner
+            .fetch_rent_reimbursements_with_missing_as(
+                pubkeys,
+                min_context_slot,
+                missing_metadata_as,
+            )
             .await
     }
 
@@ -1189,6 +1402,7 @@ mod tests {
                 &[],
             )
             .await
+            .map(|result| result.nonces)
         }
 
         async fn fetch_next_commit_nonces_with_missing_as_zero(
@@ -1196,19 +1410,21 @@ mod tests {
             pubkeys: &[Pubkey],
             _: u64,
             _: &[Pubkey],
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        ) -> TaskInfoFetcherResult<CommitNonceFetchResult> {
             if let Some(delay) = self.delay {
                 tokio::time::sleep(delay).await;
             }
             let mut q = self.nonces.lock().unwrap();
-            Ok(pubkeys
-                .iter()
-                .map(|pk| {
-                    let nonce =
-                        q.pop_front().expect("mock nonce queue exhausted");
-                    (*pk, nonce + 1)
-                })
-                .collect())
+            Ok(CommitNonceFetchResult::from_nonces(
+                pubkeys
+                    .iter()
+                    .map(|pk| {
+                        let nonce =
+                            q.pop_front().expect("mock nonce queue exhausted");
+                        (*pk, nonce + 1)
+                    })
+                    .collect(),
+            ))
         }
 
         async fn fetch_current_commit_nonces(

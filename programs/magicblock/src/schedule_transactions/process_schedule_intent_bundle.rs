@@ -159,12 +159,16 @@ pub(crate) fn process_schedule_intent_bundle(
     let transaction_context = &*invoke_context.transaction_context;
     let payer_account =
         get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
-    let magic_fee_vault = try_get_fee_vault(
-        transaction_context,
-        invoke_context,
-        PAYER_IDX,
-        MAGIC_CONTEXT_IDX + 1,
-    )?;
+    // Reuse the pre-construction fee-vault decision: undelegation may have
+    // cleared the payer's delegated flag, which must not skip the charge.
+    let magic_fee_vault = rent_pending_materialization_accounts
+        .map(|_| {
+            get_instruction_account_with_idx(
+                transaction_context,
+                MAGIC_CONTEXT_IDX + 1,
+            )
+        })
+        .transpose()?;
     if let Some(magic_fee_vault) = magic_fee_vault {
         let rent_pending_pubkeys = scheduled_intent
             .intent_bundle

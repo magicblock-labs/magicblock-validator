@@ -203,6 +203,7 @@ where
             return Err(IntentExecutorError::EmptyIntentError);
         }
         let all_committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
+        let validator = self.authority.pubkey();
 
         // Update tasks status to Pending
         {
@@ -222,6 +223,7 @@ where
             let commit_tasks = TaskBuilderImpl::commit_tasks(
                 &self.task_info_fetcher,
                 &intent_bundle,
+                &validator,
                 persister,
             )
             .await?;
@@ -248,11 +250,13 @@ where
             let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
                 &self.task_info_fetcher,
                 &intent_bundle,
+                &validator,
                 persister,
             );
             let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
                 &self.task_info_fetcher,
                 &intent_bundle,
+                &validator,
             );
             let (commit_tasks, finalize_tasks) =
                 join(commit_tasks_fut, finalize_tasks_fut).await;

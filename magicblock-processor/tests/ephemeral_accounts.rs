@@ -121,14 +121,13 @@ fn init_spl_mint(env: &ExecutionTestEnv, mint: Pubkey) {
     };
     let mut data = vec![0; SplMint::LEN];
     SplMint::pack(mint_state, &mut data).unwrap();
-    let mut account = AccountSharedData::from(Account {
+    let account = AccountSharedData::from(Account {
         lamports: 1_000_000,
         data,
         owner: TOKEN_PROGRAM_ID,
         executable: false,
         rent_epoch: 0,
     });
-    account.set_delegated(true);
     env.accountsdb.insert_account(&mint, &account).unwrap();
 }
 

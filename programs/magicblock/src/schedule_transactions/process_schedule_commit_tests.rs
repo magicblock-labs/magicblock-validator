@@ -1603,6 +1603,65 @@ mod tests {
 
     #[test]
     #[serial]
+    fn test_schedule_commit_rent_pending_ata_without_fee_vault_errors() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"rent_pending_ata_no_fee_vault_____").unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet_owner, &mint);
+
+        // Non-delegated payer: no fee vault path, so a rent-pending ATA
+        // committee must be rejected instead of scheduled without a charge.
+        let mut account_data = {
+            let mut map = HashMap::new();
+            map.insert(
+                payer.pubkey(),
+                AccountSharedData::new(1_000_000, 0, &system_program::id()),
+            );
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
+            );
+            map.insert(
+                ata,
+                make_rent_pending_spl_ata_account(&wallet_owner, &mint, 42),
+            );
+            map
+        };
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(0)),
+        );
+
+        let mut transaction_accounts = vec![(
+            clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        )];
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![ata],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::IllegalOwner),
+        );
+    }
+
+    #[test]
+    #[serial]
     fn test_schedule_commit_rent_pending_ata_records_materialization() {
         init_logger!();
         let payer =

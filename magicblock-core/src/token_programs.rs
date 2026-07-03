@@ -454,6 +454,13 @@ pub fn try_get_rent_pending_ata_info(
     {
         return None;
     }
+    // Default owner/mint are reserved: they act as the legacy-decode sentinel
+    // for persisted MagicContext materializations.
+    if token_account.owner == Pubkey::default()
+        || token_account.mint == Pubkey::default()
+    {
+        return None;
+    }
 
     let expected_ata = derive_ata_with_token_program(
         &token_account.owner,
@@ -808,5 +815,67 @@ mod tests {
         undelegating_account.set_undelegating(true);
         assert!(try_get_rent_pending_ata_info(&ata, &undelegating_account)
             .is_none());
+
+        let mut not_delegated = account.clone();
+        not_delegated.set_delegated(false);
+        assert!(try_get_rent_pending_ata_info(&ata, &not_delegated).is_none());
+
+        let mut ephemeral_account = account.clone();
+        ephemeral_account.set_ephemeral(true);
+        assert!(
+            try_get_rent_pending_ata_info(&ata, &ephemeral_account).is_none()
+        );
+
+        let mut confined_account = account.clone();
+        confined_account.set_confined(true);
+        assert!(
+            try_get_rent_pending_ata_info(&ata, &confined_account).is_none()
+        );
+
+        let mut wrong_owner = account.clone();
+        wrong_owner.set_owner(Pubkey::new_unique());
+        assert!(try_get_rent_pending_ata_info(&ata, &wrong_owner).is_none());
+
+        let mut native_account = account.clone();
+        let mut token = SplAccount::unpack(native_account.data()).unwrap();
+        token.is_native = COption::Some(0);
+        SplAccount::pack(token, native_account.data_as_mut_slice()).unwrap();
+        assert!(try_get_rent_pending_ata_info(&ata, &native_account).is_none());
+    }
+
+    #[test]
+    fn rent_pending_ata_rejects_default_owner_and_mint() {
+        // Default owner/mint are reserved as the MagicContext legacy-decode
+        // sentinel and must never classify as rent-pending.
+        for (wallet_owner, mint) in [
+            (Pubkey::default(), Pubkey::new_unique()),
+            (Pubkey::new_unique(), Pubkey::default()),
+        ] {
+            let ata = derive_ata(&wallet_owner, &mint);
+            let token_account = SplAccount {
+                mint,
+                owner: wallet_owner,
+                amount: 9,
+                delegate: COption::None,
+                state: AccountState::Initialized,
+                is_native: COption::None,
+                delegated_amount: 0,
+                close_authority: COption::Some(
+                    RENT_PENDING_ATA_CLOSE_AUTHORITY,
+                ),
+            };
+            let mut data = vec![0u8; SplAccount::LEN];
+            SplAccount::pack(token_account, &mut data).unwrap();
+            let mut account = AccountSharedData::from(Account {
+                owner: TOKEN_PROGRAM_ID,
+                data,
+                lamports: Rent::default().minimum_balance(SplAccount::LEN),
+                executable: false,
+                ..Default::default()
+            });
+            account.set_delegated(true);
+
+            assert!(try_get_rent_pending_ata_info(&ata, &account).is_none());
+        }
     }
 }
