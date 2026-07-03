@@ -47,7 +47,7 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `src/config.rs` and `src/compute_budget.rs` | Chain/RPC configuration, default action timeout, and per-task compute-budget helpers. |
 | `src/committor_processor.rs` | Constructs `MagicblockRpcClient`, `TableMania`, `IntentPersisterImpl`, `IntentExecutionManager`, and `CacheTaskInfoFetcher`; exposes persistence queries and recovery helpers. |
 | `src/intent_execution_manager.rs` | Backpressure boundary between service and execution engine; enqueues bundles and falls back to an internal DB when the channel is full. |
-| `src/intent_execution_manager/intent_execution_engine.rs` | Main scheduler loop, executor semaphore (`MAX_EXECUTORS = 50`), result broadcasting, metrics, and successful-cleanup spawning. |
+| `src/intent_execution_manager/intent_execution_engine.rs` | Main scheduler loop, executor semaphore (`MAX_EXECUTORS = 50`), result broadcasting, metrics, and awaited cleanup before scheduler completion. |
 | `src/intent_execution_manager/intent_scheduler.rs` | Pubkey conflict scheduler for committed accounts. Maintains FIFO blocking queues and prevents duplicate/concurrent conflicting intents. |
 | `src/intent_executor/` | Intent execution state machine, transaction client, factory, single-stage/two-stage executors, timeout helpers, and commit nonce fetcher/cache. |
 | `src/tasks/` | Atomic base-layer task types and task builders/strategist for commit, commit-finalize, undelegate, actions, buffers, ALTs, and compute budgets. |
@@ -179,7 +179,9 @@ Preserve the no-repersist path for recovered intents. Re-inserting rows can viol
 3. asks `IntentScheduler` whether it can run now;
 4. waits for one of `MAX_EXECUTORS = 50` semaphore permits;
 5. creates an executor and spawns intent execution;
-6. broadcasts the result, completes the scheduler entry, and cleans buffers/ALTs only after successful execution.
+6. broadcasts the result, awaits executor cleanup, completes the scheduler entry, and releases the executor permit.
+
+Results are broadcast before cleanup, so subscribers can observe completion while conflicting intents remain blocked. Cleanup must finish before scheduler completion unblocks a conflicting intent, because nonce reuse can target the same buffer PDAs and a detached cleanup could close buffers a next intent just re-initialized.
 
 The scheduler blocks on the union of `ScheduledIntentBundle::get_all_committed_pubkeys()`, including commit and commit-and-undelegate accounts in the same bundle. Standalone base actions with no committed pubkeys do not block on account keys.
 
@@ -215,7 +217,7 @@ For committed accounts with `data.len() > COMMIT_STATE_SIZE_THRESHOLD` (`256`), 
 4. reserve ALTs in TableMania and wait for finalized lookup table accounts;
 5. assemble the final versioned message with real lookup table accounts.
 
-Cleanup closes prepared buffers and releases TableMania pubkeys. `IntentExecutionEngine` intentionally runs cleanup only after successful execution because failed intent cleanup can race with a retried or concurrent intent using the same buffer PDA set.
+Cleanup closes prepared buffers and releases TableMania pubkeys. `IntentExecutionEngine` awaits cleanup after broadcasting the result and before completing the scheduler entry, so conflicting intents with the same committed pubkeys cannot start until the previous intent's cleanup has finished. The executor closes buffers only after successful execution; after a failure, cleanup releases ALT reservations without closing buffer PDAs, because failed intent buffer cleanup can race with a retry or later intent using the same PDA set.
 
 ## Important internals and caveats
 
@@ -255,12 +257,13 @@ The public service API uses nonblocking `try_send`. If the service channel is fu
 6. Fresh intent scheduling must persist rows before execution when possible; recovered scheduling must not reinsert rows.
 7. Pending-intent recovery must reconstruct only rows inside the recovery window and skip inconsistent or incomplete persisted groups.
 8. Buffer accounts and ALTs must be prepared before transaction assembly uses them, and released/closed only when safe.
-9. Failed intent cleanup must not race with retries using the same buffer PDAs; current cleanup is success-only for that reason.
-10. Transaction-size and compute-budget choices must keep produced transactions under Solana wire limits.
-11. Base-layer sends must preserve explicit processed/committed confirmation semantics from `magicblock-rpc-client`.
-12. Signer/authority requirements for validator-signed commits, committor-program buffers, ALTs, callbacks, and base-layer instructions must not be relaxed.
-13. Persistence status/signature updates must continue to expose enough information for diagnostics, retries, and recovery.
-14. Avoid adding blocking I/O or unbounded work to service actor, scheduler, executor, task-preparation, or RPC hot paths.
+9. Failed intent cleanup must not close buffer PDAs that retries or later intents can reuse; release ALT reservations without closing those buffers.
+10. Successful intent cleanup must finish before scheduler completion unblocks conflicting intents that can reuse the same buffer PDAs.
+11. Transaction-size and compute-budget choices must keep produced transactions under Solana wire limits.
+12. Base-layer sends must preserve explicit processed/committed confirmation semantics from `magicblock-rpc-client`.
+13. Signer/authority requirements for validator-signed commits, committor-program buffers, ALTs, callbacks, and base-layer instructions must not be relaxed.
+14. Persistence status/signature updates must continue to expose enough information for diagnostics, retries, and recovery.
+15. Avoid adding blocking I/O or unbounded work to service actor, scheduler, executor, task-preparation, or RPC hot paths.
 
 ## Common change areas and what to inspect
 
@@ -282,7 +285,7 @@ Start with `src/tasks/task_builder.rs`, `src/tasks/task_strategist.rs`, `src/tas
 
 ### Changing delivery preparation or cleanup
 
-Start with `src/transaction_preparator/mod.rs` and `delivery_preparator.rs`, then inspect `.agents/context/crates/magicblock-committor-program.md`, `.agents/context/crates/magicblock-table-mania.md`, and `.agents/context/crates/magicblock-rpc-client.md`. Check buffer init/realloc/write chunking, retry handling for already-initialized buffers, cached blockhash invalidation, ALT finalized waits, cleanup-on-success only, and release of TableMania refs.
+Start with `src/transaction_preparator/mod.rs` and `delivery_preparator.rs`, then inspect `.agents/context/crates/magicblock-committor-program.md`, `.agents/context/crates/magicblock-table-mania.md`, and `.agents/context/crates/magicblock-rpc-client.md`. Check buffer init/realloc/write chunking, retry handling for already-initialized buffers, cached blockhash invalidation, ALT finalized waits, success-only buffer closing, release of TableMania refs, and cleanup-before-scheduler-completion ordering for conflicting intents.
 
 ### Changing persistence or recovery
 
