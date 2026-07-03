@@ -418,7 +418,7 @@ lazy_static::lazy_static! {
         )
         .buckets(vec![0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0]),
     ).unwrap();
-    
+
     // GetMultiplAccount investigation
     static ref REMOTE_ACCOUNT_PROVIDER_A_COUNT: IntCounter = IntCounter::new(
         "remote_account_provider_a_count", "Get mupltiple account count"

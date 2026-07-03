@@ -24,11 +24,8 @@ mod utils;
 /// Small enough that the commit and finalize transactions fit even without
 /// any size optimization.
 const FEW_ACCOUNTS: usize = 3;
-/// Comfortably above the point where even the smallest possible task
-/// representation (buffer-mode commits, full ALT coverage) can no longer
-/// fit -- empirically around 11-12 accounts for this test program's small
-/// committee account layout.
-const TOO_MANY_ACCOUNTS: usize = 20;
+/// CommitAndUndelegate won't with more than 11 accs
+const TOO_MANY_ACCOUNTS: usize = 12;
 
 fn schedule_commit_ix(
     payer: &solana_sdk::signature::Keypair,

@@ -302,7 +302,9 @@ fn test_committing_and_undelegating_one_account() {
 
 #[test]
 fn test_commit_huge_order_book_account() {
-    run_test_for_commit_huge_order_book_account(ScheduleCommitType::CommitFinalize);
+    run_test_for_commit_huge_order_book_account(
+        ScheduleCommitType::CommitFinalize,
+    );
 }
 
 #[test]

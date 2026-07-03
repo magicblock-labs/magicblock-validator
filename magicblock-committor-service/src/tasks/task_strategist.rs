@@ -15,7 +15,7 @@ use crate::{
     transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
 };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,

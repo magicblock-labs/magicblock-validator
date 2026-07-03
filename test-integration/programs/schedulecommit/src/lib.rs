@@ -223,16 +223,14 @@ impl ScheduleCommitType {
         magic_fee_vault: Option<&'a AccountInfo<'info>>,
     ) -> ProgramResult {
         match self {
-            ScheduleCommitType::Commit => {
-                invoke_schedule_via_builder(
-                    payer,
-                    accounts,
-                    magic_context,
-                    magic_program,
-                    magic_fee_vault,
-                    false
-                )
-            },
+            ScheduleCommitType::Commit => invoke_schedule_via_builder(
+                payer,
+                accounts,
+                magic_context,
+                magic_program,
+                magic_fee_vault,
+                false,
+            ),
             ScheduleCommitType::CommitAndUndelegate => {
                 invoke_schedule_via_builder(
                     payer,
@@ -240,7 +238,7 @@ impl ScheduleCommitType {
                     magic_context,
                     magic_program,
                     magic_fee_vault,
-                    true
+                    true,
                 )
             }
             ScheduleCommitType::CommitFinalize => invoke_schedule_commit(
@@ -270,12 +268,12 @@ fn invoke_schedule_via_builder<'a, 'info>(
     magic_context: &'a AccountInfo<'info>,
     magic_program: &'a AccountInfo<'info>,
     magic_fee_vault: Option<&'a AccountInfo<'info>>,
-    undelegate: bool
+    undelegate: bool,
 ) -> ProgramResult {
     let builder = MagicIntentBundleBuilder::new(
         payer.clone(),
         magic_context.clone(),
-        magic_program.clone()
+        magic_program.clone(),
     );
     let builder = if let Some(vault) = magic_fee_vault {
         builder.magic_fee_vault(vault.clone())
@@ -284,7 +282,9 @@ fn invoke_schedule_via_builder<'a, 'info>(
     };
     let accounts_owned: Vec<_> = accounts.into_iter().cloned().collect();
     if undelegate {
-        builder.commit_and_undelegate(&accounts_owned).build_and_invoke()
+        builder
+            .commit_and_undelegate(&accounts_owned)
+            .build_and_invoke()
     } else {
         builder.commit(&accounts_owned).build_and_invoke()
     }

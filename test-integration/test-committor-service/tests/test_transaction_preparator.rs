@@ -36,13 +36,7 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks: Vec<BaseTaskImpl> = vec![
-        create_commit_task(
-            1,
-            true,
-            committed_account.clone(),
-            None,
-        )
-        .into(),
+        create_commit_task(1, true, committed_account.clone(), None).into(),
         FinalizeTask {
             delegated_account: committed_account.pubkey,
         }
@@ -99,13 +93,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     // Create test data
     let tasks: Vec<BaseTaskImpl> = vec![
         // account 1
-        create_commit_task(
-            1,
-            true,
-            committed_account1.clone(),
-            None,
-        )
-        .into(),
+        create_commit_task(1, true, committed_account1.clone(), None).into(),
         // account 2
         buffer_commit_task.into(),
         // finalize account 1

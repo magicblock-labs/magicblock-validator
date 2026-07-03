@@ -255,10 +255,14 @@ where
             | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
                 _,
                 _,
-            )
-            | TransactionStrategyExecutionError::TransactionTooLargeError(_) => {
+            ) => {
                 // Can't be handled
                 error!(error = ?err, "Commit tasks exceeded execution limit");
+                Ok(ControlFlow::Break(()))
+            }
+            TransactionStrategyExecutionError::TransactionTooLargeError(_) => {
+                // Can't be handled but also shouldn't occur
+                error!(strategy = ?self.state.commit_strategy, error = ?err, "Commit tasks do not fit in tx");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::InternalError(_) => {
@@ -496,10 +500,14 @@ where
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _)
-            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _)
-            | TransactionStrategyExecutionError::TransactionTooLargeError(_) => {
+            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _) => {
                 // Can't be handled
                 warn!(error = ?err, "Finalization tasks exceeded execution limit");
+                Ok(ControlFlow::Break(()))
+            }
+            TransactionStrategyExecutionError::TransactionTooLargeError(_) => {
+                // Can't be handled but also shouldn't occur
+                error!(strategy = ?self.state.finalize_strategy, error = ?err, "Finalization tasks do not fit in tx");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::InternalError(_) => {
