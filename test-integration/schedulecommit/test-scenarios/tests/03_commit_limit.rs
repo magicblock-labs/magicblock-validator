@@ -74,7 +74,7 @@ fn get_prepared() -> &'static ScheduleCommitTestContext {
                 None,
                 &players,
                 &pdas,
-                ScheduleCommitType::Commit,
+                ScheduleCommitType::CommitFinalize,
             );
             let blockhash = ephem_client.get_latest_blockhash().unwrap();
             let tx = Transaction::new_signed_with_payer(
@@ -133,7 +133,7 @@ fn test_schedule_commit_fails_at_commit_limit() {
             None,
             &[committee.0.pubkey()],
             &[committee.1],
-            ScheduleCommitType::Commit,
+            ScheduleCommitType::CommitFinalize,
         );
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(

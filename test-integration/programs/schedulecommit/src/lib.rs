@@ -208,9 +208,12 @@ pub enum ScheduleCommitInstruction {
 pub enum ScheduleCommitType {
     Commit,
     CommitAndUndelegate,
+    CommitFinalize,
+    CommitFinalizeAndUndelegate,
 }
 
 impl ScheduleCommitType {
+    #[inline(never)]
     fn invoke_commit<'a, 'info>(
         self,
         payer: &'a AccountInfo<'info>,
@@ -220,14 +223,34 @@ impl ScheduleCommitType {
         magic_fee_vault: Option<&'a AccountInfo<'info>>,
     ) -> ProgramResult {
         match self {
-            ScheduleCommitType::Commit => invoke_schedule_commit(
+            ScheduleCommitType::Commit => {
+                invoke_schedule_via_builder(
+                    payer,
+                    accounts,
+                    magic_context,
+                    magic_program,
+                    magic_fee_vault,
+                    false
+                )
+            },
+            ScheduleCommitType::CommitAndUndelegate => {
+                invoke_schedule_via_builder(
+                    payer,
+                    accounts,
+                    magic_context,
+                    magic_program,
+                    magic_fee_vault,
+                    true
+                )
+            }
+            ScheduleCommitType::CommitFinalize => invoke_schedule_commit(
                 payer,
                 accounts,
                 magic_context,
                 magic_program,
                 magic_fee_vault,
             ),
-            ScheduleCommitType::CommitAndUndelegate => {
+            ScheduleCommitType::CommitFinalizeAndUndelegate => {
                 commit_and_undelegate_accounts(
                     payer,
                     accounts,
@@ -237,6 +260,33 @@ impl ScheduleCommitType {
                 )
             }
         }
+    }
+}
+
+#[inline(never)]
+fn invoke_schedule_via_builder<'a, 'info>(
+    payer: &'a AccountInfo<'info>,
+    accounts: Vec<&'a AccountInfo<'info>>,
+    magic_context: &'a AccountInfo<'info>,
+    magic_program: &'a AccountInfo<'info>,
+    magic_fee_vault: Option<&'a AccountInfo<'info>>,
+    undelegate: bool
+) -> ProgramResult {
+    let builder = MagicIntentBundleBuilder::new(
+        payer.clone(),
+        magic_context.clone(),
+        magic_program.clone()
+    );
+    let builder = if let Some(vault) = magic_fee_vault {
+        builder.magic_fee_vault(vault.clone())
+    } else {
+        builder
+    };
+    let accounts_owned: Vec<_> = accounts.into_iter().cloned().collect();
+    if undelegate {
+        builder.commit_and_undelegate(&accounts_owned).build_and_invoke()
+    } else {
+        builder.commit(&accounts_owned).build_and_invoke()
     }
 }
 
