@@ -176,6 +176,15 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }
 
+    async fn fetch_next_commit_nonces_with_missing_as_zero(
+        &self,
+        pubkeys: &[Pubkey],
+        _: u64,
+        _: &[Pubkey],
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        self.fetch_next_commit_nonces(pubkeys, 0).await
+    }
+
     async fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],

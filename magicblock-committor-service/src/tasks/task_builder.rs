@@ -108,6 +108,7 @@ impl TaskBuilderImpl {
         task_info_fetcher: &Arc<C>,
         accounts: &[CommittedAccount],
         min_context_slot: u64,
+        missing_metadata_as_zero: &[Pubkey],
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         let committed_pubkeys = accounts
             .iter()
@@ -115,7 +116,11 @@ impl TaskBuilderImpl {
             .collect::<Vec<_>>();
 
         task_info_fetcher
-            .fetch_next_commit_nonces(&committed_pubkeys, min_context_slot)
+            .fetch_next_commit_nonces_with_missing_as_zero(
+                &committed_pubkeys,
+                min_context_slot,
+                missing_metadata_as_zero,
+            )
             .await
     }
 
@@ -148,12 +153,8 @@ impl TaskBuilderImpl {
             .rent_pending_ata_materializations
             .iter()
             .map(|materialization| materialization.eata_pubkey)
-            .collect::<std::collections::HashSet<_>>();
-        let all_committed_accounts = intent_bundle
-            .get_all_committed_accounts()
-            .into_iter()
-            .filter(|account| !rent_pending_pubkeys.contains(&account.pubkey))
             .collect::<Vec<_>>();
+        let all_committed_accounts = intent_bundle.get_all_committed_accounts();
         // Get commit nonces and base accounts
         let min_context_slot = all_committed_accounts
             .iter()
@@ -164,7 +165,8 @@ impl TaskBuilderImpl {
             Self::fetch_commit_nonces(
                 task_info_fetcher,
                 &all_committed_accounts,
-                min_context_slot
+                min_context_slot,
+                &rent_pending_pubkeys
             ),
             Self::fetch_diffable_accounts(
                 task_info_fetcher,
@@ -172,14 +174,8 @@ impl TaskBuilderImpl {
                 min_context_slot
             )
         );
-        let mut commit_nonces =
+        let commit_nonces =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
-        for materialization in &intent_bundle
-            .intent_bundle
-            .rent_pending_ata_materializations
-        {
-            commit_nonces.insert(materialization.eata_pubkey, 1);
-        }
         let base_accounts = base_accounts.unwrap_or_else(|err| {
             tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
             Default::default()
@@ -365,30 +361,48 @@ impl TasksBuilder for TaskBuilderImpl {
         async fn create_undelegate_tasks<C: TaskInfoFetcher>(
             commit_and_undelegate: &CommitAndUndelegate,
             info_fetcher: &Arc<C>,
+            rent_pending_reimbursements: &HashMap<Pubkey, Pubkey>,
         ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
             // Get rent reimbursments for undelegated accounts
             let accounts = commit_and_undelegate.get_committed_accounts();
             let mut min_context_slot = 0;
             let pubkeys = accounts
                 .iter()
-                .map(|account| {
+                .filter_map(|account| {
                     min_context_slot =
                         std::cmp::max(min_context_slot, account.remote_slot);
-                    account.pubkey
+                    (!rent_pending_reimbursements.contains_key(&account.pubkey))
+                        .then_some(account.pubkey)
                 })
                 .collect::<Vec<_>>();
-            let rent_reimbursements = info_fetcher
+            let fetched_rent_reimbursements = info_fetcher
                 .fetch_rent_reimbursements(&pubkeys, min_context_slot)
                 .await
                 .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+            let rent_reimbursements = pubkeys
+                .into_iter()
+                .zip(fetched_rent_reimbursements)
+                .collect::<HashMap<_, _>>();
 
-            let mut tasks = accounts
-                .iter()
-                .zip(rent_reimbursements)
-                .map(|(account, rent_reimbursement)| {
-                    undelegate_task(account, &rent_reimbursement)
-                })
-                .collect::<Vec<_>>();
+            let mut tasks = Vec::with_capacity(accounts.len());
+            for account in accounts {
+                let rent_reimbursement = if let Some(rent_reimbursement) =
+                    rent_pending_reimbursements.get(&account.pubkey)
+                {
+                    *rent_reimbursement
+                } else if let Some(rent_reimbursement) =
+                    rent_reimbursements.get(&account.pubkey)
+                {
+                    *rent_reimbursement
+                } else {
+                    return Err(TaskBuilderError::FinalizedTasksBuildError(
+                        TaskInfoFetcherError::AccountNotFoundError(
+                            account.pubkey,
+                        ),
+                    ));
+                };
+                tasks.push(undelegate_task(account, &rent_reimbursement));
+            }
 
             if let UndelegateType::WithBaseActions(actions) =
                 &commit_and_undelegate.undelegate_action
@@ -399,6 +413,14 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         let mut tasks = Vec::new();
+        let rent_pending_reimbursements = intent_bundle
+            .intent_bundle
+            .rent_pending_ata_materializations
+            .iter()
+            .map(|materialization| {
+                (materialization.eata_pubkey, materialization.validator)
+            })
+            .collect::<HashMap<_, _>>();
         let mut futures = Vec::with_capacity(2);
 
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
@@ -409,13 +431,21 @@ impl TasksBuilder for TaskBuilderImpl {
             intent_bundle.intent_bundle.commit_and_undelegate
         {
             tasks.extend(create_finalize_tasks(&value.commit_action));
-            futures.push(create_undelegate_tasks(value, info_fetcher));
+            futures.push(create_undelegate_tasks(
+                value,
+                info_fetcher,
+                &rent_pending_reimbursements,
+            ));
         }
 
         if let Some(ref value) =
             intent_bundle.intent_bundle.commit_finalize_and_undelegate
         {
-            futures.push(create_undelegate_tasks(value, info_fetcher));
+            futures.push(create_undelegate_tasks(
+                value,
+                info_fetcher,
+                &rent_pending_reimbursements,
+            ));
         }
 
         tasks.extend(try_join_all(futures).await?.into_iter().flatten());
@@ -596,10 +626,24 @@ mod tests {
         async fn fetch_next_commit_nonces(
             &self,
             pubkeys: &[Pubkey],
-            _min_context_slot: u64,
+            min_context_slot: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            assert!(pubkeys.is_empty());
-            Ok(HashMap::new())
+            self.fetch_next_commit_nonces_with_missing_as_zero(
+                pubkeys,
+                min_context_slot,
+                pubkeys,
+            )
+            .await
+        }
+
+        async fn fetch_next_commit_nonces_with_missing_as_zero(
+            &self,
+            pubkeys: &[Pubkey],
+            _min_context_slot: u64,
+            missing_metadata_as_zero: &[Pubkey],
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            assert_eq!(pubkeys, missing_metadata_as_zero);
+            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 1)).collect())
         }
 
         async fn fetch_current_commit_nonces(
@@ -613,9 +657,72 @@ mod tests {
 
         async fn fetch_rent_reimbursements(
             &self,
-            _pubkeys: &[Pubkey],
+            pubkeys: &[Pubkey],
             _min_context_slot: u64,
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+            assert!(pubkeys.is_empty());
+            Ok(Vec::new())
+        }
+
+        async fn get_base_accounts(
+            &self,
+            pubkeys: &[Pubkey],
+            _min_context_slot: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+            assert!(pubkeys.is_empty());
+            Ok(HashMap::new())
+        }
+    }
+
+    struct ExistingMetadataFetcher {
+        next_nonce: u64,
+    }
+
+    #[async_trait]
+    impl TaskInfoFetcher for ExistingMetadataFetcher {
+        async fn fetch_next_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            min_context_slot: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            self.fetch_next_commit_nonces_with_missing_as_zero(
+                pubkeys,
+                min_context_slot,
+                &[],
+            )
+            .await
+        }
+
+        async fn fetch_next_commit_nonces_with_missing_as_zero(
+            &self,
+            pubkeys: &[Pubkey],
+            _min_context_slot: u64,
+            missing_metadata_as_zero: &[Pubkey],
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            assert_eq!(pubkeys, missing_metadata_as_zero);
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| (*pubkey, self.next_nonce))
+                .collect())
+        }
+
+        async fn fetch_current_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _min_context_slot: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| (*pubkey, self.next_nonce.saturating_sub(1)))
+                .collect())
+        }
+
+        async fn fetch_rent_reimbursements(
+            &self,
+            pubkeys: &[Pubkey],
+            _min_context_slot: u64,
+        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+            assert!(pubkeys.is_empty());
             Ok(Vec::new())
         }
 
@@ -746,6 +853,45 @@ mod tests {
         let delegate_ix = tasks[1].instruction(&validator);
         assert_eq!(delegate_ix.data[0], 4);
         assert_eq!(&delegate_ix.data[1..], validator.as_ref());
+    }
+
+    #[tokio::test]
+    async fn rent_pending_commit_and_undelegate_finalize_defaults_reimbursement(
+    ) {
+        let fetcher = Arc::new(EmptyFetcher);
+        let (intent, validator) = rent_pending_intent(true);
+
+        let tasks = TaskBuilderImpl::finalize_tasks(&fetcher, &intent)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            tasks.as_slice(),
+            [BaseTaskImpl::Finalize(_), BaseTaskImpl::Undelegate(_)]
+        ));
+        let BaseTaskImpl::Undelegate(undelegate) = &tasks[1] else {
+            panic!("expected undelegate task");
+        };
+        assert_eq!(undelegate.rent_reimbursement, validator);
+    }
+
+    #[tokio::test]
+    async fn rent_pending_second_commit_uses_fetched_nonce() {
+        let fetcher = Arc::new(ExistingMetadataFetcher { next_nonce: 2 });
+        let (intent, _validator) = rent_pending_intent(false);
+
+        let tasks = TaskBuilderImpl::commit_tasks(
+            &fetcher,
+            &intent,
+            &None::<crate::persist::IntentPersisterImpl>,
+        )
+        .await
+        .unwrap();
+
+        let BaseTaskImpl::Commit(commit) = &tasks[2] else {
+            panic!("expected commit task");
+        };
+        assert_eq!(commit.commit_id, 2);
     }
 
     #[tokio::test]

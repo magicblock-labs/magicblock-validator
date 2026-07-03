@@ -1,10 +1,20 @@
 use std::{io::Cursor, mem};
 
+use magicblock_core::{
+    token_programs::{TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID},
+    Slot,
+};
 use magicblock_magic_program_api::MAGIC_CONTEXT_SIZE;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
+use solana_transaction::Transaction;
 
-use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
+use crate::magic_scheduled_base_intent::{
+    BaseAction, CommitAndUndelegate, CommitType, MagicIntentBundle,
+    ScheduledIntentBundle,
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {
@@ -20,8 +30,19 @@ impl MagicContext {
         if data.is_empty() || is_zeroed(data) {
             Ok(Self::default())
         } else {
-            bincode::deserialize_from(Cursor::new(data))
+            match deserialize_with_zero_padding(data) {
+                Ok(context) if has_valid_rent_pending_metadata(&context) => {
+                    Ok(context)
+                }
+                Ok(_) => Self::deserialize_legacy(data),
+                Err(err) => Self::deserialize_legacy(data).map_err(|_| err),
+            }
         }
+    }
+
+    fn deserialize_legacy(data: &[u8]) -> Result<Self, bincode::Error> {
+        deserialize_with_zero_padding::<LegacyMagicContext>(data)
+            .map(Into::into)
     }
 
     pub(crate) fn write_to(
@@ -88,9 +109,121 @@ fn is_zeroed(buf: &[u8]) -> bool {
     }
 }
 
+fn deserialize_with_zero_padding<T: DeserializeOwned + Serialize>(
+    data: &[u8],
+) -> Result<T, bincode::Error> {
+    let value = bincode::deserialize_from(Cursor::new(data))?;
+    let encoded = bincode::serialize(&value)?;
+    if data.get(..encoded.len()) == Some(encoded.as_slice())
+        && data.get(encoded.len()..).is_some_and(is_zeroed)
+    {
+        Ok(value)
+    } else {
+        Err(Box::new(bincode::ErrorKind::Custom(
+            "non-zero trailing bytes".to_string(),
+        )))
+    }
+}
+
+fn has_valid_rent_pending_metadata(context: &MagicContext) -> bool {
+    context.scheduled_base_intents.iter().all(|intent| {
+        intent
+            .intent_bundle
+            .rent_pending_ata_materializations
+            .iter()
+            .all(|materialization| {
+                materialization.ata_pubkey != Pubkey::default()
+                    && materialization.eata_pubkey != Pubkey::default()
+                    && materialization.wallet_owner != Pubkey::default()
+                    && materialization.mint != Pubkey::default()
+                    && materialization.validator != Pubkey::default()
+                    && materialization.delegated_payer != Pubkey::default()
+                    && materialization.delegated_vault != Pubkey::default()
+                    && materialization.token_account_data_len != 0
+                    && (materialization.token_program == TOKEN_PROGRAM_ID
+                        || materialization.token_program
+                            == TOKEN_2022_PROGRAM_ID)
+            })
+    })
+}
+
+// Compat invariant: pre-rent-pending MagicContext bytes do not contain
+// `rent_pending_ata_materializations`; restored legacy intents use an empty vec.
+#[derive(Serialize, Deserialize)]
+struct LegacyMagicContext {
+    intent_id: u64,
+    scheduled_base_intents: Vec<LegacyScheduledIntentBundle>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LegacyScheduledIntentBundle {
+    id: u64,
+    slot: Slot,
+    blockhash: Hash,
+    sent_transaction: Transaction,
+    payer: Pubkey,
+    intent_bundle: LegacyMagicIntentBundle,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LegacyMagicIntentBundle {
+    commit: Option<CommitType>,
+    commit_and_undelegate: Option<CommitAndUndelegate>,
+    commit_finalize: Option<CommitType>,
+    commit_finalize_and_undelegate: Option<CommitAndUndelegate>,
+    standalone_actions: Vec<BaseAction>,
+}
+
+impl From<LegacyMagicContext> for MagicContext {
+    fn from(value: LegacyMagicContext) -> Self {
+        Self {
+            intent_id: value.intent_id,
+            scheduled_base_intents: value
+                .scheduled_base_intents
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<LegacyScheduledIntentBundle> for ScheduledIntentBundle {
+    fn from(value: LegacyScheduledIntentBundle) -> Self {
+        Self {
+            id: value.id,
+            slot: value.slot,
+            blockhash: value.blockhash,
+            sent_transaction: value.sent_transaction,
+            payer: value.payer,
+            intent_bundle: value.intent_bundle.into(),
+        }
+    }
+}
+
+impl From<LegacyMagicIntentBundle> for MagicIntentBundle {
+    fn from(value: LegacyMagicIntentBundle) -> Self {
+        Self {
+            commit: value.commit,
+            commit_and_undelegate: value.commit_and_undelegate,
+            commit_finalize: value.commit_finalize,
+            commit_finalize_and_undelegate: value
+                .commit_finalize_and_undelegate,
+            standalone_actions: value.standalone_actions,
+            rent_pending_ata_materializations: Vec::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::MagicContext;
+    use solana_hash::Hash;
+    use solana_pubkey::Pubkey;
+    use solana_transaction::Transaction;
+
+    use super::{
+        LegacyMagicContext, LegacyMagicIntentBundle,
+        LegacyScheduledIntentBundle, MagicContext,
+    };
 
     #[test]
     fn deserialize_treats_empty_and_zeroed_as_default() {
@@ -113,5 +246,58 @@ mod tests {
         let got = MagicContext::deserialize(&data).unwrap();
         assert_eq!(got.intent_id, ctx.intent_id);
         assert!(got.scheduled_base_intents.is_empty());
+    }
+
+    #[test]
+    fn deserialize_recovers_legacy_context_with_two_pending_intents() {
+        let legacy = LegacyMagicContext {
+            intent_id: 11,
+            scheduled_base_intents: vec![
+                LegacyScheduledIntentBundle {
+                    id: 1,
+                    slot: 2,
+                    blockhash: Hash::new_unique(),
+                    sent_transaction: Transaction::default(),
+                    payer: Pubkey::new_unique(),
+                    intent_bundle: LegacyMagicIntentBundle {
+                        commit: None,
+                        commit_and_undelegate: None,
+                        commit_finalize: None,
+                        commit_finalize_and_undelegate: None,
+                        standalone_actions: Vec::new(),
+                    },
+                },
+                LegacyScheduledIntentBundle {
+                    id: 999,
+                    slot: 3,
+                    blockhash: Hash::new_unique(),
+                    sent_transaction: Transaction::default(),
+                    payer: Pubkey::new_unique(),
+                    intent_bundle: LegacyMagicIntentBundle {
+                        commit: None,
+                        commit_and_undelegate: None,
+                        commit_finalize: None,
+                        commit_finalize_and_undelegate: None,
+                        standalone_actions: Vec::new(),
+                    },
+                },
+            ],
+        };
+        let encoded = bincode::serialize(&legacy).unwrap();
+        let mut data = vec![0; MagicContext::SIZE];
+        data[..encoded.len()].copy_from_slice(&encoded);
+
+        let got = MagicContext::deserialize(&data).unwrap();
+
+        assert_eq!(got.intent_id, 11);
+        assert_eq!(got.scheduled_base_intents.len(), 2);
+        assert_eq!(got.scheduled_base_intents[0].id, 1);
+        assert_eq!(got.scheduled_base_intents[1].id, 999);
+        assert!(got.scheduled_base_intents.iter().all(|intent| {
+            intent
+                .intent_bundle
+                .rent_pending_ata_materializations
+                .is_empty()
+        }));
     }
 }
