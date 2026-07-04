@@ -11,7 +11,10 @@ use magicblock_core::{
         },
     },
     tls::ExecutionTlsStash,
-    token_programs::try_get_rent_pending_ata_info,
+    token_programs::{
+        try_get_rent_pending_ata_info,
+        try_get_undelegating_rent_pending_ata_info, RentPendingAtaInfo,
+    },
 };
 use magicblock_metrics::metrics::{
     FAILED_TRANSACTIONS_COUNT, TRANSACTION_COUNT,
@@ -477,7 +480,7 @@ impl super::TransactionExecutor {
                 ));
                 break;
             };
-            let Some(info) = try_get_rent_pending_ata_info(&pubkey, acc) else {
+            let Some(info) = created_rent_pending_ata_info(&pubkey, acc) else {
                 executed.execution_details.status =
                     Err(TransactionError::UnbalancedTransaction);
                 logs.push(format!(
@@ -537,6 +540,20 @@ fn transaction_balances(
     )
 }
 
+fn created_rent_pending_ata_info(
+    pubkey: &Pubkey,
+    acc: &AccountSharedData,
+) -> Option<RentPendingAtaInfo> {
+    try_get_rent_pending_ata_info(pubkey, acc).or_else(|| {
+        if !ExecutionTlsStash::has_recorded_rent_pending_ata_materialization(
+            pubkey,
+        ) {
+            return None;
+        }
+        try_get_undelegating_rent_pending_ata_info(pubkey, acc)
+    })
+}
+
 fn signature_fee(
     txn: &SanitizedTransaction,
     lamports_per_signature: u64,
@@ -544,4 +561,76 @@ fn signature_fee(
     txn.message()
         .num_total_signatures()
         .saturating_mul(lamports_per_signature)
+}
+
+#[cfg(test)]
+mod tests {
+    use magicblock_core::token_programs::{
+        derive_ata, RENT_PENDING_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
+    };
+    use solana_account::{Account, WritableAccount};
+    use solana_program::{program_option::COption, program_pack::Pack};
+    use spl_token::state::{
+        Account as SplAccount, AccountState as SplAccountState,
+    };
+
+    use super::*;
+
+    fn rent_pending_ata_account(
+        wallet_owner: Pubkey,
+        mint: Pubkey,
+        amount: u64,
+    ) -> AccountSharedData {
+        let token_account = SplAccount {
+            mint,
+            owner: wallet_owner,
+            amount,
+            delegate: COption::None,
+            state: SplAccountState::Initialized,
+            is_native: COption::None,
+            delegated_amount: 0,
+            close_authority: COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY),
+        };
+        let mut data = vec![0; SplAccount::LEN];
+        SplAccount::pack(token_account, &mut data).unwrap();
+        let mut account = AccountSharedData::from(Account {
+            lamports: 1_000_000,
+            data,
+            owner: TOKEN_PROGRAM_ID,
+            executable: false,
+            rent_epoch: 0,
+        });
+        account.set_delegated(true);
+        account
+    }
+
+    #[test]
+    fn created_rent_pending_ata_accepts_recorded_undelegating_materialization()
+    {
+        ExecutionTlsStash::clear();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet_owner, &mint);
+        let active_account = rent_pending_ata_account(wallet_owner, mint, 9);
+
+        assert!(created_rent_pending_ata_info(&ata, &active_account).is_some());
+
+        let mut undelegating_account = active_account.clone();
+        undelegating_account.set_owner(Pubkey::new_unique());
+        undelegating_account.set_delegated(false);
+        undelegating_account.set_undelegating(true);
+        assert!(created_rent_pending_ata_info(&ata, &undelegating_account)
+            .is_none());
+
+        ExecutionTlsStash::register_recorded_rent_pending_ata_materialization(
+            ata,
+        );
+        let info = created_rent_pending_ata_info(&ata, &undelegating_account)
+            .expect("recorded undelegating rent-pending ATA should validate");
+        assert_eq!(info.ata_pubkey, ata);
+        assert_eq!(info.wallet_owner, wallet_owner);
+        assert_eq!(info.mint, mint);
+        assert_eq!(info.amount, 9);
+        ExecutionTlsStash::clear();
+    }
 }

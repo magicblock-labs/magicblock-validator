@@ -5,6 +5,7 @@ use std::{
 
 use magicblock_core::{
     intent::{BaseActionCallback, CommittedAccount},
+    tls::ExecutionTlsStash,
     token_programs::{
         try_get_rent_pending_ata_info, RentPendingAtaMaterialization,
         EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
@@ -106,6 +107,9 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
                 );
                 return Err(InstructionError::IllegalOwner);
             };
+            ExecutionTlsStash::register_recorded_rent_pending_ata_materialization(
+                info.ata_pubkey,
+            );
             materializations.push(RentPendingAtaMaterialization {
                 ata_pubkey: info.ata_pubkey,
                 eata_pubkey: info.eata_pubkey,

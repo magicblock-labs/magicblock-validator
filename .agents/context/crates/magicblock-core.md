@@ -137,7 +137,7 @@ Use `CoordinationMode::current()`, `needs_validator_signer()`, `should_schedule_
 
 ### Execution TLS
 
-`tls::ExecutionTlsStash` is a thread-local queue currently used for `TaskRequest`s emitted by Magic Program task scheduling/cancel instructions and for newly created rent-pending ATA pubkeys that need post-execution validation. The processor clears the stash around execution, drains scheduled tasks after a successful transaction path, and verifies newly created rent-pending ATAs before local state is committed. Do not use it as a cross-thread channel or persistent store.
+`tls::ExecutionTlsStash` is a thread-local queue currently used for `TaskRequest`s emitted by Magic Program task scheduling/cancel instructions, newly created rent-pending ATA pubkeys that need post-execution validation, and rent-pending ATA materialization pubkeys recorded during scheduling. The processor clears the stash around execution, drains scheduled tasks after a successful transaction path, and verifies newly created rent-pending ATAs before local state is committed. The materialization marker lets that verifier accept a rent-pending ATA that was created, funded, recorded for materialization, and then marked undelegating in the same transaction. Do not use TLS as a cross-thread channel or persistent store.
 
 ### Token/eATA helpers
 

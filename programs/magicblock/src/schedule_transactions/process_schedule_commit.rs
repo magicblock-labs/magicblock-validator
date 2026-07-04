@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use magicblock_core::{
     intent::CommittedAccount,
+    tls::ExecutionTlsStash,
     token_programs::{
         try_get_rent_pending_ata_info, RentPendingAtaMaterialization,
     },
@@ -246,6 +247,9 @@ pub(crate) fn process_schedule_commit(
             }
 
             if let Some(info) = rent_pending_info {
+                ExecutionTlsStash::register_recorded_rent_pending_ata_materialization(
+                    info.ata_pubkey,
+                );
                 rent_pending_ata_materializations.push(
                     RentPendingAtaMaterialization {
                         ata_pubkey: info.ata_pubkey,

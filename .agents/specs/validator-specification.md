@@ -344,7 +344,11 @@ that marker is not rent-pending.
 New local rent-pending ATA creation is free, but the same transaction must leave
 the newly created account with a positive token amount. The processor rejects
 and rolls back a creation transaction that leaves a newly created rent-pending
-ATA at zero balance.
+ATA at zero balance. The same transaction may also schedule commit-and-undelegate
+for that newly created ATA after materialization metadata has been recorded; in
+that case the post-creation verifier accepts the undelegating token-account shape
+only because the execution TLS materialization marker proves scheduling already
+captured the rent-pending metadata.
 
 When a rent-pending ATA is scheduled for commit or commit-and-undelegate, the
 Magic Program records explicit materialization metadata, charges the delegated

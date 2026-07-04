@@ -437,17 +437,55 @@ pub fn try_get_rent_pending_ata_info(
         return None;
     }
 
-    let token_program_owner = account.owner();
-    let is_spl_token = *token_program_owner == TOKEN_PROGRAM_ID;
-    let is_token_2022 = *token_program_owner == TOKEN_2022_PROGRAM_ID;
-    if !(is_spl_token || is_token_2022) {
+    let token_program = account.owner();
+    if !is_supported_token_program(token_program) {
+        return None;
+    }
+    try_get_rent_pending_ata_info_for_token_program(
+        pubkey,
+        account,
+        token_program,
+    )
+}
+
+/// Parses a rent-pending ATA after scheduling has marked it undelegating.
+/// Callers must separately prove rent-pending materialization metadata was
+/// recorded before trusting this shape.
+pub fn try_get_undelegating_rent_pending_ata_info(
+    pubkey: &Pubkey,
+    account: &AccountSharedData,
+) -> Option<RentPendingAtaInfo> {
+    if account.delegated()
+        || account.ephemeral()
+        || account.confined()
+        || !account.undelegating()
+    {
         return None;
     }
 
-    let token_account = parse_token_account_for_rent_pending(
-        token_program_owner,
-        account.data(),
-    )?;
+    [TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID]
+        .into_iter()
+        .find_map(|token_program| {
+            try_get_rent_pending_ata_info_for_token_program(
+                pubkey,
+                account,
+                &token_program,
+            )
+        })
+}
+
+fn is_supported_token_program(token_program: &Pubkey) -> bool {
+    *token_program == TOKEN_PROGRAM_ID
+        || *token_program == TOKEN_2022_PROGRAM_ID
+}
+
+fn try_get_rent_pending_ata_info_for_token_program(
+    pubkey: &Pubkey,
+    account: &AccountSharedData,
+    token_program: &Pubkey,
+) -> Option<RentPendingAtaInfo> {
+    let token_account =
+        parse_token_account_for_rent_pending(token_program, account.data())?;
     if token_account.close_authority
         != COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
         || token_account.is_native.is_some()
@@ -465,7 +503,7 @@ pub fn try_get_rent_pending_ata_info(
     let expected_ata = derive_ata_with_token_program(
         &token_account.owner,
         &token_account.mint,
-        token_program_owner,
+        token_program,
     );
     if expected_ata != *pubkey {
         return None;
@@ -479,7 +517,7 @@ pub fn try_get_rent_pending_ata_info(
     Some(RentPendingAtaInfo {
         ata_pubkey: *pubkey,
         eata_pubkey,
-        token_program: *token_program_owner,
+        token_program: *token_program,
         wallet_owner: token_account.owner,
         mint: token_account.mint,
         amount: token_account.amount,
@@ -815,6 +853,20 @@ mod tests {
         undelegating_account.set_undelegating(true);
         assert!(try_get_rent_pending_ata_info(&ata, &undelegating_account)
             .is_none());
+
+        let mut scheduled_undelegating_account = account.clone();
+        scheduled_undelegating_account.set_owner(Pubkey::new_unique());
+        scheduled_undelegating_account.set_delegated(false);
+        scheduled_undelegating_account.set_undelegating(true);
+        let undelegating_info = try_get_undelegating_rent_pending_ata_info(
+            &ata,
+            &scheduled_undelegating_account,
+        )
+        .expect("scheduled undelegating rent-pending ATA should be detected");
+        assert_eq!(undelegating_info.ata_pubkey, ata);
+        assert_eq!(undelegating_info.wallet_owner, wallet_owner);
+        assert_eq!(undelegating_info.mint, mint);
+        assert_eq!(undelegating_info.amount, 9);
 
         let mut not_delegated = account.clone();
         not_delegated.set_delegated(false);
