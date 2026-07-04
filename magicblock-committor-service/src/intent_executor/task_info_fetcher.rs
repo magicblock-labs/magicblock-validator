@@ -882,32 +882,25 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         let nonce_guards = locks_guard.lock().await;
         let (mut existing, mut missing) = (vec![], vec![]);
         for (pubkey, guard) in nonce_guards {
-            if guard.value.is_some() {
+            if guard.value.is_some() && !guard.missing_metadata {
                 existing.push((pubkey, guard));
             } else {
                 missing.push((pubkey, guard))
             }
         }
 
-        let zero_defaults: HashSet<_> =
-            missing_metadata_as_zero.iter().copied().collect();
         // If all in cache - great! return
         if missing.is_empty() {
             let mut nonces = HashMap::with_capacity(existing.len());
-            let mut missing_metadata = HashSet::new();
             for (pubkey, mut guard) in existing {
                 if let Some(nonce) = guard.value.as_mut() {
                     *nonce += 1;
                     nonces.insert(*pubkey, *nonce);
-                    if guard.missing_metadata && zero_defaults.contains(pubkey)
-                    {
-                        missing_metadata.insert(*pubkey);
-                    }
                 }
             }
             return Ok(CommitNonceFetchResult {
                 nonces,
-                missing_metadata,
+                missing_metadata: HashSet::new(),
             });
         }
 
@@ -931,9 +924,6 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
             if let Some(nonce) = guard.value.as_mut() {
                 *nonce += 1;
                 nonces.insert(*pubkey, *nonce);
-                if guard.missing_metadata && zero_defaults.contains(pubkey) {
-                    missing_metadata.insert(*pubkey);
-                }
             }
         }
         for (pubkey, mut guard) in missing {
@@ -1324,6 +1314,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn missing_metadata_cache_entry_refetches_until_materialized() {
+        let pk = Pubkey::new_unique();
+        let fetcher = FetcherBuilder::new(vec![0, 20])
+            .missing_metadata(vec![true, false])
+            .build();
+
+        let r1 = fetcher
+            .fetch_next_commit_nonces_with_missing_as_zero(&[pk], 0, &[pk])
+            .await
+            .unwrap();
+        assert_eq!(r1.nonces[&pk], 1);
+        assert!(r1.missing_metadata.contains(&pk));
+
+        let r2 = fetcher
+            .fetch_next_commit_nonces_with_missing_as_zero(&[pk], 0, &[pk])
+            .await
+            .unwrap();
+        assert_eq!(r2.nonces[&pk], 21);
+        assert!(r2.missing_metadata.is_empty());
+
+        let r3 = fetcher
+            .fetch_next_commit_nonces_with_missing_as_zero(&[pk], 0, &[pk])
+            .await
+            .unwrap();
+        assert_eq!(r3.nonces[&pk], 22);
+        assert!(r3.missing_metadata.is_empty());
+    }
+
+    #[tokio::test]
     async fn peek_awaits_inflight_fetch() {
         let pk1 = Pubkey::new_unique();
         let pk2 = Pubkey::new_unique();
@@ -1372,6 +1391,7 @@ mod tests {
     /// Fetcher mock
     struct MockInfoFetcher {
         nonces: Mutex<VecDeque<u64>>,
+        missing_metadata: Mutex<VecDeque<bool>>,
         delay: Option<Duration>,
     }
 
@@ -1379,8 +1399,17 @@ mod tests {
         fn new(nonces: Vec<u64>) -> Self {
             Self {
                 nonces: Mutex::new(nonces.into()),
+                missing_metadata: Mutex::new(VecDeque::new()),
                 delay: None,
             }
+        }
+
+        fn with_missing_metadata(
+            mut self,
+            missing_metadata: Vec<bool>,
+        ) -> Self {
+            self.missing_metadata = Mutex::new(missing_metadata.into());
+            self
         }
 
         fn with_delay(mut self, delay: Duration) -> Self {
@@ -1415,16 +1444,20 @@ mod tests {
                 tokio::time::sleep(delay).await;
             }
             let mut q = self.nonces.lock().unwrap();
-            Ok(CommitNonceFetchResult::from_nonces(
-                pubkeys
-                    .iter()
-                    .map(|pk| {
-                        let nonce =
-                            q.pop_front().expect("mock nonce queue exhausted");
-                        (*pk, nonce + 1)
-                    })
-                    .collect(),
-            ))
+            let mut missing_q = self.missing_metadata.lock().unwrap();
+            let mut nonces = HashMap::with_capacity(pubkeys.len());
+            let mut missing_metadata = HashSet::new();
+            for pk in pubkeys {
+                let nonce = q.pop_front().expect("mock nonce queue exhausted");
+                nonces.insert(*pk, nonce + 1);
+                if missing_q.pop_front().unwrap_or(false) {
+                    missing_metadata.insert(*pk);
+                }
+            }
+            Ok(CommitNonceFetchResult {
+                nonces,
+                missing_metadata,
+            })
         }
 
         async fn fetch_current_commit_nonces(
@@ -1478,6 +1511,11 @@ mod tests {
 
         fn rpc_delay(mut self, d: Duration) -> Self {
             self.inner = self.inner.with_delay(d);
+            self
+        }
+
+        fn missing_metadata(mut self, missing_metadata: Vec<bool>) -> Self {
+            self.inner = self.inner.with_missing_metadata(missing_metadata);
             self
         }
 

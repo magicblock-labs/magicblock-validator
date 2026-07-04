@@ -146,7 +146,7 @@ solana-transaction-context = { git = "https://github.com/magicblock-labs/magicbl
 ] }
 solana-transaction-error = { version = "3.0" }
 solana-transaction-status = { version = "4.0" }
-solana-transaction-status-client-types = "4.0"
+solana-transaction-status-client-types = "=4.0.0"
 solana-zk-elgamal-proof-program = { version = "=4.0.0", features = [
     "agave-unstable-api",
 ] }
@@ -195,7 +195,7 @@ serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
 solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
-solana-account-decoder = { version = "4.0" }
+solana-account-decoder = { version = "=4.0.0" }
 solana-account-decoder-client-types = { version = "4.0" }
 solana-account-info = { version = "3.1" }
 solana-address-lookup-table-interface = { version = "3.0" }

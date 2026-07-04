@@ -207,12 +207,12 @@ For committed accounts with `data.len() > COMMIT_STATE_SIZE_THRESHOLD` (`256`), 
 
 Rent-pending ATA materialization metadata is handled before normal DLP commit
 tasks. For each metadata entry, `TaskBuilderImpl::commit_tasks` prepends an
-e-token initialize-eATA task and a delegate-eATA-to-this-validator task, skips
-base nonce/base-account fetches for the newly materialized eATA, and uses
-synthetic commit nonce `1` for the following DLP commit. If an eATA already
-exists and is delegated to another validator, the e-token delegate task is the
-expected validator-mismatch failure gate before any DLP commit/undelegation
-task is allowed to succeed.
+e-token initialize-eATA task and a delegate-eATA-to-this-validator task. The
+task builder still fetches the eATA commit nonce; it defaults missing base DLP
+metadata to current nonce `0` only for rent-pending eATAs, otherwise it uses the
+fetched base nonce. If an eATA already exists and is delegated to another
+validator, the e-token delegate task is the expected validator-mismatch failure
+gate before any DLP commit/undelegation task is allowed to succeed.
 
 ### Delivery preparation and cleanup flow
 
@@ -233,6 +233,13 @@ Cleanup closes prepared buffers and releases TableMania pubkeys. `IntentExecutio
 `CacheTaskInfoFetcher` caches commit nonces in a 10,000-entry LRU. It uses per-pubkey async mutexes acquired in sorted order to avoid A->B / B->A deadlocks, and a `retiring` map to keep evicted locks alive while in-flight requests still hold them. `fetch_next_commit_nonces` increments cached values and reserves the next nonce; `fetch_current_commit_nonces` reads/stores the current value without incrementing.
 
 `IntentExecutorImpl` resets cached nonces according to execution certainty. On any execution error, it resets all committed pubkeys because it cannot know what landed on chain. On successful undelegation paths, it resets only the pubkeys returned by `get_undelegate_intent_pubkeys()` and `get_commit_finalize_and_undelegate_intent_pubkeys()`. Other successfully committed pubkeys keep their incremented cached nonce, which avoids a chain re-fetch racing the just-landed finalize and reusing a stale nonce/buffer PDA.
+
+When `fetch_next_commit_nonces_with_missing_as_zero` defaults a rent-pending
+eATA with missing base metadata to zero, the cache records that the nonce came
+from missing metadata. The next fetch for that pubkey must re-check the inner
+fetcher instead of treating the entry as a normal cache hit, so a successfully
+materialized base metadata account clears the recovery marker and does not
+generate duplicate init/delegate materialization tasks.
 
 Do not remove sorted lock acquisition or the retiring map without replacing the deadlock/race prevention. Commit nonce races can cause base-layer commit failures and stuck undelegations.
 

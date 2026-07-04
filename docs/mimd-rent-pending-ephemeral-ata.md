@@ -169,7 +169,9 @@ The processor must:
    - `mint = mint`;
    - `owner = wallet_owner`;
    - `amount = 0`;
-   - token account state is initialized;
+   - token account state is initialized for SPL Token, and for Token-2022
+     mirrors the mint `DefaultAccountState` extension (`Initialized` by
+     default, `Frozen` when the mint default is frozen);
    - delegate is unset;
    - native state is unset;
    - close authority is `Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)`.
