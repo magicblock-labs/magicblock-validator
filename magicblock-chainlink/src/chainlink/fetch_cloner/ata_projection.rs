@@ -5,7 +5,7 @@ use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
     is_ata, try_derive_eata_address_and_bump, try_derive_supported_ata_pubkeys,
-    AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
+    try_get_rent_pending_ata_info, AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -203,7 +203,11 @@ where
         }
     };
 
-    if base_ata.delegated() || base_ata.undelegating() {
+    let is_rent_pending_base_ata =
+        try_get_rent_pending_ata_info(&ata_pubkey, &base_ata).is_some();
+    if base_ata.undelegating()
+        || (base_ata.delegated() && !is_rent_pending_base_ata)
+    {
         return None;
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(

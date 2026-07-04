@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use dlp_api::state::DelegationRecord;
+use magicblock_core::token_programs::{
+    try_get_rent_pending_ata_info, RENT_PENDING_ATA_CLOSE_AUTHORITY,
+};
 use magicblock_metrics::metrics::{
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
@@ -6582,6 +6585,102 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
     assert!(
         projected_ata_request.is_none(),
         "delegated eATA updates should not synthesize a projected ATA without an ATA already in the bank",
+    );
+}
+
+#[tokio::test]
+async fn test_projected_ata_clone_request_from_eata_update_clears_rent_pending_marker(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const CHAIN_EATA_AMOUNT: u64 = 777;
+    const RENT_PENDING_ATA_AMOUNT: u64 = 999;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account =
+        create_eata_account(&wallet_owner, &mint, CHAIN_EATA_AMOUNT, true);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(eata_pubkey, eata_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    let mut rent_pending_ata = create_ata_account(&wallet_owner, &mint);
+    let mut rent_pending_token =
+        SplAccount::unpack(&rent_pending_ata.data).unwrap();
+    rent_pending_token.amount = RENT_PENDING_ATA_AMOUNT;
+    rent_pending_token.close_authority =
+        COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY);
+    SplAccount::pack(rent_pending_token, &mut rent_pending_ata.data).unwrap();
+    let mut rent_pending_ata_shared = AccountSharedData::from(rent_pending_ata);
+    rent_pending_ata_shared.set_remote_slot(CURRENT_SLOT - 1);
+    rent_pending_ata_shared.set_delegated(true);
+    assert!(
+        try_get_rent_pending_ata_info(&ata_pubkey, &rent_pending_ata_shared)
+            .is_some(),
+        "test setup must create a rent-pending ATA marker",
+    );
+    accounts_bank.insert(ata_pubkey, rent_pending_ata_shared);
+
+    let (deleg_record, _) = fetch_cloner
+        .fetch_and_parse_delegation_record(
+            eata_pubkey,
+            CURRENT_SLOT,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .expect("delegation record should resolve");
+
+    let mut eata_shared = AccountSharedData::from(eata_account);
+    eata_shared.set_remote_slot(CURRENT_SLOT);
+
+    let projected_ata_request = fetch_cloner
+        .maybe_build_projected_ata_clone_request_from_subscription_update(
+            eata_pubkey,
+            &eata_shared,
+            Some(&deleg_record),
+            &DelegationActions::default(),
+        )
+        .await
+        .expect("rent-pending ATA should be replaced by projected eATA state");
+
+    assert_eq!(projected_ata_request.pubkey, ata_pubkey);
+    assert!(projected_ata_request.account.delegated());
+    assert_eq!(projected_ata_request.account.remote_slot(), CURRENT_SLOT);
+    assert!(
+        try_get_rent_pending_ata_info(
+            &ata_pubkey,
+            &projected_ata_request.account,
+        )
+        .is_none(),
+        "projected ATA must clear the rent-pending marker",
+    );
+
+    let projected_token =
+        SplAccount::unpack(projected_ata_request.account.data()).unwrap();
+    assert_eq!(projected_token.amount, CHAIN_EATA_AMOUNT);
+    assert_eq!(
+        projected_token.close_authority,
+        COption::Some(Pubkey::default())
     );
 }
 
