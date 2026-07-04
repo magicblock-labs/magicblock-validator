@@ -162,10 +162,7 @@ pub(crate) fn fetch_commit_nonces_with_missing_as_zero(
     missing_as_zero: &HashSet<Pubkey>,
 ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
     match fetch_current_commit_nonces(commits) {
-        Ok(mut nonces) => {
-            fill_missing_commit_nonces(&mut nonces, commits, missing_as_zero)?;
-            Ok(nonces)
-        }
+        Ok(nonces) => Ok(nonces),
         Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR)) => {
             fetch_commit_nonces_individually(commits, missing_as_zero)
         }
@@ -180,12 +177,7 @@ fn fetch_commit_nonces_individually(
     let mut nonces = HashMap::with_capacity(commits.len());
     for account in commits {
         match fetch_current_commit_nonces(std::slice::from_ref(account)) {
-            Ok(mut fetched) => {
-                fill_missing_commit_nonces(
-                    &mut fetched,
-                    std::slice::from_ref(account),
-                    missing_as_zero,
-                )?;
+            Ok(fetched) => {
                 nonces.extend(fetched);
             }
             Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR))
@@ -197,24 +189,6 @@ fn fetch_commit_nonces_individually(
         }
     }
     Ok(nonces)
-}
-
-fn fill_missing_commit_nonces(
-    nonces: &mut HashMap<Pubkey, u64>,
-    commits: &[CommittedAccount],
-    missing_as_zero: &HashSet<Pubkey>,
-) -> Result<(), InstructionError> {
-    for account in commits {
-        if nonces.contains_key(&account.pubkey) {
-            continue;
-        }
-        if missing_as_zero.contains(&account.pubkey) {
-            nonces.insert(account.pubkey, 0);
-        } else {
-            return Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
