@@ -362,9 +362,10 @@ local mutation clears the `delegated` flag and the payer can also be one of the
 undelegated accounts. Token-2022 rent-pending ATA initialization must mirror the
 mint's default account state extension; a mint whose `DefaultAccountState` is
 `Frozen` must create a frozen local rent-pending ATA rather than an initialized
-one. Rent-pending eATA fee calculation must use an existing base commit nonce
-when delegation metadata already exists, and default the nonce to zero only when
-that metadata is actually missing.
+one. Token-2022 rent-pending ATAs must include `ImmutableOwner` in addition to
+any mint-required account extensions. Rent-pending eATA fee calculation must use
+an existing base commit nonce when delegation metadata already exists, and
+default the nonce to zero only when that metadata is actually missing.
 
 ## RPC and router specification
 

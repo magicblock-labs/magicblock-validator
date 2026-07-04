@@ -189,10 +189,13 @@ fn token_account_shape(
             } else {
                 Token2022AccountState::Initialized
             };
-        let required_extensions =
+        let mut required_extensions =
             ExtensionType::get_required_init_account_extensions(
                 &mint_extensions,
             );
+        if !required_extensions.contains(&ExtensionType::ImmutableOwner) {
+            required_extensions.push(ExtensionType::ImmutableOwner);
+        }
         let len = ExtensionType::try_calculate_account_len::<Token2022Account>(
             &required_extensions,
         )
@@ -462,7 +465,11 @@ mod tests {
 
         let ata_after = &accounts[1];
         assert_eq!(ata_after.owner(), &TOKEN_2022_PROGRAM_ID);
-        assert_eq!(ata_after.data().len(), Token2022Account::LEN);
+        let expected_len = ExtensionType::try_calculate_account_len::<
+            Token2022Account,
+        >(&[ExtensionType::ImmutableOwner])
+        .unwrap();
+        assert_eq!(ata_after.data().len(), expected_len);
         let token_account =
             StateWithExtensions::<Token2022Account>::unpack(ata_after.data())
                 .unwrap();
@@ -473,6 +480,7 @@ mod tests {
             token_account.base.close_authority,
             COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
         );
+        assert!(token_account.get_extension::<ImmutableOwner>().is_ok());
 
         let info = try_get_rent_pending_ata_info(&ata, ata_after).unwrap();
         assert_eq!(info.token_program, TOKEN_2022_PROGRAM_ID);

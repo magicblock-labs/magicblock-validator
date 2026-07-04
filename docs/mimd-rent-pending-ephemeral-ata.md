@@ -182,10 +182,10 @@ The processor must:
    - `confined = false`;
    - `undelegating = false`;
    - `remote_slot = 0`.
-6. For Token-2022, compute the required token-account length from the mint
-   extensions and reject required account extensions that cannot be initialized
-   correctly in the ER. The implementation must not pack a Token-2022 account
-   into the legacy SPL Token layout.
+6. For Token-2022, compute the token-account length from the mint-required
+   account extensions plus `ImmutableOwner`, and reject required account
+   extensions that cannot be initialized correctly in the ER. The implementation
+   must not pack a Token-2022 account into the legacy SPL Token layout.
 
 The instruction must be idempotent:
 
