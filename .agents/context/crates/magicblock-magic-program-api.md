@@ -189,6 +189,11 @@ generic ephemeral account. Its account metas are payer signer, writable ATA,
 mint, and token program. It reuses the former `Unused` bincode slot, so do not
 insert another variant in that position or assume an unused discriminant remains
 there.
+For Token-2022, rent-pending creation supports default account state plus
+marker-only account extensions such as `ImmutableOwner`,
+`NonTransferableAccount`, and `PausableAccount`; reject required stateful account
+extensions such as `TransferFeeAmount` or `TransferHookAccount` until settlement
+preserves extension state.
 
 Changing the rent constant, vault pubkey, rent-pending ATA instruction shape, or account-meta shape affects user-visible balance semantics and tests.
 

@@ -193,6 +193,11 @@ fn token_account_shape(
             ExtensionType::get_required_init_account_extensions(
                 &mint_extensions,
             );
+        if required_extensions.iter().any(|extension| {
+            !is_supported_rent_pending_account_extension(*extension)
+        }) {
+            return Err(InstructionError::InvalidAccountData);
+        }
         if !required_extensions.contains(&ExtensionType::ImmutableOwner) {
             required_extensions.push(ExtensionType::ImmutableOwner);
         }
@@ -206,6 +211,17 @@ fn token_account_shape(
             initial_state,
         })
     }
+}
+
+fn is_supported_rent_pending_account_extension(
+    extension: ExtensionType,
+) -> bool {
+    matches!(
+        extension,
+        ExtensionType::ImmutableOwner
+            | ExtensionType::NonTransferableAccount
+            | ExtensionType::PausableAccount
+    )
 }
 
 fn initialize_token_data(
@@ -295,6 +311,7 @@ mod tests {
     use spl_token_2022::extension::{
         immutable_owner::ImmutableOwner,
         non_transferable::{NonTransferable, NonTransferableAccount},
+        transfer_fee::TransferFeeConfig,
     };
 
     use super::*;
@@ -338,6 +355,9 @@ mod tests {
                 }
                 ExtensionType::NonTransferable => {
                     state.init_extension::<NonTransferable>(false).unwrap();
+                }
+                ExtensionType::TransferFeeConfig => {
+                    state.init_extension::<TransferFeeConfig>(false).unwrap();
                 }
                 _ => panic!("unsupported test extension"),
             }
@@ -556,6 +576,57 @@ mod tests {
             COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
         );
         assert!(try_get_rent_pending_ata_info(&ata, ata_after).is_some());
+    }
+
+    #[test]
+    fn create_rent_pending_token_2022_ata_rejects_stateful_account_extensions()
+    {
+        let payer = Pubkey::new_unique();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata_with_token_program(
+            &wallet_owner,
+            &mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+
+        let ix = Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CreateRentPendingAta {
+                wallet_owner,
+                mint,
+                token_program: TOKEN_2022_PROGRAM_ID,
+            },
+            vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new(ata, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false),
+            ],
+        );
+
+        process_instruction(
+            &ix.data,
+            vec![
+                (
+                    payer,
+                    AccountSharedData::new(1_000_000, 0, &system_program::id()),
+                ),
+                (ata, AccountSharedData::new(0, 0, &system_program::id())),
+                (
+                    mint,
+                    token_2022_mint_account(&[
+                        ExtensionType::TransferFeeConfig,
+                    ]),
+                ),
+                (
+                    TOKEN_2022_PROGRAM_ID,
+                    AccountSharedData::new(1, 0, &native_loader::id()),
+                ),
+            ],
+            ix.accounts,
+            Err(InstructionError::InvalidAccountData),
+        );
     }
 
     #[test]
