@@ -369,6 +369,9 @@ default the nonce to zero only when that metadata is actually missing.
 Commit-and-undelegate rent reimbursement must use an existing base metadata rent
 payer when present, defaulting to the validator only when rent-pending eATA
 metadata is actually missing.
+The committor must not infer rent-pending materialization from eATA account
+shape alone; without explicit scheduled materialization metadata, missing base
+metadata remains an error.
 
 ## RPC and router specification
 

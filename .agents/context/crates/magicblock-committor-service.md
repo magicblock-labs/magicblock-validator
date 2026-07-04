@@ -213,6 +213,9 @@ metadata to current nonce `0` only for rent-pending eATAs, otherwise it uses the
 fetched base nonce. If an eATA already exists and is delegated to another
 validator, the e-token delegate task is the expected validator-mismatch failure
 gate before any DLP commit/undelegation task is allowed to succeed.
+Only explicit scheduled materialization metadata authorizes this path; eATA
+shape alone is treated as a normal commit input and missing base metadata
+remains an error.
 Commit-and-undelegate reimbursement also fetches existing base DLP metadata
 first; it defaults rent reimbursement to the validator only when rent-pending
 eATA metadata is actually missing.
