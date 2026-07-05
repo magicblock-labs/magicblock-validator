@@ -10,6 +10,7 @@ use magicblock_metrics::metrics::{
     HistogramTimer,
 };
 use solana_measure::measure::Measure;
+use solana_pubkey::Pubkey;
 use tokio::{runtime::Builder, time::interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
@@ -31,11 +32,34 @@ pub const DEFAULT_TRUNCATION_TIME_INTERVAL: Duration =
     Duration::from_secs(2 * 60);
 const PERCENTAGE_TO_TRUNCATE: u8 = 10;
 const FILLED_PERCENTAGE_LIMIT: u8 = 100 - PERCENTAGE_TO_TRUNCATE;
+/// Bounds purge work per truncation cycle
+const MAX_PURGED_TXS_PER_CYCLE: usize = 100_000;
+
+/// Programs whose transactions are purged (oldest first) before generic
+/// slot truncation kicks in, sparing the rest of the ledger.
+#[derive(Debug, Clone, Default)]
+pub struct ProgramPurgeConfig {
+    pub programs: Vec<Pubkey>,
+    /// Number of most recent slots whose transactions are never purged
+    pub protected_slots: u64,
+}
+
+impl ProgramPurgeConfig {
+    /// Protects the most recent 12 hours worth of slots from purging
+    pub fn new(programs: Vec<Pubkey>, block_time_ms: u64) -> Self {
+        const PROTECTED_WINDOW_MS: u64 = 12 * 60 * 60 * 1000;
+        Self {
+            programs,
+            protected_slots: PROTECTED_WINDOW_MS / block_time_ms.max(1),
+        }
+    }
+}
 
 struct LedgerTrunctationWorker {
     ledger: Arc<Ledger>,
     truncation_time_interval: Duration,
     ledger_size: u64,
+    purge_config: ProgramPurgeConfig,
     cancellation_token: CancellationToken,
 }
 
@@ -44,12 +68,14 @@ impl LedgerTrunctationWorker {
         ledger: Arc<Ledger>,
         truncation_time_interval: Duration,
         ledger_size: u64,
+        purge_config: ProgramPurgeConfig,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             ledger,
             truncation_time_interval,
             ledger_size,
+            purge_config,
             cancellation_token,
         }
     }
@@ -65,7 +91,7 @@ impl LedgerTrunctationWorker {
                 _ = interval.tick() => {
                     // Note: since we clean 10%, tomstones will take around 10% as well
 
-                    let current_size = match self.ledger.storage_size() {
+                    let mut current_size = match self.ledger.storage_size() {
                         Ok(value) => value,
                         Err(err) => {
                             error!(error = ?err, "Truncation check failed");
@@ -74,18 +100,123 @@ impl LedgerTrunctationWorker {
                     };
 
                     // Check if we should truncate
-                    if current_size < (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT as u64 {
+                    let size_limit = (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT as u64;
+                    if current_size < size_limit {
                         debug!(current_size, "Skipping truncation");
                         continue;
                     }
 
                     info!(current_size, "Checking ledger size");
+
+                    // Purge configured programs' transactions first; skip slot
+                    // truncation entirely when that frees enough space
+                    if self.purge_first_programs() {
+                        match self.ledger.storage_size() {
+                            Ok(size) if size < size_limit => {
+                                info!(size, "Program purge freed enough space");
+                                continue;
+                            }
+                            Ok(size) => current_size = size,
+                            Err(err) => {
+                                error!(error = ?err, "Size check after purge failed")
+                            }
+                        }
+                    }
+
                     if let Err(err) = self.truncate(current_size) {
                         error!(error = ?err, "Truncation failed");
                     }
                 }
             }
         }
+    }
+
+    /// Purges transactions of the configured programs outside the protected
+    /// window. Returns whether anything was purged and compacted.
+    fn purge_first_programs(&self) -> bool {
+        if self.purge_config.programs.is_empty() {
+            return false;
+        }
+        let (from_slot, latest_slot) = match self.available_truncation_range() {
+            Some(range) => range,
+            None => return false,
+        };
+        let to_slot =
+            latest_slot.saturating_sub(self.purge_config.protected_slots);
+        if to_slot < from_slot {
+            return false;
+        }
+
+        let mut purged = 0;
+        for program in &self.purge_config.programs {
+            match self.ledger.purge_program_transactions(
+                program,
+                from_slot,
+                to_slot,
+                MAX_PURGED_TXS_PER_CYCLE - purged,
+            ) {
+                Ok(count) => purged += count,
+                Err(err) => {
+                    error!(%program, error = ?err, "Program purge failed")
+                }
+            }
+            if purged >= MAX_PURGED_TXS_PER_CYCLE {
+                break;
+            }
+        }
+        if purged == 0 {
+            return false;
+        }
+
+        info!(purged, from_slot, to_slot, "Purged truncate-first programs");
+        if let Err(err) = self.ledger.flush() {
+            // We will still compact
+            error!(error = ?err, "Flush failed");
+        }
+        Self::compact_purged_columns(
+            &self.ledger,
+            self.cancellation_token.clone(),
+        );
+        true
+    }
+
+    /// Compacts the transaction columns touched by a program purge
+    fn compact_purged_columns(
+        ledger: &Arc<Ledger>,
+        cancellation_token: CancellationToken,
+    ) {
+        use crate::compact_cf_or_return;
+
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (None, None),
+            SlotSignatures
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (None, None),
+            TransactionStatus
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (None, None),
+            Transaction
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (None, None),
+            TransactionMemos
+        );
+        compact_cf_or_return!(
+            ledger,
+            cancellation_token,
+            (None, None),
+            AddressSignatures
+        );
     }
 
     pub fn truncate(&self, current_ledger_size: u64) -> LedgerResult<()> {
@@ -409,6 +540,7 @@ pub struct LedgerTruncator {
     ledger: Arc<Ledger>,
     ledger_size: u64,
     truncation_time_interval: Duration,
+    purge_config: ProgramPurgeConfig,
     state: ServiceState,
 }
 
@@ -417,11 +549,13 @@ impl LedgerTruncator {
         ledger: Arc<Ledger>,
         truncation_time_interval: Duration,
         ledger_size: u64,
+        purge_config: ProgramPurgeConfig,
     ) -> Self {
         Self {
             ledger,
             truncation_time_interval,
             ledger_size,
+            purge_config,
             state: ServiceState::Created,
         }
     }
@@ -433,6 +567,7 @@ impl LedgerTruncator {
                 self.ledger.clone(),
                 self.truncation_time_interval,
                 self.ledger_size,
+                self.purge_config.clone(),
                 cancellation_token.clone(),
             );
             let worker_handle = thread::spawn(move || {

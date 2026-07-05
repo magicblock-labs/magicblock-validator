@@ -42,7 +42,9 @@ use magicblock_core::{
 };
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
-    ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
+    ledger_truncator::{
+        LedgerTruncator, ProgramPurgeConfig, DEFAULT_TRUNCATION_TIME_INTERVAL,
+    },
     LatestBlock, Ledger,
 };
 use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
@@ -300,6 +302,15 @@ impl MagicValidator {
             ledger.clone(),
             DEFAULT_TRUNCATION_TIME_INTERVAL,
             config.ledger.size,
+            ProgramPurgeConfig::new(
+                config
+                    .ledger
+                    .truncate_first_programs
+                    .iter()
+                    .map(|program| program.0)
+                    .collect(),
+                config.ledger.block_time_ms(),
+            ),
         );
 
         init_validator_identity(&accountsdb, &validator_pubkey);

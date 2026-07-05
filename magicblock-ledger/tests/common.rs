@@ -21,6 +21,18 @@ pub fn write_dummy_transaction(
     slot: Slot,
     index: u32,
 ) -> (Hash, Signature) {
+    write_dummy_transaction_with_readonly(ledger, slot, index, &[])
+}
+
+/// Writes a dummy transaction referencing `readonly_keys` in addition
+/// to its own random accounts, e.g. to simulate a program invocation
+#[allow(dead_code)]
+pub fn write_dummy_transaction_with_readonly(
+    ledger: &Ledger,
+    slot: Slot,
+    index: u32,
+    readonly_keys: &[Pubkey],
+) -> (Hash, Signature) {
     let from = Keypair::new();
     let to = Pubkey::new_unique();
     let tx =
@@ -32,13 +44,14 @@ pub fn write_dummy_transaction(
     let versioned = transaction.to_versioned_transaction();
     let encoded = bincode::serialize(&versioned).unwrap();
     let locks = transaction.get_account_locks_unchecked();
+    let readonly = [locks.readonly, readonly_keys.iter().collect()].concat();
     ledger
         .write_transaction(
             signature,
             slot,
             index,
             locks.writable,
-            locks.readonly,
+            readonly,
             &encoded,
             status,
         )

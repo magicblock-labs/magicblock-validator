@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::consts;
+use crate::{consts, types::SerdePubkey};
 
 /// Configuration for the ledger database and block production.
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -29,6 +29,11 @@ pub struct LedgerConfig {
     /// ledger truncation logic kicks in, when the disk space
     /// used by the ledger approaches this number.
     pub size: u64,
+
+    /// Programs whose transactions are purged first (oldest first) when
+    /// the ledger approaches its max size. Transactions from the recent
+    /// protected window are never purged.
+    pub truncate_first_programs: Vec<SerdePubkey>,
 }
 
 impl Default for LedgerConfig {
@@ -42,6 +47,7 @@ impl Default for LedgerConfig {
             reset: false,
             verify_keypair: true,
             size: consts::DEFAULT_LEDGER_SIZE,
+            truncate_first_programs: Vec::new(),
         }
     }
 }

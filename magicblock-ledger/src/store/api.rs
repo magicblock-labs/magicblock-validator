@@ -988,6 +988,72 @@ impl Ledger {
         }
     }
 
+    /// Deletes transactions referencing `program` in slots
+    /// [from_slot, to_slot], up to `max_txs`. Returns the number purged.
+    /// AddressSignatures entries of other accounts in purged transactions
+    /// are left behind; regular slot truncation removes them later.
+    pub fn purge_program_transactions(
+        &self,
+        program: &Pubkey,
+        from_slot: Slot,
+        to_slot: Slot,
+        max_txs: usize,
+    ) -> LedgerResult<usize> {
+        const WRITES_PER_BATCH: usize = 1_000;
+
+        let mut purged = 0;
+        let mut batch = self.db.batch();
+        let iter = self.address_signatures_cf.iter_current_index_filtered(
+            IteratorMode::From(
+                (*program, from_slot, 0, Signature::default()),
+                IteratorDirection::Forward,
+            ),
+        );
+        for ((address, slot, tx_idx, signature), _) in iter {
+            if address != *program || slot > to_slot || purged >= max_txs {
+                break;
+            }
+            batch.delete::<cf::Transaction>((signature, slot));
+            batch.delete::<cf::TransactionStatus>((signature, slot));
+            batch.delete::<cf::TransactionMemos>((signature, slot));
+            batch.delete::<cf::SlotSignatures>((slot, tx_idx));
+            batch.delete::<cf::AddressSignatures>((
+                address, slot, tx_idx, signature,
+            ));
+            purged += 1;
+            if purged.is_multiple_of(WRITES_PER_BATCH) {
+                let full = std::mem::replace(&mut batch, self.db.batch());
+                self.db.write(full)?;
+            }
+        }
+        self.db.write(batch)?;
+
+        if purged > 0 {
+            // Exact per-column deletion counts are unknowable
+            // (e.g. not every transaction has memos), mark counters dirty
+            self.transaction_cf
+                .entry_counter
+                .store(DIRTY_COUNT, Ordering::Relaxed);
+            self.transaction_status_cf
+                .entry_counter
+                .store(DIRTY_COUNT, Ordering::Relaxed);
+            self.transaction_memos_cf
+                .entry_counter
+                .store(DIRTY_COUNT, Ordering::Relaxed);
+            self.slot_signatures_cf
+                .entry_counter
+                .store(DIRTY_COUNT, Ordering::Relaxed);
+            self.address_signatures_cf
+                .entry_counter
+                .store(DIRTY_COUNT, Ordering::Relaxed);
+            self.transaction_successful_status_count
+                .store(DIRTY_COUNT, Ordering::Relaxed);
+            self.transaction_failed_status_count
+                .store(DIRTY_COUNT, Ordering::Relaxed);
+        }
+        Ok(purged)
+    }
+
     /// Verifies the signature of a transaction stored in the ledger.
     ///
     /// Returns:

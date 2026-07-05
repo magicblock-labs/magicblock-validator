@@ -2,13 +2,17 @@ mod common;
 use std::{sync::Arc, time::Duration};
 
 use magicblock_ledger::{
-    ledger_truncator::LedgerTruncator, LatestBlockInner, Ledger,
+    ledger_truncator::{LedgerTruncator, ProgramPurgeConfig},
+    LatestBlockInner, Ledger,
 };
 use solana_hash::Hash;
+use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use test_kit::init_logger;
 
-use crate::common::{setup, write_dummy_transaction};
+use crate::common::{
+    setup, write_dummy_transaction, write_dummy_transaction_with_readonly,
+};
 
 const TEST_TRUNCATION_TIME_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -90,6 +94,7 @@ async fn test_truncator_not_purged_size() {
         ledger.clone(),
         TEST_TRUNCATION_TIME_INTERVAL,
         1 << 30, // 1 GB
+        ProgramPurgeConfig::default(),
     );
 
     for i in 0..NUM_TRANSACTIONS {
@@ -136,8 +141,12 @@ async fn test_truncator_non_empty_ledger() {
 
     ledger.flush().unwrap();
     ledger.set_lowest_cleanup_slot(FINAL_SLOT);
-    let mut ledger_truncator =
-        LedgerTruncator::new(ledger.clone(), TEST_TRUNCATION_TIME_INTERVAL, 0);
+    let mut ledger_truncator = LedgerTruncator::new(
+        ledger.clone(),
+        TEST_TRUNCATION_TIME_INTERVAL,
+        0,
+        ProgramPurgeConfig::default(),
+    );
 
     ledger_truncator.start();
     tokio::time::sleep(TEST_TRUNCATION_TIME_INTERVAL * 2).await;
@@ -190,8 +199,12 @@ async fn test_truncator_with_tx_spammer() {
     init_logger!();
     let ledger = Arc::new(setup());
 
-    let mut ledger_truncator =
-        LedgerTruncator::new(ledger.clone(), TEST_TRUNCATION_TIME_INTERVAL, 0);
+    let mut ledger_truncator = LedgerTruncator::new(
+        ledger.clone(),
+        TEST_TRUNCATION_TIME_INTERVAL,
+        0,
+        ProgramPurgeConfig::default(),
+    );
 
     ledger_truncator.start();
     let handle = tokio::spawn(transaction_spammer(ledger.clone(), 10, 20));
@@ -215,6 +228,110 @@ async fn test_truncator_with_tx_spammer() {
 
     assert!(ledger.get_lowest_cleanup_slot() >= last_signature_slot);
     verify_transactions_state(&ledger, 0, &signatures, false);
+}
+
+// Writes one transaction per slot in [0, num_slots);
+// even slots reference `program`, odd slots don't
+fn write_program_and_plain_transactions(
+    ledger: &Ledger,
+    program: &Pubkey,
+    num_slots: u64,
+) -> Vec<Signature> {
+    (0..num_slots)
+        .map(|slot| {
+            let readonly = if slot.is_multiple_of(2) {
+                std::slice::from_ref(program)
+            } else {
+                &[]
+            };
+            let (_, signature) = write_dummy_transaction_with_readonly(
+                ledger, slot, 0, readonly,
+            );
+            ledger
+                .write_block(LatestBlockInner::new(slot, Hash::new_unique(), 0))
+                .unwrap();
+            signature
+        })
+        .collect()
+}
+
+// Tests that program purge removes only the targeted program's transactions
+// within the requested slot range
+#[test]
+fn test_purge_program_transactions() {
+    init_logger!();
+    const NUM_SLOTS: u64 = 100;
+    const PURGE_TO_SLOT: u64 = 79;
+
+    let ledger = setup();
+    let program = Pubkey::new_unique();
+    let signatures =
+        write_program_and_plain_transactions(&ledger, &program, NUM_SLOTS);
+
+    let purged = ledger
+        .purge_program_transactions(&program, 0, PURGE_TO_SLOT, usize::MAX)
+        .unwrap();
+    assert_eq!(purged, 40);
+
+    for (slot, signature) in signatures.iter().enumerate() {
+        let slot = slot as u64;
+        let is_purged = slot.is_multiple_of(2) && slot <= PURGE_TO_SLOT;
+        assert_eq!(
+            ledger
+                .read_transaction((*signature, slot))
+                .unwrap()
+                .is_some(),
+            !is_purged
+        );
+        assert_eq!(
+            ledger
+                .read_transaction_status((*signature, slot))
+                .unwrap()
+                .is_some(),
+            !is_purged
+        );
+        assert_eq!(
+            ledger.read_slot_signature((slot, 0)).unwrap().is_some(),
+            !is_purged
+        );
+    }
+
+    // Blocks of purged slots remain readable, just without the transactions
+    let block = ledger.get_block(0).unwrap().unwrap();
+    assert!(block.transactions.is_empty());
+    let block = ledger.get_block(1).unwrap().unwrap();
+    assert_eq!(block.transactions.len(), 1);
+}
+
+// Tests that max_txs caps the purge at the oldest transactions
+#[test]
+fn test_purge_program_transactions_max_txs() {
+    init_logger!();
+    const NUM_SLOTS: u64 = 100;
+    const MAX_TXS: usize = 10;
+
+    let ledger = setup();
+    let program = Pubkey::new_unique();
+    let signatures =
+        write_program_and_plain_transactions(&ledger, &program, NUM_SLOTS);
+
+    let purged = ledger
+        .purge_program_transactions(&program, 0, NUM_SLOTS, MAX_TXS)
+        .unwrap();
+    assert_eq!(purged, MAX_TXS);
+
+    // Only the oldest MAX_TXS program transactions (even slots 0..=18) purged
+    for (slot, signature) in signatures.iter().enumerate() {
+        let slot = slot as u64;
+        let is_purged = slot.is_multiple_of(2) && slot < (MAX_TXS as u64) * 2;
+        assert_eq!(
+            ledger
+                .read_transaction((*signature, slot))
+                .unwrap()
+                .is_some(),
+            !is_purged
+        );
+    }
 }
 
 #[ignore = "Long running test"]
@@ -244,6 +361,7 @@ async fn test_with_1gb_db() {
         ledger.clone(),
         TEST_TRUNCATION_TIME_INTERVAL,
         DB_SIZE,
+        ProgramPurgeConfig::default(),
     );
 
     ledger_truncator.start();

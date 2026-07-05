@@ -344,6 +344,7 @@ fn test_ledger_and_commit_settings() {
         [ledger]
         block-time = "800ms"
         verify-keypair = false
+        truncate-first-programs = ["MyProgram1111111111111111111111111111111111"]
 
         [commit]
         compute-unit-price = 123456
@@ -354,6 +355,11 @@ fn test_ledger_and_commit_settings() {
 
     assert_eq!(config.ledger.block_time.as_millis(), 800);
     assert!(!config.ledger.verify_keypair);
+    assert_eq!(config.ledger.truncate_first_programs.len(), 1);
+    assert_eq!(
+        config.ledger.truncate_first_programs[0].0.to_string(),
+        "MyProgram1111111111111111111111111111111111"
+    );
     assert_eq!(config.commit.compute_unit_price, 123456);
 }
 
