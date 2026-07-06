@@ -22,7 +22,7 @@ use crate::tasks::task_strategist::TransactionStrategy;
 use crate::{
     intent_engine::{
         db::BacklogDB,
-        intent_channerl::{IntentScheduleError, IntentStream},
+        intent_channel::{IntentScheduleError, IntentStream},
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
     },
     intent_executor::{
@@ -360,7 +360,7 @@ mod tests {
     use crate::{
         intent_engine::{
             db::{BacklogDB, DummyDB},
-            intent_channerl::{channel, IntentScheduleHandle},
+            intent_channel::{channel, IntentScheduleHandle},
             intent_scheduler::{create_test_intent, create_test_intent_bundle},
         },
         intent_executor::{

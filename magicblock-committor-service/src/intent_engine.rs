@@ -1,5 +1,5 @@
 pub mod db;
-pub mod intent_channerl;
+pub mod intent_channel;
 mod intent_execution_engine;
 pub mod intent_scheduler;
 
@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 use crate::{
     intent_engine::{
         db::BacklogDB,
-        intent_channerl::{channel, IntentScheduleError, IntentScheduleHandle},
+        intent_channel::{channel, IntentScheduleError, IntentScheduleHandle},
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
     intent_executor::{
