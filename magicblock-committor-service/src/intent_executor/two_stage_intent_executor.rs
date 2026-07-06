@@ -120,6 +120,7 @@ where
         commit_signature: Signature,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        let meta = ScheduledBaseIntentMeta::new(&intent);
         // Commit succeeded so we skip those tasks all together
         let finalize_tasks = TaskBuilderImpl::finalize_tasks(
             &self.ctx.task_info_fetcher,
@@ -157,10 +158,17 @@ where
 
         let finalized_stage =
             finalize_strategy_executor.done(finalize_signature);
-        Ok(ExecutionOutput::TwoStage {
+        let result = Ok(ExecutionOutput::TwoStage {
             commit_signature: finalized_stage.commit_signature,
             finalize_signature: finalized_stage.finalize_signature,
-        })
+        });
+        self.ctx
+            .outbox_client
+            .notify_commit_sent(meta, &result, execution_report)
+            .await
+            .map_err(Into::into)?;
+
+        result
     }
 
     async fn execute_inner(
