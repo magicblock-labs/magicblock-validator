@@ -58,7 +58,8 @@ url = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 magicblock-chainlink = { path = ".", features = ["dev-context"] }
+magicblock-metrics = { workspace = true, features = ["dev-context"] }
 
 [features]
 default = []
-dev-context = []
+dev-context = ["magicblock-metrics/dev-context"]

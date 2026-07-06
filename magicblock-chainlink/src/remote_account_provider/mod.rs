@@ -66,9 +66,23 @@ pub use endpoint::{Endpoint, Endpoints};
 use magicblock_metrics::{
     metrics,
     metrics::{
-        inc_account_fetches_failed, inc_account_fetches_found,
-        inc_account_fetches_not_found, inc_account_fetches_success,
+        dec_chainlink_pending_fetch_waiters_gauge, inc_account_fetches_failed,
+        inc_account_fetches_found, inc_account_fetches_not_found,
+        inc_account_fetches_success,
+        inc_chainlink_empty_placeholder_accounts_total,
+        inc_chainlink_pending_fetch_accounts,
+        inc_chainlink_pending_fetch_waiters,
+        inc_chainlink_pending_fetch_waiters_gauge,
+        inc_chainlink_subscription_cleanup_accounts,
+        inc_chainlink_subscription_registration_accounts,
+        inc_chainlink_subscription_release_accounts,
+        observe_chainlink_pending_fetch_owner_duration_seconds,
         set_monitored_accounts_count, AccountFetchOrigin,
+        ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
+        ChainlinkPendingFetchOutcome, Outcome, SubscriptionCleanupOutcome,
+        SubscriptionCleanupSource, SubscriptionReasonLabel,
+        SubscriptionRegistrationOrigin, SubscriptionRegistrationOutcome,
+        SubscriptionReleaseOutcome,
     },
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
@@ -229,10 +243,46 @@ type FetchingAccountGeneration = u64;
 struct FetchingAccountState {
     generation: FetchingAccountGeneration,
     fetch_start_slot: u64,
+    fetch_origin: AccountFetchOrigin,
+    owner_started_at: std::time::Instant,
     waiters: Vec<oneshot::Sender<FetchResult>>,
 }
 
 type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
+
+struct PendingFetchWaiterGaugeGuard {
+    layer: ChainlinkPendingFetchLayer,
+    active: bool,
+}
+
+impl PendingFetchWaiterGaugeGuard {
+    fn active(layer: ChainlinkPendingFetchLayer) -> Self {
+        Self {
+            layer,
+            active: true,
+        }
+    }
+
+    fn inactive(layer: ChainlinkPendingFetchLayer) -> Self {
+        Self {
+            layer,
+            active: false,
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.active {
+            dec_chainlink_pending_fetch_waiters_gauge(self.layer);
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for PendingFetchWaiterGaugeGuard {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
 
 struct ClaimedSubscriptionSetupGuard {
     fetching_accounts: Arc<FetchingAccounts>,
@@ -276,6 +326,12 @@ impl ClaimedSubscriptionSetupGuard {
                         generation,
                     )
                 {
+                    observe_chainlink_pending_fetch_owner_duration_seconds(
+                        state.fetch_origin,
+                        ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                        ChainlinkPendingFetchOutcome::OwnerFailed,
+                        state.owner_started_at.elapsed().as_secs_f64(),
+                    );
                     for sender in state.waiters {
                         let _ = sender.send(Err(
                             RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
@@ -326,6 +382,20 @@ pub enum SubscriptionReason {
     ProgramData,
     UndelegationTracking,
     AtaProjection,
+}
+
+impl From<SubscriptionReason> for SubscriptionReasonLabel {
+    fn from(reason: SubscriptionReason) -> Self {
+        match reason {
+            SubscriptionReason::DirectAccount => Self::DirectAccount,
+            SubscriptionReason::DelegationRecord => Self::DelegationRecord,
+            SubscriptionReason::ProgramData => Self::ProgramData,
+            SubscriptionReason::UndelegationTracking => {
+                Self::UndelegationTracking
+            }
+            SubscriptionReason::AtaProjection => Self::AtaProjection,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1006,6 +1076,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 // resolve with the subscription data instead
                                 if slot >= state.fetch_start_slot {
                                     trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Using subscription update instead of fetch");
+                                    metrics::observe_chainlink_pending_fetch_owner_duration_seconds(
+                                        state.fetch_origin,
+                                        ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                                        ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
+                                        state.owner_started_at.elapsed().as_secs_f64(),
+                                    );
+                                    metrics::inc_chainlink_pending_fetch_accounts(
+                                        state.fetch_origin,
+                                        ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                                        ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
+                                        1,
+                                    );
 
                                     // Resolve all pending requests with subscription data
                                     for sender in state.waiters {
@@ -1223,8 +1305,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // pushed into the FetchingAccountState.waiters queue (either
         // because this call inserted the entry, or because it joined an
         // existing in-flight fetch as a waiter).
-        let mut await_receivers: Vec<(Pubkey, oneshot::Receiver<FetchResult>)> =
-            Vec::with_capacity(pubkeys.len());
+        let mut await_receivers: Vec<(
+            Pubkey,
+            oneshot::Receiver<FetchResult>,
+            PendingFetchWaiterGaugeGuard,
+        )> = Vec::with_capacity(pubkeys.len());
 
         // Pubkeys this call actually inserted.
         // Only these pubkeys cause side effects (subscription setup, fetch)
@@ -1241,9 +1326,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             for &pubkey in pubkeys {
                 let (sender, receiver) = oneshot::channel();
                 let mut claimed = false;
+                let layer = ChainlinkPendingFetchLayer::RemoteAccountProvider;
+                let mut waiter_guard =
+                    PendingFetchWaiterGaugeGuard::inactive(layer);
                 match fetching.entry(pubkey) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().waiters.push(sender);
+                        inc_chainlink_pending_fetch_accounts(
+                            fetch_origin,
+                            layer,
+                            ChainlinkPendingFetchOutcome::JoinedExisting,
+                            1,
+                        );
+                        inc_chainlink_pending_fetch_waiters(
+                            fetch_origin,
+                            layer,
+                            1,
+                        );
+                        inc_chainlink_pending_fetch_waiters_gauge(layer);
+                        waiter_guard =
+                            PendingFetchWaiterGaugeGuard::active(layer);
                     }
                     Entry::Vacant(entry) => {
                         let generation =
@@ -1251,8 +1353,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         entry.insert(FetchingAccountState {
                             generation,
                             fetch_start_slot,
+                            fetch_origin,
+                            owner_started_at: std::time::Instant::now(),
                             waiters: vec![sender],
                         });
+                        inc_chainlink_pending_fetch_accounts(
+                            fetch_origin,
+                            layer,
+                            ChainlinkPendingFetchOutcome::Owned,
+                            1,
+                        );
                         claimed_generations.insert(pubkey, generation);
                         claimed = true;
                     }
@@ -1260,7 +1370,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 if claimed {
                     claimed_pubkeys.push(pubkey);
                 }
-                await_receivers.push((pubkey, receiver));
+                await_receivers.push((pubkey, receiver, waiter_guard));
             }
         }
 
@@ -1276,7 +1386,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     claimed_pubkeys.clone(),
                     claimed_generations.clone(),
                 );
-            if let Err(err) = self.setup_subscriptions(&claimed_pubkeys).await {
+            if let Err(err) = self
+                .setup_subscriptions(&claimed_pubkeys, fetch_origin)
+                .await
+            {
                 subscription_setup_guard.cleanup_with_error(err.to_string());
                 return Err(err);
             }
@@ -1302,9 +1415,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let mut resolved_accounts = vec![];
         let mut errors = vec![];
 
-        for (idx, (pubkey, receiver)) in await_receivers.into_iter().enumerate()
+        for (idx, (pubkey, receiver, mut waiter_guard)) in
+            await_receivers.into_iter().enumerate()
         {
-            match receiver.await {
+            let receiver_result = receiver.await;
+            waiter_guard.finish();
+            match receiver_result {
                 Ok(result) => match result {
                     Ok(remote_account) => {
                         resolved_accounts.push(remote_account)
@@ -1445,6 +1561,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     async fn setup_subscriptions(
         &self,
         pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<()> {
         if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys_str = pubkeys
@@ -1458,10 +1575,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // We use join_all instead of try_join_all to ensure ALL acquire
         // attempts complete, even if some fail.
         let subscription_results =
-            join_all(pubkeys.iter().map(|pubkey| async {
-                self.acquire_subscription(
+            join_all(pubkeys.iter().map(|pubkey| async move {
+                self.acquire_subscription_with_origin(
                     pubkey,
                     SubscriptionReason::DirectAccount,
+                    SubscriptionRegistrationOrigin::Fetch(fetch_origin),
                 )
                 .await
             }))
@@ -1529,9 +1647,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
         reason: SubscriptionReason,
+        origin: SubscriptionRegistrationOrigin,
     ) -> RemoteAccountProviderResult<()> {
         // 1. First realize subscription
-        self.pubsub_client.subscribe(*pubkey, None).await?;
+        if let Err(err) = self.pubsub_client.subscribe(*pubkey, None).await {
+            inc_chainlink_subscription_registration_accounts(
+                origin,
+                reason.into(),
+                SubscriptionRegistrationOutcome::SubscribeError,
+            );
+            return Err(err);
+        }
 
         // 2. Add to LRU cache
         // If an account is evicted then we need to unsubscribe from it
@@ -1580,7 +1706,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         };
 
         match add_outcome {
-            AddAccountOutcome::AlreadyPresent | AddAccountOutcome::Added => {}
+            AddAccountOutcome::AlreadyPresent => {
+                inc_chainlink_subscription_registration_accounts(
+                    origin,
+                    reason.into(),
+                    SubscriptionRegistrationOutcome::AlreadyPresent,
+                );
+            }
+            AddAccountOutcome::Added => {
+                inc_chainlink_subscription_registration_accounts(
+                    origin,
+                    reason.into(),
+                    SubscriptionRegistrationOutcome::AddedBelowCapacity,
+                );
+            }
             AddAccountOutcome::Evicted(evicted) => {
                 trace!(evicted = %evicted, "Evicting account");
 
@@ -1588,28 +1727,51 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 // ownership intact until pubsub confirms the subscription is
                 // gone so a failed unsubscribe cannot leave ownership state
                 // inconsistent with the active subscription.
-                if let Err(err) = self.pubsub_client.unsubscribe(evicted).await
-                {
-                    if matches!(
-                        err,
-                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                            _
-                        )
-                    ) {
-                        debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
-                    } else {
-                        // Should we retry here?
-                        warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
-                    }
-                    self.subscription_ownership
-                        .lock()
-                        .await
-                        .entry(*pubkey)
-                        .or_default()
-                        .acquire(reason);
-                    return Err(err);
-                }
+                let cleanup_outcome =
+                    match self.pubsub_client.unsubscribe(evicted).await {
+                        Ok(()) => SubscriptionCleanupOutcome::Unsubscribed,
+                        Err(err)
+                            if matches!(
+                                err,
+                                RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                                    _
+                                )
+                            ) =>
+                        {
+                            debug!(evicted = %evicted, error = ?err, "Evicted pubsub subscription was already absent");
+                            SubscriptionCleanupOutcome::AlreadyAbsent
+                        }
+                        Err(err) => {
+                            // Should we retry here?
+                            warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                            inc_chainlink_subscription_cleanup_accounts(
+                                SubscriptionCleanupSource::CapacityEviction,
+                                SubscriptionCleanupOutcome::UnsubscribeFailed,
+                            );
+                            self.subscription_ownership
+                                .lock()
+                                .await
+                                .entry(*pubkey)
+                                .or_default()
+                                .acquire(reason);
+                            inc_chainlink_subscription_registration_accounts(
+                                origin,
+                                reason.into(),
+                                SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
+                            );
+                            return Err(err);
+                        }
+                    };
 
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::CapacityEviction,
+                    cleanup_outcome,
+                );
+                inc_chainlink_subscription_registration_accounts(
+                    origin,
+                    reason.into(),
+                    SubscriptionRegistrationOutcome::EvictedCandidate,
+                );
                 self.subscription_ownership.lock().await.remove(&evicted);
 
                 // Inform upstream so it can remove it from the store. Failure
@@ -1622,18 +1784,51 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             AddAccountOutcome::NoEvictableCandidate => {
                 if let Err(err) = self.pubsub_client.unsubscribe(*pubkey).await
                 {
-                    debug!(
-                        pubkey = %pubkey,
-                        error = ?err,
-                        "Failed to unsubscribe new subscription after all LRU candidates were protected"
+                    if matches!(
+                        err,
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                            _
+                        )
+                    ) {
+                        // Nothing to roll back on pubsub; continue with the
+                        // local cleanup/removal for the rejected pubkey.
+                        inc_chainlink_subscription_cleanup_accounts(
+                            SubscriptionCleanupSource::RejectedNewSubscription,
+                            SubscriptionCleanupOutcome::AlreadyAbsent,
+                        );
+                    } else {
+                        debug!(
+                            pubkey = %pubkey,
+                            error = ?err,
+                            "Failed to unsubscribe new subscription after all LRU candidates were protected"
+                        );
+                        inc_chainlink_subscription_cleanup_accounts(
+                            SubscriptionCleanupSource::RejectedNewSubscription,
+                            SubscriptionCleanupOutcome::UnsubscribeFailed,
+                        );
+                        inc_chainlink_subscription_registration_accounts(
+                            origin,
+                            reason.into(),
+                            SubscriptionRegistrationOutcome::UnsubscribeRejectedError,
+                        );
+                        return Err(err);
+                    }
+                } else {
+                    inc_chainlink_subscription_cleanup_accounts(
+                        SubscriptionCleanupSource::RejectedNewSubscription,
+                        SubscriptionCleanupOutcome::Unsubscribed,
                     );
-                    return Err(err);
                 }
                 self.subscription_ownership.lock().await.remove(pubkey);
                 self.lrucache_subscribed_accounts.remove(pubkey);
                 debug!(
                     pubkey = %pubkey,
                     "No evictable subscription capacity available; all LRU candidates are protected"
+                );
+                inc_chainlink_subscription_registration_accounts(
+                    origin,
+                    reason.into(),
+                    SubscriptionRegistrationOutcome::RejectedAndUnsubscribed,
                 );
                 return Err(
                     RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
@@ -1696,7 +1891,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
-        self.acquire_subscription_with_mode(pubkey, reason, false)
+        self.acquire_subscription_with_mode(
+            pubkey,
+            reason,
+            false,
+            SubscriptionRegistrationOrigin::Internal,
+        )
+        .await
+    }
+
+    async fn acquire_subscription_with_origin(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+        origin: SubscriptionRegistrationOrigin,
+    ) -> RemoteAccountProviderResult<()> {
+        self.acquire_subscription_with_mode(pubkey, reason, false, origin)
             .await
     }
 
@@ -1705,8 +1915,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
-        self.acquire_subscription_with_mode(pubkey, reason, true)
-            .await
+        self.acquire_subscription_with_mode(
+            pubkey,
+            reason,
+            true,
+            SubscriptionRegistrationOrigin::Internal,
+        )
+        .await
     }
 
     async fn acquire_subscription_with_mode(
@@ -1714,6 +1929,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
         skip_existing_reason: bool,
+        origin: SubscriptionRegistrationOrigin,
     ) -> RemoteAccountProviderResult<()> {
         let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
@@ -1725,11 +1941,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 existing.acquire(reason);
             }
             self.lrucache_subscribed_accounts.add(*pubkey);
+            inc_chainlink_subscription_registration_accounts(
+                origin,
+                reason.into(),
+                SubscriptionRegistrationOutcome::AlreadyPresent,
+            );
             return Ok(());
         }
         drop(ownership);
 
-        self.register_subscription(pubkey, reason).await?;
+        self.register_subscription(pubkey, reason, origin).await?;
 
         let mut ownership = self.subscription_ownership.lock().await;
         ownership.entry(*pubkey).or_default().acquire(reason);
@@ -1760,6 +1981,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let _subscription_guard = subscription_key_lock.lock().await;
 
         if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
+            inc_chainlink_subscription_release_accounts(
+                reason.into(),
+                SubscriptionReleaseOutcome::RetainedIntentionally,
+            );
             return Ok(false);
         }
 
@@ -1778,9 +2003,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     };
                     (existing.is_empty(), released_count)
                 }
-                None => return Ok(false),
+                None => {
+                    inc_chainlink_subscription_release_accounts(
+                        reason.into(),
+                        SubscriptionReleaseOutcome::AlreadyAbsent,
+                    );
+                    return Ok(false);
+                }
             };
             if !is_empty {
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::RetainedOtherReasons,
+                );
                 return Ok(false);
             }
             ownership.remove(pubkey);
@@ -1791,12 +2026,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             *pubkey,
             &self.pubsub_client,
             &self.removed_account_tx,
+            SubscriptionCleanupSource::NormalRelease,
         )
         .await;
 
         if success {
+            inc_chainlink_subscription_release_accounts(
+                reason.into(),
+                SubscriptionReleaseOutcome::Unsubscribed,
+            );
             self.lrucache_subscribed_accounts.remove(pubkey);
         } else {
+            inc_chainlink_subscription_release_accounts(
+                reason.into(),
+                SubscriptionReleaseOutcome::UnsubscribeFailed,
+            );
             let mut ownership = self.subscription_ownership.lock().await;
             if ownership
                 .get(pubkey)
@@ -1837,14 +2081,40 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     };
                     (existing.is_empty(), released_count)
                 }
-                None => return Ok(false),
+                None => {
+                    inc_chainlink_subscription_release_accounts(
+                        reason.into(),
+                        SubscriptionReleaseOutcome::AlreadyAbsent,
+                    );
+                    inc_chainlink_subscription_cleanup_accounts(
+                        SubscriptionCleanupSource::DelegatedAccountSilent,
+                        SubscriptionCleanupOutcome::AlreadyAbsent,
+                    );
+                    return Ok(false);
+                }
             };
 
             if released_count == 0 {
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::AlreadyAbsent,
+                );
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::DelegatedAccountSilent,
+                    SubscriptionCleanupOutcome::AlreadyAbsent,
+                );
                 return Ok(false);
             }
 
             if !is_empty {
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::RetainedOtherReasons,
+                );
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::DelegatedAccountSilent,
+                    SubscriptionCleanupOutcome::RetainedIntentionally,
+                );
                 trace!(
                     pubkey = %pubkey,
                     ?reason,
@@ -1861,6 +2131,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         match self.pubsub_client.unsubscribe(*pubkey).await {
             Ok(()) => {
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::Unsubscribed,
+                );
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::DelegatedAccountSilent,
+                    SubscriptionCleanupOutcome::Unsubscribed,
+                );
                 self.lrucache_subscribed_accounts.remove(pubkey);
                 trace!(
                     pubkey = %pubkey,
@@ -1877,6 +2155,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         _
                     )
                 ) {
+                    inc_chainlink_subscription_release_accounts(
+                        reason.into(),
+                        SubscriptionReleaseOutcome::AlreadyAbsent,
+                    );
+                    inc_chainlink_subscription_cleanup_accounts(
+                        SubscriptionCleanupSource::DelegatedAccountSilent,
+                        SubscriptionCleanupOutcome::AlreadyAbsent,
+                    );
                     self.lrucache_subscribed_accounts.remove(pubkey);
                     trace!(
                         pubkey = %pubkey,
@@ -1886,6 +2172,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     return Ok(false);
                 }
 
+                inc_chainlink_subscription_release_accounts(
+                    reason.into(),
+                    SubscriptionReleaseOutcome::UnsubscribeFailed,
+                );
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::DelegatedAccountSilent,
+                    SubscriptionCleanupOutcome::UnsubscribeFailed,
+                );
                 let mut ownership = self.subscription_ownership.lock().await;
                 if ownership
                     .get(pubkey)
@@ -1924,11 +2218,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
             warn!(pubkey = %pubkey, "Tried to unsubscribe from account that should never be evicted");
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::ManualUnsubscribe,
+                SubscriptionCleanupOutcome::RetainedIntentionally,
+            );
             return Ok(());
         }
 
         if !self.lrucache_subscribed_accounts.contains(pubkey) {
             trace!(pubkey = %pubkey, "Already unsubscribed from LRU");
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::ManualUnsubscribe,
+                SubscriptionCleanupOutcome::AlreadyAbsent,
+            );
             return Ok(());
         }
 
@@ -1936,6 +2238,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             *pubkey,
             &self.pubsub_client,
             &self.removed_account_tx,
+            SubscriptionCleanupSource::ManualUnsubscribe,
         )
         .await;
 
@@ -1997,6 +2300,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 generation,
                             )
                         {
+                            observe_chainlink_pending_fetch_owner_duration_seconds(
+                                state.fetch_origin,
+                                ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                                ChainlinkPendingFetchOutcome::OwnerFailed,
+                                state.owner_started_at.elapsed().as_secs_f64(),
+                            );
                             for sender in state.waiters {
                                 let error = RemoteAccountProviderError::AccountResolutionsFailed(
                                     format!("{}: {}", pubkey, error_msg)
@@ -2190,6 +2499,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                     None if mark_empty_if_not_found.contains(pubkey) => {
                         not_found_count += 1;
+                        inc_chainlink_empty_placeholder_accounts_total(
+                            fetch_origin,
+                            ChainlinkEmptyPlaceholderStage::ConvertedToEmpty,
+                            Outcome::Success,
+                        );
                         RemoteAccount::from_fresh_account(
                             Account {
                                 lamports: 0,
@@ -2245,8 +2559,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             generation,
                         )
                     {
+                        observe_chainlink_pending_fetch_owner_duration_seconds(
+                            state.fetch_origin,
+                            ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                            ChainlinkPendingFetchOutcome::OwnerSucceeded,
+                            state.owner_started_at.elapsed().as_secs_f64(),
+                        );
                         state.waiters
                     } else {
+                        inc_chainlink_pending_fetch_accounts(
+                            fetch_origin,
+                            ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                            ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
+                            1,
+                        );
                         // Account was already resolved or replaced, skip.
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(

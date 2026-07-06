@@ -77,17 +77,23 @@ pub(crate) fn process_schedule_cloned_account_undelegation(
         return Err(InstructionError::InvalidAccountData);
     }
 
+    // Materialize the committed state BEFORE flipping the owner to the
+    // delegation program: on mmap-backed accounts `to_account_shared_data`
+    // returns a shallow view, so mutations made through the instruction
+    // account are visible through `account`. Committing after the mark
+    // would bake the delegation program in as the owner, making the
+    // base-layer commit fail its program-config PDA check.
+    let committed = CommittedAccount::from_account_shared(
+        cloned_account_pubkey,
+        &account,
+        None,
+    );
+
     mark_account_as_undelegated(&cloned_account)?;
     ic_msg!(
         invoke_context,
         "ScheduleClonedAccountUndelegation: Marking account {} as undelegating",
         cloned_account_pubkey
-    );
-
-    let committed = CommittedAccount::from_account_shared(
-        cloned_account_pubkey,
-        &account,
-        None,
     );
 
     let context_acc = get_instruction_account_with_idx(
