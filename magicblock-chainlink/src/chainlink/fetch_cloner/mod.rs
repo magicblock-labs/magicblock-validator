@@ -76,6 +76,7 @@ use crate::{
         blacklisted_accounts::{
             blacklisted_accounts, programs_not_to_subscribe,
         },
+        unique_pubkey_estimator::{UniquePubkeyEstimator, UniquePubkeyStage},
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
@@ -307,6 +308,12 @@ where
         &self,
     ) -> &Arc<RemoteAccountProvider<T, U>> {
         &self.remote_account_provider
+    }
+
+    pub(crate) fn unique_pubkey_estimator(
+        &self,
+    ) -> &Arc<UniquePubkeyEstimator> {
+        self.remote_account_provider.unique_pubkey_estimator()
     }
 
     #[cfg(test)]
@@ -810,6 +817,11 @@ where
                             clone_intent,
                             ChainlinkCloneOutcome::CloneFailed,
                         );
+                        self.unique_pubkey_estimator().observe(
+                            fetch_origin,
+                            ChainlinkCloneOutcome::CloneFailed,
+                            &pubkey,
+                        );
                         metrics::inc_chainlink_clone_accounts_total(
                             fetch_origin,
                             remote_result,
@@ -926,6 +938,11 @@ where
                                 remote_result,
                                 clone_intent,
                                 ChainlinkCloneOutcome::CloneFailed,
+                            );
+                            self.unique_pubkey_estimator().observe(
+                                fetch_origin,
+                                ChainlinkCloneOutcome::CloneFailed,
+                                &program_id,
                             );
                             metrics::inc_chainlink_clone_accounts_total(
                                 fetch_origin,
@@ -1154,6 +1171,11 @@ where
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::CloneFailed,
+                        );
+                        self.unique_pubkey_estimator().observe(
+                            fetch_origin,
+                            ChainlinkCloneOutcome::CloneFailed,
+                            &pubkey,
                         );
                         metrics::inc_chainlink_clone_accounts_total(
                             fetch_origin,
@@ -2403,6 +2425,14 @@ where
             subscription_slot.max(self.remote_account_provider.chain_slot())
         });
 
+        self.remote_account_provider
+            .unique_pubkey_estimator()
+            .observe_many(
+                fetch_origin,
+                UniquePubkeyStage::RemoteFetch,
+                pubkeys.iter(),
+            );
+
         let accs = self
             .remote_account_provider
             .try_get_multi(
@@ -2476,6 +2506,13 @@ where
             clone_as_empty,
             not_found,
         } = pipeline::partition_not_found(mark_empty_if_not_found, not_found);
+        self.remote_account_provider
+            .unique_pubkey_estimator()
+            .observe_many(
+                fetch_origin,
+                UniquePubkeyStage::RemoteNotFound,
+                not_found.iter().map(|(pubkey, _)| pubkey),
+            );
 
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own
@@ -2908,6 +2945,13 @@ where
             let count = pubkeys.len();
             trace!(count, "Fetching and cloning accounts with dedup");
         }
+        self.remote_account_provider
+            .unique_pubkey_estimator()
+            .observe_many(
+                fetch_origin,
+                UniquePubkeyStage::RequestedByRpc,
+                pubkeys.iter().copied(),
+            );
 
         let mut in_bank = HashSet::new();
         let mut extra_mark_empty = vec![];
@@ -2924,6 +2968,9 @@ where
         let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
         for pubkey in pubkeys.iter() {
             if force_refresh_pubkeys.contains(*pubkey) {
+                self.remote_account_provider
+                    .unique_pubkey_estimator()
+                    .observe(fetch_origin, UniquePubkeyStage::BankMiss, pubkey);
                 forced_refresh_remote_required_count += 1;
                 continue;
             }
@@ -2954,6 +3001,9 @@ where
                     in_bank.insert(**pubkey);
                 }
             } else {
+                self.remote_account_provider
+                    .unique_pubkey_estimator()
+                    .observe(fetch_origin, UniquePubkeyStage::BankMiss, pubkey);
                 bank_miss_remote_required_count += 1;
             }
         }
@@ -2997,6 +3047,13 @@ where
                             pubkey = %pubkey,
                             "Account completed undelegation which was missed and is fetched again"
                         );
+                        self.remote_account_provider
+                            .unique_pubkey_estimator()
+                            .observe(
+                                fetch_origin,
+                                UniquePubkeyStage::BankMiss,
+                                &pubkey,
+                            );
                         bank_hit_undelegating_refresh_required_count += 1;
                         metrics::inc_unstuck_undelegation_count();
                         if let RefreshDecision::YesAndMarkEmptyIfNotFound =
@@ -3182,6 +3239,8 @@ where
         fetch_origin: AccountFetchOrigin,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let provider = self.remote_account_provider.clone();
+        let unique_pubkey_estimator =
+            provider.unique_pubkey_estimator().clone();
         let bank = self.accounts_bank.clone();
         let fetch_count = self.fetch_count.clone();
         task::spawn(async move {
@@ -3194,6 +3253,11 @@ where
 
             // Increment fetch counter for testing deduplication (2 accounts: pubkey + delegation_record_pubkey)
             fetch_count.fetch_add(2, Ordering::Relaxed);
+            unique_pubkey_estimator.observe_many(
+                fetch_origin,
+                UniquePubkeyStage::CompanionFetch,
+                [&pubkey, &companion_pubkey],
+            );
 
             provider
                 .try_get_multi_until_slots_match(

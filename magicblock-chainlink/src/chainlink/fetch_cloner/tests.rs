@@ -4,8 +4,10 @@ use dlp_api::state::DelegationRecord;
 use magicblock_metrics::metrics::{
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
-    chainlink_pending_fetch_waiters_value, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome,
+    chainlink_pending_fetch_waiters_value,
+    chainlink_unique_pubkeys_estimate_value, ChainlinkCloneOutcome,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
+    ChainlinkUniquePubkeyWindow,
 };
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
@@ -31,6 +33,7 @@ use crate::{
     accounts_bank::mock::AccountsBankStub,
     assert_not_cloned, assert_not_subscribed, assert_subscribed,
     assert_subscribed_without_delegation_record,
+    chainlink::unique_pubkey_estimator::UniquePubkeyStage,
     remote_account_provider::{
         chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_slot::ChainSlot, pubsub_common::SubscriptionSource,
@@ -2306,6 +2309,97 @@ async fn test_parallel_fetch_prevention_multiple_accounts() {
         account3,
         CURRENT_SLOT,
         account_owner
+    );
+}
+
+#[tokio::test]
+async fn test_unique_pubkey_metrics_observe_requested_and_remote_fetch() {
+    init_logger();
+    const TEST_SLOT: u64 = 100;
+    let validator_keypair = Keypair::new();
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+
+    let FetcherTestCtx { fetch_cloner, .. } =
+        setup([], TEST_SLOT, validator_keypair.insecure_clone()).await;
+
+    fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[pubkey1, pubkey2],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .unwrap();
+
+    fetch_cloner
+        .unique_pubkey_estimator()
+        .force_export_for_tests(0);
+
+    assert!(
+        chainlink_unique_pubkeys_estimate_value(
+            &AccountFetchOrigin::GetAccount,
+            &UniquePubkeyStage::RequestedByRpc,
+            ChainlinkUniquePubkeyWindow::OneMinute,
+        ) >= 2
+    );
+    assert!(
+        chainlink_unique_pubkeys_estimate_value(
+            &AccountFetchOrigin::GetAccount,
+            &UniquePubkeyStage::RemoteFetch,
+            ChainlinkUniquePubkeyWindow::OneMinute,
+        ) >= 2
+    );
+}
+
+#[tokio::test]
+async fn test_unique_pubkey_metrics_observe_clone_failed() {
+    init_logger();
+    const TEST_SLOT: u64 = 100;
+    let validator_keypair = Keypair::new();
+    let pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        cloner,
+        ..
+    } = setup(
+        [(pubkey, account)],
+        TEST_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    cloner.set_fail_next_clone(true);
+    fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .expect_err("clone failure should be returned");
+
+    fetch_cloner
+        .unique_pubkey_estimator()
+        .force_export_for_tests(0);
+
+    assert!(
+        chainlink_unique_pubkeys_estimate_value(
+            &AccountFetchOrigin::GetAccount,
+            &ChainlinkCloneOutcome::CloneFailed,
+            ChainlinkUniquePubkeyWindow::OneMinute,
+        ) >= 1
     );
 }
 

@@ -10,8 +10,9 @@ use magicblock_metrics::metrics::{
     chainlink_pending_fetch_waiters_value,
     chainlink_subscription_cleanup_accounts_value,
     chainlink_subscription_registration_accounts_value,
-    chainlink_subscription_release_accounts_value, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome,
+    chainlink_subscription_release_accounts_value,
+    chainlink_unique_pubkeys_estimate_value, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome, ChainlinkUniquePubkeyWindow,
 };
 use solana_account::Account;
 use solana_system_interface::program as system_program;
@@ -19,6 +20,7 @@ use tokio::sync::mpsc;
 
 use super::*;
 use crate::{
+    chainlink::unique_pubkey_estimator::UniquePubkeyStage,
     remote_account_provider::{
         chain_pubsub_client::mock::ChainPubsubClientMock, chain_slot::ChainSlot,
     },
@@ -2268,6 +2270,49 @@ async fn test_registration_metric_already_present_on_duplicate_acquire() {
         SubscriptionRegistrationOutcome::AlreadyPresent,
     );
     assert_eq!(after - before, 1);
+}
+
+#[tokio::test]
+async fn test_unique_pubkey_metrics_observe_subscription_added_and_duplicate() {
+    init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
+
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let ProviderTestCtx { provider, .. } =
+        setup_provider(pubkey, account).await;
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    provider.unique_pubkey_estimator().force_export_for_tests(0);
+
+    assert!(
+        chainlink_unique_pubkeys_estimate_value(
+            &SubscriptionRegistrationOrigin::Internal,
+            &UniquePubkeyStage::SubscriptionAdded,
+            ChainlinkUniquePubkeyWindow::OneMinute,
+        ) >= 1
+    );
+    assert!(
+        chainlink_unique_pubkeys_estimate_value(
+            &SubscriptionRegistrationOrigin::Internal,
+            &UniquePubkeyStage::SubscriptionAlreadyPresent,
+            ChainlinkUniquePubkeyWindow::OneMinute,
+        ) >= 1
+    );
 }
 
 #[tokio::test]

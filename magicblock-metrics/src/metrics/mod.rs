@@ -10,8 +10,9 @@ pub use types::{
     BankPrecheckReason, ChainlinkCloneIntent,
     ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
     ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage,
-    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome, LabelValue,
-    Outcome, SubscriptionCleanupOutcome, SubscriptionCleanupSource,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
+    ChainlinkUniquePubkeyWindow, LabelValue, Outcome,
+    SubscriptionCleanupOutcome, SubscriptionCleanupSource,
     SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
     SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
 };
@@ -204,6 +205,16 @@ lazy_static::lazy_static! {
                 "Account subscription cleanup actions by cleanup source and terminal outcome",
             ),
             &["cleanup_source", "outcome"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_UNIQUE_PUBKEYS_ESTIMATE: IntGaugeVec =
+        IntGaugeVec::new(
+            Opts::new(
+                "chainlink_unique_pubkeys_estimate",
+                "Approximate unique Chainlink pubkeys by origin, stage, and rolling window",
+            ),
+            &["origin", "stage", "window"],
         )
         .unwrap();
     static ref PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT: IntCounter = IntCounter::new(
@@ -732,6 +743,7 @@ pub(crate) fn register() {
         register!(CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_UNIQUE_PUBKEYS_ESTIMATE);
         register!(PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
@@ -950,6 +962,33 @@ pub fn inc_chainlink_subscription_cleanup_accounts(
     CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL
         .with_label_values(&[cleanup_source.value(), outcome.value()])
         .inc();
+}
+
+pub fn set_chainlink_unique_pubkeys_estimate(
+    origin: &impl LabelValue,
+    stage: &impl LabelValue,
+    window: ChainlinkUniquePubkeyWindow,
+    estimate: u64,
+) {
+    CHAINLINK_UNIQUE_PUBKEYS_ESTIMATE
+        .with_label_values(&[origin.value(), stage.value(), window.value()])
+        .set(estimate as i64);
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_unique_pubkeys_estimate_value(
+    origin: &impl LabelValue,
+    stage: &impl LabelValue,
+    window: ChainlinkUniquePubkeyWindow,
+) -> i64 {
+    CHAINLINK_UNIQUE_PUBKEYS_ESTIMATE
+        .get_metric_with_label_values(&[
+            origin.value(),
+            stage.value(),
+            window.value(),
+        ])
+        .map(|m| m.get())
+        .unwrap_or(0)
 }
 
 #[cfg(any(test, feature = "dev-context"))]

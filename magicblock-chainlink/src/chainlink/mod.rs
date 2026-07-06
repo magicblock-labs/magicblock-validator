@@ -9,7 +9,9 @@ use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_metrics::metrics::AccountFetchOrigin;
+use magicblock_metrics::metrics::{
+    AccountFetchOrigin, ChainlinkCloneMaterializationOutcome,
+};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -35,6 +37,7 @@ mod blacklisted_accounts;
 pub mod config;
 pub mod errors;
 pub mod fetch_cloner;
+pub(crate) mod unique_pubkey_estimator;
 
 pub use blacklisted_accounts::*;
 
@@ -550,6 +553,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 fetch_origin,
             )
             .await?;
+        let still_missing_after_ensure = pubkeys
+            .iter()
+            .filter(|pubkey| self.accounts_bank.get_account(pubkey).is_none())
+            .collect::<Vec<_>>();
+        fetch_cloner.unique_pubkey_estimator().observe_many(
+            fetch_origin,
+            ChainlinkCloneMaterializationOutcome::StillMissingAfterEnsure,
+            still_missing_after_ensure,
+        );
         trace!("Fetched and cloned accounts");
         Ok(result)
     }
@@ -605,15 +617,20 @@ mod tests {
     use std::{sync::Arc, time::Duration};
 
     use magicblock_accounts_db::traits::AccountsBank;
-    use magicblock_metrics::metrics::AccountFetchOrigin;
+    use magicblock_metrics::metrics::{
+        chainlink_unique_pubkeys_estimate_value, AccountFetchOrigin,
+        ChainlinkCloneMaterializationOutcome, ChainlinkUniquePubkeyWindow,
+    };
     use solana_account::AccountSharedData;
+    use solana_keypair::Keypair;
     use solana_message::legacy::Message;
     use solana_pubkey::Pubkey;
     use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
     use tokio::sync::mpsc;
 
     use super::{
-        errors::ChainlinkError, InnerChainlink, ReplicationModeAwareChainlink,
+        errors::ChainlinkError, FetchCloner, InnerChainlink,
+        ReplicationModeAwareChainlink,
     };
     use crate::{
         accounts_bank::mock::AccountsBankStub,
@@ -685,6 +702,30 @@ mod tests {
         (accounts_bank, chainlink)
     }
 
+    async fn enabled_chainlink(
+    ) -> (Arc<AccountsBankStub>, TestReplicationModeAwareChainlink) {
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+        let remote_account_provider = test_remote_account_provider().await;
+        let (_subscription_tx, subscription_rx) = mpsc::channel(1_000);
+        let fetch_cloner = FetchCloner::new(
+            &remote_account_provider,
+            &accounts_bank,
+            &cloner,
+            Keypair::new(),
+            subscription_rx,
+            None,
+            None,
+        );
+        let chainlink =
+            InnerChainlink::try_new(&accounts_bank, Some(fetch_cloner))
+                .expect("enabled Chainlink should be constructed");
+        (
+            accounts_bank,
+            TestReplicationModeAwareChainlink::enabled(chainlink),
+        )
+    }
+
     #[tokio::test]
     async fn disabled_mode_ensure_accounts_is_noop() {
         let (accounts_bank, chainlink) = disabled_chainlink();
@@ -700,6 +741,32 @@ mod tests {
         assert!(accounts_bank.get_account(&pubkey).is_none());
         assert_eq!(chainlink.fetch_count(), None);
         assert!(!chainlink.is_watching(&pubkey));
+    }
+
+    #[tokio::test]
+    async fn test_unique_pubkey_metrics_observe_still_missing_after_ensure() {
+        init_logger();
+        let (_accounts_bank, chainlink) = enabled_chainlink().await;
+        let pubkey = Pubkey::new_unique();
+
+        chainlink
+            .ensure_accounts(&[pubkey], None, AccountFetchOrigin::GetAccount)
+            .await
+            .expect("missing account ensure should complete");
+
+        chainlink
+            .fetch_cloner()
+            .expect("enabled Chainlink should have a fetch cloner")
+            .unique_pubkey_estimator()
+            .force_export_for_tests(0);
+
+        assert!(
+            chainlink_unique_pubkeys_estimate_value(
+                &AccountFetchOrigin::GetAccount,
+                &ChainlinkCloneMaterializationOutcome::StillMissingAfterEnsure,
+                ChainlinkUniquePubkeyWindow::OneMinute,
+            ) >= 1
+        );
     }
 
     #[tokio::test]
