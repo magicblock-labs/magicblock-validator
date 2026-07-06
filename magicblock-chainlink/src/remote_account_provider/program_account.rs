@@ -10,7 +10,7 @@ use solana_loader_v4_interface::{
     instruction::LoaderV4Instruction as LoaderInstructionV4,
     state::{LoaderV4State, LoaderV4Status},
 };
-use solana_pubkey::{pubkey, Pubkey};
+use solana_pubkey::{Pubkey, pubkey};
 use solana_rent::Rent;
 use tracing::*;
 
@@ -280,17 +280,17 @@ impl ProgramAccountResolver {
             // Valid cases
             (V1, Some(program_account), _) | (V2, Some(program_account), _) => {
                 get_state_v1_v2(*program_id, program_account.data())
-                    .map(|data| (data, program_account.remote_slot()))
+                    .map(|data| (data, program_account.slot()))
 
             }
             (V3, _, Some(program_data_account)) => {
                 get_state_v3(*program_id, program_data_account.data())
-                    .map(|data| (data, program_data_account.remote_slot()))
+                    .map(|data| (data, program_data_account.slot()))
             }
 
             (V4, Some(program_account), _) => {
                 get_state_v4(*program_id, program_account.data())
-                    .map(|data| (data, program_account.remote_slot()))
+                    .map(|data| (data, program_account.slot()))
             }
         }
     }
@@ -380,7 +380,7 @@ fn get_state_v3(
             return Err(RemoteAccountProviderError::UnsupportedProgramLoader(
                 "LoaderV3 program data account is not in ProgramData state"
                     .to_string(),
-            ))
+            ));
         }
     };
     Ok(program_data_with_authority)
@@ -445,10 +445,10 @@ fn state_data_v4(
 
 #[cfg(test)]
 mod tests {
+    use nucleus::testkit::sign_instructions;
     use solana_hash::Hash;
     use solana_keypair::Keypair;
     use solana_signer::Signer;
-    use solana_transaction::Transaction;
 
     use super::*;
 
@@ -469,14 +469,11 @@ mod tests {
         }
         .try_into_deploy_data_and_ixs_v4(1, validator_kp.pubkey())
         .unwrap();
-        let recent_blockhash = Hash::new_unique();
-
         // This would fail if we had invalid/missing signers
-        Transaction::new_signed_with_payer(
-            &[deploy_instruction],
-            Some(&validator_kp.pubkey()),
-            &[&validator_kp],
-            recent_blockhash,
+        sign_instructions(
+            &validator_kp,
+            [deploy_instruction],
+            Hash::new_unique(),
         );
     }
 }

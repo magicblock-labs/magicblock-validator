@@ -1,38 +1,38 @@
 use std::{collections::HashSet, sync::atomic::Ordering};
 
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
-use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, ChainlinkCloneIntent,
     ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
 };
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
-    subscription::{acquire_subs, release_subs, SubscriptionRelease},
+    FetchCloner,
+    subscription::{SubscriptionRelease, acquire_subs, release_subs},
     types::{
         AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
         ResolvedDelegatedAccounts, ResolvedPrograms,
     },
-    FetchCloner,
 };
 use crate::{
+    accounts_bank::AccountsBank,
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{
-        errors::ClonerResult, AccountCloneRequest, Cloner, DelegationActions,
+        AccountCloneRequest, Cloner, DelegationActions, errors::ClonerResult,
     },
     remote_account_provider::{
-        program_account::{
-            get_loaderv3_get_program_data_address, ProgramAccountResolver,
-            LOADER_V3,
-        },
-        pubsub_common::is_internal_dlp_account_data,
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         ResolvedAccount, SubscriptionReason,
+        program_account::{
+            LOADER_V3, ProgramAccountResolver,
+            get_loaderv3_get_program_data_address,
+        },
+        pubsub_common::is_internal_dlp_account_data,
     },
 };
 
@@ -107,7 +107,7 @@ fn classify_single_account(
         Found(remote_account_state) => {
             match remote_account_state.account {
                 ResolvedAccount::Fresh(account_shared_data) => {
-                    let slot = account_shared_data.remote_slot();
+                    let slot = account_shared_data.slot();
 
                     if account_shared_data.owner().eq(&dlp_api::id()) {
                         // Account owned by delegation program
@@ -374,7 +374,10 @@ where
             let cleanup_delegated_subscription = account.delegated();
             let cleanup_undelegation_tracking = cleanup_delegated_subscription
                 && this.accounts_bank.get_account(&pubkey).is_some_and(
-                    |in_bank| in_bank.undelegating() || !in_bank.delegated(),
+                    |in_bank| {
+                        in_bank.is(AccountMode::Transient)
+                            || !in_bank.is(AccountMode::Delegated)
+                    },
                 );
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
@@ -648,7 +651,7 @@ pub(crate) fn compute_subscription_releases(
         .collect::<HashSet<_>>();
     let delegated_cloned_accounts = accounts_to_clone
         .iter()
-        .filter(|request| request.account.delegated())
+        .filter(|request| request.account.is(AccountMode::Delegated))
         .map(|request| request.pubkey)
         .collect::<HashSet<_>>();
 
@@ -741,7 +744,7 @@ where
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
                 pubkey = %request.pubkey,
-                slot = request.account.remote_slot(),
+                slot = request.account.slot(),
                 owner = %request.account.owner(),
                 "Cloning account"
             );
@@ -769,7 +772,7 @@ where
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
                 pubkey = %request.pubkey,
-                slot = request.account.remote_slot(),
+                slot = request.account.slot(),
                 owner = %request.account.owner(),
                 "Cloning account with delegation actions"
             );

@@ -2,13 +2,13 @@ use std::{ffi::OsString, fmt::Display, path::PathBuf};
 
 use clap::Parser;
 use config::{
-    aperture::ApertureConfig, cli::CliParams, grpc::GrpcConfig,
-    metrics::MetricsConfig, LifecycleMode,
+    LifecycleMode, aperture::ApertureConfig, cli::CliParams, grpc::GrpcConfig,
+    metrics::MetricsConfig,
 };
 use figment::{
+    Figment, Profile,
     providers::{Env, Format, Serialized, Toml},
     value::Uncased,
-    Figment, Profile,
 };
 use serde::{Deserialize, Serialize};
 use types::StorageDirectory;

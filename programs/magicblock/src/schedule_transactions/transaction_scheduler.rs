@@ -6,7 +6,7 @@ use std::{
 
 use lazy_static::lazy_static;
 use solana_account::{
-    state_traits::StateMut, AccountSharedData, ReadableAccount,
+    AccountSharedData, ReadableAccount, state_traits::StateMut,
 };
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;

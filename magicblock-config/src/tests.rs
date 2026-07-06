@@ -6,10 +6,10 @@ use solana_keypair::Keypair;
 use tempfile::TempDir;
 
 use crate::{
-    config::{validator::ReplicationConfig, BlockSize, LifecycleMode},
+    ValidatorParams,
+    config::{BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
     types::network::{BindAddress, Remote},
-    ValidatorParams,
 };
 
 // ============================================================================
@@ -41,14 +41,16 @@ struct EnvVarGuard(&'static str);
 
 impl EnvVarGuard {
     fn new(var: &'static str, val: &str) -> Self {
-        std::env::set_var(var, val);
+        // SAFETY: callers serialize every test using this process-global guard.
+        unsafe { std::env::set_var(var, val) };
         Self(var)
     }
 }
 
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
-        std::env::remove_var(self.0);
+        // SAFETY: callers serialize every test using this process-global guard.
+        unsafe { std::env::remove_var(self.0) };
     }
 }
 
@@ -451,10 +453,12 @@ fn test_example_config_full_coverage() {
     }));
     assert_eq!(config.aperture.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
-    assert!(config
-        .storage
-        .to_string_lossy()
-        .contains("magicblock-test-storage"));
+    assert!(
+        config
+            .storage
+            .to_string_lossy()
+            .contains("magicblock-test-storage")
+    );
 
     // ========================================================================
     // 4. Metrics
@@ -862,17 +866,4 @@ fn test_aperture_listen_port_max_is_rejected() {
         .expect_err("listen port u16::MAX must be rejected")
         .to_string();
     assert!(msg.contains("65535"), "unexpected error: {msg}");
-}
-
-#[test]
-#[parallel]
-fn test_replication_config_debug_redacts_secret() {
-    let cfg = ReplicationConfig {
-        url: "nats://0.0.0.0:4222".parse().unwrap(),
-        secret: "SUASECRET".into(),
-    };
-
-    let dbg = format!("{cfg:?}");
-    assert!(dbg.contains("<redacted>"));
-    assert!(!dbg.contains("SUASECRET"));
 }

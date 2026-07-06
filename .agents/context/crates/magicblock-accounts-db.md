@@ -57,7 +57,7 @@ Main consumers:
 - `magicblock-aperture` serves RPC reads and transaction submission paths from local account state.
 - `magicblock-chainlink` and `magicblock-account-cloner` read/write local clones and evict/update accounts through `AccountsBank`.
 - `magicblock-replicator` snapshots, resets, and replays state for replica mode.
-- `test-kit`, integration tests, and tools such as `tools/ledger-stats` open/read the database for harnesses and inspection.
+- engine testkit helpers and tools such as `tools/ledger-stats` open/read the database for harnesses and inspection.
 
 Important upstream dependencies:
 
@@ -259,7 +259,6 @@ Start with `src/storage.rs`, `src/index/iterator.rs`, `src/index/utils.rs`, `Acc
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-accounts-db`.
 - Related package checks by change area: `magicblock-config` for config parsing, and `magicblock-processor` for execution commits, snapshots, reset, or replication lifecycle.
-- Relevant integration suites: `test-restore-ledger`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance validation intent: for read/write/index changes, reason about allocations, LMDB transaction count, lock/transaction lifetime, and mmap deserialization; for snapshot/defragment changes, report I/O, memory, and startup/shutdown impact.
 
 ## Adjacent implementation references

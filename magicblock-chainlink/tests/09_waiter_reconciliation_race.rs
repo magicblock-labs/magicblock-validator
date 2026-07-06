@@ -1,22 +1,15 @@
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_not_subscribed,
-    testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchContext,
+    AccountFetchContext, assert_cloned_as_delegated, assert_not_subscribed,
+    testing::{
+        context::{TestChainlink, TestContext},
+        deleg::add_delegation_record_for,
+    },
 };
 use solana_account::Account;
-use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::test_context::{TestChainlink, TestContext};
-
-mod utils;
 
 const CURRENT_SLOT: u64 = 11;
-
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
 
 async fn wait_for_registered_waiters(
     chainlink: &TestChainlink,
@@ -61,7 +54,7 @@ async fn test_owned_pending_operation_dedups_concurrent_delegated_fetches() {
         bank: _,
         validator_pubkey,
         ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let account_pubkey = Pubkey::new_unique();
     let account_owner = Pubkey::new_unique();
@@ -156,7 +149,7 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
         bank: _,
         validator_pubkey,
         ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let account_pubkey = Pubkey::new_unique();
     let account_owner = Pubkey::new_unique();

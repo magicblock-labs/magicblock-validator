@@ -231,6 +231,10 @@ Supported loader handling lives in `remote_account_provider/program_account.rs`:
 - Loader V3: program account plus separate program-data account; Chainlink fetches both with matching slots and holds a `ProgramData` subscription reason while resolving.
 - Loader V4: single account with loader-v4 state and deployable data handling.
 
+Loader V3 state and Loader V4 instructions retain upstream serde/bincode
+encoding because those external loader types do not provide wincode schemas.
+Other supported fixed Solana payloads in this crate use wincode.
+
 Program clone restrictions:
 
 - `allowed_programs` from config, when non-empty, limits program cloning.
@@ -493,7 +497,6 @@ Start with:
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-chainlink`.
-- Relevant integration suites: `test-chainlink`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Useful Chainlink test files: `magicblock-chainlink/tests/basics.rs`, `01_ensure-accounts.rs`, `03_deleg_after_sub.rs`, redelegation tests `04` through `07`, `08_subupdate-ordering.rs`, and `09_waiter_reconciliation_race.rs`.
 - Performance validation intent: fetch/clone, subscription, LRU, or update-ordering hot-path changes should include the smallest practical test or measurement that can expose duplicate fetches/clones, increased latency, contention, or subscription churn; if skipped, report the residual performance risk.
 

@@ -2,24 +2,25 @@ use std::collections::HashSet;
 
 use dlp_api::state::DelegationRecord;
 use futures_util::future::join_all;
-use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
-    is_ata, try_derive_eata_address_and_bump, try_derive_supported_ata_pubkeys,
-    AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
+    AtaInfo, EATA_PROGRAM_ID, EphemeralAta, is_ata,
+    try_derive_eata_address_and_bump, try_derive_supported_ata_pubkeys,
 };
 use magicblock_metrics::metrics;
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{
+    AccountFieldPatch, AccountMode, AccountSharedData, ReadableAccount,
+};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
-    delegation,
-    subscription::{acquire_subs, release_subs, SubscriptionRelease},
+    FetchCloner, delegation,
+    subscription::{SubscriptionRelease, acquire_subs, release_subs},
     types::AccountWithCompanion,
-    FetchCloner,
 };
 use crate::{
+    accounts_bank::AccountsBank,
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
@@ -133,7 +134,7 @@ where
         delegation::fetch_and_parse_delegation_record(
             this,
             eata_pubkey,
-            eata_account.remote_slot(),
+            eata_account.slot(),
             metrics::AccountFetchContext::project_ata(),
         )
         .await?;
@@ -184,26 +185,23 @@ where
     for candidate_pubkey in ata_pubkeys.iter().copied() {
         if let Some(candidate_account) =
             this.accounts_bank.get_account(&candidate_pubkey)
+            && is_ata(&candidate_pubkey, &candidate_account).is_some()
         {
-            if is_ata(&candidate_pubkey, &candidate_account).is_some() {
-                base_ata = Some((candidate_pubkey, candidate_account));
-                break;
-            }
+            base_ata = Some((candidate_pubkey, candidate_account));
+            break;
         }
     }
     let (ata_pubkey, base_ata) = match base_ata {
         Some(base_ata) => base_ata,
         None => {
-            fetch_remote_base_ata(
-                this,
-                &ata_pubkeys,
-                eata_account.remote_slot(),
-            )
-            .await?
+            fetch_remote_base_ata(this, &ata_pubkeys, eata_account.slot())
+                .await?
         }
     };
 
-    if base_ata.delegated() || base_ata.undelegating() {
+    if base_ata.is(AccountMode::Delegated)
+        || base_ata.is(AccountMode::Transient)
+    {
         return None;
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(
@@ -319,7 +317,7 @@ where
         .try_get_multi_until_slots_match(
             &[eata_pubkey],
             Some(MatchSlotsConfig {
-                min_context_slot: Some(ata_account.remote_slot()),
+                min_context_slot: Some(ata_account.slot()),
                 ..Default::default()
             }),
             metrics::AccountFetchContext::project_ata(),
@@ -354,7 +352,7 @@ where
     let deleg_record = delegation::fetch_and_parse_delegation_record(
         this,
         eata_pubkey,
-        ata_account.remote_slot().max(eata_account.remote_slot()),
+        ata_account.slot().max(eata_account.slot()),
         metrics::AccountFetchContext::project_ata(),
     )
     .await;
@@ -407,10 +405,9 @@ where
             return None;
         }
     };
-    let projected_slot =
-        ata_account.remote_slot().max(eata_account.remote_slot());
-    projected_ata.set_remote_slot(projected_slot);
-    projected_ata.set_delegated(true);
+    let projected_slot = ata_account.slot().max(eata_account.slot());
+    AccountFieldPatch::Slot(projected_slot).apply(&mut projected_ata);
+    projected_ata.set_mode(AccountMode::Delegated);
     Some(projected_ata)
 }
 
@@ -571,24 +568,22 @@ where
         let mut delegated_to_other = None;
         let mut actions = None;
 
-        if let Some(eata_shared) = &input.eata_shared {
-            if let Some(Some(deleg)) = deleg_iter.next() {
-                let (deleg_record, delegation_actions) = deleg;
-                delegated_to_other =
-                    delegation::get_delegated_to_other(this, &deleg_record);
-                commit_frequency_ms = Some(deleg_record.commit_frequency_ms);
+        if let Some(eata_shared) = &input.eata_shared
+            && let Some(Some(deleg)) = deleg_iter.next()
+        {
+            let (deleg_record, delegation_actions) = deleg;
+            delegated_to_other =
+                delegation::get_delegated_to_other(this, &deleg_record);
+            commit_frequency_ms = Some(deleg_record.commit_frequency_ms);
 
-                if let Some(projected_ata) =
-                    maybe_project_delegated_ata_from_eata(
-                        this,
-                        input.ata_account.account_shared_data(),
-                        eata_shared,
-                        &deleg_record,
-                    )
-                {
-                    account_to_clone = projected_ata;
-                    actions = delegation_actions;
-                }
+            if let Some(projected_ata) = maybe_project_delegated_ata_from_eata(
+                this,
+                input.ata_account.account_shared_data(),
+                eata_shared,
+                &deleg_record,
+            ) {
+                account_to_clone = projected_ata;
+                actions = delegation_actions;
             }
         }
 

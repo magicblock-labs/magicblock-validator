@@ -7,29 +7,21 @@ use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_subscribed, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
-    testing::{deleg::add_delegation_record_for, init_logger},
+    testing::{
+        accounts::account_shared_with_owner_and_slot,
+        context::{DelegateResult, TestContext},
+        deleg::add_delegation_record_for,
+    },
 };
 use solana_account::Account;
-use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::{
-    accounts::account_shared_with_owner_and_slot,
-    test_context::{DelegateResult, TestContext},
-};
-
-mod utils;
-
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
 
 #[tokio::test]
 async fn test_undelegate_redelegate_to_other_in_separate_slot() {
     let mut slot: u64 = 11;
 
-    let ctx = setup(slot).await;
+    let ctx = TestContext::init(slot).await;
     let TestContext {
         chainlink,
         cloner,
@@ -71,7 +63,9 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
     // 2. Account is undelegated
     // Undelegation requested, setup subscription, writes refused
     {
-        info!("2.1. Account is undelegated - Undelegation requested (account owner set to DP in Ephem)");
+        info!(
+            "2.1. Account is undelegated - Undelegation requested (account owner set to DP in Ephem)"
+        );
 
         ctx.force_undelegation(&pubkey);
 
@@ -99,7 +93,9 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
     // 4. Account redelegated to another authority
     // Delegate to other, subscription update, writes refused
     {
-        info!("4.1. Account redelegated to another authority - Delegate account to other");
+        info!(
+            "4.1. Account redelegated to another authority - Delegate account to other"
+        );
         slot = rpc_client.set_slot(slot + 2);
 
         let DelegateResult {

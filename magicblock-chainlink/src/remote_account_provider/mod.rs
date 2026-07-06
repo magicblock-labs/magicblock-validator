@@ -1,9 +1,9 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     num::NonZeroUsize,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, Mutex, RwLock, Weak,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -33,7 +33,7 @@ use solana_rpc_client_api::{
 };
 use solana_sdk_ids::sysvar::clock;
 use tokio::{
-    sync::{mpsc, oneshot, Mutex as AsyncMutex},
+    sync::{Mutex as AsyncMutex, mpsc, oneshot},
     task, time,
 };
 use tracing::*;
@@ -64,8 +64,13 @@ pub use endpoint::{Endpoint, Endpoints};
 use magicblock_metrics::{
     metrics,
     metrics::{
-        dec_chainlink_pending_fetch_waiters_gauge, inc_account_fetches_failed,
-        inc_account_fetches_found_with_context,
+        AccountFetchContext, AccountFetchReason,
+        ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
+        ChainlinkPendingFetchOutcome, Outcome, SubscriptionCleanupOutcome,
+        SubscriptionCleanupSource, SubscriptionReasonLabel,
+        SubscriptionRegistrationOrigin, SubscriptionRegistrationOutcome,
+        SubscriptionReleaseOutcome, dec_chainlink_pending_fetch_waiters_gauge,
+        inc_account_fetches_failed, inc_account_fetches_found_with_context,
         inc_account_fetches_not_found_with_context,
         inc_account_fetches_success,
         inc_chainlink_empty_placeholder_accounts_total_with_context,
@@ -76,12 +81,7 @@ use magicblock_metrics::{
         inc_chainlink_subscription_registration_accounts,
         inc_chainlink_subscription_release_accounts,
         observe_chainlink_pending_fetch_owner_duration_seconds_with_context,
-        set_monitored_accounts_count, AccountFetchContext, AccountFetchReason,
-        ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
-        ChainlinkPendingFetchOutcome, Outcome, SubscriptionCleanupOutcome,
-        SubscriptionCleanupSource, SubscriptionReasonLabel,
-        SubscriptionRegistrationOrigin, SubscriptionRegistrationOutcome,
-        SubscriptionReleaseOutcome,
+        set_monitored_accounts_count,
     },
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
@@ -1229,16 +1229,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         }
                     };
 
-                    if let Some(forward_update) = forward_update {
-                        if let Err(err) =
+                    if let Some(forward_update) = forward_update
+                        && let Err(err) =
                             subscription_forwarder.send(forward_update).await
-                        {
-                            warn!(
-                                pubkey = %update.pubkey,
-                                error = ?err,
-                                "Failed to forward subscription update"
-                            );
-                        }
+                    {
+                        warn!(
+                            pubkey = %update.pubkey,
+                            error = ?err,
+                            "Failed to forward subscription update"
+                        );
                     }
                 }
             }
@@ -2413,26 +2412,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 for pubkey in &pubkeys {
                     // Update metrics
                     // Remove pending requests and send error
-                    if let Some(generation) = generations.get(pubkey).copied() {
-                        if let Some(state) =
+                    if let Some(generation) = generations.get(pubkey).copied()
+                        && let Some(state) =
                             remove_fetching_account_if_generation_matches(
                                 &mut fetching,
                                 pubkey,
                                 generation,
                             )
-                        {
-                            observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+                    {
+                        observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
                                 state.fetch_context,
                                 ChainlinkPendingFetchLayer::RemoteAccountProvider,
                                 ChainlinkPendingFetchOutcome::OwnerFailed,
                                 state.owner_started_at.elapsed().as_secs_f64(),
                             );
-                            for sender in state.waiters {
-                                let error = RemoteAccountProviderError::AccountResolutionsFailed(
+                        for sender in state.waiters {
+                            let error = RemoteAccountProviderError::AccountResolutionsFailed(
                                     format!("{}: {}", pubkey, error_msg)
                                 );
-                                let _ = sender.send(Err(error));
-                            }
+                            let _ = sender.send(Err(error));
                         }
                     }
                 }
@@ -2487,7 +2485,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     Ok(Ok(res)) => {
                         let (slot, value) = res;
                         if slot < min_context_slot {
-                            retry!("Response slot {slot} < {min_context_slot}. Retrying...");
+                            retry!(
+                                "Response slot {slot} < {min_context_slot}. Retrying..."
+                            );
                         } else {
                             break (slot, value);
                         }
@@ -2579,7 +2579,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             );
                         remaining_retries -= 1;
                         if remaining_retries == 0 {
-                            let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
+                            let err_msg = format!(
+                                "Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}"
+                            );
                             notify_error(&err_msg);
                             return;
                         }

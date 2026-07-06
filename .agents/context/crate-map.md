@@ -9,7 +9,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
 | `magicblock-validator` | Main validator binary and process entrypoint. | `magicblock-api`, `magicblock-config`, `magicblock-core`, `magicblock-tui-client`, `magicblock-version` | End users/operators | Parses config, builds runtime, starts headless/TUI validator; see `.agents/context/crates/magicblock-validator.md` before changing this crate. |
-| `magicblock-api` | Top-level service orchestration and `MagicValidator` implementation. | accounts, aperture, chainlink, committor, config, core, ledger, processor, replicator, task scheduler, admin/services | `magicblock-validator` | Owns startup/shutdown wiring for most services; see `.agents/context/crates/magicblock-api.md` before changing this crate. |
+| `magicblock-api` | Top-level service orchestration and `MagicValidator` implementation. | engine/keeper, aperture, chainlink, committor, config, deprecated ledger, task scheduler, admin/services | `magicblock-validator` | Owns the engine handle and validator-side startup/shutdown wiring; see `.agents/context/crates/magicblock-api.md` before changing this crate. |
 | `magicblock-config` | Validator configuration model and layered config loading. | none | Most service crates | CLI/env/TOML/default config source; see `.agents/context/crates/magicblock-config.md` before changing configurable behavior. |
 | `magicblock-core` | Shared channels, traits, account locks/helpers, intent/core types. | `magicblock-magic-program-api` | Most runtime crates | Central wiring layer; changes can affect scheduler, RPC, ledger, services, replication. See `.agents/context/crates/magicblock-core.md` before changing this crate. |
 | `magicblock-version` | Build/version metadata. | none | `magicblock-validator`, `magicblock-aperture` | Keep version reporting stable for RPC/operator tooling; see `.agents/context/crates/magicblock-version.md` before changing this crate. |
@@ -18,18 +18,22 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `magicblock-aperture` | Solana-compatible JSON-RPC and websocket/pubsub server. | account cloner, accounts-db, chainlink, config, core, ledger, metrics, version | `magicblock-api` | Handles RPC methods, subscriptions, transaction submission, local read misses/cloning. See `.agents/context/crates/magicblock-aperture.md` before changing this crate. |
+| `magicblock-aperture` | Solana-compatible JSON-RPC and websocket/pubsub server. | engine, chainlink, config, deprecated ledger, metrics, version | `magicblock-api` | Uses engine for live state/submission and deprecated ledger only for historical fallback. See `.agents/context/crates/magicblock-aperture.md` before changing this crate. |
 | `magicblock-rpc-client` | RPC client utilities for sending/confirming base-layer transactions. | `magicblock-metrics` | committor, table-mania, account-cloner, API/admin | Critical for base-layer commit delivery; see `.agents/context/crates/magicblock-rpc-client.md` before changing this crate. |
 | `magicblock-validator-admin` | Admin/client helpers for validator management operations. | `magicblock-program`, `magicblock-rpc-client` | `magicblock-api` | Keep compatible with operator/admin workflows; see `.agents/context/crates/magicblock-validator-admin.md` before changing this crate. |
 | `magicblock-tui-client` | TUI client/binary support. | none | `magicblock-validator` | UI-facing; should not own core validator logic. |
 
 ## Execution and storage crates
 
+The primary execution, accountsdb, current ledger, keeper, and TCP replication
+crates now live in the sibling `../engine` workspace. Read `../engine/AGENTS.md`
+and the owning engine crate README before changing them. MBV depends on those
+crates by path and keeps only the deprecated RocksDB ledger during the historical
+RPC fallback period.
+
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `magicblock-processor` | Transaction scheduler, executor pool, SVM execution, commit-to-local-state path. | `magicblock-accounts-db`, `magicblock-core`, `magicblock-ledger`, `magicblock-magic-program-api`, `magicblock-metrics`, `magicblock-program` | `magicblock-api`, tests | Core execution path; preserve account locking and writable-account access invariants. |
-| `magicblock-accounts-db` | Custom local account database. | `magicblock-config`, `magicblock-magic-program-api` | account cloner, accounts, aperture, API, chainlink, processor, replicator, tests/tools | Append-only mmap storage plus indexes/snapshots; maintenance requires scheduler pause. See `.agents/context/crates/magicblock-accounts-db.md` before changing this crate. |
-| `magicblock-ledger` | Local ledger/history and latest block state. | `magicblock-core`, `magicblock-metrics`, `solana-storage-proto`, `test-kit` | aperture, API, processor, replicator, task scheduler, tools/tests | Stores tx/status/block history and latest blockhash/slot; see `.agents/context/crates/magicblock-ledger.md` before changing this crate. |
+| `magicblock-ledger` | Deprecated RocksDB history retained during migration. | `magicblock-core`, `magicblock-metrics`, `solana-storage-proto` | aperture, API | Read-only historical fallback after engine misses; it no longer owns execution state. |
 | `solana-storage-proto` | Generated/protobuf storage support. | none | `magicblock-ledger` | Low-level ledger serialization support; see `.agents/context/crates/storage-proto.md` before changing this crate. |
 
 ## Delegation, cloning, and account lifecycle crates
@@ -37,8 +41,6 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
 | `magicblock-chainlink` | Base-chain account/delegation coordination. | accounts-db, AML, config, core, magic-program API, metrics | account-cloner, aperture, API, magic program, services | Checks/clones remote accounts, tracks delegation state, coordinates base-layer reads and observed undelegation requests. See `.agents/context/crates/magicblock-chainlink.md` before changing this crate. |
-| `magicblock-account-cloner` | Fetches and injects base-layer accounts/programs into local validator state. | accounts-db, chainlink, committor-service, config, core, ledger, magic-program API, magic program, rpc-client | aperture, API, services | Distinguishes fee payer, delegated, and undelegated accounts; handles large/program clone paths. See `.agents/context/crates/magicblock-account-cloner.md` before changing this crate. |
-| `magicblock-accounts` | Legacy account config/error/trait compatibility crate. | committor-service | no active runtime consumer | Do not add new services here; current account lifecycle and scheduled-intent behavior live in chainlink/cloner, services, and committor-service. See `.agents/context/crates/magicblock-accounts.md` before changing this crate. |
 | `magicblock-aml` | External/cached risk-scoring integration. | `magicblock-config` (dev: `magicblock-core`) | `magicblock-chainlink` | Optional Range risk checks for post-delegation action signers; see `.agents/context/crates/magicblock-aml.md` before changing this crate. |
 
 ## Commit and base-layer settlement crates
@@ -53,24 +55,21 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `magicblock-program` | Magic Program implementation (`programs/magicblock`). | chainlink, core, magic-program API, test-kit | account-cloner, accounts, API, committor, processor, task scheduler, admin | Implements scheduling, cloning, ephemeral accounts, validator-only operations. |
-| `magicblock-magic-program-api` | Shared Magic Program instruction, PDA, args, and compatibility types. | none | core, accounts-db, chainlink, processor, magic program, services, cloner, API, test programs | Use this instead of duplicating Magic Program wire types; see `.agents/context/crates/magicblock-magic-program-api.md` before changing this crate. |
-| `guinea` | Test-only program for validator behavior. | `magicblock-magic-program-api` | processor tests, test-kit | Used to exercise ephemeral/delegated behavior in tests. |
+| `magicblock-program` | Magic Program implementation (`programs/magicblock`). | chainlink, core, magic-program API | account-cloner, accounts, API, committor, processor, task scheduler, admin | Implements scheduling, cloning, ephemeral accounts, validator-only operations. |
+| `magicblock-magic-program-api` | Shared Magic Program instruction, PDA, args, and compatibility types. | none | core, accounts-db, chainlink, processor, magic program, services, cloner, API | Use this instead of duplicating Magic Program wire types; see `.agents/context/crates/magicblock-magic-program-api.md` before changing this crate. |
 
 ## Scheduling, replication, services, and observability
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `magicblock-task-scheduler` | Program-scheduled task/crank service. | config, core, ledger, magic program | `magicblock-api` | SQLite-backed delay queue, retries/backoff, scheduled transaction submission. See `.agents/context/crates/magicblock-task-scheduler.md` before changing this crate. |
-| `magicblock-replicator` | Primary/replica event replication over NATS JetStream. | accounts-db, config, core, ledger | `magicblock-api` | Preserves HA/replica replay behavior; primary and replica modes differ intentionally. |
-| `magicblock-services` | Shared validator services/adapters. | account-cloner, chainlink, core, magic-program API, metrics, magic program | `magicblock-api` | Callback adapter and owner-program undelegation request observer. See `.agents/context/crates/magicblock-services.md` before changing this crate. |
+| `magicblock-task-scheduler` | Program-scheduled task/crank service. | engine, config, core, magic program | `magicblock-api` | SQLite-backed delay queue, retries/backoff, and engine transaction submission. See `.agents/context/crates/magicblock-task-scheduler.md` before changing this crate. |
+| `magicblock-services` | Shared validator services/adapters. | engine, chainlink, core, magic-program API, metrics, magic program | `magicblock-api` | Callback adapter and owner-program undelegation request observer. See `.agents/context/crates/magicblock-services.md` before changing this crate. |
 | `magicblock-metrics` | Metrics helpers and instrumentation. | none | RPC, ledger, processor, chainlink, committor, table-mania, API | Prefer adding observability here rather than ad-hoc metrics code. See `.agents/context/crates/magicblock-metrics.md` before changing this crate. |
 
 ## Tools and test support
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `test-kit` | Shared integration/unit test helpers. | guinea, accounts-db, core, ledger, processor | aperture, committor, ledger, processor, magic program tests | Put reusable test harness logic here; see `.agents/context/crates/test-kit.md` before changing this crate. |
 | `genx` | Developer/tooling binary. | `magicblock-accounts-db` | manual/tooling use | Keep outside runtime-critical paths. |
 | `ledger-stats` | Ledger/accounts statistics tool. | accounts-db, core, ledger | manual/tooling use | Useful for inspecting local persisted state. |
 | `keypair-base58` | Keypair conversion/helper binary. | none | manual/tooling use | Small standalone operator/dev helper. |

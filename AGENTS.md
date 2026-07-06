@@ -18,8 +18,8 @@ At startup, before doing task work, the agent **must make the user aware of ever
 
 Currently available:
 
-- `mbv-check` — formats, lints, and tests the magicblock-validator Rust workspace (nightly rustfmt, workspace clippy, nextest) with optional error fixing.
-- `mbv-run-single-integration-test` — runs a single integration test with the correct validator setup (brings up only the devnet and/or ephem validators the suite needs, then runs one targeted test).
+- `mbv-check` — runs the full workspace format, lint, and test gate only on explicit request or at a significant working milestone.
+- `mbv-engine-integration` — maintains the local MBV/engine integration plan, progress, decisions, validation results, and session handoff context in one ignored file.
 
 Only load a skill (read its `SKILL.md`) when the task actually calls for it.
 
@@ -52,6 +52,8 @@ For document routing, read ./.agents/README.md; it is the single routing map for
 Before changing code, consult the matching `./.agents` material so the change does not violate the validator's goals, invariants, performance requirements, or specification. This acknowledgement is required; do not proceed silently.
 
 The validator is performance-sensitive infrastructure. Changes must not degrade critical-path performance unless there is no viable alternative; if a tradeoff is unavoidable, call it out explicitly with the reason, expected impact, and any mitigation.
+
+Validator execution tests use the sibling engine's `testkit` API and v42 test program; do not add local test-program crates for that role.
 
 For durable-knowledge and documentation-stewardship requirements, follow `.agents/memory/agent-memory-and-docs.md`. In every task's final reply, state whether agent docs were updated, or why no update was needed.
 

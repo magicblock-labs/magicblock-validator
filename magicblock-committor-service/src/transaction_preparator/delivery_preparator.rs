@@ -2,23 +2,23 @@ use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
 use futures_util::future::{join, join_all, try_join_all};
 use magicblock_committor_program::{
-    instruction_chunks::chunk_realloc_ixs, Chunks,
+    Chunks, instruction_chunks::chunk_realloc_ixs,
 };
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
-    utils::{
-        decide_rpc_error_flow, map_magicblock_client_error,
-        send_transaction_with_retries, SendErrorMapper, TransactionErrorMapper,
-    },
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
+    utils::{
+        SendErrorMapper, TransactionErrorMapper, decide_rpc_error_flow,
+        map_magicblock_client_error, send_transaction_with_retries,
+    },
 };
-use magicblock_table_mania::{error::TableManiaError, TableMania};
+use magicblock_table_mania::{TableMania, error::TableManiaError};
 use solana_compute_budget_interface::ComputeBudgetInstruction;
-use solana_instruction::{error::InstructionError, Instruction};
+use solana_instruction::{Instruction, error::InstructionError};
 use solana_keypair::Keypair;
 use solana_message::{
-    v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
+    AddressLookupTableAccount, CompileError, VersionedMessage, v0::Message,
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -28,15 +28,15 @@ use solana_transaction_error::TransactionError;
 use tracing::{error, info};
 
 use crate::{
+    ComputeBudgetConfig,
     persist::{CommitStatus, IntentPersister},
     tasks::{
+        BaseTaskImpl,
         commit_stage_task::{CleanupTask, PreparationTask},
         task_strategist::TransactionStrategy,
         utils::TransactionUtils,
-        BaseTaskImpl,
     },
     utils::persist_status_update,
-    ComputeBudgetConfig,
 };
 
 pub struct DeliveryPreparator {
@@ -251,7 +251,7 @@ impl DeliveryPreparator {
                         .instructions(ixs.len());
                     realloc_budget_ixs
                 };
-                ixs_with_budget.extend(ixs.into_iter());
+                ixs_with_budget.extend(ixs);
                 ixs_with_budget
             })
             .collect::<Vec<_>>();

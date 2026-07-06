@@ -4,7 +4,7 @@ pub mod instruction;
 pub mod pda;
 pub mod response;
 
-pub use compat::{declare_id, pubkey, Pubkey};
+pub use compat::{Pubkey, declare_id, pubkey};
 
 declare_id!("Magic11111111111111111111111111111111111111");
 

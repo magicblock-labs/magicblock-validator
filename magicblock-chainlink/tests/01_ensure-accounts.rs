@@ -1,27 +1,18 @@
 use assert_matches::assert_matches;
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_cloned_as_undelegated,
-    assert_not_cloned, assert_not_found, assert_not_subscribed,
-    assert_not_undelegating, assert_remain_undelegating,
+    AccountFetchContext, assert_cloned_as_delegated,
+    assert_cloned_as_undelegated, assert_not_cloned, assert_not_found,
+    assert_not_subscribed, assert_not_undelegating, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
-    testing::deleg::add_delegation_record_for, AccountFetchContext,
+    testing::{context::TestContext, deleg::add_delegation_record_for},
 };
-use solana_account::{Account, AccountSharedData};
-use solana_program::clock::Slot;
+use solana_account::{
+    Account, AccountFieldPatch, AccountMode, AccountSharedData,
+};
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::test_context::TestContext;
-
-mod utils;
-
-use magicblock_chainlink::testing::init_logger;
 const CURRENT_SLOT: u64 = 11;
-
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
 
 // NOTE: Case comments refer to the case studies in the relevant tabs of draw.io document, i.e. Fetch
 
@@ -32,7 +23,7 @@ async fn setup(slot: Slot) -> TestContext {
 async fn test_write_non_existing_account() {
     let TestContext {
         chainlink, cloner, ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let pubkey = Pubkey::new_unique();
     let pubkeys = [pubkey];
@@ -61,7 +52,7 @@ async fn test_existing_account_undelegated() {
         rpc_client,
         cloner,
         ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let pubkey = Pubkey::new_unique();
     rpc_client.add_account(pubkey, Account::default());
@@ -91,7 +82,7 @@ async fn test_existing_account_missing_delegation_record() {
         rpc_client,
         cloner,
         ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let pubkey = Pubkey::new_unique();
     rpc_client.add_account(
@@ -128,7 +119,7 @@ async fn test_write_existing_account_valid_delegation_record() {
         validator_pubkey,
         cloner,
         ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let pubkey = Pubkey::new_unique();
     let owner = Pubkey::new_unique();
@@ -174,7 +165,7 @@ async fn test_write_existing_account_other_authority() {
         rpc_client,
         cloner,
         ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let pubkey = Pubkey::new_unique();
     let account = Account {
@@ -217,7 +208,7 @@ async fn test_write_undelegating_account_undelegated_to_other_validator() {
         bank,
         cloner,
         ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let other_authority = Pubkey::new_unique();
     let pubkey = Pubkey::new_unique();
@@ -239,8 +230,8 @@ async fn test_write_undelegating_account_undelegated_to_other_validator() {
         data: vec![0; 100],
         ..Default::default()
     });
-    shared_data.set_undelegating(true);
-    shared_data.set_remote_slot(CURRENT_SLOT);
+    shared_data.set_mode(AccountMode::Transient);
+    AccountFieldPatch::Slot(CURRENT_SLOT).apply(&mut shared_data);
     bank.insert(pubkey, shared_data);
 
     let pubkeys = [pubkey];
@@ -265,7 +256,7 @@ async fn test_write_undelegating_account_still_being_undelegated() {
         cloner,
         validator_pubkey,
         ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let authority = validator_pubkey;
     let pubkey = Pubkey::new_unique();
@@ -287,8 +278,8 @@ async fn test_write_undelegating_account_still_being_undelegated() {
         data: vec![0; 100],
         ..Default::default()
     });
-    shared_data.set_remote_slot(CURRENT_SLOT);
-    shared_data.set_undelegating(true);
+    AccountFieldPatch::Slot(CURRENT_SLOT).apply(&mut shared_data);
+    shared_data.set_mode(AccountMode::Transient);
     bank.insert(pubkey, shared_data);
 
     let pubkeys = [pubkey];
@@ -314,7 +305,7 @@ async fn test_write_existing_account_invalid_delegation_record() {
         rpc_client,
         cloner,
         ..
-    } = setup(CURRENT_SLOT).await;
+    } = TestContext::init(CURRENT_SLOT).await;
 
     let pubkey = Pubkey::new_unique();
     rpc_client.add_account(

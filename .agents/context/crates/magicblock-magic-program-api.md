@@ -4,7 +4,7 @@
 
 `magicblock-magic-program-api` is the shared wire-contract crate for the Magic Program and its built-in companion programs. It defines the program IDs, fixed accounts, PDA helpers, instruction enums, scheduling argument structs, clone metadata, task request payloads, callback response payloads, and Solana-type compatibility exports used by the validator and test programs.
 
-This crate is small, but it is protocol- and compatibility-sensitive. Its types are serialized with `bincode` into transactions, persisted scheduled intents, executor TLS payloads, and callback instructions. Changes can affect Magic Program CPI callers, account cloning, task scheduling, callback delivery, committor intent construction, account reset/blacklist behavior, and integration tests. Treat enum variant order, field order, constants, and feature-gated public type aliases as wire/API contracts.
+This crate is small, but it is protocol- and compatibility-sensitive. Its current types derive wincode schemas and use bincode-compatible wincode encoding in transactions, persisted scheduled intents, executor TLS payloads, and callback instructions. The opt-in `backward-compat` feature retains serde/bincode for Solana 2.x types that do not expose wincode schemas. Changes can affect Magic Program CPI callers, account cloning, task scheduling, callback delivery, committor intent construction, account reset/blacklist behavior, and integration tests. Treat enum variant order, field order, constants, and feature-gated public type aliases as wire/API contracts.
 
 End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns shared Magic Program wire types, intent/callback payloads, program IDs, and PDA helpers consumed by settlement and callback code.
 
@@ -29,7 +29,7 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - the `backward-compat` feature or `compat` module public type aliases;
 - callback response payload shape or receipt semantics;
 - account metas expected by Magic Program processors or helper builders in `programs/magicblock/src/utils/instruction_utils.rs`;
-- validation commands or integration suites that should be run after API changes.
+- validation commands that should be run after API changes.
 
 
 For the general documentation-update rule, see .agents/memory/agent-memory-and-docs.md.
@@ -48,18 +48,16 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `programs/magicblock/src/magicblock_processor.rs` | Deserializes and dispatches `MagicBlockInstruction` and `CallbackInstruction` values. Keep this aligned with instruction variants. |
 | `programs/magicblock/src/utils/instruction_utils.rs` | Validator/program helper builders for many `MagicBlockInstruction` variants and account metas. |
 | `programs/magicblock/src/magic_scheduled_base_intent.rs` | Interprets `MagicIntentBundleArgs`, commit/action args, `ShortAccountMeta`, fees, duplicate checks, and secure/legacy action behavior. |
-| `magicblock-services/src/actions_callback_service.rs` | Builds `CallbackInstruction::ExecuteCallback` and bincode-encoded `MagicResponse` values. |
+| `magicblock-services/src/actions_callback_service.rs` | Builds `CallbackInstruction::ExecuteCallback` and wincode-encoded `MagicResponse` values. |
 | `magicblock-account-cloner/src/lib.rs` | Builds clone, cleanup, post-delegation action, program-finalize, and task-related Magic Program instructions using this API. |
 | `magicblock-processor/tests/ephemeral_accounts.rs` and `magicblock-processor/tests/post_delegation_actions.rs` | Focused processor coverage for API-driven ephemeral account and post-delegation-action behavior. |
-| `test-integration/schedulecommit/` and `test-integration/test-schedule-intent/` | Integration coverage for commit scheduling, intent bundles, commit limits, security, undelegation, actions, and callbacks. |
 
 Main consumers include:
 
 - `programs/magicblock`, the runtime implementation that deserializes and executes these instructions;
 - `magicblock-core`, which stores task requests and callback/action payload dependencies;
 - `magicblock-account-cloner`, `magicblock-chainlink`, `magicblock-accounts-db`, `magicblock-api`, `magicblock-processor`, and `magicblock-services`;
-- workspace/test programs such as `programs/guinea`, `test-integration/programs/schedulecommit`, and `test-integration/programs/flexi-counter`;
-- integration suites under `test-integration/schedulecommit` and `test-integration/test-schedule-intent`.
+- processor and service tests backed by the engine testkit.
 
 ## Public API shape / Main public types and APIs
 
@@ -88,13 +86,13 @@ Use `crate::compat::{Instruction, AccountMeta, AccountInfo, Signature}` and `cra
 
 `instruction.rs` defines:
 
-- `MagicBlockInstruction`: the primary bincode-serialized instruction enum for the Magic Program. Variants cover account modification, legacy and bundled commit scheduling, task scheduling/canceling, executable-check toggles, no-op uniqueness, ephemeral account create/resize/close, clone/chunk/cleanup, program finalization, callback attachment, account eviction, and crank execution.
+- `MagicBlockInstruction`: the primary wincode-serialized instruction enum for the Magic Program. Variants cover account modification, legacy and bundled commit scheduling, task scheduling/canceling, executable-check toggles, no-op uniqueness, ephemeral account create/resize/close, clone/chunk/cleanup, program finalization, callback attachment, account eviction, and crank execution.
 - `CallbackInstruction`: instruction enum for the callback executor built-in. Current variant is `ExecuteCallback { instruction }`.
 - `PostDelegationActionExecutorInstruction`: instruction enum for the post-delegation action executor built-in. Current variant is `Execute { cloned_account_pubkey, actions }`.
 - `AccountCloneFields`: clone metadata (`lamports`, `owner`, `executable`, `delegated`, `confined`, `remote_slot`) that must preserve remote/local account semantics across clone instructions.
 - `AccountModification` and `AccountModificationForInstruction`: validator-only account flag/owner modifications.
 
-`MagicBlockInstruction::try_to_vec()` is a thin `bincode::serialize` helper. Most call sites use `Instruction::new_with_bincode` directly.
+`MagicBlockInstruction::try_to_vec()` uses wincode by default. Under `backward-compat` it retains bincode serialization because the Solana 2.x compatibility types do not implement wincode schemas. Current call sites use `Instruction::new_with_wincode`.
 
 ### Commit/action/intent args
 
@@ -135,10 +133,10 @@ Callback account metas treat `CALLBACK_SIGNER` specially: user-facing `ShortAcco
 `response.rs` defines:
 
 - `MagicResponse::V1(MagicResponseV1)` with convenience accessors `ok()`, `data()`, and `error()`;
-- `MagicResponseV1 { ok, data, error, receipt }`, bincode-encoded after a callback-specific discriminator by `magicblock-services`;
+- `MagicResponseV1 { ok, data, error, receipt }`, wincode-encoded after a callback-specific discriminator by `magicblock-services`;
 - `ActionReceipt { signature }`, present when the base action transaction signature is available.
 
-Callback programs, such as `test-integration/programs/flexi-counter`, deserialize this payload directly.
+Callback programs deserialize this payload directly.
 
 ## Runtime flows
 
@@ -146,13 +144,13 @@ Callback programs, such as `test-integration/programs/flexi-counter`, deserializ
 
 ```text
 caller / validator helper
-  -> Instruction::new_with_bincode(program_id, &MagicBlockInstruction::..., metas)
+  -> Instruction::new_with_wincode(program_id, &MagicBlockInstruction::..., metas)
   -> programs/magicblock/src/magicblock_processor.rs
-  -> bincode::deserialize::<MagicBlockInstruction>()
+  -> wincode::deserialize::<MagicBlockInstruction>()
   -> variant-specific processor
 ```
 
-`programs/magicblock/src/magicblock_processor.rs` is the dispatch source of truth for current variant behavior. Adding a variant or changing variant fields requires updating dispatch, helper builders, tests, and this guide. Reordering variants changes bincode discriminants and must be treated as a wire compatibility break.
+`programs/magicblock/src/magicblock_processor.rs` is the dispatch source of truth for current variant behavior. Adding a variant or changing variant fields requires updating dispatch, helper builders, tests, and this guide. Wincode preserves the existing bincode-compatible layout, so reordering variants changes wire discriminants and must be treated as a compatibility break.
 
 ### Intent bundle scheduling flow
 
@@ -203,16 +201,16 @@ program CPI
 1. A secure intent bundle can attach an action callback with `AddActionCallbackArgs`.
 2. `process_add_action_callback` validates the latest intent, same payer, same slot/blockhash, source program, fee vault, and callback account metas.
 3. Committor/service code reports action results through `ActionsCallbackService`.
-4. `magicblock-services` builds a callback executor instruction under `CALLBACK_PROGRAM_ID`, wraps the destination instruction in `CallbackInstruction::ExecuteCallback`, and bincode-encodes `MagicResponse::V1` after the destination discriminator.
+4. `magicblock-services` builds a callback executor instruction under `CALLBACK_PROGRAM_ID`, wraps the destination instruction in `CallbackInstruction::ExecuteCallback`, and wincode-encodes `MagicResponse::V1` after the destination discriminator.
 5. Callback programs deserialize `MagicResponse` and can check `CALLBACK_SIGNER` as the authorized PDA signer.
 
 Do not add user-controlled signer bits to `ShortAccountMeta`; callback signer handling is intentionally derived from `CALLBACK_SIGNER`.
 
 ## Important internals and caveats
 
-### Bincode compatibility
+### Wire compatibility
 
-All major public structs/enums derive `Serialize` and `Deserialize` and are serialized with `bincode`. Enum variant order and struct field order matter. Adding fields without compatibility handling, removing variants, or reordering variants can break old transactions, persisted contexts, integration programs, or callback decoders.
+Current public structs/enums retain serde derives and also derive `SchemaRead`/`SchemaWrite`; wincode's default encoding remains byte-compatible with the prior bincode representation. Enum variant order and struct field order still matter. Under `backward-compat`, schema derives are disabled and `try_to_vec` uses bincode for Solana 2.x types.
 
 The `Unused` instruction variant is intentionally retained as an unused slot after a removed `ScheduleCommitFinalize` path. Do not delete or repurpose it casually; doing so changes discriminants or semantics.
 
@@ -234,7 +232,7 @@ This crate currently has no local unit tests. Behavior is validated through cons
 
 ## Important invariants
 
-1. `MagicBlockInstruction`, `CallbackInstruction`, `PostDelegationActionExecutorInstruction`, and public argument/response structs must remain bincode-compatible unless the change is an intentional protocol migration with all consumers updated.
+1. `MagicBlockInstruction`, `CallbackInstruction`, `PostDelegationActionExecutorInstruction`, and public argument/response structs must remain byte-compatible with their established encoding unless the change is an intentional protocol migration with all consumers updated.
 2. Program IDs, fixed account pubkeys, PDA seeds, and PDA derivations must remain stable across validator, Magic Program, services, tests, reset/blacklist logic, and application CPI callers.
 3. `ShortAccountMeta` must not grow a user-controlled signer flag for base actions/callbacks without a security review and corresponding Magic Program validation changes.
 4. Clone metadata must preserve `lamports`, `owner`, `executable`, `delegated`, `confined`, and `remote_slot`; missing or reordered fields can corrupt local clone semantics.
@@ -242,7 +240,7 @@ This crate currently has no local unit tests. Behavior is validated through cons
 6. Intent bundles must continue to reject empty bundles and duplicate committed-account pubkeys in the Magic Program implementation; API changes must not bypass those checks.
 7. `ScheduleBaseIntent` and `ScheduleIntentBundle` must preserve their legacy/secure behavior distinction.
 8. `EPHEMERAL_RENT_PER_BYTE` and `EPHEMERAL_VAULT_PUBKEY` changes are user-visible balance/lifecycle changes and require processor/integration validation.
-9. Callback response payloads must remain decodable by callback programs that expect discriminator-prefixed bincode `MagicResponse` data.
+9. Callback response payloads must remain decodable by callback programs that expect the established discriminator-prefixed `MagicResponse` encoding.
 10. The `backward-compat` feature must keep public type aliases coherent; do not expose mixed Solana major-version types in one public payload.
 
 ## Common change areas and what to inspect
@@ -255,9 +253,9 @@ Start with:
 - `programs/magicblock/src/magicblock_processor.rs`;
 - `programs/magicblock/src/utils/instruction_utils.rs`;
 - relevant processor module under `programs/magicblock/src/`;
-- call sites in `magicblock-account-cloner`, `magicblock-services`, `programs/guinea`, and integration programs.
+- call sites in `magicblock-account-cloner`, `magicblock-services`, processor tests, and integration programs.
 
-Check account metas, signer/writable bits, bincode compatibility, discriminant impact, and whether `Unused` must remain in place.
+Check account metas, signer/writable bits, wire compatibility, discriminant impact, and whether `Unused` must remain in place.
 
 ### Changing commit/action/undelegation args
 
@@ -268,8 +266,6 @@ Inspect:
 - `programs/magicblock/src/schedule_transactions/process_schedule_intent_bundle.rs`;
 - `programs/magicblock/src/schedule_transactions/process_add_action_callback.rs`;
 - `magicblock-core/src/intent.rs`;
-- `test-integration/programs/flexi-counter/src/processor/schedule_intent.rs`;
-- `test-integration/schedulecommit/` suites.
 
 Preserve compact index resolution, duplicate-account checks, fee behavior, callback source authorization, and undelegation immutability.
 
@@ -282,7 +278,6 @@ Inspect:
 - `programs/magicblock/src/clone_account/`;
 - `programs/magicblock/src/utils/instruction_utils.rs`;
 - `magicblock-processor/tests/post_delegation_actions.rs`;
-- `test-integration/test-cloning/`.
 
 Do not drop `remote_slot`, delegation/confined flags, executable state, or post-delegation action handling.
 
@@ -292,7 +287,7 @@ Inspect:
 
 - `magicblock-magic-program-api/src/lib.rs`;
 - `programs/magicblock/src/ephemeral_accounts/`;
-- `programs/guinea/src/lib.rs` helper CPIs;
+- engine-testkit-backed processor coverage;
 - `magicblock-api/src/fund_account.rs`;
 - `magicblock-processor/tests/ephemeral_accounts.rs`.
 
@@ -317,7 +312,6 @@ Inspect:
 - `magicblock-magic-program-api/src/response.rs` and `src/pda.rs`;
 - `magicblock-services/src/actions_callback_service.rs`;
 - `programs/magicblock/src/schedule_transactions/process_add_action_callback.rs`;
-- callback consumers such as `test-integration/programs/flexi-counter/src/processor/callback.rs`.
 
 Preserve discriminator-prefixing, `MagicResponse::V1` decoding, `CALLBACK_SIGNER` semantics, and callback fee/source validation.
 
@@ -336,7 +330,6 @@ Run builds/tests with and without `--features backward-compat` when public type 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-magic-program-api`, including the `backward-compat` feature when public type aliases change.
 - Consumer validation intent: because this crate has no local tests, include affected consumer packages such as `magicblock-program` and focused `magicblock-processor` tests for ephemeral accounts or post-delegation actions.
-- Relevant integration suites: schedule-intent, schedulecommit, committor intent-bundle, and cloning suites as appropriate; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance/security validation intent: report API changes that increase serialized instruction size or account requirements, and validate the smallest relevant hot path.
 
 
@@ -346,4 +339,3 @@ Run builds/tests with and without `--features backward-compat` when public type 
 - `.agents/context/crates/magicblock-account-cloner.md` — clone/program-clone flows that emit this crate's instruction payloads.
 - `.agents/context/crates/magicblock-services.md` — callback instruction and response delivery.
 - `programs/magicblock/src/magicblock_processor.rs` and `programs/magicblock/src/utils/instruction_utils.rs` — current instruction interpretation and helper builders.
-- `test-integration/schedulecommit/` and `test-integration/test-schedule-intent/` — intent scheduling and callback integration coverage.

@@ -1,20 +1,20 @@
 use std::{
     path::Path,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
 };
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
+use engine::Engine;
 use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_metrics::metrics::AccountFetchContext;
-use solana_account::{AccountSharedData, ReadableAccount};
+use nucleus::runtime::TransactionView;
+use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{
     sync::{broadcast, mpsc},
     task,
@@ -22,13 +22,14 @@ use tokio::{
 use tracing::*;
 
 use crate::{
+    accounts_bank::AccountsBank,
     cloner::Cloner,
     config::ChainlinkConfig,
     fetch_cloner::FetchAndCloneResult,
     filters::is_noop_system_transfer,
     remote_account_provider::{
-        chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
-        ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
+        ChainPubsubClient, ChainRpcClient, ChainRpcClientImpl, Endpoints,
+        RemoteAccountProvider, chain_updates_client::ChainUpdatesClient,
     },
     submux::SubMuxClient,
 };
@@ -47,7 +48,7 @@ pub(crate) const SUBSCRIPTION_UPDATE_LIMIT: usize = 5_000;
 pub type ProdInnerChainlink<C> = InnerChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
-    AccountsDb,
+    Engine,
     C,
 >;
 
@@ -55,7 +56,7 @@ pub type ProdInnerChainlink<C> = InnerChainlink<
 pub type ProdChainlink<C> = ReplicationModeAwareChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
-    AccountsDb,
+    Engine,
     C,
 >;
 
@@ -191,7 +192,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
     pub async fn ensure_transaction_accounts(
         &self,
-        tx: &SanitizedTransaction,
+        tx: &TransactionView,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         match self {
             Self::Enabled(chainlink) => {
@@ -441,9 +442,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 // ephemeral bank state stale.
                 let should_evict = match accounts_bank.get_account(&pubkey) {
                     Some(account) => {
-                        let undelegating = account.undelegating();
-                        let delegated = account.delegated();
-                        let ephemeral = account.ephemeral();
+                        let undelegating = account.is(AccountMode::Transient);
+                        let delegated = account.is(AccountMode::Delegated);
+                        let ephemeral = account.is(AccountMode::Ephemeral);
                         let evict = !undelegating && !delegated && !ephemeral;
                         if !evict {
                             trace!(
@@ -524,23 +525,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     #[instrument(skip(self, tx))]
     pub async fn ensure_transaction_accounts(
         &self,
-        tx: &SanitizedTransaction,
+        tx: &TransactionView,
     ) -> ChainlinkResult<FetchAndCloneResult> {
+        let signature = tx.signatures()[0];
         if is_noop_system_transfer(tx) {
             trace!(
-                tx_sig = %tx.signature(),
+                tx_sig = %signature,
                 "Skipping account ensure for noop system transfer transaction"
             );
             return Ok(Default::default());
         }
 
-        let mut pubkeys = tx
-            .message()
-            .account_keys()
-            .iter()
-            .copied()
-            .collect::<Vec<_>>();
-        let feepayer = tx.message().fee_payer();
+        let mut pubkeys = tx.static_account_keys().to_vec();
+        let feepayer = &tx.static_account_keys()[0];
 
         let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
 
@@ -566,7 +563,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .ensure_accounts(
                 &pubkeys,
                 mark_empty_if_not_found,
-                AccountFetchContext::send_transaction(*tx.signature()),
+                AccountFetchContext::send_transaction(signature),
             )
             .await?;
 
@@ -683,7 +680,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                     None => AccountStatusOnEr::Missing,
                     Some(account) => {
                         // Q: do we need to compare the owner? isn't delegated() alone enough?
-                        if account.delegated()
+                        if account.is(AccountMode::Delegated)
                             || account.owner().eq(&dlp_api::id())
                         {
                             AccountStatusOnEr::Delegated
@@ -797,22 +794,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 mod tests {
     use std::{sync::Arc, time::Duration};
 
-    use magicblock_accounts_db::traits::AccountsBank;
     use magicblock_metrics::metrics::AccountFetchContext;
-    use solana_account::AccountSharedData;
-    use solana_message::legacy::Message;
+    use nucleus::testkit::signed_view;
+    use solana_account::{AccountMode, AccountSharedData};
+    use solana_hash::Hash;
+    use solana_keypair::Keypair;
     use solana_pubkey::Pubkey;
-    use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
     use tokio::sync::mpsc;
 
     use super::{
-        errors::ChainlinkError, InnerChainlink, ReplicationModeAwareChainlink,
+        InnerChainlink, ReplicationModeAwareChainlink, errors::ChainlinkError,
     };
     use crate::{
-        accounts_bank::mock::AccountsBankStub,
+        accounts_bank::{AccountsBank, mock::AccountsBankStub},
         remote_account_provider::{
-            chain_pubsub_client::mock::ChainPubsubClientMock,
             SubscriptionReason,
+            chain_pubsub_client::mock::ChainPubsubClientMock,
         },
         testing::{
             cloner_stub::ClonerStub, init_logger,
@@ -837,7 +834,7 @@ mod tests {
 
         use crate::{
             remote_account_provider::{
-                chain_slot::ChainSlot, RemoteAccountProvider,
+                RemoteAccountProvider, chain_slot::ChainSlot,
             },
             testing::{
                 rpc_client_mock::ChainRpcClientMockBuilder,
@@ -870,8 +867,8 @@ mod tests {
         )
     }
 
-    fn disabled_chainlink(
-    ) -> (Arc<AccountsBankStub>, TestReplicationModeAwareChainlink) {
+    fn disabled_chainlink()
+    -> (Arc<AccountsBankStub>, TestReplicationModeAwareChainlink) {
         let accounts_bank = Arc::new(AccountsBankStub::default());
         let chainlink = TestReplicationModeAwareChainlink::disabled()
             .expect("disabled Chainlink should be constructed");
@@ -891,9 +888,11 @@ mod tests {
             )
             .await;
 
-        assert!(result
-            .expect("disabled ensure_accounts should succeed")
-            .is_ok());
+        assert!(
+            result
+                .expect("disabled ensure_accounts should succeed")
+                .is_ok()
+        );
         assert!(accounts_bank.get_account(&pubkey).is_none());
         assert_eq!(chainlink.fetch_count(), None);
         assert!(!chainlink.is_watching(&pubkey));
@@ -919,10 +918,8 @@ mod tests {
     #[tokio::test]
     async fn disabled_mode_rejects_transaction_ensure() {
         let (_accounts_bank, chainlink) = disabled_chainlink();
-        let payer = Pubkey::new_unique();
-        let message = Message::new(&[], Some(&payer));
-        let tx = Transaction::new_unsigned(message);
-        let sanitized_tx = SanitizedTransaction::from_transaction_for_tests(tx);
+        let (_, sanitized_tx) =
+            signed_view(&Keypair::new(), &[], Hash::default());
 
         let error = chainlink
             .ensure_transaction_accounts(&sanitized_tx)
@@ -933,8 +930,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscribe_account_removals_skips_delegated_or_undelegating_and_evicts_normal(
-    ) {
+    async fn test_subscribe_account_removals_skips_delegated_or_undelegating_and_evicts_normal()
+     {
         init_logger();
 
         let accounts_bank = Arc::new(AccountsBankStub::default());
@@ -950,17 +947,17 @@ mod tests {
 
         let mut delegated_account =
             AccountSharedData::new(1_000_000, 0, &owner);
-        delegated_account.set_delegated(true);
+        delegated_account.set_mode(AccountMode::Delegated);
         accounts_bank.insert(delegated_pubkey, delegated_account);
 
         let mut undelegating_account =
             AccountSharedData::new(1_000_000, 0, &owner);
-        undelegating_account.set_undelegating(true);
+        undelegating_account.set_mode(AccountMode::Transient);
         accounts_bank.insert(undelegating_pubkey, undelegating_account);
 
         let mut ephemeral_account =
             AccountSharedData::new(1_000_000, 0, &owner);
-        ephemeral_account.set_ephemeral(true);
+        ephemeral_account.set_mode(AccountMode::Ephemeral);
         accounts_bank.insert(ephemeral_pubkey, ephemeral_account);
 
         let normal_account = AccountSharedData::new(1_000_000, 0, &owner);
@@ -999,7 +996,7 @@ mod tests {
         let ephemeral_account = accounts_bank
             .get_account(&ephemeral_pubkey)
             .expect("ephemeral account should not be evicted");
-        assert!(ephemeral_account.ephemeral());
+        assert!(ephemeral_account.is(AccountMode::Ephemeral));
         assert!(accounts_bank.get_account(&normal_pubkey).is_none());
 
         drop(removed_tx);
@@ -1007,8 +1004,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscribe_account_removals_skips_evict_when_account_is_watched_again(
-    ) {
+    async fn test_subscribe_account_removals_skips_evict_when_account_is_watched_again()
+     {
         init_logger();
 
         let accounts_bank = Arc::new(AccountsBankStub::default());
@@ -1062,8 +1059,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_defensive_eviction_blocks_same_pubkey_subscription_until_eviction_finishes(
-    ) {
+    async fn test_defensive_eviction_blocks_same_pubkey_subscription_until_eviction_finishes()
+     {
         init_logger();
 
         let remote_account_provider = test_remote_account_provider().await;
@@ -1105,12 +1102,9 @@ mod tests {
         });
 
         assert!(
-            tokio::time::timeout(
-                Duration::from_millis(50),
-                &mut result_rx,
-            )
-            .await
-            .is_err(),
+            tokio::time::timeout(Duration::from_millis(50), &mut result_rx,)
+                .await
+                .is_err(),
             "same-pubkey subscribe must wait while defensive eviction holds the per-pubkey subscription lock"
         );
 

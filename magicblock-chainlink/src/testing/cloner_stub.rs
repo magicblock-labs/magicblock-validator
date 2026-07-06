@@ -3,25 +3,24 @@ use std::{
     collections::HashMap,
     fmt,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
 
 use async_trait::async_trait;
-use solana_account::AccountSharedData;
+use solana_account::{AccountFieldPatch, AccountSharedData};
 use solana_instruction::error::InstructionError;
 use solana_loader_v4_interface::state::LoaderV4State;
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
 use tokio::sync::Notify;
 
 #[cfg(any(test, feature = "dev-context"))]
 use crate::cloner::AccountCloneRequest;
 use crate::{
     accounts_bank::mock::AccountsBankStub,
-    cloner::{errors::ClonerResult, Cloner},
+    cloner::{Cloner, errors::ClonerResult},
     remote_account_provider::program_account::LoadedProgram,
 };
 
@@ -98,7 +97,7 @@ impl ClonerStub {
 
     #[allow(dead_code)]
     pub fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-        use magicblock_accounts_db::traits::AccountsBank;
+        use crate::accounts_bank::AccountsBank;
 
         self.accounts_bank.get_account(pubkey)
     }
@@ -191,7 +190,7 @@ impl Cloner for ClonerStub {
     async fn clone_account(
         &self,
         request: AccountCloneRequest,
-    ) -> ClonerResult<Signature> {
+    ) -> ClonerResult<()> {
         let active =
             self.active_account_clones.fetch_add(1, Ordering::SeqCst) + 1;
         self.max_active_account_clones
@@ -226,19 +225,15 @@ impl Cloner for ClonerStub {
         self.wait_for_clone_completion_allowed().await;
         self.accounts_bank.insert(request.pubkey, request.account);
         self.active_account_clones.fetch_sub(1, Ordering::SeqCst);
-        Ok(Signature::default())
+        Ok(())
     }
 
     async fn evict_account(&self, pubkey: Pubkey) -> ClonerResult<()> {
-        use magicblock_accounts_db::traits::AccountsBank;
         self.accounts_bank.remove_account(&pubkey);
         Ok(())
     }
 
-    async fn clone_program(
-        &self,
-        program: LoadedProgram,
-    ) -> ClonerResult<Signature> {
+    async fn clone_program(&self, program: LoadedProgram) -> ClonerResult<()> {
         use solana_account::WritableAccount;
         use solana_loader_v4_interface::state::LoaderV4State;
         use solana_program::rent::Rent;
@@ -287,7 +282,8 @@ impl Cloner for ClonerStub {
                 [LoaderV4State::program_data_offset()..]
                 .copy_from_slice(&program.program_data);
 
-            program_account.set_remote_slot(program.remote_slot);
+            AccountFieldPatch::Slot(program.remote_slot)
+                .apply(&mut program_account);
             self.accounts_bank
                 .insert(program.program_id, program_account);
         }
@@ -300,7 +296,7 @@ impl Cloner for ClonerStub {
                 .insert(program.program_id, program);
         }
         self.active_program_clones.fetch_sub(1, Ordering::SeqCst);
-        Ok(Signature::default())
+        Ok(())
     }
 }
 

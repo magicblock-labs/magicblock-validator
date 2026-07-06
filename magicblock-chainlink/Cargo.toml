@@ -11,11 +11,12 @@ borsh = { workspace = true }
 futures-util = { workspace = true }
 helius-laserstream = { workspace = true }
 lru = { workspace = true }
-magicblock-accounts-db = { workspace = true }
 magicblock-aml = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
+magicblock-engine = { workspace = true }
+magicblock-engine-nucleus = { workspace = true, features = ["runtime"] }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 parking_lot = { workspace = true }
@@ -24,7 +25,7 @@ solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }
 solana-address-lookup-table-interface = { workspace = true }
-solana-clock = { workspace = true }
+solana-clock = { workspace = true, features = ["wincode"] }
 solana-commitment-config = { workspace = true }
 solana-feature-set = { workspace = true }
 solana-hash = { workspace = true }
@@ -42,7 +43,7 @@ solana-rpc-client-api = { workspace = true }
 solana-sdk-ids = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
-solana-system-interface = { workspace = true, features = ["bincode"] }
+solana-system-interface = { workspace = true, features = ["wincode"] }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
 spl-token = { workspace = true }
@@ -54,10 +55,12 @@ tokio-util = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
+wincode = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
 magicblock-chainlink = { path = ".", features = ["dev-context"] }
+magicblock-engine-nucleus = { workspace = true, features = ["runtime", "testkit"] }
 magicblock-metrics = { workspace = true, features = ["dev-context"] }
 
 [features]

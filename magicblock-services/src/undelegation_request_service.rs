@@ -1,19 +1,13 @@
 use std::{fmt, sync::Arc, time::Duration};
 
 use dlp_api::pda::undelegation_request_pda_from_delegated_account;
-use magicblock_account_cloner::ChainlinkCloner;
+use engine::Engine;
 use magicblock_chainlink::{
     AccountStatusOnEr, ObservedUndelegationRequest, ProdChainlink,
-};
-use magicblock_core::{
-    link::transactions::TransactionSchedulerHandle, traits::LatestBlockProvider,
+    cloner::ChainlinkCloner,
 };
 use magicblock_metrics::metrics::AccountFetchContext;
 use magicblock_program::instruction_utils::InstructionUtils;
-use solana_hash::Hash;
-use solana_keypair::Keypair;
-use solana_signer::Signer;
-use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tokio::{sync::broadcast, time::MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
@@ -51,39 +45,20 @@ impl fmt::Display for ObservedUndelegationRequestError {
 pub struct UndelegationRequestService {
     chainlink: Arc<ChainlinkImpl>,
     cancellation_token: CancellationToken,
-    internal_transaction_scheduler: TransactionSchedulerHandle,
-    validator_authority: Arc<Keypair>,
-    latest_block_reader: Arc<dyn LatestBlockReader>,
+    engine: Engine,
     undelegation_request_poll_interval: Duration,
-}
-
-trait LatestBlockReader: Send + Sync {
-    fn blockhash(&self) -> Hash;
-}
-
-impl<T> LatestBlockReader for T
-where
-    T: LatestBlockProvider,
-{
-    fn blockhash(&self) -> Hash {
-        LatestBlockProvider::blockhash(self)
-    }
 }
 
 impl UndelegationRequestService {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
-        internal_transaction_scheduler: TransactionSchedulerHandle,
-        validator_authority: Keypair,
-        latest_block: impl LatestBlockProvider,
+        engine: Engine,
         undelegation_request_poll_interval: Duration,
     ) -> Self {
         Self {
             chainlink,
             cancellation_token: CancellationToken::new(),
-            internal_transaction_scheduler,
-            validator_authority: Arc::new(validator_authority),
-            latest_block_reader: Arc::new(latest_block.clone()),
+            engine,
             undelegation_request_poll_interval,
         }
     }
@@ -92,9 +67,7 @@ impl UndelegationRequestService {
         mut requests: broadcast::Receiver<ObservedUndelegationRequest>,
         cancellation_token: CancellationToken,
         chainlink: Arc<ChainlinkImpl>,
-        internal_transaction_scheduler: TransactionSchedulerHandle,
-        validator_authority: Arc<Keypair>,
-        latest_block: Arc<dyn LatestBlockReader>,
+        engine: Engine,
     ) {
         loop {
             let request = tokio::select! {
@@ -125,9 +98,7 @@ impl UndelegationRequestService {
             Self::process_observed_undelegation_request_with_retries(
                 request,
                 &chainlink,
-                &internal_transaction_scheduler,
-                validator_authority.as_ref(),
-                latest_block.as_ref(),
+                &engine,
                 &cancellation_token,
             )
             .await;
@@ -138,9 +109,7 @@ impl UndelegationRequestService {
         poll_interval: Duration,
         cancellation_token: CancellationToken,
         chainlink: Arc<ChainlinkImpl>,
-        internal_transaction_scheduler: TransactionSchedulerHandle,
-        validator_authority: Arc<Keypair>,
-        latest_block: Arc<dyn LatestBlockReader>,
+        engine: Engine,
     ) {
         if poll_interval.is_zero() {
             debug!(
@@ -176,9 +145,7 @@ impl UndelegationRequestService {
                 Self::process_observed_undelegation_request_with_retries(
                     request,
                     &chainlink,
-                    &internal_transaction_scheduler,
-                    validator_authority.as_ref(),
-                    latest_block.as_ref(),
+                    &engine,
                     &cancellation_token,
                 )
                 .await;
@@ -189,9 +156,7 @@ impl UndelegationRequestService {
     async fn process_observed_undelegation_request_with_retries(
         request: ObservedUndelegationRequest,
         chainlink: &ChainlinkImpl,
-        internal_transaction_scheduler: &TransactionSchedulerHandle,
-        validator_authority: &Keypair,
-        latest_block: &dyn LatestBlockReader,
+        engine: &Engine,
         cancellation_token: &CancellationToken,
     ) {
         let mut attempt = 1;
@@ -199,9 +164,7 @@ impl UndelegationRequestService {
             let result = Self::process_observed_undelegation_request(
                 request.clone(),
                 chainlink,
-                internal_transaction_scheduler,
-                validator_authority,
-                latest_block,
+                engine,
             )
             .await;
             match result {
@@ -253,9 +216,7 @@ impl UndelegationRequestService {
     async fn process_observed_undelegation_request(
         request: ObservedUndelegationRequest,
         chainlink: &ChainlinkImpl,
-        internal_transaction_scheduler: &TransactionSchedulerHandle,
-        validator_authority: &Keypair,
-        latest_block: &dyn LatestBlockReader,
+        engine: &Engine,
     ) -> Result<(), ObservedUndelegationRequestError> {
         if request.observed_slot >= request.expires_at_slot {
             warn!(
@@ -384,17 +345,24 @@ impl UndelegationRequestService {
         }
 
         let ix = InstructionUtils::validator_schedule_commit_and_undelegate_instruction(
-            &validator_authority.pubkey(),
+            &engine.authority(),
             vec![request.delegated_account],
         );
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&validator_authority.pubkey()),
-            &[validator_authority],
-            latest_block.blockhash(),
-        );
-
-        if let Err(err) = internal_transaction_scheduler.execute(tx).await {
+        let submitted = engine
+            .transaction(&[ix])
+            .map_err(|_| {
+                ObservedUndelegationRequestError::Transient(
+                    "failed to compose undelegation transaction",
+                )
+            })?
+            .execute()
+            .await
+            .map_err(|_| {
+                ObservedUndelegationRequestError::Transient(
+                    "engine unavailable while scheduling undelegation",
+                )
+            })?;
+        if let Err(err) = submitted {
             return Err(ObservedUndelegationRequestError::Schedule(err));
         }
 
@@ -423,9 +391,7 @@ impl UndelegationRequestService {
             requests,
             self.cancellation_token.clone(),
             self.chainlink.clone(),
-            self.internal_transaction_scheduler.clone(),
-            self.validator_authority.clone(),
-            self.latest_block_reader.clone(),
+            self.engine.clone(),
         ));
         self.spawn_undelegation_request_poll_processor();
     }
@@ -439,9 +405,7 @@ impl UndelegationRequestService {
             self.undelegation_request_poll_interval,
             self.cancellation_token.clone(),
             self.chainlink.clone(),
-            self.internal_transaction_scheduler.clone(),
-            self.validator_authority.clone(),
-            self.latest_block_reader.clone(),
+            self.engine.clone(),
         ));
     }
 

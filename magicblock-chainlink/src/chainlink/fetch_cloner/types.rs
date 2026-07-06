@@ -6,7 +6,7 @@ use solana_pubkey::Pubkey;
 use crate::{
     cloner::AccountCloneRequest,
     remote_account_provider::{
-        program_account::LoadedProgram, ResolvedAccountSharedData,
+        ResolvedAccountSharedData, program_account::LoadedProgram,
     },
 };
 

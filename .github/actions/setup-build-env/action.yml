@@ -44,7 +44,6 @@ runs:
       shared-key: ${{ inputs.build_cache_key_name }}
       workspaces: |
         magicblock-validator -> target
-        magicblock-validator/test-integration -> target
       cache-targets: true
       cache-all-crates: true
       cache-on-failure: true

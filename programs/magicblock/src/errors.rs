@@ -18,7 +18,9 @@ pub enum MagicBlockProgramError {
     #[error("need at least one account to modify")]
     NoAccountsToModify,
 
-    #[error("number of accounts to modify needs to match number of account modifications")]
+    #[error(
+        "number of accounts to modify needs to match number of account modifications"
+    )]
     AccountsToModifyNotMatchingAccountModifications,
 
     #[error("The account modification for the provided key is missing")]
@@ -63,9 +65,7 @@ pub enum MagicBlockProgramError {
     #[error("Post-delegation actions require a delegated clone target")]
     PostDelegationActionsRequireDelegatedClone,
 
-    #[error(
-        "Post-delegation actions cannot use validator authority as signer"
-    )]
+    #[error("Post-delegation actions cannot use validator authority as signer")]
     PostDelegationActionUsesValidatorAuthority,
 
     #[error("Post-delegation action executor is missing")]
@@ -76,4 +76,12 @@ pub enum MagicBlockProgramError {
 
     #[error("Post-delegation action executor must be top-level")]
     PostDelegationActionExecutorNotTopLevel,
+
+    // NOTE: keep new variants at the end. The discriminant is what reaches
+    // clients as `InstructionError::Custom`, so inserting above renumbers
+    // every variant that follows.
+    #[error(
+        "Account cloning and modification instructions are no longer supported; account composition is handled by the engine"
+    )]
+    AccountCompositionRemoved,
 }

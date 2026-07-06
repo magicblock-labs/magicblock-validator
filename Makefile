@@ -8,8 +8,7 @@ $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST=test --no
 $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=test --no-fail-fast -- --nocapture))
 
 test:
-	RUST_BACKTRACE=1 cargo $(CARGO_TEST) && \
-	$(MAKE) -C $(DIR)/test-integration test
+	RUST_BACKTRACE=1 cargo $(CARGO_TEST)
 
 test-log:
 	cargo $(CARGO_TEST_NOCAP)
@@ -43,9 +42,6 @@ run-release-no-geyser:
 	GEYSER_DISABLE=accounts,transactions \
 	cargo run --release
 
-update-sysvars:
-	$(DIR)/test-integration/sysvars/sh/update
-
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 
@@ -55,9 +51,6 @@ lint:
 
 ci-test-unit:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP)
-
-ci-test-integration:
-	RUN_TESTS=$(RUN_TESTS) $(MAKE) -C $(DIR)/test-integration test
 
 ## NOTE: We're getting the following error in github CI when trying to use
 #  nightly Rust. Until that is fixed we have to use stable to verify format.

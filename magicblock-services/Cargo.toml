@@ -9,18 +9,18 @@ edition.workspace = true
 description = "Services that run on top of the MagicBlock validator and communicate via RPC"
 
 [dependencies]
-bincode = { workspace = true }
+wincode = { workspace = true }
 futures-util = { workspace = true }
-magicblock-account-cloner = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-engine = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 thiserror = { workspace = true }
 solana-hash = { workspace = true }
-solana-instruction = { workspace = true }
+solana-instruction = { workspace = true, features = ["wincode"] }
 solana-keypair = { workspace = true }
 solana-message = { workspace = true }
 solana-pubkey = { workspace = true }

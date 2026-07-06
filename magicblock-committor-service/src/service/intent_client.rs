@@ -1,21 +1,15 @@
-use std::{mem, sync::Arc};
-
 use async_trait::async_trait;
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
-use magicblock_core::{
-    link::transactions::{with_encoded, TransactionSchedulerHandle},
-    traits::LatestBlockProvider,
-};
+use engine::Engine;
 use magicblock_program::{
+    MAGIC_CONTEXT_PUBKEY, MagicContext, SentCommit, TransactionScheduler, id,
     instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    register_scheduled_commit_sent, MagicContext, SentCommit,
-    TransactionScheduler, MAGIC_CONTEXT_PUBKEY,
+    register_scheduled_commit_sent,
 };
 use solana_account::ReadableAccount;
 use solana_hash::Hash;
+use solana_message::Message;
 use solana_pubkey::Pubkey;
-use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tracing::{debug, error, info};
 
@@ -24,25 +18,11 @@ use crate::{
     intent_executor::ExecutionOutput,
 };
 
-/// Tracks the `ScheduledCommitSent` transaction for an in-flight intent.
-///
-/// Bundles recovered from persistence have no pre-built transaction: the
-/// original blockhash is likely expired by restart time. `Recovered` signals
-/// that the transaction must be constructed at notification time using a
-/// fresh ER blockhash.
-#[derive(Default)]
-pub enum IntentSentTransaction {
-    Known(Transaction),
-    #[default]
-    Recovered,
-}
-
 pub struct ScheduledBaseIntentMeta {
     slot: u64,
     blockhash: Hash,
     payer: Pubkey,
     included_pubkeys: Vec<Pubkey>,
-    pub(crate) intent_sent_transaction: IntentSentTransaction,
     requested_undelegation: bool,
 }
 
@@ -53,15 +33,6 @@ impl ScheduledBaseIntentMeta {
             blockhash: intent.blockhash,
             payer: intent.payer,
             included_pubkeys: intent.get_all_committed_pubkeys(),
-            intent_sent_transaction: if intent
-                .sent_transaction
-                .signatures
-                .is_empty()
-            {
-                IntentSentTransaction::Recovered
-            } else {
-                IntentSentTransaction::Known(intent.sent_transaction.clone())
-            },
             requested_undelegation: intent.has_undelegate_intent(),
         }
     }
@@ -87,50 +58,53 @@ pub trait ERIntentClient: Send + Sync + 'static {
     // CommittorProcessor::pending_intent_bundles could be moved here in the future
 }
 
-pub struct InternalIntentRpcClient<L: LatestBlockProvider> {
-    /// Provides access to MagicContext
-    accounts_db: Arc<AccountsDb>,
-    /// Internal endpoint for scheduling ER TXs
-    transaction_scheduler: TransactionSchedulerHandle,
-    /// Provides access to ER latest block for TX creation
-    latest_block_provider: L,
+/// Reads the MagicContext, builds ER transactions against the engine's latest
+/// blockhash, and submits them through the engine.
+pub struct InternalIntentRpcClient {
+    engine: Engine,
 }
 
-impl<L: LatestBlockProvider> InternalIntentRpcClient<L> {
-    pub fn new(
-        accounts_db: Arc<AccountsDb>,
-        transaction_scheduler: TransactionSchedulerHandle,
-        latest_block_provider: L,
-    ) -> Self {
-        Self {
-            accounts_db,
-            transaction_scheduler,
-            latest_block_provider,
-        }
+impl InternalIntentRpcClient {
+    pub fn new(engine: Engine) -> Self {
+        Self { engine }
+    }
+
+    /// Composes `message` into a transaction, signs it with the engine's
+    /// authority, submits it, and awaits its committed result.
+    async fn execute(
+        &self,
+        message: Message,
+    ) -> Result<(), InternalIntentClientError> {
+        self.engine
+            .transaction(message)
+            .map_err(|err| {
+                error!(error = ?err, "Failed to compose intent transaction");
+                TransactionError::SanitizeFailure
+            })?
+            .execute()
+            .await
+            .map_err(|err| {
+                error!(error = ?err, "Failed to execute intent transaction");
+                TransactionError::ClusterMaintenance
+            })??;
+        Ok(())
     }
 
     /// Sends transaction to move the scheduled commits from the `MagicContext`
     /// to the global ScheduledCommit store
     async fn send_accept_tx(&self) -> Result<(), InternalIntentClientError> {
-        let tx = InstructionUtils::accept_scheduled_commits(
-            self.latest_block_provider.blockhash(),
-        );
-        let encoded_tx = with_encoded(tx).inspect_err(|err| {
-            error!(error = ?err, "Failed to bincode intent transaction");
-        })?;
-        self.transaction_scheduler
-            .execute(encoded_tx)
-            .await
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to accept scheduled commits");
-            })?;
-
-        Ok(())
+        let authority = self.engine.authority();
+        let ix =
+            InstructionUtils::accept_scheduled_commits_instruction(&authority);
+        let message = Message::new(&[ix], Some(&authority));
+        self.execute(message).await.inspect_err(|err| {
+            error!(error = ?err, "Failed to accept scheduled commits");
+        })
     }
 }
 
 #[async_trait]
-impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
+impl ERIntentClient for InternalIntentRpcClient {
     type Error = InternalIntentClientError;
 
     async fn accept_scheduled_intents(
@@ -138,8 +112,13 @@ impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
     ) -> Result<Vec<ScheduledIntentBundle>, Self::Error> {
         // If accounts were scheduled to be committed, we accept them here
         // and processs the commits
-        let magic_context_acc =
-            self.accounts_db.get_account(&MAGIC_CONTEXT_PUBKEY).expect(
+        let magic_context_acc = self
+            .engine
+            .accounts()
+            .get(&MAGIC_CONTEXT_PUBKEY)
+            .ok()
+            .flatten()
+            .expect(
                 "Validator found to be running without MagicContext account!",
             );
         if !MagicContext::has_scheduled_commits(magic_context_acc.data()) {
@@ -153,25 +132,20 @@ impl<L: LatestBlockProvider> ERIntentClient for InternalIntentRpcClient<L> {
 
     async fn notify_commit_sent(
         &self,
-        mut meta: ScheduledBaseIntentMeta,
+        meta: ScheduledBaseIntentMeta,
         result: BroadcastedIntentExecutionResult,
     ) -> Result<(), Self::Error> {
         let intent_id = result.id;
-        let tx = match mem::take(&mut meta.intent_sent_transaction) {
-            IntentSentTransaction::Known(tx) => tx,
-            IntentSentTransaction::Recovered => {
-                let blockhash = self.latest_block_provider.blockhash();
-                InstructionUtils::scheduled_commit_sent(intent_id, blockhash)
-            }
-        };
+        let authority = self.engine.authority();
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
+            &id(),
+            &authority,
+            intent_id,
+        );
+        let message = Message::new(&[ix], Some(&authority));
         let sent_commit = build_sent_commit(meta, &result);
         register_scheduled_commit_sent(sent_commit);
-        let txn = with_encoded(tx).inspect_err(|err| {
-            // Unreachable case, all intent transactions are smaller than 64KB by construction
-            error!(error = ?err, "Failed to bincode intent transaction");
-        })?;
-        self.transaction_scheduler
-            .execute(txn)
+        self.execute(message)
             .await
             .inspect(|_| debug!("Sent commit signaled"))
             .inspect_err(

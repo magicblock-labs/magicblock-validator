@@ -65,13 +65,17 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to resolve account ({0}) to track slots")]
     ClockAccountCouldNotBeResolved(String),
 
-    #[error("Failed to resolve accounts to same slot ({0}) with slots {1:?} to track slots hit limit: {2}")]
+    #[error(
+        "Failed to resolve accounts to same slot ({0}) with slots {1:?} to track slots hit limit: {2}"
+    )]
     SlotsDidNotMatch(String, Vec<u64>, String),
 
     #[error("The message {0} is not supported by this actor")]
     UnsupportedActorMessage(String),
 
-    #[error("Accounts matched same slot ({0}) with slots {1:?}, but it's less than min required context slot {2} hit limit: {3}")]
+    #[error(
+        "Accounts matched same slot ({0}) with slots {1:?}, but it's less than min required context slot {2} hit limit: {3}"
+    )]
     MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64, String),
 
     #[error("LRU capacity must be greater than 0")]
@@ -80,9 +84,7 @@ pub enum RemoteAccountProviderError {
     #[error("Resubscription delay must be greater than 0")]
     InvalidResubscriptionDelay,
 
-    #[error(
-        "Only one listener supported on lru cache removed accounts events"
-    )]
+    #[error("Only one listener supported on lru cache removed accounts events")]
     LruCacheRemoveAccountSenderSupportsSingleReceiverOnly,
 
     #[error("Failed to send account removal event: {0:?}")]
@@ -103,9 +105,7 @@ pub enum RemoteAccountProviderError {
     )]
     LoaderV3StateMissingProgramDataAccount(Pubkey),
 
-    #[error(
-        "The LoaderV3 program {0} data account has an invalid length: {1}"
-    )]
+    #[error("The LoaderV3 program {0} data account has an invalid length: {1}")]
     LoaderV3StateInvalidLength(Pubkey, usize),
 
     #[error("The LoaderV4 program {0} needs a program account to be provided")]
@@ -121,9 +121,7 @@ pub enum RemoteAccountProviderError {
     )]
     LoaderV4StateDeserializationFailed(Pubkey, String),
 
-    #[error(
-        "Failed to update gRPC subscription to {0} after {1} retries: {2}"
-    )]
+    #[error("Failed to update gRPC subscription to {0} after {1} retries: {2}")]
     GrpcSubscriptionUpdateFailed(String, usize, String),
 }
 impl From<solana_pubsub_client::pubsub_client::PubsubClientError>

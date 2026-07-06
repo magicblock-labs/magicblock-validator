@@ -58,7 +58,6 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `src/service.rs` and `src/service/intent_client.rs` | Runtime producer/consumer: accepts scheduled intent bundles from `MagicContext`, schedules them with the committor, consumes result broadcasts, submits `ScheduledCommitSent`, and performs pending-intent recovery after ledger replay. |
 | `magicblock-account-cloner/src/account_cloner.rs` | Uses `BaseIntentCommittor` for lookup-table reservation around account cloning and diagnostic mapping of committor errors. |
 | `magicblock-api/src/magic_sys_adapter.rs` | Fetches current commit nonces through the committor service for Magic syscalls. |
-| `test-integration/test-committor-service/` | Integration coverage for delivery preparators, transaction preparators, intent executor flows, and local commit execution. |
 
 Main upstream dependencies:
 
@@ -245,9 +244,12 @@ SQLite rows are used by operator/status APIs and by restart recovery. Updating s
 
 `TaskStrategist` first tries args, then buffer optimization, then ALTs. It chooses two-stage execution in cases where a single-stage ALT transaction would be slower than two no-ALT transactions. Altering thresholds such as `MAX_UNITED_TASKS_LEN = 22`, `COMMIT_STATE_SIZE_THRESHOLD = 256`, transaction-size constants, or buffer chunking changes latency, RPC transaction counts, and fit behavior.
 
+Transaction and instruction fit checks use wincode's canonical Solana byte
+layout, matching the bytes submitted on the wire.
+
 ### Per-intent uniqueness noop
 
-Intent transactions are otherwise built from fully deterministic inputs. After an undelegate/re-delegate cycle the delegation metadata nonce restarts, so a first commit (nonce 1) can be byte-identical to a prior instance's landed transaction: identical bytes yield the identical signature, the skip-preflight send is deduped by the network, and the status-based confirmer matches the old transaction — the intent reports success without executing. `IntentExecutorImpl::execute_inner` therefore passes `Some(intent_id)` as `uniqueness_nonce` to `TaskStrategist` for intents whose commit uses nonce <= 1 (and always for standalone actions). The strategist renders it as a constant-size spl-noop instruction carrying the intent id on every produced stage — the finalize stage needs the same protection, since without the noop its bytes contain nothing per-instance — and includes it in all fit checks. Retries of the same intent keep the same id, preserving intentional dedup. Commit-id recovery (`handle_commit_id_error`) re-tags the strategy when a stale-cache retry lands back on nonce 1. The noop program must exist on the base layer (deployed on mainnet/devnet; loaded from `test-integration/schedulecommit/elfs/noop.so` in integration configs).
+Intent transactions are otherwise built from fully deterministic inputs. After an undelegate/re-delegate cycle the delegation metadata nonce restarts, so a first commit (nonce 1) can be byte-identical to a prior instance's landed transaction: identical bytes yield the identical signature, the skip-preflight send is deduped by the network, and the status-based confirmer matches the old transaction — the intent reports success without executing. `IntentExecutorImpl::execute_inner` therefore passes `Some(intent_id)` as `uniqueness_nonce` to `TaskStrategist` for intents whose commit uses nonce <= 1 (and always for standalone actions). The strategist renders it as a constant-size spl-noop instruction carrying the intent id on every produced stage — the finalize stage needs the same protection, since without the noop its bytes contain nothing per-instance — and includes it in all fit checks. Retries of the same intent keep the same id, preserving intentional dedup. Commit-id recovery (`handle_commit_id_error`) re-tags the strategy when a stale-cache retry lands back on nonce 1. The noop program must exist on the base layer.
 
 The same uniqueness nonce is appended to every independently signed buffer init, realloc, write, and cleanup transaction sent by `DeliveryPreparator`. Buffer PDAs are keyed by authority, account pubkey, and commit id; because the commit id restarts at 1 after re-delegation, those transactions could otherwise alias a prior delegation instance under the same cached base-layer blockhash. Reusing the intent id keeps retries of one intent idempotent while ensuring a later delegation instance produces distinct signatures. Keep the noop in every buffer lifecycle stage: protecting only initialization still allows an old resize, chunk write, or close status to be mistaken for the current operation.
 
@@ -293,7 +295,7 @@ Start with `src/intent_executor/task_info_fetcher.rs` and `src/tasks/task_builde
 
 ### Changing task construction or strategy selection
 
-Start with `src/tasks/task_builder.rs`, `src/tasks/task_strategist.rs`, `src/tasks/commit_task.rs`, `src/tasks/commit_finalize_task.rs`, and `src/tasks/utils.rs`. Then inspect `magicblock-committor-program` instruction builders, `magicblock-delegation-program-api` expectations, and integration tests under `test-integration/test-committor-service`. Validate commit ids, allow-undelegation flags, action ordering, diff-vs-state delivery, buffer conversion, ALT keys, and strategy persistence.
+Start with `src/tasks/task_builder.rs`, `src/tasks/task_strategist.rs`, `src/tasks/commit_task.rs`, `src/tasks/commit_finalize_task.rs`, and `src/tasks/utils.rs`. Then inspect `magicblock-committor-program` instruction builders and `magicblock-delegation-program-api` expectations. Validate commit ids, allow-undelegation flags, action ordering, diff-vs-state delivery, buffer conversion, ALT keys, and strategy persistence.
 
 ### Changing delivery preparation or cleanup
 
@@ -311,7 +313,6 @@ Start with metric calls in `intent_execution_engine.rs`, `delivery_preparator.rs
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-committor-service`.
-- Relevant integration suites: `test-committor`, including preparators, ix-order, ix-multi, commit-finalize, intent-executor, and recovery targets; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Related suite intent: when TableMania or RPC-client behavior is touched, include the TableMania suite or focused committor preparation/delivery coverage.
 - Performance/security validation intent: report effects on executor parallelism, RPC calls, transaction count, ALT waits, buffer writes/chunks, SQLite writes, and cleanup latency; confirm signer/authority requirements, `min_context_slot` freshness, nonce sequencing, scheduler conflict blocking, and recovery durability remain intact.
 
@@ -323,4 +324,3 @@ Start with metric calls in `intent_execution_engine.rs`, `delivery_preparator.rs
 - `.agents/context/crates/magicblock-table-mania.md` — ALT lifecycle and finalized-read semantics.
 - `.agents/context/crates/magicblock-services.md` — request-driven local scheduling that can create commit-and-undelegate intents.
 - `magicblock-committor-service/README.md` — high-level implementation notes.
-- `test-integration/test-committor-service/` — integration coverage of delivery and intent execution.

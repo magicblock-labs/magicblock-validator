@@ -1,36 +1,27 @@
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_cloned_as_undelegated,
-    assert_not_cloned, assert_not_subscribed,
+    AccountFetchContext, assert_cloned_as_delegated,
+    assert_cloned_as_undelegated, assert_not_cloned, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
-    testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchContext,
+    testing::{
+        accounts::account_shared_with_owner_and_slot, context::TestContext,
+        deleg::add_delegation_record_for,
+    },
 };
 use solana_account::Account;
-use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::{
-    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
-};
-
-mod utils;
 
 // Implements the following flow:
 //
 // ## Account created then fetched, then delegated
 // @docs/flows/deleg-non-existing-after-sub.md
 
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
-
 // NOTE: Flow "Account created then fetched, then delegated"
 #[tokio::test]
 async fn test_deleg_after_subscribe_case2() {
     let mut slot: u64 = 11;
 
-    let ctx = setup(slot).await;
+    let ctx = TestContext::init(slot).await;
     let TestContext {
         chainlink,
         cloner,

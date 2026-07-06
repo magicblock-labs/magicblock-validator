@@ -60,7 +60,8 @@ Architecture rule: the RPC layer should route work to account sync and execution
 
 ### 3. Account synchronization
 
-Owned primarily by `magicblock-chainlink`, `magicblock-account-cloner`, and `magicblock-accounts`.
+Owned primarily by `magicblock-chainlink`, with materialization executed through
+the sibling engine's account accessor.
 
 Responsibilities:
 
@@ -75,7 +76,8 @@ Architecture rule: this layer prepares local state for execution. It should not 
 
 ### 4. Transaction execution
 
-Owned primarily by `magicblock-processor`, `magicblock-core`, the local storage crates, and the forked SVM dependency.
+Owned by the sibling `../engine` workspace: engine, keeper, processor,
+accountsdb, ledger, and the forked SVM crates.
 
 Responsibilities:
 
@@ -92,7 +94,9 @@ Architecture rule: execution must preserve the writable-account invariant and av
 
 ### 5. Local persistence
 
-Owned primarily by `magicblock-accounts-db` and `magicblock-ledger`.
+Owned primarily by the sibling engine's keeper, accountsdb, and ledger. MBV's
+deprecated `magicblock-ledger` remains only for historical RPC reads after an
+engine miss.
 
 Responsibilities:
 
@@ -121,7 +125,8 @@ Architecture rule: Magic Program instructions schedule intent; validator service
 
 ### 7. Background services
 
-Owned by task scheduler, replicator, metrics, admin, and shared service crates.
+Owned by task scheduler, metrics, admin, shared service crates, and the sibling
+engine's TCP replicator.
 
 Responsibilities:
 
@@ -169,11 +174,11 @@ program invokes Magic Program in ER
 
 ```text
 load config
-  -> open ledger/accounts storage
-  -> initialize services
-  -> recover persisted work
-  -> replay/repair local state where configured
-  -> enter primary or replica execution mode
+  -> open deprecated history ledger
+  -> construct engine storage/execution with role-appropriate pacing
+  -> complete engine recovery and start authenticated TCP replication if configured
+  -> initialize validator-owned services
+  -> enter the configured execution/replication mode
 ```
 
 ### Shutdown path

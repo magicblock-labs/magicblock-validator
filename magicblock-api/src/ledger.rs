@@ -6,8 +6,8 @@ use std::{
 
 use fd_lock::{RwLock, RwLockWriteGuard};
 use magicblock_config::config::LedgerConfig;
-use magicblock_ledger::{
-    Ledger, LedgerOptions, BLOCKSTORE_DIRECTORY_ROCKS_LEVEL,
+use magicblock_ledger_deprecated::{
+    BLOCKSTORE_DIRECTORY_ROCKS_LEVEL, Ledger, LedgerOptions,
 };
 use solana_keypair::Keypair;
 use solana_program::clock::Slot;

@@ -1,13 +1,11 @@
-use std::fmt;
+use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 use solana_keypair::Keypair;
-use solana_pubkey::Pubkey;
-use url::Url;
 
 use crate::{
     consts,
-    types::{SerdeKeypair, SerdePubkey},
+    types::{BindAddress, SerdeKeypair, SerdePubkey},
 };
 
 /// Configuration for the validator's core behavior and identity.
@@ -26,55 +24,28 @@ pub struct ValidatorConfig {
 
 /// Defines the validator's role in a replication setup.
 #[derive(Deserialize, Serialize, Debug, Clone)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ReplicationMode {
-    // Validator which doesn't participate in replication
+    /// Validator which does not participate in replication.
     Standalone,
-    /// Validator which participates in replication: acting as a primary source of events
-    Primary(ReplicationConfig),
-    /// Validator which participates in replication as consumer of state transitions
-    Replica {
-        #[serde(flatten)]
-        config: ReplicationConfig,
-        #[serde(rename = "authority-override")]
-        authority_override: SerdePubkey,
+    /// Validator that serves its durable execution stream to authenticated followers.
+    Primary {
+        /// TCP address on which followers connect.
+        #[serde(rename = "bind-address")]
+        bind_address: BindAddress,
+        /// Local identities permitted to follow this validator.
+        #[serde(rename = "allowed-followers")]
+        allowed_followers: Vec<SerdePubkey>,
     },
-}
-
-#[derive(Deserialize, Clone)]
-#[serde(rename_all = "kebab-case")]
-pub struct ReplicationConfig {
-    pub url: Url,
-    pub secret: String,
-}
-
-impl fmt::Debug for ReplicationConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReplicationConfig")
-            .field("url", &self.url)
-            .field("secret", &"<redacted>")
-            .finish()
-    }
-}
-
-impl Serialize for ReplicationConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(Serialize)]
-        #[serde(rename_all = "kebab-case")]
-        struct Redacted<'a> {
-            url: &'a Url,
-            secret: &'static str,
-        }
-
-        Redacted {
-            url: &self.url,
-            secret: "<redacted>",
-        }
-        .serialize(serializer)
-    }
+    /// Validator that follows an authenticated upstream execution stream.
+    Replica {
+        /// TCP address of the immediate upstream validator.
+        #[serde(rename = "upstream-address")]
+        upstream_address: SocketAddr,
+        /// Identity whose signed replication responses this replica accepts.
+        #[serde(rename = "upstream-authority")]
+        upstream_authority: SerdePubkey,
+    },
 }
 
 impl Default for ValidatorConfig {
@@ -86,27 +57,5 @@ impl Default for ValidatorConfig {
             keypair: SerdeKeypair(keypair),
             replication_mode: ReplicationMode::Standalone,
         }
-    }
-}
-
-impl ReplicationMode {
-    /// Returns the remote URL if this node participates in replication.
-    /// Returns `None` for `Standalone` mode.
-    pub fn config(&self) -> Option<ReplicationConfig> {
-        match self {
-            Self::Standalone => None,
-            Self::Primary(c) => Some(c.clone()),
-            Self::Replica { config, .. } => Some(config.clone()),
-        }
-    }
-
-    pub fn authority_override(&self) -> Option<Pubkey> {
-        if let Self::Replica {
-            authority_override, ..
-        } = self
-        {
-            return Some(authority_override.0);
-        }
-        None
     }
 }

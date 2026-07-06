@@ -16,7 +16,7 @@ async fn test_get_slot_leaders() {
     assert_eq!(leaders.len(), 1, "should return a single leader");
     assert_eq!(
         leaders[0],
-        env.execution.get_payer().pubkey,
+        env.engine.authority(),
         "leader should be the validator's own identity"
     );
 }
@@ -158,16 +158,7 @@ async fn test_get_epoch_info() {
         .expect("get_epoch_info request failed");
 
     assert_eq!(epoch_info.epoch, 0, "epoch should be 0");
-    // The absolute_slot should be at most 3 behind the current slot
-    // due to auto-advancement timing (50ms block time)
-    let current_slot = env.latest_slot();
-    assert!(
-        epoch_info.absolute_slot <= current_slot
-            && epoch_info.absolute_slot >= current_slot.saturating_sub(3),
-        "absolute_slot {} should be within 3 of current slot {}",
-        epoch_info.absolute_slot,
-        current_slot
-    );
+    assert_eq!(epoch_info.absolute_slot, env.engine.blocks().latest().slot);
 }
 
 /// Verifies the mocked `getEpochSchedule` RPC method.
@@ -200,7 +191,7 @@ async fn test_get_cluster_nodes() {
     assert_eq!(nodes.len(), 1, "should be exactly one node in the cluster");
     assert_eq!(
         nodes[0].pubkey,
-        env.execution.get_payer().pubkey.to_string(),
+        env.engine.authority().to_string(),
         "node pubkey should match validator identity"
     );
 }

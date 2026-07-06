@@ -7,28 +7,20 @@ use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_subscribed, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
-    testing::{deleg::add_delegation_record_for, init_logger},
+    testing::{
+        accounts::account_shared_with_owner_and_slot, context::TestContext,
+        deleg::add_delegation_record_for,
+    },
 };
 use solana_account::Account;
-use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::{
-    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
-};
-
-mod utils;
-
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
 
 #[tokio::test]
 async fn test_undelegate_redelegate_to_us_in_separate_slots() {
     let mut slot: u64 = 11;
 
-    let ctx = setup(slot).await;
+    let ctx = TestContext::init(slot).await;
     let TestContext {
         chainlink,
         cloner,
@@ -71,7 +63,9 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots() {
     // 2. Account is undelegated
     // Undelegation requested, setup subscription, writes would be refused
     {
-        info!("2.1. Account is undelegated - Undelegation requested (account owner set to DP in Ephem)");
+        info!(
+            "2.1. Account is undelegated - Undelegation requested (account owner set to DP in Ephem)"
+        );
 
         ctx.force_undelegation(&pubkey);
 

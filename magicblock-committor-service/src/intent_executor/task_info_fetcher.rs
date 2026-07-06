@@ -145,7 +145,7 @@ impl RpcTaskInfoFetcher {
 
             match err {
                 TaskInfoFetcherError::AccountNotFoundError(_) => {
-                    break Err(err)
+                    break Err(err);
                 }
                 err @ TaskInfoFetcherError::InvalidAccountDataError(_) => {
                     error!(error = ?err, "Unexpected error");
@@ -476,7 +476,10 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
                                 false,
                                 "Just evicted value can't be in retiring"
                             );
-                            error!("Retiring map already contained lock with pubkey: {}", evicted_pk);
+                            error!(
+                                "Retiring map already contained lock with pubkey: {}",
+                                evicted_pk
+                            );
                         }
                     }
                 }

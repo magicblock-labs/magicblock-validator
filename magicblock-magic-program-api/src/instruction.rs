@@ -1,17 +1,20 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(feature = "backward-compat"))]
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
+    Pubkey,
     args::{
         AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
         ScheduleTaskArgs,
     },
     compat::Instruction,
-    Pubkey,
 };
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum MagicBlockInstruction {
     /// Modify one or more accounts
     ///
@@ -314,12 +317,19 @@ pub enum MagicBlockInstruction {
 }
 
 impl MagicBlockInstruction {
+    #[cfg(not(feature = "backward-compat"))]
+    pub fn try_to_vec(&self) -> Result<Vec<u8>, wincode::WriteError> {
+        wincode::serialize(self)
+    }
+
+    #[cfg(feature = "backward-compat")]
     pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
         bincode::serialize(self)
     }
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct AccountModification {
     pub pubkey: Pubkey,
     pub owner: Option<Pubkey>,
@@ -328,6 +338,7 @@ pub struct AccountModification {
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct AccountModificationForInstruction {
     pub owner: Option<Pubkey>,
     pub delegated: Option<bool>,
@@ -338,6 +349,7 @@ pub struct AccountModificationForInstruction {
 #[derive(
     Default, Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq,
 )]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct AccountCloneFields {
     pub lamports: u64,
     pub owner: Pubkey,
@@ -349,6 +361,7 @@ pub struct AccountCloneFields {
 
 /// Instruction(s) for Callback Executor builtin-program
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum CallbackInstruction {
     /// Executes a callback
     ///
@@ -361,6 +374,7 @@ pub enum CallbackInstruction {
 
 /// Instruction(s) for the post-delegation action executor builtin-program.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum PostDelegationActionExecutorInstruction {
     /// Executes post-delegation actions immediately after a matching delegated
     /// clone instruction in the same transaction.
@@ -389,6 +403,7 @@ pub enum PostDelegationActionExecutorInstruction {
 /// Instruction(s) for the ephemeral system builtin-program: creates,
 /// resizes, and closes ephemeral accounts.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum EphemeralSystemInstruction {
     /// # Account references
     /// - 0. [WRITE] Sponsor account (pays rent, can be PDA or oncurve)

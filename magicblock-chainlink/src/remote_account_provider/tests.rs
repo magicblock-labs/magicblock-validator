@@ -1,17 +1,17 @@
 use std::{
     path::{Path, PathBuf},
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
     time::Duration,
 };
 
 use magicblock_metrics::metrics::{
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
     chainlink_pending_fetch_waiters_value,
     chainlink_subscription_cleanup_accounts_value,
     chainlink_subscription_registration_accounts_value,
-    chainlink_subscription_release_accounts_value, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome,
+    chainlink_subscription_release_accounts_value,
 };
 use solana_account::Account;
 use solana_system_interface::program as system_program;
@@ -304,8 +304,8 @@ async fn setup_matching_slots(
 }
 
 #[tokio::test]
-async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
-) {
+async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry()
+ {
     let _metrics_guard =
         crate::testing::pending_metric_test_lock().lock().await;
     let pubkey = solana_pubkey::Pubkey::new_unique();
@@ -493,8 +493,8 @@ async fn test_ensure_subscription_does_not_duplicate_existing_reason() {
 }
 
 #[tokio::test]
-async fn test_release_subscription_reason_keeps_watching_until_last_direct_refcount(
-) {
+async fn test_release_subscription_reason_keeps_watching_until_last_direct_refcount()
+ {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -630,8 +630,8 @@ async fn test_release_subscription_reason_unsubscribes_after_final_release() {
 }
 
 #[tokio::test]
-async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notification(
-) {
+async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notification()
+ {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -828,8 +828,8 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
 }
 
 #[tokio::test]
-async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lru(
-) {
+async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lru()
+ {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -889,8 +889,8 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
 }
 
 #[tokio::test]
-async fn test_lock_aware_reconciler_still_removes_truly_stale_pubsub_only_subscription(
-) {
+async fn test_lock_aware_reconciler_still_removes_truly_stale_pubsub_only_subscription()
+ {
     let setup_pubkey = solana_pubkey::Pubkey::new_unique();
     let stale_pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -918,8 +918,8 @@ async fn test_lock_aware_reconciler_still_removes_truly_stale_pubsub_only_subscr
 }
 
 #[tokio::test]
-async fn test_lock_aware_reconciler_still_resubscribes_lru_owned_missing_pubsub(
-) {
+async fn test_lock_aware_reconciler_still_resubscribes_lru_owned_missing_pubsub()
+ {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -991,11 +991,13 @@ async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
 
     assert!(provider.is_watching(&pubkey1));
     assert!(pubsub_client.subscriptions_union().contains(&pubkey1));
-    assert!(provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
+    assert!(
+        provider
+            .subscription_ownership
+            .lock()
+            .await
+            .contains_key(&pubkey1)
+    );
 
     provider
         .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
@@ -1006,16 +1008,20 @@ async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
     assert!(provider.is_watching(&pubkey2));
     assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
     assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
-    assert!(provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey2));
+    assert!(
+        !provider
+            .subscription_ownership
+            .lock()
+            .await
+            .contains_key(&pubkey1)
+    );
+    assert!(
+        provider
+            .subscription_ownership
+            .lock()
+            .await
+            .contains_key(&pubkey2)
+    );
 }
 
 #[tokio::test]
@@ -1062,16 +1068,20 @@ async fn test_lru_eviction_and_reason_release_are_serialized() {
     assert!(provider.is_watching(&pubkey2));
     assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
     assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
-    assert!(provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey2));
+    assert!(
+        !provider
+            .subscription_ownership
+            .lock()
+            .await
+            .contains_key(&pubkey1)
+    );
+    assert!(
+        provider
+            .subscription_ownership
+            .lock()
+            .await
+            .contains_key(&pubkey2)
+    );
 }
 
 #[tokio::test]
@@ -1232,8 +1242,8 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
 }
 
 #[tokio::test]
-async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_late_rpc(
-) {
+async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_late_rpc()
+ {
     let _metrics_guard =
         crate::testing::pending_metric_test_lock().lock().await;
     const CURRENT_SLOT: u64 = 100;
@@ -1475,8 +1485,8 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot() {
 }
 
 #[tokio::test]
-async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batch(
-) {
+async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batch()
+ {
     const CURRENT_SLOT: u64 = 42;
     let pubkey1 = random_pubkey();
     let pubkey2 = random_pubkey();
@@ -1623,8 +1633,8 @@ async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
 }
 
 #[tokio::test]
-async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_min_context_slot(
-) {
+async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_min_context_slot()
+ {
     const CURRENT_SLOT: u64 = 42;
     let pubkey1 = random_pubkey();
     let pubkey2 = random_pubkey();
@@ -1668,8 +1678,8 @@ async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_
 }
 
 #[tokio::test]
-async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_account_slot_smaller_than_min_context_slot(
-) {
+async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_account_slot_smaller_than_min_context_slot()
+ {
     const CURRENT_SLOT: u64 = 42;
     let pubkey1 = random_pubkey();
     let pubkey2 = random_pubkey();
@@ -1969,14 +1979,18 @@ async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
     assert!(provider.is_watching(&pubkey3));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey2));
+    assert!(
+        !provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey1)
+    );
+    assert!(
+        provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey2)
+    );
 
     let removed_accounts = drain_removed_account_rx(&mut removed_rx);
     assert_eq!(removed_accounts, [pubkey1]);
@@ -2039,10 +2053,12 @@ async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
             )
             .await
     );
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey2));
+    assert!(
+        provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey2)
+    );
 
     let removed_accounts = drain_removed_account_rx(&mut removed_rx);
     assert!(removed_accounts.is_empty());
@@ -2106,27 +2122,33 @@ async fn test_capacity_eviction_missing_pubsub_subscription_completes_cleanup()
 
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
+    assert!(
+        !provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey1)
+    );
+    assert!(
+        provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey2)
+    );
+    assert!(
+        !provider
+            .subscription_ownership
+            .lock()
+            .await
+            .contains_key(&pubkey1)
+    );
 
     let removed_accounts = drain_removed_account_rx(&mut removed_rx);
     assert_eq!(removed_accounts, [pubkey1]);
 }
 
 #[tokio::test]
-async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribing_protected(
-) {
+async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribing_protected()
+ {
     init_logger();
     let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
@@ -2187,18 +2209,24 @@ async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribin
     assert!(provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
     assert!(!provider.is_watching(&pubkey3));
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey2));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey3));
+    assert!(
+        provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey1)
+    );
+    assert!(
+        provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey2)
+    );
+    assert!(
+        !provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey3)
+    );
 
     let removed_accounts = drain_removed_account_rx(&mut removed_rx);
     assert!(removed_accounts.is_empty());

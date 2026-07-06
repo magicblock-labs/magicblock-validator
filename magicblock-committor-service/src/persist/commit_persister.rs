@@ -5,18 +5,17 @@ use std::{
 };
 
 use magicblock_core::intent::{
-    types::CommittedAccount, CommitAndUndelegate,
-    CommitType as IntentCommitType, MagicIntentBundle, UndelegateType,
+    CommitAndUndelegate, CommitType as IntentCommitType, MagicIntentBundle,
+    UndelegateType, types::CommittedAccount,
 };
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
-use solana_transaction::Transaction;
 use tracing::warn;
 
 use super::{
-    db::CommitStatusRow, error::CommitPersistResult, utils::now, CommitStatus,
-    CommitStrategy, CommitType, CommittsDb, MessageSignatures,
+    CommitStatus, CommitStrategy, CommitType, CommittsDb, MessageSignatures,
+    db::CommitStatusRow, error::CommitPersistResult, utils::now,
 };
 use crate::{
     intent_executor::ExecutionOutput, persist::db::BundleSignatureRow,
@@ -567,7 +566,6 @@ fn intent_bundle_from_rows(
         id: message_id,
         slot,
         blockhash,
-        sent_transaction: Transaction::default(),
         payer: Pubkey::default(),
         intent_bundle,
     })
@@ -604,20 +602,19 @@ fn committed_account_from_row(
 #[cfg(test)]
 mod tests {
     use magicblock_core::intent::{
-        types::CommittedAccount, CommitAndUndelegate, CommitType,
-        MagicIntentBundle, UndelegateType,
+        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
+        types::CommittedAccount,
     };
     use solana_account::Account;
     use solana_hash::Hash;
     use solana_pubkey::Pubkey;
     use solana_signature::Signature;
-    use solana_transaction::Transaction;
     use tempfile::NamedTempFile;
 
     use super::*;
     use crate::{
         committor_processor::RECOVERY_MAX_AGE_SECS,
-        persist::{types, CommitStatusSignatures},
+        persist::{CommitStatusSignatures, types},
         test_utils,
     };
 
@@ -712,7 +709,6 @@ mod tests {
             id,
             slot: 100,
             blockhash: Hash::new_unique(),
-            sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
             intent_bundle,
         }

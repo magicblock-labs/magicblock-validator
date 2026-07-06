@@ -1,6 +1,6 @@
 use std::{fmt, path::Path, str::FromStr};
 
-use rusqlite::{params, Connection, Result, Transaction};
+use rusqlite::{Connection, Result, Transaction, params};
 use solana_hash::Hash;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
@@ -8,9 +8,9 @@ use solana_signature::Signature;
 use tracing::error;
 
 use super::{
+    CommitStatus, CommitStatusSignatures, CommitStrategy, CommitType,
     error::CommitPersistResult,
     utils::{i64_into_u64, u64_into_i64},
-    CommitStatus, CommitStatusSignatures, CommitStrategy, CommitType,
 };
 use crate::persist::{error::CommitPersistError, utils::now};
 

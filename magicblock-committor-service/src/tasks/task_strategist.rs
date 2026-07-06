@@ -9,10 +9,10 @@ use tracing::error;
 use crate::{
     persist::{CommitStrategy, IntentPersister},
     tasks::{
-        commit_task::CommitDelivery, utils::TransactionUtils, BaseActionTask,
-        BaseTask, BaseTaskImpl,
+        BaseActionTask, BaseTask, BaseTaskImpl, commit_task::CommitDelivery,
+        utils::TransactionUtils,
     },
-    transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+    transactions::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
 };
 
 #[derive(Default, Debug)]
@@ -174,7 +174,7 @@ impl TaskStrategist {
                 );
             }
             Err(TaskStrategistError::SignerError(err)) => {
-                return Err(err.into())
+                return Err(err.into());
             }
         };
 
@@ -444,7 +444,7 @@ impl TaskStrategist {
         // In that case we set size to max
         let sizes = ixs
             .iter()
-            .map(|ix| bincode::serialized_size(ix).unwrap_or(u64::MAX))
+            .map(|ix| wincode::serialized_size(ix).unwrap_or(u64::MAX))
             .map(|size| usize::try_from(size).unwrap_or(usize::MAX))
             .collect::<Vec<_>>();
         let mut map = sizes
@@ -468,7 +468,7 @@ impl TaskStrategist {
                 // Possible serialization failures are possible only due to size in our case
                 // In that case we set size to max
                 let new_ix_size =
-                    bincode::serialized_size(&new_ix).unwrap_or(u64::MAX);
+                    wincode::serialized_size(&new_ix).unwrap_or(u64::MAX);
                 let new_ix_size =
                     usize::try_from(new_ix_size).unwrap_or(usize::MAX);
                 current_tx_length = calculate_tx_length(tasks)?;
@@ -497,7 +497,7 @@ mod tests {
 
     use dlp_api::state::{DelegationMetadata, UndelegationRequester};
     use magicblock_core::intent::{
-        types::CommittedAccount, BaseAction, ProgramArgs,
+        BaseAction, ProgramArgs, types::CommittedAccount,
     };
     use solana_account::Account;
     use solana_pubkey::Pubkey;
@@ -510,11 +510,11 @@ mod tests {
         },
         persist::IntentPersisterImpl,
         tasks::{
-            commit_task::CommitTask,
-            task_builder::{TaskBuilderImpl, TasksBuilder},
-            utils::{create_commit_task, COMMIT_STATE_SIZE_THRESHOLD},
             BaseActionTask, BaseActionTaskV1, FinalizeTask, TaskStrategy,
             UndelegateTask,
+            commit_task::CommitTask,
+            task_builder::{TaskBuilderImpl, TasksBuilder},
+            utils::{COMMIT_STATE_SIZE_THRESHOLD, create_commit_task},
         },
         test_utils,
     };
@@ -735,8 +735,8 @@ mod tests {
     }
 
     #[test]
-    fn test_build_strategy_does_not_optimize_large_account_and_above_threshold_diff(
-    ) {
+    fn test_build_strategy_does_not_optimize_large_account_and_above_threshold_diff()
+     {
         let validator = Pubkey::new_unique();
 
         let task =
@@ -909,10 +909,12 @@ mod tests {
         };
 
         let without_nonce = assemble(None);
-        assert!(!without_nonce
-            .message
-            .static_account_keys()
-            .contains(&noop_program));
+        assert!(
+            !without_nonce
+                .message
+                .static_account_keys()
+                .contains(&noop_program)
+        );
 
         let extract_noop_data = |tx: &VersionedTransaction| {
             let keys = tx.message.static_account_keys();
@@ -1042,8 +1044,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_two_stage_mode_when_task_count_exceeds_single_stage_limit(
-    ) {
+    async fn test_build_two_stage_mode_when_task_count_exceeds_single_stage_limit()
+     {
         let pubkeys: [_; 8] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent(0, &pubkeys, true);
 

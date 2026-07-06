@@ -5,11 +5,13 @@ use errors::ClonerResult;
 use solana_account::AccountSharedData;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
 
 use crate::remote_account_provider::program_account::LoadedProgram;
 
+mod engine_cloner;
 pub mod errors;
+
+pub use engine_cloner::ChainlinkCloner;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DelegationActions(Vec<Instruction>);
@@ -74,16 +76,13 @@ pub trait Cloner: Send + Sync + 'static {
     async fn clone_account(
         &self,
         request: AccountCloneRequest,
-    ) -> ClonerResult<Signature>;
+    ) -> ClonerResult<()>;
 
     // Overrides the accounts in the bank to make sure the program is usable normally (and upgraded)
     // We make sure all accounts involved in the program are present in the bank with latest state
-    async fn clone_program(
-        &self,
-        program: LoadedProgram,
-    ) -> ClonerResult<Signature>;
+    async fn clone_program(&self, program: LoadedProgram) -> ClonerResult<()>;
 
-    /// Evicts an account from the ephemeral validator by submitting an
-    /// EvictAccount transaction through the transaction pipeline.
+    /// Evicts an account from the ephemeral validator by closing it through the
+    /// engine.
     async fn evict_account(&self, pubkey: Pubkey) -> ClonerResult<()>;
 }

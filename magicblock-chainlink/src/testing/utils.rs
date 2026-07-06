@@ -11,8 +11,8 @@ use solana_signer::Signer;
 use crate::{
     accounts_bank::mock::AccountsBankStub,
     remote_account_provider::{
-        config::RemoteAccountProviderConfig, AccountsLruCache, RemoteAccount,
-        RemoteAccountUpdateSource,
+        AccountsLruCache, RemoteAccount, RemoteAccountUpdateSource,
+        config::RemoteAccountProviderConfig,
     },
 };
 

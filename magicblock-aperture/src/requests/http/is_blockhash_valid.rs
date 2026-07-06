@@ -10,10 +10,10 @@ impl HttpDispatcher {
         request: &mut JsonRequest,
     ) -> HandlerResult {
         let blockhash_bytes = parse_params!(request.params()?, Serde32Bytes);
-        let blockhash = some_or_err!(blockhash_bytes);
+        let blockhash: solana_hash::Hash = some_or_err!(blockhash_bytes);
 
-        let valid = self.blocks.contains(&blockhash);
-        let slot = self.blocks.block_height();
+        let valid = self.engine.blocks().is_valid(&blockhash);
+        let slot = self.engine.blocks().latest().slot;
 
         Ok(ResponsePayload::encode(&request.id, valid, slot))
     }

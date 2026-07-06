@@ -120,18 +120,9 @@ This cluster allows you to test Ephemeral Rollup interactions without local setu
 
 The project includes a comprehensive test suite managed via `Makefile`.
 
-* **Run all tests (Unit & Integration):**
+* **Run the workspace tests:**
 ```bash
 make test
-
-```
-
-
-* **Run integration tests specifically:**
-See [test-integration/README.md](./test-integration/README.md) for detailed instructions on running specific scenarios.
-```bash
-make -C test-integration test
-
 ```
 
 
@@ -172,4 +163,3 @@ This project is licensed under the **Business Source License 1.1**. See [LICENSE
 <div align="center">
 <sub>Built with ❤️ by MagicBlock Labs</sub>
 </div>
-

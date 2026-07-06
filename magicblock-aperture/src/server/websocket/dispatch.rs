@@ -1,23 +1,18 @@
 use std::collections::HashMap;
 
+use engine::Engine;
 use hyper::body::Bytes;
 use json::{Serialize, Value};
 use magicblock_metrics::metrics::RPC_REQUESTS_COUNT;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinHandle};
 
 use super::connection::ConnectionID;
 use crate::{
+    RpcResult,
     error::RpcError,
     parse_params,
     requests::{JsonRpcWsMethod, JsonWsRequest},
-    state::{
-        signatures::SignaturesExpirer,
-        subscriptions::{
-            CleanUp, SubscriptionHandle, SubscriptionID, SubscriptionsDb,
-        },
-        transactions::TransactionsCache,
-    },
-    RpcResult,
+    state::subscriptions::SubscriptionID,
 };
 
 /// The sender half of an MPSC channel used to push subscription notifications
@@ -26,38 +21,27 @@ pub(crate) type ConnectionTx = mpsc::Sender<Bytes>;
 
 /// The stateful request dispatcher for a single WebSocket connection.
 ///
-/// An instance of `WsDispatcher` is created for each connected client and is
-/// responsible for managing that client's specific set of subscriptions and their
-/// lifecycles. It holds all the state necessary to process subscribe and
-/// unsubscribe requests from that one client.
+/// An instance is created per connected client. Each subscribe request spawns a
+/// dedicated Tokio task that subscribes to the relevant engine update stream,
+/// encodes each update, and forwards it to this connection's channel. The task's
+/// [`JoinHandle`] is retained keyed by the public subscription id so an
+/// unsubscribe (or a dropped connection) can abort it.
 pub(crate) struct WsDispatcher {
-    /// A handle to the global subscription database.
-    pub(crate) subscriptions: SubscriptionsDb,
-    /// A map storing the RAII `CleanUp` guards for this connection's active subscriptions.
-    /// The key is the public `SubscriptionID` returned to the client. When a `CleanUp`
-    /// guard is removed from this map, it is dropped, and its unsubscription logic is
-    /// automatically executed.
-    pub(crate) unsubs: HashMap<SubscriptionID, CleanUp>,
-    /// A per-connection expirer for one-shot `signatureSubscribe` requests.
-    pub(crate) signatures: SignaturesExpirer,
-    /// A handle to the global transactions cache.
-    pub(crate) transactions: TransactionsCache,
+    /// The engine, used to open update subscriptions.
+    pub(crate) engine: Engine,
+    /// Forwarding tasks for this connection's active subscriptions, keyed by the
+    /// public `SubscriptionID` returned to the client.
+    pub(crate) unsubs: HashMap<SubscriptionID, JoinHandle<()>>,
     /// The communication channel for this specific connection.
     pub(crate) chan: WsConnectionChannel,
 }
 
 impl WsDispatcher {
     /// Creates a new dispatcher for a single client connection.
-    pub(crate) fn new(
-        subscriptions: SubscriptionsDb,
-        transactions: TransactionsCache,
-        chan: WsConnectionChannel,
-    ) -> Self {
+    pub(crate) fn new(engine: Engine, chan: WsConnectionChannel) -> Self {
         Self {
-            subscriptions,
+            engine,
             unsubs: Default::default(),
-            signatures: SignaturesExpirer::init(),
-            transactions,
             chan,
         }
     }
@@ -80,8 +64,8 @@ impl WsDispatcher {
             AccountSubscribe => self.account_subscribe(request).await,
             ProgramSubscribe => self.program_subscribe(request).await,
             SignatureSubscribe => self.signature_subscribe(request).await,
-            SlotSubscribe => self.slot_subscribe(),
-            LogsSubscribe => self.logs_subscribe(request),
+            SlotSubscribe => self.slot_subscribe().await,
+            LogsSubscribe => self.logs_subscribe(request).await,
             AccountUnsubscribe | ProgramUnsubscribe | LogsUnsubscribe
             | SlotUnsubscribe | SignatureUnsubscribe => {
                 self.unsubscribe(request)
@@ -95,26 +79,10 @@ impl WsDispatcher {
         })
     }
 
-    /// Performs periodic cleanup tasks for the connection.
-    ///
-    /// This is designed to be polled continuously in the connection's main event loop.
-    /// Its primary job is to manage the lifecycle of one-shot `signatureSubscribe`
-    /// requests, removing them from the global database if they expire before being fulfilled.
-    #[inline]
-    pub(crate) async fn cleanup(&mut self) {
-        let signature = self.signatures.expire().await;
-        // The subscription might have already been fulfilled and removed, so we
-        // don't need to handle the case where `remove_async` finds nothing.
-        self.subscriptions
-            .remove_signature_subscriber(&signature.signature, signature.conid)
-            .await;
-    }
-
     /// Handles a request to unsubscribe from a previously established subscription.
     ///
-    /// This works by removing the subscription's `CleanUp` guard from the `unsubs`
-    /// map. When the guard is dropped, its associated cleanup logic is automatically
-    /// executed in a background task, removing the subscriber from the global database.
+    /// Removes the subscription's forwarding task and aborts it, stopping further
+    /// notifications for that id.
     fn unsubscribe(
         &mut self,
         request: &mut JsonWsRequest,
@@ -128,19 +96,32 @@ impl WsDispatcher {
             RpcError::invalid_params("missing or invalid subscription id")
         })?;
 
-        // `remove` returns `Some(value)` if the key was present.
-        // Dropping the value triggers the unsubscription logic.
-        let success = self.unsubs.remove(&id).is_some();
+        let success = self
+            .unsubs
+            .remove(&id)
+            .inspect(|handle| handle.abort())
+            .is_some();
         Ok(SubResult::Unsub(success))
     }
 
-    /// Register the unsubscription callback for the new subscription on this connection
-    pub(crate) fn register_unsub(&mut self, handle: SubscriptionHandle) {
-        let cleanup = self.unsubs.insert(handle.id, handle.cleanup);
-        // If we have a duplicate subscription, drop the
-        // previous cleanup callback to prevent double-cleanup
-        if let Some(mut callback) = cleanup {
-            callback.0.take();
+    /// Registers a spawned forwarding task under its subscription id. A duplicate
+    /// id (should not happen with the global counter) aborts the previous task.
+    pub(crate) fn register(
+        &mut self,
+        id: SubscriptionID,
+        handle: JoinHandle<()>,
+    ) {
+        if let Some(previous) = self.unsubs.insert(id, handle) {
+            previous.abort();
+        }
+    }
+}
+
+impl Drop for WsDispatcher {
+    /// Aborts every forwarding task when the connection goes away.
+    fn drop(&mut self) {
+        for (_, handle) in self.unsubs.drain() {
+            handle.abort();
         }
     }
 }

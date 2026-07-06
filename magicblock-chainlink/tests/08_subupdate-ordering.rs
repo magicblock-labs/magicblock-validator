@@ -1,20 +1,16 @@
-use magicblock_chainlink::{testing::init_logger, AccountFetchContext};
+use magicblock_chainlink::{
+    AccountFetchContext,
+    testing::{
+        accounts::account_shared_with_owner_and_slot, context::TestContext,
+    },
+};
 use solana_account::{Account, ReadableAccount};
-use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::{
-    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
-};
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
-mod utils;
 
 #[tokio::test]
 async fn test_subs_receive_out_of_order_updates() {
-    let ctx = setup(1).await;
+    let ctx = TestContext::init(1).await;
     let TestContext {
         chainlink,
         cloner,

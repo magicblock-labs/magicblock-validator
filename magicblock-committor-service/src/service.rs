@@ -12,13 +12,14 @@ use futures_util::future::join_all;
 use intent_client::{
     ERIntentClient, InternalIntentClientError, ScheduledBaseIntentMeta,
 };
-use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
+use magicblock_chainlink::{
+    ProdChainlink, ProdInnerChainlink, cloner::ChainlinkCloner,
+};
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason,
 };
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle, Pubkey,
+    Pubkey, magic_scheduled_base_intent::ScheduledIntentBundle,
 };
 use tokio::{
     sync::broadcast,

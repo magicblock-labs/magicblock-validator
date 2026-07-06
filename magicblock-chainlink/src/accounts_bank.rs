@@ -1,12 +1,31 @@
+use engine::Engine;
+use solana_account::AccountSharedData;
+use solana_pubkey::Pubkey;
+
+/// Read access to the validator's account store.
+///
+/// Chainlink only ever reads through this trait; every mutation it performs
+/// goes through the engine's MagicRoot program via [`crate::cloner::Cloner`],
+/// so there is deliberately no write half here.
+pub trait AccountsBank: Send + Sync + 'static {
+    fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
+}
+
+impl AccountsBank for Engine {
+    fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        self.accounts().get(pubkey).ok().flatten()
+    }
+}
+
 #[cfg(any(test, feature = "dev-context"))]
 pub mod mock {
     use std::{collections::HashMap, fmt, sync::Mutex};
 
-    use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
-    use solana_account::{AccountSharedData, WritableAccount};
+    use solana_account::{AccountMode, AccountSharedData, WritableAccount};
     use solana_pubkey::Pubkey;
     use tracing::*;
 
+    use super::AccountsBank;
     use crate::blacklisted_accounts;
 
     #[derive(Default)]
@@ -35,11 +54,11 @@ pub mod mock {
             self
         }
 
-        fn set_delegated(&self, pubkey: &Pubkey, delegated: bool) -> &Self {
-            trace!(pubkey = %pubkey, delegated = delegated, "Setting delegated for account");
+        pub fn set_mode(&self, pubkey: &Pubkey, mode: AccountMode) -> &Self {
+            trace!(pubkey = %pubkey, ?mode, "Setting mode for account");
             let mut accounts = self.accounts.lock().unwrap();
             if let Some(account) = accounts.get_mut(pubkey) {
-                account.set_delegated(delegated);
+                account.set_mode(mode);
             } else {
                 panic!("Account not found in bank: {pubkey}");
             }
@@ -47,37 +66,36 @@ pub mod mock {
         }
 
         pub fn delegate(&self, pubkey: &Pubkey) -> &Self {
-            self.set_delegated(pubkey, true)
+            self.set_mode(pubkey, AccountMode::Delegated)
         }
 
         pub fn undelegate(&self, pubkey: &Pubkey) -> &Self {
-            self.set_undelegating(pubkey, true);
-            self.set_delegated(pubkey, false)
+            self.set_mode(pubkey, AccountMode::Transient)
         }
 
         /// Here we mark the account as undelegated in our validator via:
         /// - set_owner to delegation program
-        /// - set_delegated to false
+        /// - move it to the `Transient` mode
         pub fn force_undelegation(&self, pubkey: &Pubkey) {
-            // NOTE: that the validator will also have to set flip the delegated flag like
-            //       we do here.
+            // NOTE: that the validator will also have to move the account out of
+            //       the delegated mode like we do here.
             //       See programs/magicblock/src/schedule_transactions/process_schedule_commit.rs :172
             self.set_owner(pubkey, dlp_api::id()).undelegate(pubkey);
         }
 
+        /// `Transient` is the engine's representation of a delegated account
+        /// that is on its way back to readonly, i.e. the old `undelegating` flag.
         pub fn set_undelegating(
             &self,
             pubkey: &Pubkey,
             undelegating: bool,
         ) -> &Self {
-            trace!(pubkey = %pubkey, undelegating = undelegating, "Setting undelegating status");
-            let mut accounts = self.accounts.lock().unwrap();
-            if let Some(account) = accounts.get_mut(pubkey) {
-                account.set_undelegating(undelegating);
+            let mode = if undelegating {
+                AccountMode::Transient
             } else {
-                panic!("Account not found in bank: {pubkey}");
-            }
-            self
+                AccountMode::Delegated
+            };
+            self.set_mode(pubkey, mode)
         }
 
         pub fn dump_account_keys(&self, include_blacklisted: bool) -> String {
@@ -100,21 +118,27 @@ pub mod mock {
         }
     }
 
-    impl AccountsBank for AccountsBankStub {
-        fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-            self.accounts.lock().unwrap().get(pubkey).cloned()
-        }
-        fn remove_account(&self, pubkey: &Pubkey) {
+    impl AccountsBankStub {
+        /// Eviction is not part of [`AccountsBank`] — production code evicts
+        /// through the engine, so this exists only for the test cloner stub.
+        pub fn remove_account(&self, pubkey: &Pubkey) {
             self.accounts.lock().unwrap().remove(pubkey);
         }
-        fn remove_where(
+
+        pub fn remove_where(
             &self,
             mut predicate: impl FnMut(&Pubkey, &AccountSharedData) -> bool,
-        ) -> AccountsDbResult<usize> {
+        ) -> usize {
             let mut accounts = self.accounts.lock().unwrap();
             let initial_len = accounts.len();
             accounts.retain(|k, v| !predicate(k, v));
-            Ok(initial_len - accounts.len())
+            initial_len - accounts.len()
+        }
+    }
+
+    impl AccountsBank for AccountsBankStub {
+        fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+            self.accounts.lock().unwrap().get(pubkey).cloned()
         }
     }
 

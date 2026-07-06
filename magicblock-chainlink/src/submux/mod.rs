@@ -3,8 +3,8 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     hash::{Hash, Hasher},
     sync::{
-        atomic::{AtomicBool, AtomicU16, Ordering},
         Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, AtomicU16, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -787,14 +787,11 @@ where
                                     pending,
                                     ..
                                 } = debounce_state
-                                {
-                                    if now >= *next_allowed_forward {
-                                        if let Some(u) = pending.take() {
+                                    && now >= *next_allowed_forward
+                                        && let Some(u) = pending.take() {
                                             *next_allowed_forward = now + interval;
                                             to_forward.push(u);
                                         }
-                                    }
-                                }
                             }
                         }
                         for update in to_forward {
@@ -940,7 +937,8 @@ where
 
             let enable = if arrivals_len >= allowed_count {
                 let arrivals = debounce_state.arrivals_ref();
-                let spans_ok = {
+
+                {
                     let len = arrivals.len();
                     if len < allowed_count {
                         false
@@ -953,8 +951,7 @@ where
                             dt <= debounce_interval
                         })
                     }
-                };
-                spans_ok
+                }
             } else {
                 false
             };
@@ -1266,8 +1263,8 @@ mod tests {
     use super::*;
     use crate::{
         remote_account_provider::{
-            chain_pubsub_client::mock::ChainPubsubClientMock,
-            subscription_reconciler::reconcile_subscriptions, AccountsLruCache,
+            AccountsLruCache, chain_pubsub_client::mock::ChainPubsubClientMock,
+            subscription_reconciler::reconcile_subscriptions,
         },
         submux::subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker,
         testing::{init_logger, utils::sleep_ms},

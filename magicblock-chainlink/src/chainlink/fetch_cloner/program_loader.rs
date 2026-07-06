@@ -1,18 +1,18 @@
-use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_metrics::metrics::{AccountFetchContext, AccountFetchReason};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tracing::*;
 
-use super::{subscription::release_program_data_subs, FetchCloner};
+use super::{FetchCloner, subscription::release_program_data_subs};
 use crate::{
+    accounts_bank::AccountsBank,
     cloner::Cloner,
     remote_account_provider::{
-        program_account::{
-            get_loaderv3_get_program_data_address, ProgramAccountResolver,
-            LOADER_V1, LOADER_V3,
-        },
         ChainPubsubClient, ChainRpcClient, SubscriptionReason,
+        program_account::{
+            LOADER_V1, LOADER_V3, ProgramAccountResolver,
+            get_loaderv3_get_program_data_address,
+        },
     },
 };
 
@@ -72,7 +72,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
         match FetchCloner::task_to_fetch_with_program_data(
             this,
             pubkey,
-            account.remote_slot(),
+            account.slot(),
             program_data_context,
         )
         .await

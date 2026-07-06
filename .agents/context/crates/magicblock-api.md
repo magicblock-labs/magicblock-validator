@@ -2,316 +2,158 @@
 
 ## Purpose
 
-`magicblock-api` is the validator orchestration crate. It turns `magicblock-config::ValidatorParams` into a running validator service graph, owns the `MagicValidator` lifecycle, and wires together storage, account synchronization, RPC/pubsub, transaction execution, settlement, replication, metrics, task scheduling, and operator-facing on-chain registration flows.
+`magicblock-api` is the validator orchestration crate. It turns
+`magicblock-config::ValidatorParams` into a running service graph and owns the
+`MagicValidator` lifecycle around one `magicblock_engine::Engine`.
 
-High-level responsibilities:
+The engine owns execution, accountsdb, current transaction/block history,
+subscriptions, replay, block pacing, and durable shutdown. MBV keeps validator
+policy and services around it: Chainlink, Aperture compatibility, settlement,
+scheduled tasks, operator flows, and the temporary deprecated-ledger fallback.
 
-- initialize persistent ledger and AccountsDb state;
-- sync and verify the validator keypair stored beside the ledger;
-- build genesis/sys accounts required by the local runtime;
-- create Chainlink/account-cloning, committor/intent-execution, undelegation-request, replication, metrics, task-scheduler, and Aperture RPC services;
-- spawn transaction execution, RPC runtime, slot/system tickers, ledger truncation, and optional replication service threads/tasks;
-- transition the scheduler out of `StartingUp` after replay/reset/recovery;
-- register/unregister the validator in the Magic Domain Program and manage validator fee-vault setup in standalone ephemeral mode;
-- stop services in an order that protects in-flight commits and flushes durable state.
+This crate is on startup and shutdown paths. Ordering mistakes can expose RPC
+before required state exists, admit work during shutdown, lose settlement work,
+or make replicated roles diverge.
 
-This crate sits directly on startup and shutdown paths and coordinates hot-path services owned by other crates. Changes here can introduce latency, ordering bugs, persistence/recovery failures, or primary/replica divergence even when the changed code is not itself in an execution hot loop.
-
-## Update requirement
-
-Update this document in the same change whenever `magicblock-api` behavior or contracts change. Update it for changes to:
-
-- `MagicValidator::try_from_config`, `start`, `stop`, `prepare_ledger_for_shutdown`, or validator registration/unregistration behavior;
-- startup/shutdown ordering, service ownership, cancellation semantics, or thread/runtime spawning;
-- ledger, AccountsDb, keypair, genesis, MagicContext, ephemeral vault, or native mint initialization;
-- Chainlink, committor/intent-execution, undelegation request service, replication, task scheduler, RPC/Aperture, metrics, or ledger truncator wiring;
-- scheduler mode transitions for standalone, primary, or replica roles;
-- MagicSys/commit nonce lookup behavior;
-- domain registry, fee vault, claim-fees, or other base-layer operator flows;
-- public APIs, exported modules, error types, validation commands, or integration-test expectations.
-
-For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
-
-## Where it sits in the repository
+## Important paths
 
 | Path | Role |
 |---|---|
-| `magicblock-api/src/lib.rs` | Public module exports: `domain_registry_manager`, `errors`, `ledger`, and `magic_validator`; internal wiring modules stay private. |
-| `magicblock-api/src/magic_validator.rs` | Main `MagicValidator` implementation and startup/shutdown service graph. |
-| `magicblock-api/src/domain_registry_manager.rs` | Magic Domain Program registration, sync, fetch, and unregister helpers. |
-| `magicblock-api/src/ledger.rs` | Ledger open/reset helpers, ledger lockfile helpers used by the binary, and validator-keypair persistence beside the ledger. |
-| `magicblock-api/src/fund_account.rs` | Local genesis/runtime account seeding for validator identity, `MagicContext`, and ephemeral vault. |
-| `magicblock-api/src/genesis_utils.rs` | Local genesis account construction, native mint setup, and feature activation helpers. |
-| `magicblock-api/src/magic_sys_adapter.rs` | Adapter from Magic Program `MagicSys` trait calls to `CommittorService` commit-nonce lookups. |
-| `magicblock-api/src/tickers.rs` | System metrics ticker for storage/account gauges. |
-| `magicblock-api/src/errors.rs` | `ApiError` and `ApiResult`, including boxed conversions from downstream service errors. |
-| `magicblock-api/README.md` | Short public usage example for constructing and starting `MagicValidator`. |
-| `magicblock-validator/src/main.rs` | Primary consumer: parses config, creates `MagicValidator`, takes the ledger lock, starts/stops the validator, and drives TUI/headless lifecycle. |
-| `test-integration/test-magicblock-api/` | Integration coverage for domain registry, claim fees, and block/transaction timestamp stability. |
-| `config.example.toml` | Operator-facing configuration consumed through `ValidatorParams` and wired by this crate. |
+| `src/magic_validator.rs` | Builds the engine and wires the validator services around it. |
+| `src/fund_account.rs` | Builds validator-controlled startup accounts supplied to `KeeperBuilder`. |
+| `src/ledger.rs` | Opens the deprecated history ledger and provides its process lock and keypair verification. |
+| `src/magic_sys_adapter.rs` | Bridges Magic Program commit-nonce reads to the committor. |
+| `src/domain_registry_manager.rs` | Registration, synchronization, and unregistration through the Magic Domain Program. |
+| `src/errors.rs` | Orchestration error surface. |
 
-Main consumers:
+`magicblock-validator/src/main.rs` is the production consumer. It retains the
+deprecated ledger lock for process exclusivity and reports that path to the TUI.
 
-- `magicblock-validator` is the only production binary consumer of `MagicValidator`.
-- `test-integration/test-magicblock-api` directly uses `DomainRegistryManager` and exercises runtime behavior through integration contexts.
-- Other crates are mostly downstream services wired by this crate rather than consumers of it.
+## Construction
 
-Important downstream dependencies include `magicblock-accounts-db`, `magicblock-ledger`, `magicblock-processor`, `magicblock-aperture`, `magicblock-chainlink`, `magicblock-account-cloner`, `magicblock-committor-service`, `magicblock-replicator`, `magicblock-task-scheduler`, `magicblock-metrics`, `magicblock-services`, `magicblock-program`, and `magicblock-validator-admin`.
+`MagicValidator::try_from_config` currently performs this sequence:
 
-## Public API shape / Main public types and APIs
+1. Open the deprecated RocksDB ledger for historical RPC fallback and verify
+   the configured signer against the keypair stored beside it.
+2. Build `KeeperBuilder` with:
+   - the configured signer;
+   - engine accountsdb at `<storage>/accountsdb`;
+   - engine ledger at `<storage>/ledger`;
+   - configured block time, superblock interval, and ledger size;
+   - native and Magic Program builtins;
+   - configured loader-v4 program ELF bytes;
+   - validator-controlled startup accounts and the native mint.
+3. Start `Engine::new` with internal pacing for standalone/primary nodes or an
+   external pacer for replicas, then retain its `ShutdownManager`. Engine
+   construction performs keeper recovery/replay before returning.
+4. Spawn the primary replication dispatcher or replica replication client from
+   the role-specific authenticated TCP configuration.
+5. Build Chainlink with the engine as its read bank and `ChainlinkCloner` target.
+6. Build the committor and install `MagicSysAdapter`.
+7. Build intent execution, undelegation observation, Aperture, metrics, and task
+   scheduling with cloned engine handles.
+8. Spawn the dedicated Aperture runtime thread.
 
-The exported public API is intentionally small for production use:
+The deprecated ledger is not an execution source. Aperture may query it only
+after an engine history miss, according to the fallback rules documented in
+the Aperture crate guide.
 
-- `magic_validator::MagicValidator`
-  - `try_from_config(ValidatorParams) -> ApiResult<MagicValidator>` builds the service graph and spawns some long-lived components such as transaction execution and the RPC runtime.
-  - `start(&mut self) -> ApiResult<()>` performs ledger replay/reset/recovery, switches scheduler/replication mode, and starts post-start services such as slot ticking, ledger truncation, claim-fees, and the task scheduler.
-  - `stop(self)` consumes the validator and shuts down services, joins threads/tasks where available, flushes AccountsDb and ledger, and performs ledger shutdown.
-  - `start_unregister_validator_on_chain(&mut self)` sends a best-effort unregister transaction for standalone ephemeral validators that use on-chain coordination.
-  - `prepare_ledger_for_shutdown(&mut self)` stops truncation, cancels manual compactions, and flushes the ledger before final shutdown.
-  - `ledger(&self) -> &Ledger` exposes the ledger for the binary to lock and report paths.
-- `domain_registry_manager::DomainRegistryManager`
-  - builds Solana RPC clients for the Magic Domain Program;
-  - fetches `ErRecord` data;
-  - registers, syncs, and unregisters validator records;
-  - has static helper variants used by `MagicValidator` background startup/shutdown flows.
-- `ledger`
-  - `ledger_lockfile` and `lock_ledger` are public for the binary to prevent multiple validators using the same ledger path.
-  - validator-keypair and reset/open helpers are crate-private.
-- `errors::{ApiError, ApiResult}` is the crate-level error surface.
+`accountsdb.reset` removes the engine accountsdb directory before construction;
+`ledger.reset` removes both the engine ledger directory and the deprecated
+history ledger. Engine accountsdb currently has no defragmentation operation,
+so `accountsdb.defragment_on_startup` emits a warning instead of silently
+claiming that maintenance ran.
 
-Private but important internal APIs:
+## Startup and shutdown
 
-- `MagicSysAdapter` implements `magicblock_core::traits::MagicSys` so Magic Program execution can synchronously ask the committor service for current commit nonces.
-- `init_system_metrics_ticker` periodically updates storage/account gauges.
+`MagicValidator::start` starts validator-owned services after engine recovery is
+complete:
 
-## Runtime flows
+- standalone ephemeral base-layer setup;
+- undelegation-request observation;
+- periodic fee claims;
+- intent execution/recovery;
+- the persisted task scheduler.
 
-### Construction flow: `MagicValidator::try_from_config`
+Engine execution and pacing already run by this point. Do not reintroduce a
+parallel scheduler, block ticker, replay path, ledger truncator, or accountsdb
+lifecycle in MBV.
 
-```text
-ValidatorParams
-  -> ledger open/reset + keypair sync
-  -> AccountsDb open/snapshot/genesis/sys accounts
-  -> committor + MagicSys adapter
-  -> chainlink/account cloner
-  -> replication service (optional)
-  -> metrics + system metrics ticker
-  -> undelegation request service
-  -> program loading + validator authority init
-  -> transaction scheduler/execution thread
-  -> Aperture RPC runtime thread
-  -> task scheduler construction
+`MagicValidator::stop` first stops request ingress, undelegation scheduling,
+intent execution, fee claims, and the RPC thread. It then calls
+`ShutdownManager::terminate`, which stops the engine in tier order and flushes
+its durable state. The deprecated ledger is shut down last.
+
+`prepare_ledger_for_shutdown` now cancels request ingress before the caller
+enters the blocking stop path; it no longer controls engine storage.
+
+## Authority and validator-controlled accounts
+
+Outside builtin execution, use `Engine::authority()` for the represented
+validator and `Engine::signer()` for local signing. Standalone on-chain fee,
+vault, registration, and unregistration flows use the engine signer. Builtins
+obtain the execution authority from `nucleus::tls::AUTHORITY`, populated by the
+engine executor and simulator.
+
+`fund_account::initial_accounts` supplies:
+
+- the validator identity in `AccountMode::System`;
+- MagicContext as Magic Program-owned and delegated;
+- the ephemeral vault as Magic Program-owned and ephemeral;
+- the native mint as a read-only initialized SPL mint.
+
+These modes are access-control invariants, not incidental startup defaults.
+
+## Replication boundary
+
+The removed MBV replicator used a NATS URL and shared secret. That configuration
+is intentionally rejected rather than translated into an invented authorization
+policy. Primaries now configure a TCP bind address and explicit follower pubkey
+allowlist. Replicas configure the immediate upstream address and authority.
+
+Replica construction sets `Authority::remote` before opening keeper, supplies an
+external pacer to `Engine::new`, and passes the matching sender to
+`ReplicationClient`. Primary construction keeps internal pacing and starts
+`ReplicationDispatcher` with the configured allowlist. An empty allowlist denies
+all followers. Replica Aperture is read-only, and Chainlink, intent execution,
+scheduled-task execution, and base-layer operator work remain disabled. The
+replica's local keypair authenticates its follower connection while
+`Engine::authority()` represents the upstream validator.
+
+## Invariants
+
+1. Engine is the only owner of execution, accountsdb, current ledger, replay,
+   subscriptions, pacing, and durable shutdown.
+2. The deprecated ledger is read-only fallback state and must never feed new
+   execution or overwrite engine state.
+3. Engine recovery must complete before RPC and validator-owned recovery
+   services can accept work.
+4. MagicContext and the ephemeral vault must retain their owner and account
+   modes.
+5. Local signing must use `Engine::signer`; represented authority must use
+   `Engine::authority` when replicas are restored.
+6. Replicas must use external pacing and authenticate their configured upstream;
+   primaries must admit only explicitly allowed follower identities.
+7. Shutdown must stop ingress and settlement producers before terminating and
+   flushing the engine.
+8. Avoid blocking I/O or extra cloning in RPC, Chainlink, or execution paths;
+   orchestration work belongs at startup or in bounded background services.
+
+## Validation
+
+Use the narrowest checks that cover an orchestration change:
+
+```bash
+cargo check -p magicblock-api
+cargo check -p magicblock-validator
+cargo clippy -p magicblock-api --all-targets --no-deps -- -D warnings
+cargo nextest run -p magicblock-api
 ```
 
-Current order matters:
+Run broader workspace checks through `mbv-check`. For changes that enable
+replication or alter persistent recovery, add engine replication/recovery tests
+and the relevant package tests.
 
-1. Create a cancellation token and clone the configured validator keypair.
-2. Build local genesis accounts from the validator pubkey and base fee.
-3. Open/reset the ledger, derive `last_slot`, and sync the validator keypair file stored beside the ledger.
-4. Open AccountsDb at the ledger-derived slot.
-5. Connect to a replication broker for primary/replica modes; a fresh replica may import an external snapshot and set `config.accountsdb.reset = true` so Chainlink does not prune replica state.
-6. Create the committor service and install `MagicSysAdapter` with `init_magic_sys`.
-7. Create Chainlink unless the role is `ReplicationMode::Replica`, where `ChainlinkImpl::disabled()` is used.
-8. Create replication service if a broker was configured.
-9. Insert missing genesis accounts, initialize validator identity, MagicContext, and ephemeral vault accounts.
-10. Start metrics service and system metrics ticker.
-11. Create the undelegation request service for non-replica validators.
-12. Load configured upgradeable programs and initialize Magic Program validator authority/override.
-13. Build the SVM environment, transaction scheduler state, and executor count; spawn the transaction execution thread.
-14. Build Aperture shared state and start the RPC server on its own Tokio runtime thread.
-15. Construct the task scheduler database path next to the ledger parent and create `TaskSchedulerService`.
-
-Caveats:
-
-- `try_from_config` already spawns long-lived execution and RPC resources before `start()` is called.
-- Startup timing is logged via `log_timing`; preserve useful timings if changing slow startup sections.
-- The RPC runtime uses roughly half available CPUs minus one worker, while the process main runtime is created in `magicblock-validator`.
-
-### Start flow: replay, reset, mode transition, recovery
-
-1. `maybe_process_ledger` skips replay when `ledger.reset` is set or AccountsDb slot is already at least the ledger slot.
-2. Ledger replay uses `process_ledger` with a blockhash age derived from configured block time.
-3. After replay, Magic Program scheduled actions are cleared so replayed accept-commit transactions do not re-commit.
-4. Optional AccountsDb defragmentation runs before normal work starts; this is explicitly marked safe only before cleanup, scheduler mode changes, replication, slot ticks, or task recovery.
-5. Standalone/primary nodes reset the bank and, for primaries, send a replication `Message::Reset`. The retained replication sender is dropped after this one-shot send: the shutdown drain treats channel closure as "producer finished", so only the scheduler may keep a sender clone.
-6. The intent execution service starts only after replay/reset and handles pending commit intent recovery before its normal accept loop.
-7. Standalone nodes switch the scheduler to `SchedulerMode::Primary`; primary/replica modes spawn the replication service instead.
-8. Non-replica validators start `UndelegationRequestService`; it consumes Chainlink observed requests and the configured polling backfill. Replicas keep Chainlink disabled and do not scan DLP requests.
-9. Standalone ephemeral nodes start background base-layer setup: funding check, magic fee vault init/delegation, optional startup fee claim, and optional domain registration.
-10. Claim-fees periodic task, intent execution service, ledger truncator, and primary-only task scheduler are started.
-
-### Scheduled intent service flow
-
-```text
-intent execution service interval
-  -> read MagicContext from AccountsDb
-  -> if scheduled commits exist, execute AcceptScheduleCommits tx through scheduler
-  -> take accepted ScheduledIntentBundle(s)
-  -> committor processor schedules base-layer work
-  -> result processor submits ScheduledCommitSent locally
-```
-
-The accept transaction uses the same transaction scheduler path as normal execution. The scheduling/result loop lives in `magicblock-committor-service::service`, while this crate owns construction, start, and stop ordering.
-
-### Undelegation request service flow
-
-```text
-Chainlink observes DLP UndelegationRequest
-  -> magicblock-services::UndelegationRequestService validates request/delegation
-  -> submit local ScheduleCommitAndUndelegate transaction
-  -> scheduled intent service accepts and executes the resulting intent
-```
-
-This service is started only for non-replica validators.
-
-### Shutdown flow: `MagicValidator::stop`
-
-1. Send unregister transaction in the background when standalone ephemeral on-chain coordination is enabled.
-2. Set the local `exit` flag, drop any remaining replication sender, and cancel the shared cancellation token. The sender must be gone before the primary replication drain runs, otherwise the drain cannot observe channel closure and waits out its full timeout.
-3. Stop the undelegation request service, then the intent execution service.
-4. Stop claim-fees task.
-5. Join RPC thread, slot ticker, ledger truncator, replication thread, and transaction execution thread.
-6. Flush AccountsDb.
-7. Flush and shut down ledger.
-8. Join unregister confirmation thread only if it has already finished; shutdown does not wait for that confirmation.
-
-Durable state is flushed only after workers that can admit, commit, truncate, or replicate state are stopped.
-
-### Domain registry and base-layer operator flow
-
-Standalone ephemeral validators that need on-chain interactions may:
-
-1. verify the validator authority has at least 5 SOL on the base layer;
-2. initialize and delegate the validator magic fee vault if missing;
-3. optionally claim existing validator fees on startup and periodically thereafter;
-4. register or sync an `ErRecord` in the Magic Domain Program;
-5. send an unregister transaction during shutdown and confirm it in a background thread with an 8s timeout and 400ms polling interval.
-
-The domain registry manager sends ordinary Solana transactions against the configured base-layer RPC URL. Changes here affect operator-facing registration semantics and should be tested against the `test-magicblock-api` integration suite when possible.
-
-## Important internals and caveats
-
-### Startup/shutdown ordering is the main contract
-
-`magicblock-api` is mostly glue, but the glue order is correctness-critical. Ledger replay must finish before account reset and scheduler mode transition. Pending intent recovery must run after replay/reset. Replica startup must not let Chainlink prune state imported from the primary. Shutdown must prevent more state changes before flushing storage.
-
-### Replication modes intentionally diverge
-
-`ReplicationMode::Standalone` and `ReplicationMode::Primary` use enabled Chainlink. `ReplicationMode::Replica` uses disabled Chainlink and waits for replicated state. The unit tests in `magic_validator.rs` cover this helper. Do not “simplify” the modes into one startup path without checking replication service expectations.
-
-### `MagicSysAdapter` blocks on a synchronous committor response
-
-Magic Program execution can call `fetch_current_commit_nonces`; the adapter converts this into a committor-service sync-channel request and waits up to 30 seconds. This is not a place to add unbounded blocking, and error codes are surfaced as `InstructionError::Custom` values.
-
-### Local sys accounts are special
-
-`fund_account.rs` seeds the validator identity as privileged, `MagicContext` as delegated and Magic Program-owned, and the ephemeral vault as ephemeral and Magic Program-owned. Those flags are part of execution/access-control behavior and must stay aligned with Magic Program/SVM invariants.
-
-### Ledger keypair verification protects operators
-
-The ledger stores a validator keypair file beside the blockstore parent. With `verify_keypair` enabled, a mismatch between the configured keypair and stored ledger keypair fails startup. Do not bypass this without understanding operator safety and persisted-state identity assumptions.
-
-## Important invariants
-
-1. Ledger replay, optional defragmentation, bank reset, pending intent recovery, and scheduler mode transition must remain ordered so execution does not race recovery or cleanup.
-2. Replicas must not use enabled Chainlink or local cleanup in ways that diverge from primary-replicated state.
-3. Pending intent recovery must run only after replay and reset, because it reads local account state for delegation checks.
-4. `MagicContext` must exist before the slot ticker can run, and it must remain Magic Program-owned and delegated locally.
-5. Ephemeral vault initialization must preserve the ephemeral flag and Magic Program owner.
-6. Validator identity must remain privileged in local AccountsDb.
-7. Committor service wiring must stay available before Magic Program execution can fetch commit nonces or schedule settlement work.
-8. Owner-program DLP undelegation request polling must stay in the background processor path, not the slot ticker or transaction-execution hot path.
-9. Do not add blocking RPC, slow I/O, or expensive serialization to scheduler/executor hot paths from this crate; keep such work in startup/background services where possible.
-10. Shutdown must cancel/stop services before flushing AccountsDb and ledger.
-11. Operator-facing config keys and base-layer registration/fee-vault behavior are compatibility-sensitive.
-
-## Common change areas and what to inspect
-
-### Changing validator startup or service wiring
-
-Inspect first:
-
-- `magicblock-api/src/magic_validator.rs` around `try_from_config` and `start`;
-- downstream service constructors (`initialize_aperture`, `CommittorService::try_start`, `ProdInnerChainlink::try_new_from_endpoints`, `TransactionScheduler::new`, `TaskSchedulerService::new`);
-- `.agents/context/architecture.md` startup path and service boundaries;
-- `magicblock-validator/src/main.rs` for main runtime, ledger lock, TUI/headless lifecycle.
-
-Risks:
-
-- starting RPC or task scheduler before replay/reset/recovery is complete;
-- double-spawning services that are currently constructed in `try_from_config` but started in `start`;
-- breaking primary/replica mode transitions.
-
-### Changing shutdown behavior
-
-Inspect first:
-
-- `MagicValidator::stop`;
-- `prepare_ledger_for_shutdown` and `magicblock-validator/src/main.rs` shutdown sequence;
-- downstream service `stop`/`join` semantics for undelegation requests, intent execution, ledger truncator, replication, transaction scheduler, task scheduler, and RPC.
-
-Risks:
-
-- flushing state while workers can still mutate it;
-- dropping Tokio runtimes before required async cleanup;
-- waiting indefinitely for unregister confirmation or background services.
-
-### Changing commit, fee vault, or domain registration flows
-
-Inspect first:
-
-- `magicblock-api/src/domain_registry_manager.rs`;
-- `spawn_primary_onchain_setup`, `ensure_magic_fee_vault_on_chain`, `register_validator_on_chain`, and `start_unregister_validator_on_chain`;
-- `magicblock-validator-admin/src/claim_fees.rs`;
-- Magic Domain Program and Delegation Program instruction builders;
-- `test-integration/test-magicblock-api/tests/test_domain_registry.rs` and `test_claim_fees.rs`.
-
-Risks:
-
-- base-layer RPC commitment or confirmation changes affecting operator startup;
-- fee vault not being delegated before commit scheduling;
-- registering the wrong authority when replication authority override is active.
-
-### Changing local account/genesis setup
-
-Inspect first:
-
-- `fund_account.rs`;
-- `genesis_utils.rs`;
-- Magic Program API constants for `MAGIC_CONTEXT_PUBKEY` and `EPHEMERAL_VAULT_PUBKEY`;
-- SVM/account access validation docs in `.agents/specs/validator-specification.md`.
-
-Risks:
-
-- missing local sys accounts causing startup or scheduled-intent accept loop panics;
-- changing account flags that SVM access validation relies on;
-- primary/replica genesis state divergence.
-
-### Changing validation, replay, or timestamps
-
-Inspect first:
-
-- `maybe_process_ledger`;
-- `magicblock-ledger::blockstore_processor::process_ledger`;
-- `test-integration/test-magicblock-api/tests/test_clocks_match.rs`;
-- `test-integration/test-magicblock-api/tests/test_get_block_timestamp_stability.rs`.
-
-Risks:
-
-- replaying scheduled commit accept transactions in a way that re-commits;
-- inconsistent block time across transaction status, ledger block, and RPC block-time APIs.
-
-## Tests and validation
-
-- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
-- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-api`.
-- Relevant integration suites: `test-magicblock-api`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
-- Related validation intent: startup/shutdown changes should report timing-sensitive effects and preserve `log_timing` coverage where useful; changes that move work into RPC, account sync, scheduler/executor, ledger, replication, or committor paths need focused performance reasoning or measurement.
-
-## Adjacent implementation references
-
-- `.agents/context/crates/magicblock-aperture.md` — RPC/pubsub service details wired by this crate.
-- `.agents/context/crates/magicblock-account-cloner.md`, `.agents/context/crates/magicblock-chainlink.md`, `.agents/context/crates/magicblock-committor-service.md`, and `.agents/context/crates/magicblock-services.md` — account sync, scheduled-intent, and request-observer dependencies wired by this crate.
-- `magicblock-api/README.md` — short usage example for `MagicValidator`.
-- `magicblock-validator/src/main.rs` — production binary lifecycle around `MagicValidator`.
-- `test-integration/test-magicblock-api/` — integration tests for API-owned flows.
+Update this guide whenever constructor ownership, startup/shutdown ordering,
+authority handling, storage paths, replication behavior, or service wiring
+changes.

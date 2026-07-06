@@ -202,8 +202,8 @@ streaming of transactions/blocks over NATS JetStream with leader takeover),
 [`magicblock-aml`](../magicblock-aml) (cached external risk-scoring API),
 [`magicblock-magic-program-api`](../magicblock-magic-program-api) (shared
 instruction/PDA types so the validator doesn't link the program crate),
-[`programs/guinea`](../programs/guinea) (test-only program exercising ephemeral
-accounts and task scheduling).
+Execution tests use the sibling engine's `testkit` API and its v42 program for
+program behavior fixtures.
 
 ## 5. The SVM fork
 

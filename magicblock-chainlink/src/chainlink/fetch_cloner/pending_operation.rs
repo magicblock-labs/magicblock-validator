@@ -7,7 +7,7 @@ use magicblock_metrics::metrics::{
 use scc::HashMap;
 use solana_pubkey::Pubkey;
 use tokio::{
-    sync::{oneshot, Notify},
+    sync::{Notify, oneshot},
     time::Instant,
 };
 
@@ -126,7 +126,7 @@ impl Drop for PendingWaiter {
         }
 
         self.finish_active_waiter();
-        self.pending.update(&self.pubkey, |_, pending| {
+        self.pending.update_sync(&self.pubkey, |_, pending| {
             if pending.generation == self.generation {
                 pending.waiters.remove(&self.waiter_id);
             }
@@ -220,7 +220,7 @@ pub(super) fn claim_or_join_pending(
 ) -> PendingClaim {
     let (tx, rx) = oneshot::channel();
 
-    let claim = match pending.entry(pubkey) {
+    match pending.entry_sync(pubkey) {
         scc::hash_map::Entry::Vacant(entry) => {
             let deadline = Instant::now() + total_budget;
             let cancel = Arc::new(Notify::new());
@@ -287,9 +287,7 @@ pub(super) fn claim_or_join_pending(
                 owner: None,
             })
         }
-    };
-
-    claim
+    }
 }
 
 fn finish_pending_cleanup(
@@ -298,8 +296,8 @@ fn finish_pending_cleanup(
     generation: PendingGeneration,
     terminal: Option<PendingTerminal>,
 ) -> usize {
-    if let Some((_, pending)) =
-        pending.remove_if(&pubkey, |pending| pending.generation == generation)
+    if let Some((_, pending)) = pending
+        .remove_if_sync(&pubkey, |pending| pending.generation == generation)
     {
         let waiter_count = pending.waiters.len();
         if let Some(terminal) = terminal {

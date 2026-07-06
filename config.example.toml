@@ -129,13 +129,12 @@ keypair = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vN
 # - "replica": replay the state transitions from primary
 # 
 # [validator.replication-mode.primary]
-# url = "nats://0.0.0.0:4222"
-# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+# bind-address = "0.0.0.0:10000"
+# allowed-followers = ["L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"]
 # 
 # [validator.replication-mode.replica]
-# url = "nats://0.0.0.0:4222"
-# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-# authority-override = "L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
+# upstream-address = "127.0.0.1:10000"
+# upstream-authority = "L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
 
 [aperture]
 # Network address to bind the main JSON RPC service to.

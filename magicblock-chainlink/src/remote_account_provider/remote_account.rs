@@ -1,9 +1,11 @@
-use magicblock_accounts_db::traits::AccountsBank;
 use solana_account::{
-    Account, AccountSharedData, ReadableAccount, WritableAccount,
+    Account, AccountFieldPatch, AccountMode, AccountSharedData,
+    ReadableAccount, WritableAccount,
 };
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;
+
+use crate::accounts_bank::AccountsBank;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteAccountUpdateSource {
@@ -95,42 +97,40 @@ impl ResolvedAccountSharedData {
     pub fn delegated(&self) -> bool {
         use ResolvedAccountSharedData::*;
         match self {
-            Fresh(account) => account.delegated(),
-            Bank(account) => account.delegated(),
+            Fresh(account) => account.is(AccountMode::Delegated),
+            Bank(account) => account.is(AccountMode::Delegated),
         }
-    }
-
-    pub fn set_delegated(&mut self, delegated: bool) -> &mut Self {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.set_delegated(delegated),
-            Bank(account) => account.set_delegated(delegated),
-        }
-        self
     }
 
     pub fn confined(&self) -> bool {
         use ResolvedAccountSharedData::*;
         match self {
-            Fresh(account) => account.confined(),
-            Bank(account) => account.confined(),
+            Fresh(account) => account.is(AccountMode::Ephemeral),
+            Bank(account) => account.is(AccountMode::Ephemeral),
         }
     }
 
-    pub fn set_confined(&mut self, confined: bool) -> &mut Self {
+    /// Sets the account's mode.
+    ///
+    /// Delegation state is a single exclusive mode rather than the independent
+    /// `delegated`/`confined` flags this replaced, so callers must resolve the
+    /// final mode up front; setting one aspect at a time would silently discard
+    /// the others.
+    pub fn set_mode(&mut self, mode: AccountMode) -> &mut Self {
         use ResolvedAccountSharedData::*;
         match self {
-            Fresh(account) => account.set_confined(confined),
-            Bank(account) => account.set_confined(confined),
+            Fresh(account) => account.set_mode(mode),
+            Bank(account) => account.set_mode(mode),
         }
         self
     }
 
     pub fn set_remote_slot(&mut self, remote_slot: Slot) -> &mut Self {
         use ResolvedAccountSharedData::*;
+        let patch = AccountFieldPatch::Slot(remote_slot);
         match self {
-            Fresh(account) => account.set_remote_slot(remote_slot),
-            Bank(account) => account.set_remote_slot(remote_slot),
+            Fresh(account) => patch.apply(account),
+            Bank(account) => patch.apply(account),
         }
         self
     }
@@ -162,8 +162,8 @@ impl ResolvedAccountSharedData {
     pub fn remote_slot(&self) -> Slot {
         use ResolvedAccountSharedData::*;
         match self {
-            Fresh(account) => account.remote_slot(),
-            Bank(account) => account.remote_slot(),
+            Fresh(account) => account.slot(),
+            Bank(account) => account.slot(),
         }
     }
 }
@@ -187,7 +187,7 @@ impl RemoteAccount {
         source: RemoteAccountUpdateSource,
     ) -> Self {
         let mut account_shared_data = AccountSharedData::from(account);
-        account_shared_data.set_remote_slot(slot);
+        AccountFieldPatch::Slot(slot).apply(&mut account_shared_data);
         Self::from_fresh_account_shared_data(account_shared_data, source)
     }
 
@@ -229,7 +229,7 @@ impl RemoteAccount {
             RemoteAccount::Found(RemoteAccountState { account, .. }) => {
                 match account {
                     ResolvedAccount::Fresh(account_shared_data) => {
-                        account_shared_data.remote_slot()
+                        account_shared_data.slot()
                     }
                     ResolvedAccount::Bank((_, slot)) => *slot,
                 }

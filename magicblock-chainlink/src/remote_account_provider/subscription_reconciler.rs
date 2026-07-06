@@ -2,16 +2,17 @@ use std::{collections::HashSet, sync::atomic::AtomicU16};
 
 use magicblock_core::logger::log_trace_warn;
 use magicblock_metrics::metrics::{
-    inc_chainlink_subscription_cleanup_accounts, SubscriptionCleanupOutcome,
-    SubscriptionCleanupSource,
+    SubscriptionCleanupOutcome, SubscriptionCleanupSource,
+    inc_chainlink_subscription_cleanup_accounts,
 };
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 use tracing::*;
 
 use super::{
-    subscription_key_owned_guard_from_map, AccountsLruCache, ChainPubsubClient,
-    SubscriptionKeyLocks, SubscriptionOwnershipMap, SubscriptionReason,
+    AccountsLruCache, ChainPubsubClient, SubscriptionKeyLocks,
+    SubscriptionOwnershipMap, SubscriptionReason,
+    subscription_key_owned_guard_from_map,
 };
 use crate::remote_account_provider::RemoteAccountProviderError;
 
@@ -245,12 +246,12 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
 
             // Undelegation tracking must stay watched until undelegation
             // completes; keep the entry and retry next cycle.
-            if let Some(ownership) = subscription_ownership {
-                if ownership.lock().await.get(&pubkey).is_some_and(|own| {
+            if let Some(ownership) = subscription_ownership
+                && ownership.lock().await.get(&pubkey).is_some_and(|own| {
                     own.contains(SubscriptionReason::UndelegationTracking)
-                }) {
-                    continue;
-                }
+                })
+            {
+                continue;
             }
 
             // No client holds the subscription: evict so the account is

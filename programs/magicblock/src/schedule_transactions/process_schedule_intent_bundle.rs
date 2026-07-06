@@ -8,13 +8,15 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    MagicContext,
     magic_scheduled_base_intent::{
-        extract_commit_accounts, ConstructionContext, ScheduledIntentBundle,
+        ConstructionContext, ScheduledIntentBundle, extract_commit_accounts,
     },
     magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
-        check_commit_limits, check_magic_context_id, get_clock,
-        get_parent_program_id, try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
+        MAGIC_CONTEXT_IDX, PAYER_IDX, check_commit_limits,
+        check_magic_context_id, get_clock, get_parent_program_id,
+        try_get_fee_vault,
     },
     utils::{
         account_actions::{
@@ -24,7 +26,6 @@ use crate::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
     },
-    MagicContext,
 };
 
 pub(crate) fn process_schedule_intent_bundle(
@@ -154,8 +155,6 @@ pub(crate) fn process_schedule_intent_bundle(
         check_commit_limits(commit_accounts, invoke_context)?;
     }
 
-    let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];
-
     context.add_scheduled_action(scheduled_intent);
     let context_acc = get_instruction_account_with_idx(
         transaction_context,
@@ -164,11 +163,6 @@ pub(crate) fn process_schedule_intent_bundle(
     context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
 
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
-    ic_msg!(
-        invoke_context,
-        "ScheduledCommitSent signature: {}",
-        action_sent_signature,
-    );
 
     Ok(())
 }
