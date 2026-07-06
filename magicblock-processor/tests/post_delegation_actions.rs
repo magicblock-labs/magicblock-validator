@@ -6,6 +6,7 @@ use magicblock_magic_program_api::{
 use magicblock_program::{
     instruction_utils::InstructionUtils,
     validator::{generate_validator_authority_if_needed, validator_authority},
+    MagicContext,
 };
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_instruction::{AccountMeta, Instruction};
@@ -151,6 +152,78 @@ async fn schedule_undelegation_marks_cloned_account_as_undelegated() {
     // The schedule instruction mutates the cloned account's owner/state, so it
     // must be writable in the instruction. After execution the account is
     // marked undelegating and no longer delegated.
+    let target_account = env.get_account(target);
+    assert!(target_account.undelegating());
+    assert!(!target_account.delegated());
+}
+
+#[tokio::test]
+async fn schedule_undelegation_commits_original_owner() {
+    generate_validator_authority_if_needed();
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let validator = validator_authority();
+    env.fund_account(validator.pubkey(), 10_000_000);
+    insert_magic_context(&env);
+
+    let target = Pubkey::new_unique();
+    env.accountsdb
+        .insert_account(
+            &target,
+            &AccountSharedData::new(100, 0, &system_program::id()),
+        )
+        .unwrap();
+
+    // Clone a delegated account owned by a real program, then schedule its
+    // undelegation in the same transaction.
+    let clone_ix = InstructionUtils::clone_account_instruction(
+        target,
+        vec![7],
+        AccountCloneFields {
+            lamports: 1_000_000,
+            owner: guinea::ID,
+            delegated: true,
+            remote_slot: 1,
+            ..Default::default()
+        },
+        Vec::new(),
+    );
+    let schedule_ix =
+        InstructionUtils::schedule_cloned_account_undelegation_instruction(
+            target,
+        );
+
+    let txn = env.build_transaction_with_signers(
+        &[clone_ix, schedule_ix],
+        &[&validator],
+    );
+    env.execute_transaction(txn).await.unwrap();
+
+    // The scheduled intent must commit the account with its original owner.
+    // Scheduling marks the live account as undelegating (owner flipped to the
+    // delegation program); on mmap-backed accounts that mutation is visible
+    // through shallow snapshots, so a wrong ordering in the processor bakes
+    // the delegation program in as the owner. The committor then derives the
+    // dlp program-config PDA from it and the base-layer commit is rejected
+    // with InvalidAuthority.
+    let context_data = env.get_account(MAGIC_CONTEXT_PUBKEY);
+    let context: MagicContext =
+        bincode::deserialize(context_data.data()).unwrap();
+    let intent = context
+        .scheduled_base_intents
+        .first()
+        .expect("undelegation intent must be scheduled");
+    let committed = intent
+        .intent_bundle
+        .commit_and_undelegate
+        .as_ref()
+        .expect("intent must be a commit-and-undelegate")
+        .get_committed_accounts()
+        .first()
+        .expect("intent must commit the cloned account");
+    assert_eq!(committed.pubkey, target);
+    assert_eq!(committed.account.owner, guinea::ID);
+
+    // The live account is still locked for undelegation as before.
     let target_account = env.get_account(target);
     assert!(target_account.undelegating());
     assert!(!target_account.delegated());
