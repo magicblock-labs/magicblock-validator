@@ -544,8 +544,18 @@ where
     ) -> IntentExecutionResult {
         self.started_at = Instant::now();
         let message_id = base_intent.id;
-        let is_undelegate = base_intent.has_undelegate_intent();
         let pubkeys = base_intent.get_all_committed_pubkeys();
+        let undelegated_pubkeys: Vec<Pubkey> = base_intent
+            .intent_bundle
+            .get_undelegate_intent_pubkeys()
+            .into_iter()
+            .chain(
+                base_intent
+                    .intent_bundle
+                    .get_commit_finalize_and_undelegate_intent_pubkeys(),
+            )
+            .flatten()
+            .collect();
 
         let mut execution_report = IntentExecutionReport::default();
         let result = self
@@ -553,10 +563,17 @@ where
             .await;
         if !pubkeys.is_empty() {
             // Reset TaskInfoFetcher, as cache could become invalid
-            // NOTE: if undelegation was removed - we still reset
-            // We assume its safe since all consecutive commits will fail
-            if result.is_err() || is_undelegate {
+            if result.is_err() {
+                // We can't know what landed on chain, resync everything
                 self.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
+            } else if !undelegated_pubkeys.is_empty() {
+                // Only undelegated accounts' nonces become stale. Keep the
+                // rest cached: a chain re-fetch can race the just-landed
+                // finalize and reuse a nonce (buffer PDA collision).
+                // NOTE: if undelegation was removed - we still reset
+                // We assume its safe since all consecutive commits will fail
+                self.task_info_fetcher
+                    .reset(ResetType::Specific(&undelegated_pubkeys));
             }
 
             // Write result of intent into Persister

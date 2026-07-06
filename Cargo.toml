@@ -47,7 +47,7 @@ edition = "2021"
 homepage = "https://www.magicblock.xyz"
 license = "Business Source License 1.1"
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
-version = "0.13.2"
+version = "0.13.3"
 
 [workspace.dependencies]
 agave-geyser-plugin-interface = { version = "4.0" }
@@ -196,7 +196,6 @@ serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
 # TODO: Update to the merged version when ready
-
 solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
 solana-account-decoder = { version = "4.0" }
 solana-account-decoder-client-types = { version = "4.0" }
