@@ -8,12 +8,12 @@ use magicblock_magic_program_api::{
 pub(crate) use process_cancel_task::*;
 pub(crate) use process_execute_task::*;
 pub(crate) use process_schedule_task::*;
-use solana_instruction::{error::InstructionError, Instruction};
+use solana_instruction::{Instruction, error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
-use crate::validator::effective_validator_authority_id;
+use crate::validator::authority as engine_authority;
 
 // Assert that the task instructions do not have signers aside from the crank signer
 // Assert they don't use the validator either
@@ -39,7 +39,7 @@ pub(crate) fn validate_cranks_instructions(
                     "Crank ERR: the crank signer PDA cannot be a writable account in cranks",
                 );
                 return Err(InstructionError::Immutable);
-            } else if account.pubkey.eq(&effective_validator_authority_id()) {
+            } else if account.pubkey.eq(&engine_authority()) {
                 ic_msg!(
                     invoke_context,
                     "Crank ERR: the validator authority cannot be used in cranks",
@@ -53,7 +53,7 @@ pub(crate) fn validate_cranks_instructions(
         }
 
         let Ok(decoded_instruction) =
-            bincode::deserialize::<MagicBlockInstruction>(&instruction.data)
+            wincode::deserialize::<MagicBlockInstruction>(&instruction.data)
         else {
             // Not a MagicBlock instruction, skip
             continue;

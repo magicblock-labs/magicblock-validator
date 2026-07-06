@@ -1,17 +1,12 @@
 use std::{collections::HashMap, fmt};
 
-use solana_clock::Clock;
-use solana_hash::Hash;
 use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
-use tokio::sync::broadcast;
 
-use crate::{
-    intent::{types::CommittedAccount, BaseActionCallback, MagicIntentBundle},
-    link::blocks::LatestBlockInner,
-    Slot,
+use crate::intent::{
+    BaseActionCallback, MagicIntentBundle, types::CommittedAccount,
 };
 
 /// Trait that provides access to system calls implemented outside of SVM,
@@ -34,16 +29,6 @@ pub trait MagicSys: Sync + Send + 'static {
     ) -> Result<(), InstructionError>;
 }
 
-/// Provides read access to the latest confirmed block's metadata.
-/// Allows components to access block data without depending on the full ledger,
-/// abstracting away the underlying storage.
-pub trait LatestBlockProvider: Send + Sync + Clone + 'static {
-    fn slot(&self) -> Slot;
-    fn blockhash(&self) -> Hash;
-    fn clock(&self) -> Clock;
-    fn subscribe(&self) -> broadcast::Receiver<LatestBlockInner>;
-}
-
 /// Interface for service handling callback execution/scheduling
 pub trait ActionsCallbackScheduler: Send + Sync + Clone + 'static {
     /// Schedules callback txs.
@@ -58,7 +43,7 @@ pub trait ActionsCallbackScheduler: Send + Sync + Clone + 'static {
 
 #[derive(Debug)]
 pub enum CallbackScheduleError {
-    SerializationError(bincode::Error),
+    SerializationError(wincode::WriteError),
     SigningError(String),
 }
 

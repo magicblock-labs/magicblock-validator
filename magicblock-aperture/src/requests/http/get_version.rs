@@ -1,15 +1,11 @@
-use super::prelude::*;
+use super::HandlerResult;
+use crate::{
+    requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
+    server::http::dispatch::HttpDispatcher,
+};
 
 impl HttpDispatcher {
-    /// Handles the `getVersion` RPC request.
-    ///
-    /// Returns a JSON object containing the version information of the running
-    /// validator node, including the Solana core version, feature set, and
-    /// git commit hash.
-    pub(crate) fn get_version(
-        &self,
-        request: &mut JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_version(&self, request: &JsonRequest) -> HandlerResult {
         let version = magicblock_version::Version::default();
 
         let version_info = json::json! {{

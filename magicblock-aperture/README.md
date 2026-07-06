@@ -4,13 +4,17 @@ Provides the JSON-RPC (HTTP) and Pub/Sub (WebSocket) API Server for the Magicblo
 
 ## Overview
 
-This crate serves as the primary external interface for the validator, allowing clients to query the ledger, submit transactions, and subscribe to real-time events. It is a high-performance, asynchronous server built with low-level libraries for maximum control over implementation.
+This crate serves as the primary external interface for the validator. Accounts,
+transactions, blocks, submission, and live subscriptions are owned by the
+engine. `magicblock-ledger-deprecated` remains read-only and is consulted only
+when an engine history accessor successfully returns no data.
 
 It provides two core services running on adjacent ports:
 1.  **JSON-RPC Server (HTTP):** Handles traditional request/response RPC methods like `getAccountInfo`, `getTransaction`, and `sendTransaction`.
 2.  **Pub/Sub Server (WebSocket):** Manages persistent connections for clients to subscribe to streams of data, such as `accountSubscribe` or `slotSubscribe`.
 
-The server is designed to be a lean API layer that validates and sanitizes incoming requests before dispatching them to the `magicblock-processor` crate for heavy computation.
+The server is a lean API layer that decodes requests, ensures required accounts
+through Chainlink, and calls the engine directly.
 
 ## A Note on Naming
 
@@ -35,9 +39,9 @@ The server's architecture is divided into logical components for handling HTTP a
 
 ### Shared Infrastructure
 
--   **`SharedState`**: The global, read-only context that is shared across all handlers. It provides `Arc`-wrapped access to the `AccountsDb`, `Ledger`, various caches, and the `DispatchEndpoints` for communicating with the processor.
--   **`EventProcessor`**: A background worker that listens for broadcasted events from the validator core (e.g., `TransactionStatus`, `AccountUpdate`) and forwards them to the appropriate WebSocket subscribers via the `SubscriptionsDb`.
--   **`GeyserPluginManager`**: Manages dynamically loaded Geyser plugins that subscribe to in-validator events. Plugins receive notifications for account updates, transactions, blocks, and slot status changes via the Geyser plugin interface.
+-   **`SharedState`**: Holds the engine, node context, Chainlink, and the read-only deprecated-ledger fallback.
+-   **Engine subscriptions**: Each WebSocket subscription forwards directly from the corresponding engine account, program, signature, log, or block receiver.
+-   **`GeyserPluginManager`**: Loads plugins after both sockets bind and forwards engine block and processed-transaction streams through a bounded queue.
 
 ---
 
@@ -56,6 +60,13 @@ Geyser plugins are loaded from shared library files (`.so` on Linux, `.dylib` on
 ```
 
 Multiple plugins can be loaded simultaneously by providing multiple configuration paths.
+`event_processors` controls the number of queue workers; zero is treated as one.
+The queue is bounded at 1,024 events. When no plugin loads successfully,
+Aperture creates no processed-transaction subscription, avoiding Geyser fanout
+and balance-clone overhead on transaction execution.
+
+Plugin load and callback failures are logged and remain non-fatal to the RPC
+server and to other plugins.
 
 ### Important Requirements
 
@@ -82,9 +93,9 @@ Magicblock provides a customized Yellowstone gRPC plugin designed to work with t
 1.  A client sends a `sendTransaction` request to the HTTP port.
 2.  The `HttpServer` accepts the connection and passes the request to the `HttpDispatcher`.
 3.  The `HttpDispatcher` parses the request and calls the `send_transaction` handler.
-4.  The handler decodes and sanitizes the transaction, checks for recent duplicates in the `TransactionsCache`, and performs a preflight simulation by default.
-5.  If validation passes, it sends the transaction to the `magicblock-processor` via the `transaction_scheduler` channel.
-6.  The handler awaits a successful execution result from the processor.
+4.  The handler decodes the transaction and asks Chainlink to ensure its accounts.
+5.  It calls the engine transaction accessor to execute or schedule the transaction.
+6.  Unless preflight is skipped, the handler awaits the engine execution result.
 7.  A JSON-RPC response containing the transaction signature is serialized and sent back to the client.
 
 ### WebSocket Subscription (`accountSubscribe` example)
@@ -93,11 +104,10 @@ Magicblock provides a customized Yellowstone gRPC plugin designed to work with t
 2.  The `WebsocketServer` handles the handshake, and upon success, spawns a dedicated `ConnectionHandler` task for that client.
 3.  The client sends an `accountSubscribe` JSON message over the WebSocket.
 4.  The `ConnectionHandler` receives the message and passes it to its `WsDispatcher`.
-5.  The `WsDispatcher` registers the client's interest in the global `SubscriptionsDb`, storing a "cleanup" handle to ensure automatic unsubscription on disconnect (RAII).
+5.  The `WsDispatcher` opens the matching engine subscription and retains its forwarding task for automatic cancellation on disconnect.
 6.  A subscription ID is sent back to the client.
-7.  Later, the `magicblock-processor` modifies the subscribed account and broadcasts an `AccountUpdate`.
-8.  The `EventProcessor` receives this update, looks up the account in `SubscriptionsDb`, and finds the client's channel.
-9.  It sends a formatted notification payload to the `ConnectionHandler`'s private channel.
+7.  Later, the engine publishes an account update.
+8.  The subscription task encodes it and sends it to the `ConnectionHandler`'s private channel.
 10. The `ConnectionHandler` receives the payload and writes it to the WebSocket stream, pushing the update to the client.
 
 ---
@@ -110,3 +120,17 @@ Magicblock provides a customized Yellowstone gRPC plugin designed to work with t
 -   **Solana API Compatibility**: Implements a large subset of the standard Solana JSON-RPC methods and subscription types.
 -   **Geyser Plugin Support**: Integrates with Solana's Geyser plugin system for extensible in-validator event streaming. Dynamically loads and manages plugins that receive real-time notifications for account updates, transactions, blocks, and slot status changes.
 
+## Engine history and metadata
+
+`getBlock`, `getBlockTime`, `getTransaction`, `getSignatureStatuses`, and
+`getSignaturesForAddress` query the engine first and propagate engine read
+errors. Deprecated storage is a historical fallback only after an engine miss.
+Address-signature pages merge both stores newest-first with deduplication and
+cursor/limit handling. Engine block reads request only the transaction detail
+needed by the RPC configuration.
+
+Geyser transaction notifications include the available result, fee, native
+balances, logs, CPI trace, return data, and compute units. Account write versions
+are globally increasing. The following remain explicit placeholders because the
+engine does not retain them: account transaction context, transaction index,
+parent blockhash, executed-transaction count, and entry count.

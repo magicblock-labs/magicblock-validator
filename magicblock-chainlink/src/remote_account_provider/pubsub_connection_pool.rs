@@ -1,10 +1,10 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use magicblock_metrics::metrics;
-use scc::{ebr::Guard, Queue};
+use scc::{Guard, Queue};
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::{
     nonblocking::pubsub_client::PubsubClientResult,
@@ -131,9 +131,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     ) -> PubsubClientResult<(S, UnsubscribeFn)>
     where
         F: FnOnce(Arc<T>) -> Fut,
-        Fut: std::future::Future<
-            Output = PubsubClientResult<(S, UnsubscribeFn)>,
-        >,
+        Fut: std::future::Future<Output = PubsubClientResult<(S, UnsubscribeFn)>>,
         S: 'static,
     {
         // Find or create a connection
@@ -237,8 +235,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         );
         trace!(
             url = self.url,
-            connection_count,
-            "Created new pooled connection"
+            connection_count, "Created new pooled connection"
         );
         Ok((sub_count, new_connection))
     }

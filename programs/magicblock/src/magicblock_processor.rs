@@ -1,46 +1,55 @@
 use magicblock_magic_program_api::instruction::{
     CallbackInstruction, EphemeralSystemInstruction, MagicBlockInstruction,
-    PostDelegationActionExecutorInstruction,
 };
 use solana_instruction::error::InstructionError;
 use solana_program_runtime::{
     declare_process_instruction, invoke_context::InvokeContext,
 };
+use wincode::{SchemaRead, config::DefaultConfig};
 
 use crate::{
-    clone_account::{
-        process_cleanup_partial_clone, process_clone_account,
-        process_clone_account_continue, process_clone_account_init,
-        process_evict_account, process_execute_post_delegation_actions,
-        process_finalize_program_from_buffer,
-        process_finalize_v1_program_from_buffer, process_set_program_authority,
-    },
     ephemeral_accounts::{
         process_close_ephemeral_account, process_create_ephemeral_account,
         process_resize_ephemeral_account,
     },
-    mutate_accounts::process_mutate_accounts,
+    errors::MagicBlockProgramError,
     process_scheduled_commit_sent,
     schedule_task::{
         process_cancel_task, process_execute_crank, process_schedule_task,
     },
     schedule_transactions::{
-        process_accept_scheduled_commits, process_add_action_callback,
-        process_execute_callback, process_schedule_cloned_account_undelegation,
+        ProcessScheduleCommitOptions, process_accept_scheduled_commits,
+        process_add_action_callback, process_execute_callback,
         process_schedule_commit, process_schedule_intent_bundle,
-        ProcessScheduleCommitOptions,
     },
 };
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
+/// Rejects an instruction whose account-composition handler was removed.
+///
+/// The discriminants are retained so existing clients still deserialize and get
+/// a defined error rather than a decode failure, but the engine composes
+/// accounts now, so nothing here can service them.
+fn composition_removed(
+    invoke_context: &InvokeContext,
+    instruction: &str,
+) -> Result<(), InstructionError> {
+    solana_log_collector::ic_msg!(
+        invoke_context,
+        "{} is no longer supported: account composition is handled by the engine",
+        instruction
+    );
+    Err(MagicBlockProgramError::AccountCompositionRemoved.into())
+}
+
 fn deserialize_instruction<T>(
     invoke_context: &mut InvokeContext,
 ) -> Result<T, InstructionError>
 where
-    T: for<'de> serde::de::Deserialize<'de>,
+    T: for<'de> SchemaRead<'de, DefaultConfig, Dst = T>,
 {
-    bincode::deserialize(
+    wincode::deserialize(
         invoke_context
             .transaction_context
             .get_current_instruction_context()?
@@ -62,16 +71,9 @@ declare_process_instruction!(
         let signers = instruction_context.get_signers()?;
 
         match instruction {
-            ModifyAccounts {
-                mut accounts,
-                message,
-            } => process_mutate_accounts(
-                signers,
-                invoke_context,
-                transaction_context,
-                &mut accounts,
-                message,
-            ),
+            ModifyAccounts { .. } => {
+                composition_removed(invoke_context, "ModifyAccounts")
+            }
             ScheduleCommit => process_schedule_commit(
                 signers,
                 invoke_context,
@@ -120,8 +122,6 @@ declare_process_instruction!(
             CancelTask { task_id } => {
                 process_cancel_task(signers, invoke_context, task_id)
             }
-            // NOTE: Solana runtime 3.x no longer exposes executable checks,
-            // and program deployment works without them.
             DisableExecutableCheck => Ok(()),
             EnableExecutableCheck => Ok(()),
             CreateEphemeralAccount { data_len } => {
@@ -145,86 +145,31 @@ declare_process_instruction!(
             AddActionCallback(args) => {
                 process_add_action_callback(signers, invoke_context, args)
             }
-            EvictAccount { pubkey } => process_evict_account(
-                &signers,
-                invoke_context,
-                transaction_context,
-                pubkey,
-            ),
-            Noop(_) => Ok(()),
-            CloneAccount {
-                pubkey,
-                data,
-                fields,
-                actions,
-            } => process_clone_account(
-                &signers,
-                invoke_context,
-                pubkey,
-                data,
-                fields,
-                actions,
-            ),
-            CloneAccountInit {
-                pubkey,
-                total_data_len,
-                initial_data,
-                fields,
-            } => process_clone_account_init(
-                &signers,
-                invoke_context,
-                transaction_context,
-                pubkey,
-                total_data_len,
-                initial_data,
-                fields,
-            ),
-            CloneAccountContinue {
-                pubkey,
-                offset,
-                data,
-                is_last,
-                actions,
-                needs_undelegation,
-            } => process_clone_account_continue(
-                &signers,
-                invoke_context,
-                pubkey,
-                offset,
-                data,
-                is_last,
-                actions,
-                needs_undelegation,
-            ),
-            CleanupPartialClone { pubkey } => process_cleanup_partial_clone(
-                &signers,
-                invoke_context,
-                transaction_context,
-                pubkey,
-            ),
-            FinalizeProgramFromBuffer { remote_slot } => {
-                process_finalize_program_from_buffer(
-                    &signers,
-                    invoke_context,
-                    transaction_context,
-                    remote_slot,
-                )
+            EvictAccount { .. } => {
+                composition_removed(invoke_context, "EvictAccount")
             }
-            SetProgramAuthority { authority } => process_set_program_authority(
-                &signers,
+            Noop(_) => Ok(()),
+            CloneAccount { .. } => {
+                composition_removed(invoke_context, "CloneAccount")
+            }
+            CloneAccountInit { .. } => {
+                composition_removed(invoke_context, "CloneAccountInit")
+            }
+            CloneAccountContinue { .. } => {
+                composition_removed(invoke_context, "CloneAccountContinue")
+            }
+            CleanupPartialClone { .. } => {
+                composition_removed(invoke_context, "CleanupPartialClone")
+            }
+            FinalizeProgramFromBuffer { .. } => {
+                composition_removed(invoke_context, "FinalizeProgramFromBuffer")
+            }
+            SetProgramAuthority { .. } => {
+                composition_removed(invoke_context, "SetProgramAuthority")
+            }
+            FinalizeV1ProgramFromBuffer { .. } => composition_removed(
                 invoke_context,
-                transaction_context,
-                authority,
-            ),
-            FinalizeV1ProgramFromBuffer {
-                remote_slot,
-                authority,
-            } => process_finalize_v1_program_from_buffer(
-                &signers,
-                invoke_context,
-                transaction_context,
-                remote_slot,
-                authority,
+                "FinalizeV1ProgramFromBuffer",
             ),
             ExecuteCrank {
                 authority,
@@ -284,38 +229,6 @@ declare_process_instruction!(
 );
 
 declare_process_instruction!(
-    PostDelegationActionEntrypoint,
-    DEFAULT_COMPUTE_UNITS,
-    |invoke_context| {
-        let instruction: PostDelegationActionExecutorInstruction =
-            deserialize_instruction(invoke_context)?;
-        let transaction_context = &invoke_context.transaction_context;
-        let instruction_context =
-            transaction_context.get_current_instruction_context()?;
-        let signers = instruction_context.get_signers()?;
-
-        match instruction {
-            PostDelegationActionExecutorInstruction::Execute {
-                cloned_account_pubkey,
-                actions,
-            } => process_execute_post_delegation_actions(
-                signers,
-                invoke_context,
-                cloned_account_pubkey,
-                actions,
-            ),
-            PostDelegationActionExecutorInstruction::ScheduleUndelegation {
-                cloned_account_pubkey,
-            } => process_schedule_cloned_account_undelegation(
-                signers,
-                invoke_context,
-                cloned_account_pubkey,
-            ),
-        }
-    }
-);
-
-declare_process_instruction!(
     EphemeralSystemEntrypoint,
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
@@ -352,13 +265,16 @@ declare_process_instruction!(
 mod test {
     use magicblock_magic_program_api::args::ScheduleTaskArgs;
     use solana_instruction::AccountMeta;
-    use solana_program_runtime::invoke_context::mock_process_instruction;
+    use solana_program_runtime::{
+        invoke_context::mock_process_instruction,
+        solana_sbpf::program::BuiltinFunctionDefinition,
+    };
 
     use super::*;
 
     #[test]
     fn crank_entrypoint_rejects_non_execute_crank_instructions() {
-        let data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(
+        let data = wincode::serialize(&MagicBlockInstruction::ScheduleTask(
             ScheduleTaskArgs {
                 task_id: 1,
                 execution_interval_millis: 10,
@@ -375,7 +291,7 @@ mod test {
             Vec::new(),
             vec![AccountMeta::new_readonly(crate::CRANK_PROGRAM_ID, false)],
             Err(InstructionError::InvalidInstructionData),
-            CrankEntrypoint::vm,
+            (CrankEntrypoint::vm, CrankEntrypoint::codegen),
             |_invoke_context| {},
             |_invoke_context| {},
         );
@@ -392,7 +308,7 @@ mod test {
             Vec::new(),
             vec![AccountMeta::new_readonly(crate::CALLBACK_PROGRAM_ID, false)],
             Err(InstructionError::InvalidInstructionData),
-            CallbackEntrypoint::vm,
+            (CallbackEntrypoint::vm, CallbackEntrypoint::codegen),
             |_invoke_context| {},
             |_invoke_context| {},
         );

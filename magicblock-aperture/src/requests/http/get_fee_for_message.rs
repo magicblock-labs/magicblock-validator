@@ -1,59 +1,41 @@
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use solana_message::{
     SanitizedMessage, SanitizedVersionedMessage, SimpleAddressLoader,
     VersionedMessage,
 };
 
-use super::prelude::*;
+use super::HandlerResult;
+use crate::{
+    error::RpcError,
+    requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
+    server::http::dispatch::HttpDispatcher,
+};
 
 impl HttpDispatcher {
-    /// Handles the `getFeeForMessage` RPC request.
-    ///
-    /// Calculates the estimated fee for a given transaction message. The calculation
-    /// accounts for the number of signatures, the validator's base fee
     pub(crate) fn get_fee_for_message(
         &self,
-        request: &mut JsonRequest,
+        request: &JsonRequest,
     ) -> HandlerResult {
-        let message_b64 = parse_params!(request.params()?, String);
-        let message_b64: String = some_or_err!(message_b64);
+        let message_b64 = request.required::<String>(0)?;
 
-        // Decode and deserialize the transaction message.
         let message_bytes = BASE64_STANDARD
             .decode(message_b64)
             .map_err(RpcError::parse_error)?;
         let versioned_message: VersionedMessage =
-            bincode::deserialize(&message_bytes)
+            wincode::deserialize(&message_bytes)
                 .map_err(RpcError::invalid_params)?;
 
-        // Sanitize the message for processing.
         let sanitized_versioned_message =
             SanitizedVersionedMessage::try_new(versioned_message)
                 .map_err(RpcError::transaction_verification)?;
-        let sanitized_message = SanitizedMessage::try_new(
+        SanitizedMessage::try_new(
             sanitized_versioned_message,
             SimpleAddressLoader::Disabled,
             &Default::default(),
         )
         .map_err(RpcError::transaction_verification)?;
 
-        let fee = signature_fee(&sanitized_message, self.context.base_fee);
-
-        let slot = self.blocks.block_height();
-        Ok(ResponsePayload::encode(&request.id, fee, slot))
+        let slot = self.engine.blocks().latest().slot;
+        Ok(ResponsePayload::encode(&request.id, 0_u64, slot))
     }
-}
-
-fn signature_fee(
-    message: &SanitizedMessage,
-    lamports_per_signature: u64,
-) -> u64 {
-    if lamports_per_signature == 0 {
-        return 0;
-    }
-
-    message
-        .get_signature_details()
-        .total_signatures()
-        .saturating_mul(lamports_per_signature)
 }

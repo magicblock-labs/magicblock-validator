@@ -12,21 +12,21 @@ use tracing::info;
 
 use crate::{
     intent_executor::{
+        IntentExecutionReport,
         error::{IntentExecutorResult, TransactionStrategyExecutionError},
         intent_execution_client::IntentExecutionClient,
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         two_stage_executor::{Committed, Initialized, TwoStageExecutor},
-        IntentExecutionReport,
     },
     persist::IntentPersister,
     tasks::{
+        BaseTaskImpl,
         task_builder::TaskBuilderError,
         task_strategist::{TaskStrategist, TransactionStrategy},
-        BaseTaskImpl,
     },
     transaction_preparator::{
-        error::TransactionPreparatorError, TransactionPreparator,
+        TransactionPreparator, error::TransactionPreparatorError,
     },
 };
 

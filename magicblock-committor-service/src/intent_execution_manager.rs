@@ -9,6 +9,7 @@ use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
+use solana_keypair::Keypair;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
 
 use crate::{
@@ -30,7 +31,9 @@ pub struct IntentExecutionManager<D: DB> {
 }
 
 impl<D: DB> IntentExecutionManager<D> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new<P, A>(
+        authority: Keypair,
         rpc_client: MagicblockRpcClient,
         db: D,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
@@ -46,6 +49,7 @@ impl<D: DB> IntentExecutionManager<D> {
         let db = Arc::new(db);
 
         let executor_factory = IntentExecutorFactoryImpl {
+            authority,
             rpc_client,
             table_mania,
             executor_config,

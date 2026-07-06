@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
+#[cfg(not(feature = "backward-compat"))]
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
-    compat::{AccountInfo, AccountMeta, Instruction},
     Pubkey,
+    compat::{AccountInfo, AccountMeta, Instruction},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct ActionArgs {
     pub escrow_index: u8,
     pub data: Vec<u8>,
@@ -33,6 +36,7 @@ impl ActionArgs {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct BaseActionArgs {
     pub args: ActionArgs,
     pub compute_units: u32, // compute units your action will use
@@ -42,6 +46,7 @@ pub struct BaseActionArgs {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum CommitTypeArgs {
     Standalone(Vec<u8>), // indices on accounts
     WithBaseActions {
@@ -62,12 +67,14 @@ impl CommitTypeArgs {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum UndelegateTypeArgs {
     Standalone,
     WithBaseActions { base_actions: Vec<BaseActionArgs> },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct CommitAndUndelegateArgs {
     pub commit_type: CommitTypeArgs,
     pub undelegate_type: UndelegateTypeArgs,
@@ -80,6 +87,7 @@ impl CommitAndUndelegateArgs {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum MagicBaseIntentArgs {
     BaseActions(Vec<BaseActionArgs>),
     Commit(CommitTypeArgs),
@@ -89,6 +97,7 @@ pub enum MagicBaseIntentArgs {
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct MagicIntentBundleArgs {
     pub commit: Option<CommitTypeArgs>,
     pub commit_and_undelegate: Option<CommitAndUndelegateArgs>,
@@ -126,6 +135,7 @@ impl From<MagicBaseIntentArgs> for MagicIntentBundleArgs {
 /// `is_signer` flag. Users cannot request signatures: the only signer available
 /// is the validator.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct ShortAccountMeta {
     pub pubkey: Pubkey,
     /// Whether this account should be marked **writable**
@@ -157,6 +167,7 @@ impl<'a> From<&AccountInfo<'a>> for ShortAccountMeta {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct AddActionCallbackArgs {
     /// Flat index of the action to attach the callback to, ordered as:
     /// commit actions, commit_and_undelegate commit actions,
@@ -170,6 +181,7 @@ pub struct AddActionCallbackArgs {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct ScheduleTaskArgs {
     pub task_id: i64,
     pub execution_interval_millis: i64,
@@ -178,12 +190,14 @@ pub struct ScheduleTaskArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum TaskRequest {
     Schedule(ScheduleTaskRequest),
     Cancel(CancelTaskRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct ScheduleTaskRequest {
     /// Unique identifier for this task
     pub id: i64,
@@ -198,6 +212,7 @@ pub struct ScheduleTaskRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct CancelTaskRequest {
     /// Unique identifier for the task to cancel
     pub task_id: i64,

@@ -1,38 +1,43 @@
-use std::sync::{atomic::AtomicU64, Arc};
+use magicblock_metrics::metrics::AccountFetchContext;
+use solana_account::AccountMode;
+use solana_pubkey::Pubkey;
 
-use super::prelude::*;
+use super::ClaimedHandlerResult;
+use crate::{
+    requests::{
+        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
+        payload::ResponsePayload,
+    },
+    server::http::dispatch::HttpDispatcher,
+};
 
 impl HttpDispatcher {
-    /// Handles the `getDelegationStatus` RPC request.
-    ///
-    /// Returns a minimal delegation status object of the form:
-    /// `{ "isDelegated": true | false }`
-    ///
-    /// The status is derived solely from the `AccountSharedData::delegated()`
-    /// flag of the local `AccountsDb`. No delegation record resolution or
-    /// router-style logic is performed here by design.
     pub(crate) async fn get_delegation_status(
         &self,
-        request: &mut JsonRequest,
-        remote_account_claims: Arc<AtomicU64>,
-    ) -> HandlerResult {
-        // Parse the first positional parameter (account pubkey) using the
-        // standard helper macro, mirroring `get_account_info`.
-        let pubkey = parse_params!(request.params()?, Serde32Bytes);
-        let pubkey: Pubkey = some_or_err!(pubkey);
+        request: &JsonRequest,
+    ) -> ClaimedHandlerResult {
+        let mut claims = 0;
+        let result = async {
+            let pubkey: Pubkey = request.required::<Serde32Bytes>(0)?.into();
 
-        // Ensure the account is present in the local AccountsDb, cloning it
-        // from the reference cluster if necessary.
-        let fetch_context =
-            Self::rpc_get_account_context(remote_account_claims);
-        let account =
-            self.read_account_with_ensure(&pubkey, fetch_context).await;
+            let (account, remote_account_claims) = self
+                .read_account_with_ensure(
+                    &pubkey,
+                    AccountFetchContext::rpc_get_account(),
+                )
+                .await;
+            claims += remote_account_claims;
 
-        let is_delegated =
-            account.as_ref().map(|acc| acc.delegated()).unwrap_or(false);
+            let is_delegated = account
+                .as_ref()
+                .map(|acc| acc.is(AccountMode::Delegated))
+                .unwrap_or(false);
 
-        let payload = json::json!({ "isDelegated": is_delegated });
+            let payload = json::json!({ "isDelegated": is_delegated });
 
-        Ok(ResponsePayload::encode_no_context(&request.id, payload))
+            Ok(ResponsePayload::encode_no_context(&request.id, payload))
+        }
+        .await;
+        (result, claims)
     }
 }

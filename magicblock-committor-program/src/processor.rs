@@ -1,4 +1,4 @@
-use borsh::{to_vec, BorshDeserialize};
+use borsh::{BorshDeserialize, to_vec};
 use solana_account_info::AccountInfo;
 use solana_program::{
     entrypoint::ProgramResult, log::sol_log_64, msg, program::invoke_signed,
@@ -8,14 +8,14 @@ use solana_pubkey::Pubkey;
 use solana_system_interface::instruction as system_instruction;
 
 use crate::{
-    consts,
+    Chunks, consts,
     error::CommittorError,
     instruction::CommittorInstruction,
     utils::{
         assert_account_unallocated, assert_is_signer, assert_program_id,
         close_and_refund_authority,
     },
-    verified_seeds_and_pda, Chunks,
+    verified_seeds_and_pda,
 };
 
 pub fn process(
@@ -112,10 +112,17 @@ fn process_init(
 ) -> ProgramResult {
     msg!("Instruction: Init");
 
-    let [authority_info, chunks_account_info, buffer_account_info, _system_program] =
-        accounts
+    let [
+        authority_info,
+        chunks_account_info,
+        buffer_account_info,
+        _system_program,
+    ] = accounts
     else {
-        msg!("Need the following accounts: [authority, chunks, buffer, system program ], but got {}", accounts.len());
+        msg!(
+            "Need the following accounts: [authority, chunks, buffer, system program ], but got {}",
+            accounts.len()
+        );
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     assert_is_signer(authority_info, "authority")?;
@@ -279,7 +286,10 @@ fn process_write(
 
     let [authority_info, chunks_account_info, buffer_account_info] = accounts
     else {
-        msg!("Need the following accounts: [authority, chunks, buffer ], but got {}", accounts.len());
+        msg!(
+            "Need the following accounts: [authority, chunks, buffer ], but got {}",
+            accounts.len()
+        );
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     assert_is_signer(authority_info, "authority")?;
@@ -294,7 +304,9 @@ fn process_write(
         buffer_bump,
     )?;
 
-    msg!("Updating Buffer and Chunks accounts [ _, chunks_acc_len, buffer_acc_len, offset, size ]");
+    msg!(
+        "Updating Buffer and Chunks accounts [ _, chunks_acc_len, buffer_acc_len, offset, size ]"
+    );
 
     {
         let buffer_data = buffer_account_info.data.borrow();
@@ -357,7 +369,10 @@ pub fn process_close(
 
     let [authority_info, chunks_account_info, buffer_account_info] = accounts
     else {
-        msg!("Need the following accounts: [authority, chunks, buffer ], but got {}", accounts.len());
+        msg!(
+            "Need the following accounts: [authority, chunks, buffer ], but got {}",
+            accounts.len()
+        );
         return Err(ProgramError::NotEnoughAccountKeys);
     };
     assert_is_signer(authority_info, "authority")?;

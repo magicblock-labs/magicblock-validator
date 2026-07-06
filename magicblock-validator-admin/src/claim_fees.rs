@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use dlp_api::instruction_builder::validator_claim_fees;
-use magicblock_program::validator::validator_authority;
+use engine::Engine;
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_commitment_config::CommitmentConfig;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
@@ -12,6 +13,17 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument};
 
 const MIN_CLAIMABLE_LAMPORTS: u64 = 100_000_000;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ClaimFeesError {
+    #[error(
+        "Engine authority {authority} cannot be signed by local identity {signer}"
+    )]
+    AuthoritySignerMismatch { authority: Pubkey, signer: Pubkey },
+
+    #[error(transparent)]
+    Rpc(#[from] MagicBlockRpcClientError),
+}
 
 pub struct ClaimFeesTask {
     pub handle: Option<JoinHandle<()>>,
@@ -26,14 +38,20 @@ impl ClaimFeesTask {
         }
     }
 
-    pub fn start(&mut self, tick_period: Duration, url: String) {
+    pub fn start(
+        &mut self,
+        engine: Engine,
+        tick_period: Duration,
+        url: String,
+    ) {
         if self.handle.is_some() {
             error!("Claim fees task already started");
             return;
         }
 
         let token = self.token.clone();
-        let handle = tokio::spawn(run_claim_fees_loop(token, tick_period, url));
+        let handle =
+            tokio::spawn(run_claim_fees_loop(engine, token, tick_period, url));
         self.handle = Some(handle);
     }
 
@@ -58,8 +76,9 @@ impl Default for ClaimFeesTask {
     }
 }
 
-#[instrument(skip(token), fields(tick_period_ms = tick_period.as_millis() as u64, url = %url))]
+#[instrument(skip(engine, token), fields(tick_period_ms = tick_period.as_millis() as u64, url = %url))]
 async fn run_claim_fees_loop(
+    engine: Engine,
     token: CancellationToken,
     tick_period: Duration,
     url: String,
@@ -70,7 +89,7 @@ async fn run_claim_fees_loop(
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                if let Err(err) = claim_fees(url.clone()).await {
+                if let Err(err) = claim_fees(&engine, url.clone()).await {
                     error!(error = ?err, "Failed to claim fees");
                 }
             },
@@ -80,15 +99,27 @@ async fn run_claim_fees_loop(
     info!("Claim fees task stopped");
 }
 
-#[instrument(fields(validator = %validator_authority().pubkey()))]
-pub async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
+#[instrument(skip(engine), fields(validator = %engine.authority()))]
+pub async fn claim_fees(
+    engine: &Engine,
+    url: String,
+) -> Result<(), ClaimFeesError> {
     info!("Claiming validator fees");
 
     let rpc_client =
         RpcClient::new_with_commitment(url, CommitmentConfig::confirmed());
 
-    let keypair_ref = &validator_authority();
-    let validator = keypair_ref.pubkey();
+    let validator = engine.authority();
+    let signer = engine.signer();
+    // Fee claiming only runs for standalone/primary engines, whose represented
+    // authority is the local signer. Replicas may represent a remote authority
+    // and must never claim its vault with their local identity.
+    if validator != signer.pubkey() {
+        return Err(ClaimFeesError::AuthoritySignerMismatch {
+            authority: validator,
+            signer: signer.pubkey(),
+        });
+    }
     let validator_fees_vault =
         dlp_api::pda::validator_fees_vault_pda_from_validator(&validator);
     let vault_lamports = rpc_client
@@ -116,7 +147,7 @@ pub async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&validator),
-        &[keypair_ref],
+        &[signer],
         latest_blockhash,
     );
 

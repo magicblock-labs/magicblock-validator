@@ -143,6 +143,7 @@ impl TestFixture {
         let transaction_preparator = self.create_transaction_preparator();
 
         IntentExecutorImpl::new(
+            self.authority.insecure_clone(),
             self.rpc_client.clone(),
             transaction_preparator,
             self.create_task_info_fetcher(),

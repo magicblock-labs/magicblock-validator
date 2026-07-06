@@ -9,7 +9,7 @@ use ephemeral_rollups_sdk::spl::{
     find_rent_pda, find_shuttle_ata, find_shuttle_ephemeral_ata,
 };
 use integration_test_tools::{
-    expect,
+    expect, init_logger,
     loaded_accounts::{LoadedAccounts, DLP_TEST_AUTHORITY_BYTES},
     tmpdir::resolve_tmp_dir,
 };
@@ -26,7 +26,6 @@ use test_aml::{
     setup_validator_with_local_remote, wait_for_delegation_record_absent,
     MockRangeServer,
 };
-use test_kit::init_logger;
 
 const SHUTTLE_AMOUNT: u64 = 200;
 const SHUTTLE_ID: u32 = 0;

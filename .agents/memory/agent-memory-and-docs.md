@@ -57,6 +57,8 @@ Keep updates concise and operational:
 
 The weekly task should review the durable documentation follow-ups and merged code changes since the previous pass, update the relevant documentation, and submit only documentation changes. Verify that file paths and cross-references remain accurate.
 
-## Final response requirement
+## Task handoff
 
-When finishing a task, report whether agent documentation was updated. For code tasks, state either that no durable documentation follow-up was needed or list the exact follow-up for the weekly maintenance task.
+Mention agent documentation only when updated or when a durable follow-up is
+needed; then name the exact file and missing information. Omit routine no-change
+status.

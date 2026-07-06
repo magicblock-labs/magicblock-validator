@@ -1,30 +1,38 @@
-use std::sync::{atomic::AtomicU64, Arc};
+use magicblock_metrics::metrics::AccountFetchContext;
+use solana_account::ReadableAccount;
+use solana_pubkey::Pubkey;
 
-use super::prelude::*;
+use super::ClaimedHandlerResult;
+use crate::{
+    requests::{
+        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
+        payload::ResponsePayload,
+    },
+    server::http::dispatch::HttpDispatcher,
+};
 
 impl HttpDispatcher {
-    /// Handles the `getBalance` RPC request.
-    ///
-    /// Fetches the lamport balance for a given public key. If the account
-    /// does not exist, it correctly returns a balance of `0`. The result is
-    /// returned with the current slot context.
     pub(crate) async fn get_balance(
         &self,
-        request: &mut JsonRequest,
-        remote_account_claims: Arc<AtomicU64>,
-    ) -> HandlerResult {
-        let pubkey_bytes = parse_params!(request.params()?, Serde32Bytes);
-        let pubkey = some_or_err!(pubkey_bytes);
+        request: &JsonRequest,
+    ) -> ClaimedHandlerResult {
+        let mut claims = 0;
+        let result = async {
+            let pubkey: Pubkey = request.required::<Serde32Bytes>(0)?.into();
 
-        let fetch_context =
-            Self::rpc_get_account_context(remote_account_claims);
-        let balance = self
-            .read_account_with_ensure(&pubkey, fetch_context)
-            .await
-            .map(|a| a.lamports())
-            .unwrap_or_default(); // Default to 0 if account not found
+            let (account, remote_account_claims) = self
+                .read_account_with_ensure(
+                    &pubkey,
+                    AccountFetchContext::rpc_get_account(),
+                )
+                .await;
+            claims += remote_account_claims;
+            let balance = account.map(|a| a.lamports()).unwrap_or_default();
 
-        let slot = self.blocks.block_height();
-        Ok(ResponsePayload::encode(&request.id, balance, slot))
+            let slot = self.engine.blocks().latest().slot;
+            Ok(ResponsePayload::encode(&request.id, balance, slot))
+        }
+        .await;
+        (result, claims)
     }
 }

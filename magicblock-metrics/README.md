@@ -1,5 +1,9 @@
 # Prometheus Grafana Setup
 
+The validator metrics endpoint combines the namespaced `mbv_*` collectors with
+all Engine collectors registered in the process-wide default Prometheus
+registry. Both `mbv-leader` and `mbv-verifier` expose this combined endpoint.
+
 ## Installation
 
 ### Install Prometheus

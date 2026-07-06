@@ -1,27 +1,27 @@
 [package]
-name = "magicblock-config"
-version.workspace = true
 authors.workspace = true
-repository.workspace = true
+edition.workspace = true
 homepage.workspace = true
 license.workspace = true
-edition.workspace = true
+name = "magicblock-config"
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
-derive_more = { workspace = true, features = ["display", "from_str", "deref"] }
-figment = { workspace = true, features = ["toml", "env"] }
+derive_more = { workspace = true, features = ["deref", "display", "from_str"] }
+figment = { workspace = true, features = ["env", "toml"] }
 humantime = { workspace = true }
-isocountry = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_with = { workspace = true }
-toml = { workspace = true }
 url = { workspace = true, features = ["serde"] }
 
-solana-pubkey = { workspace = true, features = ["serde"] }
+nucleus = { workspace = true, features = ["config"] }
+
 solana-keypair = { workspace = true }
+solana-pubkey = { workspace = true, features = ["serde"] }
 solana-signer = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 serial_test = { workspace = true }
+tempfile = { workspace = true }

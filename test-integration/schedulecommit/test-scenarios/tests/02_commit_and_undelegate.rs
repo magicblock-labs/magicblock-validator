@@ -5,7 +5,7 @@ use std::{
 
 use dlp_api::pda::undelegation_request_pda_from_delegated_account;
 use integration_test_tools::{
-    conversions::stringify_simulation_result, run_test,
+    conversions::stringify_simulation_result, init_logger, run_test,
     scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
     transactions::send_and_confirm_instructions_with_payer,
 };
@@ -37,7 +37,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::{Transaction, TransactionError},
 };
-use test_kit::init_logger;
 use tracing::*;
 use utils::{
     assert_one_committee_account_was_undelegated_on_chain,

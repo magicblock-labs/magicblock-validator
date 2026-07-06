@@ -1,20 +1,18 @@
 use std::{collections::HashSet, fmt};
 
-use solana_account::AccountSharedData;
+use solana_account::{AccountBuilder, AccountMode};
 use solana_pubkey::Pubkey;
 
 use crate::{
     cloner::AccountCloneRequest,
-    remote_account_provider::{
-        program_account::LoadedProgram, ResolvedAccountSharedData,
-    },
+    remote_account_provider::program_account::LoadedProgram,
 };
 
 pub(crate) struct AccountWithCompanion {
     pub(crate) pubkey: Pubkey,
-    pub(crate) account: ResolvedAccountSharedData,
+    pub(crate) account: AccountBuilder,
     pub(crate) companion_pubkey: Pubkey,
-    pub(crate) companion_account: Option<ResolvedAccountSharedData>,
+    pub(crate) companion_account: Option<AccountBuilder>,
 }
 
 pub(crate) enum RefreshDecision {
@@ -26,11 +24,11 @@ pub(crate) enum RefreshDecision {
 pub(crate) struct ClassifiedAccounts {
     pub(crate) not_found: Vec<(Pubkey, u64)>,
     pub(crate) plain: Vec<AccountCloneRequest>,
-    pub(crate) owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
-    pub(crate) programs: Vec<(Pubkey, AccountSharedData, u64)>,
+    pub(crate) owned_by_deleg: Vec<(Pubkey, AccountBuilder, u64)>,
+    pub(crate) programs: Vec<(Pubkey, AccountBuilder, u64)>,
     pub(crate) atas: Vec<(
         Pubkey,
-        AccountSharedData,
+        AccountBuilder,
         magicblock_core::token_programs::AtaInfo,
         u64,
     )>,
@@ -50,6 +48,17 @@ pub(crate) struct ResolvedPrograms {
 pub(crate) struct PartitionedNotFound {
     pub(crate) clone_as_empty: Vec<(Pubkey, u64)>,
     pub(crate) not_found: Vec<(Pubkey, u64)>,
+}
+
+pub(crate) struct MaterializedAccount {
+    pub(crate) pubkey: Pubkey,
+    pub(crate) mode: AccountMode,
+}
+
+#[derive(Default)]
+pub(crate) struct FetchAndCloneBatchResult {
+    pub(crate) result: FetchAndCloneResult,
+    pub(crate) materialized: Vec<MaterializedAccount>,
 }
 
 #[derive(Debug, Default, Clone)]

@@ -1,26 +1,25 @@
 use std::time::{Duration, Instant};
 
-use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_metrics::metrics::{
     AccountFetchContext, AccountFetchReason, ChainlinkCompanionFetchKind,
 };
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::AccountBuilder;
 use solana_loader_v3_interface::state::UpgradeableLoaderState;
 use solana_pubkey::Pubkey;
 use tracing::*;
 
 use super::{
-    log_companion_fetch_failure, subscription::release_program_data_subs,
     CompanionFetchLogContext, FetchCloner, ProgramVerifyState,
+    log_companion_fetch_failure, subscription::release_program_data_subs,
 };
 use crate::{
-    cloner::Cloner,
+    cloner::AccountMaterialization,
     remote_account_provider::{
-        program_account::{
-            get_loaderv3_get_program_data_address, ProgramAccountResolver,
-            LOADER_V1, LOADER_V2, LOADER_V3,
-        },
         ChainPubsubClient, ChainRpcClient, SubscriptionReason,
+        program_account::{
+            LOADER_V1, LOADER_V2, LOADER_V3, ProgramAccountResolver,
+            get_loaderv3_get_program_data_address,
+        },
     },
 };
 
@@ -44,17 +43,15 @@ fn programdata_header_len() -> usize {
 /// notifications suppressed within the window are never lost — without
 /// this, an upgrade of a rarely-invoked program could go undetected
 /// indefinitely because no later notification would re-trigger a check.
-fn schedule_deferred_verify<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+fn schedule_deferred_verify<T, U>(
+    this: &FetchCloner<T, U>,
     pubkey: Pubkey,
-    account: &AccountSharedData,
+    account: &AccountBuilder,
     companion_fetch_log_context: &CompanionFetchLogContext,
     elapsed: Duration,
 ) where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     {
         let mut cache = this.program_verify_cache.lock();
@@ -93,37 +90,35 @@ fn schedule_deferred_verify<T, U, V, C>(
 /// programdata header fetch (throttled, with a deferred check covering
 /// suppressed notifications). Any doubt returns `false` so the caller
 /// runs the unchanged full-reload path.
-async fn resolve_update_for_loaded_program<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+async fn resolve_update_for_loaded_program<T, U>(
+    this: &FetchCloner<T, U>,
     pubkey: Pubkey,
-    account: &AccountSharedData,
+    account: &AccountBuilder,
     program_data_pubkey: Pubkey,
     companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> bool
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     let Some(state) = this.program_verify_cache.lock().get(&pubkey).cloned()
     else {
         // Not loaded by this process yet: full load.
         return false;
     };
-    if this.accounts_bank.get_account(&pubkey).is_none() {
+    if this.get_account(&pubkey).is_none() {
         // The bank copy was evicted since the load that populated the
         // cache; drop the stale entry and reload.
         this.program_verify_cache.lock().pop(&pubkey);
         return false;
     }
 
-    if account.owner().eq(&LOADER_V2) {
+    if account.read().owner() == LOADER_V2 {
         // LoaderV2 programs are immutable once deployed.
         trace!(pubkey = %pubkey, "Ignoring update for immutable LoaderV2 program");
         return true;
     }
-    if !account.owner().eq(&LOADER_V3) {
+    if account.read().owner() != LOADER_V3 {
         return false;
     }
     let elapsed = state.verified_at.elapsed();
@@ -149,7 +144,7 @@ where
             &program_data_pubkey,
             0,
             programdata_header_len(),
-            account.remote_slot(),
+            account.read().slot(),
         )
         .await
     {
@@ -183,23 +178,21 @@ where
     }
 }
 
-pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn handle_executable_sub_update_with_context<T, U>(
+    this: &FetchCloner<T, U>,
     pubkey: Pubkey,
-    account: AccountSharedData,
+    account: AccountBuilder,
     companion_fetch_log_context: &CompanionFetchLogContext,
 ) where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     if !this.is_program_allowed(&pubkey) {
         debug!(pubkey = %pubkey, "Skipping clone of program, not in allowed_programs");
         return;
     }
 
-    if account.owner().eq(&LOADER_V1) {
+    if account.read().owner() == LOADER_V1 {
         // This is a program deployed on chain with BPFLoader1111111111111111111111111111111111.
         // By definition it cannot be upgraded, hence we should never get a subscription
         // update for it.
@@ -209,7 +202,7 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
 
     // For LoaderV3 programs we need to fetch the program data account
     let program_data_pubkey = get_loaderv3_get_program_data_address(&pubkey);
-    let account_owner = *account.owner();
+    let account_owner = account.read().owner();
 
     if resolve_update_for_loaded_program(
         this,
@@ -223,7 +216,7 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
         return;
     }
 
-    let acquired_program_data_reason = if account.owner().eq(&LOADER_V3) {
+    let acquired_program_data_reason = if account.read().owner() == LOADER_V3 {
         this.acquire_subscription_reason(
             &program_data_pubkey,
             SubscriptionReason::ProgramData,
@@ -249,20 +242,18 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
         .with_reason(AccountFetchReason::ProgramData);
 
     let (program_account, program_data_account) =
-        if account.owner().eq(&LOADER_V3) {
+        if account.read().owner() == LOADER_V3 {
             match FetchCloner::task_to_fetch_with_program_data(
                 this,
                 pubkey,
-                account.remote_slot(),
+                account.read().slot(),
                 program_data_context,
             )
             .await
             {
                 Ok(Ok(account_with_companion)) => (
-                    account_with_companion.account.into_account_shared_data(),
-                    account_with_companion
-                        .companion_account
-                        .map(|x| x.into_account_shared_data()),
+                    account_with_companion.account,
+                    account_with_companion.companion_account,
                 ),
                 Ok(Err(err)) => {
                     log_companion_fetch_failure(
@@ -300,17 +291,20 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
                 }
             }
         } else {
-            (account, None::<AccountSharedData>)
+            (account, None::<AccountBuilder>)
         };
 
-    let fetched_programdata_header = program_data_account
-        .as_ref()
-        .and_then(|pd| pd.data().get(..programdata_header_len()))
-        .map(|header| header.to_vec());
+    let fetched_programdata_header =
+        program_data_account.as_ref().and_then(|pd| {
+            pd.read()
+                .data()
+                .get(..programdata_header_len())
+                .map(<[u8]>::to_vec)
+        });
 
     let loaded_program = match ProgramAccountResolver::try_new(
         pubkey,
-        *program_account.owner(),
+        program_account.read().owner(),
         Some(program_account),
         program_data_account,
     ) {
@@ -329,7 +323,11 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
         }
     };
     match this
-        .clone_program_with_ownership(loaded_program, program_load_context)
+        .clone_program(
+            loaded_program,
+            program_load_context,
+            AccountMaterialization::Update,
+        )
         .await
     {
         // Only successful loads are remembered: a failure leaves the next
@@ -338,8 +336,7 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
             this.program_verify_cache.lock().put(
                 pubkey,
                 ProgramVerifyState {
-                    programdata_header: account_owner
-                        .eq(&LOADER_V3)
+                    programdata_header: (account_owner == LOADER_V3)
                         .then_some(fetched_programdata_header)
                         .flatten(),
                     verified_at: Instant::now(),

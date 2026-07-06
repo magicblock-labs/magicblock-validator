@@ -5,7 +5,7 @@ use solana_pubkey::Pubkey;
 /// Tracks and provides the current set of subscribed accounts.
 ///
 /// This trait abstracts the source of subscription state, allowing SubMuxClient
-/// to remain decoupled from the specific implementation (e.g., LRU cache).
+/// to remain decoupled from the specific implementation (e.g., subscription set).
 /// The reconnect logic queries this tracker to determine which accounts to
 /// resubscribe when a client reconnects after being disconnected.
 ///

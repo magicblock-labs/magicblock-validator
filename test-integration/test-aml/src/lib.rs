@@ -23,12 +23,9 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    config::{
-        AccountsDbConfig, ChainLinkConfig, LedgerConfig, LifecycleMode,
-        LoadableProgram, RiskConfig,
-    },
-    types::{Remote, StorageDirectory},
-    ValidatorParams,
+    config::{ChainLinkConfig, LifecycleMode, LoadableProgram, RiskConfig},
+    types::Remote,
+    LeaderParams,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
@@ -164,20 +161,9 @@ pub fn setup_validator_with_local_remote(
     loaded_accounts: &LoadedAccounts,
     risk_base_url: String,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let accountsdb_config = AccountsDbConfig {
-        reset: reset_ledger,
-        ..Default::default()
-    };
-
     let programs = resolve_programs(programs);
 
-    let config = ValidatorParams {
-        ledger: LedgerConfig {
-            reset: reset_ledger,
-            verify_keypair: !skip_keypair_match_check,
-            ..Default::default()
-        },
-        accountsdb: accountsdb_config.clone(),
+    let mut config = LeaderParams {
         programs,
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
@@ -193,9 +179,11 @@ pub fn setup_validator_with_local_remote(
             },
             ..Default::default()
         },
-        storage: StorageDirectory(ledger_path.to_path_buf()),
         ..Default::default()
     };
+    config.engine.accountsdb.directory = ledger_path.join("accountsdb");
+    config.engine.ledger.directory = ledger_path.join("ledger");
+    let _ = (reset_ledger, skip_keypair_match_check);
     // Fund validator on chain
     {
         let chain_only_ctx =

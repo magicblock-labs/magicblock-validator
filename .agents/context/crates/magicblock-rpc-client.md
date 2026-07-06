@@ -28,7 +28,7 @@ Queue an update to this guide for the weekly documentation-maintenance task when
 - `get_multiple_accounts*`, lookup-table helpers, transaction log/CU helpers, or account-not-found handling;
 - retry and error-mapping traits/functions in `src/utils.rs`;
 - metrics emitted through `magicblock-metrics` for RPC-client confirmation paths;
-- validation commands or integration suites relevant to base-layer send/confirm behavior.
+- validation commands relevant to base-layer send/confirm behavior.
 
 
 For the general documentation-update rule, see .agents/memory/agent-memory-and-docs.md.
@@ -47,7 +47,6 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` | Sends delivery/preparation transactions with `ensure_committed()`. |
 | `magicblock-committor-service/src/intent_executor/task_info_fetcher.rs` | Fetches committed accounts with `get_multiple_accounts_with_config` and `min_context_slot`. |
 | `magicblock-table-mania/src/lookup_table_rc.rs` and `magicblock-table-mania/src/manager.rs` | Create/extend/deactivate/close ALTs, fetch lookup-table metadata/addresses, and choose send confirmation policy. |
-| `magicblock-api/src/domain_registry_manager.rs` | Uses `MagicblockRpcClient` for validator domain-registry transaction submission. |
 | `magicblock-account-cloner/src/util.rs` | Uses static transaction log/CU extraction helpers for clone diagnostics. |
 
 Main consumers:
@@ -55,8 +54,7 @@ Main consumers:
 - `magicblock-committor-service` for commit/undelegation/action transaction delivery, recovery-related slot reads, task-info fetching, and post-send metrics;
 - `magicblock-table-mania` for ALT lifecycle reads and transactions;
 - `magicblock-account-cloner` for diagnostic helpers around transaction logs and compute units;
-- `magicblock-api` and `magicblock-validator-admin` for operator/admin transaction helpers;
-- integration suites `test-integration/test-committor-service` and `test-integration/test-table-mania`.
+- `magicblock-validator-admin` for operator/admin transaction helpers;
 
 ## Public API shape / Main public types and APIs
 
@@ -295,7 +293,6 @@ Start with `magicblock-rpc-client/src/signature_confirmer.rs` metric calls and `
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-rpc-client`.
-- Relevant integration suites: committor and TableMania suites for confirmation, settlement, or lookup-table behavior; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance/security validation intent: report effects on RPC call counts, confirmation latency, waiter batching, websocket fallback rates, and task spawning; preserve explicit send/confirm semantics and transaction-error visibility.
 
 
@@ -305,5 +302,4 @@ Start with `magicblock-rpc-client/src/signature_confirmer.rs` metric calls and `
 - `.agents/context/crates/magicblock-committor-service.md` — primary send/confirm, task-info, and delivery-preparation consumer.
 - `.agents/context/crates/magicblock-table-mania.md` — ALT transaction and finalized remote-read consumer.
 - `.agents/context/crates/magicblock-account-cloner.md` — transaction diagnostic helper consumer.
-- `.agents/context/crates/magicblock-api.md` — domain-registry and validator wiring consumers.
-- `test-integration/test-committor-service/` and `test-integration/test-table-mania/` — integration coverage for settlement and ALT behavior.
+- `.agents/context/crates/mbv-leader.md` — leader-side settlement and admin consumers.

@@ -23,8 +23,8 @@ index-size = 2048576
 max-snapshots = 7
 
 [ledger]
-reset = true
 block-time = "50ms"
+reset = true
 
 [[programs]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"

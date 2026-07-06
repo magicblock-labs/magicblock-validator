@@ -2,55 +2,50 @@ use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcProgramAccountsConfig;
 
 use super::prelude::*;
-use crate::{
-    encoder::{AccountEncoder, ProgramAccountEncoder},
-    some_or_err,
-    utils::ProgramFilters,
-};
+use crate::encoder::{AccountEncoder, ProgramAccountEncoder};
 
 impl WsDispatcher {
-    /// Handles the `programSubscribe` WebSocket RPC request.
-    ///
-    /// Registers the current WebSocket connection to receive notifications for all
-    /// accounts owned by the specified program. The stream of notifications can be
-    /// refined using server-side data filters and a custom data encoding, provided
-    /// in an optional configuration object.
     pub(crate) async fn program_subscribe(
         &mut self,
-        request: &mut JsonRequest,
+        request: &JsonRequest,
     ) -> RpcResult<SubResult> {
-        let (pubkey, config) = parse_params!(
-            request.params()?,
-            Serde32Bytes,
-            RpcProgramAccountsConfig
-        );
-
-        let pubkey = some_or_err!(pubkey);
-        let config = config.unwrap_or_default();
+        let pubkey = request.required::<Serde32Bytes>(0)?.into();
+        let config = request
+            .optional::<RpcProgramAccountsConfig>(1)?
+            .unwrap_or_default();
 
         let encoding = config
             .account_config
             .encoding
             .unwrap_or(UiAccountEncoding::Base58);
 
-        let filters = ProgramFilters::from(config.filters);
+        let filters = config.filters.unwrap_or_default();
+        for filter in &filters {
+            filter.verify().map_err(crate::RpcError::invalid_params)?;
+        }
         let encoder = AccountEncoder {
             encoding,
             data_slice: config.account_config.data_slice,
         };
-
-        // Bundle the encoding and filtering options for the subscription.
         let encoder = ProgramAccountEncoder { encoder, filters };
 
-        let handle = self
-            .subscriptions
-            .subscribe_to_program(pubkey, encoder, self.chan.clone())
-            .await;
+        let id = next_subid();
+        let mut rx = self.engine.accounts().subscribe_program(pubkey).await;
+        let tx = self.chan.tx.clone();
+        let handle = tokio::spawn(async move {
+            while let Ok((pubkey, account)) = rx.recv().await {
+                let slot = account.slot();
+                let Some(bytes) = encoder.encode(slot, &(pubkey, account), id)
+                else {
+                    continue;
+                };
+                if tx.send(bytes).await.is_err() {
+                    break;
+                }
+            }
+        });
+        self.register(id, handle);
 
-        let result = SubResult::SubId(handle.id);
-        // Store the cleanup handle to manage the subscription's lifecycle.
-        self.register_unsub(handle);
-
-        Ok(result)
+        Ok(SubResult::SubId(id))
     }
 }

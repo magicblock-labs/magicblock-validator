@@ -1,9 +1,8 @@
-use integration_test_tools::IntegrationTestContext;
+use integration_test_tools::{init_logger, IntegrationTestContext};
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
     signer::Signer,
 };
-use test_kit::init_logger;
 use tracing::*;
 
 fn random_pubkey() -> Pubkey {
