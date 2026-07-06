@@ -1,0 +1,32 @@
+# Bare engine verifier configuration.
+# Environment overrides use MBV_VERIFIER_ with __ between nested fields.
+
+[metrics]
+# Use a different address when running a leader on the same host.
+address = "127.0.0.1:9001"
+
+[engine.authority]
+# Local identity used to authenticate this verifier to the leader.
+local = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ"
+
+[engine.accountsdb]
+directory = "magicblock-verifier-storage/accountsdb"
+lru-capacity = 5000
+
+[engine.blockstore]
+blocktime = "400ms"
+superblock = 72000
+
+[engine.ledger]
+directory = "magicblock-verifier-storage"
+size-limit = 536_870_912
+
+[engine.replication]
+upstream-address = "127.0.0.1:10000"
+# Replace with the leader's public authority.
+upstream-authority = "BPFLoaderUpgradeab1e11111111111111111111111"
+
+# Programs must match the leader configuration.
+# [[programs]]
+# id = "..."
+# path = "..."

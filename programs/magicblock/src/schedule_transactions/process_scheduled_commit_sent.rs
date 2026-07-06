@@ -4,7 +4,6 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use magicblock_core::coordination_mode;
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
@@ -12,12 +11,11 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::transaction::TransactionContext;
 
 use crate::{
     errors::custom_error_codes,
-    utils::accounts::get_instruction_pubkey_with_idx,
-    validator::effective_validator_authority_id,
+    utils::accounts::get_instruction_pubkey_with_idx, validator::authority,
 };
 
 /// Error code returned when an intent execution failed.
@@ -118,16 +116,6 @@ pub fn process_scheduled_commit_sent(
     transaction_context: &TransactionContext,
     commit_id: u64,
 ) -> Result<(), InstructionError> {
-    let mode = coordination_mode::CoordinationMode::current();
-    if !mode.should_schedule_intents() {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommitSent: skipped (mode={:?})",
-            mode
-        );
-        return Ok(());
-    }
-
     const PROGRAM_IDX: u16 = 0;
     const VALIDATOR_IDX: u16 = 1;
 
@@ -146,12 +134,13 @@ pub fn process_scheduled_commit_sent(
     // Assert validator identity matches
     let validator_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let validator_authority_id = effective_validator_authority_id();
+    let validator_authority_id = authority();
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: provided validator account {} does not match validator identity {}",
-            validator_pubkey, validator_authority_id
+            validator_pubkey,
+            validator_authority_id
         );
         return Err(InstructionError::IncorrectAuthority);
     }
@@ -266,7 +255,7 @@ pub fn process_scheduled_commit_sent(
 #[cfg(test)]
 mod tests {
     use solana_account::AccountSharedData;
-    use solana_instruction::{error::InstructionError, Instruction};
+    use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
     use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
     use solana_signer::Signer;

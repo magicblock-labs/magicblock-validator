@@ -75,7 +75,7 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-publish-v000"
-          rust_toolchain_release: "1.94.1"
+          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install target
@@ -151,7 +151,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --features tui --target ${{ matrix.build.TARGET }}
+          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }} -p magicblock-validator -p magicblock-verifier -p magicblock -p magicblock-validator-tui
 
       - name: Check versions are aligned
         shell: bash
@@ -163,7 +163,6 @@ jobs:
         run: |
           cd magicblock-validator
           bin="ephemeral-validator"
-          mv target/${{ matrix.build.TARGET }}/release/magicblock-validator target/${{ matrix.build.TARGET }}/release/${bin}
           node_os=$(echo "${{ matrix.build.NAME }}" | cut -d '-' -f1)
           export node_os
           node_arch=$(echo "${{ matrix.build.NAME }}" | cut -d '-' -f2)
@@ -175,21 +174,56 @@ jobs:
           envsubst < .github/packages/npm-package/package.json.tmpl > "${node_pkg}/package.json"
           cat "${node_pkg}/package.json"
           echo "bin_name=${bin}" >> $GITHUB_ENV
-          cp "target/${{ matrix.build.TARGET }}/release/${bin}" "${node_pkg}/bin"
-          release_name="ephemeral-validator-${{ matrix.build.NAME }}"
-          echo "release_name=${release_name}" >> $GITHUB_ENV
-          mv "target/${{ matrix.build.TARGET }}/release/${bin}" "target/${{ matrix.build.TARGET }}/release/${release_name}"
+          cp "target/${{ matrix.build.TARGET }}/release/magicblock-validator" "${node_pkg}/bin/${bin}"
+          for artifact in magicblock-validator magicblock-verifier magicblock magicblock-validator-tui; do
+            cp \
+              "target/${{ matrix.build.TARGET }}/release/${artifact}" \
+              "target/${{ matrix.build.TARGET }}/release/${artifact}-${{ matrix.build.NAME }}"
+          done
 
-      - name: Publish binary to GitHub release
+      - name: Publish magicblock-validator to GitHub release
         if: ${{ env.DRY_RUN == 'false' }}
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/${{ env.release_name }}
+          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/magicblock-validator-${{ matrix.build.NAME }}
           overwrite: true
           tag: "${{ env.RELEASE_VERSION }}"
           release_name: "${{ env.RELEASE_VERSION }}"
-          asset_name: "${{ env.release_name }}"
+          asset_name: "magicblock-validator-${{ matrix.build.NAME }}"
+
+      - name: Publish magicblock-verifier to GitHub release
+        if: ${{ env.DRY_RUN == 'false' }}
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/magicblock-verifier-${{ matrix.build.NAME }}
+          overwrite: true
+          tag: "${{ env.RELEASE_VERSION }}"
+          release_name: "${{ env.RELEASE_VERSION }}"
+          asset_name: "magicblock-verifier-${{ matrix.build.NAME }}"
+
+      - name: Publish magicblock to GitHub release
+        if: ${{ env.DRY_RUN == 'false' }}
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/magicblock-${{ matrix.build.NAME }}
+          overwrite: true
+          tag: "${{ env.RELEASE_VERSION }}"
+          release_name: "${{ env.RELEASE_VERSION }}"
+          asset_name: "magicblock-${{ matrix.build.NAME }}"
+
+      - name: Publish magicblock-validator-tui to GitHub release
+        if: ${{ env.DRY_RUN == 'false' }}
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/magicblock-validator-tui-${{ matrix.build.NAME }}
+          overwrite: true
+          tag: "${{ env.RELEASE_VERSION }}"
+          release_name: "${{ env.RELEASE_VERSION }}"
+          asset_name: "magicblock-validator-tui-${{ matrix.build.NAME }}"
 
       - name: Publish the NPM package
         shell: bash

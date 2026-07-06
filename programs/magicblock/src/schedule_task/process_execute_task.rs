@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::{pda::crank_signer_pda, CRANK_PROGRAM_ID};
-use solana_instruction::{error::InstructionError, Instruction};
+use magicblock_magic_program_api::{CRANK_PROGRAM_ID, pda::crank_signer_pda};
+use solana_instruction::{Instruction, error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
@@ -9,7 +9,7 @@ use solana_pubkey::Pubkey;
 use crate::{
     schedule_task::validate_cranks_instructions,
     utils::accounts::get_instruction_pubkey_with_idx,
-    validator::effective_validator_authority_id,
+    validator::authority as engine_authority,
 };
 
 pub(crate) fn process_execute_crank(
@@ -55,7 +55,7 @@ pub(crate) fn process_execute_crank(
             transaction_context,
             VALIDATOR_IDX,
         )?;
-        let validator_authority = effective_validator_authority_id();
+        let validator_authority = engine_authority();
         if validator_pubkey != &validator_authority {
             ic_msg!(
                 invoke_context,
@@ -129,6 +129,7 @@ mod test {
         let authority = Pubkey::new_unique();
         let crank_signer = crank_signer_pda(&authority);
         let ix = InstructionUtils::execute_task_instruction(
+            validator_authority_id(),
             authority,
             vec![InstructionUtils::noop_instruction(0)],
         );
@@ -157,6 +158,7 @@ mod test {
         let crank_signer = crank_signer_pda(&authority);
         let payer = Pubkey::new_unique();
         let ix = InstructionUtils::execute_task_instruction(
+            validator_authority_id(),
             authority,
             vec![complex_ix(payer)],
         );
@@ -188,6 +190,7 @@ mod test {
         let authority = Pubkey::new_unique();
         let crank_signer = crank_signer_pda(&authority);
         let ix = InstructionUtils::execute_task_instruction(
+            validator_authority_id(),
             authority,
             vec![InstructionUtils::noop_instruction(0)],
         );
@@ -215,6 +218,7 @@ mod test {
         let authority = Pubkey::new_unique();
         let crank_signer = crank_signer_pda(&authority);
         let ix = InstructionUtils::execute_task_instruction(
+            validator_authority_id(),
             authority,
             vec![InstructionUtils::noop_instruction(0)],
         );
@@ -243,6 +247,7 @@ mod test {
         let authority = Pubkey::new_unique();
         let crank_signer = crank_signer_pda(&authority);
         let mut ix = InstructionUtils::execute_task_instruction(
+            validator_authority_id(),
             authority,
             vec![InstructionUtils::noop_instruction(0)],
         );
@@ -270,6 +275,7 @@ mod test {
         init_validator_authority(Keypair::new());
         let authority = Pubkey::new_unique();
         let ix = InstructionUtils::execute_task_instruction(
+            validator_authority_id(),
             authority,
             vec![InstructionUtils::noop_instruction(0)],
         );
@@ -299,6 +305,7 @@ mod test {
         let authority = Pubkey::new_unique();
         let crank_signer = crank_signer_pda(&authority);
         let ix = InstructionUtils::execute_task_instruction(
+            validator_authority_id(),
             authority,
             vec![complex_ix(payer)],
         );
@@ -355,6 +362,7 @@ mod test {
             inner_ix.accounts[0].is_writable = writable;
             inner_ix.accounts[0].pubkey = pubkey;
             let ix = InstructionUtils::execute_task_instruction(
+                validator_authority_id(),
                 authority,
                 vec![inner_ix.clone()],
             );

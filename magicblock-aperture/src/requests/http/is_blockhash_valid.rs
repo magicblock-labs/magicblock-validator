@@ -1,19 +1,22 @@
-use super::prelude::*;
+use super::HandlerResult;
+use crate::{
+    requests::{
+        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
+        payload::ResponsePayload,
+    },
+    server::http::dispatch::HttpDispatcher,
+};
 
 impl HttpDispatcher {
-    /// Handles the `isBlockhashValid` RPC request.
-    ///
-    /// Checks if a given blockhash is still valid. Validity is determined by the
-    /// blockhash's presence in the validator's time-limited `BlocksCache`.
     pub(crate) fn is_blockhash_valid(
         &self,
-        request: &mut JsonRequest,
+        request: &JsonRequest,
     ) -> HandlerResult {
-        let blockhash_bytes = parse_params!(request.params()?, Serde32Bytes);
-        let blockhash = some_or_err!(blockhash_bytes);
+        let blockhash: solana_hash::Hash =
+            request.required::<Serde32Bytes>(0)?.into();
 
-        let valid = self.blocks.contains(&blockhash);
-        let slot = self.blocks.block_height();
+        let valid = self.engine.blocks().is_valid(&blockhash);
+        let slot = self.engine.blocks().latest().slot;
 
         Ok(ResponsePayload::encode(&request.id, valid, slot))
     }

@@ -6,7 +6,7 @@ Replicate the `feat/tui-feature` TUI without coupling it to validator internals.
 
 ## Implemented Option (Recommended): RPC/WS Client
 
-- New standalone binary crate: `tools/magicblock-tui-client`
+- Standalone binary crate: `bins/mbv-tui`
 - Data sources:
   - WebSocket `slotSubscribe` for slot header updates
   - HTTP RPC `getBlock` (driven by incoming slots) for transaction list (`signature`, `slot`, `success`)
@@ -15,7 +15,7 @@ Replicate the `feat/tui-feature` TUI without coupling it to validator internals.
 - Characteristics:
   - Works against any compatible validator endpoint
   - No validator-process embedding required
-  - No internal channels, no compile-time coupling to `magicblock-api`/`magicblock-processor`
+  - No internal channels or compile-time coupling to leader orchestration
 
 ## Geyser Plugin Option (Less Preferable)
 
@@ -32,16 +32,9 @@ Given the current requirements, RPC/WS is the best default.
 
 ## Packaging Strategy
 
-### Same binary with feature-gate
-
-Feasible and now implemented:
-- `magicblock-validator` now has a `tui` feature which launches the TUI after validator startup.
-- Invocation: `cargo run --features tui --bin magicblock-validator`
-- The default headless mode is unchanged when `tui` is not enabled.
-
 ### Independent binary (chosen)
 
-Still the best fit for strict externalization:
+The TUI is distributed only as `mbv-tui`:
 - Clean separation of concerns
 - Decoupled release cadence
 - Can monitor remote validators from a separate host

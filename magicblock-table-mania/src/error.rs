@@ -14,7 +14,9 @@ pub enum TableManiaError {
     #[error("Cannot extend deactivated table {0}.")]
     CannotExtendDeactivatedTable(Pubkey),
 
-    #[error("Can only use one authority for a TableMania instance. {0} does not match {1}.")]
+    #[error(
+        "Can only use one authority for a TableMania instance. {0} does not match {1}."
+    )]
     InvalidAuthority(Pubkey, Pubkey),
 
     #[error("Can only extend by {0} pubkeys at a time, but was provided {1}")]

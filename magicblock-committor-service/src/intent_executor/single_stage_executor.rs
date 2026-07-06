@@ -9,6 +9,7 @@ use tracing::{error, instrument};
 
 use crate::{
     intent_executor::{
+        IntentExecutionReport,
         error::{
             IntentExecutorError, IntentExecutorResult,
             TransactionStrategyExecutionError,
@@ -19,10 +20,9 @@ use crate::{
             handle_actions_result, handle_commit_id_error,
             handle_undelegation_error, prepare_and_execute_strategy,
         },
-        IntentExecutionReport,
     },
     persist::{IntentPersister, IntentPersisterImpl},
-    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
+    tasks::{BaseTaskImpl, FinalizeTask, task_strategist::TransactionStrategy},
     transaction_preparator::TransactionPreparator,
 };
 

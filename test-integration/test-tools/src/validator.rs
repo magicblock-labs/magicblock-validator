@@ -8,7 +8,7 @@ use std::{
 };
 
 use magicblock_config::{
-    config::LoadableProgram, types::BindAddress, ValidatorParams,
+    config::LoadableProgram, types::BindAddress, LeaderParams,
 };
 use rand::{thread_rng, Rng};
 use solana_commitment_config::CommitmentConfig;
@@ -37,14 +37,23 @@ pub fn start_magic_block_validator_with_config(
         ..
     } = test_runner_paths;
 
-    let port = rpc_port_from_config(config_path);
+    let rpc_port = rpc_port_from_config(config_path);
+    let metrics_port = resolve_port("127.0.0.1".parse().unwrap(), &[rpc_port]);
+    let replication_port =
+        resolve_port("127.0.0.1".parse().unwrap(), &[rpc_port, metrics_port]);
+    let storage = tempfile::Builder::new()
+        .prefix("mbv-integration-")
+        .tempdir()
+        .expect("failed to create validator storage")
+        .keep();
     let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
 
     // In CI we ship a prebuilt validator binary as an artifact so we never
     // pay for `cargo build` here. Locally we keep the convenient
     // `cargo build` + `cargo run` flow so source changes are picked up.
-    let prebuilt =
-        std::env::var("MAGICBLOCK_VALIDATOR_BIN").ok().filter(|p| {
+    let prebuilt = std::env::var("MAGICBLOCK_VALIDATOR_BIN")
+        .ok()
+        .filter(|p| {
             let exists = Path::new(p).is_file();
             if !exists {
                 eprintln!(
@@ -61,7 +70,7 @@ pub fn start_magic_block_validator_with_config(
         c
     } else {
         let mut build_cmd = process::Command::new("cargo");
-        build_cmd.arg("build");
+        build_cmd.args(["build", "-p", "magicblock-validator"]);
         let build_res = build_cmd.current_dir(root_dir.clone()).output();
         if build_res.is_ok_and(|output| !output.status.success()) {
             eprintln!("Failed to build validator");
@@ -69,7 +78,8 @@ pub fn start_magic_block_validator_with_config(
         }
 
         let mut c = process::Command::new("cargo");
-        c.arg("run").arg("--").arg(config_path);
+        c.args(["run", "-p", "magicblock-validator", "--"])
+            .arg(config_path);
         c
     };
 
@@ -77,18 +87,28 @@ pub fn start_magic_block_validator_with_config(
         std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
         .env("RUST_LOG_STYLE", rust_log_style)
-        .env("MBV_VALIDATOR__KEYPAIR", keypair_base58.clone())
+        .env("MBV_ENGINE__AUTHORITY__LOCAL", keypair_base58)
+        .env("MBV_METRICS__ADDRESS", format!("127.0.0.1:{metrics_port}"))
+        .env(
+            "MBV_ENGINE__REPLICATION__BIND_ADDRESS",
+            format!("127.0.0.1:{replication_port}"),
+        )
+        .env("MBV_ENGINE__LEDGER__DIRECTORY", storage.join("ledger"))
+        .env(
+            "MBV_ENGINE__ACCOUNTSDB__DIRECTORY",
+            storage.join("accountsdb"),
+        )
         .current_dir(root_dir);
 
-    eprintln!("Starting validator with {:?}", command);
     eprintln!(
-        "Setting validator keypair to {} ({})",
-        loaded_chain_accounts.validator_authority(),
-        keypair_base58
+        "Starting magicblock-validator from {} with config {} and authority {}",
+        prebuilt.as_deref().unwrap_or("cargo"),
+        config_path.display(),
+        loaded_chain_accounts.validator_authority()
     );
 
     let validator = command.spawn().expect("Failed to start validator");
-    wait_for_validator(validator, port)
+    wait_for_validator(validator, rpc_port)
 }
 
 pub fn start_test_validator_with_config(
@@ -384,22 +404,32 @@ fn resolve_port(bind_ip: IpAddr, exclude: &[u16]) -> u16 {
 /// run in parallel.
 /// Then uses that config to start the validator.
 pub fn start_magicblock_validator_with_config_struct(
-    config: ValidatorParams,
+    config: LeaderParams,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>, u16) {
     let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
     let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
+    let replication_port = resolve_port(
+        config.engine.replication.bind_address.ip(),
+        &[rpc_port, metrics_port],
+    );
 
     let mut config = config.clone();
     config.aperture.listen =
         BindAddress(SocketAddr::new(config.aperture.listen.ip(), rpc_port));
     config.metrics.address =
         BindAddress(SocketAddr::new(config.metrics.address.ip(), metrics_port));
+    config.engine.replication.bind_address = BindAddress(SocketAddr::new(
+        config.engine.replication.bind_address.ip(),
+        replication_port,
+    ));
 
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
+    config.engine.ledger.directory = temp_dir.join("ledger");
+    config.engine.accountsdb.directory = temp_dir.join("accountsdb");
     let config_path = temp_dir.join("config.toml");
-    let config_toml = config.to_string();
+    let config_toml = toml::to_string(&config).unwrap();
     fs::write(&config_path, config_toml).unwrap();
 
     let root_dir = Path::new(&workspace_dir)
@@ -424,23 +454,34 @@ pub fn start_magicblock_validator_with_config_struct(
 }
 
 pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
-    config: ValidatorParams,
+    config: LeaderParams,
     loaded_chain_accounts: &LoadedAccounts,
     default_tmpdir: TempDir,
     temp_dir: PathBuf,
 ) -> (TempDir, Option<process::Child>, u16) {
     let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
     let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
+    let replication_port = resolve_port(
+        config.engine.replication.bind_address.ip(),
+        &[rpc_port, metrics_port],
+    );
 
     let mut config = config.clone();
     config.aperture.listen =
         BindAddress(SocketAddr::new(config.aperture.listen.ip(), rpc_port));
     config.metrics.address =
         BindAddress(SocketAddr::new(config.metrics.address.ip(), metrics_port));
+    config.engine.replication.bind_address = BindAddress(SocketAddr::new(
+        config.engine.replication.bind_address.ip(),
+        replication_port,
+    ));
+
+    config.engine.ledger.directory = temp_dir.join("ledger");
+    config.engine.accountsdb.directory = temp_dir.join("accountsdb");
 
     let workspace_dir = resolve_workspace_dir();
     let config_path = temp_dir.join("config.toml");
-    let config_toml = config.to_string();
+    let config_toml = toml::to_string(&config).unwrap();
     fs::write(&config_path, config_toml).unwrap();
 
     let root_dir = Path::new(&workspace_dir)
@@ -465,12 +506,28 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
 }
 
 pub fn cleanup(validator: &mut Child) {
-    let _ = validator.kill().inspect_err(|e| {
-        eprintln!("ERR: Failed to kill validator: {:?}", e);
-    });
-    let _ = validator.wait().inspect_err(|e| {
-        eprintln!("ERR: Failed to reap validator: {:?}", e);
-    });
+    stop_validator(validator, Duration::from_secs(10));
+}
+
+pub fn stop_validator(validator: &mut Child, timeout: Duration) {
+    if validator.try_wait().ok().flatten().is_some() {
+        return;
+    }
+
+    let _ = process::Command::new("kill")
+        .args(["-TERM", &validator.id().to_string()])
+        .status();
+
+    let started = std::time::Instant::now();
+    while started.elapsed() < timeout {
+        if validator.try_wait().ok().flatten().is_some() {
+            return;
+        }
+        sleep(Duration::from_millis(50));
+    }
+
+    let _ = validator.kill();
+    let _ = validator.wait();
 }
 
 /// Directories

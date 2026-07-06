@@ -1,11 +1,11 @@
 //! Validation helpers for ephemeral account instructions.
 
 use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
-use solana_account::ReadableAccount;
+use solana_account::{AccountMode, ReadableAccount};
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::transaction::TransactionContext;
 
 use super::{EPHEMERAL_IDX, SPONSOR_IDX, VAULT_IDX};
 use crate::utils::{
@@ -102,7 +102,7 @@ pub(super) fn validate_existing_ephemeral<'a, 'ix_data>(
         accounts::get_instruction_account_with_idx(tc, EPHEMERAL_IDX)?;
     let ep_ref = ephemeral.borrow()?;
 
-    if !ep_ref.ephemeral() {
+    if !ep_ref.is(AccountMode::Ephemeral) {
         return Err(InstructionError::InvalidAccountData);
     }
     if ep_ref.owner() != caller_program_id {

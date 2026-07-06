@@ -1,7 +1,4 @@
-use std::{
-    sync::atomic::{AtomicU32, Ordering},
-    time::Duration,
-};
+use std::time::Duration;
 
 use fastwebsockets::{
     CloseCode, Frame, OpCode, Payload, WebSocket, WebSocketError,
@@ -14,11 +11,10 @@ use tokio::{
     time::{self, Instant},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument};
 
 use super::{
-    dispatch::{WsDispatchResult, WsDispatcher},
     ConnectionState,
+    dispatch::{WsDispatchResult, WsDispatcher},
 };
 use crate::{
     error::RpcError,
@@ -28,8 +24,6 @@ use crate::{
 
 /// A type alias for the underlying WebSocket stream provided by `fastwebsockets`.
 type WebsocketStream = WebSocket<TokioIo<Upgraded>>;
-/// A type alias for a unique identifier assigned to each WebSocket connection.
-pub(crate) type ConnectionID = u32;
 
 /// Manages the lifecycle and bi-directional communication of a single WebSocket connection.
 ///
@@ -58,16 +52,11 @@ impl ConnectionHandler {
     /// This function generates a unique ID and creates a dedicated MPSC channel for this
     /// connection, which is used to push subscription notifications from the EventProcessor.
     pub(super) fn new(ws: WebsocketStream, state: ConnectionState) -> Self {
-        static CONNECTION_COUNTER: AtomicU32 = AtomicU32::new(0);
-        let id = CONNECTION_COUNTER.fetch_add(1, Ordering::Relaxed);
-
-        // Create a dedicated channel for this connection to receive updates.
         let (tx, updates_rx) = mpsc::channel(4096);
-        let chan = WsConnectionChannel { id, tx };
+        let chan = WsConnectionChannel { tx };
 
         // The dispatcher is tied to this specific connection via its channel.
-        let dispatcher =
-            WsDispatcher::new(state.subscriptions, state.transactions, chan);
+        let dispatcher = WsDispatcher::new(state.engine, chan);
         Self {
             dispatcher,
             cancel: state.cancel,
@@ -86,7 +75,6 @@ impl ConnectionHandler {
     /// - **Shutdown**: Listens for the global server shutdown signal.
     ///
     /// The loop terminates upon any I/O error, an inactivity timeout, or a shutdown signal.
-    #[instrument(skip(self), fields(connection_id = self.dispatcher.connection_id()))]
     pub(super) async fn run(mut self) {
         const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
         const PING_PERIOD: Duration = Duration::from_secs(30);
@@ -116,7 +104,7 @@ impl ConnectionHandler {
 
                     // Parse the JSON RPC request.
                     let parsed = json::from_slice(&frame.payload).map_err(RpcError::parse_error);
-                    let mut request = match parsed {
+                    let request = match parsed {
                         Ok(r) => r,
                         Err(error) => {
                             let _ = self.report_failure(None, error).await;
@@ -125,7 +113,7 @@ impl ConnectionHandler {
                     };
 
                     // Dispatch the request and report the outcome to the client.
-                    let success = match self.dispatcher.dispatch(&mut request).await {
+                    let success = match self.dispatcher.dispatch(&request).await {
                         Ok(r) => self.report_success(r).await,
                         Err(e) => self.report_failure(Some(&request.id), e).await,
                     };
@@ -154,15 +142,12 @@ impl ConnectionHandler {
                     next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
                 }
 
-                // 3. Handle a new subscription notification from the server backend.
+                // 3. Handle a new subscription notification from a forwarding task.
                 Some(update) = self.updates_rx.recv() => {
                     if self.send(update.as_ref()).await.is_err() {
                         break;
                     }
                 }
-
-                // 4. Run cleanup logic for this connection (e.g., an expiring sub).
-                _ = self.dispatcher.cleanup() => {}
 
                 else => {
                     break;
@@ -199,8 +184,6 @@ impl ConnectionHandler {
         payload: impl Into<Payload<'_>>,
     ) -> Result<(), WebSocketError> {
         let frame = Frame::text(payload.into());
-        self.ws.write_frame(frame).await.inspect_err(
-            |e| debug!(error = ?e, "Failed to send WebSocket frame"),
-        )
+        self.ws.write_frame(frame).await
     }
 }

@@ -1,7 +1,7 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     path::Path,
-    sync::{atomic::AtomicU64, Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicU64},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -21,7 +21,7 @@ use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::{
-        db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
+        BroadcastedIntentExecutionResult, IntentExecutionManager, db::DummyDB,
     },
     intent_executor::{
         intent_executor_factory::ExecutorConfig,
@@ -102,6 +102,7 @@ impl CommittorProcessor {
             RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
         ));
         let commits_scheduler = IntentExecutionManager::new(
+            authority.insecure_clone(),
             magic_block_rpc_client.clone(),
             DummyDB::new(),
             task_info_fetcher.clone(),
@@ -291,7 +292,7 @@ impl CommittorProcessor {
             return Err(err);
         }
 
-        let results = join_all(receivers.into_iter())
+        let results = join_all(receivers)
             .await
             .into_iter()
             .collect::<Result<Vec<_>, RecvError>>()?;

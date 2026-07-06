@@ -4,13 +4,17 @@ use std::{
     time::Duration,
 };
 
-use magicblock_metrics::metrics::TRANSACTION_COUNT;
-use scc::{ebr::Guard, TreeIndex};
+use magicblock_core::Slot;
+use scc::{Guard, TreeIndex};
 use solana_rpc_client_api::response::RpcPerfSample;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
-use super::prelude::*;
+use super::HandlerResult;
+use crate::{
+    requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
+    server::http::dispatch::HttpDispatcher,
+};
 
 /// 60 seconds per sample
 const PERIOD_SECS: u64 = 60;
@@ -36,10 +40,9 @@ struct Sample {
 impl HttpDispatcher {
     pub(crate) fn get_recent_performance_samples(
         &self,
-        request: &mut JsonRequest,
+        request: &JsonRequest,
     ) -> HandlerResult {
-        let count = parse_params!(request.params()?, usize);
-        let mut count: usize = some_or_err!(count);
+        let mut count = request.required::<usize>(0)?;
 
         // Cap request at max history size (12h)
         count = count.min(MAX_PERF_SAMPLES);
@@ -67,24 +70,19 @@ impl HttpDispatcher {
     ) {
         let mut interval = time::interval(Duration::from_secs(PERIOD_SECS));
 
-        let mut last_slot = self.blocks.block_height();
-        let mut last_tx_count = TRANSACTION_COUNT.get();
-
+        let mut last_slot = self.engine.blocks().latest().slot;
         loop {
             tokio::select! {
                 _ = interval.tick() => {
                     // Capture current state
-                    let current_slot = self.blocks.block_height();
-                    let current_tx_count = TRANSACTION_COUNT.get();
-
+                    let current_slot = self.engine.blocks().latest().slot;
                     // Calculate Deltas (Activity within the last 60s)
                     let slots_delta = current_slot.saturating_sub(last_slot).max(1);
-                    let tx_delta = current_tx_count.saturating_sub(last_tx_count);
 
                     let index = PERF_SAMPLES.get_or_init(TreeIndex::default);
                     let sample = Sample {
                         slots: slots_delta,
-                        transactions: tx_delta,
+                        transactions: 0,
                     };
                     let _ = index.insert_async(Reverse(current_slot), sample).await;
 
@@ -102,7 +100,6 @@ impl HttpDispatcher {
 
                     // Update baseline for next tick
                     last_slot = current_slot;
-                    last_tx_count = current_tx_count;
                 }
                 _ = cancel.cancelled() => {
                     break;

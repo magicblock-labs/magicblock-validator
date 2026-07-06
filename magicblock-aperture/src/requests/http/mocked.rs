@@ -8,15 +8,20 @@
 //! full supply details). They ensure API compatibility with standard tools by
 //! returning default or empty responses, rather than 'method not found' errors.
 
-use magicblock_core::link::blocks::BlockHash;
-use magicblock_metrics::metrics::TRANSACTION_COUNT;
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_rpc_client_api::response::{
     RpcBlockCommitment, RpcContactInfo, RpcSnapshotSlotInfo, RpcSupply,
     RpcVoteAccountStatus,
 };
 
-use super::prelude::*;
+use super::HandlerResult;
+use crate::{
+    requests::{
+        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
+        payload::ResponsePayload,
+    },
+    server::http::dispatch::HttpDispatcher,
+};
 const SLOTS_IN_EPOCH: u64 = 432_000;
 
 impl HttpDispatcher {
@@ -29,19 +34,12 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
-            Serde32Bytes::from(self.context.identity),
+            Serde32Bytes::from(self.engine.authority()),
         ))
     }
 
-    /// Handles the `getTransactionCount` RPC request.
-    /// currently we don't keep track of transaction count,
-    /// but with new the new ledger implementation will
-    pub(crate) fn get_transaction_count(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
-        let count = TRANSACTION_COUNT.get();
-        Ok(ResponsePayload::encode_no_context(&request.id, count))
+    pub(crate) fn mock_zero(&self, request: &JsonRequest) -> HandlerResult {
+        Ok(ResponsePayload::encode_no_context(&request.id, 0u64))
     }
 
     /// Handles the `getSlotLeaders` RPC request.
@@ -49,46 +47,22 @@ impl HttpDispatcher {
     /// only the validator's own identity.
     pub(crate) fn get_slot_leaders(
         &self,
-        request: &mut JsonRequest,
+        request: &JsonRequest,
     ) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
-            [Serde32Bytes::from(self.context.identity)],
+            [Serde32Bytes::from(self.engine.authority())],
         ))
     }
 
-    /// Handles the `getFirstAvailableBlock` RPC request.
-    /// This is a **placeholder implementation** that always returns `0`.
-    pub(crate) fn get_first_available_block(
-        &self,
-        request: &mut JsonRequest,
-    ) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(&request.id, 0))
-    }
-
-    /// Handles the `getLargestAccounts` RPC request.
-    /// This is a **placeholder implementation** that always returns an empty list.
-    pub(crate) fn get_largest_accounts(
+    pub(crate) fn mock_empty_context(
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
         Ok(ResponsePayload::encode(
             &request.id,
             Vec::<()>::new(),
-            self.blocks.block_height(),
-        ))
-    }
-
-    /// Handles the `getTokenLargestAccounts` RPC request.
-    /// This is a **placeholder implementation** that always returns an empty list.
-    pub(crate) fn get_token_largest_accounts(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
-        Ok(ResponsePayload::encode(
-            &request.id,
-            Vec::<()>::new(),
-            self.blocks.block_height(),
+            self.engine.blocks().latest().slot,
         ))
     }
 
@@ -107,7 +81,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode(
             &request.id,
             supply,
-            self.blocks.block_height(),
+            self.engine.blocks().latest().slot,
         ))
     }
 
@@ -124,7 +98,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode(
             &request.id,
             supply,
-            self.blocks.block_height(),
+            self.engine.blocks().latest().slot,
         ))
     }
 
@@ -155,7 +129,7 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
-            Serde32Bytes::from(BlockHash::default()),
+            Serde32Bytes::from(solana_hash::Hash::default()),
         ))
     }
 
@@ -165,15 +139,14 @@ impl HttpDispatcher {
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
-        let slot = self.blocks.block_height();
-        let transaction_count = self.ledger.count_transactions()?;
+        let slot = self.engine.blocks().latest().slot;
         let info = json::json! {{
             "epoch": slot / SLOTS_IN_EPOCH,
             "slotIndex": slot % SLOTS_IN_EPOCH,
             "slotsInEpoch": SLOTS_IN_EPOCH,
             "absoluteSlot": slot,
             "blockHeight": slot,
-            "transactionCount": Some(transaction_count),
+            "transactionCount": Some(0),
         }};
         Ok(ResponsePayload::encode_no_context(&request.id, info))
     }
@@ -215,7 +188,7 @@ impl HttpDispatcher {
         request: &JsonRequest,
     ) -> HandlerResult {
         let info = RpcContactInfo {
-            pubkey: self.context.identity.to_string(),
+            pubkey: self.engine.authority().to_string(),
             gossip: None,
             tvu: None,
             tpu: None,
@@ -245,12 +218,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode_no_context(&request.id, status))
     }
 
-    /// Handles the `getRoutes` RPC request.
-    ///
-    /// This is a validator-specific, mocked implementation used only to satisfy
-    /// the Magic Router / SDK API. A validator does not act as a router and
-    /// therefore always returns an empty list of routes.
-    pub(crate) fn get_routes(&self, request: &JsonRequest) -> HandlerResult {
+    pub(crate) fn mock_empty(&self, request: &JsonRequest) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
             Vec::<()>::new(),

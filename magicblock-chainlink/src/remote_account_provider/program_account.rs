@@ -1,24 +1,18 @@
 use std::fmt;
 
-use solana_account::{AccountSharedData, ReadableAccount};
-use solana_instruction::{AccountMeta, Instruction};
+use solana_account::AccountBuilder;
+use solana_instruction::Instruction;
 use solana_loader_v3_interface::{
     get_program_data_address as get_program_data_v3_address,
     state::UpgradeableLoaderState as LoaderV3State,
 };
-use solana_loader_v4_interface::{
-    instruction::LoaderV4Instruction as LoaderInstructionV4,
-    state::{LoaderV4State, LoaderV4Status},
-};
-use solana_pubkey::{pubkey, Pubkey};
+use solana_loader_v4_interface::state::{LoaderV4State, LoaderV4Status};
+use solana_pubkey::{Pubkey, pubkey};
 use solana_rent::Rent;
 use tracing::*;
 
-use crate::{
-    cloner::errors::ClonerResult,
-    remote_account_provider::{
-        RemoteAccountProviderError, RemoteAccountProviderResult,
-    },
+use crate::remote_account_provider::{
+    RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
 // -----------------
@@ -127,62 +121,6 @@ impl LoadedProgram {
             V4 => LOADER_V4,
         }
     }
-
-    /// Creates the instructions to deploy this program into our validator
-    /// NOTE: assumes that the program account was created already with enough
-    /// lamports since we cannot do a system transfer without the keypair of the
-    /// program account.
-    /// NOTE: uses the validator authority in order to sign the deploy instruction
-    ///       the caller itself will modify the authority to match the one on chain
-    ///       after the deploy.
-    pub fn try_into_deploy_data_and_ixs_v4(
-        self,
-        ephem_slot: u64,
-        validator_auth: Pubkey,
-    ) -> ClonerResult<DeployableV4Program> {
-        let Self {
-            program_id,
-            authority,
-            program_data,
-            ..
-        } = self;
-        let five_slots_ago = ephem_slot.saturating_sub(5).max(1);
-        let pre_deploy_loader_state = LoaderV4State {
-            slot: five_slots_ago,
-            authority_address_or_next_version: validator_auth,
-            status: LoaderV4Status::Retracted,
-        };
-        let post_deploy_loader_state = LoaderV4State {
-            slot: five_slots_ago,
-            authority_address_or_next_version: authority,
-            status: LoaderV4Status::Deployed,
-        };
-        let pre_deploy_state_data =
-            state_data_v4(&pre_deploy_loader_state, &program_data)?;
-        let post_deploy_state_data =
-            state_data_v4(&post_deploy_loader_state, &program_data)?;
-
-        let deploy_instruction = {
-            let loader_instruction = LoaderInstructionV4::Deploy;
-
-            Instruction {
-                program_id: LOADER_V4,
-                accounts: vec![
-                    // [writable] The program account to deploy
-                    AccountMeta::new(program_id, false),
-                    // [signer] The authority of the program
-                    AccountMeta::new_readonly(validator_auth, true),
-                ],
-                data: bincode::serialize(&loader_instruction)?,
-            }
-        };
-
-        Ok(DeployableV4Program {
-            pre_deploy_loader_state: pre_deploy_state_data,
-            deploy_instruction,
-            post_deploy_loader_state: post_deploy_state_data,
-        })
-    }
 }
 
 impl fmt::Display for LoadedProgram {
@@ -221,8 +159,8 @@ impl ProgramAccountResolver {
     pub fn try_new(
         program_id: Pubkey,
         owner: Pubkey,
-        program_account: Option<AccountSharedData>,
-        program_data_account: Option<AccountSharedData>,
+        program_account: Option<AccountBuilder>,
+        program_data_account: Option<AccountBuilder>,
     ) -> RemoteAccountProviderResult<ProgramAccountResolver> {
         let loader = RemoteProgramLoader::try_from(&owner)?;
         let (
@@ -251,8 +189,8 @@ impl ProgramAccountResolver {
     fn try_get_data_with_authority(
         loader: &RemoteProgramLoader,
         program_id: &Pubkey,
-        program_account: Option<&AccountSharedData>,
-        program_data_account: Option<&AccountSharedData>,
+        program_account: Option<&AccountBuilder>,
+        program_data_account: Option<&AccountBuilder>,
     ) -> RemoteAccountProviderResult<(ProgramDataWithAuthority, u64)> {
         use RemoteProgramLoader::*;
         match (loader, program_account, program_data_account) {
@@ -279,18 +217,20 @@ impl ProgramAccountResolver {
             }
             // Valid cases
             (V1, Some(program_account), _) | (V2, Some(program_account), _) => {
+                let program_account = program_account.read();
                 get_state_v1_v2(*program_id, program_account.data())
-                    .map(|data| (data, program_account.remote_slot()))
-
+                    .map(|data| (data, program_account.slot()))
             }
             (V3, _, Some(program_data_account)) => {
+                let program_data_account = program_data_account.read();
                 get_state_v3(*program_id, program_data_account.data())
-                    .map(|data| (data, program_data_account.remote_slot()))
+                    .map(|data| (data, program_data_account.slot()))
             }
 
             (V4, Some(program_account), _) => {
+                let program_account = program_account.read();
                 get_state_v4(*program_id, program_account.data())
-                    .map(|data| (data, program_account.remote_slot()))
+                    .map(|data| (data, program_account.slot()))
             }
         }
     }
@@ -380,7 +320,7 @@ fn get_state_v3(
             return Err(RemoteAccountProviderError::UnsupportedProgramLoader(
                 "LoaderV3 program data account is not in ProgramData state"
                     .to_string(),
-            ))
+            ));
         }
     };
     Ok(program_data_with_authority)
@@ -421,62 +361,4 @@ fn get_state_v4(
         program_data,
         loader_status: state.status,
     })
-}
-
-// -----------------
-// Loader State Serialization
-// -----------------
-fn state_data_v4(
-    loader_state: &LoaderV4State,
-    program_data: &[u8],
-) -> RemoteAccountProviderResult<Vec<u8>> {
-    let state_metadata = unsafe {
-        std::slice::from_raw_parts(
-            (loader_state as *const LoaderV4State) as *const u8,
-            LoaderV4State::program_data_offset(),
-        )
-    };
-    let mut state_data =
-        Vec::with_capacity(state_metadata.len() + program_data.len());
-    state_data.extend_from_slice(state_metadata);
-    state_data.extend_from_slice(program_data);
-    Ok(state_data)
-}
-
-#[cfg(test)]
-mod tests {
-    use solana_hash::Hash;
-    use solana_keypair::Keypair;
-    use solana_signer::Signer;
-    use solana_transaction::Transaction;
-
-    use super::*;
-
-    #[test]
-    fn test_loaded_program_into_deploy_ixs_v4() {
-        // Ensuring that the instructions are created correctly and we can
-        // create a signed transaction from them
-        let validator_kp = Keypair::new();
-        let DeployableV4Program {
-            deploy_instruction, ..
-        } = LoadedProgram {
-            program_id: Pubkey::new_unique(),
-            authority: Pubkey::new_unique(),
-            program_data: vec![1, 2, 3, 4, 5],
-            loader: RemoteProgramLoader::V4,
-            loader_status: LoaderV4Status::Deployed,
-            remote_slot: 0,
-        }
-        .try_into_deploy_data_and_ixs_v4(1, validator_kp.pubkey())
-        .unwrap();
-        let recent_blockhash = Hash::new_unique();
-
-        // This would fail if we had invalid/missing signers
-        Transaction::new_signed_with_payer(
-            &[deploy_instruction],
-            Some(&validator_kp.pubkey()),
-            &[&validator_kp],
-            recent_blockhash,
-        );
-    }
 }

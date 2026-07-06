@@ -1,37 +1,37 @@
 [package]
-name = "magicblock-table-mania"
-version.workspace = true
 authors.workspace = true
-repository.workspace = true
+edition.workspace = true
 homepage.workspace = true
 license.workspace = true
-edition.workspace = true
+name = "magicblock-table-mania"
+repository.workspace = true
+version.workspace = true
 
 [lib]
 doctest = false
 
 [dependencies]
 ed25519-dalek = { workspace = true }
-tracing = { workspace = true }
-magicblock-rpc-client = { workspace = true }
 magicblock-metrics = { workspace = true }
+magicblock-rpc-client = { workspace = true }
 rand = { workspace = true }
 sha3 = { workspace = true }
-solana-pubkey = { workspace = true }
-solana-keypair = { workspace = true }
-thiserror = { workspace = true }
-solana-clock = { workspace = true }
-solana-signature = { workspace = true }
-solana-signer = { workspace = true }
-solana-commitment-config = { workspace = true }
 solana-address-lookup-table-interface = { workspace = true }
-solana-slot-hashes = { workspace = true }
-solana-transaction = { workspace = true }
+solana-clock = { workspace = true }
+solana-commitment-config = { workspace = true }
 solana-compute-budget-interface = { workspace = true }
 solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
 solana-message = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+solana-slot-hashes = { workspace = true }
+solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 [features]
 default = []

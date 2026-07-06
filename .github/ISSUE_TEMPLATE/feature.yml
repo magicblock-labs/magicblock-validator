@@ -1,7 +1,7 @@
 name: Feature
 description: New capability or improvement
 title: "feat: "
-labels: ["enhancement"]
+labels: ["priority: medium", "enhancement"]
 body:
   - type: textarea
     id: problem
@@ -12,9 +12,9 @@ body:
       required: true
 
   - type: textarea
-    id: proposal
+    id: outcome
     attributes:
-      label: Proposed Solution
-      description: How should this work?
+      label: Desired Outcome
+      description: What should be true when this is complete? Include important constraints or acceptance criteria.
     validations:
       required: true

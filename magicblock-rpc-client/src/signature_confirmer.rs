@@ -1,8 +1,8 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -19,7 +19,7 @@ use solana_signature::Signature;
 use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::TransactionStatus;
 use tokio::{
-    sync::{oneshot, Mutex},
+    sync::{Mutex, oneshot},
     time::{sleep, timeout},
 };
 use tracing::*;
@@ -412,13 +412,11 @@ impl SignatureConfirmer {
             match self.rpc_client.get_signature_statuses(chunk).await {
                 Ok(response) => {
                     fetched.extend(
-                        chunk
-                            .iter()
-                            .copied()
-                            .zip(response.value.into_iter())
-                            .filter_map(|(signature, status)| {
+                        chunk.iter().copied().zip(response.value).filter_map(
+                            |(signature, status)| {
                                 status.map(|status| (signature, status))
-                            }),
+                            },
+                        ),
                     );
                 }
                 Err(err) => {
@@ -517,8 +515,8 @@ fn status_result_for_commitment(
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Mutex as StdMutex,
+        atomic::{AtomicUsize, Ordering},
     };
 
     use async_trait::async_trait;

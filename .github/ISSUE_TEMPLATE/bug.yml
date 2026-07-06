@@ -1,7 +1,7 @@
 name: Bug
 description: Something is broken or incorrect
 title: "bug: "
-labels: ["bug"]
+labels: ["priority: high", "bug"]
 body:
   - type: textarea
     id: report
@@ -12,22 +12,26 @@ body:
         **Observed:**
         **Expected:**
         **Steps to reproduce:**
+        **Environment / logs (if relevant):**
     validations:
       required: true
 
   - type: input
     id: version
     attributes:
-      label: Commit / version
-      placeholder: "git sha / tag"
+      label: Revision / version
+      description: Provide an exact commit or release. For a checkout, run `git rev-parse --short HEAD`.
+      placeholder: "e.g., abc1234 or v0.13.19"
     validations:
       required: true
 
   - type: dropdown
     id: deployment
     attributes:
-      label: Deployment
+      label: Deployment / discovery context
+      description: Where the problem was observed or discovered
       options:
+        - Code inspection / not deployment-specific
         - Local (native)
         - Local (Docker)
         - Testnet
@@ -35,19 +39,3 @@ body:
         - Other
     validations:
       required: true
-
-  - type: input
-    id: os
-    attributes:
-      label: OS / Arch
-      placeholder: "e.g., macOS arm64, Linux x86_64"
-    validations:
-      required: false
-
-  - type: textarea
-    id: logs
-    attributes:
-      label: Logs / Links
-      description: Relevant logs, stack traces, or links
-    validations:
-      required: false

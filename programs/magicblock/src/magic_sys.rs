@@ -5,7 +5,7 @@ use std::{
 
 use lazy_static::lazy_static;
 use magicblock_core::{
-    intent::{types::CommittedAccount, MagicIntentBundle},
+    intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
 };
 use solana_instruction::error::InstructionError;

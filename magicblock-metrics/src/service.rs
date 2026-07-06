@@ -1,9 +1,9 @@
 use std::net::SocketAddr;
 
-use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
+use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::{
-    body::Bytes, server::conn::http1, service::service_fn, Method, Request,
-    Response, StatusCode,
+    Method, Request, Response, StatusCode, body::Bytes, server::conn::http1,
+    service::service_fn,
 };
 use hyper_util::rt::TokioIo;
 use prometheus::TextEncoder;
@@ -125,8 +125,10 @@ async fn metrics_service_router(
 
     let result = match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") => {
+            let mut metric_families = metrics::REGISTRY.gather();
+            metric_families.extend(prometheus::gather());
             let metrics = TextEncoder::new()
-                .encode_to_string(&metrics::REGISTRY.gather())
+                .encode_to_string(&metric_families)
                 .unwrap_or_else(|error| {
                     warn!(error = %error, "Failed to encode metrics");
                     String::new()

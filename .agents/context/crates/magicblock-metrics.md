@@ -2,11 +2,12 @@
 
 ## Purpose
 
-`magicblock-metrics` is the validator's shared Prometheus metrics crate. It centralizes metric definitions, metric label helper types, metric mutation wrappers, and the small HTTP service that exposes the process-local Prometheus registry.
+`magicblock-metrics` is the validator's shared Prometheus metrics crate. It centralizes metric definitions, metric label helper types, metric mutation wrappers, and the small HTTP service that exposes the process-local MBV and Engine registries.
 
 At a high level it:
 
 - defines the validator-wide Prometheus `Registry` with namespace `mbv`,
+- gathers Engine collectors from Prometheus's process-wide default registry,
 - declares gauges, counters, counter vectors, histograms, and histogram vectors used by runtime crates,
 - registers all collectors exactly once before the metrics server starts,
 - exposes a `/metrics` HTTP endpoint in Prometheus text format,
@@ -26,7 +27,8 @@ Update this file for changes to:
 - wrapper functions in `magicblock-metrics/src/metrics/mod.rs`,
 - label enums/traits in `magicblock-metrics/src/metrics/types.rs`,
 - metrics service routing, binding, cancellation, or response behavior in `src/service.rs`,
-- startup/configuration flow in `magicblock-api` or `magicblock-config` that changes how the service/ticker runs,
+- startup/configuration flow in either Engine-hosting binary or
+  `magicblock-config` that changes service lifetime,
 - any new consumer crate or major consumer flow that records metrics through this crate,
 - validation commands or dashboard/scrape guidance relevant to this crate,
 - performance characteristics of metrics used in hot paths.
@@ -44,23 +46,23 @@ Primary source files:
 | `magicblock-metrics/src/lib.rs` | Crate exports. Re-exports `metrics`, `try_start_metrics_service`, and `MetricsService`. |
 | `magicblock-metrics/src/metrics/mod.rs` | Collector declarations, bucket constants, registry setup, and public mutation/timer wrappers. |
 | `magicblock-metrics/src/metrics/types.rs` | Shared metric label helpers (`LabelValue`, `Outcome`, `AccountFetchEntrypoint`, `AccountFetchReason`, `AccountFetchContext`) plus currently-unused account clone/commit shape enums. |
-| `magicblock-metrics/src/service.rs` | Hyper/Tokio HTTP server exposing `GET /metrics`, handling cancellation, and encoding registry contents. |
+| `magicblock-metrics/src/service.rs` | Hyper/Tokio HTTP server exposing `GET /metrics`, handling cancellation, and encoding the MBV and default registry contents. |
 | `magicblock-metrics/README.md` | Prometheus/Grafana setup notes for local scraping and visualization. |
 | `magicblock-config/src/config/metrics.rs` | Validator configuration shape for metrics address and system collection frequency. |
-| `magicblock-api/src/magic_validator.rs` | Starts the metrics service and system metrics ticker during validator startup. |
-| `magicblock-api/src/tickers.rs` | Periodically samples ledger/account storage gauges. |
+| `bins/mbv-leader/src/leader.rs` | Starts and owns the leader metrics service. |
+| `bins/mbv-verifier/src/main.rs` | Starts one verifier metrics service outside the Engine reopen loop. |
 
 Main consumers:
 
-- `magicblock-api` starts the metrics service, starts the periodic system metrics ticker, initializes transaction count from restored ledger history, and observes commit nonce wait time through `MagicSysAdapter`.
+- `mbv-leader` and `mbv-verifier` start the metrics service for their process lifetime.
 - `magicblock-aperture` records RPC request counts, RPC handling time, websocket subscription gauges, send-transaction processing time, and skipped-preflight count.
-- `magicblock-processor` records slot, transaction count, failed transaction count, and maximum lock-contention queue size.
 - `magicblock-ledger` records ledger column counts, storage size, shutdown/compaction/truncation timers, and RPC API column-family metrics.
 - `magicblock-chainlink` records account fetch outcomes, chain slot, monitored/evicted accounts, pubsub/gRPC subscription state, undelegation lifecycle counts, and some investigation counters.
-- `magicblock-accounts` records scheduled committor-intent count.
-- `magicblock-committor-service` records intent backlog, failed intents, busy executors, execution times, CU usage, task/ALT preparation timing, task-info fetcher state, and commit nonce wait time via `magicblock-api`.
+- `magicblock-committor-service` records intent backlog, failed intents, busy executors, execution times, CU usage, task/ALT preparation timing, task-info fetcher state, and commit nonce wait time through the leader's `MagicSysAdapter`.
 - `magicblock-rpc-client` records signature-subscribe and signature-status confirmation counters.
 - `magicblock-table-mania` records lookup-table fetch/close investigation counters.
+- Engine AccountsDB, Keeper, Ledger, Processor, and Replicator crates register
+  their collectors in Prometheus's default registry.
 
 ## Public API shape
 
@@ -91,6 +93,10 @@ use magicblock_metrics::metrics::{TRANSACTION_COUNT, RPC_REQUEST_HANDLING_TIME};
 
 `metrics::register()` registers all collectors into this registry and is guarded by `std::sync::Once`. The function is `pub(crate)`, so production code starts registration through `try_start_metrics_service(...)` rather than calling registration directly.
 
+Engine crates register their collectors in Prometheus's default registry. MBV
+and Engine must resolve the same Prometheus crate version so the endpoint and
+Engine share that process-wide registry.
+
 Important behavior:
 
 - All declared collectors must be registered in `register()` or they will not appear under `/metrics`.
@@ -107,7 +113,9 @@ Important behavior:
 3. spawns the service on the current Tokio runtime,
 4. returns the `MetricsService` handle or an I/O error from construction.
 
-`MetricsService` currently stores the bind address and cancellation token. It does not expose a join handle; `magicblock-api` stores it to keep service ownership tied to validator lifetime.
+`MetricsService` currently stores the bind address and cancellation token. It
+does not expose a join handle; each Engine-hosting binary stores it to keep
+service ownership tied to process lifetime.
 
 `start_metrics_server`:
 
@@ -120,7 +128,9 @@ Important behavior:
 
 `metrics_service_router` behavior:
 
-- `GET /metrics` returns Prometheus text encoding of `metrics::REGISTRY.gather()`.
+- `GET /metrics` returns one Prometheus text body containing
+  `metrics::REGISTRY.gather()` followed by `prometheus::gather()` from the
+  process-wide default registry.
 - All other methods/paths return `404 Not Found` with an empty body.
 - It records optional `host` and `user-agent` headers into the tracing span.
 - It consumes the entire request body before returning so HTTP keep-alive does not leave unread bytes in the connection buffer.
@@ -135,7 +145,8 @@ Pitfalls:
 
 ### Configuration and startup
 
-Metrics are configured through `ValidatorParams.metrics`, backed by `magicblock-config/src/config/metrics.rs`:
+Metrics are configured through `LeaderParams.metrics` and
+`VerifierParams.metrics`, backed by `magicblock-config/src/config/metrics.rs`:
 
 ```toml
 [metrics]
@@ -150,14 +161,14 @@ Current defaults come from `magicblock-config/src/consts.rs`:
 
 `config.example.toml` currently documents a sample address of `127.0.0.1:9090`; check the config defaults before assuming the example value is the runtime default.
 
-Startup flow in `magicblock-api/src/magic_validator.rs`:
+The leader starts the service as part of its service graph. The verifier starts
+it once in `main`, outside the snapshot-driven Engine reopen loop, so the
+endpoint remains bound while the Engine is replaced. Verifier TOML must contain
+a `[metrics]` section; use a distinct address when leader and verifier run on
+the same host.
 
-1. storage and core services are initialized,
-2. `magicblock_metrics::try_start_metrics_service(config.metrics.address.0, token.clone())` starts the HTTP service,
-3. `init_system_metrics_ticker(config.metrics.collect_frequency, &ledger, &accountsdb, token.clone())` starts periodic system/storage gauge updates,
-4. `TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64)` seeds transaction count from persisted ledger history before new execution starts.
-
-Shutdown is cancellation-token based: the system metrics ticker exits when the token is cancelled, and the metrics server stops accepting when the same token is cancelled.
+Shutdown is cancellation-token based. The metrics server stops accepting when
+its process token is cancelled.
 
 ## Metric groups currently defined
 
@@ -195,7 +206,9 @@ When adding a histogram, choose buckets around the expected latency distribution
 | `start_ledger_disable_compactions_timer()` | Timer for disabling manual compaction. |
 | `start_ledger_shutdown_timer()` | Timer for ledger shutdown. |
 
-System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at `metrics.collect-frequency`. This means gauges such as ledger size and accounts size are sampled, not updated continuously.
+These wrappers do not poll storage themselves; a collector retains its last
+explicitly supplied value. `MetricsConfig.collect_frequency` remains in the
+configuration model but does not currently drive a sampling task.
 
 ### Accounts and account sync
 
@@ -214,7 +227,6 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 | `inc_account_fetches_found_with_context(context, count)` | Network fetches that found accounts, labelled by `entrypoint` and `fetch_reason`. |
 | `inc_account_fetches_not_found_with_context(context, count)` | Network fetches that did not find accounts, labelled by `entrypoint` and `fetch_reason`. |
 | `inc_chainlink_clone_accounts_total_with_context(context, remote_result, clone_intent, outcome)` | Chainlink clone lifecycle attempts and outcomes, labelled by bounded entrypoint/fetch-reason, remote-result, clone-intent, and outcome values. |
-| `inc_chainlink_clone_materialization_accounts_total_with_context(context, remote_result, outcome)` | Post-clone bank materialization checks, labelled by bounded entrypoint/fetch-reason, remote-result, and materialization-outcome values. |
 | `inc_chainlink_empty_placeholder_accounts_total_with_context(context, stage, outcome)` | Empty-placeholder lifecycle events, labelled by bounded entrypoint/fetch-reason, placeholder-stage, and binary outcome values. |
 | `inc_undelegation_requested()` | Chainlink observed an undelegation request. |
 | `inc_undelegation_completed()` | Chainlink detected undelegation completion. |
@@ -232,11 +244,11 @@ Important caveats:
 - Clone lifecycle counters use only bounded enum-like labels. Do not include pubkeys, signatures, raw errors, endpoints, request parameters, or other unbounded/user-controlled values in these labels.
 - `remote_result=failed` is reserved for fetch failures before a clone request is built. Emit it only with `clone_intent=unknown` and `outcome=skipped` unless a later implementation has a concrete clone request to classify.
 - The clone lifecycle counters replace the stale clone-cache and pending-clone gauges removed by the eviction-vs-get metrics cleanup; use the counters for clone observability rather than reintroducing those gauges.
-- Empty-placeholder stages are bounded enum labels: `converted_to_empty` when Chainlink converts a remote `None` into the zero-lamport/default-owner/empty-data placeholder, `clone_submitted` after a placeholder clone is submitted, `clone_submit_failed` if that clone submission fails, `observed_in_bank_after_ensure` when the post-clone materialization check sees the placeholder in bank, and `still_missing_after_ensure` when the cloner returned success but the placeholder is still not visible. `later_refetched` is reserved for a future sampled/sketch implementation and is not emitted by the current code because retaining per-pubkey state would create unbounded memory/cardinality risk.
+- Empty-placeholder stages are bounded enum labels: `converted_to_empty` when Chainlink converts a remote `None` into the zero-lamport/default-owner/empty-data placeholder, `clone_submitted` after a placeholder clone is submitted, and `clone_submit_failed` if that clone submission fails. `later_refetched` is reserved for a future sampled/sketch implementation and is not emitted by the current code because retaining per-pubkey state would create unbounded memory/cardinality risk.
 - Subscription lifecycle counters are for Chainlink registration, release, and cleanup outcome classification. Call sites must use the provided enum/static labels only; do not add pubkey, signature, raw error, endpoint URL, or other free-form labels.
 - Fetch attribution metrics use bounded `entrypoint` + `fetch_reason` labels. Entrypoint identifies the top-level flow; fetch_reason identifies the immediate cause. Signatures remain tracing-only and must never be metric labels.
 - `chainlink_pending_fetch_waiters_gauge` is incremented only for waiter joins, not for owner calls awaiting their own operation. It must be decremented on success, failure, cancellation, timeout, and waiter-drop paths.
-- Pending-fetch labels are low-cardinality enum/static labels only: `entrypoint` and `fetch_reason` use `AccountFetchContext`, `layer` uses `fetch_cloner` or `remote_account_provider`, and `outcome` uses exactly `owned`, `joined_existing`, `owner_succeeded`, `owner_failed`, `owner_cancelled`, `resolved_by_subscription_update`, or `rpc_fetch_completed_after_update`.
+- Pending-fetch labels are low-cardinality enum/static labels only: `entrypoint` and `fetch_reason` use `AccountFetchContext`, `layer` is `remote_account_provider`, and `outcome` uses exactly `owned`, `joined_existing`, `owner_succeeded`, `owner_failed`, `owner_cancelled`, `resolved_by_subscription_update`, or `rpc_fetch_completed_after_update`.
 
 Useful PromQL examples for the pending-fetch contract use scraped `mbv_` names:
 
@@ -388,33 +400,21 @@ Signatures attached to `send_transaction` are intentionally not part of metric l
 
 ## Runtime flows
 
-### Validator startup and scrape flow
+### Engine-host startup and scrape flow
 
 ```text
-MagicValidator::try_from_config
+mbv-leader or mbv-verifier
   -> try_start_metrics_service(address, cancellation_token)
        -> metrics::register() once
        -> spawn metrics HTTP server
-  -> init_system_metrics_ticker(collect_frequency, ledger, accountsdb, token)
-  -> seed TRANSACTION_COUNT from ledger count
+  -> initialize Engine subsystems
+       -> register Engine collectors in the default registry
   -> Prometheus scrapes GET /metrics
-       -> REGISTRY.gather()
+       -> namespaced MBV REGISTRY.gather()
+       -> default prometheus::gather()
        -> TextEncoder::encode_to_string(...)
        -> HTTP 200 text body
 ```
-
-### Periodic system gauge flow
-
-```text
-system metrics ticker
-  -> sleep(config.metrics.collect_frequency)
-  -> ledger.storage_size() -> set_ledger_size
-  -> accountsdb.storage_size() -> set_accounts_size
-  -> accountsdb.account_count() -> set_accounts_count
-  -> repeat until cancellation token is cancelled
-```
-
-This flow samples relatively heavyweight storage values off the critical execution path. Do not move these operations into RPC request handling or transaction execution.
 
 ### Hot-path instrumentation flow
 
@@ -439,15 +439,17 @@ Preserve these invariants when editing this crate:
 1. **Metric names are operator-facing API.** Renames/removals require explicit documentation and migration notes.
 2. **Every declared collector must be registered exactly once.** Add new collectors to `register()`.
 3. **The registry namespace is `mbv`.** Scraped metric names are namespace-prefixed.
-4. **Labels must be bounded and low-cardinality.** Never use signatures, pubkeys, account addresses, transaction IDs, raw errors, endpoint URLs with secrets, or user input as labels unless a bounded cardinality design is documented.
-5. **Hot-path metrics must be cheap.** Avoid allocations, formatting, locks beyond Prometheus collector internals, and repeated label lookup in tight loops when a batch/outer operation metric is sufficient.
-6. **Gauge wrappers must preserve set-vs-delta semantics.** Some wrappers set absolute counts; others increment/decrement. Do not mix these up.
-7. **Increment/decrement gauges must be balanced on all control-flow paths.** Do not reintroduce the removed pending-clone gauge; clone observability now comes from the lifecycle counters above.
-8. **Histograms must use seconds and meaningful buckets.** Bucket choices should match expected latency ranges.
-9. **Scrape handling must not mutate validator state.** `/metrics` observes registry values only.
-10. **Metrics service shutdown must remain cancellation-token driven.** Do not introduce shutdown paths that can block validator shutdown indefinitely.
-11. **This crate should stay dependency-light.** Do not add dependencies on runtime workspace crates; metrics should be a leaf observability helper that others can depend on.
-12. **Do not hide critical failures by removing metrics.** Account-update connectivity, commit backlog/failure, RPC latency, transaction count/failure, and storage-size metrics are operationally important.
+4. **Engine collectors remain in the default registry.** The endpoint must
+   gather both registries, and MBV must stay on Engine's Prometheus version.
+5. **Labels must be bounded and low-cardinality.** Never use signatures, pubkeys, account addresses, transaction IDs, raw errors, endpoint URLs with secrets, or user input as labels unless a bounded cardinality design is documented.
+6. **Hot-path metrics must be cheap.** Avoid allocations, formatting, locks beyond Prometheus collector internals, and repeated label lookup in tight loops when a batch/outer operation metric is sufficient.
+7. **Gauge wrappers must preserve set-vs-delta semantics.** Some wrappers set absolute counts; others increment/decrement. Do not mix these up.
+8. **Increment/decrement gauges must be balanced on all control-flow paths.** Do not reintroduce the removed pending-clone gauge; clone observability now comes from the lifecycle counters above.
+9. **Histograms must use seconds and meaningful buckets.** Bucket choices should match expected latency ranges.
+10. **Scrape handling must not mutate validator state.** `/metrics` observes registry values only.
+11. **Metrics service shutdown must remain cancellation-token driven.** Do not introduce shutdown paths that can block validator shutdown indefinitely.
+12. **This crate should stay dependency-light.** Do not add dependencies on runtime workspace crates; metrics should be a leaf observability helper that others can depend on.
+13. **Do not hide critical failures by removing metrics.** Account-update connectivity, commit backlog/failure, RPC latency, transaction count/failure, and storage-size metrics are operationally important.
 
 ## Common change areas and what to inspect
 
@@ -486,7 +488,7 @@ Inspect:
 
 If a metric is obsolete, prefer a staged approach when possible: keep the old metric while adding the replacement, or document the exact replacement and update all repository references.
 
-The eviction-vs-get metrics plan intentionally removed the stale clone-cache/pending-clone gauges and replaced them with the clone lifecycle, clone materialization, and empty-placeholder counters documented above. Treat that as an operator-visible migration path rather than reintroducing the old gauges.
+The eviction-vs-get metrics plan intentionally removed the stale clone-cache/pending-clone gauges. Clone lifecycle and empty-placeholder counters are the operator-visible replacements; do not reintroduce the old gauges.
 
 ### Adding or changing labels
 
@@ -507,9 +509,10 @@ Pitfalls:
 Inspect:
 
 - `magicblock-metrics/src/service.rs`,
-- `magicblock-api/src/magic_validator.rs` startup/shutdown ownership,
+- `bins/mbv-leader/src/leader.rs` and `bins/mbv-verifier/src/main.rs`
+  startup/shutdown ownership,
 - `magicblock-config/src/config/metrics.rs` and config tests,
-- `config.example.toml`,
+- `config.example.toml` and `config.verifier.example.toml`,
 - local Prometheus scrape configuration.
 
 Preserve:
@@ -518,16 +521,6 @@ Preserve:
 - cancellation-token shutdown,
 - body consumption for keep-alive correctness,
 - low scrape overhead.
-
-### Changing periodic system metrics
-
-Inspect:
-
-- `magicblock-api/src/tickers.rs`,
-- ledger/account storage APIs called by the ticker,
-- `MetricsConfig.collect_frequency` defaults and tests.
-
-Do not put storage-size/account-count calls on critical RPC or execution paths. They can involve storage/index work and are intentionally sampled.
 
 ### Instrumenting hot paths
 
@@ -543,13 +536,17 @@ Before adding metrics to scheduler, executor, RPC, Chainlink fetch/clone, commit
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-metrics`.
-- Configuration/startup changes should also include focused checks for `magicblock-config` metrics coverage and `magicblock-api` startup behavior where practical.
-- Manual scrape validation is appropriate when changing `service.rs` or startup wiring: start a validator with a known metrics address and verify `/metrics` returns Prometheus text containing `mbv_` metric names while unknown routes return `404`.
+- Configuration/startup changes should also include focused checks for
+  `magicblock-config`, `mbv-leader`, and `mbv-verifier`.
+- Manual scrape validation is appropriate when changing `service.rs` or
+  startup wiring: start an Engine host with a known metrics address and verify
+  `/metrics` contains both `mbv_*` and Engine metric families while unknown
+  routes return `404`.
 - When changing metrics on performance-sensitive paths, include at least a reasoned assessment of label cardinality, allocation/formatting overhead, and scrape/runtime cost.
 
 ## Adjacent implementation references
 
 - `magicblock-metrics/README.md` — local Prometheus/Grafana setup.
 - `magicblock-config/src/config/metrics.rs` — metrics address and collection-frequency config.
-- `magicblock-api/src/magic_validator.rs` — metrics service startup and transaction-count seeding.
-- `magicblock-api/src/tickers.rs` — periodic system/storage gauge sampling.
+- `bins/mbv-leader/src/leader.rs` — leader metrics service ownership.
+- `bins/mbv-verifier/src/main.rs` — verifier metrics service ownership across Engine reopen.

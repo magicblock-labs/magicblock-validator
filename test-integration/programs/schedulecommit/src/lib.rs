@@ -622,9 +622,14 @@ fn process_update_order_book<'a>(
     updates: BookUpdate,
 ) -> entrypoint::ProgramResult {
     msg!("Update orderbook");
-    let account_info_iter = &mut accounts.iter();
-    let payer_info = next_account_info(account_info_iter)?;
-    let order_book_account = next_account_info(account_info_iter)?;
+    let (payer_info, order_book_account) = match accounts {
+        // Direct invocation uses the public instruction builder's layout.
+        [payer, order_book, ..] if payer.is_signer => (payer, order_book),
+        // DLP CallHandler appends the escrow authority and its signed PDA after
+        // the action accounts.
+        [order_book, .., escrow] => (escrow, order_book),
+        _ => return Err(ProgramError::NotEnoughAccountKeys),
+    };
 
     assert_is_signer(payer_info, "payer")?;
 

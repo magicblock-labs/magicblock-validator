@@ -1,14 +1,13 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::{pda::CALLBACK_SIGNER, CALLBACK_PROGRAM_ID};
-use solana_instruction::{error::InstructionError, Instruction};
+use magicblock_magic_program_api::{CALLBACK_PROGRAM_ID, pda::CALLBACK_SIGNER};
+use solana_instruction::{Instruction, error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 
 use crate::{
-    schedule_transactions::validate_callback_accounts,
-    utils::accounts::get_instruction_pubkey_with_idx,
-    validator::effective_validator_authority_id, Pubkey,
+    Pubkey, schedule_transactions::validate_callback_accounts,
+    utils::accounts::get_instruction_pubkey_with_idx, validator::authority,
 };
 
 const VALIDATOR_IDX: u16 = 0;
@@ -55,7 +54,7 @@ fn validate(
     // Only the validator can execute a callback
     let validator_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let validator_authority = effective_validator_authority_id();
+    let validator_authority = authority();
     if validator_pubkey != &validator_authority {
         ic_msg!(
             invoke_context,
@@ -93,13 +92,16 @@ fn validate(
 #[cfg(test)]
 mod tests {
     use magicblock_magic_program_api::{
-        instruction::CallbackInstruction, pda::CALLBACK_SIGNER,
-        CALLBACK_PROGRAM_ID,
+        CALLBACK_PROGRAM_ID, instruction::CallbackInstruction,
+        pda::CALLBACK_SIGNER,
     };
     use serial_test::serial;
     use solana_account::AccountSharedData;
-    use solana_instruction::{error::InstructionError, AccountMeta};
-    use solana_program_runtime::invoke_context::mock_process_instruction;
+    use solana_instruction::{AccountMeta, error::InstructionError};
+    use solana_program_runtime::{
+        invoke_context::mock_process_instruction,
+        solana_sbpf::program::BuiltinFunctionDefinition,
+    };
     use solana_pubkey::Pubkey;
 
     use crate::{
@@ -113,7 +115,7 @@ mod tests {
     fn make_data(inner_accounts: Vec<AccountMeta>) -> Vec<u8> {
         let mut instruction = InstructionUtils::noop_instruction(0);
         instruction.accounts = inner_accounts;
-        bincode::serialize(&CallbackInstruction::ExecuteCallback {
+        wincode::serialize(&CallbackInstruction::ExecuteCallback {
             instruction,
         })
         .unwrap()
@@ -153,7 +155,7 @@ mod tests {
             transaction_accounts,
             instruction_accounts,
             expected,
-            CallbackEntrypoint::vm,
+            (CallbackEntrypoint::vm, CallbackEntrypoint::codegen),
             |_| {},
             |_| {},
         );

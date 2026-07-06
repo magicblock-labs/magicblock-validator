@@ -1,0 +1,22 @@
+name: Task / Maintenance
+description: Concrete maintenance, cleanup, or operational work
+title: ""
+labels: ["priority:medium"]
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: Task
+      description: What needs to change, and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Done When
+      description: List the observable conditions that complete this task.
+      placeholder: |
+        - [ ]
+    validations:
+      required: true

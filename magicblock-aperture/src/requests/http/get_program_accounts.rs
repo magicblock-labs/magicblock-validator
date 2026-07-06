@@ -1,34 +1,69 @@
-use solana_rpc_client_api::config::RpcProgramAccountsConfig;
+use json::Serialize;
+use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account_decoder::{
+    UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account,
+};
+use solana_pubkey::Pubkey;
+use solana_rpc_client_api::{
+    config::RpcProgramAccountsConfig, filter::RpcFilterType,
+};
+use spl_token_2022::{
+    generic_token_account::GenericTokenAccount, state::Account as TokenAccount,
+};
 
-use super::prelude::*;
-use crate::utils::ProgramFilters;
+use super::HandlerResult;
+use crate::{
+    error::RpcError,
+    requests::{
+        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
+        payload::ResponsePayload,
+    },
+    server::http::dispatch::HttpDispatcher,
+};
+
+#[derive(Serialize)]
+pub(crate) struct AccountWithPubkey {
+    pubkey: Serde32Bytes,
+    account: UiAccount,
+}
+
+impl AccountWithPubkey {
+    pub(crate) fn new(
+        pubkey: Pubkey,
+        account: &AccountSharedData,
+        encoding: UiAccountEncoding,
+        slice: Option<UiDataSliceConfig>,
+    ) -> Self {
+        Self {
+            pubkey: pubkey.into(),
+            account: encode_ui_account(&pubkey, account, encoding, None, slice),
+        }
+    }
+}
+
+pub(crate) fn matches_filters(filters: &[RpcFilterType], data: &[u8]) -> bool {
+    filters.iter().all(|filter| match filter {
+        RpcFilterType::DataSize(size) => data.len() as u64 == *size,
+        RpcFilterType::Memcmp(memcmp) => memcmp.bytes_match(data),
+        RpcFilterType::TokenAccountState => {
+            TokenAccount::valid_account_data(data)
+        }
+    })
+}
 
 impl HttpDispatcher {
-    /// Handles the `getProgramAccounts` RPC request.
-    ///
-    /// Fetches all accounts owned by a given program public key. The request can be
-    /// customized with an optional configuration object to apply server-side data
-    /// filters, specify the data encoding, request a slice of the account data,
-    /// and control whether the result is wrapped in a context object.
     pub(crate) fn get_program_accounts(
         &self,
-        request: &mut JsonRequest,
+        request: &JsonRequest,
     ) -> HandlerResult {
-        let (program_bytes, config) = parse_params!(
-            request.params()?,
-            Serde32Bytes,
-            RpcProgramAccountsConfig
-        );
-        let program: Pubkey = some_or_err!(program_bytes);
-        let config = config.unwrap_or_default();
-        let filters = ProgramFilters::from(config.filters);
-
-        // Fetch all accounts owned by the program, applying
-        // filters at the database level for efficiency.
-        let accounts =
-            self.accountsdb.get_program_accounts(&program, move |a| {
-                filters.matches(a.data())
-            })?;
+        let program: Pubkey = request.required::<Serde32Bytes>(0)?.into();
+        let config = request
+            .optional::<RpcProgramAccountsConfig>(1)?
+            .unwrap_or_default();
+        let filters = config.filters.unwrap_or_default();
+        for filter in &filters {
+            filter.verify().map_err(RpcError::invalid_params)?;
+        }
 
         let encoding = config
             .account_config
@@ -36,18 +71,18 @@ impl HttpDispatcher {
             .unwrap_or(UiAccountEncoding::Base58);
         let slice = config.account_config.data_slice;
 
-        // Encode the filtered accounts for the RPC response.
+        let accounts = self.engine.accounts();
         let accounts = accounts
+            .program(&program)
+            .map_err(RpcError::internal)?
+            .filter(|(_, account)| matches_filters(&filters, account.data()))
             .map(|(pubkey, account)| {
-                // lock account to prevent data races with concurrently modifying
-                // transaction executor threads (unlikely, but not impossible)
-                let locked = LockedAccount::new(pubkey, account);
-                AccountWithPubkey::new(&locked, encoding, slice)
+                AccountWithPubkey::new(pubkey, &account, encoding, slice)
             })
             .collect::<Vec<_>>();
 
         if config.with_context.unwrap_or_default() {
-            let slot = self.blocks.block_height();
+            let slot = self.engine.blocks().latest().slot;
             Ok(ResponsePayload::encode(&request.id, accounts, slot))
         } else {
             Ok(ResponsePayload::encode_no_context(&request.id, accounts))

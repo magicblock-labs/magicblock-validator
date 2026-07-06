@@ -1,23 +1,23 @@
 [package]
-name = "magicblock-metrics"
-version.workspace = true
 authors.workspace = true
-repository.workspace = true
+edition.workspace = true
 homepage.workspace = true
 license.workspace = true
-edition.workspace = true
+name = "magicblock-metrics"
+repository.workspace = true
+version.workspace = true
 
 [features]
 default = []
 dev-context = []
 
 [dependencies]
-solana-signature = { workspace = true }
-tracing = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["http1", "server"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 lazy_static = { workspace = true }
 prometheus = { workspace = true }
+solana-signature = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 tokio-util = { workspace = true }
+tracing = { workspace = true }

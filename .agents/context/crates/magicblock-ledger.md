@@ -52,7 +52,7 @@ For the general documentation-update rule, see `.agents/memory/agent-memory-and-
 | `magicblock-aperture/src/requests/http/` | Serves `getTransaction`, `getSignatureStatuses`, and `getSignaturesForAddress` from the ledger. |
 | `magicblock-aperture/src/state/` | Seeds RPC blockhash cache from `ledger.latest_block()`. |
 | `magicblock-task-scheduler/src/service.rs` | Uses `LatestBlock` as the source of recent blockhashes for scheduled task transactions. |
-| `test-kit/src/lib.rs`, `tools/ledger-stats/` | Test harness and manual/operator inspection consumers. |
+| engine testkit, `tools/ledger-stats/` | Test harness and manual/operator inspection consumers. |
 
 Main consumers:
 
@@ -249,7 +249,6 @@ Inspect `src/database/options.rs`, `src/database/rocksdb_options.rs`, `src/datab
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-ledger`.
 - Add focused tests for touched behavior such as address-signature pagination, block assembly, replay ordering, truncation, or serialization compatibility.
-- Relevant integration suites: restore-ledger for replay/recovery, `test-pubsub` and `test-magicblock-api` for RPC-visible block/status behavior; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance validation is important for execution writes, RPC history reads, startup replay, and truncation/compaction. If no benchmark or load-oriented check is run, report the residual disk-growth, compaction-latency, or resource-use risk.
 - Security validation for this crate is persistence correctness and adversarial resource-use behavior; signer/authority checks remain owned by execution/Magic Program layers, with global security policy in `.agents/rules/validator-goals.md` and `.agents/specs/validator-specification.md`.
 
@@ -259,4 +258,4 @@ Inspect `src/database/options.rs`, `src/database/rocksdb_options.rs`, `src/datab
 - `magicblock-api/src/ledger.rs` and `magicblock-api/src/magic_validator.rs` — startup/reset/replay/truncator integration.
 - `magicblock-processor/src/executor/processing.rs` — main write-side call site.
 - `magicblock-aperture/src/requests/http/` — RPC-history consumers.
-- `test-kit/src/lib.rs` and `tools/ledger-stats/` — test harness and operator inspection consumers.
+- engine testkit and `tools/ledger-stats/` — test harness and operator inspection consumers.

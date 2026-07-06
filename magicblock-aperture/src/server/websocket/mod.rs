@@ -1,25 +1,19 @@
 use connection::ConnectionHandler;
+use engine::Engine;
 use fastwebsockets::upgrade::upgrade;
 use http_body_util::Empty;
 use hyper::{
+    Request, Response,
     body::{Bytes, Incoming},
     server::conn::http1,
     service::service_fn,
-    Request, Response,
 };
 use hyper_util::rt::TokioIo;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, instrument, warn};
+use tracing::warn;
 
-use crate::{
-    error::RpcError,
-    state::{
-        subscriptions::SubscriptionsDb, transactions::TransactionsCache,
-        SharedState,
-    },
-    RpcResult,
-};
+use crate::{RpcResult, error::RpcError, state::SharedState};
 
 const MAX_BODY_SIZE: usize = 1024 * 1024;
 
@@ -42,10 +36,8 @@ pub struct WebsocketServer {
 /// the necessary context to process requests and manage subscriptions.
 #[derive(Clone)]
 struct ConnectionState {
-    /// A handle to the central subscription database.
-    subscriptions: SubscriptionsDb,
-    /// A handle to the cache of recent transactions.
-    transactions: TransactionsCache,
+    /// A handle to the engine, used to open per-subscription update streams.
+    engine: Engine,
     /// The global cancellation token for shutting down the server.
     cancel: CancellationToken,
 }
@@ -59,8 +51,7 @@ impl WebsocketServer {
         cancel: CancellationToken,
     ) -> RpcResult<Self> {
         let state = ConnectionState {
-            subscriptions: state.subscriptions.clone(),
-            transactions: state.transactions.clone(),
+            engine: state.engine.clone(),
             cancel,
         };
         Ok(Self { socket, state })
@@ -71,7 +62,6 @@ impl WebsocketServer {
     /// When the server's `cancel` token is triggered, the loop stops accepting
     /// new connections and returns immediately so validator restart time is not
     /// blocked by active WebSocket connections.
-    #[instrument(skip(self))]
     pub(crate) async fn run(mut self) {
         loop {
             tokio::select! {
@@ -80,16 +70,12 @@ impl WebsocketServer {
                     self.handle(stream);
                 },
                 // The server shutdown signal has been received.
-                _ = self.state.cancel.cancelled() => {
-                    info!("WebSocket server shutdown signal received");
-                    break
-                }
+                _ = self.state.cancel.cancelled() => break,
             }
         }
         // Drop shared state before returning; active connection tasks are
         // dropped with the RPC runtime.
         drop(self.state);
-        info!("WebSocket server shutdown");
     }
 
     /// Spawns a task to handle a new TCP stream as a potential WebSocket connection.

@@ -12,7 +12,8 @@ use dlp_api::{
     },
 };
 use integration_test_tools::{
-    loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
+    init_logger, loaded_accounts::DLP_TEST_AUTHORITY_BYTES,
+    IntegrationTestContext,
 };
 use magicblock_core::token_programs::{
     derive_ata, derive_eata, ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID,
@@ -31,7 +32,6 @@ use solana_system_interface::{
 };
 use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
 use spl_token::{instruction as spl_token_ix, state::Mint};
-use test_kit::init_logger;
 
 const SOURCE_EATA_BALANCE: u64 = 200;
 const DESTINATION_EATA_BALANCE: u64 = 100;
