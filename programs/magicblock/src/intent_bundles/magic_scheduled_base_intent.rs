@@ -182,6 +182,20 @@ impl ScheduledIntentBundle {
         self.intent_bundle.get_undelegate_intent_pubkeys()
     }
 
+    /// Returns pubkeys of accounts whose commit nonce becomes stale once
+    /// undelegated, i.e. those undelegated directly or via commit-finalize.
+    pub fn get_undelegated_pubkeys(&self) -> Vec<Pubkey> {
+        self.intent_bundle
+            .get_undelegate_intent_pubkeys()
+            .into_iter()
+            .chain(
+                self.intent_bundle
+                    .get_commit_finalize_and_undelegate_intent_pubkeys(),
+            )
+            .flatten()
+            .collect()
+    }
+
     pub fn has_undelegate_intent(&self) -> bool {
         self.intent_bundle.has_undelegate_intent()
     }

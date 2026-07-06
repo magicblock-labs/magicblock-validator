@@ -240,16 +240,26 @@ where
         intent: ScheduledIntentBundle,
     ) -> (IntentExecutionResult, CleanupHandle<T>) {
         // Duplicates AcceptedIntentExecutor::execute
-        let is_undelegate = intent.has_undelegate_intent();
         let pubkeys = intent.get_all_committed_pubkeys();
+        let undelegated_pubkeys = intent.get_undelegated_pubkeys();
 
         let mut execution_report = IntentExecutionReport::default();
         let result = self.execute_inner(intent, &mut execution_report).await;
 
-        if is_undelegate {
-            self.ctx
-                .task_info_fetcher
-                .reset(ResetType::Specific(&pubkeys));
+        if !pubkeys.is_empty() {
+            if result.is_err() {
+                // We can't know what landed on chain, resync everything
+                self.ctx
+                    .task_info_fetcher
+                    .reset(ResetType::Specific(&pubkeys));
+            } else if !undelegated_pubkeys.is_empty() {
+                // Only undelegated accounts' nonces become stale. Keep the
+                // rest cached: a chain re-fetch can race the just-landed
+                // finalize and reuse a nonce (buffer PDA collision).
+                self.ctx
+                    .task_info_fetcher
+                    .reset(ResetType::Specific(&undelegated_pubkeys));
+            }
         }
         let close_buffers = result.is_ok();
         let junk = execution_report.junk;

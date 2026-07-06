@@ -143,20 +143,25 @@ where
         base_intent: ScheduledIntentBundle,
     ) -> (IntentExecutionResult, CleanupHandle<T>) {
         self.started_at = Instant::now();
-        let is_undelegate = base_intent.has_undelegate_intent();
         let pubkeys = base_intent.get_all_committed_pubkeys();
+        let undelegated_pubkeys = base_intent.get_undelegated_pubkeys();
 
         let mut execution_report = IntentExecutionReport::default();
         let result =
             self.execute_inner(base_intent, &mut execution_report).await;
         if !pubkeys.is_empty() {
-            // Reset TaskInfoFetcher, as cache could become invalid
-            // NOTE: if undelegation was removed - we still reset
-            // We assume its safe since all consecutive commits will fail
-            if result.is_err() || is_undelegate {
+            if result.is_err() {
+                // We can't know what landed on chain, resync everything
                 self.ctx
                     .task_info_fetcher
                     .reset(ResetType::Specific(&pubkeys));
+            } else if !undelegated_pubkeys.is_empty() {
+                // Only undelegated accounts' nonces become stale. Keep the
+                // rest cached: a chain re-fetch can race the just-landed
+                // finalize and reuse a nonce (buffer PDA collision).
+                self.ctx
+                    .task_info_fetcher
+                    .reset(ResetType::Specific(&undelegated_pubkeys));
             }
         }
 
