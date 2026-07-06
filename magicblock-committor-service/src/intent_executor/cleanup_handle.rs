@@ -1,4 +1,4 @@
-use futures_util::future::try_join_all;
+use futures_util::future::join_all;
 use solana_keypair::Keypair;
 
 use crate::{
@@ -44,6 +44,10 @@ impl<T: TransactionPreparator> CleanupHandle<T> {
             )
         });
 
-        try_join_all(cleanup_futs).await.map(|_| ())
+        join_all(cleanup_futs)
+            .await
+            .into_iter()
+            .find_map(Result::err)
+            .map_or(Ok(()), Err)
     }
 }

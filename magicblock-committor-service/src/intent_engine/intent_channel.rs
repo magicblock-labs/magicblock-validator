@@ -11,7 +11,7 @@ use tokio::sync::{
     mpsc,
     mpsc::{error::TrySendError, Receiver, Sender},
 };
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 
 use crate::intent_engine::{db, db::BacklogDB};
 
@@ -95,13 +95,18 @@ impl<D: BacklogDB> Stream for IntentStream<D> {
         // That means we have backlog
         // prior to using channel again we have to clean it all first
         if !db.is_empty() {
-            // Some(T) always will be returned here as per check above
-            let el = db.pop_intent_bundle();
-            return Poll::Ready(el.transpose());
+            // Before starting to clean backlog we need to clean channel first
+            if let Poll::Ready(item) = this.stream.poll_next(cx) {
+                Poll::Ready(item.map(Ok))
+            } else {
+                // Some(T) always will be returned here as per check above
+                let el = db.pop_intent_bundle();
+                Poll::Ready(el.transpose())
+            }
+        } else {
+            let item = ready!(this.stream.poll_next(cx));
+            Poll::Ready(item.map(Ok))
         }
-
-        let item = ready!(this.stream.poll_next(cx));
-        Poll::Ready(item.map(Ok))
     }
 }
 
