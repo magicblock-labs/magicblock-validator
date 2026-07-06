@@ -22,7 +22,7 @@ use crate::{
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
-    outbox::OutboxClient,
+    outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
         task_info_fetcher::{ResetType, TaskInfoFetcher},
         task_strategist::TaskStrategist,
@@ -82,9 +82,22 @@ where
         )
         .await?;
         match flow {
-            // Intent was executed - return
+            // Intent was already executed on a previous run - notify the
+            // outbox so it isn't left pending and rediscovered again.
             ControlFlow::Break(()) => {
-                Ok(ExecutionOutput::SingleStage(self.pending_signature))
+                let output =
+                    Ok(ExecutionOutput::SingleStage(self.pending_signature));
+                self.ctx
+                    .outbox_client
+                    .notify_commit_sent(
+                        ScheduledBaseIntentMeta::new(&intent_bundle),
+                        &output,
+                        execution_report,
+                    )
+                    .await
+                    .map_err(Into::into)?;
+
+                output
             }
             ControlFlow::Continue(()) => {
                 // It we're here so previous run determined this should be single stage

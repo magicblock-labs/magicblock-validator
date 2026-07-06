@@ -27,7 +27,7 @@ use crate::{
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
-    outbox::OutboxClient,
+    outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
         task_builder::{TaskBuilderImpl, TasksBuilder},
         task_info_fetcher::{ResetType, TaskInfoFetcher},
@@ -200,14 +200,28 @@ where
                 )
                 .await
             }
-            // Finalize was executed - return
+            // Finalize was already executed on a previous run - notify the
+            // outbox so it isn't left pending and rediscovered again.
             (
                 TwoStageProgress::Finalizing { commit, finalize },
                 ControlFlow::Break(()),
-            ) => Ok(ExecutionOutput::TwoStage {
-                commit_signature: *commit,
-                finalize_signature: *finalize,
-            }),
+            ) => {
+                let output = Ok(ExecutionOutput::TwoStage {
+                    commit_signature: *commit,
+                    finalize_signature: *finalize,
+                });
+                self.ctx
+                    .outbox_client
+                    .notify_commit_sent(
+                        ScheduledBaseIntentMeta::new(&intent),
+                        &output,
+                        execution_report,
+                    )
+                    .await
+                    .map_err(Into::into)?;
+
+                output
+            }
         }
     }
 }

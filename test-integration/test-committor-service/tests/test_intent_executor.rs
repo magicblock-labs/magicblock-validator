@@ -1288,7 +1288,7 @@ async fn test_action_callback_fired_on_timeout() {
         Box::new(intent_executor).execute(scheduled_intent).await;
 
     assert!(res.inner.is_ok());
-    assert!(res.patched_errors.is_empty());
+    assert_eq!(res.patched_errors.len(), 1, "Action was supposed to fail");
     assert_eq!(res.callbacks_report.len(), 1, "1 callback scheduled");
     assert!(res.callbacks_report[0].is_ok(), "mock returns Ok(sig)");
 
