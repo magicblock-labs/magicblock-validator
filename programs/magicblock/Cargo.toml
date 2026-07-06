@@ -40,7 +40,6 @@ solana-transaction-context = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-test-kit = { workspace = true }
 assert_matches = { workspace = true }
 rand = { workspace = true }
 serial_test = { workspace = true }

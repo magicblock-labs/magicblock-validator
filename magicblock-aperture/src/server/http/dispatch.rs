@@ -16,7 +16,7 @@ use magicblock_core::{
     coordination_mode::CoordinationMode,
     link::{transactions::TransactionSchedulerHandle, DispatchEndpoints},
 };
-use magicblock_ledger::Ledger;
+use magicblock_ledger_deprecated::DeprecatedLedger;
 use magicblock_metrics::metrics::{
     RPC_REQUESTS_COUNT, RPC_REQUEST_HANDLING_TIME,
 };

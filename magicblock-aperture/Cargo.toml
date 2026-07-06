@@ -1,18 +1,18 @@
 [package]
-name = "magicblock-aperture"
-version.workspace = true
 authors.workspace = true
-repository.workspace = true
+edition.workspace = true
 homepage.workspace = true
 license.workspace = true
-edition.workspace = true
+name = "magicblock-aperture"
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
 # network
-http-body-util = { workspace = true }
-hyper = { workspace = true, features = ["server", "http2", "http1"] }
-hyper-util = { workspace = true, features = ["server", "http2", "http1"] }
 fastwebsockets = { workspace = true, features = ["upgrade"] }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["http1", "http2", "server"] }
+hyper-util = { workspace = true, features = ["http1", "http2", "server"] }
 
 # runtime
 futures = { workspace = true }
@@ -28,12 +28,11 @@ scc = { workspace = true }
 parking_lot = { workspace = true }
 
 # magicblock
-magicblock-account-cloner = { workspace = true }
-magicblock-accounts-db = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
-magicblock-ledger = { workspace = true }
+magicblock-engine = { workspace = true }
+magicblock-ledger-deprecated = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-version = { workspace = true }
 
@@ -60,12 +59,11 @@ bincode = { workspace = true }
 bs58 = { workspace = true }
 json = { workspace = true }
 serde = { workspace = true }
-tracing = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
-test-kit = { workspace = true }
 reqwest = { workspace = true }
-solana-rpc-client = { workspace = true }
 solana-pubsub-client = { workspace = true }
+solana-rpc-client = { workspace = true }

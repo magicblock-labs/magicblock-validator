@@ -17,8 +17,8 @@ macro_rules! debug_panic {
 
 pub mod coordination_mode;
 pub mod intent;
-pub mod link;
 pub mod logger;
+pub mod replication;
 pub mod tls;
 pub mod token_programs;
 pub mod traits;

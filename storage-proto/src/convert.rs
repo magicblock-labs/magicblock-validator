@@ -124,6 +124,9 @@ impl From<Reward> for generated::Reward {
                 Some(RewardType::Rent) => generated::RewardType::Rent,
                 Some(RewardType::Staking) => generated::RewardType::Staking,
                 Some(RewardType::Voting) => generated::RewardType::Voting,
+                // No representation in the legacy proto schema; old ledgers
+                // this deprecated crate reads never contain this reward type.
+                Some(RewardType::DeactivatedStake) => generated::RewardType::Unspecified,
             } as i32,
             commission: reward
                 .commission
@@ -363,6 +366,13 @@ impl From<VersionedMessage> for generated::Message {
                     .map(|lookup| lookup.into())
                     .collect(),
             },
+            // V1 introduces a new on-wire layout (lifetime_specifier / config,
+            // no address lookup tables) that the legacy proto schema cannot
+            // represent. This deprecated crate only ever reads pre-V1 ledgers,
+            // so a V1 message never reaches this write path.
+            VersionedMessage::V1(_) => {
+                panic!("V1 messages are not representable in the legacy ledger proto schema")
+            }
         }
     }
 }

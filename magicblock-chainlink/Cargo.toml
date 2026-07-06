@@ -11,7 +11,6 @@ borsh = { workspace = true }
 futures-util = { workspace = true }
 helius-laserstream = { workspace = true }
 lru = { workspace = true }
-magicblock-accounts-db = { workspace = true }
 magicblock-aml = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }

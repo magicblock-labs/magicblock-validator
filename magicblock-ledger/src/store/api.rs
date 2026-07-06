@@ -1449,7 +1449,6 @@ mod tests {
         VersionedTransactionWithStatusMeta,
     };
     use tempfile::{Builder, TempDir};
-    use test_kit::init_logger;
 
     use super::*;
 
@@ -1615,7 +1614,6 @@ mod tests {
 
     #[test]
     fn test_persist_transaction_status() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1679,7 +1677,6 @@ mod tests {
 
     #[test]
     fn test_get_transaction_status_by_signature() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1759,7 +1756,6 @@ mod tests {
 
     #[test]
     fn test_get_complete_transaction_by_signature() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1861,7 +1857,6 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_no_intra_slot_limits() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2280,7 +2275,6 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_intra_slot_limits() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2544,7 +2538,6 @@ mod tests {
 
     #[test]
     fn test_get_confirmed_signatures_with_memos() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2665,7 +2658,6 @@ mod tests {
 
     #[test]
     fn test_verify_transaction_signature() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2719,7 +2711,6 @@ mod tests {
 
     #[test]
     fn test_verify_transaction_signature_not_found() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2731,7 +2722,6 @@ mod tests {
 
     #[test]
     fn test_verify_transaction_signature_invalid() {
-        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
