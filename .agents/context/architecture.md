@@ -60,22 +60,28 @@ Architecture rule: the RPC layer should route work to account sync and execution
 
 ### 3. Account synchronization
 
-Owned primarily by `magicblock-chainlink`, `magicblock-account-cloner`, and `magicblock-accounts`.
+Owned primarily by `magicblock-chainlink`, with materialization executed through
+the sibling engine's account accessor.
 
 Responsibilities:
 
 - determine whether required accounts are delegated, undelegated/read-only, fee-payers, programs, or missing/stale,
 - fetch base-layer account data and delegation metadata,
 - subscribe to remote changes where needed,
-- materialize local account/program state,
+- materialize local account/program state through engine accessors and
+  MagicRoot, including same-transaction post-finalize actions,
 - provide account availability to RPC and transaction execution,
+- use the engine account cache for missing-load coordination, recency, and
+  readonly-account eviction while retaining remote subscription ownership in
+  Chainlink,
 - hand scheduled commit work toward settlement.
 
 Architecture rule: this layer prepares local state for execution. It should not decide post-execution account access rules; those belong to the execution/SVM path. Avoid fetch amplification, duplicate clone work, subscription churn, and unnecessary serialization in account availability paths.
 
 ### 4. Transaction execution
 
-Owned primarily by `magicblock-processor`, `magicblock-core`, the local storage crates, and the forked SVM dependency.
+Owned by the sibling `../engine` workspace: engine, keeper, processor,
+accountsdb, ledger, and the forked SVM crates.
 
 Responsibilities:
 
@@ -92,7 +98,9 @@ Architecture rule: execution must preserve the writable-account invariant and av
 
 ### 5. Local persistence
 
-Owned primarily by `magicblock-accounts-db` and `magicblock-ledger`.
+Owned primarily by the sibling engine's keeper, accountsdb, and ledger. MBV's
+deprecated `magicblock-ledger` remains only for historical RPC reads after an
+engine miss.
 
 Responsibilities:
 
@@ -121,7 +129,8 @@ Architecture rule: Magic Program instructions schedule intent; validator service
 
 ### 7. Background services
 
-Owned by task scheduler, replicator, metrics, admin, and shared service crates.
+Owned by task scheduler, metrics, admin, shared service crates, and the sibling
+engine's TCP replicator.
 
 Responsibilities:
 
@@ -139,9 +148,9 @@ Architecture rule: background services should integrate through shared channels/
 ```text
 RPC/router ingress
   -> account synchronization ensures required accounts exist locally
-  -> processor scheduler locks accounts
-  -> executor runs SVM
-  -> AccountsDb and Ledger persist results
+  -> engine sequencer and keeper lock/schedule accounts
+  -> engine processor runs SVM
+  -> engine accountsdb and ledger persist results
   -> events notify RPC subscriptions, metrics, replication, and other consumers
 ```
 
@@ -151,8 +160,9 @@ RPC/router ingress
 base-layer delegation exists
   -> ER read/transaction needs account
   -> account sync fetches account + delegation metadata
-  -> cloner installs local representation
-  -> processor can execute valid transactions against it
+  -> Engine account accessor installs it through MagicRoot
+  -> optional actions run through MagicRoot PostFinalize in the same transaction
+  -> engine processor can execute valid transactions against it
 ```
 
 ### Commit / undelegation path
@@ -169,11 +179,11 @@ program invokes Magic Program in ER
 
 ```text
 load config
-  -> open ledger/accounts storage
-  -> initialize services
-  -> recover persisted work
-  -> replay/repair local state where configured
-  -> enter primary or replica execution mode
+  -> open deprecated history ledger
+  -> construct engine storage/execution with role-appropriate pacing
+  -> complete engine recovery and start authenticated TCP replication if configured
+  -> initialize validator-owned services
+  -> enter the configured execution/replication mode
 ```
 
 ### Shutdown path

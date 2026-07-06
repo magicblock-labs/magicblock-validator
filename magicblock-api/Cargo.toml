@@ -15,21 +15,21 @@ tracing = { workspace = true }
 
 magicblock-delegation-program-api = { workspace = true }
 magic-domain-program = { workspace = true }
-magicblock-account-cloner = { workspace = true }
-magicblock-accounts-db = { workspace = true }
+magicblock-engine = { workspace = true }
+magicblock-engine-nucleus = { workspace = true }
+keeper = { workspace = true }
+replicator = { workspace = true }
 magicblock-aperture = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
-magicblock-ledger = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
-magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-services = { workspace = true }
-magicblock-replicator = { workspace = true }
+magicblock-ledger-deprecated = { workspace = true }
 magicblock-task-scheduler = { workspace = true }
 magicblock-validator-admin = { workspace = true }
 
@@ -44,6 +44,7 @@ solana-hash = { workspace = true }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }
 solana-program = { workspace = true }
+solana-program-runtime = { workspace = true }
 solana-program-option = { workspace = true }
 solana-program-pack = { workspace = true }
 solana-pubkey = { workspace = true }

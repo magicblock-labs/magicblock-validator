@@ -14,12 +14,12 @@ use tokio_stream::StreamMap;
 use tracing::{trace, warn};
 
 use super::{
-    write_with_retry, LaserResult, LaserStream, LaserStreamWithHandle,
-    SharedSubscriptions, StreamFactory,
+    LaserResult, LaserStream, LaserStreamWithHandle, SharedSubscriptions,
+    StreamFactory, write_with_retry,
 };
 use crate::remote_account_provider::{
-    chain_laser_actor::StreamHandle, chain_slot::ChainSlot,
-    RemoteAccountProviderResult,
+    RemoteAccountProviderResult, chain_laser_actor::StreamHandle,
+    chain_slot::ChainSlot,
 };
 
 /// Identifies whether a stream update came from an account or
@@ -744,7 +744,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicU64, Arc};
+    use std::sync::{Arc, atomic::AtomicU64};
 
     use helius_laserstream::grpc::CommitmentLevel;
     use solana_pubkey::Pubkey;
@@ -1625,7 +1625,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_program_subscribe_uses_from_slot_with_chain_slot() {
-        use std::sync::{atomic::AtomicU64, Arc};
+        use std::sync::{Arc, atomic::AtomicU64};
 
         let current_slot: u64 = 1000;
         let chain_slot = ChainSlot::new(Arc::new(AtomicU64::new(current_slot)));
@@ -1694,7 +1694,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_optimize_uses_from_slot_with_chain_slot() {
-        use std::sync::{atomic::AtomicU64, Arc};
+        use std::sync::{Arc, atomic::AtomicU64};
 
         use crate::remote_account_provider::chain_slot::ChainSlot;
 
@@ -1735,7 +1735,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_optimize_sets_from_slot_zero_when_chain_slot_zero() {
-        use std::sync::{atomic::AtomicU64, Arc};
+        use std::sync::{Arc, atomic::AtomicU64};
 
         use crate::remote_account_provider::chain_slot::ChainSlot;
 

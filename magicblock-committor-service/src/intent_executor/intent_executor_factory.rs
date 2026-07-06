@@ -3,14 +3,15 @@ use std::{sync::Arc, time::Duration};
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
+use solana_keypair::Keypair;
 
 use crate::{
+    ComputeBudgetConfig,
     intent_executor::{
-        task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
         IntentExecutor, IntentExecutorImpl,
+        task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     },
     transaction_preparator::TransactionPreparatorImpl,
-    ComputeBudgetConfig,
 };
 
 pub trait IntentExecutorFactory {
@@ -26,6 +27,8 @@ pub struct ExecutorConfig {
 
 /// Dummy struct to simplify signature of CommitSchedulerWorker
 pub struct IntentExecutorFactoryImpl<A> {
+    /// Base-layer signing identity — the engine's authority keypair.
+    pub authority: Keypair,
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
     pub executor_config: ExecutorConfig,
@@ -47,6 +50,7 @@ where
             self.executor_config.compute_budget_config.clone(),
         );
         Self::Executor::new(
+            self.authority.insecure_clone(),
             self.rpc_client.clone(),
             transaction_preparator,
             self.task_info_fetcher.clone(),

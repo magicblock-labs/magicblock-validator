@@ -1,6 +1,6 @@
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
 };
 
 use magicblock_metrics::metrics;
@@ -47,7 +47,7 @@ impl ChainSlot {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicU64, Arc};
+    use std::sync::{Arc, atomic::AtomicU64};
 
     use super::*;
 

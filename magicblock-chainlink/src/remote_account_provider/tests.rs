@@ -1,22 +1,17 @@
 use std::{
     path::{Path, PathBuf},
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
     time::Duration,
 };
 
 use magicblock_metrics::metrics::{
-    chainlink_companion_fetch_attempts_sample_count,
-    chainlink_companion_fetch_attempts_sample_sum,
-    chainlink_companion_fetch_duration_sample_count,
-    chainlink_companion_fetch_duration_sample_sum,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
     chainlink_pending_fetch_waiters_value,
     chainlink_subscription_cleanup_accounts_value,
     chainlink_subscription_registration_accounts_value,
-    chainlink_subscription_release_accounts_value, AccountFetchReason,
-    ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
-    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
+    chainlink_subscription_release_accounts_value,
 };
 use solana_account::Account;
 use solana_system_interface::program as system_program;
@@ -32,7 +27,7 @@ use crate::{
         rpc_client_mock::{
             AccountAtSlot, ChainRpcClientMock, ChainRpcClientMockBuilder,
         },
-        utils::{create_test_lru_cache, random_pubkey},
+        utils::{create_test_subscribed_accounts, random_pubkey},
     },
 };
 
@@ -48,14 +43,6 @@ async fn setup_provider(
     pubkey: solana_pubkey::Pubkey,
     account: Account,
 ) -> ProviderTestCtx {
-    setup_provider_with_lru_capacity(pubkey, account, 1000).await
-}
-
-async fn setup_provider_with_lru_capacity(
-    pubkey: solana_pubkey::Pubkey,
-    account: Account,
-    lru_capacity: usize,
-) -> ProviderTestCtx {
     let rpc_client = ChainRpcClientMockBuilder::new()
         .slot(100)
         .clock_sysvar_for_slot(100)
@@ -67,7 +54,7 @@ async fn setup_provider_with_lru_capacity(
         ChainPubsubClientMock::new(updates_sender, updates_receiver);
 
     let (forward_tx, forward_rx) = mpsc::channel(1_000);
-    let (subscribed_accounts, config) = create_test_lru_cache(lru_capacity);
+    let (subscribed_accounts, config) = create_test_subscribed_accounts();
     let chain_slot = Arc::<AtomicU64>::default();
 
     let provider = Arc::new(
@@ -222,7 +209,7 @@ async fn test_try_get_multi_short_multi_account_response_returns_error() {
         ChainPubsubClientMock::new(updates_sender, updates_receiver);
 
     let (forward_tx, _forward_rx) = mpsc::channel(1_000);
-    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let (subscribed_accounts, config) = create_test_subscribed_accounts();
     let chain_slot = Arc::<AtomicU64>::default();
 
     let provider = RemoteAccountProvider::new(
@@ -290,7 +277,7 @@ async fn setup_matching_slots(
     let pubsub_client = ChainPubsubClientMock::new(tx, rx);
 
     let (forward_tx, forward_rx) = mpsc::channel(100);
-    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let (subscribed_accounts, config) = create_test_subscribed_accounts();
     let chain_slot = Arc::<AtomicU64>::default();
 
     (
@@ -309,203 +296,8 @@ async fn setup_matching_slots(
 }
 
 #[tokio::test]
-async fn test_companion_fetch_metrics_record_fast_path_success() {
-    let _metrics_guard =
-        crate::testing::pending_metric_test_lock().lock().await;
-    const CURRENT_SLOT: u64 = 42;
-    let pubkey1 = random_pubkey();
-    let pubkey2 = random_pubkey();
-    let (remote_account_provider, _) = setup_matching_slots(
-        TestSlotConfig {
-            current_slot: CURRENT_SLOT,
-            account1_slot: CURRENT_SLOT,
-            account2_slot: CURRENT_SLOT,
-        },
-        pubkey1,
-        pubkey2,
-    )
-    .await;
-    let context = AccountFetchContext::subscription_update(
-        AccountFetchReason::ProgramData,
-    );
-    let kind = ChainlinkCompanionFetchKind::ProgramData;
-    let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
-    let attempts_count_before =
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
-    let attempts_sum_before =
-        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome);
-    let duration_count_before =
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
-    let duration_sum_before =
-        chainlink_companion_fetch_duration_sample_sum(context, kind, outcome);
-
-    let res = remote_account_provider
-        .try_get_multi_until_slots_match(
-            &[pubkey1, pubkey2],
-            Some(MatchSlotsConfig {
-                max_retries: 10,
-                retry_interval_ms: 50,
-                min_context_slot: Some(CURRENT_SLOT),
-                companion_fetch_kind: kind,
-            }),
-            context,
-        )
-        .await;
-
-    assert!(res.is_ok());
-    assert_eq!(
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
-        attempts_count_before + 1
-    );
-    assert_eq!(
-        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome),
-        attempts_sum_before + 1.0
-    );
-    assert_eq!(
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
-        duration_count_before + 1
-    );
-    assert!(
-        chainlink_companion_fetch_duration_sample_sum(context, kind, outcome)
-            >= duration_sum_before
-    );
-}
-
-#[tokio::test]
-async fn test_companion_fetch_metrics_record_retry_success() {
-    let _metrics_guard =
-        crate::testing::pending_metric_test_lock().lock().await;
-    const CURRENT_SLOT: u64 = 42;
-    let pubkey1 = random_pubkey();
-    let pubkey2 = random_pubkey();
-    let (remote_account_provider, _) = setup_matching_slots(
-        TestSlotConfig {
-            current_slot: CURRENT_SLOT,
-            account1_slot: CURRENT_SLOT,
-            account2_slot: CURRENT_SLOT,
-        },
-        pubkey1,
-        pubkey2,
-    )
-    .await;
-    let rpc_to_advance = remote_account_provider.rpc_client.clone();
-    let advance_handle = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        rpc_to_advance.set_slot(CURRENT_SLOT + 1);
-    });
-    let context = AccountFetchContext::subscription_update(
-        AccountFetchReason::ProgramData,
-    );
-    let kind = ChainlinkCompanionFetchKind::ProgramData;
-    let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
-    let attempts_count_before =
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
-    let attempts_sum_before =
-        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome);
-
-    let res = remote_account_provider
-        .try_get_multi_until_slots_match(
-            &[pubkey1, pubkey2],
-            Some(MatchSlotsConfig {
-                max_retries: 20,
-                retry_interval_ms: 10,
-                min_context_slot: Some(CURRENT_SLOT + 1),
-                companion_fetch_kind: kind,
-            }),
-            context,
-        )
-        .await;
-    advance_handle.await.unwrap();
-
-    assert!(res.is_ok());
-    assert_eq!(
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
-        attempts_count_before + 1
-    );
-    assert!(
-        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome)
-            > attempts_sum_before + 1.0
-    );
-}
-
-#[tokio::test]
-async fn test_companion_fetch_metrics_record_slot_mismatch_failure() {
-    let _metrics_guard =
-        crate::testing::pending_metric_test_lock().lock().await;
-    let context = AccountFetchContext::rpc_get_account()
-        .with_reason(AccountFetchReason::DelegationRecord);
-    let kind = ChainlinkCompanionFetchKind::DelegationRecord;
-    let outcome = ChainlinkCompanionFetchOutcome::FailedSlotMismatch;
-    let attempts_count_before =
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
-    let duration_count_before =
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
-
-    // RPC-only retries in the provider test mock use one batch context slot,
-    // which normalizes slots before the terminal mismatch branch. Exercise the
-    // private observation helper directly so this test covers the metric path
-    // without changing production retry behavior.
-    observe_companion_fetch_if_configured(
-        context,
-        Some(kind),
-        outcome,
-        1,
-        std::time::Instant::now(),
-    );
-
-    assert_eq!(
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
-        attempts_count_before + 1
-    );
-    assert_eq!(
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
-        duration_count_before + 1
-    );
-}
-
-#[tokio::test]
-async fn test_companion_fetch_metrics_not_recorded_without_kind() {
-    let _metrics_guard =
-        crate::testing::pending_metric_test_lock().lock().await;
-    const CURRENT_SLOT: u64 = 42;
-    let pubkey1 = random_pubkey();
-    let pubkey2 = random_pubkey();
-    let (remote_account_provider, _) = setup_matching_slots(
-        TestSlotConfig {
-            current_slot: CURRENT_SLOT,
-            account1_slot: CURRENT_SLOT,
-            account2_slot: CURRENT_SLOT,
-        },
-        pubkey1,
-        pubkey2,
-    )
-    .await;
-    let context = AccountFetchContext::project_ata();
-    let kind = ChainlinkCompanionFetchKind::AtaProjection;
-    let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
-    let attempts_count_before =
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
-    let duration_count_before =
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
-
-    let res = remote_account_provider
-        .try_get_multi_until_slots_match(&[pubkey1, pubkey2], None, context)
-        .await;
-
-    assert!(res.is_ok());
-    assert_eq!(
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
-        attempts_count_before
-    );
-    assert_eq!(
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
-        duration_count_before
-    );
-}
-
-#[tokio::test]
-async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
-) {
+async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry()
+ {
     let _metrics_guard =
         crate::testing::pending_metric_test_lock().lock().await;
     let pubkey = solana_pubkey::Pubkey::new_unique();
@@ -693,8 +485,8 @@ async fn test_ensure_subscription_does_not_duplicate_existing_reason() {
 }
 
 #[tokio::test]
-async fn test_release_subscription_reason_keeps_watching_until_last_direct_refcount(
-) {
+async fn test_release_subscription_reason_keeps_watching_until_last_direct_refcount()
+ {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -830,8 +622,8 @@ async fn test_release_subscription_reason_unsubscribes_after_final_release() {
 }
 
 #[tokio::test]
-async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notification(
-) {
+async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notification()
+ {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -847,7 +639,7 @@ async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notif
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
-    let mut removed_rx = provider.try_get_removed_account_rx().unwrap();
+    let mut removed_rx = provider.try_get_stale_account_rx().unwrap();
 
     provider
         .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
@@ -1028,8 +820,7 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
 }
 
 #[tokio::test]
-async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lru(
-) {
+async fn test_reconciler_does_not_unsubscribe_registration_before_tracking() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -1074,7 +865,7 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
 
     assert!(
         pubsub_client.subscriptions_union().contains(&pubkey),
-        "reconciler must not unsubscribe a registration that is in pubsub but not yet in the LRU"
+        "reconciler must not unsubscribe a registration that is in pubsub but not yet in the pubsub tracking"
     );
 
     pubsub_client.resume_after_subscribe_insert();
@@ -1089,8 +880,8 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
 }
 
 #[tokio::test]
-async fn test_lock_aware_reconciler_still_removes_truly_stale_pubsub_only_subscription(
-) {
+async fn test_lock_aware_reconciler_still_removes_truly_stale_pubsub_only_subscription()
+ {
     let setup_pubkey = solana_pubkey::Pubkey::new_unique();
     let stale_pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -1118,8 +909,7 @@ async fn test_lock_aware_reconciler_still_removes_truly_stale_pubsub_only_subscr
 }
 
 #[tokio::test]
-async fn test_lock_aware_reconciler_still_resubscribes_lru_owned_missing_pubsub(
-) {
+async fn test_lock_aware_reconciler_resubscribes_tracked_missing_pubsub() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -1154,124 +944,6 @@ async fn test_lock_aware_reconciler_still_resubscribes_lru_owned_missing_pubsub(
 
     assert!(provider.is_watching(&pubkey));
     assert!(pubsub_client.subscriptions_union().contains(&pubkey));
-}
-
-#[tokio::test]
-async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
-{
-    let pubkey1 = solana_pubkey::Pubkey::new_unique();
-    let pubkey2 = solana_pubkey::Pubkey::new_unique();
-    let account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: solana_pubkey::Pubkey::new_unique(),
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let ProviderTestCtx {
-        provider,
-        pubsub_client,
-        _forward_rx,
-        ..
-    } = setup_provider_with_lru_capacity(pubkey1, account, 1).await;
-
-    provider
-        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap();
-    provider
-        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap();
-    provider
-        .acquire_subscription(&pubkey1, SubscriptionReason::DelegationRecord)
-        .await
-        .unwrap();
-
-    assert!(provider.is_watching(&pubkey1));
-    assert!(pubsub_client.subscriptions_union().contains(&pubkey1));
-    assert!(provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
-
-    provider
-        .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap();
-
-    assert!(!provider.is_watching(&pubkey1));
-    assert!(provider.is_watching(&pubkey2));
-    assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
-    assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
-    assert!(provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey2));
-}
-
-#[tokio::test]
-async fn test_lru_eviction_and_reason_release_are_serialized() {
-    let pubkey1 = solana_pubkey::Pubkey::new_unique();
-    let pubkey2 = solana_pubkey::Pubkey::new_unique();
-    let account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: solana_pubkey::Pubkey::new_unique(),
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let ProviderTestCtx {
-        provider,
-        pubsub_client,
-        _forward_rx,
-        ..
-    } = setup_provider_with_lru_capacity(pubkey1, account, 1).await;
-
-    provider
-        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap();
-    provider
-        .acquire_subscription(&pubkey1, SubscriptionReason::DelegationRecord)
-        .await
-        .unwrap();
-
-    let (acquire_result, release_result) = tokio::join!(
-        provider
-            .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount,),
-        provider.release_single_subscription(
-            &pubkey1,
-            SubscriptionReason::DelegationRecord,
-        )
-    );
-
-    acquire_result.unwrap();
-    release_result.unwrap();
-
-    assert!(!provider.is_watching(&pubkey1));
-    assert!(provider.is_watching(&pubkey2));
-    assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
-    assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
-    assert!(provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey2));
 }
 
 #[tokio::test]
@@ -1432,8 +1104,8 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
 }
 
 #[tokio::test]
-async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_late_rpc(
-) {
+async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_late_rpc()
+ {
     let _metrics_guard =
         crate::testing::pending_metric_test_lock().lock().await;
     const CURRENT_SLOT: u64 = 100;
@@ -1459,7 +1131,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
     let pubsub_client =
         ChainPubsubClientMock::new(updates_sender, updates_receiver);
     let (forward_tx, _forward_rx) = mpsc::channel(1_000);
-    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let (subscribed_accounts, config) = create_test_subscribed_accounts();
     let provider = Arc::new(
         RemoteAccountProvider::new(
             rpc_client.clone(),
@@ -1551,7 +1223,7 @@ async fn test_get_non_existing_account() {
         let pubsub_client =
             chain_pubsub_client::mock::ChainPubsubClientMock::new(tx, rx);
         let (fwd_tx, _fwd_rx) = mpsc::channel(100);
-        let (subscribed_accounts, config) = create_test_lru_cache(1000);
+        let (subscribed_accounts, config) = create_test_subscribed_accounts();
         let chain_slot = Arc::<AtomicU64>::default();
 
         RemoteAccountProvider::new(
@@ -1602,7 +1274,8 @@ async fn test_get_existing_account_for_valid_slot() {
         (
             {
                 let (fwd_tx, _fwd_rx) = mpsc::channel(100);
-                let (subscribed_accounts, config) = create_test_lru_cache(1000);
+                let (subscribed_accounts, config) =
+                    create_test_subscribed_accounts();
                 let chain_slot = Arc::<AtomicU64>::default();
 
                 RemoteAccountProvider::new(
@@ -1661,7 +1334,8 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot() {
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: None,
-                companion_fetch_kind: ChainlinkCompanionFetchKind::ProgramData,
+                companion_fetch_kind:
+                    ChainlinkCompanionFetchKind::DelegationRecord,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1676,8 +1350,8 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot() {
 }
 
 #[tokio::test]
-async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batch(
-) {
+async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batch()
+ {
     const CURRENT_SLOT: u64 = 42;
     let pubkey1 = random_pubkey();
     let pubkey2 = random_pubkey();
@@ -1707,7 +1381,7 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
     let (updates_tx, updates_rx) = mpsc::channel(100);
     let pubsub_client = ChainPubsubClientMock::new(updates_tx, updates_rx);
     let (forward_tx, _forward_rx) = mpsc::channel(100);
-    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let (subscribed_accounts, config) = create_test_subscribed_accounts();
     let provider = Arc::new(
         RemoteAccountProvider::new(
             rpc_client.clone(),
@@ -1733,7 +1407,7 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
                         retry_interval_ms: 10,
                         min_context_slot: None,
                         companion_fetch_kind:
-                            ChainlinkCompanionFetchKind::ProgramData,
+                            ChainlinkCompanionFetchKind::DelegationRecord,
                     }),
                     AccountFetchContext::rpc_get_account(),
                 )
@@ -1811,7 +1485,8 @@ async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: None,
-                companion_fetch_kind: ChainlinkCompanionFetchKind::ProgramData,
+                companion_fetch_kind:
+                    ChainlinkCompanionFetchKind::DelegationRecord,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1827,8 +1502,8 @@ async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
 }
 
 #[tokio::test]
-async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_min_context_slot(
-) {
+async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_min_context_slot()
+ {
     const CURRENT_SLOT: u64 = 42;
     let pubkey1 = random_pubkey();
     let pubkey2 = random_pubkey();
@@ -1856,7 +1531,8 @@ async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT + 1),
-                companion_fetch_kind: ChainlinkCompanionFetchKind::ProgramData,
+                companion_fetch_kind:
+                    ChainlinkCompanionFetchKind::DelegationRecord,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1873,8 +1549,8 @@ async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_
 }
 
 #[tokio::test]
-async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_account_slot_smaller_than_min_context_slot(
-) {
+async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_account_slot_smaller_than_min_context_slot()
+ {
     const CURRENT_SLOT: u64 = 42;
     let pubkey1 = random_pubkey();
     let pubkey2 = random_pubkey();
@@ -1896,7 +1572,8 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_accou
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT),
-                companion_fetch_kind: ChainlinkCompanionFetchKind::ProgramData,
+                companion_fetch_kind:
+                    ChainlinkCompanionFetchKind::DelegationRecord,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1915,71 +1592,11 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_accou
 #[test]
 fn test_match_slots_retry_delay_honors_configured_interval() {
     let config = MatchSlotsRetryConfig {
-        max_retries: 10,
         retry_interval_ms: 50,
-        min_context_slot: None,
+        ..MatchSlotsRetryConfig::default()
     };
 
     assert_eq!(match_slots_retry_delay(&config), Duration::from_millis(50));
-}
-
-// -----------------
-// LRU Cache/Eviction/Removal
-// -----------------
-async fn setup_with_accounts(
-    pubkeys: &[Pubkey],
-    accounts_capacity: usize,
-) -> (
-    RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
-    mpsc::Receiver<ForwardedSubscriptionUpdate>,
-    mpsc::Receiver<Pubkey>,
-) {
-    let rpc_client = {
-        let mut rpc_client_builder = ChainRpcClientMockBuilder::new().slot(1);
-        for pubkey in pubkeys {
-            rpc_client_builder = rpc_client_builder.account(
-                *pubkey,
-                Account {
-                    lamports: 555,
-                    data: vec![],
-                    owner: system_program::id(),
-                    executable: false,
-                    rent_epoch: 0,
-                },
-            );
-        }
-        rpc_client_builder.build()
-    };
-
-    let (tx, rx) = mpsc::channel(1);
-    let pubsub_client = ChainPubsubClientMock::new(tx, rx);
-
-    let (forward_tx, forward_rx) = mpsc::channel(100);
-    let (subscribed_accounts, config) =
-        create_test_lru_cache(accounts_capacity);
-    let chain_slot = Arc::<AtomicU64>::default();
-
-    let provider = RemoteAccountProvider::new(
-        rpc_client,
-        pubsub_client,
-        forward_tx,
-        &config,
-        subscribed_accounts,
-        ChainSlot::new(chain_slot),
-    )
-    .await
-    .unwrap();
-
-    let removed_account_tx = provider.try_get_removed_account_rx().unwrap();
-    (provider, forward_rx, removed_account_tx)
-}
-
-fn drain_removed_account_rx(rx: &mut mpsc::Receiver<Pubkey>) -> Vec<Pubkey> {
-    let mut removed_accounts = Vec::new();
-    while let Ok(pubkey) = rx.try_recv() {
-        removed_accounts.push(pubkey);
-    }
-    removed_accounts
 }
 
 // Subscription lifecycle metric readers. Tests read the current counter value
@@ -2011,407 +1628,7 @@ static SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD: tokio::sync::Mutex<()> =
     tokio::sync::Mutex::const_new(());
 
 #[tokio::test]
-async fn test_add_accounts_up_to_limit_no_eviction() {
-    // Higher level version (including removed_rx) from
-    // src/remote_account_provider/lru_cache.rs:
-    // - test_lru_cache_add_accounts_up_to_limit_no_eviction
-    init_logger();
-
-    let pubkey1 = Pubkey::new_unique();
-    let pubkey2 = Pubkey::new_unique();
-    let pubkey3 = Pubkey::new_unique();
-
-    let pubkeys = &[pubkey1, pubkey2, pubkey3];
-
-    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 3).await;
-
-    // Add three accounts (up to limit)
-    for pk in pubkeys {
-        provider
-            .try_get(*pk, AccountFetchContext::rpc_get_account())
-            .await
-            .unwrap();
-    }
-
-    // No evictions should occur
-    let removed = drain_removed_account_rx(&mut removed_rx);
-    debug!(removed = ?removed, "Removed accounts");
-    assert!(removed.is_empty(), "Expected no removed accounts");
-}
-
-#[tokio::test]
-async fn test_eviction_order() {
-    // Higher level version (including removed_rx) from
-    // src/remote_account_provider/lru_cache.rs:
-    // - test_lru_cache_lru_eviction_order
-    init_logger();
-
-    let pubkey1 = Pubkey::new_unique();
-    let pubkey2 = Pubkey::new_unique();
-    let pubkey3 = Pubkey::new_unique();
-    let pubkey4 = Pubkey::new_unique();
-    let pubkey5 = Pubkey::new_unique();
-
-    let pubkeys = &[pubkey1, pubkey2, pubkey3, pubkey4, pubkey5];
-    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 3).await;
-
-    // Fill cache: [1, 2, 3] (1 is least recently used)
-    provider
-        .try_get(pubkey1, AccountFetchContext::rpc_get_account())
-        .await
-        .unwrap();
-    provider
-        .try_get(pubkey2, AccountFetchContext::rpc_get_account())
-        .await
-        .unwrap();
-    provider
-        .try_get(pubkey3, AccountFetchContext::rpc_get_account())
-        .await
-        .unwrap();
-
-    // Access pubkey1 to make it more recently used: [2, 3, 1]
-    // This should just promote, making order [2, 3, 1]
-    provider
-        .try_get(pubkey1, AccountFetchContext::rpc_get_account())
-        .await
-        .unwrap();
-
-    // Add pubkey4, should evict pubkey2 (now least recently used)
-    provider
-        .try_get(pubkey4, AccountFetchContext::rpc_get_account())
-        .await
-        .unwrap();
-
-    // Check channel received the evicted account
-
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey2]);
-
-    // Add pubkey5, should evict pubkey3 (now least recently used)
-    provider
-        .try_get(pubkey5, AccountFetchContext::rpc_get_account())
-        .await
-        .unwrap();
-
-    // Check channel received the second evicted account
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey3]);
-}
-
-#[tokio::test]
-async fn test_multiple_evictions_in_sequence() {
-    // Higher level version (including removed_rx) from
-    // src/remote_account_provider/lru_cache.rs:
-    // - test_lru_cache_multiple_evictions_in_sequence
-    init_logger();
-
-    // Create test pubkeys
-    let pubkeys: Vec<Pubkey> = (1..=7).map(|_| Pubkey::new_unique()).collect();
-
-    let (provider, _, mut removed_rx) = setup_with_accounts(&pubkeys, 4).await;
-
-    // Fill cache to capacity (no evictions)
-    for pk in pubkeys.iter().take(4) {
-        provider
-            .try_get(*pk, AccountFetchContext::rpc_get_account())
-            .await
-            .unwrap();
-    }
-
-    // Add more accounts and verify evictions happen in LRU order
-    for i in 4..7 {
-        provider
-            .try_get(pubkeys[i], AccountFetchContext::rpc_get_account())
-            .await
-            .unwrap();
-        let expected_evicted = pubkeys[i - 4]; // Should evict the account added 4 steps ago
-
-        // Verify the evicted account was sent over the channel
-        let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-        assert_eq!(removed_accounts, vec![expected_evicted]);
-    }
-}
-
-#[tokio::test]
-async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
-    init_logger();
-    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
-
-    let pubkey1 = Pubkey::new_unique();
-    let pubkey2 = Pubkey::new_unique();
-    let pubkey3 = Pubkey::new_unique();
-    let pubkeys = &[pubkey1, pubkey2, pubkey3];
-
-    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 2).await;
-
-    provider
-        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap();
-    provider
-        .acquire_subscription(
-            &pubkey2,
-            SubscriptionReason::UndelegationTracking,
-        )
-        .await
-        .unwrap();
-
-    let evicted_before = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::EvictedCandidate,
-    );
-    provider
-        .acquire_subscription(&pubkey3, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap();
-    let evicted_after = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::EvictedCandidate,
-    );
-    assert_eq!(evicted_after - evicted_before, 1);
-
-    assert!(!provider.is_watching(&pubkey1));
-    assert!(provider.is_watching(&pubkey2));
-    assert!(provider.is_watching(&pubkey3));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey2));
-
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey1]);
-}
-
-#[tokio::test]
-async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
-    init_logger();
-    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
-
-    let pubkey1 = Pubkey::new_unique();
-    let pubkey2 = Pubkey::new_unique();
-    let pubkeys = &[pubkey1, pubkey2];
-
-    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
-
-    provider
-        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap();
-    provider.pubsub_client().fail_next_unsubscriptions(1);
-
-    let registration_before = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-    );
-    let cleanup_before = cleanup_metric_value(
-        SubscriptionCleanupSource::CapacityEviction,
-        SubscriptionCleanupOutcome::UnsubscribeFailed,
-    );
-
-    let err = provider
-        .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap_err();
-
-    let registration_after = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-    );
-    let cleanup_after = cleanup_metric_value(
-        SubscriptionCleanupSource::CapacityEviction,
-        SubscriptionCleanupOutcome::UnsubscribeFailed,
-    );
-    assert_eq!(registration_after - registration_before, 1);
-    assert_eq!(cleanup_after - cleanup_before, 1);
-
-    assert!(matches!(
-        err,
-        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
-    ));
-    assert!(provider.is_watching(&pubkey2));
-    assert!(
-        provider
-            .has_subscription_reason(
-                &pubkey2,
-                SubscriptionReason::DirectAccount
-            )
-            .await
-    );
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey2));
-
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert!(removed_accounts.is_empty());
-}
-
-#[tokio::test]
-async fn test_capacity_eviction_missing_pubsub_subscription_completes_cleanup()
-{
-    init_logger();
-    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
-
-    let pubkey1 = Pubkey::new_unique();
-    let pubkey2 = Pubkey::new_unique();
-    let pubkeys = &[pubkey1, pubkey2];
-
-    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
-
-    provider
-        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap();
-    provider.pubsub_client().remove_subscription(&pubkey1);
-
-    let evicted_before = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::EvictedCandidate,
-    );
-    let error_before = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-    );
-    let cleanup_before = cleanup_metric_value(
-        SubscriptionCleanupSource::CapacityEviction,
-        SubscriptionCleanupOutcome::AlreadyAbsent,
-    );
-
-    provider
-        .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap();
-
-    let evicted_after = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::EvictedCandidate,
-    );
-    let error_after = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-    );
-    let cleanup_after = cleanup_metric_value(
-        SubscriptionCleanupSource::CapacityEviction,
-        SubscriptionCleanupOutcome::AlreadyAbsent,
-    );
-    assert_eq!(evicted_after - evicted_before, 1);
-    assert_eq!(error_after - error_before, 0);
-    assert_eq!(cleanup_after - cleanup_before, 1);
-
-    assert!(!provider.is_watching(&pubkey1));
-    assert!(provider.is_watching(&pubkey2));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
-
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey1]);
-}
-
-#[tokio::test]
-async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribing_protected(
-) {
-    init_logger();
-    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
-
-    let pubkey1 = Pubkey::new_unique();
-    let pubkey2 = Pubkey::new_unique();
-    let pubkey3 = Pubkey::new_unique();
-    let pubkeys = &[pubkey1, pubkey2, pubkey3];
-
-    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 2).await;
-
-    provider
-        .acquire_subscription(
-            &pubkey1,
-            SubscriptionReason::UndelegationTracking,
-        )
-        .await
-        .unwrap();
-    provider
-        .acquire_subscription(
-            &pubkey2,
-            SubscriptionReason::UndelegationTracking,
-        )
-        .await
-        .unwrap();
-
-    let registration_before = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::RejectedAndUnsubscribed,
-    );
-    let cleanup_before = cleanup_metric_value(
-        SubscriptionCleanupSource::RejectedNewSubscription,
-        SubscriptionCleanupOutcome::Unsubscribed,
-    );
-
-    let err = provider
-        .acquire_subscription(&pubkey3, SubscriptionReason::DirectAccount)
-        .await
-        .unwrap_err();
-
-    let registration_after = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::RejectedAndUnsubscribed,
-    );
-    let cleanup_after = cleanup_metric_value(
-        SubscriptionCleanupSource::RejectedNewSubscription,
-        SubscriptionCleanupOutcome::Unsubscribed,
-    );
-    assert_eq!(registration_after - registration_before, 1);
-    assert_eq!(cleanup_after - cleanup_before, 1);
-
-    assert!(matches!(
-        err,
-        RemoteAccountProviderError::NoEvictableSubscriptionCapacity { pubkey }
-            if pubkey == pubkey3
-    ));
-    assert!(provider.is_watching(&pubkey1));
-    assert!(provider.is_watching(&pubkey2));
-    assert!(!provider.is_watching(&pubkey3));
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
-    assert!(provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey2));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey3));
-
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert!(removed_accounts.is_empty());
-}
-
-#[tokio::test]
-async fn test_registration_metric_added_below_capacity() {
+async fn test_registration_metric_added() {
     init_logger();
     let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
@@ -2429,7 +1646,7 @@ async fn test_registration_metric_added_below_capacity() {
     let before = registration_metric_value(
         SubscriptionRegistrationOrigin::Internal,
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::AddedBelowCapacity,
+        SubscriptionRegistrationOutcome::Added,
     );
     provider
         .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
@@ -2438,7 +1655,7 @@ async fn test_registration_metric_added_below_capacity() {
     let after = registration_metric_value(
         SubscriptionRegistrationOrigin::Internal,
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::AddedBelowCapacity,
+        SubscriptionRegistrationOutcome::Added,
     );
     assert_eq!(after - before, 1);
 }
@@ -2502,7 +1719,7 @@ async fn test_registration_metric_preserves_fetch_context() {
             AccountFetchContext::rpc_get_account(),
         ),
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::AddedBelowCapacity,
+        SubscriptionRegistrationOutcome::Added,
     );
     provider
         .try_get(pubkey, AccountFetchContext::rpc_get_account())
@@ -2513,7 +1730,7 @@ async fn test_registration_metric_preserves_fetch_context() {
             AccountFetchContext::rpc_get_account(),
         ),
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::AddedBelowCapacity,
+        SubscriptionRegistrationOutcome::Added,
     );
     assert_eq!(after - before, 1);
 }
@@ -2633,7 +1850,7 @@ async fn test_cleanup_metric_on_manual_unsubscribe() {
     );
     assert_eq!(unsub_after - unsub_before, 1);
 
-    // A second unsubscribe is a no-op because the pubkey already left the LRU.
+    // A second unsubscribe is a no-op because the pubkey already left the pubsub tracking.
     let absent_before = cleanup_metric_value(
         SubscriptionCleanupSource::ManualUnsubscribe,
         SubscriptionCleanupOutcome::AlreadyAbsent,
@@ -2731,13 +1948,12 @@ fn test_removed_stuck_pubkey_symbols_are_absent_from_production_code() {
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     async fn reconcile_subscriptions_once_for_test(&self) -> usize {
-        let never_evicted =
-            self.lrucache_subscribed_accounts.never_evicted_accounts();
+        let internally_managed = self.subscribed_accounts.internally_managed();
         subscription_reconciler::reconcile_subscriptions(
-            &self.lrucache_subscribed_accounts,
+            &self.subscribed_accounts,
             &self.pubsub_client,
-            &never_evicted,
-            &self.removed_account_tx,
+            &internally_managed,
+            &self.stale_account_tx,
             Some(&self.subscription_key_locks),
             Some(&self.subscription_ownership),
         )

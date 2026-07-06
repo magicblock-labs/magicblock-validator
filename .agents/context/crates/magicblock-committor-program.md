@@ -49,13 +49,12 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `magicblock-committor-program/bin/magicblock_committor_program.so` | Checked-in program binary artifact used by validator/test setup. Treat as a deployment artifact, not source documentation. |
 | `magicblock-committor-service/src/tasks/commit_task.rs` and `commit_finalize_task.rs` | Build buffer preparation stages and derive buffer PDAs consumed by Delegation Program commit/finalize-from-buffer instructions. |
 | `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` | Sends init/realloc/write instructions, retries missing chunks, handles cleanup, and persists buffer-preparation status. |
-| `test-integration/test-committor-service/` | Integration coverage for committor delivery preparation, transactions, intent execution, and PDA/buffer behavior. |
 
 Main consumers:
 
 - `magicblock-committor-service`, which re-exports `ChangedAccount`, `Changeset`, and `ChangesetMeta`, builds buffer tasks, and sends committor-program instructions;
 - `magicblock-accounts`, which uses `ChangesetMeta` in scheduled-commit error paths;
-- integration tests under `test-integration/test-committor-service` and config tests that allow/deny the committor program id;
+- config tests that allow or deny the committor program id;
 - the workspace root, which depends on this crate with `features = ["no-entrypoint"]` for client-side/library use.
 
 ## Public API shape / Main public types and APIs
@@ -165,7 +164,7 @@ Offsets must be multiples of `chunk_size`; this is enforced through `Chunks::set
 
 ### Transaction-size constants
 
-`consts.rs` and `instruction.rs` carry hand-tuned constants used by `magicblock-committor-service/src/consts.rs` to calculate `MAX_WRITE_CHUNK_SIZE`. `MAX_INSTRUCTION_DATA_SIZE` is based on empirical Solana transaction-size limits, while `IX_*_SIZE` constants approximate serialized instruction overhead. Changing these values can make buffer writes exceed transaction size or underutilize transaction capacity; validate with committor transaction-preparator tests and integration tests.
+`consts.rs` and `instruction.rs` carry hand-tuned constants used by `magicblock-committor-service/src/consts.rs` to calculate `MAX_WRITE_CHUNK_SIZE`. `MAX_INSTRUCTION_DATA_SIZE` is based on empirical Solana transaction-size limits, while `IX_*_SIZE` constants approximate serialized instruction overhead. Changing these values can make buffer writes exceed transaction size or underutilize transaction capacity; validate with committor transaction-preparator tests.
 
 ### Allocation and chunk tracker sizing
 
@@ -202,7 +201,7 @@ All temporary accounts are validator-authority scoped. The authority must sign a
 
 ### Changing instruction layout or accounts
 
-Start with `src/instruction.rs`, `src/processor.rs`, and `src/instruction_builder/`. Then inspect `magicblock-committor-service/src/tasks/mod.rs`, `transaction_preparator/delivery_preparator.rs`, and integration tests under `test-integration/test-committor-service`. Verify Borsh layouts, account order, signer flags, PDA derivation, and transaction-size constants.
+Start with `src/instruction.rs`, `src/processor.rs`, and `src/instruction_builder/`. Then inspect `magicblock-committor-service/src/tasks/mod.rs` and `transaction_preparator/delivery_preparator.rs`. Verify Borsh layouts, account order, signer flags, PDA derivation, and transaction-size constants.
 
 ### Changing buffer size, chunk size, or packing limits
 
@@ -224,7 +223,6 @@ Inspect `src/utils/account.rs`, `processor::process_close`, and `DeliveryPrepara
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-committor-program` and, when public APIs or buffer preparation change, `magicblock-committor-service`.
-- Relevant integration suites: `test-committor`, especially preparator, commit-finalize, and intent-executor targets; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance/security validation intent: report changes to buffer transaction count, chunk count, compute units, RPC sends, or retry rounds; confirm signer/PDA checks, transaction-size fit, retry, and cleanup behavior remain intact.
 
 
@@ -234,4 +232,3 @@ Inspect `src/utils/account.rs`, `processor::process_close`, and `DeliveryPrepara
 - `.agents/context/crates/magicblock-committor-service.md` — service-side buffer preparation, retry, cleanup, and recovery integration.
 - `magicblock-committor-service/src/tasks/commit_task.rs` and `commit_finalize_task.rs` — buffer-task construction and Delegation Program commit/finalize-from-buffer call sites.
 - `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` — runtime buffer initialization, write retry, and cleanup call site.
-- `test-integration/test-committor-service/` — integration coverage for committor delivery and intent execution.

@@ -1,38 +1,38 @@
 use core::str;
-use std::{mem::size_of, ops::Range, time::Duration};
+use std::{mem::size_of, ops::Range, sync::Arc, time::Duration};
 
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use http_body_util::BodyExt;
 use hyper::{
-    body::{Bytes, Incoming},
     Request, Response,
+    body::{Bytes, Incoming},
 };
-use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_chainlink::errors::ChainlinkError;
-use magicblock_core::{
-    coordination_mode::CoordinationMode,
-    link::transactions::{SanitizeableTransaction, WithEncoded},
-};
+use magicblock_core::Slot;
 use magicblock_metrics::metrics::{AccountFetchContext, ENSURE_ACCOUNTS_TIME};
+use nucleus::runtime::TransactionView;
 use prelude::JsonBody;
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
-use solana_transaction::{
-    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
-};
+use solana_rpc_client_api::response::RpcBlockhash;
 use solana_transaction_status::UiTransactionEncoding;
 use tracing::*;
-use transaction_validation::validate_supported_transaction_shape;
 
 use super::RpcRequest;
 use crate::{
-    error::RpcError, server::http::dispatch::HttpDispatcher, RpcResult,
+    RpcResult, error::RpcError, server::http::dispatch::HttpDispatcher,
 };
 
 pub(crate) type HandlerResult = RpcResult<Response<JsonBody>>;
 
 const SYSTEM_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("11111111111111111111111111111111");
+
+/// Standard Solana slot time in milliseconds, used to scale blockhash validity
+/// to the ephemeral validator's (typically faster) block production rate.
+const SOLANA_BLOCK_TIME_MS: f64 = 400.0;
+/// Number of slots a blockhash is considered valid on Solana mainnet.
+const MAX_VALID_BLOCKHASH_SLOTS: f64 = 150.0;
 
 /// An enum to efficiently represent a request body, avoiding allocation
 /// for single-chunk bodies (which are almost always the case)
@@ -56,7 +56,7 @@ impl Data {
 pub(crate) fn parse_body(body: Data) -> RpcResult<RpcRequest> {
     let body_bytes = match &body {
         Data::Empty => {
-            return Err(RpcError::invalid_request("missing request body"))
+            return Err(RpcError::invalid_request("missing request body"));
         }
         Data::SingleChunk(slice) => slice.as_ref(),
         Data::MultiChunk(vec) => vec.as_ref(),
@@ -111,18 +111,32 @@ pub(crate) async fn extract_bytes(
 ///
 /// This block contains common helper methods used by various RPC request handlers.
 impl HttpDispatcher {
+    /// Builds an [`RpcBlockhash`] from the engine's latest block, returning it
+    /// alongside that block's slot. The validity window is scaled from the
+    /// mainnet 150-slot bound by the ratio of standard to actual block time.
+    fn latest_blockhash(&self) -> (RpcBlockhash, Slot) {
+        let block = self.engine.blocks().latest();
+        let ratio = SOLANA_BLOCK_TIME_MS / self.context.blocktime.max(1) as f64;
+        let validity = (ratio * MAX_VALID_BLOCKHASH_SLOTS) as u64;
+        let response = RpcBlockhash {
+            blockhash: block.hash.to_string(),
+            last_valid_block_height: block.slot + validity,
+        };
+        (response, block.slot)
+    }
+
     // Heuristic to render synthetic empty placeholder accounts as JSON-RPC null.
     fn account_should_render_as_null(account: &AccountSharedData) -> bool {
         account.lamports() == 0
             && account.data().is_empty()
-            && !account.delegated()
-            && !account.undelegating()
-            && !account.confined()
+            && !account.is(AccountMode::Delegated)
+            && !account.is(AccountMode::Transient)
+            && !account.is(AccountMode::Ephemeral)
             && account.owner() == &SYSTEM_PROGRAM_ID
     }
 
     fn needs_onchain_interactions(&self) -> bool {
-        CoordinationMode::current().needs_onchain_interactions()
+        self.context.is_primary
     }
 
     fn require_primary_rpc_method(
@@ -138,17 +152,13 @@ impl HttpDispatcher {
         }
     }
 
-    /// Fetches an account's data from the `AccountsDb` filling it in from chain
-    /// as needed.
+    /// Reads an account through the engine, first ensuring it is cloned in
+    /// from chain as needed.
     #[instrument(skip_all)]
     async fn read_account_with_ensure(
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
-        if !self.needs_onchain_interactions() {
-            return self.accountsdb.get_account(pubkey);
-        }
-
         let mark_empty_if_not_found = [*pubkey];
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["account"])
@@ -163,26 +173,19 @@ impl HttpDispatcher {
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
-                // Log the error and return whatever is in the accounts db
+                // Log the error and return whatever the engine holds
                 debug!(error = ?e, "Failed to ensure account");
             });
-        self.accountsdb.get_account(pubkey)
+        self.engine.accounts().get(pubkey).ok().flatten()
     }
 
-    /// Fetches multiple account's data from the `AccountsDb` filling them in from chain
-    /// as needed.
+    /// Reads multiple accounts through the engine, first ensuring they are
+    /// cloned in from chain as needed.
     #[instrument(skip(self, pubkeys), fields(pubkey_count = pubkeys.len()))]
     async fn read_accounts_with_ensure(
         &self,
         pubkeys: &[Pubkey],
     ) -> Vec<Option<AccountSharedData>> {
-        if !self.needs_onchain_interactions() {
-            return pubkeys
-                .iter()
-                .map(|pubkey| self.accountsdb.get_account(pubkey))
-                .collect();
-        }
-
         trace!("Ensuring accounts");
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["multi-account"])
@@ -197,78 +200,50 @@ impl HttpDispatcher {
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the accounts fails
-                // Log the error and return whatever is in the accounts db
+                // Log the error and return whatever the engine holds
                 warn!(error = ?e, "Failed to ensure accounts");
             });
         pubkeys
             .iter()
-            .map(|pubkey| self.accountsdb.get_account(pubkey))
+            .map(|pubkey| self.engine.accounts().get(pubkey).ok().flatten())
             .collect()
     }
 
-    /// Decodes, validates, and sanitizes a transaction from its string representation.
+    /// Decodes a wire-format transaction string into a sanitized
+    /// [`TransactionView`] over the raw signed bytes.
     ///
-    /// This is a crucial pre-processing step for both `sendTransaction` and
-    /// `simulateTransaction`. It performs the following steps:
-    /// 1. Decodes the transaction string using the specified encoding (Base58 or Base64).
-    /// 2. Deserializes the binary data into a `VersionedTransaction`.
-    /// 3. Validates the transaction's `recent_blockhash` against the ledger, optionally
-    ///    replacing it with the latest one.
-    /// 4. Sanitizes the transaction, which includes verifying signatures unless disabled.
-    ///
-    /// Returns `WithEncoded<SanitizedTransaction>` with the original wire bytes.
-    /// For execution (replace_blockhash=false), bytes are preserved for replication.
-    /// For simulation (replace_blockhash=true), bytes are unused.
-    fn prepare_transaction(
+    /// The engine owns verification, replay protection and blockhash
+    /// validation, so this performs no signature or blockhash checks — it only
+    /// decodes and sanitizes the structure so the accounts required by the
+    /// transaction can be resolved and the payload handed to the engine.
+    fn decode_transaction(
         &self,
         txn: &str,
         encoding: UiTransactionEncoding,
-        sigverify: bool,
-        replace_blockhash: bool,
-    ) -> RpcResult<WithEncoded<SanitizedTransaction>> {
-        // parse the string as bincode serialized bytes
-        let encoded = match encoding {
-            UiTransactionEncoding::Base58 => {
-                bs58::decode(txn).into_vec().map_err(RpcError::parse_error)
-            }
+    ) -> RpcResult<TransactionView> {
+        let bytes = match encoding {
+            UiTransactionEncoding::Base58 => bs58::decode(txn)
+                .into_vec()
+                .map_err(RpcError::parse_error)?,
             UiTransactionEncoding::Base64 => {
-                BASE64_STANDARD.decode(txn).map_err(RpcError::parse_error)
+                BASE64_STANDARD.decode(txn).map_err(RpcError::parse_error)?
             }
-            _ => Err(RpcError::invalid_params(
-                "unsupported transaction encoding",
-            )),
-        }?;
-
-        let mut transaction: VersionedTransaction =
-            bincode::deserialize(&encoded).map_err(RpcError::invalid_params)?;
-
-        validate_supported_transaction_shape(&transaction)?;
-
-        if replace_blockhash {
-            transaction
-                .message
-                .set_recent_blockhash(self.blocks.get_latest().hash);
-        } else {
-            let hash = transaction.message.recent_blockhash();
-            if !self.blocks.contains(hash) {
-                return Err(RpcError::transaction_verification(
-                    "Blockhash not found",
+            _ => {
+                return Err(RpcError::invalid_params(
+                    "unsupported transaction encoding",
                 ));
-            };
-        }
-
-        let txn = transaction.sanitize(sigverify)?;
-        Ok(WithEncoded {
-            txn,
-            encoded: encoded.into(),
-        })
+            }
+        };
+        TransactionView::try_new_sanitized(Arc::new(bytes), true)
+            .map_err(|e| RpcError::invalid_params(format!("{e:?}")))
     }
 
-    /// Ensures all accounts required for a transaction are present in the `AccountsDb`.
+    /// Ensures all accounts required for a transaction are cloned in via the
+    /// chainlink before the transaction is handed to the engine.
     #[instrument(skip_all)]
     async fn ensure_transaction_accounts(
         &self,
-        transaction: &SanitizedTransaction,
+        transaction: &TransactionView,
     ) -> RpcResult<()> {
         // Hard bound on account preparation: if the cloning pipeline is
         // degraded the transaction must fail with an error instead of
@@ -290,11 +265,7 @@ impl HttpDispatcher {
                 ENSURE_ACCOUNTS_TIMEOUT.as_secs(),
             ))
         }) {
-            Ok(res) if res.is_ok() => Ok(()),
-            Ok(res) => {
-                debug!(%res, "Transaction account resolution encountered issues");
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(err) => {
                 // Non-OK result indicates a general failure to guarantee
                 // all accounts, i.e. we may be disconnected, weren't able to
@@ -309,18 +280,20 @@ impl HttpDispatcher {
 
 /// A prelude module to provide common imports for all RPC handler modules.
 mod prelude {
-    pub(super) use magicblock_core::{link::accounts::LockedAccount, Slot};
+    pub(super) use magicblock_core::Slot;
     pub(super) use solana_account::ReadableAccount;
-    pub(super) use solana_account_decoder::UiAccountEncoding;
+    pub(super) use solana_account_decoder::{
+        UiAccountEncoding, encode_ui_account,
+    };
     pub(super) use solana_pubkey::Pubkey;
 
     pub(super) use super::HandlerResult;
     pub(super) use crate::{
         error::RpcError,
         requests::{
+            JsonHttpRequest as JsonRequest,
             params::{Serde32Bytes, SerdeSignature},
             payload::ResponsePayload,
-            JsonHttpRequest as JsonRequest,
         },
         server::http::dispatch::HttpDispatcher,
         some_or_err,
@@ -370,7 +343,6 @@ pub(crate) mod mocked;
 pub(crate) mod request_airdrop;
 pub(crate) mod send_transaction;
 pub(crate) mod simulate_transaction;
-mod transaction_validation;
 
 // Magic Router compatibility methods.
 pub(crate) mod get_delegation_status;

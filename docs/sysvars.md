@@ -22,10 +22,6 @@ The following sysvars exist and are supported by our validator if they have a `*
 - `epoch_rewards`: progress of epoch rewards distribution (also makes no sense in our case, Solana creates this when calculating/distributing rewards)
 - `last_restart_slot`*: last restart slot (set to `0`, but currently not enabled with the feature set we use )
 
-The program to test sysvars is defined inside `test-integration/sysvars`.
-The related tests are defined inside `magicblock-bank/tests/transaction_execute.rs` as
-`test_bank_sysvars_get` and `test_bank_sysvars_from_account`.
-
 ### Resources
 
 - [solana_sdk/sysvar](https://docs.rs/solana-sdk/latest/solana_sdk/sysvar/index.html)

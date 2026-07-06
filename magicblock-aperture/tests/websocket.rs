@@ -1,12 +1,12 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use setup::RpcTestEnv;
+use setup::{PROGRAM_ID, RpcTestEnv, transfer};
+use solana_account::AccountMode;
 use solana_rpc_client_api::{
     config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter},
     response::{ProcessedSignatureResult, RpcSignatureResult},
 };
-use test_kit::guinea;
 use tokio::time::timeout;
 
 mod setup;
@@ -15,7 +15,8 @@ mod setup;
 #[tokio::test]
 async fn test_account_subscribe() {
     let env = RpcTestEnv::new().await;
-    let account = env.create_account().pubkey;
+    let account = env.engine.store_v42(0, AccountMode::Ephemeral);
+    let balance = env.engine.load_v42_lamports(account).unwrap();
     let amount = RpcTestEnv::TRANSFER_AMOUNT;
 
     // Subscribe to the account.
@@ -25,8 +26,11 @@ async fn test_account_subscribe() {
         .await
         .expect("failed to subscribe to account");
 
-    // Trigger an update by sending lamports to the account.
-    env.transfer_lamports(account, amount).await;
+    let sender = env.engine.store_v42(0, AccountMode::Ephemeral);
+    env.engine
+        .execute(&[transfer(sender, account, amount)])
+        .await
+        .expect("transfer succeeds");
 
     // Await the notification and verify its contents.
     let notification = timeout(Duration::from_millis(200), stream.next())
@@ -34,31 +38,11 @@ async fn test_account_subscribe() {
         .expect("timed out waiting for account notification")
         .expect("stream should not be closed");
 
-    assert_eq!(
-        notification.value.lamports,
-        RpcTestEnv::INIT_ACCOUNT_BALANCE + amount
-    );
-    // The notification slot should be valid. With auto-advancement, slots
-    // advance independently, so we just verify the notification has a reasonable slot.
-    // We check that the slot is not from the distant past or future.
-    let current_slot = env.latest_slot();
-    assert!(
-        notification.context.slot <= current_slot + 1,
-        "notification slot {} should be reasonable compared to current slot {}",
-        notification.context.slot,
-        current_slot
-    );
+    assert_eq!(notification.value.lamports, balance + amount);
+    assert_eq!(notification.context.slot, env.engine.blocks().latest().slot);
 
     // Unsubscribe and verify no more messages are received.
-    // With auto-advancement, there may be buffered notifications, so we
-    // drain any remaining messages with a timeout before checking for closure.
     unsub().await;
-    // Drain any buffered notifications that were sent before unsubscription completed
-    while let Ok(Some(_)) =
-        timeout(Duration::from_millis(10), stream.next()).await
-    {
-        // Drain buffered messages
-    }
     let closed = stream.next().await.is_none();
     assert!(
         closed,
@@ -74,12 +58,12 @@ async fn test_program_subscribe() {
     // Subscribe to the test program.
     let (mut stream, unsub) = env
         .pubsub
-        .program_subscribe(&guinea::ID, None)
+        .program_subscribe(&PROGRAM_ID, None)
         .await
         .expect("failed to subscribe to program");
 
     // Trigger an update by executing an instruction that modifies a program account.
-    env.execute_transaction().await;
+    env.execute_write().await;
 
     // Await the notification and verify its contents.
     let notification = timeout(Duration::from_millis(200), stream.next())
@@ -101,8 +85,12 @@ async fn test_program_subscribe() {
 #[tokio::test]
 async fn test_signature_subscribe_before_execution() {
     let env = RpcTestEnv::new().await;
-    let transfer_tx = env.build_transfer_txn();
-    let signature = transfer_tx.signatures[0];
+    let sender = env.engine.store_v42(0, AccountMode::Ephemeral);
+    let recipient = env.engine.store_v42(0, AccountMode::Ephemeral);
+    let (signature, view) = env.engine.signed_view(
+        None,
+        transfer(sender, recipient, RpcTestEnv::TRANSFER_AMOUNT),
+    );
 
     // Subscribe to the signature before sending the transaction.
     let (mut stream, unsub) = env
@@ -111,12 +99,13 @@ async fn test_signature_subscribe_before_execution() {
         .await
         .expect("failed to subscribe to signature");
 
-    // Execute the transaction.
-    env.execution
-        .transaction_scheduler
-        .execute(transfer_tx)
+    env.engine
+        .transaction(view)
+        .expect("compose transaction view")
+        .execute()
         .await
-        .unwrap();
+        .expect("engine available")
+        .expect("transfer succeeds");
 
     // Await the notification and verify it indicates success.
     let notification = timeout(Duration::from_millis(200), stream.next())
@@ -148,7 +137,7 @@ async fn test_signature_subscribe_before_execution() {
 #[tokio::test]
 async fn test_signature_subscribe_after_execution() {
     let env = RpcTestEnv::new().await;
-    let signature = env.execute_transaction().await;
+    let signature = env.execute_write().await;
 
     // Subscribe to the signature *after* the transaction has been processed.
     // This tests the fast-path where the result is already cached.
@@ -180,8 +169,12 @@ async fn test_signature_subscribe_after_execution() {
 #[tokio::test]
 async fn test_signature_subscribe_failure() {
     let env = RpcTestEnv::new().await;
-    let failing_tx = env.build_failing_transfer_txn();
-    let signature = failing_tx.signatures[0];
+    let sender = env.engine.store_v42(0, AccountMode::Ephemeral);
+    let recipient = env.engine.store_v42(0, AccountMode::Ephemeral);
+    let amount = env.engine.load_v42_lamports(sender).unwrap() + 1;
+    let (signature, view) = env
+        .engine
+        .signed_view(None, transfer(sender, recipient, amount));
 
     let (mut stream, _) = env
         .pubsub
@@ -189,11 +182,12 @@ async fn test_signature_subscribe_failure() {
         .await
         .expect("failed to subscribe to signature");
 
-    env.execution
-        .transaction_scheduler
-        .schedule(failing_tx) // Use schedule for fire-and-forget
+    env.engine
+        .transaction(view)
+        .expect("compose transaction view")
+        .schedule()
         .await
-        .unwrap();
+        .expect("schedule failing transfer");
 
     let notification = timeout(Duration::from_millis(200), stream.next())
         .await
@@ -215,41 +209,34 @@ async fn test_signature_subscribe_failure() {
 /// Verifies `slotSubscribe` sends a notification for each new slot.
 #[tokio::test]
 async fn test_slot_subscribe() {
-    let env = RpcTestEnv::new_manual_slots().await;
+    let mut env = RpcTestEnv::new().await;
     let (mut stream, unsub) = env
         .pubsub
         .slot_subscribe()
         .await
         .expect("failed to subscribe to slots");
-    let mut last_slot = env.latest_slot();
-
+    // Each deterministic advance produces exactly one block, so the subscription
+    // should deliver exactly one strictly-increasing slot notification per step.
+    let mut last_slot: Option<u64> = None;
     for _ in 0..3 {
-        env.advance_slots(1);
-        let start = tokio::time::Instant::now();
-        let notification = loop {
-            let remaining =
-                Duration::from_secs(1).saturating_sub(start.elapsed());
-            let notification = timeout(remaining, stream.next())
-                .await
-                .expect("timed out waiting for slot notification")
-                .expect("stream should not be closed");
+        env.engine.advance(1).await;
+        let notification = timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("timed out waiting for slot notification")
+            .expect("stream should not be closed");
 
-            if notification.slot > last_slot {
-                break notification;
-            }
-        };
-
+        if let Some(prev) = last_slot {
+            assert!(
+                notification.slot > prev,
+                "slot should advance: {prev} -> {}",
+                notification.slot
+            );
+        }
         assert_eq!(notification.parent, notification.slot - 1);
-        last_slot = notification.slot;
+        last_slot = Some(notification.slot);
     }
 
     unsub().await;
-    // Drain any buffered notifications that were sent before unsubscription completed
-    while let Ok(Some(_)) =
-        timeout(Duration::from_millis(10), stream.next()).await
-    {
-        // Drain buffered messages
-    }
     let closed = stream.next().await.is_none();
     assert!(
         closed,
@@ -257,36 +244,23 @@ async fn test_slot_subscribe() {
     );
 }
 
-/// Verifies `logsSubscribe` with an `All` filter receives all transaction logs.
+/// The engine-backed `logsSubscribe` is mentions-only: the firehose `All`
+/// filter is no longer supported and must be rejected.
 #[tokio::test]
-async fn test_logs_subscribe_all() {
+async fn test_logs_subscribe_all_rejected() {
     let env = RpcTestEnv::new().await;
 
-    let (mut stream, unsub) = env
+    let result = env
         .pubsub
         .logs_subscribe(
             RpcTransactionLogsFilter::All,
             RpcTransactionLogsConfig { commitment: None },
         )
-        .await
-        .expect("failed to subscribe to all logs");
+        .await;
 
-    let signature = env.execute_transaction().await;
-
-    let notification = timeout(Duration::from_millis(200), stream.next())
-        .await
-        .expect("timed out waiting for log notification")
-        .expect("stream should not be closed");
-
-    assert_eq!(notification.value.signature, signature.to_string());
-    assert!(notification.value.err.is_none());
-    assert!(!notification.value.logs.is_empty());
-
-    unsub().await;
-    let closed = stream.next().await.is_none();
     assert!(
-        closed,
-        "should not receive a notification after unsubscribing"
+        result.is_err(),
+        "logsSubscribe(All) should be rejected; only Mentions is supported"
     );
 }
 
@@ -298,14 +272,14 @@ async fn test_logs_subscribe_mentions() {
     let (mut stream, unsub) = env
         .pubsub
         .logs_subscribe(
-            RpcTransactionLogsFilter::Mentions(vec![guinea::ID.to_string()]),
+            RpcTransactionLogsFilter::Mentions(vec![PROGRAM_ID.to_string()]),
             RpcTransactionLogsConfig { commitment: None },
         )
         .await
-        .expect("failed to subscribe to logs mentioning guinea program");
+        .expect("failed to subscribe to logs mentioning v42 program");
 
-    // This transaction mentions the guinea program ID.
-    let signature = env.execute_transaction().await;
+    // This transaction mentions the engine testkit's v42 program ID.
+    let signature = env.execute_write().await;
 
     let notification = timeout(Duration::from_millis(200), stream.next())
         .await

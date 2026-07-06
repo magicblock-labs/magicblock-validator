@@ -2,7 +2,6 @@ use magicblock_metrics::metrics::{
     TRANSACTION_PROCESSING_TIME, TRANSACTION_SKIP_PREFLIGHT,
 };
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_transaction_error::TransactionError;
 use solana_transaction_status::UiTransactionEncoding;
 use tracing::*;
 
@@ -29,28 +28,23 @@ impl HttpDispatcher {
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
         let transaction = self
-            .prepare_transaction(&transaction_str, encoding, true, false)
+            .decode_transaction(&transaction_str, encoding)
             .inspect_err(
-                |err| debug!(error = ?err, "Failed to prepare transaction"),
-            )?;
-        let signature = *transaction.txn.signature();
+            |err| debug!(error = ?err, "Failed to decode transaction"),
+        )?;
+        let signature = transaction.signatures()[0];
 
-        // Perform a replay check and reserve the signature in the cache
-        if self.transactions.contains(&signature)
-            || !self.transactions.push(signature, None)
-        {
-            return Err(TransactionError::AlreadyProcessed.into());
-        }
+        self.ensure_transaction_accounts(&transaction).await?;
 
-        self.ensure_transaction_accounts(&transaction.txn).await?;
-
-        // Based on the preflight flag, either execute and await the result,
-        // or schedule (fire-and-forget) for background processing.
+        // Hand the raw payload to the engine, which owns replay protection,
+        // signature verification and blockhash validation. Based on the
+        // preflight flag, either execute and await the committed result, or
+        // schedule (fire-and-forget) for background processing.
         if config.skip_preflight {
             TRANSACTION_SKIP_PREFLIGHT.inc();
-            self.transactions_scheduler.schedule(transaction).await?;
+            self.engine.transaction(transaction)?.schedule().await?;
         } else {
-            self.transactions_scheduler.execute(transaction).await?;
+            self.engine.transaction(transaction)?.execute().await??;
         }
 
         let signature = SerdeSignature(signature);

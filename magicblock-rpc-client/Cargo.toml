@@ -27,7 +27,7 @@ solana-instruction = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-signature = { workspace = true }
 solana-address-lookup-table-interface = { workspace = true, features = [
-  "bincode",
+  "wincode",
   "bytemuck",
 ] }
 futures-util = { workspace = true }

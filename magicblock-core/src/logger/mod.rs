@@ -1,5 +1,5 @@
 use tracing_log::LogTracer;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 mod consolidate;
 pub use consolidate::{log_trace_debug, log_trace_warn};
@@ -101,9 +101,9 @@ impl LogStyle {
 use tracing::{Event, Subscriber};
 use tracing_subscriber::{
     fmt::{
+        FmtContext,
         format::{self, FormatEvent, FormatFields, Writer},
         time::FormatTime,
-        FmtContext,
     },
     registry::LookupSpan,
 };

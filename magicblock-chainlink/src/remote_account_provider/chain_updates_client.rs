@@ -1,8 +1,8 @@
 use std::{
     collections::HashSet,
     sync::{
-        atomic::{AtomicU16, AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU16, AtomicU64, Ordering},
     },
 };
 
@@ -14,11 +14,11 @@ use tokio::sync::mpsc;
 use tracing::*;
 
 use crate::remote_account_provider::{
+    ChainPubsubClient, ChainPubsubClientImpl, Endpoint, ReconnectableClient,
+    RemoteAccountProviderError, RemoteAccountProviderResult,
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
     chain_rpc_client::ChainRpcClientImpl, chain_slot::ChainSlot,
-    pubsub_common::SubscriptionUpdate, ChainPubsubClient,
-    ChainPubsubClientImpl, Endpoint, ReconnectableClient,
-    RemoteAccountProviderError, RemoteAccountProviderResult,
+    pubsub_common::SubscriptionUpdate,
 };
 
 #[derive(Clone)]

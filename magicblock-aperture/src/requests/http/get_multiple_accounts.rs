@@ -30,19 +30,18 @@ impl HttpDispatcher {
 
         let accounts = pubkeys
             .iter()
-            .zip(self.read_accounts_with_ensure(&pubkeys).await.into_iter())
+            .zip(self.read_accounts_with_ensure(&pubkeys).await)
             .map(|(pubkey, acc)| {
                 acc.filter(|account| {
                     !Self::account_should_render_as_null(account)
                 })
                 .map(|account| {
-                    LockedAccount::new(*pubkey, account)
-                        .ui_encode(encoding, slice)
+                    encode_ui_account(pubkey, &account, encoding, None, slice)
                 })
             })
             .collect::<Vec<_>>();
 
-        let slot = self.blocks.block_height();
+        let slot = self.engine.blocks().latest().slot;
         Ok(ResponsePayload::encode(&request.id, accounts, slot))
     }
 }

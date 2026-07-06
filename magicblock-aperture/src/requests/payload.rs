@@ -1,4 +1,4 @@
-use hyper::{body::Bytes, header::CONTENT_TYPE, Response, StatusCode};
+use hyper::{Response, StatusCode, body::Bytes, header::CONTENT_TYPE};
 use json::{Serialize, Value};
 use magicblock_core::Slot;
 
@@ -113,10 +113,10 @@ impl<'id> ResponseErrorPayload<'id> {
             id,
         };
         let mut response = build_json_response(payload);
-        if http_status != 200 {
-            if let Ok(status) = StatusCode::from_u16(http_status) {
-                *response.status_mut() = status;
-            }
+        if http_status != 200
+            && let Ok(status) = StatusCode::from_u16(http_status)
+        {
+            *response.status_mut() = status;
         }
         response
     }

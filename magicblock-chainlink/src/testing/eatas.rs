@@ -1,6 +1,6 @@
 pub use magicblock_core::token_programs::{
-    derive_ata, derive_ata_with_token_program, derive_eata, EphemeralAta,
-    EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+    EATA_PROGRAM_ID, EphemeralAta, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+    derive_ata, derive_ata_with_token_program, derive_eata,
 };
 use solana_account::Account;
 use solana_program::{program_option::COption, program_pack::Pack};
@@ -9,8 +9,8 @@ use solana_rent::Rent;
 use spl_token::state::{Account as SplAccount, AccountState};
 use spl_token_2022::{
     extension::{
-        set_account_type, BaseStateWithExtensionsMut, ExtensionType,
-        StateWithExtensionsMut,
+        BaseStateWithExtensionsMut, ExtensionType, StateWithExtensionsMut,
+        set_account_type,
     },
     state::Account as Token2022Account,
 };

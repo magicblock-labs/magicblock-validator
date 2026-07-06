@@ -3,8 +3,8 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     hash::{Hash, Hasher},
     sync::{
-        atomic::{AtomicBool, AtomicU16, Ordering},
         Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, AtomicU16, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -787,14 +787,11 @@ where
                                     pending,
                                     ..
                                 } = debounce_state
-                                {
-                                    if now >= *next_allowed_forward {
-                                        if let Some(u) = pending.take() {
+                                    && now >= *next_allowed_forward
+                                        && let Some(u) = pending.take() {
                                             *next_allowed_forward = now + interval;
                                             to_forward.push(u);
                                         }
-                                    }
-                                }
                             }
                         }
                         for update in to_forward {
@@ -940,7 +937,8 @@ where
 
             let enable = if arrivals_len >= allowed_count {
                 let arrivals = debounce_state.arrivals_ref();
-                let spans_ok = {
+
+                {
                     let len = arrivals.len();
                     if len < allowed_count {
                         false
@@ -953,8 +951,7 @@ where
                             dt <= debounce_interval
                         })
                     }
-                };
-                spans_ok
+                }
             } else {
                 false
             };
@@ -1258,16 +1255,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
-
     use solana_account::Account;
     use tokio::sync::mpsc;
 
     use super::*;
     use crate::{
         remote_account_provider::{
+            SubscribedAccounts,
             chain_pubsub_client::mock::ChainPubsubClientMock,
-            subscription_reconciler::reconcile_subscriptions, AccountsLruCache,
+            subscription_reconciler::reconcile_subscriptions,
         },
         submux::subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker,
         testing::{init_logger, utils::sleep_ms},
@@ -2266,13 +2262,19 @@ mod tests {
         let before_client1_attempts = client1.subscribe_attempts();
         let before_client2_attempts = client2.subscribe_attempts();
 
-        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
-        lru.add(pk);
+        let subscriptions = SubscribedAccounts::default();
+        subscriptions.add(pk);
         let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
 
-        let count =
-            reconcile_subscriptions(&lru, &mux, &[], &removed_tx, None, None)
-                .await;
+        let count = reconcile_subscriptions(
+            &subscriptions,
+            &mux,
+            &[],
+            &removed_tx,
+            None,
+            None,
+        )
+        .await;
 
         assert_eq!(count, 1);
         assert_eq!(client1.subscribe_attempts(), before_client1_attempts);

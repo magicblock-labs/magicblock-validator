@@ -47,7 +47,7 @@ impl PubsubClientConfig {
 /// [SubscriptionUpdate]. Account-subscription updates can be safely dropped
 /// once their direct subscription is released, while program-subscription
 /// updates must still be processed even for pubkeys that are no longer in the
-/// account-subscription LRU (e.g. delegated accounts tracked only via their
+/// account-subscription pubsub tracking (e.g. delegated accounts tracked only via their
 /// owner program).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscriptionSource {

@@ -15,7 +15,7 @@ solana-account-info = { workspace = true }
 solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-sdk-ids = { workspace = true }
-solana-system-interface = { workspace = true, features = ["bincode"] }
+solana-system-interface = { workspace = true, features = ["wincode"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]

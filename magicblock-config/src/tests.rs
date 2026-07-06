@@ -6,10 +6,10 @@ use solana_keypair::Keypair;
 use tempfile::TempDir;
 
 use crate::{
-    config::{validator::ReplicationConfig, BlockSize, LifecycleMode},
+    ValidatorParams,
+    config::{BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
     types::network::{BindAddress, Remote},
-    ValidatorParams,
 };
 
 // ============================================================================
@@ -41,14 +41,16 @@ struct EnvVarGuard(&'static str);
 
 impl EnvVarGuard {
     fn new(var: &'static str, val: &str) -> Self {
-        std::env::set_var(var, val);
+        // SAFETY: callers serialize every test using this process-global guard.
+        unsafe { std::env::set_var(var, val) };
         Self(var)
     }
 }
 
 impl Drop for EnvVarGuard {
     fn drop(&mut self) {
-        std::env::remove_var(self.0);
+        // SAFETY: callers serialize every test using this process-global guard.
+        unsafe { std::env::remove_var(self.0) };
     }
 }
 
@@ -298,7 +300,6 @@ fn test_chainlink_config() {
     let (_dir, config_path) = create_temp_config(
         r#"
         [chainlink]
-        max-monitored-accounts = 5000
         resubscription-delay = "50ms"
         undelegation-request-poll-interval = "5m"
 
@@ -313,7 +314,6 @@ fn test_chainlink_config() {
 
     let config = run_cli(vec![config_path.to_str().unwrap()]);
 
-    assert_eq!(config.chainlink.max_monitored_accounts, 5000);
     assert_eq!(
         config.chainlink.resubscription_delay,
         std::time::Duration::from_millis(50)
@@ -451,10 +451,12 @@ fn test_example_config_full_coverage() {
     }));
     assert_eq!(config.aperture.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
-    assert!(config
-        .storage
-        .to_string_lossy()
-        .contains("magicblock-test-storage"));
+    assert!(
+        config
+            .storage
+            .to_string_lossy()
+            .contains("magicblock-test-storage")
+    );
 
     // ========================================================================
     // 4. Metrics
@@ -502,7 +504,6 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // 9. Chainlink (Cloning)
     // ========================================================================
-    assert_eq!(config.chainlink.max_monitored_accounts, 5000);
     assert!(!config.chainlink.risk.enabled);
 
     // ========================================================================
@@ -601,7 +602,6 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_LEDGER__VERIFY_KEYPAIR", "false"),
         EnvVarGuard::new("MBV_LEDGER__RESET", "true"),
         // --- Chainlink ---
-        EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
         EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
         EnvVarGuard::new(
             "MBV_CHAINLINK__UNDELEGATION_REQUEST_POLL_INTERVAL",
@@ -676,7 +676,6 @@ fn test_env_vars_full_coverage() {
     assert!(config.ledger.reset);
 
     // Chainlink
-    assert_eq!(config.chainlink.max_monitored_accounts, 123);
     assert_eq!(
         config.chainlink.resubscription_delay,
         Duration::from_millis(150)
@@ -862,17 +861,4 @@ fn test_aperture_listen_port_max_is_rejected() {
         .expect_err("listen port u16::MAX must be rejected")
         .to_string();
     assert!(msg.contains("65535"), "unexpected error: {msg}");
-}
-
-#[test]
-#[parallel]
-fn test_replication_config_debug_redacts_secret() {
-    let cfg = ReplicationConfig {
-        url: "nats://0.0.0.0:4222".parse().unwrap(),
-        secret: "SUASECRET".into(),
-    };
-
-    let dbg = format!("{cfg:?}");
-    assert!(dbg.contains("<redacted>"));
-    assert!(!dbg.contains("SUASECRET"));
 }

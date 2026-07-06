@@ -6,7 +6,7 @@ use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
 #[cfg(feature = "tui")]
 use magicblock_tui_client::{
-    enrich_config_from_rpc, init_embedded_logger, run_tui, TuiConfig,
+    TuiConfig, enrich_config_from_rpc, init_embedded_logger, run_tui,
 };
 use solana_signer::Signer;
 use tokio::runtime::Builder;
@@ -15,7 +15,7 @@ use tracing::{debug, error, info, instrument};
 use crate::shutdown::Shutdown;
 
 fn init_logger() {
-    use magicblock_core::logger::{init_with_config, LogStyle, LoggingConfig};
+    use magicblock_core::logger::{LogStyle, LoggingConfig, init_with_config};
     let config = LoggingConfig {
         style: LogStyle::from_env(),
     };

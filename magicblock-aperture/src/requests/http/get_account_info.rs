@@ -34,12 +34,9 @@ impl HttpDispatcher {
             .read_account_with_ensure(&pubkey)
             .await
             .filter(|acc| !Self::account_should_render_as_null(acc))
-            // `LockedAccount` provides a race-free read of the account data before encoding.
-            .map(|acc| {
-                LockedAccount::new(pubkey, acc).ui_encode(encoding, slice)
-            });
+            .map(|acc| encode_ui_account(&pubkey, &acc, encoding, None, slice));
 
-        let slot = self.blocks.block_height();
+        let slot = self.engine.blocks().latest().slot;
         Ok(ResponsePayload::encode(&request.id, account, slot))
     }
 }

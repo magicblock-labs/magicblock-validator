@@ -1,21 +1,19 @@
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
 };
 
+use engine::Engine;
 use futures_util::future::join_all;
 use magicblock_core::{
     intent::BaseActionCallback,
-    traits::{
-        ActionResult, ActionsCallbackScheduler, CallbackScheduleError,
-        LatestBlockProvider,
-    },
+    traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use magicblock_magic_program_api::{
+    CALLBACK_PROGRAM_ID,
     instruction::{CallbackInstruction, MagicBlockInstruction},
     pda::CALLBACK_SIGNER,
     response::{ActionReceipt, MagicResponse, MagicResponseV1},
-    CALLBACK_PROGRAM_ID,
 };
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -29,32 +27,32 @@ use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 use tracing::info;
 
-pub struct ActionsCallbackService<L> {
+pub struct ActionsCallbackService {
     rpc_client: Arc<RpcClient>,
     authority: Keypair,
-    latest_block: L,
+    engine: Engine,
 }
 
-impl<L: Clone> Clone for ActionsCallbackService<L> {
+impl Clone for ActionsCallbackService {
     fn clone(&self) -> Self {
         Self {
             rpc_client: self.rpc_client.clone(),
             authority: self.authority.insecure_clone(),
-            latest_block: self.latest_block.clone(),
+            engine: self.engine.clone(),
         }
     }
 }
 
-impl<L: LatestBlockProvider> ActionsCallbackService<L> {
+impl ActionsCallbackService {
     pub fn new(
         rpc_client: Arc<RpcClient>,
         authority: Keypair,
-        latest_block: L,
+        engine: Engine,
     ) -> Self {
         Self {
             rpc_client,
             authority,
-            latest_block,
+            engine,
         }
     }
 
@@ -68,7 +66,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         static TX_COUNTER: AtomicU64 = AtomicU64::new(0);
 
         let authority_pubkey = self.authority.pubkey();
-        let blockhash = self.latest_block.blockhash();
+        let blockhash = self.engine.blockhash();
         let result: Result<(), String> = result.map_err(|e| e.to_string());
 
         callbacks
@@ -76,7 +74,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
             .map(|callback| {
                 // Make each callback TX unique
                 let counter = TX_COUNTER.fetch_add(1, Ordering::Relaxed);
-                let noop_ix = Instruction::new_with_bincode(
+                let noop_ix = Instruction::new_with_wincode(
                     magicblock_magic_program_api::ID,
                     &MagicBlockInstruction::Noop(counter),
                     vec![],
@@ -133,7 +131,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         let data = CallbackInstruction::ExecuteCallback {
             instruction: inner_instruction,
         };
-        let instruction = Instruction::new_with_bincode(
+        let instruction = Instruction::new_with_wincode(
             CALLBACK_PROGRAM_ID,
             &data,
             account_metas,
@@ -155,7 +153,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         });
         let mut data = callback.discriminator;
         data.extend(
-            bincode::serialize(&response)
+            wincode::serialize(&response)
                 .map_err(CallbackScheduleError::SerializationError)?,
         );
 
@@ -181,9 +179,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
     }
 }
 
-impl<L: LatestBlockProvider> ActionsCallbackScheduler
-    for ActionsCallbackService<L>
-{
+impl ActionsCallbackScheduler for ActionsCallbackService {
     fn schedule(
         &self,
         callbacks: Vec<BaseActionCallback>,

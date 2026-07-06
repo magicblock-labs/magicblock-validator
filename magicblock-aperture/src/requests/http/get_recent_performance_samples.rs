@@ -5,7 +5,7 @@ use std::{
 };
 
 use magicblock_metrics::metrics::TRANSACTION_COUNT;
-use scc::{ebr::Guard, TreeIndex};
+use scc::{Guard, TreeIndex};
 use solana_rpc_client_api::response::RpcPerfSample;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
@@ -67,14 +67,14 @@ impl HttpDispatcher {
     ) {
         let mut interval = time::interval(Duration::from_secs(PERIOD_SECS));
 
-        let mut last_slot = self.blocks.block_height();
+        let mut last_slot = self.engine.blocks().latest().slot;
         let mut last_tx_count = TRANSACTION_COUNT.get();
 
         loop {
             tokio::select! {
                 _ = interval.tick() => {
                     // Capture current state
-                    let current_slot = self.blocks.block_height();
+                    let current_slot = self.engine.blocks().latest().slot;
                     let current_tx_count = TRANSACTION_COUNT.get();
 
                     // Calculate Deltas (Activity within the last 60s)

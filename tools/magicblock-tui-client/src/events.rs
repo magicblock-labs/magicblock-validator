@@ -129,13 +129,12 @@ fn handle_key(
     }
 
     if state.is_transaction_tab() {
-        if key.modifiers.contains(KeyModifiers::ALT) {
-            if let KeyCode::Char(ch) = key.code {
-                if let Some(shortcut) = digit_shortcut(ch) {
-                    state.select_tab_by_shortcut(shortcut);
-                    return EventAction::None;
-                }
-            }
+        if key.modifiers.contains(KeyModifiers::ALT)
+            && let KeyCode::Char(ch) = key.code
+            && let Some(shortcut) = digit_shortcut(ch)
+        {
+            state.select_tab_by_shortcut(shortcut);
+            return EventAction::None;
         }
 
         match key {
@@ -174,16 +173,16 @@ fn handle_key(
     match key.code {
         KeyCode::Char('q') => state.should_quit = true,
         KeyCode::Enter => {
-            if state.is_transaction_tab() {
-                if let (Some(tx), Some(rpc_url)) = (
+            if state.is_transaction_tab()
+                && let (Some(tx), Some(rpc_url)) = (
                     state.selected_transaction(),
                     state.active_transaction_rpc_url(),
-                ) {
-                    return EventAction::FetchTransaction {
-                        rpc_url: rpc_url.to_string(),
-                        signature: tx.signature.clone(),
-                    };
-                }
+                )
+            {
+                return EventAction::FetchTransaction {
+                    rpc_url: rpc_url.to_string(),
+                    signature: tx.signature.clone(),
+                };
             }
         }
         KeyCode::Left | KeyCode::Char('h') => {
@@ -296,7 +295,7 @@ mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use ratatui::layout::Rect;
 
-    use super::{handle_event, EventAction};
+    use super::{EventAction, handle_event};
     use crate::state::{
         Tab, TransactionAccount, TransactionDetail, TuiConfig, TuiState,
         ViewMode,
@@ -395,8 +394,11 @@ mod tests {
                 assert!(
                     url.contains("/address/11111111111111111111111111111111")
                 );
-                assert!(url
-                    .contains("customUrl=http%3A%2F%2F127%2E0%2E0%2E1%3A8898"));
+                assert!(
+                    url.contains(
+                        "customUrl=http%3A%2F%2F127%2E0%2E0%2E1%3A8898"
+                    )
+                );
             }
             other => panic!("expected OpenUrl action, got {:?}", other),
         }

@@ -1684,7 +1684,7 @@ mod fetch_context_metric_tests {
             "subscription_update",
             "delegation_record",
             "direct_account",
-            "added_below_capacity",
+            "added",
         ];
         let before_record = counter_value(
             &CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL,
@@ -1693,7 +1693,7 @@ mod fetch_context_metric_tests {
         inc_chainlink_subscription_registration_accounts(
             SubscriptionRegistrationOrigin::Fetch(record_context),
             SubscriptionReasonLabel::DirectAccount,
-            SubscriptionRegistrationOutcome::AddedBelowCapacity,
+            SubscriptionRegistrationOutcome::Added,
         );
         assert_eq!(
             counter_value(

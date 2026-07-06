@@ -2,12 +2,11 @@ use dlp_api::{
     args::PostDelegationActions, decrypt::Decrypt,
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
-use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
-    try_derive_eata_address_and_bump, EphemeralAta, EATA_PROGRAM_ID,
+    EATA_PROGRAM_ID, EphemeralAta, try_derive_eata_address_and_bump,
 };
 use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
-use solana_account::ReadableAccount;
+use solana_account::{AccountMode, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
@@ -15,13 +14,12 @@ use solana_signer::Signer;
 use tracing::*;
 
 use super::{
-    log_companion_fetch_failure,
-    subscription::{release_subs, SubscriptionRelease},
-    CompanionFetchLogContext, FetchCloner,
+    CompanionFetchLogContext, FetchCloner, log_companion_fetch_failure,
+    subscription::{SubscriptionRelease, release_subs},
 };
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
-    cloner::{Cloner, DelegationActions},
+    cloner::DelegationActions,
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig,
         ResolvedAccountSharedData, SubscriptionReason,
@@ -95,8 +93,8 @@ fn parse_post_delegation_actions(
     Ok(instructions.into())
 }
 
-pub(crate) fn apply_delegation_record_to_account<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn apply_delegation_record_to_account<T, U>(
+    this: &FetchCloner<T, U>,
     account_pubkey: Pubkey,
     account: &mut ResolvedAccountSharedData,
     delegation_record: &DelegationRecord,
@@ -104,8 +102,6 @@ pub(crate) fn apply_delegation_record_to_account<T, U, V, C>(
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     let is_confined = delegation_record.authority.eq(&Pubkey::default());
     let is_delegated_to_us =
@@ -117,16 +113,20 @@ where
     )
     .is_some();
 
-    // Always update owner and confined flags
-    account
-        .set_owner(delegation_record.owner)
-        .set_confined(is_confined);
-
-    if is_delegated_to_us && !is_raw_eata {
-        account.set_delegated(true);
+    // Delegation state is a single exclusive mode, so it is resolved once here
+    // rather than by flipping independent `delegated`/`confined` flags. A
+    // confined account is one delegated with no authority to commit back to
+    // chain, which the engine represents as `Ephemeral`; it takes precedence,
+    // since losing it would make the account committable.
+    let mode = if is_confined {
+        AccountMode::Ephemeral
+    } else if is_delegated_to_us && !is_raw_eata {
+        AccountMode::Delegated
     } else {
-        account.set_delegated(false);
-    }
+        AccountMode::ReadOnly
+    };
+    account.set_owner(delegation_record.owner).set_mode(mode);
+
     if is_delegated_to_us && !is_raw_eata {
         Some(delegation_record.commit_frequency_ms)
     } else {
@@ -150,15 +150,13 @@ pub(crate) fn parse_raw_eata_pda(
         .then_some((eata.owner, eata.mint))
 }
 
-pub(crate) fn get_delegated_to_other<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn get_delegated_to_other<T, U>(
+    this: &FetchCloner<T, U>,
     delegation_record: &DelegationRecord,
 ) -> Option<Pubkey>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     let is_delegated_to_us =
         delegation_record.authority.eq(&this.validator_pubkey)
@@ -168,8 +166,8 @@ where
 }
 
 #[instrument(skip(this))]
-pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn fetch_and_parse_delegation_record<T, U>(
+    this: &FetchCloner<T, U>,
     account_pubkey: Pubkey,
     min_context_slot: u64,
     fetch_context: metrics::AccountFetchContext,
@@ -178,8 +176,6 @@ pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     let delegation_record_pubkey =
         delegation_record_pda_from_delegated_account(&account_pubkey);
@@ -245,11 +241,7 @@ where
     // Handle edge case where it was cloned in the meantime.
     // The small possibility of a fetch + clone of this delegation record being in process
     // still exists, but it's negligible.
-    if this
-        .accounts_bank
-        .get_account(&delegation_record_pubkey)
-        .is_none()
-    {
+    if this.get_account(&delegation_record_pubkey).is_none() {
         releases.push(SubscriptionRelease::Pubkey {
             pubkey: delegation_record_pubkey,
             reason: SubscriptionReason::DirectAccount,

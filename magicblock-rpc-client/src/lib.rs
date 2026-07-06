@@ -6,8 +6,8 @@ pub mod utils;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -493,10 +493,10 @@ impl MagicblockRpcClient {
             Ok(acc) => return Ok(Some(acc)),
             Err(err) => match err.kind() {
                 RpcClientErrorKind::RpcError(rpc_err) => {
-                    if let RpcError::ForUser(msg) = rpc_err {
-                        if msg.starts_with("AccountNotFound") {
-                            return Ok(None);
-                        }
+                    if let RpcError::ForUser(msg) = rpc_err
+                        && msg.starts_with("AccountNotFound")
+                    {
+                        return Ok(None);
                     }
                     err
                 }

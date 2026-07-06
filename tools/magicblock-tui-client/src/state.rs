@@ -286,27 +286,26 @@ impl TransactionPaneState {
 
         self.transactions.push_front(entry);
 
-        if had_transactions && !anchored_to_latest {
-            if let Some(selected_signature) = selected_signature_before {
-                let filtered_indices = self.filtered_transaction_indices();
-                if let Some(new_selected) = self
-                    .find_filtered_position_by_signature(
-                        &filtered_indices,
-                        &selected_signature,
-                    )
-                {
-                    self.selected_tx = new_selected;
+        if had_transactions
+            && !anchored_to_latest
+            && let Some(selected_signature) = selected_signature_before
+        {
+            let filtered_indices = self.filtered_transaction_indices();
+            if let Some(new_selected) = self
+                .find_filtered_position_by_signature(
+                    &filtered_indices,
+                    &selected_signature,
+                )
+            {
+                self.selected_tx = new_selected;
 
-                    if tx_scroll_before > 0 {
-                        if new_selected >= selected_tx_before {
-                            self.tx_scroll = tx_scroll_before.saturating_add(
-                                new_selected - selected_tx_before,
-                            );
-                        } else {
-                            self.tx_scroll = tx_scroll_before.saturating_sub(
-                                selected_tx_before - new_selected,
-                            );
-                        }
+                if tx_scroll_before > 0 {
+                    if new_selected >= selected_tx_before {
+                        self.tx_scroll = tx_scroll_before
+                            .saturating_add(new_selected - selected_tx_before);
+                    } else {
+                        self.tx_scroll = tx_scroll_before
+                            .saturating_sub(selected_tx_before - new_selected);
                     }
                 }
             }
@@ -444,15 +443,14 @@ impl TransactionPaneState {
             return;
         }
 
-        if let Some(selected_signature) = selected_signature {
-            if let Some(new_selected) = self
+        if let Some(selected_signature) = selected_signature
+            && let Some(new_selected) = self
                 .find_filtered_position_by_signature(
                     &filtered_indices,
                     selected_signature,
                 )
-            {
-                self.selected_tx = new_selected;
-            }
+        {
+            self.selected_tx = new_selected;
         }
 
         self.clamp_tx_selection_with_len(filtered_indices.len());
