@@ -388,12 +388,13 @@ mod tests {
         estimator.observe_at(origin, stage, &pubkey_from_u64(2), 120);
         estimator.force_export_for_tests(120);
 
-        assert!(
+        assert_eq!(
             chainlink_unique_pubkeys_estimate_value(
                 &origin,
                 &stage,
                 ChainlinkUniquePubkeyWindow::OneMinute,
-            ) >= 1
+            ),
+            1
         );
         assert!(
             chainlink_unique_pubkeys_estimate_value(
