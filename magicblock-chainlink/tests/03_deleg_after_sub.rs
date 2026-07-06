@@ -1,39 +1,30 @@
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_cloned_as_undelegated,
-    assert_not_cloned, assert_not_subscribed,
+    AccountFetchContext, assert_cloned_as_delegated,
+    assert_cloned_as_undelegated, assert_not_cloned, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
-    testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchContext,
+    testing::{
+        accounts::account_shared_with_owner_and_slot, context::TestContext,
+        deleg::add_delegation_record_for,
+    },
 };
 use solana_account::Account;
-use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::{
-    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
-};
-
-mod utils;
 
 // Implements the following flow:
 //
 // ## Account created then fetched, then delegated
 // @docs/flows/deleg-non-existing-after-sub.md
 
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
-
 // NOTE: Flow "Account created then fetched, then delegated"
 #[tokio::test]
 async fn test_deleg_after_subscribe_case2() {
     let mut slot: u64 = 11;
 
-    let ctx = setup(slot).await;
+    let ctx = TestContext::init(slot).await;
     let TestContext {
         chainlink,
-        cloner,
+        bank,
         pubsub_client: _,
         rpc_client,
         ..
@@ -42,7 +33,7 @@ async fn test_deleg_after_subscribe_case2() {
     let pubkey = Pubkey::new_unique();
     let program_pubkey = Pubkey::new_unique();
     let acc = Account {
-        lamports: 1_000,
+        lamports: 1_000_000,
         owner: program_pubkey,
         ..Default::default()
     };
@@ -52,7 +43,7 @@ async fn test_deleg_after_subscribe_case2() {
     // - writable: NO
     {
         info!("1. Initially the account does not exist");
-        assert_not_cloned!(cloner, &[pubkey]);
+        assert_not_cloned!(bank, &[pubkey]);
 
         chainlink
             .ensure_accounts(
@@ -62,7 +53,7 @@ async fn test_deleg_after_subscribe_case2() {
             )
             .await
             .unwrap();
-        assert_not_cloned!(cloner, &[pubkey]);
+        assert_not_cloned!(bank, &[pubkey]);
     }
 
     // 2. Account created with original owner
@@ -91,7 +82,7 @@ async fn test_deleg_after_subscribe_case2() {
             )
             .await
             .unwrap();
-        assert_cloned_as_undelegated!(cloner, &[pubkey], slot, program_pubkey);
+        assert_cloned_as_undelegated!(bank, &[pubkey], slot, program_pubkey);
         assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
     }
     // 3. Account delegated to us
@@ -113,7 +104,7 @@ async fn test_deleg_after_subscribe_case2() {
             .send_and_receive_account_update(pubkey, acc.clone(), Some(400))
             .await;
         assert!(updated);
-        assert_cloned_as_delegated!(cloner, &[pubkey], slot, program_pubkey);
+        assert_cloned_as_delegated!(bank, &[pubkey], slot, program_pubkey);
         assert_not_subscribed!(&chainlink, &[&pubkey, &delegation_record]);
     }
 }

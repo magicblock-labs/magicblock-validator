@@ -142,15 +142,13 @@ jobs:
         shell: bash
         run: ./version-align.sh
 
-      - name: Build project and integration tests
+      - name: Build project
         working-directory: magicblock-validator
         shell: bash
         run: |
           set -euo pipefail
           cargo build --workspace --jobs "$HOST_CARGO_JOBS"
-          cargo build --workspace --manifest-path test-integration/Cargo.toml --jobs "$HOST_CARGO_JOBS"
           cargo metadata --locked --no-deps --format-version 1 >/dev/null
-          cargo metadata --manifest-path test-integration/Cargo.toml --locked --no-deps --format-version 1 >/dev/null
 
       - name: Commit and push release branch
         working-directory: magicblock-validator

@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use solana_account_decoder::{
-    parse_token::{real_number_string_trimmed, UiTokenAmount},
     StringAmount,
+    parse_token::{UiTokenAmount, real_number_string_trimmed},
 };
 use solana_message::v0::LoadedAddresses;
 use solana_transaction_error::TransactionResult;

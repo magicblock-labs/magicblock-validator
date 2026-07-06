@@ -1,4 +1,4 @@
-use dlp_api::{args::CallHandlerArgs, AccountSizeClass};
+use dlp_api::{AccountSizeClass, args::CallHandlerArgs};
 use magicblock_core::intent::{BaseAction, BaseActionCallback};
 use magicblock_metrics::metrics::LabelValue;
 use solana_instruction::{AccountMeta, Instruction};
@@ -398,7 +398,7 @@ mod serialization_safety_test {
         discriminator::DlpDiscriminator,
         pda::undelegation_request_pda_from_delegated_account,
     };
-    use magicblock_core::intent::{types::CommittedAccount, ProgramArgs};
+    use magicblock_core::intent::{ProgramArgs, types::CommittedAccount};
     use magicblock_program::args::ShortAccountMeta;
     use solana_account::Account;
 
@@ -582,7 +582,7 @@ mod serialization_safety_test {
     }
 
     fn assert_serializable(ix: &Instruction) {
-        bincode::serialize(ix).unwrap_or_else(|e| {
+        wincode::serialize(ix).unwrap_or_else(|e| {
             panic!("Failed to serialize instruction {:?}: {}", ix, e)
         });
     }
@@ -600,7 +600,7 @@ fn test_close_buffer_limit() {
         tasks::{commit_stage_task::CleanupTask, utils::TransactionUtils},
         test_utils,
         transactions::{
-            serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
+            MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size,
         },
     };
 

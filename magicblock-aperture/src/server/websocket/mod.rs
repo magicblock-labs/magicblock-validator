@@ -1,25 +1,19 @@
 use connection::ConnectionHandler;
+use engine::Engine;
 use fastwebsockets::upgrade::upgrade;
 use http_body_util::Empty;
 use hyper::{
+    Request, Response,
     body::{Bytes, Incoming},
     server::conn::http1,
     service::service_fn,
-    Request, Response,
 };
 use hyper_util::rt::TokioIo;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
-use crate::{
-    error::RpcError,
-    state::{
-        subscriptions::SubscriptionsDb, transactions::TransactionsCache,
-        SharedState,
-    },
-    RpcResult,
-};
+use crate::{RpcResult, error::RpcError, state::SharedState};
 
 const MAX_BODY_SIZE: usize = 1024 * 1024;
 
@@ -42,10 +36,8 @@ pub struct WebsocketServer {
 /// the necessary context to process requests and manage subscriptions.
 #[derive(Clone)]
 struct ConnectionState {
-    /// A handle to the central subscription database.
-    subscriptions: SubscriptionsDb,
-    /// A handle to the cache of recent transactions.
-    transactions: TransactionsCache,
+    /// A handle to the engine, used to open per-subscription update streams.
+    engine: Engine,
     /// The global cancellation token for shutting down the server.
     cancel: CancellationToken,
 }
@@ -59,8 +51,7 @@ impl WebsocketServer {
         cancel: CancellationToken,
     ) -> RpcResult<Self> {
         let state = ConnectionState {
-            subscriptions: state.subscriptions.clone(),
-            transactions: state.transactions.clone(),
+            engine: state.engine.clone(),
             cancel,
         };
         Ok(Self { socket, state })

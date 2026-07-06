@@ -1,5 +1,5 @@
 use std::{
-    sync::{atomic::AtomicU16, Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, atomic::AtomicU16},
     time::{Duration, Instant},
 };
 
@@ -18,9 +18,9 @@ const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(1_000);
 const ALERT_ON_TOTAL_SUB_FAILURE_INTERVAL: Duration = Duration::from_mins(5);
 
 use crate::remote_account_provider::{
+    DEFAULT_SUBSCRIPTION_RETRIES,
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
     errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
-    DEFAULT_SUBSCRIPTION_RETRIES,
 };
 
 #[derive(Clone, Debug)]
@@ -177,10 +177,10 @@ impl AccountSubscriptionTask {
                             continue;
                         }
                         successes += 1;
-                        if successes >= required_confirmations {
-                            if let Some(tx) = tx.take() {
-                                let _ = tx.send(Ok(()));
-                            }
+                        if successes >= required_confirmations
+                            && let Some(tx) = tx.take()
+                        {
+                            let _ = tx.send(Ok(()));
                         }
                     }
                     Err(e) => {
@@ -198,11 +198,10 @@ impl AccountSubscriptionTask {
                             // effectively a successful confirmation —
                             // the subscription is already gone.
                             successes += 1;
-                            if successes >= required_confirmations {
-                                if let Some(tx) = tx.take() {
+                            if successes >= required_confirmations
+                                && let Some(tx) = tx.take() {
                                     let _ = tx.send(Ok(()));
                                 }
-                            }
                         } else {
                             errors
                                 .push(format!("Client {}: {:?}", client_id, e));
@@ -237,7 +236,8 @@ impl AccountSubscriptionTask {
 
                 static CLIENTS_FAILED_OPERATION_COUNT: AtomicU16 =
                     AtomicU16::new(0);
-                let data = format!("operation={}, total_clients={}, required_confirmations={}, failed_clients={}",
+                let data = format!(
+                    "operation={}, total_clients={}, required_confirmations={}, failed_clients={}",
                     op_name,
                     total_clients,
                     required_confirmations,
@@ -304,8 +304,8 @@ mod tests {
     use super::*;
     use crate::remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock;
 
-    fn create_mock_client(
-    ) -> (ChainPubsubClientMock, mpsc::Sender<()>, mpsc::Receiver<()>) {
+    fn create_mock_client()
+    -> (ChainPubsubClientMock, mpsc::Sender<()>, mpsc::Receiver<()>) {
         let (updates_sndr, updates_rcvr) = mpsc::channel(100);
         let (abort_sndr, abort_rcvr) = mpsc::channel(1);
         (
@@ -393,10 +393,12 @@ mod tests {
 
         assert!(result.is_err());
         eprintln!("Error: {}", result.as_ref().unwrap_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Not enough clients succeeded to subscribe"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Not enough clients succeeded to subscribe")
+        );
     }
 
     #[tokio::test]
@@ -408,10 +410,12 @@ mod tests {
             task.process::<ChainPubsubClientMock>(vec![]).await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("No clients provided"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No clients provided")
+        );
     }
 
     #[tokio::test]
@@ -427,10 +431,12 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Required confirmations must be greater than zero"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Required confirmations must be greater than zero")
+        );
     }
 
     #[tokio::test]

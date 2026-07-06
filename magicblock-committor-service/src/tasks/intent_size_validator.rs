@@ -1,5 +1,5 @@
 use magicblock_core::intent::{
-    types::CommittedAccount, CommitType, MagicIntentBundle, UndelegateType,
+    CommitType, MagicIntentBundle, UndelegateType, types::CommittedAccount,
 };
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -7,15 +7,15 @@ use solana_signer::Signer;
 
 use crate::{
     tasks::{
+        BaseTask, BaseTaskImpl, FinalizeTask, UndelegateTask,
         commit_task::CommitDelivery,
         task_strategist::TaskStrategist,
         utils::{
-            create_action_tasks, create_commit_finalize_task,
-            create_commit_task, TransactionUtils,
+            TransactionUtils, create_action_tasks, create_commit_finalize_task,
+            create_commit_task,
         },
-        BaseTask, BaseTaskImpl, FinalizeTask, UndelegateTask,
     },
-    transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+    transactions::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
 };
 
 /// Checks whether an intent could ever fit on the base layer, so intents

@@ -24,7 +24,6 @@ flowchart TB
     end
     subgraph delegation["Base-chain delegation"]
         chainlink[magicblock-chainlink]
-        cloner[magicblock-account-cloner]
         accounts[magicblock-accounts]
         committor[magicblock-committor-service]
         tablemania[magicblock-table-mania]
@@ -110,7 +109,7 @@ mpsc for scheduled tasks, plus a `pause_permit` semaphore so maintenance operati
 (snapshot, checksum, defrag) can stop the world. Also home to `LockedAccount`
 ([`link/accounts.rs`](../magicblock-core/src/link/accounts.rs)) — an optimistic
 seqlock wrapper that lets readers detect concurrent writes to memory-mapped
-accounts — and shared traits (`AccountsBank`, `LatestBlockProvider`).
+accounts — and the shared `LatestBlockProvider` trait.
 
 ### `magicblock-processor` — scheduler + executors
 
@@ -164,12 +163,10 @@ brain — `ensure_accounts()` / `ensure_transaction_accounts()` check the local 
 fetch from remote RPC/WebSocket
 ([`remote_account_provider/`](../magicblock-chainlink/src/remote_account_provider),
 with a subscription multiplexer in [`submux/`](../magicblock-chainlink/src/submux)),
-track delegation status against the delegation program, and hand accounts to the
-`Cloner` trait. [`magicblock-account-cloner`](../magicblock-account-cloner)
-(`ChainlinkCloner`) implements it by *injecting transactions into the local
-scheduler*: small accounts in one `CloneAccount` instruction, >63 KB accounts
-chunked via `CloneAccountInit`/`Continue`; programs are re-deployed locally via
-loader-specific paths (V1→V3 conversion, V4 buffer + deploy).
+track delegation status against the delegation program, and materialize accounts
+and programs through the validator's concrete `Engine` handle. Engine account
+operations compose the MagicRoot transactions that create, update, or evict local
+state, while loader-specific resolution remains owned by Chainlink.
 
 **Outbound (committing):**
 
@@ -202,29 +199,27 @@ streaming of transactions/blocks over NATS JetStream with leader takeover),
 [`magicblock-aml`](../magicblock-aml) (cached external risk-scoring API),
 [`magicblock-magic-program-api`](../magicblock-magic-program-api) (shared
 instruction/PDA types so the validator doesn't link the program crate),
-[`programs/guinea`](../programs/guinea) (test-only program exercising ephemeral
-accounts and task scheduling).
+Execution tests use the sibling engine's `testkit` API and its v42 program for
+program behavior fixtures.
 
 ## 5. The SVM fork
 
-Four crates forked from Agave, hosted in
-[magicblock-svm](https://github.com/magicblock-labs/magicblock-svm): `svm`,
-`program-runtime`, `solana-account`, `transaction-context`. The validator consumes
-`TransactionBatchProcessor::load_and_execute_sanitized_transactions()`
-(`svm/src/transaction_processor.rs`) as its execution primitive. Fork-specific
-changes — the most important thing to understand when reading this code:
+The sibling engine owns the Agave runtime forks under `../engine/solana/`:
+`svm`, `program-runtime`, `account`, and `transaction-context`. The validator
+uses the engine as its execution boundary instead of linking a separate MBV
+processor/accountsdb stack. Important fork-specific behavior:
 
-- **`solana-account`** — `AccountSharedData` is now an enum: `Owned` (heap, like
-  upstream) or `Borrowed` (`cow.rs`) — a zero-copy view into the validator's mmap
-  storage with **copy-on-write shadow buffers** (an atomic switch selects primary vs
-  shadow buffer; the first write triggers the copy). Seven bit-packed flags replace
-  upstream semantics: `executable, delegated, privileged, compressed, undelegating,
-  confined, ephemeral`. `rent_epoch` is gone (always `Epoch::MAX`).
+- **`solana-account`** — `AccountSharedData` is either owned or a zero-copy
+  borrowed view into engine storage with copy-on-write shadow buffers.
+  `AccountMode` distinguishes read-only, placeholder, system, delegated,
+  ephemeral, transient, and closed state; only delegated, ephemeral, and
+  transient accounts are mutable. State flags retain executable/compressed
+  state, and `rent_epoch` is masked by compatibility APIs.
 - **`svm/src/access_permissions.rs`** (entirely fork-specific) — post-execution
-  `validate_accounts_access()` enforces the ephemeral-rollup invariant: *writable
-  accounts must be delegated, ephemeral, or confined* (fee payers and an allowlist
-  of magic-program instruction discriminants excepted, plus a special
-  "post-delegation action executor" two-instruction pattern).
+  access validation rejects writes to immutable engine accounts. Transactions
+  composed entirely from MagicRoot instructions form the privileged account
+  mutation path; MagicRoot validates writable post-finalize action accounts
+  before invoking them.
 - `program-runtime` and `transaction-context` are mostly upstream, adjusted for the
   new account representation.
 

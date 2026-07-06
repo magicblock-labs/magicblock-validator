@@ -12,9 +12,9 @@ use magicblock_magic_program_api::EPHEMERAL_RENT_PER_BYTE;
 pub(crate) use process_close::process_close_ephemeral_account;
 pub(crate) use process_create::process_create_ephemeral_account;
 pub(crate) use process_resize::process_resize_ephemeral_account;
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::ReadableAccount;
 use solana_instruction::error::InstructionError;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::transaction::TransactionContext;
 
 use crate::utils::accounts::{self, InstructionAccount};
 
@@ -32,10 +32,18 @@ const VAULT_IDX: u16 = 2;
 /// Maximum allowed data length for ephemeral accounts (10 MB, matching Solana's limit)
 const MAX_DATA_LEN: u32 = 10 * 1024 * 1024;
 
+/// Fixed per-account storage overhead charged as rent on top of the data.
+///
+/// Rent is a policy of this program rather than of the account layout, so the
+/// value is pinned here: lamports (8) + owner (32) + slot (8) + flags (4) +
+/// data capacity (4) + data length (4). It previously came from the account
+/// crate, which no longer publishes its static size.
+const ACCOUNT_STATIC_SIZE: u64 = 60;
+
 /// Calculates rent for an ephemeral account based on its data length.
 fn rent_for(data_len: u32) -> Result<u64, InstructionError> {
     let total_size = u64::from(data_len)
-        .checked_add(AccountSharedData::ACCOUNT_STATIC_SIZE as u64)
+        .checked_add(ACCOUNT_STATIC_SIZE)
         .ok_or(InstructionError::ArithmeticOverflow)?;
     total_size
         .checked_mul(EPHEMERAL_RENT_PER_BYTE)

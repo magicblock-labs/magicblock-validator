@@ -1,15 +1,17 @@
 use json::{JsonContainerTrait, JsonValueMutTrait, JsonValueTrait};
+use ledger::request::{BlockDetails, BlockParams};
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_transaction_status::UiTransactionEncoding;
 
 use super::prelude::*;
+use crate::engine_types::confirmed_transaction;
 
 impl HttpDispatcher {
     /// Handles the `getTransaction` RPC request.
     ///
     /// Fetches the details of a confirmed transaction from the ledger by its
     /// signature. Returns `null` if the transaction is not found.
-    pub(crate) fn get_transaction(
+    pub(crate) async fn get_transaction(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
@@ -21,9 +23,28 @@ impl HttpDispatcher {
         let signature = some_or_err!(signature);
         let config = config.unwrap_or_default();
 
-        // Fetch the complete transaction details from the persistent ledger.
-        let transaction =
-            self.ledger.get_complete_transaction(signature, u64::MAX)?;
+        let engine_transaction = self
+            .engine
+            .transactions()
+            .get(signature)
+            .await
+            .map_err(RpcError::internal)?;
+        let transaction = if let Some(transaction) = engine_transaction {
+            let slot = transaction.execution.header.slot;
+            let block_time = self
+                .engine
+                .blocks()
+                .get(BlockParams {
+                    slot,
+                    details: BlockDetails::None,
+                })
+                .await
+                .map_err(RpcError::internal)?
+                .map(|block| block.block().time);
+            Some(confirmed_transaction(transaction, block_time)?)
+        } else {
+            self.ledger.get_complete_transaction(signature, u64::MAX)?
+        };
 
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
         // This implementation supports all transaction versions, so we pass a max version number.
@@ -79,10 +100,10 @@ fn normalize_failed_transaction_balance_arrays(value: &mut json::Value) {
     let mut repaired_post_balances = pre_balances;
 
     let fee = json_value_as_u64(&value["meta"]["fee"]).unwrap_or(0);
-    if let Some(first_balance) = repaired_post_balances.first_mut() {
-        if let Some(balance) = json_value_as_u64(first_balance) {
-            *first_balance = balance.saturating_sub(fee).into();
-        }
+    if let Some(first_balance) = repaired_post_balances.first_mut()
+        && let Some(balance) = json_value_as_u64(first_balance)
+    {
+        *first_balance = balance.saturating_sub(fee).into();
     }
 
     if let Some(encoded_balances) =
@@ -120,12 +141,11 @@ fn sanitize_nan_strings_for_key(
         return;
     }
 
-    if let Some(s) = value.as_str() {
-        if let Some(key) = parent_key.filter(|key| is_numeric_json_field(key)) {
-            if is_nan_string(s) {
-                *value = nan_replacement_for_field(key);
-            }
-        }
+    if let Some(s) = value.as_str()
+        && let Some(key) = parent_key.filter(|key| is_numeric_json_field(key))
+        && is_nan_string(s)
+    {
+        *value = nan_replacement_for_field(key);
     }
 }
 
@@ -214,38 +234,38 @@ mod tests {
         assert_eq!(value["meta"]["logMessages"][2], "-nan");
         assert_eq!(value["meta"]["memo"], "nan");
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]
-                ["info"]["amount"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
+                ["amount"],
             "0"
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]
-                ["info"]["lamports"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
+                ["lamports"],
             0
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]
-                ["info"]["microLamports"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
+                ["microLamports"],
             0
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]
-                ["info"]["recentSlot"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
+                ["recentSlot"],
             0
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]
-                ["info"]["uiAmount"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
+                ["uiAmount"],
             0
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]
-                ["info"]["uiAmountString"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
+                ["uiAmountString"],
             "0"
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]
-                ["info"]["note"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
+                ["note"],
             "nan"
         );
         assert_eq!(value["transaction"]["message"]["extra"]["rentEpoch"], 0);
@@ -292,8 +312,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_failed_transaction_balance_arrays_handles_fee_exceeding_balance(
-    ) {
+    fn normalize_failed_transaction_balance_arrays_handles_fee_exceeding_balance()
+     {
         let mut value = json::json!({
             "meta": {
                 "err": "SomeError",

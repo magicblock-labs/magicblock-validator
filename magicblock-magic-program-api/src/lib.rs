@@ -4,7 +4,7 @@ pub mod instruction;
 pub mod pda;
 pub mod response;
 
-pub use compat::{declare_id, pubkey, Pubkey};
+pub use compat::{Pubkey, declare_id, pubkey};
 
 declare_id!("Magic11111111111111111111111111111111111111");
 
@@ -13,9 +13,6 @@ pub const CRANK_PROGRAM_ID: Pubkey =
 
 pub const CALLBACK_PROGRAM_ID: Pubkey =
     pubkey!("CaLLback11111111111111111111111111111111111");
-
-pub const POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID: Pubkey =
-    pubkey!("PostAct111111111111111111111111111111111111");
 
 /// Program ID for the ephemeral system builtin-program.
 pub const EPHEMERAL_SYSTEM_PROGRAM_ID: Pubkey =

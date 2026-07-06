@@ -1,7 +1,7 @@
 use magicblock_core::traits::ActionError;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
-    utils::TransactionErrorMapper, MagicBlockRpcClientError,
+    MagicBlockRpcClientError, utils::TransactionErrorMapper,
 };
 use solana_instruction::error::InstructionError;
 use solana_rpc_client_api::{
@@ -15,8 +15,8 @@ use tracing::error;
 
 use crate::{
     tasks::{
-        task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
-        BaseTaskImpl,
+        BaseTaskImpl, task_builder::TaskBuilderError,
+        task_strategist::TaskStrategistError,
     },
     transaction_preparator::error::TransactionPreparatorError,
 };
@@ -436,8 +436,7 @@ mod tests {
     use super::{InternalError, TransactionStrategyExecutionError};
 
     const TX_TOO_LARGE_SOLANA: &str = "base64 encoded too large";
-    const TX_TOO_LARGE_MAGICBLOCK: &str =
-        "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
+    const TX_TOO_LARGE_MAGICBLOCK: &str = "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
 
     fn make_send_transaction_error(message: &str) -> InternalError {
         let rpc_error = RpcClientError {

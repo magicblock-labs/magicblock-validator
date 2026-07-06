@@ -11,7 +11,8 @@ At a high level it:
 - resolves delegation records for DLP-owned accounts and rewrites local account metadata so delegated accounts execute under their original owners,
 - keeps local copies fresh while avoiding duplicate concurrent fetches/clones,
 - handles program-account loading, associated-token/eATA projection, post-delegation action dependencies, and undelegation tracking,
-- owns subscription capacity/LRU bookkeeping and defensive eviction signaling.
+- uses the engine's account cache for missing-load coordination and readonly
+  account eviction, then releases the corresponding remote subscriptions.
 
 This crate prepares local state for execution. It does **not** decide final post-execution write validity; the processor/SVM path still enforces MagicBlock writable-account invariants.
 
@@ -23,14 +24,15 @@ Whenever behavior in `magicblock-chainlink` changes, or another crate changes Ch
 
 - account fetch/clone classification,
 - delegation-record resolution or local delegated/confined/undelegating flags,
-- subscription ownership, LRU eviction, reconnection, or update ordering,
+- subscription ownership, engine cache eviction, reconnection, or update ordering,
 - program loading,
 - ATA/eATA projection,
 - post-delegation action dependency handling,
 - lifecycle-mode behavior,
-- public APIs used by `magicblock-api`, `magicblock-aperture`, `magicblock-accounts`, `magicblock-account-cloner`, or `programs/magicblock`,
+- public APIs used by `magicblock-api`, `magicblock-aperture`,
+  `magicblock-accounts`, or `programs/magicblock`,
 - tests or validation commands relevant to this crate,
-- performance characteristics of fetch/clone, deduplication, subscription, LRU/eviction, or update-ordering paths.
+- performance characteristics of fetch/clone, deduplication, subscription, cache eviction, or update-ordering paths.
 
 For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
 
@@ -41,12 +43,11 @@ Primary source files:
 | Path | Role |
 |---|---|
 | `magicblock-chainlink/src/lib.rs` | Crate exports. Re-exports Chainlink types and `AccountFetchContext`. |
-| `magicblock-chainlink/src/chainlink/mod.rs` | Public Chainlink facade, replication-mode wrapper, transaction/account ensure entrypoints, removed-account eviction listener. |
-| `magicblock-chainlink/src/chainlink/fetch_cloner/` | Main fetch/clone pipeline, delegation handling, subscription-update processing, ATA/eATA projection, pending operation deduplication. |
-| `magicblock-chainlink/src/remote_account_provider/` | RPC/pubsub provider, subscription ownership, LRU capacity, websocket/gRPC clients, program-account resolution. |
+| `magicblock-chainlink/src/chainlink/mod.rs` | Public Chainlink facade, replication-mode wrapper, transaction/account ensure entrypoints, stale-account cleanup, and engine-eviction listener. |
+| `magicblock-chainlink/src/chainlink/fetch_cloner/` | Main fetch/clone pipeline, delegation handling, subscription-update processing, ATA/eATA projection, and clone deduplication. |
+| `magicblock-chainlink/src/remote_account_provider/` | RPC/pubsub provider, subscription ownership/tracking, websocket/gRPC clients, and program-account resolution. |
 | `magicblock-chainlink/src/submux/` | Multiplexes multiple pubsub clients, deduplicates/debounces updates, reconnects clients, fans updates into one stream. |
-| `magicblock-chainlink/src/cloner/mod.rs` | `Cloner` trait implemented by `magicblock-account-cloner`; request types passed from Chainlink to the clone executor. |
-| `magicblock-chainlink/src/accounts_bank.rs` | Test/mock-oriented `AccountsBank` helpers for this crate. |
+| `magicblock-chainlink/src/cloner/mod.rs` | Request types and the concrete Engine account/program materialization operations. |
 | `magicblock-chainlink/src/testing/` | Test support behind `dev-context`. |
 | `magicblock-chainlink/tests/` | Integration-style Chainlink tests for account ensure, delegation, redelegation, ordering, and race recovery. |
 
@@ -55,7 +56,6 @@ Main consumers:
 - `magicblock-api` constructs the production Chainlink stack during validator startup.
 - `magicblock-aperture` uses Chainlink for RPC read misses and transaction submission account availability.
 - `magicblock-accounts` uses Chainlink/account cloning glue for account-manager flows and scheduled commit integration.
-- `magicblock-account-cloner` implements the `Cloner` trait and submits clone/program/evict transactions into the local validator.
 - `programs/magicblock` uses `dev-context` Chainlink helpers in tests and validator-only program flows.
 
 ## Main public types and APIs
@@ -64,9 +64,11 @@ Main consumers:
 
 `src/chainlink/mod.rs` defines the main stack:
 
-- `InnerChainlink<T, U, V, C>`: active Chainlink implementation parameterized by RPC client, pubsub client, accounts bank, and cloner.
-- `ReplicationModeAwareChainlink<T, U, V, C>`: wrapper with `Enabled` and `Disabled` modes.
-- `ProdInnerChainlink<C>` / `ProdChainlink<C>`: production aliases using `ChainRpcClientImpl`, `SubMuxClient<ChainUpdatesClient>`, `AccountsDb`, and a configurable cloner.
+- `InnerChainlink<T, U>`: active Chainlink implementation parameterized by RPC
+  and pubsub clients and backed by a concrete `Engine`.
+- `ReplicationModeAwareChainlink<T, U>`: wrapper with `Enabled` and `Disabled` modes.
+- `ProdInnerChainlink` / `ProdChainlink`: production aliases using
+  `ChainRpcClientImpl`, `SubMuxClient<ChainUpdatesClient>`, and `Engine`.
 
 Important methods:
 
@@ -87,18 +89,25 @@ Disabled replication mode is intentionally conservative:
 - `ensure_transaction_accounts` errors with `DisabledForNonPrimaryMode`.
 - undelegation tracking is ignored.
 
-### `Cloner` interface
+### Engine materialization
 
-`src/cloner/mod.rs` defines the boundary between Chainlink and local clone execution:
+`src/cloner/mod.rs` defines the requests and operations used to materialize
+remote state through Engine:
 
 - `AccountCloneRequest` carries `pubkey`, resolved `AccountSharedData`, optional `commit_frequency_ms`, post-delegation `DelegationActions`, and optional `delegated_to_other` authority.
 - `DelegationActions` wraps post-delegation action instructions from delegation records.
-- `Cloner` trait methods:
-  - `clone_account(request)`,
-  - `clone_program(LoadedProgram)`,
-  - `evict_account(pubkey)`.
+- `clone_account`, `clone_program`, and `evict_account` apply that state through
+  the concrete Engine owned by Chainlink.
 
-Chainlink should build accurate clone requests; the cloner owns how those requests are materialized in the local validator.
+Engine materializes a complete account through
+`Engine::account(...).create/update`, which composes MagicRoot field patches.
+MagicRoot is the final slot-ordering boundary: older slots fail, equal slots
+require a genuine mode change earlier in the same patch transaction, and a
+same-mode duplicate fails. `AccountFieldPatch::sequence` therefore applies mode
+before slot, while `AccountSharedData::set_mode` marks mode dirty only when the
+value actually changes. Chainlink still owns whether a requested lifecycle
+transition is valid; MagicRoot's generic mode-transition allowance is not a
+substitute for delegation/undelegation resolution.
 
 ## Runtime flow: transaction account ensure
 
@@ -109,7 +118,7 @@ Chainlink should build accurate clone requests; the cloner owns how those reques
 3. Derive `ephemeral_balance_pda_from_payer(fee_payer, 0)` and add it if absent locally.
 4. Mark all collected pubkeys as `mark_empty_if_not_found`; missing transaction accounts are cloned as empty placeholders when appropriate.
 5. Call `ensure_accounts` with `AccountFetchContext::send_transaction(signature)`.
-6. `ensure_accounts` promotes accounts in the subscription LRU and calls `FetchCloner::fetch_and_clone_accounts_with_dedup`.
+6. `ensure_accounts` calls `FetchCloner::fetch_and_clone_accounts_with_dedup`; the fetcher uses `Engine::accounts().ensure(...)` to promote cached hits and reserve missing loads.
 
 Pitfalls:
 
@@ -133,22 +142,17 @@ Before fetching remotely:
 1. Blacklisted accounts are filtered out.
 2. Existing non-undelegating accounts in `AccountsDb` are treated as ready.
 3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed.
-4. Remaining pubkeys enter `pending_requests` ownership coordination.
+4. `Engine::accounts().ensure(...)` promotes existing cached accounts and returns either an `AccountLoad` reservation or `AccountWait` handle for each missing account.
 
-Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. The upper dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="fetch_cloner"`. Owner-side internal waiters are not counted in the active waiter gauge; only callers that join existing work are counted. Metric labels remain bounded enum/static values and do not include pubkeys, signatures, errors, endpoint URLs, or raw messages.
+Only the caller holding `AccountLoad` fetches and clones a missing account. Other callers await `AccountWait`; a dropped load reports failure, while `complete(track)` reports success. Chainlink passes `track=true` only when the resulting bank account exists and is not mutable. Materialized readonly accounts therefore participate in engine recency/eviction; delegated, transient, ephemeral, and absent results do not. Detailed `FetchAndCloneResult` metadata remains internal to the owning fetch, while public ensure methods return `ChainlinkResult<()>`.
 
-Pending owners have:
-
-- generation IDs to avoid stale cleanup,
-- cancellation hooks,
-- a default timeout of `FETCH_CLONE_OPERATION_TIMEOUT` (60 seconds),
-- waiter-specific result filtering so each caller sees only the entries for its pubkey.
+This engine-owned reservation is the upper dedup layer. Preserve it for correctness and performance: bypassing it can amplify RPC traffic, clone transactions, and transaction-submission latency.
 
 There is a second dedup layer for actual clone transactions: `pending_clones` is keyed by `(pubkey, remote_slot)`, so concurrent fetch and subscription paths do not submit duplicate local clone operations for the same account version.
 
 Clone lifecycle metrics are emitted through `chainlink_clone_accounts_total` using bounded enum labels only. Clone owners record submitted and clone success/failure outcomes; pending-clone waiters do not record submitted/succeeded/failed because they did not submit clone work. Local account/program fast-path skips and program-allowlist skips record `outcome=skipped`. If the remote fetch fails before a concrete clone request exists, Chainlink records one skipped lifecycle event per requested pubkey with `remote_result=failed` and `clone_intent=unknown`. These counters must never use pubkeys, signatures, owner pubkeys, raw errors, or other unbounded/user-controlled values as labels.
 
-Post-clone materialization metrics are emitted through `chainlink_clone_materialization_accounts_total` only after successful owner account/program clone calls. The check is a single local `AccountsBank::get_account` read: account clones compare the local account against the clone request, and program clones require the local program account's remote slot to be at least the cloned program slot. `still_missing_after_ensure` means the cloner returned success but the expected account/program version was not visible in the bank immediately afterward. This check is intentionally cheap and must not perform remote fetches, retries, sleeps, or expensive scans.
+Post-clone materialization metrics are emitted through `chainlink_clone_materialization_accounts_total` only after successful owner account/program clone calls. The check is a single local `Engine::accounts().get` read: account clones compare the local account against the clone request, and program clones require the local program account's remote slot to be at least the cloned program slot. `still_missing_after_ensure` means Engine returned success but the expected account/program version was not visible immediately afterward. This check is intentionally cheap and must not perform remote fetches, retries, sleeps, or expensive scans.
 
 Empty placeholders are created in `RemoteAccountProvider::try_get_multi` when RPC returns `None` and the pubkey is included in `mark_empty_if_not_found`; the provider converts the missing account into a zero-lamport, default-owner, empty-data account and emits `converted_to_empty`. Placeholder clone stages (`clone_submitted`, `clone_submit_failed`, `observed_in_bank_after_ensure`, and `still_missing_after_ensure`) are emitted only when the account clone request has that exact empty-placeholder shape. The `later_refetched` stage is deliberately not emitted yet because detecting repeated same-pubkey placeholders with retained pubkey state would add unbounded memory/cardinality risk; use group 7 sketches or sampled logs for repeated-same-pubkey detection instead.
 
@@ -222,11 +226,18 @@ Delegation records may carry encrypted or cleartext post-delegation actions. Cha
 - force-refreshes writable dependencies that are absent or not currently delegated,
 - errors with `MissingDelegationActionAccounts` if required delegated writable dependencies cannot be resolved.
 
+After those checks, Chainlink passes the actions to
+`Engine::account(pubkey).create(...)`. The engine composes account
+materialization and MagicRoot `PostFinalize` into one transaction, so the
+actions run only after the delegated account is finalized. There is no separate
+MBV post-delegation executor builtin.
+
 Do not execute or ignore these actions blindly. They are part of clone-time invariants for post-delegation behavior.
 
 ### Program account resolution
 
-Executable accounts are converted into `LoadedProgram` values and passed to `Cloner::clone_program`.
+Executable accounts are converted into `LoadedProgram` values and materialized
+through Engine.
 
 Supported loader handling lives in `remote_account_provider/program_account.rs`:
 
@@ -234,6 +245,10 @@ Supported loader handling lives in `remote_account_provider/program_account.rs`:
 - Loader V2: single account contains metadata/data.
 - Loader V3: program account plus separate program-data account; Chainlink fetches both with matching slots and holds a `ProgramData` subscription reason while resolving.
 - Loader V4: single account with loader-v4 state and deployable data handling.
+
+Loader V3 state and Loader V4 instructions retain upstream serde/bincode
+encoding because those external loader types do not provide wincode schemas.
+Other supported fixed Solana payloads in this crate use wincode.
 
 Program clone restrictions:
 
@@ -257,9 +272,11 @@ Pitfalls:
 
 - Do not rebuild Token-2022 accounts as legacy SPL Token accounts; use the projection helpers that preserve layout.
 - Native-token normalization is safe only after Chainlink has proved the cloned account is a canonical ATA/eATA projection target. Non-canonical delegated wrapped-SOL token accounts must be preserved because commit settlement will not remap them to eATA.
-- If canonical delegated ATA normalization reports malformed token-program data, reject the clone request instead of forwarding the unnormalized account to the cloner.
+- If canonical delegated ATA normalization reports malformed token-program data,
+  reject the clone request instead of forwarding the unnormalized account to
+  Engine.
 - Projected ATAs are virtual eATA views and should be uncloseable locally; do not preserve base close authority on the projected clone.
-- Same-slot delegated refreshes are a narrow ordering exception for allowing a delegated update over plain/undelegating local state at the same `remote_slot`. They do not mean same-slot re-delegation to the same validator is fully supported; without a delegation generation/index, `account_still_undelegating_on_chain` cannot distinguish `delegation_slot == remote_slot_in_bank` from a still-pending undelegation, and `magicblock-chainlink/tests/07_redeleg_us_same_slot.rs` remains ignored for that reason.
+- Chainlink's current subscription prefilter admits a same-slot delegated refresh only when it replaces plain/undelegating local state. The downstream MagicRoot boundary is generic and admits any genuine mode transition at the same slot, supporting transitions such as `Transient -> ReadOnly`, `ReadOnly -> Delegated`, and a future `Ephemeral -> Delegated`. Neither rule means same-slot re-delegation to the same validator is fully supported; without a delegation generation/index, `account_still_undelegating_on_chain` cannot distinguish `delegation_slot == remote_slot_in_bank` from a still-pending undelegation, and `magicblock-chainlink/tests/07_redeleg_us_same_slot.rs` remains ignored for that reason.
 - Undelegating ATAs may remain in bank while a companion eATA is still delegated to this validator.
 
 ## Runtime flow: subscription updates
@@ -281,8 +298,8 @@ Key behavior:
 - Non-clock updates become `ForwardedSubscriptionUpdate` with a `SubscriptionSource` (`Account` or program source).
 - If a subscription update arrives while an RPC fetch is pending and its slot is at least the fetch start slot, it resolves the pending fetch waiters instead of being forwarded as a separate update.
 - Account-subscription updates for pubkeys no longer watched are dropped and can enqueue a removal update if stale local state exists.
-- Program-subscription updates are allowed even if the pubkey is not in the direct-account LRU; delegated accounts may be tracked only by owner-program subscriptions.
-- Non-advancing updates are ignored unless they represent a same-slot delegated refresh needed for undelegate/redelegate recovery.
+- Program-subscription updates are allowed even if the pubkey is not in the direct-account tracking set; delegated accounts may be tracked only by owner-program subscriptions.
+- The current Chainlink subscription prefilter ignores non-advancing updates unless they represent a same-slot delegated refresh needed for undelegate/redelegate recovery. Materialized clone transactions are additionally subject to MagicRoot's generic slot/mode guard.
 - Delegated updates cause direct subscription cleanup; undelegation-completion updates retain/directly ensure subscriptions as appropriate and release `UndelegationTracking` ownership.
 
 ### DLP undelegation request scanning
@@ -329,7 +346,7 @@ Fetches use `min_context_slot` to avoid serving account data older than the fres
 
 A pubkey can be held for multiple reasons:
 
-- `DirectAccount`: normal account monitoring and normal LRU capacity management.
+- `DirectAccount`: normal account monitoring.
 - `DelegationRecord`: temporary/explicit monitoring for delegation record PDAs.
 - `ProgramData`: LoaderV3 program-data accounts.
 - `UndelegationTracking`: protected monitoring while an account is expected to complete undelegation on base.
@@ -337,30 +354,23 @@ A pubkey can be held for multiple reasons:
 
 Ownership is reference-counted per reason. Releasing one reason does not unsubscribe while other reasons remain.
 
-`ensure_subscription` differs from `acquire_subscription`: it does not increment an already-held reason. This is used by eATA projection to keep an LRU entry warm without unbounded refcount growth.
+`ensure_subscription` differs from `acquire_subscription`: it does not increment an already-held reason. This is used by eATA projection to retain monitoring without unbounded refcount growth.
 
 Registration outcome metrics (`chainlink_subscription_registration_accounts_total`, exported as `mbv_chainlink_subscription_registration_accounts_total`) are emitted once per claimed subscription attempt by entrypoint, fetch reason, subscription reason, and terminal registration outcome. Waiter-only fetch callers do not independently set up subscriptions and are not counted separately; direct `try_get_multi` owners preserve their `AccountFetchContext`, while callers without a fetch context use `entrypoint="internal", fetch_reason="requested_account"`.
 
-Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_total{reason,outcome}` and `chainlink_subscription_cleanup_accounts_total{cleanup_source,outcome}`, exported with the `mbv_` prefix) are emitted only on cold subscription release/cleanup transition paths, never on per-update hot loops. Release metrics classify each explicit `release_subscription_with_mode` / silent delegated-account release result (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`). Cleanup metrics classify the actual unsubscribe/removal action by `cleanup_source` (`normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`) and `outcome` (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`). All labels are static/enum values only; no pubkey, signature, raw error, or endpoint labels are used.
+Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_total{reason,outcome}` and `chainlink_subscription_cleanup_accounts_total{cleanup_source,outcome}`, exported with the `mbv_` prefix) are emitted only on cold subscription release/cleanup transition paths, never on per-update hot loops. Release metrics classify each explicit `release_subscription_with_mode` / silent delegated-account release result (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`). Cleanup metrics classify the actual unsubscribe action by `cleanup_source` (`normal_release`, `manual_unsubscribe`, `delegated_account_silent`, `reconciler`) and `outcome` (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`). All labels are static/enum values only; no pubkey, signature, raw error, or endpoint labels are used.
 
-### LRU and defensive eviction
+### Engine cache eviction and stale-account cleanup
 
-`AccountsLruCache` bounds monitored direct-account subscriptions. On capacity pressure:
+The engine owns account recency, capacity, missing-load reservations, and eviction selection. Chainlink subscribes to `Engine::accounts().subscribe_evictions()`. For each evicted readonly account it releases remote subscription ownership and submits `Cloner::evict_account`; mutable accounts are ignored defensively. The provider's `SubscribedAccounts` is an unbounded presence set for subscriptions Chainlink still owns, not a second cache.
 
-- never-evicted accounts are skipped,
-- accounts currently delegated or undelegating in the bank are protected,
-- accounts with `UndelegationTracking` ownership are protected,
-- if no candidate can be evicted, the new subscription is unsubscribed and `NoEvictableSubscriptionCapacity` is returned.
-
-When an account is evicted from subscription capacity, the provider sends a removal update. `InnerChainlink::subscribe_account_removals` listens for these and may submit `Cloner::evict_account` to remove stale local state, but only if the bank account is neither delegated nor undelegating.
-
-Removal handling is serialized with same-pubkey subscription transitions via `evict_unwatched_with_subscription_lock`, preventing an evict transaction from being submitted after a fresh subscription re-watches the same pubkey.
+A separate stale-account channel is retained for exceptional subscription loss or a late account update after its subscription was released. That path rechecks same-pubkey subscription state under the provider lock before submitting a defensive eviction, preventing an old notification from removing an account that has already been watched again.
 
 ### Reconciliation
 
-If subscription metrics are enabled, a background task periodically runs `subscription_reconciler::reconcile_subscriptions` to compare the LRU with actual pubsub-client subscriptions, update metrics, and notify removal for subscriptions that vanished.
+If subscription metrics are enabled, a background task periodically runs `subscription_reconciler::reconcile_subscriptions` to compare the tracked subscription set with actual pubsub-client subscriptions and repair drift. A tracked subscription that cannot be restored is removed from tracking and routed through stale-account cleanup; an extra remote-only subscription is simply unsubscribed because normal bank removal belongs to engine eviction.
 
-When the pubsub client is `SubMuxClient`, reconciliation snapshots are intentionally based only on currently connected inner clients. Disconnected/reconnecting clients are ignored by `subscriptions_union()` and `subscriptions_intersection()` until the reconnect path has reconnected them, resubscribed programs/accounts from the authoritative trackers, performed its catch-up pass, and marked them connected again. Reconciler-triggered SubMux subscribe/unsubscribe repair operations also fan out only to connected clients; reconnecting clients catch up through the reconnect path instead. If no inner pubsub client is connected, reconciliation skips repair/noisy LRU-vs-pubsub mismatch reporting for that tick because there is no live client to inspect or repair.
+When the pubsub client is `SubMuxClient`, reconciliation snapshots are intentionally based only on currently connected inner clients. Disconnected/reconnecting clients are ignored by `subscriptions_union()` and `subscriptions_intersection()` until the reconnect path has reconnected them, resubscribed programs/accounts from the authoritative trackers, performed its catch-up pass, and marked them connected again. Reconciler-triggered SubMux subscribe/unsubscribe repair operations also fan out only to connected clients; reconnecting clients catch up through the reconnect path instead. If no inner pubsub client is connected, reconciliation skips repair/noisy tracking-vs-pubsub mismatch reporting for that tick because there is no live client to inspect or repair.
 
 ## SubMuxClient internals
 
@@ -392,7 +402,6 @@ Changing SubMux behavior can affect ordering, duplicate clone submissions, and p
 
 `RemoteAccountProviderConfig` includes:
 
-- subscription LRU capacity (`DEFAULT_MAX_MONITORED_ACCOUNTS` by default),
 - validator lifecycle mode,
 - subscription metrics flag,
 - startup program subscriptions (defaults to the Delegation Program),
@@ -407,23 +416,23 @@ This crate is security-critical: it is the validator's only source of truth abou
 
 - Subscriptions (websocket/gRPC), fetching, delegation-record resolution, slot/`min_context_slot`/commitment handling, and clone-freshness checks must stay at least as strong and stable as now.
 - The validator must never serve or execute against stale, forged, or out-of-sync state, never mark an account delegated without the authority checks below, and never miss base-layer updates that change delegation/undelegation truth.
-- Because subscription/fetch updates are driven by external base-layer events and untrusted submissions, treat the dedup, slot-matching, ordering, LRU-protection, and bounded-capacity logic as security controls against races, stale-overwrite, and resource exhaustion. Do not relax them for performance.
+- Because subscription/fetch updates are driven by external base-layer events and untrusted submissions, treat engine load coordination/cache eviction, slot matching, ordering, and subscription ownership as security controls against races, stale overwrite, and resource exhaustion. Do not relax them for performance.
 
 Preserve these invariants when editing this crate:
 
 1. **Never clone DLP-owned state as writable delegated state without a valid delegation record**, except explicitly recognized internal DLP accounts.
 2. **Delegated local accounts must be presented with their original owner**, not the Delegation Program owner.
 3. **Authority matters**: this validator can mark accounts delegated only when the record authority is this validator or the confined/default authority.
-4. **Delegated and undelegating local accounts are protected from subscription-capacity eviction and defensive bank eviction.**
-5. **Subscription update ordering must not overwrite fresher local state with older or duplicate data.** Same-slot delegated refresh is a narrow redelegation recovery exception.
+4. **Mutable local accounts are excluded from engine cache tracking and are protected from defensive bank eviction.**
+5. **Subscription update ordering must not overwrite fresher local state with older or duplicate data.** Chainlink currently has a narrow same-slot delegated-refresh exception; MagicRoot independently rejects every older replacement and permits an equal-slot replacement only when its account mode genuinely changes.
 6. **Fetches that need companion accounts must use matching slots or a minimum context slot** so account and delegation/program-data records are coherent.
-7. **Pending request and pending clone deduplication must clean up by generation/key** to avoid stale owners unblocking or deleting newer work.
+7. **Engine load reservations and pending clone deduplication must always resolve or drop their guards** so waiters cannot remain blocked.
 8. **Program-data subscriptions for LoaderV3 must be cleaned up on all paths.**
 9. **ATA/eATA projection must preserve base ATA layout and token-program ownership.**
-10. **Post-delegation action dependencies must be available before clone-time action handling.**
+10. **Post-delegation action dependencies must be available before the engine composes account creation and `PostFinalize` into one transaction.**
 11. **Disabled/non-primary mode must not perform remote fetches or transaction account ensures.**
 12. **This crate must not weaken processor/SVM access validation.** It only prepares local account state.
-13. **Fetch/clone and subscription paths must remain performance-conscious.** Preserve deduplication, bounded waiting, LRU protections, low subscription churn, and non-blocking behavior unless a documented correctness requirement forces a tradeoff.
+13. **Fetch/clone and subscription paths must remain performance-conscious.** Preserve deduplication, bounded waiting, engine cache ownership, low subscription churn, and non-blocking behavior unless a documented correctness requirement forces a tradeoff.
 
 ## Common change areas and what to inspect
 
@@ -452,16 +461,17 @@ Start with:
 
 Pay special attention to `SubscriptionSource::Account` vs program-source updates.
 
-### LRU/eviction bugs
+### Cache/eviction bugs
 
 Start with:
 
-- `RemoteAccountProvider::register_subscription`,
-- `CapacityEvictionProtection`,
-- `InnerChainlink::subscribe_account_removals`,
+- `AccountsBank::ensure`,
+- `AccountLoad::complete`,
+- `InnerChainlink::subscribe_account_evictions`,
+- `RemoteAccountProvider::unsubscribe`,
 - `RemoteAccountProvider::evict_unwatched_with_subscription_lock`.
 
-Do not evict delegated or undelegating local state.
+Do not track or evict mutable local state.
 
 ### Redelegation or undelegation bugs
 
@@ -497,17 +507,18 @@ Start with:
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-chainlink`.
-- Relevant integration suites: `test-chainlink`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Useful Chainlink test files: `magicblock-chainlink/tests/basics.rs`, `01_ensure-accounts.rs`, `03_deleg_after_sub.rs`, redelegation tests `04` through `07`, `08_subupdate-ordering.rs`, and `09_waiter_reconciliation_race.rs`.
-- Performance validation intent: fetch/clone, subscription, LRU, or update-ordering hot-path changes should include the smallest practical test or measurement that can expose duplicate fetches/clones, increased latency, contention, or subscription churn; if skipped, report the residual performance risk.
+- Performance validation intent: fetch/clone, subscription, cache eviction, or update-ordering hot-path changes should include the smallest practical test or measurement that can expose duplicate fetches/clones, increased latency, contention, or subscription churn; if skipped, report the residual performance risk.
 
 ## Adjacent implementation references
 
-- `.agents/context/crates/magicblock-account-cloner.md` — clone request materialization boundary implemented by the production cloner.
+- `../engine/engine/src/accessor.rs` — concrete account operations used to
+  materialize and evict local state.
 - `.agents/context/crates/magicblock-accounts.md` — scheduled commit integration and undelegation notification consumer.
 - `.agents/context/crates/magicblock-aperture.md` — RPC read and transaction submission account-ensure caller.
 - `.agents/context/crates/magicblock-aml.md` — signer risk-check integration for post-delegation actions.
-- `magicblock-chainlink/src/cloner/mod.rs` — `Cloner`, `AccountCloneRequest`, and `DelegationActions` boundary.
-- `magicblock-chainlink/src/chainlink/fetch_cloner/` — fetch/clone pipeline, delegation handling, ATA/eATA projection, and pending operation deduplication.
-- `magicblock-chainlink/src/remote_account_provider/` — RPC/pubsub provider, subscription ownership, LRU capacity, and program-account resolution.
+- `magicblock-chainlink/src/cloner/mod.rs` — `AccountCloneRequest`,
+  `DelegationActions`, and concrete Engine materialization operations.
+- `magicblock-chainlink/src/chainlink/fetch_cloner/` — fetch/clone pipeline, delegation handling, ATA/eATA projection, and engine load coordination.
+- `magicblock-chainlink/src/remote_account_provider/` — RPC/pubsub provider, subscription ownership/tracking, and program-account resolution.
 - `magicblock-chainlink/tests/` — Chainlink account ensure, delegation, ordering, and race-recovery tests.

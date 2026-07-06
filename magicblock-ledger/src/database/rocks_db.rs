@@ -2,15 +2,15 @@ use std::{
     fs,
     path::Path,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
 use rocksdb::{
-    AsColumnFamilyRef, CStrLike, ColumnFamily, DBIterator, DBPinnableSlice,
+    AsColumnFamilyRef, CStrLike, ColumnFamily, DB, DBIterator, DBPinnableSlice,
     DBRawIterator, FlushOptions, IteratorMode as RocksIteratorMode, LiveFile,
-    Options, WriteBatch as RWriteBatch, DB,
+    Options, WriteBatch as RWriteBatch,
 };
 use solana_clock::Slot;
 
@@ -104,16 +104,14 @@ impl Rocks {
         cf: &ColumnFamily,
         keys: Vec<&[u8]>,
     ) -> Vec<LedgerResult<Option<DBPinnableSlice<'_>>>> {
-        let values = self
-            .db
+        self.db
             .batched_multi_get_cf(cf, keys, false)
             .into_iter()
             .map(|result| match result {
                 Ok(opt) => Ok(opt),
                 Err(e) => Err(LedgerError::RocksDb(e)),
             })
-            .collect::<Vec<_>>();
-        values
+            .collect::<Vec<_>>()
     }
 
     pub fn delete_cf(&self, cf: &ColumnFamily, key: &[u8]) -> LedgerResult<()> {
@@ -276,14 +274,12 @@ mod tests {
 
     use rocksdb::Options;
     use tempfile::tempdir;
-    use test_kit::init_logger;
 
     use super::*;
     use crate::database::columns::columns;
 
     #[test]
     fn test_cf_names_and_descriptors_equal_length() {
-        init_logger!();
         let path = PathBuf::default();
         let options = LedgerOptions::default();
         // The names and descriptors don't need to be in the same order for our use cases;
@@ -297,7 +293,6 @@ mod tests {
 
     #[test]
     fn test_open_unknown_columns() {
-        init_logger!();
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path();
 

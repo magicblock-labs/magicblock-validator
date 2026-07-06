@@ -1,4 +1,4 @@
-use rocksdb::{AsRawPtr, Options};
+use rocksdb::Options;
 
 use super::options::AccessType;
 
@@ -58,27 +58,8 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     // 128 MiB/s those saturated the ledger disk at ~275 MB/s combined R+W for
     // over an hour per cycle. 48 MiB/s keeps combined disk throughput under
     // ~100 MB/s; the same rewrite just spreads over a longer window.
-    // kAllIo mode is required: the default limiter only charges writes, and
-    // truncation compactions are read-dominated (most input is tombstoned and
-    // discarded, so almost nothing is written back). With kWritesOnly the
-    // limiter never engages and compaction reads run at full disk speed.
-    // The safe wrapper only exposes kWritesOnly, so go through the C API.
     // RateLimiter parameters: rate_bytes_per_sec, refill_period_us, fairness
-    const RATE_LIMITER_MODE_ALL_IO: std::ffi::c_int = 2; // RateLimiter::Mode::kAllIo
-    unsafe {
-        let ratelimiter = librocksdb_sys::rocksdb_ratelimiter_create_with_mode(
-            48 * 1024 * 1024,
-            100 * 1000,
-            10,
-            RATE_LIMITER_MODE_ALL_IO,
-            false,
-        );
-        librocksdb_sys::rocksdb_options_set_ratelimiter(
-            options.as_raw_ptr(),
-            ratelimiter,
-        );
-        librocksdb_sys::rocksdb_ratelimiter_destroy(ratelimiter);
-    }
+    options.set_ratelimiter(48 * 1024 * 1024, 100 * 1000, 10);
 
     // Dynamic level bytes is a good default to balance levels
     options.set_level_compaction_dynamic_level_bytes(true);

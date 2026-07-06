@@ -6,10 +6,11 @@ use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 
 use crate::{
+    ComputeBudgetConfig,
     persist::IntentPersister,
     tasks::{
-        commit_stage_task::CleanupTask, task_strategist::TransactionStrategy,
-        utils::TransactionUtils, BaseTaskImpl,
+        BaseTaskImpl, commit_stage_task::CleanupTask,
+        task_strategist::TransactionStrategy, utils::TransactionUtils,
     },
     transaction_preparator::{
         delivery_preparator::{
@@ -17,7 +18,6 @@ use crate::{
         },
         error::PreparatorResult,
     },
-    ComputeBudgetConfig,
 };
 
 pub mod delivery_preparator;

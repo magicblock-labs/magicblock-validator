@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, str::FromStr};
 
 use derive_more::{Deref, Display};
-use serde::{de, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use url::Url;
 

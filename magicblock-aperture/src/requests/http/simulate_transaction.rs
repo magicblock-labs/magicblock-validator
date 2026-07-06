@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use magicblock_core::link::transactions::TransactionSimulationResult;
 use solana_message::inner_instruction::InnerInstructions;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
-    response::{RpcBlockhash, RpcSimulateTransactionResult},
+    response::RpcSimulateTransactionResult,
 };
+use solana_svm::transaction_processing_result::TransactionProcessingResultExtensions;
 use solana_transaction_status::{
     InnerInstruction, InnerInstructions as StatusInnerInstructions,
     UiTransactionEncoding,
@@ -18,10 +18,9 @@ impl HttpDispatcher {
     /// Handles the `simulateTransaction` RPC request.
     ///
     /// Simulates a transaction against the current state of the ledger without
-    /// committing any changes. This is used for preflight checks. The simulation
-    /// can be customized to skip signature verification or replace the transaction's
-    /// blockhash with a recent one. Returns a detailed result including execution
-    /// logs, compute units, and the simulation outcome.
+    /// committing any changes. This is used for preflight checks. Returns a
+    /// detailed result including execution logs, compute units, and the
+    /// simulation outcome.
     pub(crate) async fn simulate_transaction(
         &self,
         request: &mut JsonRequest,
@@ -37,40 +36,48 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        // Prepare the transaction, applying simulation-specific options.
+        // Decode into a sanitized view; the engine owns verification.
         let transaction = self
-            .prepare_transaction(
-                &transaction_str,
-                encoding,
-                config.sig_verify,
-                config.replace_recent_blockhash,
-            )
+            .decode_transaction(&transaction_str, encoding)
             .inspect_err(|err| {
-                debug!(error = ?err, "Failed to prepare transaction to simulate")
+                debug!(error = ?err, "Failed to decode transaction to simulate")
             })?;
-        self.ensure_transaction_accounts(&transaction.txn).await?;
-        let number_of_accounts = transaction.txn.message().account_keys().len();
+        self.ensure_transaction_accounts(&transaction).await?;
+        let number_of_accounts = transaction.static_account_keys().len();
 
         let replacement_blockhash = config
             .replace_recent_blockhash
-            .then(|| RpcBlockhash::from(self.blocks.get_latest()));
+            .then(|| self.latest_blockhash().0);
         let inner_instructions_enabled = config.inner_instructions;
         let accounts_config = config.accounts;
 
-        // Submit the transaction to the scheduler for simulation.
-        let result = self
-            .transactions_scheduler
-            .simulate(transaction.txn)
-            .await
+        // Submit the transaction to the engine for simulation. A non-ALT
+        // failure still yields a record whose `result` carries the error.
+        let record = self
+            .engine
+            .transaction(transaction)?
+            .simulate()
+            .await?
             .map_err(RpcError::transaction_simulation_from_scheduler)?;
-        let TransactionSimulationResult {
-            result,
-            logs,
-            post_simulation_accounts,
-            units_consumed,
-            return_data,
-            inner_instructions: recorded_inner_instructions,
-        } = result;
+
+        // Project the raw SVM record into the client-facing pieces.
+        let result = record.result.flattened_result();
+        let (logs, units_consumed, return_data, recorded_inner, post_accounts) =
+            match record.result {
+                Ok(executed) => {
+                    let executed = *executed;
+                    let details = executed.execution_details;
+                    (
+                        details.log_messages.map(|l| l.as_ref().clone()),
+                        details.executed_units,
+                        details.return_data,
+                        details.inner_instructions,
+                        executed.loaded_transaction.accounts,
+                    )
+                }
+                Err(_) => (None, 0, None, None, Vec::new()),
+            };
+
         let accounts = if let Some(config_accounts) = accounts_config {
             let accounts_encoding = config_accounts
                 .encoding
@@ -104,9 +111,8 @@ impl HttpDispatcher {
                     .collect::<Result<Vec<_>, _>>()?;
                 let current_accounts =
                     self.read_accounts_with_ensure(&pubkeys).await;
-                let post_simulation_accounts = post_simulation_accounts
-                    .into_iter()
-                    .collect::<HashMap<_, _>>();
+                let post_simulation_accounts =
+                    post_accounts.into_iter().collect::<HashMap<_, _>>();
 
                 Some(
                     pubkeys
@@ -118,8 +124,13 @@ impl HttpDispatcher {
                                 .cloned()
                                 .or(account)
                                 .map(|account| {
-                                    LockedAccount::new(pubkey, account)
-                                        .ui_encode(accounts_encoding, None)
+                                    encode_ui_account(
+                                        &pubkey,
+                                        &account,
+                                        accounts_encoding,
+                                        None,
+                                        None,
+                                    )
                                 })
                         })
                         .collect(),
@@ -145,7 +156,7 @@ impl HttpDispatcher {
         };
 
         let inner_instructions = inner_instructions_enabled.then(|| {
-            recorded_inner_instructions
+            recorded_inner
                 .into_iter()
                 .flatten()
                 .enumerate()
@@ -170,7 +181,7 @@ impl HttpDispatcher {
             loaded_addresses: None,
         };
 
-        let slot = self.blocks.block_height();
+        let slot = record.slot;
         Ok(ResponsePayload::encode(&request.id, result, slot))
     }
 }

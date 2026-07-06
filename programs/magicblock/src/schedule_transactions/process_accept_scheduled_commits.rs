@@ -7,12 +7,11 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    schedule_transactions,
+    MagicContext, TransactionScheduler, schedule_transactions,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    validator::effective_validator_authority_id,
-    MagicContext, TransactionScheduler,
+    validator::authority,
 };
 
 pub fn process_accept_scheduled_commits(
@@ -60,14 +59,14 @@ pub fn process_accept_scheduled_commits(
         transaction_context,
         VALIDATOR_AUTHORITY_IDX,
     )?;
-    let validator_auth = effective_validator_authority_id();
+    let validator_auth = authority();
     if !provided_validator_auth.eq(&validator_auth) {
         ic_msg!(
-             invoke_context,
-             "AcceptScheduledCommits ERR: invalid validator authority {}, should be {}",
-             provided_validator_auth,
-             validator_auth
-         );
+            invoke_context,
+            "AcceptScheduledCommits ERR: invalid validator authority {}, should be {}",
+            provided_validator_auth,
+            validator_auth
+        );
         return Err(InstructionError::InvalidArgument);
     }
     if !signers.contains(&validator_auth) {

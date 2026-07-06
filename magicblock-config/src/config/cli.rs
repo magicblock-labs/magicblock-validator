@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::{
     config::LifecycleMode,
-    types::{network::Remote, BindAddress, SerdeKeypair},
+    types::{BindAddress, SerdeKeypair, network::Remote},
 };
 
 /// CLI Arguments mirroring the structure of ValidatorParams.

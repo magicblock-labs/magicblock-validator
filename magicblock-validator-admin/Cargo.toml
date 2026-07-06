@@ -9,13 +9,15 @@ edition.workspace = true
 
 [dependencies]
 tracing = { workspace = true }
+thiserror = { workspace = true }
 
+magicblock-engine = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
-magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 
 
 solana-commitment-config = { workspace = true }
+solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }

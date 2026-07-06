@@ -1,4 +1,3 @@
-use magicblock_accounts_db::error::AccountsDbError;
 use magicblock_committor_service::service::IntentExecutionServiceError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
@@ -14,7 +13,16 @@ pub enum ApiError {
     Aperture(#[from] magicblock_aperture::error::ApertureError),
 
     #[error("Ledger error: {0}")]
-    LedgerError(Box<magicblock_ledger::errors::LedgerError>),
+    LedgerError(Box<magicblock_ledger_deprecated::errors::LedgerError>),
+
+    #[error("Engine error: {0}")]
+    Engine(#[from] engine::EngineError),
+
+    #[error("Replication error: {0}")]
+    Replication(#[from] replicator::ReplicationError),
+
+    #[error("Ledger superblock size must be non-zero")]
+    InvalidSuperblockSize,
 
     #[error("Chainlink error: {0}")]
     ChainlinkError(Box<magicblock_chainlink::errors::ChainlinkError>),
@@ -22,7 +30,9 @@ pub enum ApiError {
     #[error("Failed to obtain balance for validator '{0}' from chain. ({1})")]
     FailedToObtainValidatorOnChainBalance(Pubkey, String),
 
-    #[error("Validator '{0}' is insufficiently funded on chain. Minimum is ({1} SOL)")]
+    #[error(
+        "Validator '{0}' is insufficiently funded on chain. Minimum is ({1} SOL)"
+    )]
     ValidatorInsufficientlyFunded(Pubkey, u64),
 
     #[error("Failed to initialize magic fee vault for validator '{0}': {1}")]
@@ -89,12 +99,10 @@ pub enum ApiError {
     )]
     LedgerValidatorKeypairNotMatchingProvidedKeypair(String, String),
 
-    #[error("The slot at which we should continue after processing the ledger ({0}) does not match the bank slot ({1})"
+    #[error(
+        "The slot at which we should continue after processing the ledger ({0}) does not match the bank slot ({1})"
     )]
     NextSlotAfterLedgerProcessingNotMatchingBankSlot(u64, u64),
-
-    #[error("Accounts Database couldn't be initialized")]
-    AccountsDbError(#[from] AccountsDbError),
 
     #[error("TaskSchedulerServiceError")]
     TaskSchedulerServiceError(
@@ -105,13 +113,10 @@ pub enum ApiError {
     FailedToSanitizeTransaction(
         #[from] solana_transaction_error::TransactionError,
     ),
-
-    #[error("Replication service failed: {0}")]
-    Replication(#[from] magicblock_replicator::Error),
 }
 
-impl From<magicblock_ledger::errors::LedgerError> for ApiError {
-    fn from(e: magicblock_ledger::errors::LedgerError) -> Self {
+impl From<magicblock_ledger_deprecated::errors::LedgerError> for ApiError {
+    fn from(e: magicblock_ledger_deprecated::errors::LedgerError) -> Self {
         Self::LedgerError(Box::new(e))
     }
 }

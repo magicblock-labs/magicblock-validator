@@ -19,7 +19,7 @@ Keep `magicblock-core` dependency-light and protocol-neutral where possible. It 
 Update this guide in the same change whenever behavior or contracts in `magicblock-core` change. In particular, update it for changes to:
 
 - endpoint/channel topology, channel capacity, backpressure semantics, or scheduler pause behavior in `src/link.rs` and `src/link/transactions.rs`;
-- public transaction modes, replay/block-boundary ordering, replication message layout, or bincode payload compatibility;
+- public transaction modes, replay/block-boundary ordering, replication message layout, or intent schema compatibility;
 - `LockedAccount` optimistic read behavior or account encoding assumptions;
 - `CoordinationMode` states, transitions, or helper semantics used by startup, primary, replica, and Magic Program code;
 - `CommittedAccount`, `BaseActionCallback`, `MagicSys`, `LatestBlockProvider`, or `ActionsCallbackScheduler` contracts;
@@ -103,7 +103,7 @@ The transaction, account-update, transaction-status, and replication queues use 
 - `replay_block(block)` queues an ordered replicated block boundary and awaits scheduler acknowledgement.
 - `wait_for_idle()` acquires the scheduler pause semaphore and returns an `OwnedSemaphorePermit` that keeps scheduling paused while held.
 
-`SanitizeableTransaction` is implemented for `SanitizedTransaction`, `VersionedTransaction`, `Transaction`, and `WithEncoded<T>`. Use `with_encoded(txn)` when an internally constructed transaction also needs bincode bytes for replication or downstream reuse. For unsanitized transaction types, `sanitize(true)` verifies signatures; the `false` path uses a unique hash and is intended only for cases that explicitly skip verification.
+`SanitizeableTransaction` is implemented for `SanitizedTransaction`, `VersionedTransaction`, and `Transaction`. For unsanitized transaction types, `sanitize(true)` verifies signatures; the `false` path uses a unique hash and is intended only for cases that explicitly skip verification.
 
 ### Transaction and replay payloads
 
@@ -168,7 +168,7 @@ Do not create parallel ad-hoc channels for the same flows without updating this 
 ```text
 RPC/service caller
   -> TransactionSchedulerHandle::{schedule,execute,simulate,replay}
-  -> SanitizeableTransaction::sanitize_with_encoded(verify = true)
+  -> SanitizeableTransaction::sanitize(verify = true)
   -> SchedulerCommand::Transaction(ProcessableTransaction)
   -> bounded scheduler command channel
   -> magicblock-processor scheduler/executor
@@ -230,9 +230,9 @@ Keep these types serializable and stable enough for persistence and cross-crate 
 
 `LINK_CAPACITY` is intentionally bounded for transaction commands, account/status event channels, and replication messages. Raising it can increase memory and latency under overload; lowering it can cause premature backpressure or dropped service throughput. Scheduled tasks are currently unbounded; if that changes, inspect task scheduler behavior and Magic Program task emission semantics.
 
-### Sanitization and encoded transaction bytes
+### Intent and callback schemas
 
-`with_encoded` bincode-serializes a transaction before wrapping it. If serialization fails it maps to `TransactionError::SanitizeFailure`. Replication relies on `ProcessableTransaction::encoded` to avoid redundant serialization. Do not silently drop encoded bytes on paths that feed replication unless the downstream code has been updated.
+Core-owned intent, committed-account, action, and callback types derive wincode schemas. Keep their field and variant ordering compatible with persisted Magic Context data and service payloads.
 
 ### Replication wire compatibility
 
@@ -363,7 +363,6 @@ Start with:
 - `magicblock-chainlink/src/chainlink/fetch_cloner/delegation.rs`
 - `magicblock-chainlink/src/testing/eatas.rs`
 - `programs/magicblock/src/schedule_transactions/process_schedule_commit_tests.rs`
-- `test-integration/test-cloning/tests/10_post_delegation_token_transfer.rs`
 
 Verify legacy token and Token-2022 behavior, eATA account length compatibility, rent assumptions, and delegated-account checks.
 
@@ -383,7 +382,6 @@ Avoid adding high-cardinality or noisy logs to hot loops. Keep test logging idem
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-core` plus the smallest affected consumer package because much of this crate is exercised through downstream crates.
 - Relevant consumer packages/suites by area: `magicblock-processor` for scheduling/replay/pause semantics, `magicblock-aperture` for RPC/LockedAccount consumers, `magicblock-replicator` for replication ordering, `magicblock-program`, `magicblock-chainlink`, `magicblock-committor-service`, and `magicblock-task-scheduler` for TLS/commits/callbacks/token helpers.
-- Relevant integration suites: `test-magicblock-api`, restore-ledger/replicator suites, `test-cloning`, `test-schedule-intents`, committor suites, and `test-task-scheduler` depending on the touched flow; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - For transaction dispatch, account-update, replication, or scheduler-pause changes, report whether performance risk was measured or only reasoned about, especially queue backpressure, allocations/serialization, and lock contention.
 
 ## Adjacent implementation references

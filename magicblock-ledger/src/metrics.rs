@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rocksdb::{perf::set_perf_stats, PerfContext, PerfMetric, PerfStatsLevel};
+use rocksdb::{PerfContext, PerfMetric, PerfStatsLevel, perf::set_perf_stats};
 use solana_metrics::datapoint_info;
 
 use crate::database::options::LedgerColumnOptions;

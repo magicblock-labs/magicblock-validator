@@ -68,15 +68,29 @@ impl From<TransactionError> for RpcError {
     }
 }
 
-impl From<magicblock_ledger::errors::LedgerError> for RpcError {
-    fn from(value: magicblock_ledger::errors::LedgerError) -> Self {
+impl From<magicblock_ledger_deprecated::errors::LedgerError> for RpcError {
+    fn from(value: magicblock_ledger_deprecated::errors::LedgerError) -> Self {
         Self::internal(value)
     }
 }
 
-impl From<magicblock_accounts_db::error::AccountsDbError> for RpcError {
-    fn from(value: magicblock_accounts_db::error::AccountsDbError) -> Self {
-        Self::internal(value)
+impl From<engine::EngineError> for RpcError {
+    fn from(value: engine::EngineError) -> Self {
+        use engine::EngineError::*;
+        match value {
+            // Failures attributable to the submitted transaction itself.
+            SignatureVerification
+            | Sanitization(_)
+            | Signature(_)
+            | TransactionExecution(_) => Self::transaction_verification(value),
+            // Transient shutdown: surface as HTTP 503 so retry-aware proxies
+            // can absorb the brief validator restart gap.
+            ServiceUnavailable(_) => Self {
+                http_status: 503,
+                ..Self::internal(value)
+            },
+            _ => Self::internal(value),
+        }
     }
 }
 

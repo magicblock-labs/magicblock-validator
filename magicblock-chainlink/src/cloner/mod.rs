@@ -1,13 +1,16 @@
 use std::ops::Deref;
 
-use async_trait::async_trait;
+use engine::Engine;
 use errors::ClonerResult;
-use solana_account::AccountSharedData;
+use solana_account::{AccountBuilder, AccountSharedData, OwnedAccount};
 use solana_instruction::Instruction;
+use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
+use tracing::debug;
 
-use crate::remote_account_provider::program_account::LoadedProgram;
+use crate::remote_account_provider::program_account::{
+    LOADER_V1, LOADER_V4, LoadedProgram, RemoteProgramLoader,
+};
 
 pub mod errors;
 
@@ -64,26 +67,78 @@ pub struct AccountCloneRequest {
     pub needs_undelegation: bool,
 }
 
-#[async_trait]
-pub trait Cloner: Send + Sync + 'static {
-    /// Overrides the account in the bank to make sure it's a PDA that can be used as readonly
-    /// Future transactions should be able to read from it (but not write) on the account as-is
-    /// NOTE: this will run inside a separate task as to not block account sub handling.
-    /// However it includes a channel callback in order to signal once the account was cloned
-    /// successfully.
-    async fn clone_account(
-        &self,
-        request: AccountCloneRequest,
-    ) -> ClonerResult<Signature>;
+fn engine_err(err: impl ToString) -> errors::ClonerError {
+    errors::ClonerError::Engine(err.to_string())
+}
 
-    // Overrides the accounts in the bank to make sure the program is usable normally (and upgraded)
-    // We make sure all accounts involved in the program are present in the bank with latest state
-    async fn clone_program(
-        &self,
-        program: LoadedProgram,
-    ) -> ClonerResult<Signature>;
+pub(crate) async fn clone_account(
+    engine: &Engine,
+    request: AccountCloneRequest,
+) -> ClonerResult<()> {
+    if request.needs_undelegation {
+        return Err(errors::ClonerError::UndelegationSchedulingUnavailable(
+            request.pubkey,
+        ));
+    }
 
-    /// Evicts an account from the ephemeral validator by submitting an
-    /// EvictAccount transaction through the transaction pipeline.
-    async fn evict_account(&self, pubkey: Pubkey) -> ClonerResult<()>;
+    let actions: Vec<Instruction> = request.delegation_actions.into();
+    let actions = (!actions.is_empty()).then_some(actions);
+    engine
+        .account(request.pubkey)
+        .create(request.account.owned(), actions)
+        .await
+        .map_err(|err| {
+            errors::ClonerError::FailedToCloneRegularAccount(
+                request.pubkey,
+                Box::new(engine_err(err)),
+            )
+        })
+}
+
+pub(crate) async fn clone_program(
+    engine: &Engine,
+    program: LoadedProgram,
+) -> ClonerResult<()> {
+    let program_id = program.program_id;
+    if matches!(program.loader_status, LoaderV4Status::Retracted) {
+        debug!(%program_id, "Program is retracted on chain");
+        return Ok(());
+    }
+
+    let owner = match program.loader {
+        RemoteProgramLoader::V1 => LOADER_V1,
+        RemoteProgramLoader::V2
+        | RemoteProgramLoader::V3
+        | RemoteProgramLoader::V4 => LOADER_V4,
+    };
+    let account: OwnedAccount = AccountBuilder::default()
+        .lamports(program.lamports())
+        .data(program.program_data)
+        .owner(owner)
+        .executable(true)
+        .slot(program.remote_slot)
+        .build();
+
+    engine
+        .account(program_id)
+        .create(account, None)
+        .await
+        .map_err(|err| {
+            errors::ClonerError::FailedToCloneProgram(
+                program_id,
+                Box::new(engine_err(err)),
+            )
+        })
+}
+
+pub(crate) async fn evict_account(
+    engine: &Engine,
+    pubkey: Pubkey,
+) -> ClonerResult<()> {
+    engine.account(pubkey).delete().await.map_err(|err| {
+        errors::ClonerError::FailedToEvictAccount(
+            pubkey,
+            Box::new(engine_err(err)),
+        )
+    })
 }

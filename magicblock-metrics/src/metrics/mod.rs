@@ -8,8 +8,7 @@ use prometheus::{
 pub use types::{
     AccountClone, AccountCommit, AccountFetchContext, AccountFetchEntrypoint,
     AccountFetchReason, BankPrecheckOutcome, BankPrecheckReason,
-    ChainlinkCloneIntent, ChainlinkCloneMaterializationOutcome,
-    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
+    ChainlinkCloneIntent, ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
     ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
     ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
     ChainlinkPendingFetchOutcome, LabelValue, Outcome,
@@ -435,16 +434,6 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
-    pub static ref CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL: IntCounterVec =
-        IntCounterVec::new(
-            Opts::new(
-                "chainlink_clone_materialization_accounts_total",
-                "Total number of post-clone bank materialization checks",
-            ),
-            &["entrypoint", "fetch_reason", "remote_result", "outcome"],
-        )
-        .unwrap();
-
     pub static ref CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
@@ -819,7 +808,6 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
         register!(CHAINLINK_CLONE_ACCOUNTS_TOTAL);
-        register!(CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL);
         register!(CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL);
         register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
@@ -1175,21 +1163,6 @@ pub fn inc_chainlink_clone_accounts_total_with_context(
             context.reason().value(),
             remote_result.value(),
             clone_intent.value(),
-            outcome.value(),
-        ])
-        .inc();
-}
-
-pub fn inc_chainlink_clone_materialization_accounts_total_with_context(
-    context: AccountFetchContext,
-    remote_result: ChainlinkCloneRemoteResult,
-    outcome: ChainlinkCloneMaterializationOutcome,
-) {
-    CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL
-        .with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-            remote_result.value(),
             outcome.value(),
         ])
         .inc();
@@ -1684,7 +1657,7 @@ mod fetch_context_metric_tests {
             "subscription_update",
             "delegation_record",
             "direct_account",
-            "added_below_capacity",
+            "added",
         ];
         let before_record = counter_value(
             &CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL,
@@ -1693,7 +1666,7 @@ mod fetch_context_metric_tests {
         inc_chainlink_subscription_registration_accounts(
             SubscriptionRegistrationOrigin::Fetch(record_context),
             SubscriptionReasonLabel::DirectAccount,
-            SubscriptionRegistrationOutcome::AddedBelowCapacity,
+            SubscriptionRegistrationOutcome::Added,
         );
         assert_eq!(
             counter_value(

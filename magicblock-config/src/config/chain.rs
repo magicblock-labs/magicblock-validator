@@ -49,10 +49,6 @@ fn default_claim_fees_frequency() -> Duration {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainLinkConfig {
-    /// The maximum number of non-delegated accounts to track simultaneously for
-    /// updates.
-    pub max_monitored_accounts: usize,
-
     /// When true, confined accounts are removed during accounts bank reset.
     pub remove_confined_accounts: bool,
 
@@ -78,7 +74,6 @@ pub struct ChainLinkConfig {
 impl Default for ChainLinkConfig {
     fn default() -> Self {
         Self {
-            max_monitored_accounts: consts::DEFAULT_MAX_MONITORED_ACCOUNTS,
             remove_confined_accounts: false,
             allowed_programs: None,
             resubscription_delay: Duration::from_millis(

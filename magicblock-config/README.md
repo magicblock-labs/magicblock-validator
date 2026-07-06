@@ -77,6 +77,13 @@ storage = "/data/ledger"
 basefee = 500
 keypair = "9Vo7Tb..."
 
+# Primary nodes bind a TCP replication endpoint and explicitly authorize each
+# follower's local identity. Replica nodes instead configure upstream-address
+# and upstream-authority under [validator.replication-mode.replica].
+[validator.replication-mode.primary]
+bind-address = "0.0.0.0:10000"
+allowed-followers = ["L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"]
+
 [accounts-db]
 database-size = 104857600 # 100MB
 block-size = "block256"
@@ -86,7 +93,7 @@ block-size = "block256"
 
 The configuration is split into domain-specific structs available in `src/config/`:
 
-  * **`ValidatorConfig`**: Identity keypair, base fees.
+  * **`ValidatorConfig`**: Identity keypair, base fees, and authenticated engine replication role.
   * **`LedgerConfig`**: Block production timing, verification settings.
   * **`AccountsDbConfig`**: Snapshotting, indexing, and storage size tuning.
   * **`ChainOperationConfig`**: On-chain registration details (Country code, FQDN).
@@ -101,4 +108,3 @@ This crate includes a comprehensive test suite verifying the precedence logic, o
 ```bash
 cargo test -p magicblock-config
 ```
-

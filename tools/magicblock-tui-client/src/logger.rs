@@ -1,11 +1,11 @@
 use std::fmt::Write;
 
 use tokio::sync::mpsc::{
-    unbounded_channel, UnboundedReceiver, UnboundedSender,
+    UnboundedReceiver, UnboundedSender, unbounded_channel,
 };
-use tracing::{field::Visit, Event, Subscriber};
+use tracing::{Event, Subscriber, field::Visit};
 use tracing_subscriber::{
-    layer::Context, prelude::*, registry::Registry, EnvFilter, Layer,
+    EnvFilter, Layer, layer::Context, prelude::*, registry::Registry,
 };
 
 use crate::state::LogEntry;

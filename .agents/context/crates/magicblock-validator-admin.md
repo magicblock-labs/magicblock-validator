@@ -6,9 +6,9 @@
 
 High-level responsibilities:
 
-- expose `claim_fees(url)` for one-shot validator fee claiming against a base-layer RPC endpoint;
+- expose `claim_fees(engine, url)` for one-shot validator fee claiming against a base-layer RPC endpoint;
 - expose `ClaimFeesTask` for periodic fee-claim attempts owned by `magicblock-api::magic_validator::MagicValidator`;
-- construct and sign the Delegation Program `validator_claim_fees` instruction using the validator authority from `magicblock-program`;
+- construct and sign the Delegation Program `validator_claim_fees` instruction using the authority and local signer owned by `Engine`;
 - avoid submitting fee-claim transactions when the fees vault balance is below the local minimum threshold;
 - provide cooperative startup/shutdown behavior for the periodic Tokio task.
 
@@ -21,7 +21,7 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - public exports in `src/lib.rs` or `src/claim_fees.rs`;
 - `ClaimFeesTask` lifecycle, cancellation, tick scheduling, duplicate-start behavior, or shutdown timeout;
 - `claim_fees` RPC commitment, fee-vault derivation, threshold, signer, payer, instruction construction, or error mapping;
-- use of `magicblock-program::validator::validator_authority()` or Delegation Program APIs;
+- use of `Engine::authority()`, `Engine::signer()`, or Delegation Program APIs;
 - startup/shutdown wiring in `magicblock-api`, especially `chain_operation.claim_fees_frequency` gating;
 - configuration docs or defaults that affect fee claiming;
 - tests, integration setup, or validation commands for validator fee claiming.
@@ -34,26 +34,24 @@ For the general documentation-update rule, see `.agents/memory/agent-memory-and-
 
 | Path | Role |
 |---|---|
-| `magicblock-validator-admin/Cargo.toml` | Package metadata and dependencies on Delegation Program APIs, Magic Program validator authority helpers, Solana RPC/transaction crates, Tokio, cancellation tokens, and `magicblock-rpc-client` error types. |
+| `magicblock-validator-admin/Cargo.toml` | Package metadata and dependencies on the engine, Delegation Program APIs, Solana RPC/transaction crates, Tokio, cancellation tokens, and `magicblock-rpc-client` error types. |
 | `magicblock-validator-admin/src/lib.rs` | Public crate surface. Currently exports only `pub mod claim_fees`. |
 | `magicblock-validator-admin/src/claim_fees.rs` | Fee-claim implementation, `ClaimFeesTask`, periodic loop, minimum claim threshold, one-shot RPC transaction construction, and error mapping. |
 | `magicblock-api/src/magic_validator.rs` | Main consumer. Owns `ClaimFeesTask`, calls one-shot `claim_fees` during on-chain setup, starts periodic claims for standalone validators, and stops the task during shutdown. |
 | `magicblock-config/src/config/chain.rs` | Defines `ChainOperationConfig::claim_fees_frequency`; zero disables fee claiming and the default is 24 hours. |
 | `config.example.toml` | Operator-facing `[chain-operation] claim-fees-frequency` example and environment variable name. |
-| `test-integration/test-magicblock-api/tests/test_claim_fees.rs` | Integration coverage for instruction creation, `ClaimFeesTask` construction/defaults, fee-vault funding, direct fee-claim transaction, and RPC connectivity. |
 
 Main consumers:
 
 - `magicblock-api`, which owns runtime integration and lifecycle ordering;
-- integration tests under `test-integration/test-magicblock-api`;
 - future operator/admin code that needs validator-management helper transactions.
 
 Important upstream dependencies:
 
 - `magicblock-delegation-program-api` (imported as `dlp_api`) for `validator_claim_fees` and validator fees vault PDA derivation;
-- `magicblock-program` for the validator authority keypair used to sign fee-claim transactions;
+- `magicblock-engine` for the represented validator authority and local signer used by fee-claim transactions;
 - `solana_rpc_client::nonblocking::rpc_client::RpcClient` for balance, blockhash, and send/confirm calls;
-- `magicblock-rpc-client` for the shared `MagicBlockRpcClientError` type used by this crate's public result.
+- `magicblock-rpc-client` for the RPC error type wrapped by `ClaimFeesError`.
 
 ## Public API shape / Main public types and APIs
 
@@ -70,7 +68,7 @@ All public APIs currently live under `magicblock_validator_admin::claim_fees`.
 `ClaimFeesTask` is a small Tokio task handle plus cancellation token:
 
 - `ClaimFeesTask::new()` and `Default` create an idle task with `handle: None`;
-- `start(tick_period, url)` spawns `run_claim_fees_loop` unless the task has already been started;
+- `start(engine, tick_period, url)` spawns `run_claim_fees_loop` unless the task has already been started;
 - `stop().await` cancels the token, waits up to two seconds for the JoinHandle, and logs if the task does not stop within the grace period;
 - `handle` is public and currently used by tests to verify idle construction; the cancellation token is private.
 
@@ -78,19 +76,20 @@ All public APIs currently live under `magicblock_validator_admin::claim_fees`.
 
 ### `claim_fees`
 
-`claim_fees(url: String) -> Result<(), MagicBlockRpcClientError>` performs one fee-claim attempt:
+`claim_fees(engine: &Engine, url: String) -> Result<(), ClaimFeesError>` performs one fee-claim attempt:
 
 1. Creates a Solana nonblocking `RpcClient` with `CommitmentConfig::confirmed()`.
-2. Loads the validator authority keypair via `magicblock_program::validator::validator_authority()`.
-3. Derives the validator fees vault PDA with `dlp_api::pda::validator_fees_vault_pda_from_validator`.
-4. Reads the vault balance.
-5. Returns `Ok(())` without sending a transaction if the balance is `<= MIN_CLAIMABLE_LAMPORTS` (`100_000_000`).
-6. Builds `dlp_api::instruction_builder::validator_claim_fees(validator, None)`.
-7. Fetches a latest blockhash.
-8. Signs a transaction with the validator as payer and signer.
-9. Sends and confirms the transaction.
+2. Reads the represented validator authority from `Engine::authority()` and the local signing identity from `Engine::signer()`.
+3. Rejects an authority/signer mismatch. Fee claiming runs only for standalone/primary engines; a replica must not claim its upstream authority's vault.
+4. Derives the validator fees vault PDA with `dlp_api::pda::validator_fees_vault_pda_from_validator`.
+5. Reads the vault balance.
+6. Returns `Ok(())` without sending a transaction if the balance is `<= MIN_CLAIMABLE_LAMPORTS` (`100_000_000`).
+7. Builds `dlp_api::instruction_builder::validator_claim_fees(validator, None)`.
+8. Fetches a latest blockhash.
+9. Signs a transaction with the engine's local signer and the validator authority as payer.
+10. Sends and confirms the transaction.
 
-Error mapping is intentionally narrow and currently wraps Solana RPC failures as `RpcClientError`, `GetLatestBlockhash`, or `SendTransaction` variants from `magicblock-rpc-client`.
+`ClaimFeesError` reports authority/signer mismatches directly and transparently wraps the existing `RpcClientError`, `GetLatestBlockhash`, and `SendTransaction` failures from `magicblock-rpc-client`.
 
 ## Runtime flows
 
@@ -101,7 +100,7 @@ MagicValidator::spawn_primary_onchain_setup
   -> ensure validator is funded on the base chain
   -> ensure Magic fee vault exists
   -> if chain_operation.claim_fees_frequency is non-zero:
-       claim_fees(rpc_url).await
+       claim_fees(&engine, rpc_url).await
        log but do not abort on failure
   -> optionally register validator on-chain
 ```
@@ -114,11 +113,11 @@ The startup claim runs only inside the primary on-chain setup path. Failure is l
 MagicValidator::start
   -> after ledger replay/reset and primary/standalone mode setup
   -> if is_standalone && chain_operation.claim_fees_frequency is non-zero:
-       claim_fees_task.start(frequency, config.rpc_url())
+       claim_fees_task.start(engine.clone(), frequency, config.rpc_url())
 
 ClaimFeesTask loop
   -> wait one full tick period before first interval tick
-  -> call claim_fees(url.clone()) on each tick
+  -> call claim_fees(&engine, url.clone()) on each tick
   -> log errors and continue
   -> exit when cancellation token is cancelled
 ```
@@ -145,7 +144,7 @@ MagicValidator::stop
 
 ### Validator authority and fee vault
 
-The fee-claim transaction is signed by `validator_authority()` from `magicblock-program`, and the validator pubkey is also used as the transaction payer. The fees vault PDA must be derived from the same validator pubkey. If validator identity initialization changes, verify this helper still signs with the intended base-layer authority.
+The fee-claim transaction derives its payer and fees vault from `Engine::authority()` and signs with `Engine::signer()`. These must match, which is true for standalone and primary engines. A replica may represent a remote upstream authority, so `claim_fees` rejects that mismatch rather than signing for the wrong vault.
 
 ### RPC client choice
 
@@ -157,7 +156,7 @@ This crate currently constructs a raw Solana nonblocking `RpcClient` for one-sho
 
 ## Important invariants
 
-1. Fee claims must use the validator authority keypair that matches the validator fees vault PDA.
+1. Fee claims must derive the vault from the engine authority and use the matching engine signer.
 2. The validator pubkey must remain the payer and signer for `validator_claim_fees` transactions unless Delegation Program requirements change.
 3. The crate must not send a claim transaction when the vault balance is at or below `MIN_CLAIMABLE_LAMPORTS`.
 4. Startup fee-claim failures must remain observable through logs; do not silently swallow errors.
@@ -175,8 +174,7 @@ Start with:
 
 - `magicblock-validator-admin/src/claim_fees.rs` (`claim_fees`, `MIN_CLAIMABLE_LAMPORTS`);
 - Delegation Program API helpers used through `dlp_api::instruction_builder::validator_claim_fees` and `dlp_api::pda::validator_fees_vault_pda_from_validator`;
-- `magicblock-program` validator authority helpers;
-- `test-integration/test-magicblock-api/tests/test_claim_fees.rs`.
+- engine authority and signer accessors;
 
 Check signer/payer requirements, vault PDA derivation, commitment level, blockhash freshness, and whether error mapping still tells operators what failed.
 
@@ -199,7 +197,6 @@ Keep this crate focused on validator/operator management helpers. New helpers sh
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-validator-admin`.
 - Lifecycle or config integration changes should also include focused `magicblock-api` and `magicblock-config` coverage where practical.
-- Relevant integration suite: `test-magicblock-api`, especially `test_claim_fees`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance-sensitive risk to report: base-layer RPC load and startup/shutdown latency when fee-claim frequency, retry behavior, confirmation behavior, or task cancellation changes.
 
 ## Adjacent implementation references
@@ -208,4 +205,3 @@ Keep this crate focused on validator/operator management helpers. New helpers sh
 - `.agents/context/crates/magicblock-config.md` — `[chain-operation]` config model and env/TOML behavior.
 - `.agents/context/crates/magicblock-rpc-client.md` — shared base-layer RPC error type used by related admin/settlement helpers.
 - `config.example.toml` — operator-facing `claim-fees-frequency` example.
-- `test-integration/test-magicblock-api/tests/test_claim_fees.rs` — integration coverage for fee-claim behavior.

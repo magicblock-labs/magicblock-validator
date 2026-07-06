@@ -46,13 +46,12 @@ For the general documentation-update rule, see `.agents/memory/agent-memory-and-
 | `magicblock-config/src/config/metrics.rs` | Metrics bind address and collection frequency. |
 | `magicblock-config/src/config/program.rs` | Startup-loadable program ID/path entries. |
 | `magicblock-config/src/config/scheduler.rs` | Task scheduler reset, minimum interval, and failed-task retention/cleanup settings. |
-| `magicblock-config/src/config/validator.rs` | Base fee, validator identity, replication mode, redacted replication config, and replication authority override helper. |
+| `magicblock-config/src/config/validator.rs` | Base fee, validator identity, and role-specific authenticated TCP replication config. |
 | `magicblock-config/src/types/` | Serde/parser helper wrappers for keypairs, pubkeys, bind addresses, remotes, and storage directory. |
 | `magicblock-config/src/consts.rs` | Default values and remote aliases used by config structs and parsers. |
 | `magicblock-config/src/tests.rs` | Unit tests for defaults, precedence, overlays, env mapping, example config coverage, parser helpers, and redaction. |
 | `magicblock-config/README.md` | Human-facing crate overview and usage notes. |
 | `config.example.toml` | Operator-facing example and coverage target for available options. |
-| `test-integration/test-config/` | Integration coverage for config-to-CLI/validator behavior, including allowed program config. |
 
 Main consumers:
 
@@ -63,7 +62,6 @@ Main consumers:
 - `magicblock-accounts-db` consumes `AccountsDbConfig` for persistent account storage sizing, reset, block size, and snapshots.
 - `magicblock-task-scheduler` consumes `TaskSchedulerConfig` for SQLite reset, crank timing, and cleanup retention.
 - `magicblock-aml` consumes Range risk-related values through `RiskConfig`.
-- Integration tests under `test-integration/` parse or mirror config for validator startup scenarios.
 
 ## Public API shape / Main public types and APIs
 
@@ -98,7 +96,9 @@ Important helper types:
 - `Remote::to_websocket()` derives websocket endpoints only from HTTP remotes, preserving Solana's convention of websocket port = HTTP port + 1 when an explicit port exists.
 - `BindAddress` accepts socket addresses and plain port numbers. Plain ports bind to `127.0.0.1:<port>`. `http()` and `websocket()` convert unspecified IPs to localhost for client connection URLs and derive websocket port by saturating `port + 1`.
 - `SerdeKeypair` serializes keypairs as base58 strings but displays/debugs only the pubkey. Its clone uses `insecure_clone()` because runtime consumers need signer material.
-- `ReplicationConfig` redacts `secret` in `Debug` and `Serialize`; do not replace this with derived implementations.
+- `ReplicationMode::Primary` carries a TCP bind address and explicit follower
+  pubkey allowlist. `ReplicationMode::Replica` carries the immediate upstream
+  TCP address and authority pubkey. There is no shared replication secret.
 
 ## Runtime flows
 
@@ -179,7 +179,7 @@ Most config structs use `deny_unknown_fields`. This catches typos and stale conf
 
 ### Secrets and debug output
 
-`SerdeKeypair` debug/display output is pubkey-only, while serialized config still contains the base58 keypair. `ReplicationConfig` debug/serialize redacts the `secret`. The validator logs `format!("{config:#?}")` on startup, so any new secret-bearing type must implement redaction before being included in debug output.
+`SerdeKeypair` debug/display output is pubkey-only, while serialized config still contains the base58 keypair. Replication authentication uses the configured validator keypair and public-key allowlists, so its config contains no shared secret. The validator logs `format!("{config:#?}")` on startup, so any future secret-bearing type must implement redaction before being included in debug output.
 
 ### Defaults are operational behavior
 
@@ -248,13 +248,16 @@ Inspect first:
 - `magicblock-config/src/config/validator.rs`;
 - startup identity and replication setup in `magicblock-api/src/magic_validator.rs`;
 - ledger keypair verification and replay authority override paths;
-- tests for replication secret redaction.
+- `config.example.toml` and config parsing coverage for the role-specific fields.
 
 Risks:
 
-- leaking replication secrets or validator keypair material in logs;
+- accepting stale NATS `url`/`secret` configuration or logging validator keypair material;
 - starting with an identity that does not match persisted ledger state;
-- accidentally diverging primary and replica startup behavior.
+- accidentally diverging primary and replica startup behavior;
+- giving a replica internal pacing or trusting an upstream identity that was not
+  configured explicitly;
+- accepting a follower that is absent from the primary's allowlist.
 
 ### Changing storage, ledger, or AccountsDb settings
 
@@ -307,7 +310,6 @@ Risks:
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-config`.
-- Relevant integration suites: `test-config` for config-driven validator behavior; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Config changes that affect validator startup or operator config should include startup/recovery validation and call out runtime impact when timing, sizing, endpoint, reset, metrics, or scheduler defaults change.
 - Documentation-only changes have no runtime performance impact.
 
@@ -317,4 +319,3 @@ Risks:
 - `config.example.toml` — operator-facing example and tested config reference.
 - `magicblock-api/src/magic_validator.rs` — primary runtime consumer of `ValidatorParams`.
 - `magicblock-validator/src/main.rs` — binary entrypoint and config parsing.
-- `test-integration/test-config/` — integration tests for config-driven validator behavior.

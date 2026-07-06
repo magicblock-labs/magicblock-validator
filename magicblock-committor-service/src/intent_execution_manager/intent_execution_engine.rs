@@ -4,15 +4,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures_util::{stream::FuturesUnordered, StreamExt};
+use futures_util::{StreamExt, stream::FuturesUnordered};
 use magicblock_core::traits::CallbackScheduleError;
 use magicblock_metrics::metrics;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_signature::Signature;
 use tokio::{
     sync::{
-        broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
-        Semaphore,
+        OwnedSemaphorePermit, Semaphore, broadcast, mpsc,
+        mpsc::error::TryRecvError,
     },
     task::JoinHandle,
 };
@@ -20,17 +20,17 @@ use tracing::{error, info, instrument, trace, warn};
 
 use crate::{
     intent_execution_manager::{
+        IntentExecutionManagerError,
         db::DB,
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
-        IntentExecutionManagerError,
     },
     intent_executor::{
+        ExecutionOutput, IntentExecutionResult, IntentExecutor,
         error::{
             IntentExecutorError, IntentExecutorResult,
             TransactionStrategyExecutionError,
         },
         intent_executor_factory::IntentExecutorFactory,
-        ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
     persist::IntentPersister,
 };
@@ -332,7 +332,7 @@ where
             &INTENT_BUNDLE_LABEL,
             result,
         );
-        if let Err(ref err) = result {
+        if let Err(err) = &result {
             metrics::inc_committor_failed_intents_count(
                 &INTENT_BUNDLE_LABEL,
                 err,
@@ -359,15 +359,15 @@ mod tests {
     use std::{
         collections::HashSet,
         sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc,
+            atomic::{AtomicUsize, Ordering},
         },
         time::Duration,
     };
 
     use async_trait::async_trait;
     use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
-    use solana_pubkey::{pubkey, Pubkey};
+    use solana_pubkey::{Pubkey, pubkey};
     use solana_signature::Signature;
     use solana_signer::SignerError;
     use solana_transaction_error::TransactionError;
@@ -376,12 +376,12 @@ mod tests {
     use super::*;
     use crate::{
         intent_execution_manager::{
-            db::{DummyDB, DB},
+            db::{DB, DummyDB},
             intent_scheduler::{create_test_intent, create_test_intent_bundle},
         },
         intent_executor::{
-            error::{IntentExecutorError as ExecutorError, InternalError},
             IntentExecutionResult,
+            error::{IntentExecutorError as ExecutorError, InternalError},
         },
         persist::IntentPersisterImpl,
         test_utils,

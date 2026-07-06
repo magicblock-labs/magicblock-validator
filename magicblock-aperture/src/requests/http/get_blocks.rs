@@ -18,7 +18,7 @@ impl HttpDispatcher {
             parse_params!(request.params()?, Slot, Slot);
         let start_slot: Slot = some_or_err!(start_slot);
 
-        let latest_slot = self.blocks.block_height();
+        let latest_slot = self.engine.blocks().latest().slot;
         // If an end_slot is provided, cap it at the current latest_slot.
         // Otherwise, default to the latest_slot.
         let end_slot = end_slot

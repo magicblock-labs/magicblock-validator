@@ -1,26 +1,27 @@
 use std::collections::HashSet;
 
 use dlp_api::state::DelegationRecord;
-use futures_util::future::{join_all, FutureExt};
-use magicblock_accounts_db::traits::AccountsBank;
+use futures_util::future::{FutureExt, join_all};
 use magicblock_core::token_programs::{
-    is_ata, try_derive_eata_address_and_bump, try_derive_supported_ata_pubkeys,
-    AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
+    AtaInfo, EATA_PROGRAM_ID, EphemeralAta, is_ata,
+    try_derive_eata_address_and_bump, try_derive_supported_ata_pubkeys,
 };
 use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{
+    AccountFieldPatch, AccountMode, AccountSharedData, ReadableAccount,
+};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
-    delegation, log_companion_fetch_failure,
-    subscription::{acquire_subs, release_subs, SubscriptionRelease},
+    CompanionFetchLogContext, FetchCloner, delegation,
+    log_companion_fetch_failure,
+    subscription::{SubscriptionRelease, acquire_subs, release_subs},
     types::AccountWithCompanion,
-    CompanionFetchLogContext, FetchCloner,
 };
 use crate::{
-    cloner::{AccountCloneRequest, Cloner, DelegationActions},
+    cloner::{AccountCloneRequest, DelegationActions},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         ResolvedAccountSharedData, SubscriptionReason,
@@ -69,27 +70,23 @@ fn ata_info_from_layout(
     None
 }
 
-pub(crate) fn is_known_empty_eata<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn is_known_empty_eata<T, U>(
+    this: &FetchCloner<T, U>,
     eata_pubkey: &Pubkey,
 ) -> bool
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     this.known_empty_eatas.lock().get(eata_pubkey).is_some()
 }
 
-pub(crate) fn mark_eata_empty<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn mark_eata_empty<T, U>(
+    this: &FetchCloner<T, U>,
     eata_pubkey: Pubkey,
 ) where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     this.known_empty_eatas.lock().put(eata_pubkey, ());
 }
@@ -97,10 +94,8 @@ pub(crate) fn mark_eata_empty<T, U, V, C>(
 pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_update<
     T,
     U,
-    V,
-    C,
 >(
-    this: &FetchCloner<T, U, V, C>,
+    this: &FetchCloner<T, U>,
     eata_pubkey: Pubkey,
     eata_account: &AccountSharedData,
     deleg_record: Option<&DelegationRecord>,
@@ -110,8 +105,6 @@ pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_up
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     if let Some(deleg_record) = deleg_record {
         return maybe_build_projected_ata_clone_request_from_eata(
@@ -135,7 +128,7 @@ where
         delegation::fetch_and_parse_delegation_record(
             this,
             eata_pubkey,
-            eata_account.remote_slot(),
+            eata_account.slot(),
             metrics::AccountFetchContext::project_ata(),
             companion_fetch_log_context,
         )
@@ -153,8 +146,8 @@ where
     .await
 }
 
-async fn maybe_build_projected_ata_clone_request_from_eata<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+async fn maybe_build_projected_ata_clone_request_from_eata<T, U>(
+    this: &FetchCloner<T, U>,
     eata_pubkey: Pubkey,
     eata_account: &AccountSharedData,
     deleg_record: &DelegationRecord,
@@ -164,8 +157,6 @@ async fn maybe_build_projected_ata_clone_request_from_eata<T, U, V, C>(
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     if deleg_record.authority != this.validator_pubkey {
         return None;
@@ -185,31 +176,37 @@ where
     // eATA updates only carry the projected balance fields. The base ATA is
     // required so the clone preserves the actual token program owner and any
     // Token-2022 account layout extensions.
-    let mut base_ata = None;
-    for candidate_pubkey in ata_pubkeys.iter().copied() {
-        if let Some(candidate_account) =
-            this.accounts_bank.get_account(&candidate_pubkey)
-        {
-            if is_ata(&candidate_pubkey, &candidate_account).is_some() {
+    let base_ata = {
+        let accessor = this.engine.accounts();
+        let loader = accessor.loader();
+        let mut base_ata = None;
+        for candidate_pubkey in ata_pubkeys.iter().copied() {
+            if let Some(candidate_account) =
+                loader.load(&candidate_pubkey).ok().flatten()
+                && is_ata(&candidate_pubkey, &candidate_account).is_some()
+            {
                 base_ata = Some((candidate_pubkey, candidate_account));
                 break;
             }
         }
-    }
+        base_ata
+    };
     let (ata_pubkey, base_ata) = match base_ata {
         Some(base_ata) => base_ata,
         None => {
             fetch_remote_base_ata(
                 this,
                 &ata_pubkeys,
-                eata_account.remote_slot(),
+                eata_account.slot(),
                 companion_fetch_log_context,
             )
             .await?
         }
     };
 
-    if base_ata.delegated() || base_ata.undelegating() {
+    if base_ata.is(AccountMode::Delegated)
+        || base_ata.is(AccountMode::Transient)
+    {
         return None;
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(
@@ -229,8 +226,8 @@ where
     })
 }
 
-async fn fetch_remote_base_ata<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+async fn fetch_remote_base_ata<T, U>(
+    this: &FetchCloner<T, U>,
     ata_pubkeys: &[Pubkey],
     min_context_slot: u64,
     companion_fetch_log_context: &CompanionFetchLogContext,
@@ -238,8 +235,6 @@ async fn fetch_remote_base_ata<T, U, V, C>(
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     let remote_accounts = match this
         .remote_account_provider
@@ -278,8 +273,8 @@ where
     )
 }
 
-pub(crate) async fn maybe_project_ata_from_subscription_update<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn maybe_project_ata_from_subscription_update<T, U>(
+    this: &FetchCloner<T, U>,
     ata_pubkey: Pubkey,
     ata_account: AccountSharedData,
     companion_fetch_log_context: &CompanionFetchLogContext,
@@ -290,8 +285,6 @@ pub(crate) async fn maybe_project_ata_from_subscription_update<T, U, V, C>(
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     let Some(ata_info) = is_ata(&ata_pubkey, &ata_account) else {
         return (ata_account, None);
@@ -305,7 +298,7 @@ where
 
     let was_watching = this.remote_account_provider.is_watching(&eata_pubkey);
 
-    // Ensure before cache checks; this keeps the subscription LRU warm
+    // Ensure before cache checks; this keeps the subscription pubsub tracking warm
     // without refcounting the projection reason on every ATA update.
     let subscribed = match this
         .ensure_subscription(&eata_pubkey, SubscriptionReason::AtaProjection)
@@ -332,7 +325,7 @@ where
         .try_get_multi_until_slots_match(
             &[eata_pubkey],
             Some(MatchSlotsConfig {
-                min_context_slot: Some(ata_account.remote_slot()),
+                min_context_slot: Some(ata_account.slot()),
                 ..MatchSlotsConfig::new(
                     ChainlinkCompanionFetchKind::AtaProjection,
                 )
@@ -370,7 +363,7 @@ where
     let deleg_record = delegation::fetch_and_parse_delegation_record(
         this,
         eata_pubkey,
-        ata_account.remote_slot().max(eata_account.remote_slot()),
+        ata_account.slot().max(eata_account.slot()),
         metrics::AccountFetchContext::project_ata(),
         companion_fetch_log_context,
     )
@@ -392,8 +385,8 @@ where
     (ata_account, Some((deleg_record, delegation_actions)))
 }
 
-pub(crate) fn maybe_project_delegated_ata_from_eata<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn maybe_project_delegated_ata_from_eata<T, U>(
+    this: &FetchCloner<T, U>,
     ata_account: &AccountSharedData,
     eata_account: &AccountSharedData,
     deleg_record: &DelegationRecord,
@@ -401,8 +394,6 @@ pub(crate) fn maybe_project_delegated_ata_from_eata<T, U, V, C>(
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     if deleg_record.authority != this.validator_pubkey {
         return None;
@@ -424,10 +415,9 @@ where
             return None;
         }
     };
-    let projected_slot =
-        ata_account.remote_slot().max(eata_account.remote_slot());
-    projected_ata.set_remote_slot(projected_slot);
-    projected_ata.set_delegated(true);
+    let projected_slot = ata_account.slot().max(eata_account.slot());
+    AccountFieldPatch::Slot(projected_slot).apply(&mut projected_ata);
+    projected_ata.set_mode(AccountMode::Delegated);
     Some(projected_ata)
 }
 
@@ -436,8 +426,8 @@ where
 /// and, if the ATA is delegated to us and the eATA exists, we clone the eATA data
 /// into the ATA in the bank.
 #[instrument(skip(this, atas))]
-pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn resolve_ata_with_eata_projection<T, U>(
+    this: &FetchCloner<T, U>,
     atas: Vec<(
         Pubkey,
         AccountSharedData,
@@ -450,8 +440,6 @@ pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C>(
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     if atas.is_empty() {
         return vec![];
@@ -628,24 +616,22 @@ where
         let mut delegated_to_other = None;
         let mut actions = None;
 
-        if let Some(eata_shared) = &input.eata_shared {
-            if let Some(Some(deleg)) = deleg_iter.next() {
-                let (deleg_record, delegation_actions) = deleg;
-                delegated_to_other =
-                    delegation::get_delegated_to_other(this, &deleg_record);
-                commit_frequency_ms = Some(deleg_record.commit_frequency_ms);
+        if let Some(eata_shared) = &input.eata_shared
+            && let Some(Some(deleg)) = deleg_iter.next()
+        {
+            let (deleg_record, delegation_actions) = deleg;
+            delegated_to_other =
+                delegation::get_delegated_to_other(this, &deleg_record);
+            commit_frequency_ms = Some(deleg_record.commit_frequency_ms);
 
-                if let Some(projected_ata) =
-                    maybe_project_delegated_ata_from_eata(
-                        this,
-                        input.ata_account.account_shared_data(),
-                        eata_shared,
-                        &deleg_record,
-                    )
-                {
-                    account_to_clone = projected_ata;
-                    actions = delegation_actions;
-                }
+            if let Some(projected_ata) = maybe_project_delegated_ata_from_eata(
+                this,
+                input.ata_account.account_shared_data(),
+                eata_shared,
+                &deleg_record,
+            ) {
+                account_to_clone = projected_ata;
+                actions = delegation_actions;
             }
         }
 

@@ -13,7 +13,6 @@ on:
       - '**/Cargo.lock'
       - 'clippy.toml'
       - 'Makefile'
-      - 'test-integration/Makefile'
       - '.github/workflows/**'
       - '.github/actions/setup-build-env/**'
   pull_request:
@@ -24,7 +23,6 @@ on:
       - '**/Cargo.lock'
       - 'clippy.toml'
       - 'Makefile'
-      - 'test-integration/Makefile'
       - '.github/workflows/**'
       - '.github/actions/setup-build-env/**'
 
@@ -44,12 +42,5 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - run: make ci-lint
-        shell: bash
-        working-directory: magicblock-validator
-
-      - name: Run ci-lint in test-integration
-        run: |
-          cd test-integration
-          make ci-lint
         shell: bash
         working-directory: magicblock-validator

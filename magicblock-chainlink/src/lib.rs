@@ -1,6 +1,5 @@
 #![allow(deprecated)]
 #![allow(clippy::result_large_err)]
-pub mod accounts_bank;
 pub mod chainlink;
 pub mod cloner;
 pub mod remote_account_provider;

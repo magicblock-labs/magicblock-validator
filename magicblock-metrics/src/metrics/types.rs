@@ -237,14 +237,12 @@ impl AccountFetchContext {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChainlinkPendingFetchLayer {
-    FetchCloner,
     RemoteAccountProvider,
 }
 
 impl ChainlinkPendingFetchLayer {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::FetchCloner => "fetch_cloner",
             Self::RemoteAccountProvider => "remote_account_provider",
         }
     }
@@ -535,43 +533,10 @@ impl LabelValue for ChainlinkCloneOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChainlinkCloneMaterializationOutcome {
-    ObservedInBankAfterEnsure,
-    StillMissingAfterEnsure,
-    RemovedAfterMaterialization,
-}
-
-impl ChainlinkCloneMaterializationOutcome {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::ObservedInBankAfterEnsure => "observed_in_bank_after_ensure",
-            Self::StillMissingAfterEnsure => "still_missing_after_ensure",
-            Self::RemovedAfterMaterialization => {
-                "removed_after_materialization"
-            }
-        }
-    }
-}
-
-impl fmt::Display for ChainlinkCloneMaterializationOutcome {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl LabelValue for ChainlinkCloneMaterializationOutcome {
-    fn value(&self) -> &str {
-        self.as_str()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChainlinkEmptyPlaceholderStage {
     ConvertedToEmpty,
     CloneSubmitted,
     CloneSubmitFailed,
-    ObservedInBankAfterEnsure,
-    StillMissingAfterEnsure,
     /// Reserved for a future sampled/sketch implementation; current code does not retain per-pubkey state.
     LaterRefetched,
 }
@@ -582,8 +547,6 @@ impl ChainlinkEmptyPlaceholderStage {
             Self::ConvertedToEmpty => "converted_to_empty",
             Self::CloneSubmitted => "clone_submitted",
             Self::CloneSubmitFailed => "clone_submit_failed",
-            Self::ObservedInBankAfterEnsure => "observed_in_bank_after_ensure",
-            Self::StillMissingAfterEnsure => "still_missing_after_ensure",
             Self::LaterRefetched => "later_refetched",
         }
     }
@@ -659,24 +622,16 @@ impl LabelValue for SubscriptionReasonLabel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscriptionRegistrationOutcome {
     AlreadyPresent,
-    AddedBelowCapacity,
-    EvictedCandidate,
+    Added,
     SubscribeError,
-    UnsubscribeEvictedError,
-    RejectedAndUnsubscribed,
-    UnsubscribeRejectedError,
 }
 
 impl SubscriptionRegistrationOutcome {
     pub fn as_str(&self) -> &str {
         match self {
             Self::AlreadyPresent => "already_present",
-            Self::AddedBelowCapacity => "added_below_capacity",
-            Self::EvictedCandidate => "evicted_candidate",
+            Self::Added => "added",
             Self::SubscribeError => "subscribe_error",
-            Self::UnsubscribeEvictedError => "unsubscribe_evicted_error",
-            Self::RejectedAndUnsubscribed => "rejected_and_unsubscribed",
-            Self::UnsubscribeRejectedError => "unsubscribe_rejected_error",
         }
     }
 }
@@ -730,8 +685,6 @@ impl LabelValue for SubscriptionReleaseOutcome {
 pub enum SubscriptionCleanupSource {
     NormalRelease,
     ManualUnsubscribe,
-    CapacityEviction,
-    RejectedNewSubscription,
     DelegatedAccountSilent,
     Reconciler,
 }
@@ -741,8 +694,6 @@ impl SubscriptionCleanupSource {
         match self {
             Self::NormalRelease => "normal_release",
             Self::ManualUnsubscribe => "manual_unsubscribe",
-            Self::CapacityEviction => "capacity_eviction",
-            Self::RejectedNewSubscription => "rejected_new_subscription",
             Self::DelegatedAccountSilent => "delegated_account_silent",
             Self::Reconciler => "reconciler",
         }

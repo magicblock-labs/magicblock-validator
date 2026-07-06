@@ -6,12 +6,11 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn,
 };
-use magicblock_core::link::DispatchEndpoints;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument};
 
-use crate::{state::SharedState, RpcResult};
+use crate::{RpcResult, state::SharedState};
 
 /// A Tokio-based HTTP server built with Hyper.
 ///
@@ -32,11 +31,10 @@ impl HttpServer {
         socket: TcpListener,
         state: SharedState,
         cancel: CancellationToken,
-        dispatch: &DispatchEndpoints,
     ) -> RpcResult<Self> {
         Ok(Self {
             socket,
-            dispatcher: HttpDispatcher::new(state, dispatch),
+            dispatcher: HttpDispatcher::new(state),
             cancel,
         })
     }

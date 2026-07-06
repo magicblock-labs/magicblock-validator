@@ -7,7 +7,7 @@ use solana_account_decoder::{
 };
 
 use super::{
-    prelude::*, MINT_DECIMALS_OFFSET, SPL_MINT_RANGE, SPL_TOKEN_AMOUNT_RANGE,
+    MINT_DECIMALS_OFFSET, SPL_MINT_RANGE, SPL_TOKEN_AMOUNT_RANGE, prelude::*,
 };
 
 impl HttpDispatcher {
@@ -70,7 +70,7 @@ impl HttpDispatcher {
             },
         );
 
-        let slot = self.blocks.block_height();
+        let slot = self.engine.blocks().latest().slot;
         Ok(ResponsePayload::encode(&request.id, ui_token_amount, slot))
     }
 }

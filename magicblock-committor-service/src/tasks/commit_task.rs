@@ -1,7 +1,7 @@
 use dlp_api::{
+    AccountSizeClass,
     args::{CommitDiffArgs, CommitStateArgs, CommitStateFromBufferArgs},
     diff::compute_diff,
-    AccountSizeClass,
 };
 use magicblock_core::intent::types::CommittedAccount;
 use solana_account::{Account, ReadableAccount};

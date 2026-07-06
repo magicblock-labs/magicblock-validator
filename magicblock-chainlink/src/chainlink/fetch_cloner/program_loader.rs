@@ -1,4 +1,3 @@
-use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_metrics::metrics::{
     AccountFetchContext, AccountFetchReason, ChainlinkCompanionFetchKind,
 };
@@ -7,30 +6,25 @@ use solana_pubkey::Pubkey;
 use tracing::*;
 
 use super::{
-    log_companion_fetch_failure, subscription::release_program_data_subs,
-    CompanionFetchLogContext, FetchCloner,
+    CompanionFetchLogContext, FetchCloner, log_companion_fetch_failure,
+    subscription::release_program_data_subs,
 };
-use crate::{
-    cloner::Cloner,
-    remote_account_provider::{
-        program_account::{
-            get_loaderv3_get_program_data_address, ProgramAccountResolver,
-            LOADER_V1, LOADER_V3,
-        },
-        ChainPubsubClient, ChainRpcClient, SubscriptionReason,
+use crate::remote_account_provider::{
+    ChainPubsubClient, ChainRpcClient, SubscriptionReason,
+    program_account::{
+        LOADER_V1, LOADER_V3, ProgramAccountResolver,
+        get_loaderv3_get_program_data_address,
     },
 };
 
-pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn handle_executable_sub_update_with_context<T, U>(
+    this: &FetchCloner<T, U>,
     pubkey: Pubkey,
     account: AccountSharedData,
     companion_fetch_log_context: &CompanionFetchLogContext,
 ) where
     T: ChainRpcClient,
     U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
 {
     if !this.is_program_allowed(&pubkey) {
         debug!(pubkey = %pubkey, "Skipping clone of program, not in allowed_programs");
@@ -76,7 +70,7 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
             match FetchCloner::task_to_fetch_with_program_data(
                 this,
                 pubkey,
-                account.remote_slot(),
+                account.slot(),
                 program_data_context,
             )
             .await

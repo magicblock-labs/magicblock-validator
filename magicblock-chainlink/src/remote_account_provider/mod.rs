@@ -1,9 +1,8 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
-    num::NonZeroUsize,
+    collections::{HashMap, hash_map::Entry},
     sync::{
+        Arc, Mutex, Weak,
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, RwLock, Weak,
     },
     time::Duration,
 };
@@ -17,7 +16,6 @@ pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 use futures_util::future::{join_all, try_join_all};
-pub use lru_cache::{AccountsLruCache, AddAccountOutcome};
 use magicblock_config::config::GrpcConfig;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
@@ -32,8 +30,9 @@ use solana_rpc_client_api::{
     request::RpcError,
 };
 use solana_sdk_ids::sysvar::clock;
+pub use subscribed_accounts::SubscribedAccounts;
 use tokio::{
-    sync::{mpsc, oneshot, Mutex as AsyncMutex},
+    sync::{Mutex as AsyncMutex, mpsc, oneshot},
     task, time,
 };
 use tracing::*;
@@ -49,12 +48,12 @@ pub mod chain_updates_client;
 pub mod config;
 pub mod endpoint;
 pub mod errors;
-mod lru_cache;
 pub mod program_account;
 pub mod pubsub_common;
 pub mod pubsub_connection;
 pub mod pubsub_connection_pool;
 mod remote_account;
+mod subscribed_accounts;
 pub(crate) mod subscription_reconciler;
 
 #[cfg(test)]
@@ -64,6 +63,12 @@ pub use endpoint::{Endpoint, Endpoints};
 use magicblock_metrics::{
     metrics,
     metrics::{
+        AccountFetchContext, AccountFetchReason, ChainlinkCompanionFetchKind,
+        ChainlinkCompanionFetchOutcome, ChainlinkEmptyPlaceholderStage,
+        ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome, Outcome,
+        SubscriptionCleanupOutcome, SubscriptionCleanupSource,
+        SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
+        SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
         dec_chainlink_pending_fetch_waiters_gauge, inc_account_fetches_failed,
         inc_account_fetches_found_with_context,
         inc_account_fetches_not_found_with_context,
@@ -78,13 +83,7 @@ use magicblock_metrics::{
         observe_chainlink_companion_fetch_attempts,
         observe_chainlink_companion_fetch_duration_seconds,
         observe_chainlink_pending_fetch_owner_duration_seconds_with_context,
-        set_monitored_accounts_count, AccountFetchContext, AccountFetchReason,
-        ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
-        ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
-        ChainlinkPendingFetchOutcome, Outcome, SubscriptionCleanupOutcome,
-        SubscriptionCleanupSource, SubscriptionReasonLabel,
-        SubscriptionRegistrationOrigin, SubscriptionRegistrationOutcome,
-        SubscriptionReleaseOutcome,
+        set_monitored_accounts_count,
     },
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
@@ -188,7 +187,7 @@ fn spawn_deferred_pubsub_clients(
     resubscription_delay: Duration,
     grpc_cfg: GrpcConfig,
     submux: SubMuxClient<ChainUpdatesClient>,
-    subscribed_accounts: Arc<AccountsLruCache>,
+    subscribed_accounts: Arc<SubscribedAccounts>,
 ) {
     // Deferred clients are the fallback update sources; retry connect/attach
     // with capped backoff instead of dropping them permanently on failure.
@@ -412,17 +411,12 @@ impl Drop for ClaimedSubscriptionSetupGuard {
 
 /// Internal ownership/refcount key for shared pubsub subscriptions.
 ///
-/// `DirectAccount` is normal remote-account monitoring and is the only
-/// subscription reason that should participate in normal capacity eviction.
-/// `UndelegationTracking` is protected ownership for delegated accounts that
-/// are being undelegated and must never be treated as normal capacity-evictable
-/// ownership.
+/// `DirectAccount` is normal remote-account monitoring.
+/// `UndelegationTracking` keeps monitoring delegated accounts while they are
+/// being undelegated, even after direct ownership is released.
 ///
 /// Delegated accounts that are not undelegating are locally authoritative and
 /// should have `DirectAccount` ownership released once delegation is discovered.
-/// LRU membership is bookkeeping for live account subscriptions, but capacity
-/// eviction may only remove entries that are not protected by account state or
-/// ownership.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscriptionReason {
     DirectAccount,
@@ -491,23 +485,6 @@ pub(crate) enum SubscriptionReleaseMode {
     All,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct CapacityEvictionProtection {
-    pub delegated: bool,
-    pub undelegating: bool,
-}
-
-impl CapacityEvictionProtection {
-    pub fn is_protected(self) -> bool {
-        self.delegated || self.undelegating
-    }
-}
-
-type CapacityEvictionProtectionPredicate =
-    dyn Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync;
-type SharedCapacityEvictionProtectionPredicate =
-    Arc<RwLock<Option<Arc<CapacityEvictionProtectionPredicate>>>>;
-
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
     pub account: RemoteAccount,
@@ -561,11 +538,6 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// Subscription ownership reasons tracked per pubkey.
     subscription_ownership:
         Arc<AsyncMutex<HashMap<Pubkey, SubscriptionOwnership>>>,
-    /// Serializes subscription transitions that can affect more than one
-    /// pubkey. Acquiring one pubkey can evict and unsubscribe another pubkey
-    /// from the LRU, so per-pubkey locks alone are not enough to keep
-    /// ownership reasons and LRU membership in sync.
-    subscription_transition_lock: Arc<AsyncMutex<()>>,
     /// Per-pubkey locks serializing subscription acquire/release transitions.
     ///
     /// Values are weak references so pubkeys do not accumulate forever after
@@ -594,16 +566,12 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     received_updates_count: Arc<AtomicU64>,
 
     /// Tracks which accounts are currently subscribed to
-    lrucache_subscribed_accounts: Arc<AccountsLruCache>,
+    subscribed_accounts: Arc<SubscribedAccounts>,
 
-    capacity_eviction_protection: SharedCapacityEvictionProtectionPredicate,
-
-    /// Channel to notify when an account is removed from the cache and thus no
-    /// longer being watched
-    removed_account_tx: mpsc::Sender<Pubkey>,
-    /// Single listener channel sending an update when an account is removed
-    /// and no longer being watched.
-    removed_account_rx: Mutex<Option<mpsc::Receiver<Pubkey>>>,
+    /// Accounts whose remote subscription failed and whose local readonly
+    /// state must be discarded before it can be fetched again.
+    stale_account_tx: mpsc::Sender<Pubkey>,
+    stale_account_rx: Mutex<Option<mpsc::Receiver<Pubkey>>>,
 
     subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
 
@@ -778,7 +746,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubsub_client: U,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
-        lrucache_subscribed_accounts: Arc<AccountsLruCache>,
+        subscribed_accounts: Arc<SubscribedAccounts>,
         chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<Option<RemoteAccountProvider<T, U>>> {
         let chain_slot = ChainSlot::new(chain_slot);
@@ -789,7 +757,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     pubsub_client,
                     subscription_forwarder,
                     config,
-                    lrucache_subscribed_accounts,
+                    subscribed_accounts,
                     chain_slot,
                 )
                 .await?,
@@ -800,12 +768,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     /// Creates a background task that periodically reconciles subscriptions
-    /// with the LRU (repairing missing ones, e.g. after a partial
+    /// with the pubsub tracking (repairing missing ones, e.g. after a partial
     /// resubscription) and optionally updates the active subscriptions gauge
     fn start_active_subscriptions_updater<PubsubClient: ChainPubsubClient>(
-        subscribed_accounts: Arc<AccountsLruCache>,
+        subscribed_accounts: Arc<SubscribedAccounts>,
         pubsub_client: Arc<PubsubClient>,
-        removed_account_tx: mpsc::Sender<Pubkey>,
+        stale_account_tx: mpsc::Sender<Pubkey>,
         subscription_key_locks: SubscriptionKeyLocks,
         subscription_ownership: SubscriptionOwnershipMap,
         emit_metrics: bool,
@@ -814,7 +782,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let mut interval = time::interval(Duration::from_millis(
                 ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS,
             ));
-            let never_evicted = subscribed_accounts.never_evicted_accounts();
+            let internally_managed = subscribed_accounts.internally_managed();
 
             loop {
                 interval.tick().await;
@@ -822,8 +790,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     subscription_reconciler::reconcile_subscriptions(
                         &subscribed_accounts,
                         pubsub_client.as_ref(),
-                        &never_evicted,
-                        &removed_account_tx,
+                        &internally_managed,
+                        &stale_account_tx,
                         Some(&subscription_key_locks),
                         Some(&subscription_ownership),
                     )
@@ -845,10 +813,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubsub_client: U,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
-        lrucache_subscribed_accounts: Arc<AccountsLruCache>,
+        subscribed_accounts: Arc<SubscribedAccounts>,
         chain_slot: ChainSlot,
     ) -> RemoteAccountProviderResult<Self> {
-        let (removed_account_tx, removed_account_rx) =
+        let (stale_account_tx, stale_account_rx) =
             tokio::sync::mpsc::channel(100);
         let subscription_key_locks: SubscriptionKeyLocks =
             Arc::new(AsyncMutex::new(HashMap::new()));
@@ -859,9 +827,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // repair. The config flag only gates the metrics emission.
         let active_subscriptions_updater =
             Some(Self::start_active_subscriptions_updater(
-                lrucache_subscribed_accounts.clone(),
+                subscribed_accounts.clone(),
                 Arc::new(pubsub_client.clone()),
-                removed_account_tx.clone(),
+                stale_account_tx.clone(),
                 subscription_key_locks.clone(),
                 subscription_ownership.clone(),
                 config.enable_subscription_metrics(),
@@ -871,18 +839,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
             next_fetching_account_generation: AtomicU64::default(),
             subscription_ownership,
-            subscription_transition_lock: Arc::new(AsyncMutex::new(())),
             subscription_key_locks,
             rpc_client,
             pubsub_client,
             chain_slot,
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
-            lrucache_subscribed_accounts,
-            capacity_eviction_protection: Arc::new(RwLock::new(None)),
+            subscribed_accounts,
+            stale_account_tx,
+            stale_account_rx: Mutex::new(Some(stale_account_rx)),
             subscription_forwarder: Arc::new(subscription_forwarder),
-            removed_account_tx,
-            removed_account_rx: Mutex::new(Some(removed_account_rx)),
             _active_subscriptions_task_handle: active_subscriptions_updater,
         };
 
@@ -972,7 +938,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         config.resubscription_delay(),
                         config.grpc().clone(),
                         provider.pubsub_client.clone(),
-                        provider.lrucache_subscribed_accounts.clone(),
+                        provider.subscribed_accounts.clone(),
                     );
                 }
                 Ok(provider)
@@ -1052,13 +1018,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         if pubsubs.is_empty() {
             return Err(RemoteAccountProviderError::AllPubsubClientsFailed);
         }
-        let subscribed_accounts = Arc::new(AccountsLruCache::new({
-            // SAFETY: NonZeroUsize::new only returns None if the value is 0.
-            // RemoteAccountProviderConfig can only be constructed with
-            // capacity > 0
-            let cap = config.subscribed_accounts_lru_capacity();
-            NonZeroUsize::new(cap).expect("non-zero capacity")
-        }));
+        let subscribed_accounts = Arc::new(SubscribedAccounts::default());
 
         let submux =
             SubMuxClient::new(pubsubs, subscribed_accounts.clone(), None);
@@ -1086,10 +1046,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         )
         .await?;
         Ok((provider, deferred_pubsubs))
-    }
-
-    pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
-        self.lrucache_subscribed_accounts.promote_multi(pubkeys);
     }
 
     pub(crate) async fn get_slot(&self) -> RemoteAccountProviderResult<u64> {
@@ -1134,47 +1090,30 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         })
     }
 
-    pub(crate) fn set_capacity_eviction_protection<F>(&self, predicate: F)
-    where
-        F: Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync + 'static,
-    {
-        let mut guard = self
-            .capacity_eviction_protection
-            .write()
-            .unwrap_or_else(|poison| poison.into_inner());
-        *guard = Some(Arc::new(predicate));
+    pub fn chain_slot(&self) -> u64 {
+        self.chain_slot.load()
     }
 
-    fn capacity_eviction_protection_for(
-        &self,
-        pubkey: &Pubkey,
-    ) -> CapacityEvictionProtection {
-        let guard = self
-            .capacity_eviction_protection
-            .read()
-            .unwrap_or_else(|poison| poison.into_inner());
-        guard.as_ref().map(|predicate| predicate(pubkey)).unwrap_or(
-            CapacityEvictionProtection {
-                delegated: false,
-                undelegating: false,
-            },
-        )
-    }
-
-    pub fn try_get_removed_account_rx(
+    pub fn try_get_stale_account_rx(
         &self,
     ) -> RemoteAccountProviderResult<mpsc::Receiver<Pubkey>> {
         let mut rx = self
-            .removed_account_rx
+            .stale_account_rx
             .lock()
-            .expect("removed_account_rx lock poisoned");
+            .expect("stale_account_rx lock poisoned");
         rx.take().ok_or_else(|| {
-            RemoteAccountProviderError::LruCacheRemoveAccountSenderSupportsSingleReceiverOnly
+            RemoteAccountProviderError::StaleAccountSenderSupportsSingleReceiverOnly
         })
     }
 
-    pub fn chain_slot(&self) -> u64 {
-        self.chain_slot.load()
+    pub(crate) async fn send_stale_account(
+        &self,
+        pubkey: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        self.stale_account_tx
+            .send(pubkey)
+            .await
+            .map_err(RemoteAccountProviderError::FailedToSendStaleAccount)
     }
 
     pub fn last_update_slot(&self) -> u64 {
@@ -1286,16 +1225,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         }
                     };
 
-                    if let Some(forward_update) = forward_update {
-                        if let Err(err) =
+                    if let Some(forward_update) = forward_update
+                        && let Err(err) =
                             subscription_forwarder.send(forward_update).await
-                        {
-                            warn!(
-                                pubkey = %update.pubkey,
-                                error = ?err,
-                                "Failed to forward subscription update"
-                            );
-                        }
+                    {
+                        warn!(
+                            pubkey = %update.pubkey,
+                            error = ?err,
+                            "Failed to forward subscription update"
+                        );
                     }
                 }
             }
@@ -1894,195 +1832,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Err(err);
         }
 
-        // 2. Add to LRU cache
-        // If an account is evicted then we need to unsubscribe from it
-        // and then inform upstream that we are no longer tracking it
-        let add_outcome = {
-            let ownership = self.subscription_ownership.lock().await;
-            self.lrucache_subscribed_accounts.add_with_evict_filter(
-                *pubkey,
-                |candidate| {
-                    if !self.lrucache_subscribed_accounts.can_evict(candidate) {
-                        trace!(
-                            candidate = %candidate,
-                            "Skipping capacity eviction candidate from never-evict set"
-                        );
-                        return false;
-                    }
-
-                    let protection =
-                        self.capacity_eviction_protection_for(candidate);
-                    if protection.is_protected() {
-                        trace!(
-                            candidate = %candidate,
-                            delegated = protection.delegated,
-                            undelegating = protection.undelegating,
-                            "Skipping capacity eviction candidate protected by bank state"
-                        );
-                        return false;
-                    }
-
-                    let protected_by_ownership =
-                        ownership.get(candidate).is_some_and(|ownership| {
-                            ownership.contains(
-                                SubscriptionReason::UndelegationTracking,
-                            )
-                        });
-                    if protected_by_ownership {
-                        trace!(
-                            candidate = %candidate,
-                            reason = ?SubscriptionReason::UndelegationTracking,
-                            "Skipping capacity eviction candidate protected by subscription ownership"
-                        );
-                    }
-                    !protected_by_ownership
-                },
-            )
+        let outcome = if self.subscribed_accounts.add(*pubkey) {
+            SubscriptionRegistrationOutcome::Added
+        } else {
+            SubscriptionRegistrationOutcome::AlreadyPresent
         };
+        inc_chainlink_subscription_registration_accounts(
+            origin,
+            reason.into(),
+            outcome,
+        );
 
-        match add_outcome {
-            AddAccountOutcome::AlreadyPresent => {
-                inc_chainlink_subscription_registration_accounts(
-                    origin,
-                    reason.into(),
-                    SubscriptionRegistrationOutcome::AlreadyPresent,
-                );
-            }
-            AddAccountOutcome::Added => {
-                inc_chainlink_subscription_registration_accounts(
-                    origin,
-                    reason.into(),
-                    SubscriptionRegistrationOutcome::AddedBelowCapacity,
-                );
-            }
-            AddAccountOutcome::Evicted(evicted) => {
-                trace!(evicted = %evicted, "Evicting account");
-
-                // LRU eviction is a forced full removal, but keep local
-                // ownership intact until pubsub confirms the subscription is
-                // gone so a failed unsubscribe cannot leave ownership state
-                // inconsistent with the active subscription.
-                let cleanup_outcome =
-                    match self.pubsub_client.unsubscribe(evicted).await {
-                        Ok(()) => SubscriptionCleanupOutcome::Unsubscribed,
-                        Err(err)
-                            if matches!(
-                                err,
-                                RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                                    _
-                                )
-                            ) =>
-                        {
-                            debug!(evicted = %evicted, error = ?err, "Evicted pubsub subscription was already absent");
-                            SubscriptionCleanupOutcome::AlreadyAbsent
-                        }
-                        Err(err) => {
-                            // Should we retry here?
-                            warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
-                            inc_chainlink_subscription_cleanup_accounts(
-                                SubscriptionCleanupSource::CapacityEviction,
-                                SubscriptionCleanupOutcome::UnsubscribeFailed,
-                            );
-                            self.subscription_ownership
-                                .lock()
-                                .await
-                                .entry(*pubkey)
-                                .or_default()
-                                .acquire(reason);
-                            inc_chainlink_subscription_registration_accounts(
-                                origin,
-                                reason.into(),
-                                SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-                            );
-                            return Err(err);
-                        }
-                    };
-
-                inc_chainlink_subscription_cleanup_accounts(
-                    SubscriptionCleanupSource::CapacityEviction,
-                    cleanup_outcome,
-                );
-                inc_chainlink_subscription_registration_accounts(
-                    origin,
-                    reason.into(),
-                    SubscriptionRegistrationOutcome::EvictedCandidate,
-                );
-                self.subscription_ownership.lock().await.remove(&evicted);
-
-                // Inform upstream so it can remove it from the store. Failure
-                // to notify is non-fatal here because the LRU, pubsub, and
-                // ownership state have already been updated consistently.
-                if let Err(err) = self.send_removal_update(evicted).await {
-                    warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
-                }
-            }
-            AddAccountOutcome::NoEvictableCandidate => {
-                if let Err(err) = self.pubsub_client.unsubscribe(*pubkey).await
-                {
-                    if matches!(
-                        err,
-                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                            _
-                        )
-                    ) {
-                        // Nothing to roll back on pubsub; continue with the
-                        // local cleanup/removal for the rejected pubkey.
-                        inc_chainlink_subscription_cleanup_accounts(
-                            SubscriptionCleanupSource::RejectedNewSubscription,
-                            SubscriptionCleanupOutcome::AlreadyAbsent,
-                        );
-                    } else {
-                        debug!(
-                            pubkey = %pubkey,
-                            error = ?err,
-                            "Failed to unsubscribe new subscription after all LRU candidates were protected"
-                        );
-                        inc_chainlink_subscription_cleanup_accounts(
-                            SubscriptionCleanupSource::RejectedNewSubscription,
-                            SubscriptionCleanupOutcome::UnsubscribeFailed,
-                        );
-                        inc_chainlink_subscription_registration_accounts(
-                            origin,
-                            reason.into(),
-                            SubscriptionRegistrationOutcome::UnsubscribeRejectedError,
-                        );
-                        return Err(err);
-                    }
-                } else {
-                    inc_chainlink_subscription_cleanup_accounts(
-                        SubscriptionCleanupSource::RejectedNewSubscription,
-                        SubscriptionCleanupOutcome::Unsubscribed,
-                    );
-                }
-                self.subscription_ownership.lock().await.remove(pubkey);
-                self.lrucache_subscribed_accounts.remove(pubkey);
-                debug!(
-                    pubkey = %pubkey,
-                    "No evictable subscription capacity available; all LRU candidates are protected"
-                );
-                inc_chainlink_subscription_registration_accounts(
-                    origin,
-                    reason.into(),
-                    SubscriptionRegistrationOutcome::RejectedAndUnsubscribed,
-                );
-                return Err(
-                    RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
-                        pubkey: *pubkey,
-                    },
-                );
-            }
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn send_removal_update(
-        &self,
-        evicted: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
-        self.removed_account_tx.send(evicted).await.map_err(
-            RemoteAccountProviderError::FailedToSendAccountRemovalUpdate,
-        )?;
         Ok(())
     }
 
@@ -2090,7 +1850,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// This does not consider accounts like the clock sysvar that are watched as
     /// part of the provider's internal logic.
     pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
-        self.lrucache_subscribed_accounts.contains(pubkey)
+        self.subscribed_accounts.contains(pubkey)
     }
 
     pub(crate) async fn evict_unwatched_with_subscription_lock<F, Fut>(
@@ -2166,7 +1926,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         skip_existing_reason: bool,
         origin: SubscriptionRegistrationOrigin,
     ) -> RemoteAccountProviderResult<()> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -2175,7 +1934,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             if !skip_existing_reason || !existing.contains(reason) {
                 existing.acquire(reason);
             }
-            self.lrucache_subscribed_accounts.add(*pubkey);
+            self.subscribed_accounts.add(*pubkey);
             inc_chainlink_subscription_registration_accounts(
                 origin,
                 reason.into(),
@@ -2211,11 +1970,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         reason: SubscriptionReason,
         mode: SubscriptionReleaseMode,
     ) -> RemoteAccountProviderResult<bool> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
-        if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
+        if self.subscribed_accounts.is_internally_managed(pubkey) {
             inc_chainlink_subscription_release_accounts(
                 reason.into(),
                 SubscriptionReleaseOutcome::RetainedIntentionally,
@@ -2257,10 +2015,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             released_count
         };
 
-        let success = subscription_reconciler::unsubscribe_and_notify_removal(
+        let success = subscription_reconciler::unsubscribe_account(
             *pubkey,
             &self.pubsub_client,
-            &self.removed_account_tx,
             SubscriptionCleanupSource::NormalRelease,
         )
         .await;
@@ -2270,7 +2027,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 reason.into(),
                 SubscriptionReleaseOutcome::Unsubscribed,
             );
-            self.lrucache_subscribed_accounts.remove(pubkey);
+            self.subscribed_accounts.remove(pubkey);
         } else {
             inc_chainlink_subscription_release_accounts(
                 reason.into(),
@@ -2296,7 +2053,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<bool> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -2355,7 +2111,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     ?reason,
                     released_count,
                     "Released delegated-account subscription ownership; \
-                     kept protected/live subscription and LRU entry"
+                     kept protected/live subscription and subscription-set entry"
                 );
                 return Ok(false);
             }
@@ -2374,12 +2130,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     SubscriptionCleanupSource::DelegatedAccountSilent,
                     SubscriptionCleanupOutcome::Unsubscribed,
                 );
-                self.lrucache_subscribed_accounts.remove(pubkey);
+                self.subscribed_accounts.remove(pubkey);
                 trace!(
                     pubkey = %pubkey,
                     ?reason,
                     "Removed final delegated-account subscription ownership \
-                     and LRU entry silently; no removal notification emitted"
+                     and subscription-set entry silently; no removal notification emitted"
                 );
                 Ok(true)
             }
@@ -2398,11 +2154,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         SubscriptionCleanupSource::DelegatedAccountSilent,
                         SubscriptionCleanupOutcome::AlreadyAbsent,
                     );
-                    self.lrucache_subscribed_accounts.remove(pubkey);
+                    self.subscribed_accounts.remove(pubkey);
                     trace!(
                         pubkey = %pubkey,
                         ?reason,
-                        "Removed stale delegated-account LRU entry for missing subscription"
+                        "Removed stale delegated-account subscription-set entry for missing subscription"
                     );
                     return Ok(false);
                 }
@@ -2447,12 +2203,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
-        if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
-            warn!(pubkey = %pubkey, "Tried to unsubscribe from account that should never be evicted");
+        if self.subscribed_accounts.is_internally_managed(pubkey) {
+            warn!(pubkey = %pubkey, "Tried to unsubscribe an internally managed account");
             inc_chainlink_subscription_cleanup_accounts(
                 SubscriptionCleanupSource::ManualUnsubscribe,
                 SubscriptionCleanupOutcome::RetainedIntentionally,
@@ -2460,8 +2215,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(());
         }
 
-        if !self.lrucache_subscribed_accounts.contains(pubkey) {
-            trace!(pubkey = %pubkey, "Already unsubscribed from LRU");
+        if !self.subscribed_accounts.contains(pubkey) {
+            trace!(pubkey = %pubkey, "Already unsubscribed from pubsub tracking");
             inc_chainlink_subscription_cleanup_accounts(
                 SubscriptionCleanupSource::ManualUnsubscribe,
                 SubscriptionCleanupOutcome::AlreadyAbsent,
@@ -2469,19 +2224,32 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(());
         }
 
-        let success = subscription_reconciler::unsubscribe_and_notify_removal(
-            *pubkey,
-            &self.pubsub_client,
-            &self.removed_account_tx,
-            SubscriptionCleanupSource::ManualUnsubscribe,
-        )
-        .await;
-
-        if success {
-            self.lrucache_subscribed_accounts.remove(pubkey);
-            self.subscription_ownership.lock().await.remove(pubkey);
+        match self.pubsub_client.unsubscribe(*pubkey).await {
+            Ok(()) => {
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::ManualUnsubscribe,
+                    SubscriptionCleanupOutcome::Unsubscribed,
+                );
+            }
+            Err(
+                RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_),
+            ) => {
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::ManualUnsubscribe,
+                    SubscriptionCleanupOutcome::AlreadyAbsent,
+                );
+            }
+            Err(err) => {
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::ManualUnsubscribe,
+                    SubscriptionCleanupOutcome::UnsubscribeFailed,
+                );
+                return Err(err);
+            }
         }
 
+        self.subscribed_accounts.remove(pubkey);
+        self.subscription_ownership.lock().await.remove(pubkey);
         Ok(())
     }
 
@@ -2528,26 +2296,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 for pubkey in &pubkeys {
                     // Update metrics
                     // Remove pending requests and send error
-                    if let Some(generation) = generations.get(pubkey).copied() {
-                        if let Some(state) =
+                    if let Some(generation) = generations.get(pubkey).copied()
+                        && let Some(state) =
                             remove_fetching_account_if_generation_matches(
                                 &mut fetching,
                                 pubkey,
                                 generation,
                             )
-                        {
-                            observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+                    {
+                        observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
                                 state.fetch_context,
                                 ChainlinkPendingFetchLayer::RemoteAccountProvider,
                                 ChainlinkPendingFetchOutcome::OwnerFailed,
                                 state.owner_started_at.elapsed().as_secs_f64(),
                             );
-                            for sender in state.waiters {
-                                let error = RemoteAccountProviderError::AccountResolutionsFailed(
+                        for sender in state.waiters {
+                            let error = RemoteAccountProviderError::AccountResolutionsFailed(
                                     format!("{}: {}", pubkey, error_msg)
                                 );
-                                let _ = sender.send(Err(error));
-                            }
+                            let _ = sender.send(Err(error));
                         }
                     }
                 }
@@ -2602,7 +2369,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     Ok(Ok(res)) => {
                         let (slot, value) = res;
                         if slot < min_context_slot {
-                            retry!("Response slot {slot} < {min_context_slot}. Retrying...");
+                            retry!(
+                                "Response slot {slot} < {min_context_slot}. Retrying..."
+                            );
                         } else {
                             break (slot, value);
                         }
@@ -2694,7 +2463,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             );
                         remaining_retries -= 1;
                         if remaining_retries == 0 {
-                            let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
+                            let err_msg = format!(
+                                "Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}"
+                            );
                             notify_error(&err_msg);
                             return;
                         }
@@ -2907,18 +2678,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub(crate) fn is_pending(&self, pubkey: &Pubkey) -> bool {
         let fetching = self.fetching_accounts.lock().unwrap();
         fetching.contains_key(pubkey)
-    }
-
-    pub(crate) async fn has_subscription_reason(
-        &self,
-        pubkey: &Pubkey,
-        reason: SubscriptionReason,
-    ) -> bool {
-        self.subscription_ownership
-            .lock()
-            .await
-            .get(pubkey)
-            .is_some_and(|ownership| ownership.contains(reason))
     }
 }
 

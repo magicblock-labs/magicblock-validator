@@ -1,4 +1,4 @@
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use solana_message::{
     SanitizedMessage, SanitizedVersionedMessage, SimpleAddressLoader,
     VersionedMessage,
@@ -23,7 +23,7 @@ impl HttpDispatcher {
             .decode(message_b64)
             .map_err(RpcError::parse_error)?;
         let versioned_message: VersionedMessage =
-            bincode::deserialize(&message_bytes)
+            wincode::deserialize(&message_bytes)
                 .map_err(RpcError::invalid_params)?;
 
         // Sanitize the message for processing.
@@ -39,7 +39,7 @@ impl HttpDispatcher {
 
         let fee = signature_fee(&sanitized_message, self.context.base_fee);
 
-        let slot = self.blocks.block_height();
+        let slot = self.engine.blocks().latest().slot;
         Ok(ResponsePayload::encode(&request.id, fee, slot))
     }
 }

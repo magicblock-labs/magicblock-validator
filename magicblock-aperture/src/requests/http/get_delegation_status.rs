@@ -22,8 +22,10 @@ impl HttpDispatcher {
         // from the reference cluster if necessary.
         let account = self.read_account_with_ensure(&pubkey).await;
 
-        let is_delegated =
-            account.as_ref().map(|acc| acc.delegated()).unwrap_or(false);
+        let is_delegated = account
+            .as_ref()
+            .map(|acc| acc.is(solana_account::AccountMode::Delegated))
+            .unwrap_or(false);
 
         let payload = json::json!({ "isDelegated": is_delegated });
 

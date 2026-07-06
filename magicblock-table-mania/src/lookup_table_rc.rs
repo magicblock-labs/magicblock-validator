@@ -3,8 +3,8 @@ use std::{
     fmt,
     ops::Deref,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Instant,
 };
@@ -16,7 +16,7 @@ use magicblock_rpc_client::{
 };
 use solana_address_lookup_table_interface::{
     self as alt,
-    state::{LookupTableMeta, LOOKUP_TABLE_MAX_ADDRESSES},
+    state::{LOOKUP_TABLE_MAX_ADDRESSES, LookupTableMeta},
 };
 use solana_clock::Slot;
 use solana_commitment_config::CommitmentLevel;
@@ -29,9 +29,8 @@ use solana_transaction::Transaction;
 use tracing::*;
 
 use crate::{
-    derive_keypair,
+    TableManiaComputeBudget, derive_keypair,
     error::{TableManiaError, TableManiaResult},
-    TableManiaComputeBudget,
 };
 
 // -----------------
@@ -131,11 +130,7 @@ impl RefcountedPubkeys {
             entry
                 .refcount
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
-                    if x == 0 {
-                        None
-                    } else {
-                        Some(x - 1)
-                    }
+                    if x == 0 { None } else { Some(x - 1) }
                 })
                 .is_ok()
         } else {

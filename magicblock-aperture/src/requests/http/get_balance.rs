@@ -19,7 +19,7 @@ impl HttpDispatcher {
             .map(|a| a.lamports())
             .unwrap_or_default(); // Default to 0 if account not found
 
-        let slot = self.blocks.block_height();
+        let slot = self.engine.blocks().latest().slot;
         Ok(ResponsePayload::encode(&request.id, balance, slot))
     }
 }

@@ -26,7 +26,7 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - crank transaction layout, signer requirements, Magic Program instruction construction, blockhash source, send configuration, or RPC endpoint selection;
 - startup/shutdown wiring in `magicblock-api`, primary/replica gating, cancellation handling, or draining of in-flight crank completions;
 - `TaskSchedulerConfig` fields/defaults/env keys or README configuration examples;
-- task scheduler unit tests, integration-test setup, or validation commands.
+- task scheduler tests or validation commands.
 
 Because this crate consumes task requests emitted by Magic Program execution, also update this file when `magicblock-program`, `magicblock-magic-program-api`, `magicblock-core`, or `magicblock-processor` changes `ScheduleTask`, `CancelTask`, `ExecuteTask`, `TaskRequest`, `ExecutionTlsStash`, or the scheduled-task channel semantics.
 
@@ -41,20 +41,18 @@ For the general documentation-update rule, see `.agents/memory/agent-memory-and-
 | `magicblock-task-scheduler/src/lib.rs` | Public crate surface. Re-exports `SchedulerDatabase`, `TaskSchedulerError`, and `TaskSchedulerService`. |
 | `magicblock-task-scheduler/src/db.rs` | SQLite persistence layer, task/failure record types, task serialization, optimistic concurrency tokens, and batch crank-completion transaction. |
 | `magicblock-task-scheduler/src/service.rs` | Runtime service, startup recovery, request processing, delay queue, crank send batching, retry/backoff, cleanup ticker, and cancellation handling. |
-| `magicblock-task-scheduler/src/errors.rs` | `TaskSchedulerError` and `TaskSchedulerResult`. Wraps SQLite, bincode, RPC, I/O, invalid config, and unauthorized replacement errors. |
+| `magicblock-task-scheduler/src/errors.rs` | `TaskSchedulerError` and `TaskSchedulerResult`. Wraps SQLite, wincode writes, RPC, I/O, invalid config, and unauthorized replacement errors. |
 | `magicblock-config/src/config/scheduler.rs` | `TaskSchedulerConfig` (`reset`, `min_interval`, failed-record retention and cleanup interval). |
 | `magicblock-api/src/magic_validator.rs` | Constructs the service at startup and starts it only after the validator leaves `StartingUp` in primary mode. |
 | `magicblock-core/src/link/transactions.rs` | Defines `ScheduledTasksTx`/`ScheduledTasksRx`, the channel carrying `TaskRequest`s from executor to service. |
 | `magicblock-processor/src/executor/processing.rs` | Drains `ExecutionTlsStash` after transaction execution and sends scheduled-task requests to this crate. |
 | `programs/magicblock/src/schedule_task/` | Magic Program processors that validate schedule/cancel/execute-task instructions and register `TaskRequest`s. |
-| `test-integration/test-task-scheduler/` | Integration tests for scheduling, cancellation, rescheduling, signing, schedule errors, unauthorized reschedule, crank signer use, and scheduled-commit interaction. |
 
 Main consumers:
 
 - `magicblock-api`, which owns construction/startup and passes the local aperture HTTP URL as the RPC endpoint;
 - `magicblock-processor`, which sends task requests after successful instruction execution through `ScheduledTasksTx`;
 - Magic Program task instructions, which define the wire/request semantics this crate persists and executes;
-- task scheduler integration tests, which inspect the SQLite database directly through `SchedulerDatabase`.
 
 ## Public API shape / Main public types and APIs
 
@@ -80,7 +78,7 @@ Important API:
 - `apply_crank_batch_completion(...)` atomically applies one batch of success updates, success removals, failed moves, and retry checks using optimistic `tasks.updated_at` tokens;
 - `delete_failed_records_older_than(cutoff)` removes old rows from both failure tables in one transaction.
 
-`DbTask` is the persisted runtime task shape. It stores task IDs and timestamps as `i64`, serializes `Vec<Instruction>` with `bincode`, stores authority as a stringified `Pubkey`, and uses `executions_left`, `last_execution_millis`, and `updated_at` to drive future scheduling.
+`DbTask` is the persisted runtime task shape. It stores task IDs and timestamps as `i64`, serializes `Vec<Instruction>` with byte-compatible wincode, stores authority as a stringified `Pubkey`, and uses `executions_left`, `last_execution_millis`, and `updated_at` to drive future scheduling.
 
 ### `TaskSchedulerService`
 
@@ -103,7 +101,7 @@ The type has manual `unsafe impl Send`/`Sync` with an explicit safety comment: t
 
 ### Errors
 
-`TaskSchedulerError` wraps invalid configuration, SQLite, bincode, Solana RPC client errors, I/O, unauthorized task replacement, and a currently unused `SizeMismatch` variant. Schedule/cancel processing errors are normally recorded as failed scheduling and treated as recoverable; service-level failures returned from the main loop cause `magicblock-api` to log and exit the process.
+`TaskSchedulerError` wraps invalid configuration, SQLite, wincode writes, Solana RPC client errors, I/O, unauthorized task replacement, and a currently unused `SizeMismatch` variant. Schedule/cancel processing errors are normally recorded as failed scheduling and treated as recoverable; service-level failures returned from the main loop cause `magicblock-api` to log and exit the process.
 
 ## Runtime flows
 
@@ -189,7 +187,7 @@ The service uses the processor's unbounded scheduled-task channel and an interna
 
 ### Validator authority and crank signer assumptions
 
-Crank transactions are built with `validator_authority()` and include Magic Program `ExecuteTask` instruction helpers that derive the required crank signer PDA from task authority. The Magic Program verifies validator/crank signer constraints. Do not change signer layout or payer selection in this crate without checking `programs/magicblock/src/schedule_task/process_execute_task.rs` and integration tests such as `test_use_crank_signer.rs`.
+Crank transactions are built with `validator_authority()` and include Magic Program `ExecuteTask` instruction helpers that derive the required crank signer PDA from task authority. The Magic Program verifies validator/crank signer constraints. Do not change signer layout or payer selection in this crate without checking `programs/magicblock/src/schedule_task/process_execute_task.rs` and the scheduler service tests.
 
 ### Primary-only execution
 
@@ -229,7 +227,7 @@ Check validator authority, crank signer PDA, noop uniqueness, blockhash source, 
 
 Start with `magicblock-task-scheduler/src/db.rs` and `load_persisted_tasks` in `service.rs`. Also inspect `magicblock-api/src/magic_validator.rs` for the database path and `magicblock-config/src/config/scheduler.rs` for reset/retention config.
 
-Schema changes need migration/recovery thought; the current code only creates missing tables and does not run versioned migrations. Preserve bincode compatibility for stored `Vec<Instruction>` or add an explicit migration/compatibility path.
+Schema changes need migration/recovery thought; the current code only creates missing tables and does not run versioned migrations. Preserve the established byte layout for stored `Vec<Instruction>` or add an explicit migration/compatibility path.
 
 ### Changing retry/backoff or cleanup
 
@@ -246,7 +244,6 @@ Inspect `TaskSchedulerService::start`, `run`, and `magicblock-api/src/magic_vali
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-task-scheduler`.
 - Config changes should also include focused `magicblock-config` task-scheduler coverage.
-- Relevant integration suite: `test-task-scheduler`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands and single-test workflows.
 - Performance-sensitive changes should report whether concurrency, SQLite transaction count, lock hold time, RPC send volume, or scheduler startup/recovery latency was measured or only reasoned about.
 
 ## Adjacent implementation references
@@ -256,4 +253,3 @@ Inspect `TaskSchedulerService::start`, `run`, and `magicblock-api/src/magic_vali
 - Inspect `.agents/context/crates/magicblock-core.md` to understand shared channels, coordination mode, and `ExecutionTlsStash` boundaries.
 - Refer to `.agents/context/crates/magicblock-magic-program-api.md` for task request and Magic Program instruction wire types.
 - Use `magicblock-task-scheduler/README.md` for operator-facing scheduler configuration and performance notes.
-- Review `test-integration/test-task-scheduler/` for end-to-end scheduled-task behavior.

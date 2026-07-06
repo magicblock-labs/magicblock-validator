@@ -2,17 +2,16 @@
 
 ## Purpose
 
-`magicblock-aperture` owns the validator's external Solana-compatible ingress and event egress surface. It exposes JSON-RPC over HTTP, PubSub over WebSocket, local request caches, and dynamic Agave Geyser plugin notifications. `magicblock-api` constructs it during validator startup through `initialize_aperture`, then runs the returned `JsonRpcServer` as part of the validator service graph.
+`magicblock-aperture` owns the validator's external Solana-compatible ingress and event egress surface. It exposes JSON-RPC over HTTP, PubSub over WebSocket, and dynamic Agave Geyser plugin notifications. The engine is the primary source for accounts, blocks, transactions, submission, and subscriptions. `magicblock-api` constructs Aperture through `initialize_aperture` and retains `magicblock-ledger-deprecated` only as a read-only historical fallback.
 
 High-level responsibilities:
 
 - bind the HTTP JSON-RPC listener and adjacent WebSocket PubSub listener;
 - parse, validate, route, and encode supported Solana JSON-RPC requests plus Magic Router compatibility methods;
-- serve local account, ledger, block, transaction, node, token, and mocked Solana RPC reads;
+- serve engine-backed account, block, transaction, node, token, and mocked Solana RPC reads;
 - submit and simulate transactions through `magicblock-core` dispatch channels and the processor scheduler;
 - trigger Chainlink/account-cloner ensure paths for RPC reads and transactions when the validator is primary;
-- maintain short-lived transaction and blockhash caches used for replay prevention, status reads, and blockhash validity;
-- maintain WebSocket subscription registries and push account, program, signature, logs, and slot notifications;
+- open direct engine account, program, signature, log, and block subscriptions for WebSocket clients;
 - load and notify Agave Geyser plugins from configured JSON files.
 
 Aperture sits directly on performance-sensitive RPC, PubSub, event-processing, account-sync, and transaction-submission paths. Keep per-request and per-event work lean: avoid blocking I/O, unbounded allocations, high-cardinality metrics labels, duplicate account fetches, and slow plugin work in hot paths. Aperture is an ingress/router layer, not the protocol source of truth for execution validity, delegation lifecycle, or settlement.
@@ -57,27 +56,26 @@ For the general documentation-update rule, see `.agents/memory/agent-memory-and-
 | `magicblock-api/src/magic_validator.rs` | Runtime consumer: builds `SharedState`, calls `initialize_aperture`, and runs the RPC server. |
 | `magicblock-config/src/config/aperture.rs` | Defines `ApertureConfig` (`listen`, `event_processors`, `geyser_plugins`). |
 | `config.example.toml` | Operator-facing `[aperture]` example, including `geyser-plugins`. |
-| `test-integration/test-pubsub/` and `test-integration/test-magicblock-api/` | Integration suites that exercise validator-level PubSub and MagicBlock API behavior. |
 
 Main consumers:
 
 - `magicblock-api` is the runtime consumer and owns service orchestration around Aperture.
 - External Solana/RPC clients consume the HTTP and WebSocket APIs.
 - Dynamically loaded shared libraries implementing `agave_geyser_plugin_interface::GeyserPlugin` consume Geyser notifications.
-- `test-kit` and `magicblock-aperture/tests/setup.rs` provide test backends for crate-local RPC tests.
+- engine testkit and `magicblock-aperture/tests/setup/mod.rs` provide the backend for crate-local RPC tests.
 
 Important upstream/downstream relationships:
 
 - Upstream state comes from `AccountsDb`, `Ledger`, `Chainlink`, `DispatchEndpoints`, and `magicblock-config`.
 - Transaction submission/simulation flows downstream into the processor scheduler via `TransactionSchedulerHandle`.
 - Account read and transaction account availability flows downstream into `magicblock-chainlink` / `magicblock-account-cloner` ensure APIs.
-- Event egress consumes `magicblock-core` account/transaction/block channels and feeds WebSocket subscriptions, local caches, and Geyser plugins.
+- WebSocket event egress consumes per-topic engine subscriptions directly. Geyser consumes engine block and processed-transaction subscriptions through a bounded worker queue.
 
 ## Public API shape / Main public types and APIs
 
 Public surface from `src/lib.rs`:
 
-- `initialize_aperture(config, state, dispatch, cancel) -> ApertureResult<JsonRpcServer>` — binds HTTP and WebSocket listeners, constructs the server, then starts `EventProcessor` workers. Event processors start only after sockets bind successfully so startup retries do not leak background tasks.
+- `initialize_aperture(config, state, cancel) -> ApertureResult<JsonRpcServer>` — binds HTTP and WebSocket listeners, constructs the server, then starts Geyser delivery. Delivery starts only after sockets bind successfully so startup retries do not leak engine subscriptions.
 - `JsonRpcServer` — returned service handle with:
   - `http_addr()` and `ws_addr()` for bound listener addresses;
   - `run(self)` to concurrently run HTTP and WebSocket servers until cancellation.
@@ -88,9 +86,11 @@ Public surface from `src/lib.rs`:
 Key configuration/API contracts:
 
 - `ApertureConfig::listen` binds the HTTP listener. The WebSocket listener binds to `listen.port() + 1`, except when the configured HTTP port is `0`; in that case both HTTP and WebSocket request OS-assigned ports by binding port `0`. After startup, use `JsonRpcServer::http_addr()` and `JsonRpcServer::ws_addr()` to discover the actual bound ports.
-- `ApertureConfig::event_processors` controls the number of event-processing Tokio tasks.
+- `ApertureConfig::event_processors` controls Geyser queue workers; `0` is treated as one worker.
 - `ApertureConfig::geyser_plugins` is a list of JSON config paths. Each JSON file must contain `libpath` pointing to a shared library exporting `_create_plugin`.
-- `NodeContext` carries validator identity, base fee, feature set, and block time. `SharedState::new` uses block time to compute blockhash validity and initializes transaction/block/subscription caches.
+- `NodeContext` carries validator identity, primary-role permission, base fee,
+  feature set, and block time. `SharedState::new` uses block time to compute
+  blockhash validity and initializes transaction/block/subscription caches.
 
 Supported HTTP method enum (`JsonRpcHttpMethod`) includes standard reads, transaction methods, token helpers, and Magic Router compatibility methods:
 
@@ -111,10 +111,9 @@ Supported WebSocket method enum (`JsonRpcWsMethod`) includes:
 
 Important internal service handles:
 
-- `HttpDispatcher` is the shared per-request context for HTTP handlers. It owns cloned handles to node context, accounts DB, ledger, Chainlink, transaction/block caches, and transaction scheduler.
+- `HttpDispatcher` owns cloned handles to node context, engine, Chainlink, and the deprecated-ledger fallback.
 - `WsDispatcher` is per WebSocket connection. It owns that client's cleanup guards and signature expirer while sharing global subscription DB and transaction cache.
-- `EventProcessor` is a background worker. Each worker subscribes to account, transaction, and block event channels and forwards events to subscriptions, Geyser plugins, and caches.
-- `GeyserPluginManager` owns loaded plugin trait objects and `Library` handles. The library handles must outlive plugin objects.
+- `GeyserPluginManager` owns loaded plugin trait objects and `Library` handles. The library handles outlive plugin objects. A feeder places engine transaction/block events on a bounded 1,024-event queue consumed by the configured workers.
 
 ## Runtime flows
 
@@ -127,8 +126,9 @@ magicblock-api
       -> bind HTTP listener
       -> derive and bind WebSocket listener
       -> construct WebsocketServer and HttpServer
-      -> unsafe GeyserPluginManager::new(config.geyser_plugins)
-      -> spawn config.event_processors EventProcessor tasks
+      -> load Geyser plugins independently
+      -> subscribe to engine transaction/block streams only when a plugin loaded
+      -> spawn max(config.event_processors, 1) bounded-queue workers
   -> JsonRpcServer::run()
       -> join HTTP and WebSocket accept loops
 ```
@@ -138,7 +138,7 @@ Important details:
 1. Socket binding happens before event processors start. Preserve this ordering to avoid leaked event tasks after bind failures in tests/startup retries.
 2. HTTP and WebSocket accept loops stop accepting new connections when `cancel` is triggered.
 3. Active HTTP/WebSocket connection tasks are not drained indefinitely; shutdown favors fast validator restart.
-4. Geyser plugins are loaded during `EventProcessor::start`; plugin loading failures fail Aperture initialization.
+4. Geyser plugin load and callback failures are logged and non-fatal; one plugin cannot prevent startup or delivery to another.
 5. Dropping `GeyserPluginManager` calls `plugin.on_unload()` for each loaded plugin.
 
 ### HTTP request dispatch flow
@@ -156,7 +156,8 @@ TCP connection
 Important details:
 
 1. `OPTIONS` receives CORS headers without JSON-RPC parsing.
-2. `/health/primary` returns `503 Service Unavailable` unless `CoordinationMode::current() == Primary`.
+2. `/health/primary` returns `503 Service Unavailable` unless
+   `NodeContext::is_primary` is true.
 3. Request bodies are capped at 1 MiB. `Data::SingleChunk` avoids allocating for common single-chunk requests; only multi-chunk bodies allocate a `Vec`.
 4. Batch requests run handlers through `FuturesOrdered`, preserving response order while allowing concurrent futures.
 5. `RPC_REQUESTS_COUNT` and `RPC_REQUEST_HANDLING_TIME` are labeled by bounded method names from the enum; do not replace them with user-controlled labels.
@@ -234,7 +235,7 @@ WebSocket TCP connection
   -> WsDispatcher per connection
   -> subscribe handler registers global subscriber
   -> CleanUp guard stored in connection unsubs map
-  -> EventProcessor sends encoded notification to connection channel
+  -> per-subscription engine forwarding task sends encoded notification
   -> ConnectionHandler writes text frame
 ```
 
@@ -247,36 +248,63 @@ Important details:
 5. The connection loop sends WebSocket pings every 30 seconds and closes connections inactive for more than 60 seconds.
 6. `WsDispatcher::drop` drains pending signature subscriptions to avoid orphaned global entries.
 
-### Event processor and Geyser flow
+### Direct subscriptions and Geyser flow
 
 ```text
-processor/ledger dispatch channels
-  -> EventProcessor workers
-      -> WebSocket subscription DB notifications
-      -> GeyserPluginManager notifications
-      -> TransactionsCache / BlocksCache updates
+engine keyed subscriptions
+  -> per-WebSocket forwarding tasks
+
+engine processed-transaction + block subscriptions
+  -> bounded 1,024-event queue
+  -> max(event_processors, 1) Geyser workers
+  -> GeyserPluginManager notifications
 ```
 
-Event ordering in the current implementation:
-
-1. Block update: send slot WebSocket notification, notify Geyser slot, notify Geyser block, then update `BlocksCache`.
-2. Account update: send account WebSocket notification, send program WebSocket notification, then notify Geyser account.
-3. Transaction status: send signature WebSocket notification, send logs WebSocket notification, notify Geyser transaction, then push final status into `TransactionsCache`.
-4. Individual Geyser notification errors are logged with `warn!` and do not stop event processing.
+WebSocket account, program, signature, log, and slot streams are independent
+engine subscriptions. For each processed Geyser transaction, the worker sends
+the transaction notification and then committed dirty-account notifications.
+A block event sends rooted slot status before block metadata. Individual plugin
+failures are logged and do not stop delivery.
 
 Geyser caveats:
 
-- Plugin callbacks run inline on event-processor tasks. Slow or blocking plugins can delay WebSocket notifications and cache updates handled by that task.
-- Account Geyser notifications set `txn: None` and `write_version: 0`.
+- Plugin callbacks run inline on Geyser workers. Slow plugins can fill the bounded queue and cause the broadcast feeder to lag, but do not delay WebSocket subscription tasks.
+- With no valid plugin, Aperture opens no processed-transaction receiver. Keeper therefore does not clone subscriber-visible balance data on the normal execution path.
+- Account Geyser notifications set `txn: None` because engine account entries lack transaction context. `write_version` comes from a global monotonic atomic counter.
 - Slot notifications use `SlotStatus::Rooted` and parent `slot.checked_sub(1)`.
-- Block metadata currently uses placeholder `parent_blockhash`, `executed_transaction_count`, and `entry_count` values.
-- Plugin JSON uses `libpath`; error text in `geyser.rs` still mentions `path` in some messages, but the implemented compatibility contract is `libpath`.
+- Transaction notifications include available result, fee, native balances, logs, CPI, return data, and compute units; transaction index remains `0` because engine does not retain it.
+- Block metadata uses placeholders for `parent_blockhash`, `executed_transaction_count`, and `entry_count`.
+- Plugin JSON uses the string key `libpath`.
+
+### Engine-first history reads
+
+`getBlock`, `getBlockTime`, `getTransaction`, `getSignatureStatuses`, and
+`getSignaturesForAddress` call async engine accessors first. Engine errors are
+propagated. The deprecated ledger is consulted only for an engine `None` or an
+empty engine history partition. Signature history merges both sources
+newest-first, deduplicates signatures, and preserves `before`, `until`, and the
+1,000-result cap. Block reads select bare, signatures, or full detail from the
+requested RPC transaction detail so metadata is not decompressed unnecessarily.
+
+Engine ledger appends are asynchronous. Tests that immediately query durable
+history after execution must advance through a block boundary and call the test
+engine's `sync()` before asserting; live RPC clients may observe `null` until
+the containing block is published.
+
+Engine transaction payloads and `getFeeForMessage` messages are decoded with
+wincode using the canonical Solana wire layout.
 
 ## Important internals and caveats
 
 ### Coordination mode boundaries
 
-Aperture consults `CoordinationMode::current()` to decide whether on-chain interactions are allowed. Primary mode can ensure accounts and submit/simulate transactions. Replica mode should serve local reads only and reject transaction-affecting RPC methods. Do not bypass `require_primary_rpc_method` or `needs_onchain_interactions` when adding write-like or fetch-amplifying RPC methods.
+Aperture consults `NodeContext::is_primary`, supplied by `magicblock-api`, to
+decide whether on-chain interactions are allowed. Standalone and primary nodes
+can ensure accounts and submit/simulate transactions. Replica mode serves local
+reads only, returns HTTP 503 from `/health/primary`, and rejects
+transaction-affecting RPC methods. Do not bypass `require_primary_rpc_method` or
+`needs_onchain_interactions` when adding write-like or fetch-amplifying RPC
+methods.
 
 ### Cache semantics
 
@@ -298,11 +326,11 @@ The crate intentionally implements a subset of Solana JSON-RPC behavior plus Mag
 
 ### Geyser FFI safety
 
-`GeyserPluginManager::new` is unsafe because plugins cross a Rust trait-object FFI boundary. Plugins must be ABI-compatible with the validator's Agave/Solana and Rust toolchain versions. The manager stores `Library` handles beside plugin boxes so loaded symbols remain valid while plugins are used; preserve that lifetime relationship.
+`GeyserPluginManager::load_plugin` is unsafe because plugins cross a Rust trait-object FFI boundary. Each dynamic-library load, symbol lookup, factory call, and raw-pointer adoption is isolated in a documented unsafe block. Plugins must be ABI-compatible with the validator's Agave/Solana and Rust toolchain versions. The manager drops plugin boxes before `Library` handles so loaded code remains valid through plugin destruction.
 
 ## Important invariants
 
-1. HTTP listener binding must succeed before event processors are spawned.
+1. HTTP and WebSocket listener binding must succeed before Geyser tasks subscribe to the engine.
 2. The WebSocket listener must bind to `HTTP port + 1`, except when HTTP port is `0`, where both listeners request OS-assigned ports.
 3. Aperture must remain a lean ingress/egress layer; it must not duplicate SVM execution, delegation lifecycle, commit, or settlement protocol logic.
 4. Primary/replica gating must prevent replicas from submitting/simulating transactions or performing on-chain account ensure work.
@@ -314,8 +342,9 @@ The crate intentionally implements a subset of Solana JSON-RPC behavior plus Mag
 10. Request and metric labels must come from bounded method/config values, not client-controlled arbitrary strings.
 11. Subscription cleanup guards must be retained for the life of a WebSocket subscription and dropped on unsubscribe/disconnect.
 12. `signatureSubscribe` must remain one-shot and bounded by expiration to avoid unbounded memory growth.
-13. Geyser plugin libraries must outlive plugin trait objects, and notification failures must not accidentally kill event processors unless the availability policy is intentionally changed.
-14. Avoid adding blocking I/O, slow locks, unbounded serialization, or excessive cloning to HTTP dispatch, account ensure, transaction submission, event processing, or WebSocket notification hot paths.
+13. Geyser plugin libraries must outlive plugin trait objects, and plugin failures must remain non-fatal.
+14. Geyser delivery must remain bounded and must not add processed-transaction subscription overhead when disabled.
+15. Avoid adding blocking I/O, slow locks, unbounded serialization, or excessive cloning to HTTP dispatch, account ensure, transaction submission, Geyser delivery, or WebSocket notification hot paths.
 
 ## Common change areas and what to inspect
 
@@ -326,7 +355,7 @@ Inspect first:
 - `magicblock-aperture/src/requests/mod.rs` for enum and `as_str()` entries;
 - `magicblock-aperture/src/server/http/dispatch.rs` for routing and metrics;
 - matching `magicblock-aperture/src/requests/http/<method>.rs` handler;
-- `magicblock-aperture/tests/` and relevant integration suites;
+- `magicblock-aperture/tests/`;
 - `.agents/specs/validator-specification.md` for protocol-level methods like delegation, routing, or commits.
 
 Risks:
@@ -374,7 +403,7 @@ Inspect first:
 
 - `server/websocket/connection.rs`, `server/websocket/dispatch.rs`, `requests/websocket/*.rs`;
 - `state/subscriptions.rs`, `state/signatures.rs`, and `encoder.rs`;
-- `magicblock-aperture/tests/websocket.rs` and `test-integration/test-pubsub/`.
+- `magicblock-aperture/tests/websocket.rs`.
 
 Risks:
 
@@ -417,7 +446,6 @@ Risks:
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-aperture`.
 - Relevant focused test areas: crate tests for accounts, transactions, transaction primary-mode gating, WebSocket behavior, and transaction validation.
-- Relevant integration suites: `test-magicblock-api` and `test-pubsub`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance validation intent: RPC/account-read changes should report added account fetches, blocking work, serialization, or scans; transaction changes should report scheduler/account-ensure latency and replay-protection impact; PubSub/Geyser/event changes should report notification throughput, queue growth, plugin callback latency, and cache-update ordering.
 
 ## Adjacent implementation references
@@ -426,4 +454,3 @@ Risks:
 - `.agents/context/crates/magicblock-chainlink.md` — account synchronization and ensure behavior used by RPC reads/transactions.
 - `magicblock-aperture/README.md` — human-facing crate overview.
 - `magicblock-config/src/config/aperture.rs` and `config.example.toml` — operator-facing Aperture configuration.
-- `test-integration/test-magicblock-api/` and `test-integration/test-pubsub/` — validator-level RPC/PubSub integration suites.

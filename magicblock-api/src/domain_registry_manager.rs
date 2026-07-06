@@ -6,10 +6,10 @@ use magicblock_rpc_client::{
     MagicBlockSendTransactionConfig, MagicblockRpcClient,
 };
 use mdp::{
+    ID,
     consts::ER_RECORD_SEED,
     instructions::{sync::SyncInstruction, version::v0::SyncRecordV0},
     state::record::ErRecord,
-    ID,
 };
 use solana_account::ReadableAccount;
 use solana_commitment_config::CommitmentConfig;

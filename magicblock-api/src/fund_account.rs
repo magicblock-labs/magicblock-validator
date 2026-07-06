@@ -1,68 +1,55 @@
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use std::collections::HashMap;
+
 use magicblock_magic_program_api as magic_program;
 use magicblock_program::MagicContext;
-use solana_account::{AccountSharedData, WritableAccount};
+use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
+use solana_native_token::LAMPORTS_PER_SOL;
+use solana_program_option::COption;
+use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
+use spl_token::{native_mint, state::Mint};
 
-pub(crate) fn fund_account(
-    accountsdb: &AccountsDb,
-    pubkey: &Pubkey,
-    lamports: u64,
-) {
-    fund_account_with_data(accountsdb, pubkey, lamports, 0);
-}
+/// Builds validator-controlled accounts that must exist before execution starts.
+pub(crate) fn initial_accounts(
+    validator_id: Pubkey,
+) -> HashMap<Pubkey, AccountSharedData> {
+    let authority = AccountBuilder::default()
+        .lamports(u64::MAX / 2)
+        .mode(AccountMode::System)
+        .build();
+    let mut accounts = HashMap::from([(validator_id, authority)]);
 
-pub(crate) fn fund_account_with_data(
-    accountsdb: &AccountsDb,
-    pubkey: &Pubkey,
-    lamports: u64,
-    size: usize,
-) {
-    if accountsdb.get_account(pubkey).is_some() {
-        return;
+    let magic_context = AccountBuilder::default()
+        .lamports(u64::MAX)
+        .data(vec![0; MagicContext::SIZE])
+        .owner(magic_program::ID)
+        .mode(AccountMode::Delegated)
+        .build();
+    accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY, magic_context);
+
+    let vault = AccountBuilder::default()
+        .lamports(Rent::default().minimum_balance(0))
+        .owner(magic_program::ID)
+        .mode(AccountMode::Ephemeral)
+        .build();
+    accounts.insert(magic_program::EPHEMERAL_VAULT_PUBKEY, vault);
+
+    let mut native_mint_data = vec![0; Mint::LEN];
+    Mint {
+        mint_authority: COption::None,
+        supply: 0,
+        decimals: native_mint::DECIMALS,
+        is_initialized: true,
+        freeze_authority: COption::None,
     }
-    let account = AccountSharedData::new(lamports, size, &Default::default());
-    let _ = accountsdb.insert_account(pubkey, &account);
-}
+    .pack_into_slice(&mut native_mint_data);
+    let native_mint = AccountBuilder::default()
+        .lamports(LAMPORTS_PER_SOL)
+        .data(native_mint_data)
+        .owner(spl_token::id())
+        .build();
+    accounts.insert(native_mint::id(), native_mint);
 
-pub(crate) fn init_validator_identity(
-    accountsdb: &AccountsDb,
-    validator_id: &Pubkey,
-) {
-    fund_account(accountsdb, validator_id, u64::MAX / 2);
-    let mut authority = accountsdb.get_account(validator_id).unwrap();
-    authority.set_privileged(true);
-    let _ = accountsdb.insert_account(validator_id, &authority);
-}
-
-pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
-    const CONTEXT_LAMPORTS: u64 = u64::MAX;
-
-    fund_account_with_data(
-        accountsdb,
-        &magic_program::MAGIC_CONTEXT_PUBKEY,
-        CONTEXT_LAMPORTS,
-        MagicContext::SIZE,
-    );
-    let mut magic_context = accountsdb
-        .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
-        .expect("magic context should have been created");
-    magic_context.set_delegated(true);
-    magic_context.set_owner(magic_program::ID);
-
-    let _ = accountsdb
-        .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
-}
-
-pub(crate) fn fund_ephemeral_vault(accountsdb: &AccountsDb) {
-    let lamports = Rent::default().minimum_balance(0);
-    fund_account(accountsdb, &magic_program::EPHEMERAL_VAULT_PUBKEY, lamports);
-    let mut vault = accountsdb
-        .get_account(&magic_program::EPHEMERAL_VAULT_PUBKEY)
-        .expect("vault should have been created");
-    vault.set_ephemeral(true);
-    vault.set_owner(magic_program::ID);
-    let _ = accountsdb
-        .insert_account(&magic_program::EPHEMERAL_VAULT_PUBKEY, &vault);
+    accounts
 }

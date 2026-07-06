@@ -12,7 +12,6 @@ storage = "magicblock-test-storage"
 listen = "127.0.0.1:9988"
 
 [chainlink]
-max-monitored-accounts = 100
 
 [accountsdb]
 # size of the main storage, we have to preallocate in advance

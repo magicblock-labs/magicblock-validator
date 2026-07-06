@@ -2,15 +2,15 @@ use std::{
     collections::HashSet,
     fmt,
     sync::{
-        atomic::{AtomicU16, AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU16, AtomicU64, Ordering},
     },
     time::Duration,
 };
 
 use helius_laserstream::{
-    grpc::{subscribe_update::UpdateOneof, CommitmentLevel, SubscribeUpdate},
     LaserstreamConfig, LaserstreamError,
+    grpc::{CommitmentLevel, SubscribeUpdate, subscribe_update::UpdateOneof},
 };
 use magicblock_config::config::GrpcConfig;
 use magicblock_core::logger::log_trace_debug;
@@ -25,7 +25,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
-    time::{interval, Instant, MissedTickBehavior},
+    time::{Instant, MissedTickBehavior, interval},
 };
 use tonic::Code;
 use tracing::*;
@@ -35,14 +35,14 @@ use super::{
     StreamManager, StreamManagerConfig, StreamUpdateSource,
 };
 use crate::remote_account_provider::{
+    RemoteAccountProviderError, RemoteAccountProviderResult,
+    SubscriptionUpdate,
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
     pubsub_common::{
-        ChainPubsubActorMessage, SubscriptionSource, MESSAGE_CHANNEL_SIZE,
-        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
+        SUBSCRIPTION_UPDATE_CHANNEL_SIZE, SubscriptionSource,
     },
-    RemoteAccountProviderError, RemoteAccountProviderResult,
-    SubscriptionUpdate,
 };
 
 // -----------------
@@ -330,8 +330,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                     }
                 },
                 _ = optimization_interval.tick() => {
-                    if self.stream_manager.has_unoptimized_streams() {
-                        if let Err(err) = self
+                    if self.stream_manager.has_unoptimized_streams()
+                        && let Err(err) = self
                             .stream_manager
                             .optimize(&self.commitment)
                             .await
@@ -342,7 +342,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                                 "Time-based optimization failed"
                             );
                         }
-                    }
                     if self.stream_manager.take_optimized_flag() {
                         optimization_interval.reset();
                     }

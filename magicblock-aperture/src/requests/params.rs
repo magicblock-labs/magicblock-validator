@@ -1,14 +1,14 @@
 use std::fmt;
 
 use json::{Deserialize, Serialize};
-use magicblock_core::link::blocks::BlockHash;
 use serde::{
+    Deserializer, Serializer,
     de::{self, Visitor},
     ser::Error as _,
-    Deserializer, Serializer,
 };
+use solana_hash::Hash as BlockHash;
 use solana_pubkey::Pubkey;
-use solana_signature::{Signature, SIGNATURE_BYTES};
+use solana_signature::{SIGNATURE_BYTES, Signature};
 
 /// A newtype wrapper for `solana_signature::Signature` to provide a custom
 /// `serde` implementation for Base58 encoding.

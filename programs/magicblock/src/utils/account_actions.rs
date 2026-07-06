@@ -1,4 +1,4 @@
-use solana_account::{ReadableAccount, WritableAccount};
+use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 
 use super::DELEGATION_PROGRAM_ID;
@@ -10,8 +10,9 @@ pub(crate) fn mark_account_as_undelegated(
 ) -> Result<(), InstructionError> {
     let mut acc = acc.borrow_mut()?;
     acc.set_owner(DELEGATION_PROGRAM_ID);
-    acc.set_undelegating(true);
-    acc.set_delegated(false);
+    // `Transient` is a delegated account on its way back to readonly, which is
+    // what the separate undelegating/delegated flags used to express together.
+    acc.set_mode(AccountMode::Transient);
     Ok(())
 }
 
@@ -22,10 +23,10 @@ pub(crate) fn charge_delegated_payer(
     fee_vault: &InstructionAccount<'_, '_>,
     fee: u64,
 ) -> Result<(), InstructionError> {
-    if !payer.borrow()?.delegated() {
+    if !payer.borrow()?.is(AccountMode::Delegated) {
         return Err(InstructionError::IllegalOwner);
     }
-    if !fee_vault.borrow()?.delegated() {
+    if !fee_vault.borrow()?.is(AccountMode::Delegated) {
         return Err(InstructionError::IllegalOwner);
     }
     if fee == 0 {

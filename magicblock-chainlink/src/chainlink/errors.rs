@@ -16,7 +16,7 @@ pub enum ChainlinkError {
     #[error("JoinError: {0}")]
     JoinError(#[from] tokio::task::JoinError),
 
-    #[error("Cloner error: {0}")]
+    #[error("Engine clone operation failed: {0}")]
     ClonerError(#[from] crate::cloner::errors::ClonerError),
 
     #[error("Timed out ensuring accounts after {0}s")]
@@ -31,7 +31,9 @@ pub enum ChainlinkError {
     #[error("Token account could not be decoded while cloning: {0} ({1})")]
     InvalidTokenAccount(Pubkey, String),
 
-    #[error("Failed to resolve one or more accounts {0} when getting delegation records")]
+    #[error(
+        "Failed to resolve one or more accounts {0} when getting delegation records"
+    )]
     DelegatedAccountResolutionsFailed(String),
 
     #[error("Failed to find account that was just resolved {0}")]
@@ -46,29 +48,21 @@ pub enum ChainlinkError {
     #[error("Failed to resolve program data account {0} for program {1}")]
     FailedToResolveProgramDataAccount(Pubkey, Pubkey),
 
-    #[error("Failed to resolve/deserialize one or more accounts {0} when getting programs")]
+    #[error(
+        "Failed to resolve/deserialize one or more accounts {0} when getting programs"
+    )]
     ProgramAccountResolutionsFailed(String),
 
-    #[error("Unexpected number of accounts returned when fetching account with companion: {0}")]
+    #[error(
+        "Unexpected number of accounts returned when fetching account with companion: {0}"
+    )]
     UnexpectedAccountCount(String),
 
     #[error("Missing accounts required by delegation actions: {0:?}")]
     MissingDelegationActionAccounts(Vec<Pubkey>),
 
-    #[error("timeout waiting for pending request for {0}")]
-    PendingRequestTimeout(Pubkey),
-
-    #[error("pending request cancelled for {0}")]
-    PendingRequestCancelled(Pubkey),
-
-    #[error("pending request owner disappeared for {0}: {1}")]
-    PendingRequestOwnerDisappeared(Pubkey, String),
-
-    #[error("missing pending request owner for {0}")]
-    MissingPendingRequestOwner(Pubkey),
-
-    #[error("pending request owner failed for {0}: {1}")]
-    PendingRequestOwnerFailed(Pubkey, String),
+    #[error("account load failed for {0}")]
+    AccountLoadFailed(Pubkey),
 
     #[error("Failed to perform Range risk check: {0}")]
     RangeRisk(#[from] RiskError),

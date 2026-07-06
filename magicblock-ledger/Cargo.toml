@@ -1,52 +1,39 @@
 [package]
-name = "magicblock-ledger"
-version.workspace = true
+name = "magicblock-ledger-deprecated"
+
 authors.workspace = true
-repository.workspace = true
+edition.workspace = true
 homepage.workspace = true
 license.workspace = true
-edition.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
-arc-swap = { workspace = true }
 bincode = { workspace = true }
-tracing = { workspace = true }
-log = { workspace = true }
 byteorder = { workspace = true }
 fs_extra = { workspace = true }
 libc = { workspace = true }
-num_cpus = { workspace = true }
-num-format = { workspace = true }
-prost = { workspace = true }
-serde = { workspace = true }
-magicblock-core = { workspace = true }
+# Only used for solana_metrics::datapoint_info! macro expansion
+log = { workspace = true }
 magicblock-metrics = { workspace = true }
-solana-account-decoder = { workspace = true }
-solana-measure = { workspace = true, features = ["agave-unstable-api"] }
-solana-metrics = { workspace = true }
-solana-storage-proto = { workspace = true }
-solana-transaction-status = { workspace = true, features = ["agave-unstable-api"] }
+num_cpus = { workspace = true }
+prost = { workspace = true }
+rocksdb = { workspace = true }
+serde = { workspace = true }
 solana-clock = { workspace = true }
 solana-hash = { workspace = true }
+solana-measure = { workspace = true, features = ["agave-unstable-api"] }
+solana-metrics = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-signature = { workspace = true, features = ["rand"] }
-solana-signer = { workspace = true }
-solana-instruction = { workspace = true }
+solana-storage-proto = { workspace = true }
 solana-transaction = { workspace = true, features = ["blake3", "verify"] }
-solana-transaction-error = { workspace = true }
-solana-message = { workspace = true }
-solana-transaction-context = { workspace = true }
+solana-transaction-status = { workspace = true, features = ["agave-unstable-api"] }
 thiserror = { workspace = true }
-tokio = { workspace = true }
-tokio-util = { workspace = true }
-rocksdb = { workspace = true }
-librocksdb-sys = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-solana-keypair = { workspace = true }
-solana-system-transaction = { workspace = true }
-test-kit = { workspace = true }
 
 [build-dependencies]
 
