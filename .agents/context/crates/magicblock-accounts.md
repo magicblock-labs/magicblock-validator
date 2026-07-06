@@ -233,7 +233,7 @@ The code uses `expect(POISONED_MUTEX_MSG)` in the normal processing paths. One r
 
 ### Owner-program undelegation requests
 
-`magicblock-api` starts `ScheduledCommitsProcessorImpl::spawn_undelegation_request_processor` for non-replica validators. That observer consumes Chainlink's observed Delegation Program `UndelegationRequest` updates and synthesizes the commit/finalize opportunity for owner-program requested undelegation. The committor then relies on DLP finalize/commit-finalize auto-undelegation accounts derived from `DelegationMetadata`; it does not need a separate request-PDA fetch to find the request rent payer.
+`magicblock-api` starts `ScheduledCommitsProcessorImpl::spawn_undelegation_request_processor` for non-replica validators. That observer consumes Chainlink's observed Delegation Program `UndelegationRequest` updates and synthesizes the commit/finalize opportunity for owner-program requested undelegation. Current DLP finalize instructions do not undelegate; the committor finalizes state and then sends standalone DLP `Undelegate`. When `DelegationMetadata.undelegation_requester = OwnerProgram`, the committor fetches the matching request PDA and passes the request rent payer to `Undelegate` so DLP can close the request account.
 
 ### Undelegation notifications are best-effort
 

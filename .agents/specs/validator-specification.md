@@ -260,19 +260,20 @@ This is a critical lifecycle invariant. Do not allow normal ER transactions to k
 Owner-program requested undelegation is recorded by the Delegation Program in
 `DelegationMetadata.undelegation_requester = OwnerProgram` and an
 `UndelegationRequest` PDA. This marker is not a validator-side completion
-signal: the validator must still commit/finalize the latest ER state. For
-commit/finalize, commit-finalize, and commit-finalize-from-buffer paths, the
-committor supplies the DLP auto-undelegation accounts using the delegated
-account's owner program and `DelegationMetadata.rent_payer`; it derives the
-request PDA for those instruction metas and does not need to fetch or decode
-`UndelegationRequest` during task construction.
+signal: the validator must still schedule commit-and-undelegate so the latest
+ER state is committed/finalized before ownership returns to the owner program.
 
-If DLP sees `OwnerProgram` requester during a successful finalize path, it
-finalizes the committed state and undelegates/closes the delegation/request PDAs
-in the same instruction flow. An explicit undelegate instruction later in the
-same transaction may no-op once ownership has already returned to the owner
-program. `AlreadyUndelegated` remains a conflict for validator-requested
-undelegation state, not a reason to drop an owner-program request.
+The current Delegation Program does not undelegate from finalize instructions.
+Commit/finalize-style instructions only commit/finalize state and record or
+preserve `DelegationMetadata.undelegation_requester`. The validator-side
+committor completes undelegation by sending a standalone DLP `Undelegate`
+instruction in the finalize stage. When metadata says the requester is
+`OwnerProgram`, the committor must also pass the undelegation request PDA and
+the request account's rent payer to `Undelegate`; when metadata says
+`Validator` or is still `None` at task-build time, no request accounts are
+passed. `None` can be valid for validator-requested undelegation because commit
+and finalize task lists are built before the commit-stage transaction records
+the validator requester on base.
 
 ### Callback discriminator
 

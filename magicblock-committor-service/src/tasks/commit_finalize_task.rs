@@ -31,7 +31,6 @@ pub struct CommitFinalizeTask {
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
     pub delivery: CommitDelivery,
-    pub rent_reimbursement: Pubkey,
 }
 
 impl CommitFinalizeTask {
@@ -66,8 +65,6 @@ impl CommitFinalizeTask {
         dlp_api::instruction_builder::commit_finalize(
             *validator,
             self.committed_account.pubkey,
-            self.committed_account.account.owner,
-            self.rent_reimbursement,
             &mut args,
             &data,
         )
@@ -100,8 +97,6 @@ impl CommitFinalizeTask {
             *validator,
             self.committed_account.pubkey,
             data_buffer_pubkey,
-            self.committed_account.account.owner,
-            self.rent_reimbursement,
             &mut args,
         )
         .0

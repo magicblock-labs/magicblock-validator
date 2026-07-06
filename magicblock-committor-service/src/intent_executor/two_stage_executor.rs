@@ -23,10 +23,7 @@ use crate::{
         IntentExecutionReport,
     },
     persist::{IntentPersister, IntentPersisterImpl},
-    tasks::{
-        task_builder::TaskBuilderError, task_strategist::TransactionStrategy,
-        BaseTaskImpl, FinalizeTask,
-    },
+    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
     transaction_preparator::TransactionPreparator,
 };
 
@@ -207,55 +204,21 @@ where
                 let optimized_tasks =
                     self.state.commit_strategy.optimized_tasks.as_slice();
                 let task_index = err.task_index();
-                if let Some((
-                    delegated_account,
-                    owner_program,
-                    min_context_slot,
-                    rent_reimbursement,
-                )) = task_index
+                if let Some(delegated_account) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
                     .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => Some((
-                            task.committed_account.pubkey,
-                            task.committed_account.account.owner,
-                            task.committed_account.remote_slot,
-                            None,
-                        )),
-                        BaseTaskImpl::CommitFinalize(task) => Some((
-                            task.committed_account.pubkey,
-                            task.committed_account.account.owner,
-                            task.committed_account.remote_slot,
-                            Some(task.rent_reimbursement),
-                        )),
+                        BaseTaskImpl::Commit(task) => {
+                            Some(task.committed_account.pubkey)
+                        }
+                        BaseTaskImpl::CommitFinalize(task) => {
+                            Some(task.committed_account.pubkey)
+                        }
                         _ => None,
                     })
                 {
-                    let rent_reimbursement =
-                        if let Some(rent_reimbursement) = rent_reimbursement {
-                            rent_reimbursement
-                        } else {
-                            task_info_fetcher
-                                .fetch_delegation_metadata(
-                                    &[delegated_account],
-                                    min_context_slot,
-                                )
-                                .await
-                                .map_err(
-                                    TaskBuilderError::FinalizedTasksBuildError,
-                                )?
-                                .get(&delegated_account)
-                                .map(|metadata| metadata.rent_payer)
-                                .ok_or(
-                                    TaskBuilderError::MissingDelegationMetadata(
-                                        delegated_account,
-                                    ),
-                                )?
-                        };
                     self.handle_unfinalized_account_error(
                         signature,
                         delegated_account,
-                        owner_program,
-                        rent_reimbursement,
                         transaction_preparator,
                     )
                     .await
@@ -311,16 +274,10 @@ where
         &self,
         failed_signature: &Option<Signature>,
         delegated_account: Pubkey,
-        owner_program: Pubkey,
-        rent_reimbursement: Pubkey,
         transaction_preparator: &T,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl = FinalizeTask {
-            delegated_account,
-            owner_program,
-            rent_reimbursement,
-        }
-        .into();
+        let finalize_task: BaseTaskImpl =
+            FinalizeTask { delegated_account }.into();
         prepare_and_execute_strategy(
             &self.intent_client,
             &self.authority,

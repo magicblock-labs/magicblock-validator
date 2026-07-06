@@ -38,12 +38,12 @@ pub const MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP: u8 = 4;
 
 /// How many finalize instructions fit into a single transaction
 #[allow(unused)] // serves as documentation as well
-pub const MAX_FINALIZE_PER_TX: u8 = 2;
+pub const MAX_FINALIZE_PER_TX: u8 = 5;
 
 /// How many finalize instructions fit into a single transaction
 /// when using address lookup tables
 #[allow(unused)] // serves as documentation as well
-pub const MAX_FINALIZE_PER_TX_USING_LOOKUP: u8 = 40;
+pub const MAX_FINALIZE_PER_TX_USING_LOOKUP: u8 = 48;
 
 /// How many undelegate instructions fit into a single transaction
 /// NOTE: that we assume the rent reimbursement account to be the delegated account
@@ -222,12 +222,7 @@ mod test {
         validator_auth: Pubkey,
         pubkey: &Pubkey,
     ) -> Instruction {
-        dlp_api::instruction_builder::finalize(
-            validator_auth,
-            *pubkey,
-            Pubkey::new_unique(),
-            Pubkey::new_unique(),
-        )
+        dlp_api::instruction_builder::finalize(validator_auth, *pubkey)
     }
 
     // These tests statically determine the optimal ix count to fit into a single

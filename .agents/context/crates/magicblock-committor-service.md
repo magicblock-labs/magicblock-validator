@@ -203,7 +203,7 @@ IntentExecutorImpl::execute
   -> reset nonce cache for all committed pubkeys on errors, or only undelegated pubkeys on successful undelegation
 ```
 
-Task building fetches `DelegationMetadata` for accounts whose base-layer flow may finalize. `FinalizeTask` and `CommitFinalizeTask` include the delegated account owner and `DelegationMetadata.rent_payer` so the Delegation Program can auto-undelegate owner-program requests during finalize, commit-finalize, and commit-finalize-from-buffer. The active task-building path derives the request PDA through the DLP instruction builders and does not fetch or decode `UndelegationRequest`; explicit undelegate tasks still pass `request_rent_payer = None` unless a future path deliberately restores request-account decoding.
+Current DLP finalize instructions do not undelegate and require only the validator plus delegated account, so `FinalizeTask` and `CommitFinalizeTask` no longer fetch or carry owner/rent metadata. Finalize-stage `UndelegateTask`s complete ownership return through standalone DLP `Undelegate`. For owner-program requests, task building detects `DelegationMetadata.undelegation_requester = OwnerProgram`, fetches the matching `UndelegationRequest` with the same `min_context_slot`, validates the request owner against the committed account owner, and passes `request.rent_payer` so DLP can close the request PDA. For validator-requested undelegation, or metadata still showing `None` because commit and finalize task lists are built before the commit-stage transaction records the validator requester on base, `request_rent_payer` remains `None`.
 
 Transaction fit is not only packet size. `TaskStrategist` currently checks whether a single-stage transaction or each two-stage transaction fits the wire size, optionally after switching commits to buffers and adding ALTs, but it does not split a transaction stage by compute units. Each commit, finalize, commit-finalize, and undelegate task currently advertises `120_000` CU, while Agave caps a transaction at `1_400_000` CU. Keep task bundles below that transaction-level cap unless the strategist and executor/output/persistence model are extended to split, record, and confirm multiple transactions for the affected stage.
 
@@ -233,7 +233,7 @@ Do not remove sorted lock acquisition or the retiring map without replacing the 
 
 ### `min_context_slot` and freshness
 
-Task-info RPC reads use the maximum `remote_slot` across committed accounts as `min_context_slot` when fetching delegation metadata and diffable base accounts. This helps avoid building commits against base-layer state older than the ER account snapshot, including stale rent-payer or owner-program undelegation-requester metadata used by auto-undelegation account metas. The fetcher retries `Minimum context slot not reached` up to five times with short sleeps. Preserve this freshness check unless the broader account-sync/settlement contract changes.
+Task-info RPC reads use the maximum `remote_slot` across committed accounts as `min_context_slot` when fetching delegation metadata, undelegation requests, and diffable base accounts. This helps avoid building commits or standalone undelegate tasks against base-layer state older than the ER account snapshot, including stale rent-payer or owner-program requester metadata. The fetcher retries `Minimum context slot not reached` up to five times with short sleeps. Preserve this freshness check unless the broader account-sync/settlement contract changes.
 
 ### Persistence is both status API and recovery state
 

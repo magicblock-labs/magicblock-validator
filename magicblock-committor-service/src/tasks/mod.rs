@@ -216,8 +216,6 @@ impl From<UndelegateTask> for BaseTaskImpl {
 #[derive(Clone, Debug)]
 pub struct FinalizeTask {
     pub delegated_account: Pubkey,
-    pub owner_program: Pubkey,
-    pub rent_reimbursement: Pubkey,
 }
 
 impl FinalizeTask {
@@ -225,8 +223,6 @@ impl FinalizeTask {
         dlp_api::instruction_builder::finalize(
             *validator,
             self.delegated_account,
-            self.owner_program,
-            self.rent_reimbursement,
         )
     }
 }
@@ -628,8 +624,6 @@ mod serialization_safety_test {
         // Test Finalize variant
         let finalize_task: BaseTaskImpl = FinalizeTask {
             delegated_account: Pubkey::new_unique(),
-            owner_program: Pubkey::new_unique(),
-            rent_reimbursement: Pubkey::new_unique(),
         }
         .into();
         assert_serializable(&finalize_task.instruction(&validator));
