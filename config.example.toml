@@ -223,6 +223,13 @@ superblock-size = 72000
 # Env: MBV_LEDGER__SIZE
 size = 536_870_912
 
+# Capacity in bytes of the RocksDB block cache shared by all ledger columns.
+# This is the only read caching layer (the ledger bypasses the OS page cache),
+# so production nodes should set 16 GB or more.
+# Default: 536_870_912 (512 MB)
+# Env: MBV_LEDGER__BLOCK_CACHE_SIZE
+block-cache-size = 536_870_912
+
 # Whether to verify that the ledger on disk belongs to the configured keypair.
 # Default: true
 # Env: MBV_LEDGER__VERIFY_KEYPAIR
