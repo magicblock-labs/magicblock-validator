@@ -233,7 +233,7 @@ Do not remove sorted lock acquisition or the retiring map without replacing the 
 
 ### `min_context_slot` and freshness
 
-Task-info RPC reads use the maximum `remote_slot` across committed accounts as `min_context_slot` when fetching delegation metadata, undelegation requests, and diffable base accounts. This helps avoid building commits or standalone undelegate tasks against base-layer state older than the ER account snapshot, including stale rent-payer or owner-program requester metadata. The fetcher retries `Minimum context slot not reached` up to five times with short sleeps. Preserve this freshness check unless the broader account-sync/settlement contract changes.
+Task-info RPC reads use the maximum `remote_slot` across committed accounts as `min_context_slot` when fetching delegation metadata and diffable base accounts. This helps avoid building commits or standalone undelegate tasks against base-layer state older than the ER account snapshot, including stale rent-payer or owner-program requester metadata. The fetcher retries `Minimum context slot not reached` up to five times with short sleeps. Preserve this freshness check unless the broader account-sync/settlement contract changes.
 
 ### Persistence is both status API and recovery state
 

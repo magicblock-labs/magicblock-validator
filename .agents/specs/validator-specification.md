@@ -262,6 +262,10 @@ Owner-program requested undelegation is recorded by the Delegation Program in
 `UndelegationRequest` PDA. This marker is not a validator-side completion
 signal: the validator must still schedule commit-and-undelegate so the latest
 ER state is committed/finalized before ownership returns to the owner program.
+The request account data carries the delegated account and expiry slot only;
+owner, rent payer, and commit nonce information must come from the delegation
+record/metadata. Validators must still verify that the request PDA matches the
+delegated account before scheduling.
 
 The current Delegation Program does not undelegate from finalize instructions.
 Commit/finalize-style instructions only commit/finalize state and record or

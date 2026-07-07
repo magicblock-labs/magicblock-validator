@@ -2190,19 +2190,12 @@ where
                             let observed = ObservedUndelegationRequest {
                                 request_pda: pubkey,
                                 delegated_account: request.delegated_account,
-                                owner_program: request.owner_program,
-                                rent_payer: request.rent_payer,
-                                created_slot: request.created_slot,
                                 expires_at_slot: request.expires_at_slot,
-                                last_commit_id_at_request: request
-                                    .last_commit_id_at_request,
                                 observed_slot: account.remote_slot(),
                             };
                             trace!(
                                 request_pda = %observed.request_pda,
                                 delegated_account = %observed.delegated_account,
-                                owner_program = %observed.owner_program,
-                                rent_payer = %observed.rent_payer,
                                 expires_at_slot = observed.expires_at_slot,
                                 "Observed DLP undelegation request"
                             );
@@ -2212,7 +2205,6 @@ where
                                 warn!(
                                     request_pda = %observed.request_pda,
                                     delegated_account = %observed.delegated_account,
-                                    owner_program = %observed.owner_program,
                                     "Dropped observed DLP undelegation request because no subscribers are active"
                                 );
                             }

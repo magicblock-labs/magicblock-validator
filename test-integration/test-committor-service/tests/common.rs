@@ -202,7 +202,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
                         rent_payer: *pubkey,
                     },
                 )
-                })
+            })
             .collect())
     }
 

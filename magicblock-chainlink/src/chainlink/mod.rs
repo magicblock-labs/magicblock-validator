@@ -63,11 +63,7 @@ pub type ProdChainlink<C> = ReplicationModeAwareChainlink<
 pub struct ObservedUndelegationRequest {
     pub request_pda: Pubkey,
     pub delegated_account: Pubkey,
-    pub owner_program: Pubkey,
-    pub rent_payer: Pubkey,
-    pub created_slot: u64,
     pub expires_at_slot: u64,
-    pub last_commit_id_at_request: u64,
     pub observed_slot: u64,
 }
 

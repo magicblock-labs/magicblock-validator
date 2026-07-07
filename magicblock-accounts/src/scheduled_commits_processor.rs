@@ -7,9 +7,7 @@ use std::{
 
 use dlp_api::pda::undelegation_request_pda_from_delegated_account;
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_chainlink::{
-    ObservedUndelegationRequest, ProdChainlink, ProdInnerChainlink,
-};
+use magicblock_chainlink::{ObservedUndelegationRequest, ProdChainlink};
 use magicblock_core::{
     link::transactions::TransactionSchedulerHandle, traits::LatestBlockProvider,
 };
@@ -34,15 +32,11 @@ const UNDELEGATION_REQUEST_MAX_ATTEMPTS: usize = 3;
 const UNDELEGATION_REQUEST_RETRY_BASE_DELAY: Duration =
     Duration::from_millis(100);
 
-pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ObservedUndelegationRequestIdentity {
-    created_slot: u64,
     expires_at_slot: u64,
-    last_commit_id_at_request: u64,
-    rent_payer: Pubkey,
 }
 
 impl From<&ObservedUndelegationRequest>
@@ -50,10 +44,7 @@ impl From<&ObservedUndelegationRequest>
 {
     fn from(request: &ObservedUndelegationRequest) -> Self {
         Self {
-            created_slot: request.created_slot,
             expires_at_slot: request.expires_at_slot,
-            last_commit_id_at_request: request.last_commit_id_at_request,
-            rent_payer: request.rent_payer,
         }
     }
 }

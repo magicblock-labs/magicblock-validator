@@ -137,16 +137,6 @@ impl TaskBuilderImpl {
             .await
     }
 
-    async fn fetch_delegation_metadata<C: TaskInfoFetcher>(
-        task_info_fetcher: &Arc<C>,
-        pubkeys: &[Pubkey],
-        min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
-        task_info_fetcher
-            .fetch_delegation_metadata(pubkeys, min_context_slot)
-            .await
-    }
-
     fn get_finalize_stage_metadata_pubkeys(
         intent_bundle: &ScheduledIntentBundle,
     ) -> Vec<Pubkey> {
@@ -278,7 +268,7 @@ impl TasksBuilder for TaskBuilderImpl {
                     commit_nonces: &mut commit_nonces,
                     base_accounts: &mut base_accounts,
                 }
-                .build(value)?,
+                .build(value),
             );
         }
         if let Some(ref value) =
@@ -300,7 +290,7 @@ impl TasksBuilder for TaskBuilderImpl {
                     commit_nonces: &mut commit_nonces,
                     base_accounts: &mut base_accounts,
                 }
-                .build(&value.commit_action)?,
+                .build(&value.commit_action),
             );
         }
 
@@ -336,26 +326,23 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         // Helper to process commit types
-        fn create_finalize_tasks(
-            commit: &CommitType,
-        ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+        fn create_finalize_tasks(commit: &CommitType) -> Vec<BaseTaskImpl> {
             match commit {
-                CommitType::Standalone(accounts) => accounts
-                    .iter()
-                    .map(|account| Ok(finalize_task(account)))
-                    .collect(),
+                CommitType::Standalone(accounts) => {
+                    accounts.iter().map(finalize_task).collect()
+                }
                 CommitType::WithBaseActions {
                     committed_accounts,
                     base_actions,
                 } => {
                     let mut tasks = committed_accounts
                         .iter()
-                        .map(|account| Ok(finalize_task(account)))
-                        .collect::<TaskBuilderResult<Vec<_>>>()?;
+                        .map(finalize_task)
+                        .collect::<Vec<_>>();
                     tasks.extend(TaskBuilderImpl::create_action_tasks(
                         base_actions,
                     ));
-                    Ok(tasks)
+                    tasks
                 }
             }
         }
@@ -403,22 +390,22 @@ impl TasksBuilder for TaskBuilderImpl {
             .map(|account| account.remote_slot)
             .max()
             .unwrap_or(0);
-        let delegation_metadata = Self::fetch_delegation_metadata(
-            info_fetcher,
-            &finalize_metadata_pubkeys,
-            min_context_slot,
-        )
-        .await
-        .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+        let delegation_metadata = info_fetcher
+            .fetch_delegation_metadata(
+                &finalize_metadata_pubkeys,
+                min_context_slot,
+            )
+            .await
+            .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
 
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
-            tasks.extend(create_finalize_tasks(value)?);
+            tasks.extend(create_finalize_tasks(value));
         }
 
         if let Some(ref value) =
             intent_bundle.intent_bundle.commit_and_undelegate
         {
-            tasks.extend(create_finalize_tasks(&value.commit_action)?);
+            tasks.extend(create_finalize_tasks(&value.commit_action));
             tasks.extend(create_undelegate_tasks(value, &delegation_metadata)?);
         }
 
@@ -490,33 +477,30 @@ struct CommitFinalizeBuilder<'a> {
 }
 
 impl<'a> CommitFinalizeBuilder<'a> {
-    fn build(
-        &mut self,
-        commit_type: &CommitType,
-    ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+    fn build(&mut self, commit_type: &CommitType) -> Vec<BaseTaskImpl> {
         let mut tasks: Vec<BaseTaskImpl> = commit_type
             .get_committed_accounts()
             .iter()
-            .map(|account| -> TaskBuilderResult<BaseTaskImpl> {
+            .map(|account| {
                 let nonce =
                     take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                Ok(TaskBuilderImpl::create_commit_finalize_task(
+                TaskBuilderImpl::create_commit_finalize_task(
                     nonce,
                     false,
                     account.clone(),
                     base,
                 )
-                .into())
+                .into()
             })
-            .collect::<TaskBuilderResult<Vec<_>>>()?;
+            .collect();
         if let CommitType::WithBaseActions {
             ref base_actions, ..
         } = commit_type
         {
             tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
         }
-        Ok(tasks)
+        tasks
     }
 }
 
@@ -526,33 +510,30 @@ struct CommitFinalizeAndUndelegateBuilder<'a> {
 }
 
 impl<'a> CommitFinalizeAndUndelegateBuilder<'a> {
-    fn build(
-        &mut self,
-        commit_type: &CommitType,
-    ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+    fn build(&mut self, commit_type: &CommitType) -> Vec<BaseTaskImpl> {
         let mut tasks: Vec<BaseTaskImpl> = commit_type
             .get_committed_accounts()
             .iter()
-            .map(|account| -> TaskBuilderResult<BaseTaskImpl> {
+            .map(|account| {
                 let nonce =
                     take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                Ok(TaskBuilderImpl::create_commit_finalize_task(
+                TaskBuilderImpl::create_commit_finalize_task(
                     nonce,
                     true,
                     account.clone(),
                     base,
                 )
-                .into())
+                .into()
             })
-            .collect::<TaskBuilderResult<Vec<_>>>()?;
+            .collect();
         if let CommitType::WithBaseActions {
             ref base_actions, ..
         } = commit_type
         {
             tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
         }
-        Ok(tasks)
+        tasks
     }
 }
 

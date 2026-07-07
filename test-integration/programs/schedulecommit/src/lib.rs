@@ -199,18 +199,7 @@ pub enum ScheduleCommitInstruction {
 
     ScheduleCommitForOrderBook(ScheduleCommitType),
 
-    /// CPI into the delegation program to request undelegation for a
-    /// schedulecommit-owned PDA.
-    ///
-    /// # Account references
-    /// - **0.** `[WRITE, SIGNER]` Payer funding the request PDA
-    /// - **1.** `[]`              Delegated schedulecommit PDA
-    /// - **2.** `[]`              Schedulecommit owner program
-    /// - **3.** `[WRITE]`         Undelegation request PDA
-    /// - **4.** `[]`              Delegation record PDA
-    /// - **5.** `[]`              Delegation metadata PDA
-    /// - **6.** `[]`              System program
-    /// - **7.** `[]`              Delegation program
+    /// CPI into DLP to request undelegation for a schedulecommit-owned PDA.
     RequestUndelegationCpi(Pubkey),
 }
 

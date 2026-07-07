@@ -55,8 +55,6 @@ pub enum ScheduledCommitsProcessorError {
     RecvError(#[from] RecvError),
     #[error("CommittorSerivceError: {0}")]
     CommittorSerivceError(Box<CommittorServiceError>),
-    #[error("PoisonedMutex: {0}")]
-    PoisonedMutex(&'static str),
 }
 
 impl From<CommittorServiceError> for ScheduledCommitsProcessorError {

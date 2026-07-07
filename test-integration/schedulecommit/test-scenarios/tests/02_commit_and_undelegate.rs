@@ -3,10 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dlp_api::{
-    pda::undelegation_request_pda_from_delegated_account,
-    state::UndelegationRequest,
-};
+use dlp_api::pda::undelegation_request_pda_from_delegated_account;
 use integration_test_tools::{
     conversions::stringify_simulation_result, run_test,
     scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
@@ -298,35 +295,6 @@ fn commit_and_undelegate_two_accounts_twice() -> (
     (ctx, *sig, tx_res)
 }
 
-fn assert_undelegation_request(
-    request_data: &[u8],
-    delegated_account: Pubkey,
-    rent_payer: Pubkey,
-) {
-    let request =
-        UndelegationRequest::try_from_bytes_with_discriminator(request_data)
-            .unwrap();
-    assert_eq!(
-        request.delegated_account.to_bytes(),
-        delegated_account.to_bytes(),
-        "request should target delegated account"
-    );
-    assert_eq!(
-        request.owner_program.to_bytes(),
-        program_schedulecommit::id().to_bytes(),
-        "request should target schedulecommit owner program"
-    );
-    assert_eq!(
-        request.rent_payer.to_bytes(),
-        rent_payer.to_bytes(),
-        "request rent payer should match chain payer"
-    );
-    assert!(
-        request.expires_at_slot > request.created_slot,
-        "request should use a future timeout slot"
-    );
-}
-
 fn wait_for_requested_undelegation_on_chain(
     ctx: &ScheduleCommitTestContext,
     pda: Pubkey,
@@ -447,16 +415,6 @@ fn test_request_undelegation_commits_and_undelegates_one_account() {
             request_res.is_ok(),
             "request undelegation transaction failed: {request_res:?}"
         );
-
-        if let Ok(request_data) = ctx.fetch_chain_account_data(request_pda) {
-            assert_undelegation_request(
-                &request_data,
-                *committee_pda,
-                payer_chain.pubkey(),
-            );
-        } else {
-            debug!("Undelegation request was already consumed");
-        }
 
         wait_for_requested_undelegation_on_chain(
             &ctx,

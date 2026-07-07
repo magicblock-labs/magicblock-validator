@@ -3776,7 +3776,6 @@ dependencies = [
  "rusqlite",
  "solana-account 3.4.0",
  "solana-account-decoder",
- "solana-address-lookup-table-interface 3.0.1",
  "solana-commitment-config",
  "solana-compute-budget-interface",
  "solana-hash 4.2.0",
@@ -3788,13 +3787,11 @@ dependencies = [
  "solana-pubkey 4.1.0",
  "solana-rpc-client",
  "solana-rpc-client-api",
- "solana-sdk-ids 3.1.0",
  "solana-signature 3.3.0",
  "solana-signer",
  "solana-transaction",
  "solana-transaction-error 3.1.0",
  "solana-transaction-status-client-types",
- "static_assertions",
  "tempfile",
  "test-kit",
  "thiserror 2.0.18",
@@ -3856,7 +3853,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program-api"
 version = "3.0.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=074a1a4175faea2e47b745e15dcabecb046e815d#074a1a4175faea2e47b745e15dcabecb046e815d"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=26d01c4b5c0c29acbebd41d14b303e1608bbaa71#26d01c4b5c0c29acbebd41d14b303e1608bbaa71"
 dependencies = [
  "bincode",
  "borsh 0.10.4",

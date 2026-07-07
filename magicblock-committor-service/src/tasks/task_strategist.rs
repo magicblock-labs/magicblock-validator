@@ -887,29 +887,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_finalize_tasks_uses_metadata_rent_payer_for_undelegate() {
-        let delegated_account = Pubkey::new_unique();
-        let intent = create_test_intent(0, &[delegated_account], true);
-        let info_fetcher = Arc::new(MockInfoFetcher::default());
-
-        let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-            .await
-            .unwrap();
-
-        assert_eq!(tasks.len(), 2);
-        let BaseTaskImpl::Finalize(task) = &tasks[0] else {
-            panic!("expected finalize task");
-        };
-        assert_eq!(task.delegated_account, delegated_account);
-        let BaseTaskImpl::Undelegate(task) = &tasks[1] else {
-            panic!("expected undelegate task");
-        };
-        assert_eq!(task.delegated_account, delegated_account);
-        assert_eq!(task.rent_reimbursement, delegated_account);
-        assert!(!task.include_undelegation_request);
-    }
-
-    #[tokio::test]
     async fn test_finalize_tasks_include_request_for_owner_program_undelegate()
     {
         let delegated_account = Pubkey::new_unique();
