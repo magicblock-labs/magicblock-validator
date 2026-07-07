@@ -61,10 +61,7 @@ impl Sysvar for HighPrecisionClock {
     fn get() -> Result<Self, ProgramError> {
         let mut data = [0u8; Self::SIZE];
         get_sysvar(&mut data, &HIGH_PRECISION_CLOCK_ID, 0, Self::SIZE as u64)?;
-        let unix_timestamp_millis = i64::from_le_bytes(
-            data.try_into()
-                .map_err(|_| ProgramError::InvalidAccountData)?,
-        );
+        let unix_timestamp_millis = i64::from_le_bytes(data);
         Ok(Self {
             unix_timestamp_millis,
         })
