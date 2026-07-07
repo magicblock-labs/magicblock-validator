@@ -82,7 +82,6 @@ type TestIntentExecutorCtx = IntentExecutorCtx<
 
 struct TestEnv {
     ctx: IntegrationTestContext,
-    validator_authority: Keypair,
     chain_mb_client: MagicblockRpcClient,
     ephem_rpc: Arc<AsyncRpcClient>,
     intent_client: IntentExecutionClient,
@@ -112,7 +111,6 @@ impl TestEnv {
 
         Self {
             ctx,
-            validator_authority,
             chain_mb_client: chain_mb_rpc,
             ephem_rpc,
             intent_client,
@@ -134,10 +132,7 @@ impl TestEnv {
     }
 
     fn outbox_client(&self) -> TestOutboxClient {
-        TestOutboxClient::new(
-            self.ephem_rpc.clone(),
-            self.validator_authority.insecure_clone(),
-        )
+        TestOutboxClient::new(self.ephem_rpc.clone())
     }
 
     fn transaction_preparator(&self) -> TransactionPreparatorImpl {
@@ -306,13 +301,22 @@ async fn test_pickup_executed_intent() {
     });
 
     // Execute intent
-    let executor_ctx = test_env.executor_ctx_builder().build();
+    let outbox_client = Arc::new(test_env.outbox_client());
+    let executor_ctx = test_env
+        .executor_ctx_builder()
+        .with_outbox_client(outbox_client.clone())
+        .build();
     let executor =
         AcceptedIntentExecutor::new(executor_ctx, DEFAULT_ACTIONS_TIMEOUT);
     let (result, cleanup_handle) = Box::new(executor)
         .execute(outbox_bundle.inner.clone())
         .await;
     assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
+    assert_eq!(
+        outbox_client.sent_commits.lock().unwrap().as_slice(),
+        [(outbox_bundle.inner.id, true)],
+        "notify_commit_sent should have been called once with success"
+    );
 
     cleanup_handle.clean().await.expect("cleanup failed");
 
@@ -891,7 +895,6 @@ impl OutboxIntentBundlesReader for TestOutboxReader {
 
 struct TestOutboxClient {
     ephem_rpc: Arc<AsyncRpcClient>,
-    validator_keypair: Keypair,
     pub stage_calls: Arc<Mutex<Vec<(u64, ExecutionStage)>>>,
     pub sent_commits: Arc<Mutex<Vec<(u64, bool)>>>,
 
@@ -902,10 +905,9 @@ struct TestOutboxClient {
 }
 
 impl TestOutboxClient {
-    fn new(ephem_rpc: Arc<AsyncRpcClient>, validator_keypair: Keypair) -> Self {
+    fn new(ephem_rpc: Arc<AsyncRpcClient>) -> Self {
         Self {
             ephem_rpc,
-            validator_keypair,
             stage_calls: Default::default(),
             sent_commits: Default::default(),
             fail_set_execution_stage: false,
@@ -981,25 +983,8 @@ impl OutboxClient for TestOutboxClient {
             .get_latest_blockhash()
             .await
             .map_err(InternalOutboxClientError::RpcClientError)?;
-        let ix = Instruction::new_with_bincode(
-            magicblock_magic_program_api::id(),
-            &MagicBlockInstruction::SetIntentExecutionStage {
-                intent_id,
-                stage,
-            },
-            vec![
-                AccountMeta::new_readonly(
-                    self.validator_keypair.pubkey(),
-                    true,
-                ),
-                AccountMeta::new(outbox_intent_pda(intent_id), false),
-            ],
-        );
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&self.validator_keypair.pubkey()),
-            &[&self.validator_keypair],
-            blockhash,
+        let tx = InstructionUtils::set_intent_execution_stage(
+            blockhash, intent_id, stage,
         );
         self.ephem_rpc
             .send_and_confirm_transaction(&tx)
@@ -1014,15 +999,11 @@ impl OutboxClient for TestOutboxClient {
         result: &IntentExecutorResult<ExecutionOutput>,
         _execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
-        let IntentSentTransaction::Known(ref tx) = meta.intent_sent_transaction
+        let IntentSentTransaction::Known(_) = meta.intent_sent_transaction
         else {
             panic!("should be known");
         };
         let succeeded = result.is_ok();
-        self.ephem_rpc
-            .send_and_confirm_transaction(tx)
-            .await
-            .map_err(InternalOutboxClientError::RpcClientError)?;
         self.sent_commits.lock().unwrap().push((meta.id, succeeded));
         Ok(())
     }

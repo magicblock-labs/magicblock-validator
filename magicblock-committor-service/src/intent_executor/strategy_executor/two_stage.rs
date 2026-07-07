@@ -168,7 +168,11 @@ where
             transaction_preparator,
             commit_stage_patcher,
             self.intent_id,
-            |sig| ExecutionStage::TwoStage(TwoStageProgress::Committing(sig)),
+            |pending_tx| {
+                ExecutionStage::TwoStage(TwoStageProgress::Committing(
+                    pending_tx,
+                ))
+            },
             IntentExecutorError::FailedCommitPreparationError,
             execution_state,
         )
@@ -311,10 +315,10 @@ where
             transaction_preparator,
             finalize_stage_patcher,
             self.intent_id,
-            |sig| {
+            |pending_tx| {
                 ExecutionStage::TwoStage(TwoStageProgress::Finalizing {
                     commit: commit_signature,
-                    finalize: sig,
+                    finalize: pending_tx,
                 })
             },
             IntentExecutorError::FailedFinalizePreparationError,
