@@ -40,28 +40,37 @@ pub(crate) async fn write_with_retry<S: StreamHandle>(
     request: SubscribeRequest,
 ) -> RemoteAccountProviderResult<()> {
     const MAX_RETRIES: usize = 5;
+    // A healthy write flushes in milliseconds. A write into a dead/frozen
+    // gRPC connection hangs without erroring once the sink backpressures,
+    // which would wedge the single actor loop forever - bound it instead.
+    const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
     let mut retries = MAX_RETRIES;
     let initial_retries = retries;
 
     loop {
-        match handle.write(request.clone()).await {
-            Ok(()) => return Ok(()),
-            Err(err) => {
-                if retries > 0 {
-                    retries -= 1;
-                    let backoff_ms = 50u64 * (initial_retries - retries) as u64;
-                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                    continue;
-                }
-                return Err(
-                    RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
-                        task.to_string(),
-                        MAX_RETRIES,
-                        format!("{err} ({err:?})"),
-                    ),
-                );
+        let err_msg = match tokio::time::timeout(
+            WRITE_TIMEOUT,
+            handle.write(request.clone()),
+        )
+        .await
+        {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(err)) => format!("{err} ({err:?})"),
+            Err(_) => {
+                format!("stream write timed out after {WRITE_TIMEOUT:?}")
             }
+        };
+        if retries > 0 {
+            retries -= 1;
+            let backoff_ms = 50u64 * (initial_retries - retries) as u64;
+            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+            continue;
         }
+        return Err(RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
+            task.to_string(),
+            MAX_RETRIES,
+            err_msg,
+        ));
     }
 }
 

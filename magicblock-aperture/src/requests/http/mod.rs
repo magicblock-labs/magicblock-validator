@@ -1,5 +1,5 @@
 use core::str;
-use std::{mem::size_of, ops::Range};
+use std::{mem::size_of, ops::Range, time::Duration};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use http_body_util::BodyExt;
@@ -269,16 +269,26 @@ impl HttpDispatcher {
         &self,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
+        // Hard bound on account preparation: if the cloning pipeline is
+        // degraded the transaction must fail with an error instead of
+        // holding the request (and the client) hostage indefinitely.
+        const ENSURE_ACCOUNTS_TIMEOUT: Duration = Duration::from_secs(30);
+
         self.require_primary_rpc_method("transaction")?;
 
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["transaction"])
             .start_timer();
-        match self
-            .chainlink
-            .ensure_transaction_accounts(transaction)
-            .await
-        {
+        match tokio::time::timeout(
+            ENSURE_ACCOUNTS_TIMEOUT,
+            self.chainlink.ensure_transaction_accounts(transaction),
+        )
+        .await
+        .unwrap_or_else(|_elapsed| {
+            Err(magicblock_chainlink::errors::ChainlinkError::EnsureAccountsTimeout(
+                ENSURE_ACCOUNTS_TIMEOUT.as_secs(),
+            ))
+        }) {
             Ok(res) if res.is_ok() => Ok(()),
             Ok(res) => {
                 debug!(%res, "Transaction account resolution encountered issues");

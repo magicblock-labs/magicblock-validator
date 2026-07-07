@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -42,6 +43,26 @@ use crate::remote_account_provider::{
 /// data. It exists purely for accounting purposes.
 static SLOT_SUBSCRIPTION_DUMMY: Pubkey =
     pubkey!("FAKESUB111111111111111111111111111111111111");
+
+/// Upper bound on any round-trip to the actor. Normally these complete in
+/// milliseconds; if the actor is wedged (e.g. on a dead gRPC connection) this
+/// converts an indefinite hang of every caller into an error, which the
+/// fetch/subscription layers handle and retry.
+const ACTOR_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Awaits the actor's oneshot response, bounded by
+/// [`ACTOR_RESPONSE_TIMEOUT`].
+async fn await_actor_response<T>(
+    rx: oneshot::Receiver<RemoteAccountProviderResult<T>>,
+    op: &str,
+) -> RemoteAccountProviderResult<T> {
+    match tokio::time::timeout(ACTOR_RESPONSE_TIMEOUT, rx).await {
+        Ok(response) => response?,
+        Err(_) => Err(RemoteAccountProviderError::ChainPubsubActorTimeout(
+            op.to_string(),
+        )),
+    }
+}
 
 #[derive(Clone)]
 pub struct ChainLaserClientImpl {
@@ -115,7 +136,7 @@ impl ChainLaserClientImpl {
         })
         .await?;
 
-        rx.await?
+        await_actor_response(rx, "subscribe_multiple").await
     }
 
     #[instrument(skip(self, msg), fields(client_id = %self.client_id))]
@@ -123,12 +144,24 @@ impl ChainLaserClientImpl {
         &self,
         msg: ChainPubsubActorMessage,
     ) -> RemoteAccountProviderResult<()> {
-        self.messages.send(msg).await.map_err(|err| {
-            RemoteAccountProviderError::ChainLaserActorSendError(
-                err.to_string(),
-                format!("{err:#?}"),
-            )
-        })
+        // The message channel only backs up when the actor stopped draining
+        // it; bound the send so callers fail instead of hanging with it.
+        match tokio::time::timeout(
+            ACTOR_RESPONSE_TIMEOUT,
+            self.messages.send(msg),
+        )
+        .await
+        {
+            Ok(sent) => sent.map_err(|err| {
+                RemoteAccountProviderError::ChainLaserActorSendError(
+                    err.to_string(),
+                    format!("{err:#?}"),
+                )
+            }),
+            Err(_) => Err(RemoteAccountProviderError::ChainPubsubActorTimeout(
+                "send_msg".to_string(),
+            )),
+        }
     }
 }
 
@@ -161,7 +194,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         })
         .await?;
 
-        rx.await?
+        await_actor_response(rx, "subscribe").await
     }
 
     async fn subscribe_program(
@@ -175,7 +208,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         })
         .await?;
 
-        rx.await?
+        await_actor_response(rx, "subscribe_program").await
     }
 
     async fn unsubscribe(
@@ -189,7 +222,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         })
         .await?;
 
-        rx.await?
+        await_actor_response(rx, "unsubscribe").await
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
@@ -197,12 +230,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         self.send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
             .await?;
 
-        rx.await.map_err(|err| {
-            RemoteAccountProviderError::ChainLaserActorSendError(
-                err.to_string(),
-                format!("{err:#?}"),
-            )
-        })?
+        await_actor_response(rx, "shutdown").await
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -234,9 +262,11 @@ impl ReconnectableClient for ChainLaserClientImpl {
         self.send_msg(ChainPubsubActorMessage::Reconnect { response: tx })
             .await?;
 
-        rx.await.inspect_err(|err| {
-            warn!(error = ?err, "RecvError while awaiting reconnect response");
-        })?
+        await_actor_response(rx, "reconnect")
+            .await
+            .inspect_err(|err| {
+                warn!(error = ?err, "Error while awaiting reconnect response");
+            })
     }
 
     async fn resub_multiple(
