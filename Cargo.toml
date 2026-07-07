@@ -142,7 +142,7 @@ prometheus = "0.13.4"
 
 # TODO: Update to the merged version when ready
 
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28", features = [
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc", features = [
     "dev-context-only-utils",
 ] }
 solana-transaction-error = { version = "3.0" }
@@ -196,7 +196,7 @@ serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
 # TODO: Update to the merged version when ready
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 solana-account-decoder = { version = "4.0" }
 solana-account-decoder-client-types = { version = "4.0" }
 solana-account-info = { version = "3.1" }
@@ -249,7 +249,7 @@ solana-program-error = { version = "3.0" }
 solana-program-option = { version = "3.0" }
 solana-program-pack = { version = "3.0" }
 # TODO: Update to the merged version when ready
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 solana-pubkey = { version = "4.1" }
 solana-pubsub-client = { version = "4.0" }
 solana-rent = { version = "3.0" }
@@ -283,18 +283,18 @@ solana-transaction = { version = "3.0" }
 [workspace.dependencies.solana-svm]
 features = ["dev-context-only-utils"]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28"
+rev = "ab02436a458bf83aade6a8b9276f6384077c78fc"
 
 [patch.crates-io]
 # TODO: Update to the merged version when ready
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 # TODO: Update to the merged version when ready
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 solana-storage-proto = { path = "storage-proto" }
 # TODO: Update to the merged version when ready
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 # TODO: Update to the merged version when ready
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 # Fork is used to enable `disable_manual_compaction` usage
 # Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
 # without patching update isn't possible due to conflict with solana deps

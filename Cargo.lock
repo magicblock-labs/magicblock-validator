@@ -6268,7 +6268,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "3.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=bccdeeb1e773352cf0afef2087f4e752efe69a28#bccdeeb1e773352cf0afef2087f4e752efe69a28"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=ab02436a458bf83aade6a8b9276f6384077c78fc#ab02436a458bf83aade6a8b9276f6384077c78fc"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -7848,7 +7848,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "4.0.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=bccdeeb1e773352cf0afef2087f4e752efe69a28#bccdeeb1e773352cf0afef2087f4e752efe69a28"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=ab02436a458bf83aade6a8b9276f6384077c78fc#ab02436a458bf83aade6a8b9276f6384077c78fc"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -8544,7 +8544,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "4.0.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=bccdeeb1e773352cf0afef2087f4e752efe69a28#bccdeeb1e773352cf0afef2087f4e752efe69a28"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=ab02436a458bf83aade6a8b9276f6384077c78fc#ab02436a458bf83aade6a8b9276f6384077c78fc"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -8860,7 +8860,7 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "4.0.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=bccdeeb1e773352cf0afef2087f4e752efe69a28#bccdeeb1e773352cf0afef2087f4e752efe69a28"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=ab02436a458bf83aade6a8b9276f6384077c78fc#ab02436a458bf83aade6a8b9276f6384077c78fc"
 dependencies = [
  "bincode",
  "qualifier_attr",

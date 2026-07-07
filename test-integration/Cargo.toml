@@ -81,7 +81,7 @@ serde = "1.0.217"
 serial_test = "3.2.0"
 shlex = "1.3.0"
 # TODO: Update to the merged version when ready
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 solana-address-lookup-table-interface = "3.0"
 solana-commitment-config = "3.1.1"
 solana-compute-budget-interface = "3.0"
@@ -123,12 +123,12 @@ solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
 # TODO: Update to the merged version when ready
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 # TODO: Update to the merged version when ready
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 # TODO: Update to the merged version when ready
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 # TODO: Update to the merged version when ready
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bccdeeb1e773352cf0afef2087f4e752efe69a28" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 # Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
