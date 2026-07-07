@@ -57,7 +57,6 @@ pub struct Ledger {
     db: Arc<Database>,
 
     blocktime_cf: LedgerColumn<cf::Blocktime>,
-    blocktimenanos_cf: LedgerColumn<cf::BlocktimeNanos>,
     blockhash_cf: LedgerColumn<cf::Blockhash>,
     slot_signatures_cf: LedgerColumn<cf::SlotSignatures>,
     address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
@@ -134,7 +133,6 @@ impl Ledger {
         let address_signatures_cf = db.column();
         let slot_signatures_cf = db.column();
         let blocktime_cf = db.column();
-        let blocktimenanos_cf = db.column();
         let blockhash_cf = db.column();
         let transaction_cf = db.column();
         let transaction_memos_cf = db.column();
@@ -156,7 +154,6 @@ impl Ledger {
             address_signatures_cf,
             slot_signatures_cf,
             blocktime_cf,
-            blocktimenanos_cf,
             blockhash_cf,
             transaction_cf,
             transaction_memos_cf,
@@ -170,13 +167,12 @@ impl Ledger {
             latest_block,
         };
         let (slot, blockhash) = ledger.get_max_blockhash()?;
-        let time = ledger.get_block_time(slot)?.unwrap_or_default();
-        // Absent for ledgers written before high-precision time was persisted.
-        let block = LatestBlockInner::new_with_nanos(
+        let timestamp_millis =
+            ledger.get_block_time_millis(slot)?.unwrap_or_default();
+        let block = LatestBlockInner::new_with_millis(
             slot,
             blockhash,
-            time,
-            ledger.get_block_time_nanos(slot)?.unwrap_or_default(),
+            timestamp_millis,
         );
         ledger.latest_block.store(block);
         ledger.initialize_lowest_cleanup_slot()?;
@@ -193,7 +189,6 @@ impl Ledger {
         self.address_signatures_cf.submit_rocksdb_cf_metrics();
         self.slot_signatures_cf.submit_rocksdb_cf_metrics();
         self.blocktime_cf.submit_rocksdb_cf_metrics();
-        self.blocktimenanos_cf.submit_rocksdb_cf_metrics();
         self.blockhash_cf.submit_rocksdb_cf_metrics();
         self.transaction_cf.submit_rocksdb_cf_metrics();
         self.transaction_memos_cf.submit_rocksdb_cf_metrics();
@@ -290,17 +285,20 @@ impl Ledger {
         slot: Slot,
     ) -> LedgerResult<Option<UnixTimestamp>> {
         let _lock = self.check_lowest_cleanup_slot(slot)?;
-        self.blocktime_cf.get(slot)
+        // The column stores milliseconds; consumers of this API expect whole
+        // seconds (RPC `getBlockTime`, block metadata, replay, ...).
+        Ok(self
+            .blocktime_cf
+            .get(slot)?
+            .map(|millis| millis.div_euclid(1000)))
     }
 
-    /// Returns the sub-second (nanosecond) component of the block time for
-    /// `slot`, or `None` for slots written before it was persisted.
-    pub(crate) fn get_block_time_nanos(
+    pub(crate) fn get_block_time_millis(
         &self,
         slot: Slot,
-    ) -> LedgerResult<Option<u32>> {
+    ) -> LedgerResult<Option<i64>> {
         let _lock = self.check_lowest_cleanup_slot(slot)?;
-        self.blocktimenanos_cf.get(slot)
+        self.blocktime_cf.get(slot)
     }
 
     pub fn count_block_times(&self) -> LedgerResult<i64> {
@@ -388,12 +386,8 @@ impl Ledger {
     // As far as we are concerned these are just the time when we advanced to
     // a specific slot.
     pub fn write_block(&self, block: LatestBlockInner) -> LedgerResult<()> {
-        self.blocktime_cf
-            .put(block.slot, &block.clock.unix_timestamp)?;
+        self.blocktime_cf.put(block.slot, &block.timestamp_millis)?;
         self.blocktime_cf.try_increase_entry_counter(1);
-
-        self.blocktimenanos_cf.put(block.slot, &block.nanos)?;
-        self.blocktimenanos_cf.try_increase_entry_counter(1);
 
         self.blockhash_cf.put(block.slot, &block.blockhash)?;
         self.blockhash_cf.try_increase_entry_counter(1);
@@ -1359,7 +1353,6 @@ impl Ledger {
             self.address_signatures_cf.handle(),
             self.slot_signatures_cf.handle(),
             self.blocktime_cf.handle(),
-            self.blocktimenanos_cf.handle(),
             self.blockhash_cf.handle(),
             self.transaction_cf.handle(),
             self.transaction_memos_cf.handle(),
@@ -1431,7 +1424,6 @@ impl_has_column!(TransactionStatus, transaction_status_cf);
 impl_has_column!(AddressSignatures, address_signatures_cf);
 impl_has_column!(SlotSignatures, slot_signatures_cf);
 impl_has_column!(Blocktime, blocktime_cf);
-impl_has_column!(BlocktimeNanos, blocktimenanos_cf);
 impl_has_column!(Blockhash, blockhash_cf);
 impl_has_column!(Transaction, transaction_cf);
 impl_has_column!(TransactionMemos, transaction_memos_cf);
@@ -2811,50 +2803,51 @@ mod tests {
     }
 
     #[test]
-    fn test_block_time_nanos_persist_and_reload() {
+    fn test_block_time_millis_persist_and_reload() {
         init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
 
         let slot = 7;
         let secs = 1_700_000_000;
-        let nanos = 123_456_789u32;
+        let millis = secs * 1000 + 123;
 
         {
             let store = Ledger::open(ledger_path.path()).unwrap();
-            let block = LatestBlockInner::new_with_nanos(
+            let block = LatestBlockInner::new_with_millis(
                 slot,
                 Hash::new_unique(),
-                secs,
-                nanos,
+                millis,
             );
             store.write_block(block).unwrap();
 
+            // The single Blocktime column holds the full millisecond timestamp,
+            assert_eq!(
+                store.get_block_time_millis(slot).unwrap(),
+                Some(millis)
+            );
+            // ...which reads back as whole seconds for second-precision consumers.
             assert_eq!(store.get_block_time(slot).unwrap(), Some(secs));
-            assert_eq!(store.get_block_time_nanos(slot).unwrap(), Some(nanos));
-            assert_eq!(store.latest_block().load().nanos, nanos);
+            assert_eq!(store.latest_block().load().timestamp_millis, millis);
+            assert_eq!(store.latest_block().load().clock.unix_timestamp, secs);
         }
 
-        // Reopening reconstructs the sub-second precision for the tip block.
+        // Reopening reconstructs the millisecond precision for the tip block.
         {
             let store = Ledger::open(ledger_path.path()).unwrap();
-            assert_eq!(store.latest_block().load().nanos, nanos);
+            assert_eq!(store.latest_block().load().timestamp_millis, millis);
             assert_eq!(store.latest_block().load().clock.unix_timestamp, secs);
         }
     }
 
     #[test]
-    fn test_block_time_nanos_absent_defaults_to_zero() {
+    fn test_block_time_absent_returns_none() {
         init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
-        // Simulate a slot written by an older validator: only the whole-second
-        // block time is present, with no entry in the nanos column.
+        // A slot with no recorded block time reports no time in either form.
         let slot = 3;
-        store.blocktime_cf.put(slot, &42).unwrap();
-        store.blockhash_cf.put(slot, &Hash::new_unique()).unwrap();
-
-        assert_eq!(store.get_block_time(slot).unwrap(), Some(42));
-        assert_eq!(store.get_block_time_nanos(slot).unwrap(), None);
+        assert_eq!(store.get_block_time(slot).unwrap(), None);
+        assert_eq!(store.get_block_time_millis(slot).unwrap(), None);
     }
 }

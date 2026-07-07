@@ -18,9 +18,8 @@ use crate::{
     database::{
         columns,
         columns::{
-            AddressSignatures, Blockhash, Blocktime, BlocktimeNanos,
-            PerfSamples, SlotSignatures, Transaction, TransactionMemos,
-            TransactionStatus,
+            AddressSignatures, Blockhash, Blocktime, PerfSamples,
+            SlotSignatures, Transaction, TransactionMemos, TransactionStatus,
         },
     },
     errors::LedgerResult,
@@ -176,14 +175,6 @@ impl LedgerTrunctationWorker {
 
             ledger.delete_range_cf::<Blocktime>(start, end)?;
             <Ledger as HasColumn<Blocktime>>::with_column(
-                ledger.as_ref(),
-                |column| {
-                    column.try_decrease_entry_counter(end - start);
-                },
-            );
-
-            ledger.delete_range_cf::<BlocktimeNanos>(start, end)?;
-            <Ledger as HasColumn<BlocktimeNanos>>::with_column(
                 ledger.as_ref(),
                 |column| {
                     column.try_decrease_entry_counter(end - start);
@@ -353,13 +344,6 @@ impl LedgerTrunctationWorker {
             start,
             end,
             Blocktime
-        );
-        compact_cf_or_return!(
-            ledger,
-            cancellation_token,
-            start,
-            end,
-            BlocktimeNanos
         );
         compact_cf_or_return!(
             ledger,

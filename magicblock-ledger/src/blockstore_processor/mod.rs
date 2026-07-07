@@ -110,20 +110,20 @@ async fn replay_blocks(
             transactions: successfull_txs,
         };
 
-        let Some(timestamp) = block.block_time else {
+        if block.block_time.is_none() {
             return Err(LedgerError::BlockStoreProcessor(format!(
                 "Block has no timestamp, {block:?}",
             )));
-        };
+        }
         {
-            // Restore the sub-second precision so the HighPrecisionClock sysvar
-            // is reproduced exactly during replay. Absent (0) for slots written
-            // before high-precision time was persisted.
-            let latest = LatestBlockInner::new_with_nanos(
+            // Restore the millisecond precision so the HighPrecisionClock
+            // sysvar is reproduced exactly during replay.
+            let latest = LatestBlockInner::new_with_millis(
                 block.slot,
                 block.blockhash,
-                timestamp,
-                ledger.get_block_time_nanos(block.slot)?.unwrap_or_default(),
+                ledger
+                    .get_block_time_millis(block.slot)?
+                    .unwrap_or_default(),
             );
             ledger.latest_block().store(latest);
         }

@@ -38,7 +38,6 @@ pub fn cf_descriptors(
         new_cf_descriptor::<AddressSignatures>(options, oldest_slot),
         new_cf_descriptor::<SlotSignatures>(options, oldest_slot),
         new_cf_descriptor::<Blocktime>(options, oldest_slot),
-        new_cf_descriptor::<BlocktimeNanos>(options, oldest_slot),
         new_cf_descriptor::<Blockhash>(options, oldest_slot),
         new_cf_descriptor::<Transaction>(options, oldest_slot),
         new_cf_descriptor::<TransactionMemos>(options, oldest_slot),

@@ -175,18 +175,17 @@ fn process_record_high_precision_clock(
 
     // Read the sysvar straight from the runtime cache
     let high_precision_clock = HighPrecisionClock::get()?;
-    msg!(
-        "Observed unix_timestamp={} nanos={}",
-        high_precision_clock.unix_timestamp,
-        high_precision_clock.nanos
-    );
+    let millis = high_precision_clock.unix_timestamp_millis;
+    msg!("Observed unix_timestamp_millis={}", millis);
 
     // Record the observed value into the counter so the test can assert it is
-    // reproduced identically after a ledger replay.
+    // reproduced identically after a ledger replay. `count` holds the
+    // sub-second component in milliseconds (`[0, 1000)`) and `updates` holds the
+    // whole seconds, together demonstrating the millisecond-accurate timestamp.
     let mut counter =
         FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
-    counter.count = high_precision_clock.nanos as u64;
-    counter.updates = high_precision_clock.unix_timestamp as u64;
+    counter.count = millis.rem_euclid(1000) as u64;
+    counter.updates = millis.div_euclid(1000) as u64;
 
     let size = counter_pda_info.data_len();
     let counter_data = to_vec(&counter)?;

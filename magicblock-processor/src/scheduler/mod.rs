@@ -392,11 +392,10 @@ impl TransactionScheduler {
             .await
             .map_err(|_| "scheduler semaphore closed".to_string())?;
 
-        let block = LatestBlockInner::new_with_nanos(
+        let block = LatestBlockInner::new_with_millis(
             block.slot,
             block.hash,
-            block.timestamp,
-            block.nanos,
+            block.timestamp_millis,
         );
         self.verify_block_as_replica(&block);
         self.ledger
@@ -584,20 +583,19 @@ impl TransactionScheduler {
         // As we have a single node network, we have no
         // option but to use the time from host machine
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        // NOTE: since we can tick very frequently, a lot
-        // of blocks might have identical timestamps
-        let timestamp = now.as_secs() as i64;
-        // The discarded sub-second precision is preserved separately and
-        // exposed via the HighPrecisionClock sysvar.
-        let nanos = now.subsec_nanos();
-        let block = LatestBlockInner::new_with_nanos(
-            self.slot, blockhash, timestamp, nanos,
+        // Sampled at millisecond accuracy: this is the value persisted in the
+        // ledger and exposed via the HighPrecisionClock sysvar, so live
+        // execution and a restart/replay observe exactly the same timestamp.
+        let timestamp_millis = now.as_millis() as i64;
+        let block = LatestBlockInner::new_with_millis(
+            self.slot,
+            blockhash,
+            timestamp_millis,
         );
         let msg = Message::Block(replication::Block {
             slot: block.slot,
             hash: block.blockhash,
-            timestamp: block.clock.unix_timestamp,
-            nanos: block.nanos,
+            timestamp_millis: block.timestamp_millis,
         });
         self.send_replication(msg).await;
         block
@@ -675,8 +673,7 @@ impl TransactionScheduler {
             self.accountsdb.get_account(&HIGH_PRECISION_CLOCK_ID)
         {
             let high_precision_clock = HighPrecisionClock {
-                unix_timestamp: block.clock.unix_timestamp,
-                nanos: block.nanos,
+                unix_timestamp_millis: block.timestamp_millis,
             };
             let _ = account.serialize_data(&high_precision_clock);
             let _ = self

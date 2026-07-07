@@ -15,8 +15,6 @@ const ADDRESS_SIGNATURES_CF: &str = "address_signatures";
 const SLOT_SIGNATURES_CF: &str = "slot_signatures";
 /// Column family for Blocktime
 const BLOCKTIME_CF: &str = "blocktime";
-/// Column family for the sub-second (nanosecond) component of the block time
-const BLOCKTIME_NANOS_CF: &str = "blocktime_nanos";
 /// Column family for Blockhash
 const BLOCKHASH_CF: &str = "blockhash";
 /// Column family for Confirmed Transaction
@@ -58,20 +56,15 @@ pub struct SlotSignatures;
 
 /// The block time column
 ///
+/// Stores the block timestamp as **milliseconds** since the Unix epoch. The
+/// sub-second remainder preserves the precision exposed via the
+/// `HighPrecisionClock` sysvar so it can be reproduced deterministically during
+/// ledger replay; [`Ledger::get_block_time`] rounds it down to whole seconds
+/// for consumers that expect a [`UnixTimestamp`] (RPC `getBlockTime`, etc.).
+///
 /// * index type: `u64` (see [`SlotColumn`])
-/// * value type: [`UnixTimestamp`]
+/// * value type: [`UnixTimestamp`] (milliseconds, despite the type name)
 pub struct Blocktime;
-
-/// The sub-second component of the block time, in nanoseconds.
-///
-/// Stored separately from [`Blocktime`] (which holds whole seconds) so that the
-/// high-precision timestamp exposed via the `HighPrecisionClock` sysvar can be
-/// reproduced deterministically during ledger replay. Absent for slots written
-/// by older validators, in which case it is treated as `0`.
-///
-/// * index type: `u64` (see [`SlotColumn`])
-/// * value type: `u32`
-pub struct BlocktimeNanos;
 
 /// The block hash column
 ///
@@ -115,7 +108,6 @@ pub fn columns() -> Vec<&'static str> {
         AddressSignatures::NAME,
         SlotSignatures::NAME,
         Blocktime::NAME,
-        BlocktimeNanos::NAME,
         Blockhash::NAME,
         Transaction::NAME,
         TransactionMemos::NAME,
@@ -479,17 +471,6 @@ impl ColumnName for Blocktime {
 }
 impl TypedColumn for Blocktime {
     type Type = solana_clock::UnixTimestamp;
-}
-
-// -----------------
-// BlocktimeNanos
-// -----------------
-impl SlotColumn for BlocktimeNanos {}
-impl ColumnName for BlocktimeNanos {
-    const NAME: &'static str = BLOCKTIME_NANOS_CF;
-}
-impl TypedColumn for BlocktimeNanos {
-    type Type = u32;
 }
 
 // -----------------

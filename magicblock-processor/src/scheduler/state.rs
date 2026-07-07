@@ -94,8 +94,7 @@ impl TransactionSchedulerState {
         // Mutable sysvars (updated on each slot transition)
         self.ensure_sysvar(&sysvar::clock::ID, &block.clock);
         let high_precision_clock = HighPrecisionClock {
-            unix_timestamp: block.clock.unix_timestamp,
-            nanos: block.nanos,
+            unix_timestamp_millis: block.timestamp_millis,
         };
         self.ensure_sysvar(&HIGH_PRECISION_CLOCK_ID, &high_precision_clock);
         let slot_hashes =

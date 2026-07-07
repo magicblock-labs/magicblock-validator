@@ -29,20 +29,21 @@ async fn test_high_precision_clock_tracks_clock() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let mut hpc = read_high_precision_clock(&env);
-    // Sub-second remainder must always be a valid fraction of a second.
+    // A real timestamp must have been sampled from wall-clock time.
     assert!(
-        hpc.nanos < 1_000_000_000,
-        "nanos out of range: {}",
-        hpc.nanos
+        hpc.unix_timestamp_millis > 0,
+        "unix_timestamp_millis not set: {}",
+        hpc.unix_timestamp_millis
     );
 
     // Read a consistent (same-block) snapshot of both sysvars. A slot boundary
-    // may land between the two reads, so retry until they agree.
+    // may land between the two reads, so retry until they agree. The
+    // millisecond timestamp divided down to whole seconds must equal Clock.
     let mut consistent = false;
     for _ in 0..50 {
         let clock = read_clock(&env);
         hpc = read_high_precision_clock(&env);
-        if hpc.unix_timestamp == clock.unix_timestamp {
+        if hpc.unix_timestamp_millis.div_euclid(1000) == clock.unix_timestamp {
             consistent = true;
             break;
         }
@@ -50,7 +51,6 @@ async fn test_high_precision_clock_tracks_clock() {
     }
     assert!(
         consistent,
-        "HighPrecisionClock.unix_timestamp never matched Clock.unix_timestamp"
+        "HighPrecisionClock timestamp never matched Clock.unix_timestamp"
     );
-    assert!(hpc.nanos < 1_000_000_000);
 }

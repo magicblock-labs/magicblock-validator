@@ -271,8 +271,9 @@ pub enum FlexiCounterInstruction {
     /// Reads the MagicBlock `HighPrecisionClock` sysvar (from the runtime cache
     /// via `HighPrecisionClock::get()`, no account passed) and records the
     /// observed value into the counter PDA so it can be verified to survive
-    /// ledger replay deterministically: `count` receives the sub-second `nanos`
-    /// and `updates` receives the whole-second `unix_timestamp`.
+    /// ledger replay deterministically: from `unix_timestamp_millis`, `count`
+    /// receives the sub-second component in milliseconds (`[0, 1000)`) and
+    /// `updates` receives the whole seconds.
     ///
     /// Accounts:
     /// 0. `[signer]` The payer that created the account.

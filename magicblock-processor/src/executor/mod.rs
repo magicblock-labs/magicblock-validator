@@ -254,8 +254,7 @@ impl TransactionExecutor {
         let mut cache = self.processor.writable_sysvar_cache().write().unwrap();
         cache.set_sysvar_for_tests(&block.clock);
         cache.set_sysvar_for_tests(&HighPrecisionClock {
-            unix_timestamp: block.clock.unix_timestamp,
-            nanos: block.nanos,
+            unix_timestamp_millis: block.timestamp_millis,
         });
 
         if let Ok(hashes) = cache.get_slot_hashes() {

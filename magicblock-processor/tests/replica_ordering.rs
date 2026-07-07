@@ -220,8 +220,7 @@ async fn test_replay_block_waits_for_queued_transactions() {
         .replay_block(Block {
             slot,
             hash,
-            timestamp: slot as i64,
-            nanos: 0,
+            timestamp_millis: slot as i64 * 1000,
         })
         .await
         .expect("failed to apply replayed block");
@@ -251,8 +250,7 @@ async fn test_replica_replayed_superblock_takes_snapshot_without_publishing() {
         .replay_block(Block {
             slot,
             hash,
-            timestamp: slot as i64,
-            nanos: 0,
+            timestamp_millis: slot as i64 * 1000,
         })
         .await
         .expect("failed to apply replayed superblock boundary");
