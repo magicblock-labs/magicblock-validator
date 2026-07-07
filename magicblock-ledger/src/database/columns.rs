@@ -628,15 +628,6 @@ impl ColumnName for PerfSamples {
 }
 
 // -----------------
-// Column Configuration
-// -----------------
-
-// Returns true if the column family enables compression.
-pub fn should_enable_compression<C: 'static + Column + ColumnName>() -> bool {
-    C::NAME == TransactionStatus::NAME
-}
-
-// -----------------
 // Column Queries
 // -----------------
 pub(crate) const DIRTY_COUNT: i64 = -1;

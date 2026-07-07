@@ -458,14 +458,31 @@ where
             let mark_empty_ref = (!mark_empty_list.is_empty())
                 .then_some(mark_empty_list.as_slice());
 
-            // One shared wire call for the whole claim set.
-            let accs = match this
-                .fetch_accounts(&pubkeys, mark_empty_ref, slot, fetch_origin)
-                .await
+            // One shared wire call for the whole claim set, bounded by the
+            // earliest claim deadline so a hung fetch cannot leave the
+            // waiters of these operations blocked past their timeout.
+            let fetch_deadline = claimed
+                .iter()
+                .map(|op| op.deadline)
+                .min()
+                .expect("claimed is non-empty");
+            let fetch_result = match tokio::time::timeout_at(
+                fetch_deadline,
+                this.fetch_accounts(
+                    &pubkeys,
+                    mark_empty_ref,
+                    slot,
+                    fetch_origin,
+                ),
+            )
+            .await
             {
+                Ok(result) => result.map_err(|err| err.to_string()),
+                Err(_) => Err("account fetch deadline exceeded".to_string()),
+            };
+            let accs = match fetch_result {
                 Ok(accs) => accs,
-                Err(err) => {
-                    let owner_msg = err.to_string();
+                Err(owner_msg) => {
                     let now = tokio::time::Instant::now();
                     for mut op in claimed {
                         let failure = if op.deadline <= now {
