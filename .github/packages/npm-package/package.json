@@ -13,6 +13,7 @@
   "license": "Business Source License 1.1",
   "bin": {
     "ephemeral-validator": "ephemeralValidator.js",
+    "mb-stack": "mbStack.js",
     "mb-test-validator": "mbTestValidator.js",
     "query-filtering-service": "queryFilteringService.js",
     "rpc-router": "rpcRouter.js",
