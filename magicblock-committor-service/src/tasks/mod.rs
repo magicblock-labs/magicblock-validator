@@ -96,7 +96,7 @@ impl BaseTask for BaseTaskImpl {
                 )
             }
             Self::Undelegate(value) => {
-                if value.request_rent_payer.is_some() {
+                if value.include_undelegation_request {
                     dlp_api::instruction_builder::undelegate_with_request_size_budget(
                         AccountSizeClass::Huge,
                     )
@@ -183,18 +183,17 @@ pub struct UndelegateTask {
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
-    pub request_rent_payer: Option<Pubkey>,
+    pub include_undelegation_request: bool,
 }
 
 impl UndelegateTask {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        if let Some(request_rent_payer) = self.request_rent_payer {
+        if self.include_undelegation_request {
             dlp_api::instruction_builder::undelegate_with_request(
                 *validator,
                 self.delegated_account,
                 self.owner_program,
                 self.rent_reimbursement,
-                request_rent_payer,
             )
         } else {
             dlp_api::instruction_builder::undelegate(
@@ -633,7 +632,7 @@ mod serialization_safety_test {
             delegated_account: Pubkey::new_unique(),
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
-            request_rent_payer: None,
+            include_undelegation_request: false,
         }
         .into();
         assert_serializable(&undelegate_task.instruction(&validator));
@@ -684,30 +683,26 @@ mod serialization_safety_test {
     }
 
     #[test]
-    fn test_undelegate_task_uses_request_accounts_when_rent_payer_is_present() {
+    fn test_undelegate_task_uses_request_account_when_included() {
         let delegated_account = Pubkey::new_unique();
-        let request_rent_payer = Pubkey::new_unique();
 
         let ix = UndelegateTask {
             delegated_account,
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
-            request_rent_payer: Some(request_rent_payer),
+            include_undelegation_request: true,
         }
         .instruction(&Pubkey::new_unique());
 
         assert_eq!(ix.program_id, dlp_api::id());
         assert_eq!(ix.data, DlpDiscriminator::Undelegate.to_vec());
-        assert_eq!(ix.accounts.len(), 14);
+        assert_eq!(ix.accounts.len(), 13);
         assert_eq!(
             ix.accounts[12].pubkey,
             undelegation_request_pda_from_delegated_account(&delegated_account)
         );
         assert!(ix.accounts[12].is_writable);
         assert!(!ix.accounts[12].is_signer);
-        assert_eq!(ix.accounts[13].pubkey, request_rent_payer);
-        assert!(ix.accounts[13].is_writable);
-        assert!(!ix.accounts[13].is_signer);
     }
 
     fn make_buffer_commit_task(

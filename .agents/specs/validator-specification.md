@@ -268,12 +268,13 @@ Commit/finalize-style instructions only commit/finalize state and record or
 preserve `DelegationMetadata.undelegation_requester`. The validator-side
 committor completes undelegation by sending a standalone DLP `Undelegate`
 instruction in the finalize stage. When metadata says the requester is
-`OwnerProgram`, the committor must also pass the undelegation request PDA and
-the request account's rent payer to `Undelegate`; when metadata says
-`Validator` or is still `None` at task-build time, no request accounts are
-passed. `None` can be valid for validator-requested undelegation because commit
-and finalize task lists are built before the commit-stage transaction records
-the validator requester on base.
+`OwnerProgram`, the committor must also include the undelegation request PDA in
+`Undelegate`; the delegation metadata rent payer is used for both delegation
+and request account cleanup. When metadata says `Validator` or is still `None`
+at task-build time, no request account is passed. `None` can be valid for
+validator-requested undelegation because commit and finalize task lists are
+built before the commit-stage transaction records the validator requester on
+base.
 
 ### Callback discriminator
 

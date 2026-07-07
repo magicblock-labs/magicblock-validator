@@ -472,9 +472,7 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use dlp_api::state::{
-        DelegationMetadata, UndelegationRequest, UndelegationRequester,
-    };
+    use dlp_api::state::{DelegationMetadata, UndelegationRequester};
     use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, ProgramArgs,
@@ -503,7 +501,6 @@ mod tests {
     #[derive(Default)]
     struct MockInfoFetcher {
         delegation_metadata: HashMap<Pubkey, (UndelegationRequester, Pubkey)>,
-        undelegation_requests: HashMap<Pubkey, UndelegationRequest>,
     }
 
     #[async_trait::async_trait]
@@ -522,14 +519,6 @@ mod tests {
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
-        }
-
-        async fn fetch_rent_reimbursements(
-            &self,
-            pubkeys: &[Pubkey],
-            _: u64,
-        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
 
         async fn fetch_delegation_metadata(
@@ -555,22 +544,6 @@ mod tests {
                             rent_payer,
                         },
                     )
-                })
-                .collect())
-        }
-
-        async fn fetch_undelegation_requests(
-            &self,
-            delegated_accounts: &[Pubkey],
-            _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, UndelegationRequest>>
-        {
-            Ok(delegated_accounts
-                .iter()
-                .filter_map(|pubkey| {
-                    self.undelegation_requests
-                        .get(pubkey)
-                        .map(|request| (*pubkey, *request))
                 })
                 .collect())
         }
@@ -657,7 +630,7 @@ mod tests {
             delegated_account: Pubkey::new_unique(),
             owner_program: Pubkey::default(),
             rent_reimbursement: Pubkey::new_unique(),
-            request_rent_payer: None,
+            include_undelegation_request: false,
         }
     }
 
@@ -933,39 +906,18 @@ mod tests {
         };
         assert_eq!(task.delegated_account, delegated_account);
         assert_eq!(task.rent_reimbursement, delegated_account);
-        assert_eq!(task.request_rent_payer, None);
+        assert!(!task.include_undelegation_request);
     }
 
     #[tokio::test]
-    async fn test_finalize_tasks_use_request_rent_payer_for_owner_program_undelegate(
-    ) {
+    async fn test_finalize_tasks_include_request_for_owner_program_undelegate()
+    {
         let delegated_account = Pubkey::new_unique();
-        let request_rent_payer = Pubkey::new_unique();
         let intent = create_test_intent(0, &[delegated_account], true);
-        let owner_program = intent
-            .get_undelegate_intent_accounts()
-            .unwrap()
-            .first()
-            .unwrap()
-            .account
-            .owner;
         let info_fetcher = Arc::new(MockInfoFetcher {
             delegation_metadata: HashMap::from([(
                 delegated_account,
                 (UndelegationRequester::OwnerProgram, delegated_account),
-            )]),
-            undelegation_requests: HashMap::from([(
-                delegated_account,
-                UndelegationRequest {
-                    delegated_account,
-                    owner_program,
-                    rent_payer: request_rent_payer,
-                    created_slot: 0,
-                    expires_at_slot: 10,
-                    last_commit_id_at_request: 0,
-                    bump: 255,
-                    _padding: [0; 7],
-                },
             )]),
         });
 
@@ -978,68 +930,7 @@ mod tests {
         };
         assert_eq!(task.delegated_account, delegated_account);
         assert_eq!(task.rent_reimbursement, delegated_account);
-        assert_eq!(task.request_rent_payer, Some(request_rent_payer));
-    }
-
-    #[tokio::test]
-    async fn test_finalize_tasks_fail_when_owner_program_request_missing() {
-        let delegated_account = Pubkey::new_unique();
-        let intent = create_test_intent(0, &[delegated_account], true);
-        let info_fetcher = Arc::new(MockInfoFetcher {
-            delegation_metadata: HashMap::from([(
-                delegated_account,
-                (UndelegationRequester::OwnerProgram, delegated_account),
-            )]),
-            undelegation_requests: HashMap::new(),
-        });
-
-        let err = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-            .await
-            .unwrap_err();
-
-        assert!(matches!(
-            err,
-            crate::tasks::task_builder::TaskBuilderError::MissingUndelegationRequest(pubkey)
-                if pubkey == delegated_account
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_finalize_tasks_fail_when_owner_program_request_owner_mismatches(
-    ) {
-        let delegated_account = Pubkey::new_unique();
-        let intent = create_test_intent(0, &[delegated_account], true);
-        let info_fetcher = Arc::new(MockInfoFetcher {
-            delegation_metadata: HashMap::from([(
-                delegated_account,
-                (UndelegationRequester::OwnerProgram, delegated_account),
-            )]),
-            undelegation_requests: HashMap::from([(
-                delegated_account,
-                UndelegationRequest {
-                    delegated_account,
-                    owner_program: Pubkey::new_unique(),
-                    rent_payer: Pubkey::new_unique(),
-                    created_slot: 0,
-                    expires_at_slot: 10,
-                    last_commit_id_at_request: 0,
-                    bump: 255,
-                    _padding: [0; 7],
-                },
-            )]),
-        });
-
-        let err = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-            .await
-            .unwrap_err();
-
-        assert!(matches!(
-            err,
-            crate::tasks::task_builder::TaskBuilderError::InvalidUndelegationRequestOwner {
-                delegated_account: pubkey,
-                ..
-            } if pubkey == delegated_account
-        ));
+        assert!(task.include_undelegation_request);
     }
 
     #[tokio::test]
