@@ -590,8 +590,21 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
 
     subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
 
-    /// Task that periodically updates the active subscriptions gauge
+    /// Task that periodically reconciles subscriptions and updates the
+    /// active subscriptions gauge
     _active_subscriptions_task_handle: Option<task::JoinHandle<()>>,
+}
+
+impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
+    for RemoteAccountProvider<T, U>
+{
+    fn drop(&mut self) {
+        // The reconciler loops forever; abort it so a dropped provider
+        // doesn't leak the task and the state it holds
+        if let Some(handle) = &self._active_subscriptions_task_handle {
+            handle.abort();
+        }
+    }
 }
 
 // -----------------

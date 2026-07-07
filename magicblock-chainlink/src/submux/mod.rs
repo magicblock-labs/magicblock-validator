@@ -455,8 +455,33 @@ where
             );
         }
 
+        let client_key = Self::client_key(&client);
         Self::connected_client_ids_lock(&self.connected_client_ids)
-            .insert(Self::client_key(&client));
+            .insert(client_key);
+
+        // Catch-up pass, mirroring reconnect_client: subscriptions added
+        // after the snapshots above but before this client became visible
+        // in connected_clients_snapshot() would otherwise be missed.
+        // Already-subscribed keys dedup, so this is cheap.
+        let programs =
+            self.program_subs_lock().iter().copied().collect::<Vec<_>>();
+        for program_id in programs {
+            if let Err(err) = client.subscribe_program(program_id).await {
+                Self::connected_client_ids_lock(&self.connected_client_ids)
+                    .remove(&client_key);
+                self.remove_client(&client);
+                return Err(err);
+            }
+        }
+        let mut account_subs =
+            subscribed_accounts_tracker.subscribed_accounts();
+        account_subs.extend(self.never_debounce.iter().copied());
+        if let Err(err) = client.resub_multiple(account_subs).await {
+            Self::connected_client_ids_lock(&self.connected_client_ids)
+                .remove(&client_key);
+            self.remove_client(&client);
+            return Err(err);
+        }
 
         let connected = self
             .connected_clients
