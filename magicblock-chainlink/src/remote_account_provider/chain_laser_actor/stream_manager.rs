@@ -583,9 +583,22 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     // Internal helpers
     // ---------------------------------------------------------
 
+    /// Slot subscription filter attached to every stream. It provides chain
+    /// slot synchronisation and serves as a liveness heartbeat: a healthy
+    /// stream delivers a slot update every chain slot.
+    fn slot_updates_filter() -> HashMap<String, SubscribeRequestFilterSlots> {
+        let mut slots = HashMap::new();
+        slots.insert(
+            "slot_updates".to_string(),
+            SubscribeRequestFilterSlots {
+                filter_by_commitment: Some(true),
+                ..Default::default()
+            },
+        );
+        slots
+    }
+
     /// Build a `SubscribeRequest` for the given account pubkeys.
-    /// Includes a slot subscription for chain slot
-    /// synchronisation.
     fn build_account_request(
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
@@ -600,18 +613,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             },
         );
 
-        let mut slots = HashMap::new();
-        slots.insert(
-            "slot_updates".to_string(),
-            SubscribeRequestFilterSlots {
-                filter_by_commitment: Some(true),
-                ..Default::default()
-            },
-        );
-
         SubscribeRequest {
             accounts,
-            slots,
+            slots: Self::slot_updates_filter(),
             commitment: Some((*commitment).into()),
             from_slot: Some(from_slot),
             ..Default::default()
@@ -718,6 +722,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
         SubscribeRequest {
             accounts,
+            slots: Self::slot_updates_filter(),
             commitment: Some((*commitment).into()),
             from_slot: Some(from_slot),
             ..Default::default()
