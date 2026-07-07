@@ -17,6 +17,7 @@ use magicblock_metrics::metrics::{
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
+use solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError;
 use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     response::Response as RpcResponse,
@@ -46,6 +47,18 @@ use crate::remote_account_provider::{
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
+
+/// Errors that indicate the websocket connection itself is broken, as
+/// opposed to the server rejecting an individual request over a healthy
+/// connection.
+fn is_connection_level_error(err: &PubsubClientError) -> bool {
+    matches!(
+        err,
+        PubsubClientError::ConnectionError(_)
+            | PubsubClientError::WsError(_)
+            | PubsubClientError::ConnectionClosed(_)
+    )
+}
 #[cfg(not(test))]
 const SUBSCRIPTION_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -650,12 +663,27 @@ impl ChainPubsubActor {
                             "Failed to subscribe to account after retrying multiple times",
                         );
                     }
-                    // Fail only this subscription. Tearing the connection
-                    // down here would cancel every other (healthy)
-                    // subscription, which made mass resubscription after a
-                    // reconnect self-destruct on the first failed key.
-                    // Genuine connection loss is detected by the listener
-                    // tasks when their streams end.
+                    // A server-side rejection fails only this subscription.
+                    // Tearing the connection down for it would cancel every
+                    // other (healthy) subscription, which made mass
+                    // resubscription after a reconnect self-destruct on the
+                    // first failed key. A broken connection however must be
+                    // signaled here: with no live listener yet (e.g. right
+                    // after a reconnect) nothing else would detect it and
+                    // the client would stay attached but dead forever.
+                    if is_connection_level_error(&err) {
+                        Self::abort_and_signal_connection_issue(
+                            client_id,
+                            subs.clone(),
+                            program_subs.clone(),
+                            abort_sender,
+                            is_connected.clone(),
+                            &format!(
+                                "Connection error subscribing to \
+                                 account {pubkey}"
+                            ),
+                        );
+                    }
                     subs.lock()
                         .expect("subscriptions lock poisoned")
                         .remove(&pubkey);
@@ -844,8 +872,21 @@ impl ChainPubsubActor {
                     100,
                     &SUBSCRIPTION_FAILURE_COUNT,
                 );
-                // Fail only this subscription; see the account subscribe
-                // failure path for why we don't tear the connection down.
+                // Server-side rejections fail only this subscription;
+                // see the account subscribe failure path for details.
+                if is_connection_level_error(&err) {
+                    Self::abort_and_signal_connection_issue(
+                        client_id,
+                        subs.clone(),
+                        program_subs.clone(),
+                        abort_sender,
+                        is_connected.clone(),
+                        &format!(
+                            "Connection error subscribing to \
+                             program {program_pubkey}"
+                        ),
+                    );
+                }
                 program_subs
                     .lock()
                     .expect("program_subs lock poisoned")
