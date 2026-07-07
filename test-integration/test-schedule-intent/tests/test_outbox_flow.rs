@@ -1050,7 +1050,7 @@ fn ensure_validator_authority() -> Keypair {
 
 fn read_next_intent_id(ctx: &IntegrationTestContext) -> u64 {
     let data = ctx.fetch_ephem_account_data(MAGIC_CONTEXT_PUBKEY).unwrap();
-    MagicContext::intent_id(&data)
+    MagicContext::intent_id(&data).unwrap()
 }
 
 pub fn schedule_commit_instruction(

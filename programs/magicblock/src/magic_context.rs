@@ -62,37 +62,32 @@ impl MagicContext {
     }
 
     /// Returns `intent_id` store in `MagicContext` without deserializing whole account
-    pub fn intent_id(data: &[u8]) -> u64 {
+    pub fn intent_id(data: &[u8]) -> Option<u64> {
         const ID_OFFSET: usize = 0;
         const ID_END: usize = mem::size_of::<u64>();
 
-        let Some(raw_id) = data.get(ID_OFFSET..ID_END) else {
-            return 0;
-        };
+        let raw_id = data.get(ID_OFFSET..ID_END)?;
 
         let mut buf = [0; mem::size_of::<u64>()];
         buf.copy_from_slice(raw_id);
-        u64::from_le_bytes(buf)
+        Some(u64::from_le_bytes(buf))
     }
 
-    pub fn scheduled_intents_len(data: &[u8]) -> u64 {
+    pub fn scheduled_intents_len(data: &[u8]) -> Option<u64> {
         const LEN_OFFSET: usize = mem::size_of::<u64>();
         const LEN_END: usize = LEN_OFFSET + mem::size_of::<u64>();
 
         if is_zeroed(data) {
-            return 0;
+            return None;
         }
-        let Some(raw_len) = data.get(LEN_OFFSET..LEN_END) else {
-            return 0;
-        };
-
+        let raw_len = data.get(LEN_OFFSET..LEN_END)?;
         let mut len = [0; mem::size_of::<u64>()];
         len.copy_from_slice(raw_len);
-        u64::from_le_bytes(len)
+        Some(u64::from_le_bytes(len))
     }
 
     pub fn has_scheduled_intents(data: &[u8]) -> bool {
-        Self::scheduled_intents_len(data) != 0
+        Self::scheduled_intents_len(data).unwrap_or(0) != 0
     }
 }
 
