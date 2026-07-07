@@ -8,6 +8,7 @@ use hyper::{
     Request, Response,
 };
 use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_chainlink::errors::ChainlinkError;
 use magicblock_core::{
     coordination_mode::CoordinationMode,
     link::transactions::{SanitizeableTransaction, WithEncoded},
@@ -285,7 +286,7 @@ impl HttpDispatcher {
         )
         .await
         .unwrap_or_else(|_elapsed| {
-            Err(magicblock_chainlink::errors::ChainlinkError::EnsureAccountsTimeout(
+            Err(ChainlinkError::EnsureAccountsTimeout(
                 ENSURE_ACCOUNTS_TIMEOUT.as_secs(),
             ))
         }) {
