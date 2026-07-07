@@ -219,13 +219,20 @@ fn spawn_deferred_pubsub_clients(
                         // a paced resub of a large set can take minutes and
                         // would starve foreground transitions. The reconnect
                         // path already resubscribes lock-free.
-                        let add_result = submux
-                            .add_client(
-                                client.clone(),
-                                abort_rx,
-                                subscribed_accounts.clone(),
-                            )
-                            .await;
+                        let attach = submux.add_client(
+                            client.clone(),
+                            abort_rx,
+                            subscribed_accounts.clone(),
+                        );
+                        let add_result = tokio::select! {
+                            _ = shutdown.cancelled() => {
+                                // Stop the partial client's subscription
+                                // work; the mux is gone anyway
+                                let _ = client.shutdown().await;
+                                return;
+                            }
+                            res = attach => res,
+                        };
                         match add_result {
                             Ok(()) => {
                                 debug!(
