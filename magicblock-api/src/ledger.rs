@@ -6,7 +6,9 @@ use std::{
 
 use fd_lock::{RwLock, RwLockWriteGuard};
 use magicblock_config::config::LedgerConfig;
-use magicblock_ledger::{Ledger, BLOCKSTORE_DIRECTORY_ROCKS_LEVEL};
+use magicblock_ledger::{
+    Ledger, LedgerOptions, BLOCKSTORE_DIRECTORY_ROCKS_LEVEL,
+};
 use solana_keypair::Keypair;
 use solana_program::clock::Slot;
 use solana_signer::EncodableKey;
@@ -27,7 +29,11 @@ pub(crate) fn init(
             ApiError::UnableToCleanLedgerDirectory(path.display().to_string())
         })?;
     };
-    let ledger = Ledger::open(path)?;
+    let options = LedgerOptions {
+        block_cache_size: config.block_cache_size as usize,
+        ..Default::default()
+    };
+    let ledger = Ledger::open_with_options(path, options)?;
     let slot = if config.reset {
         // If the ledger was reset, then we use whatever
         // current slot is available in the AccountsDB
