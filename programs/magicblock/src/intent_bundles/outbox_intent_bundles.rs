@@ -13,8 +13,7 @@ use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutboxIntentBundle {
     pub inner: ScheduledIntentBundle,
-    // TODO(edwin): define visibility
-    pub status: OutboxIntentBundleStatus,
+    status: OutboxIntentBundleStatus,
 }
 
 impl OutboxIntentBundle {
@@ -23,6 +22,10 @@ impl OutboxIntentBundle {
             inner: intent_bundle,
             status: OutboxIntentBundleStatus::Accepted,
         }
+    }
+
+    pub fn status(&self) -> &OutboxIntentBundleStatus {
+        &self.status
     }
 
     pub(crate) fn apply_stage_transition(

@@ -168,8 +168,9 @@ where
                 .expect(SEMAPHORE_CLOSED_MSG);
 
             // Spawn executor
-            let executor =
-                self.executor_builder.create_instance(intent.status.clone());
+            let executor = self
+                .executor_builder
+                .create_instance(intent.status().clone());
             let inner = self.inner.clone();
 
             let handle = tokio::spawn(Self::execute(

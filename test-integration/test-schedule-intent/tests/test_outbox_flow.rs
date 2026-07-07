@@ -330,7 +330,7 @@ async fn test_pickup_executed_intent() {
     let ExecutionOutput::SingleStage(signature) = result.inner.unwrap() else {
         panic!("Unexpected execution strategy");
     };
-    match &outbox_bundle.status {
+    match outbox_bundle.status() {
         OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
             pending,
         )) => {
@@ -341,7 +341,7 @@ async fn test_pickup_executed_intent() {
     // Builder executor
     let executor = build_stage_intent_executor(
         test_env.executor_ctx_builder().build(),
-        outbox_bundle.status,
+        outbox_bundle.status().clone(),
         DEFAULT_ACTIONS_TIMEOUT,
     );
     let (result, cleanup_handle) = Box::new(executor)
@@ -414,8 +414,8 @@ async fn test_pickup_failed_intent() {
         .expect("fetch suceeds")
         .expect("outbox intent exists");
     assert_eq!(
-        chain_outbox_bundle.status,
-        OutboxIntentBundleStatus::Accepted,
+        chain_outbox_bundle.status(),
+        &OutboxIntentBundleStatus::Accepted,
         "Invalid outbox state"
     );
 
@@ -689,20 +689,20 @@ async fn test_pickup_after_committing() {
         .expect("outbox bundle present");
     assert!(
         matches!(
-            &outbox_bundle.status,
+            outbox_bundle.status(),
             OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
                 TwoStageProgress::Committing(_)
             ))
         ),
         "Expected TwoStage::Committing in outbox, got {:?}",
-        outbox_bundle.status
+        outbox_bundle.status()
     );
 
     // Recovery: build_stage_intent_executor detects the commit sig on chain and
     // runs the finalize stage without re-submitting the commit tx.
     let executor = build_stage_intent_executor(
         test_env.executor_ctx_builder().build(),
-        outbox_bundle.status,
+        outbox_bundle.status().clone(),
         DEFAULT_ACTIONS_TIMEOUT,
     );
     let (result, cleanup_handle) = Box::new(executor)
@@ -787,20 +787,20 @@ async fn test_pickup_after_finalizing() {
         .expect("outbox bundle present");
     assert!(
         matches!(
-            &outbox_bundle.status,
+            outbox_bundle.status(),
             OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
                 TwoStageProgress::Finalizing { .. }
             ))
         ),
         "Expected TwoStage::Finalizing in outbox, got {:?}",
-        outbox_bundle.status
+        outbox_bundle.status()
     );
 
     // Recovery: build_stage_intent_executor detects the finalize sig on chain and
     // returns the same signatures without re-executing either stage.
     let executor = build_stage_intent_executor(
         test_env.executor_ctx_builder().build(),
-        outbox_bundle.status,
+        outbox_bundle.status().clone(),
         DEFAULT_ACTIONS_TIMEOUT,
     );
     let (result, cleanup_handle) = Box::new(executor)

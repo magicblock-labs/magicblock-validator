@@ -63,12 +63,14 @@ pub enum MagicBlockInstruction {
     /// with `status = Accepted`. This is the second part of scheduling a commit.
     ///
     /// N is determined by the number of writable PDA accounts provided beyond
-    /// the two fixed accounts. It is run at the start of the slot.
+    /// the four fixed accounts. It is run at the start of the slot.
     ///
     /// # Account references
-    /// - **0.**   `[SIGNER]` Validator Authority
-    /// - **1.**   `[WRITE]`  Magic Context Account containing the initially scheduled commits
-    /// - **2..n** `[WRITE]`  Outbox intent PDAs, one per accepted intent, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    /// - **0.**   `[WRITE, SIGNER]` Validator Authority
+    /// - **1.**   `[]`              Magic Program
+    /// - **2.**   `[WRITE]`         Magic Context Account containing the initially scheduled commits
+    /// - **3.**   `[WRITE]`         Ephemeral Vault
+    /// - **4..n** `[WRITE]`         Outbox intent PDAs, one per accepted intent, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     AcceptScheduleCommits,
 
     /// Records the attempt to realize a scheduled commit on chain.
@@ -80,8 +82,9 @@ pub enum MagicBlockInstruction {
     ///
     /// # Account references
     /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
-    /// - **1.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
-    /// - **2.** `[WRITE]`         Ephemeral vault
+    /// - **1.** `[]`              Magic Program
+    /// - **2.** `[WRITE]`         Ephemeral Vault
+    /// - **3.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     ScheduledCommitSent(u64),
 
     /// Schedules execution of a single *base intent*.
