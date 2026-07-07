@@ -31,19 +31,17 @@ mod stream_manager;
 
 /// Retry a `handle.write(request)` call with linear backoff.
 ///
-/// Tries up to `MAX_RETRIES` (5) times with 50 ms × attempt
-/// backoff. Returns the original error after all retries are
-/// exhausted.
+/// Retries up to `MAX_RETRIES` (5) times with 50 ms × attempt
+/// backoff. Returns the original error after all retries are exhausted.
 pub(crate) async fn write_with_retry<S: StreamHandle>(
     handle: &S,
     task: &str,
     request: SubscribeRequest,
 ) -> RemoteAccountProviderResult<()> {
     const MAX_RETRIES: usize = 5;
-    // A healthy write flushes in milliseconds. A write into a dead/frozen
-    // gRPC connection hangs without erroring once the sink backpressures,
-    // which would wedge the single actor loop forever - bound it instead.
-    const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+    // A healthy write flushes in milliseconds. Keep the full retry sequence
+    // below the caller's 30s actor response timeout.
+    const WRITE_TIMEOUT: Duration = Duration::from_secs(4);
     let mut retries = MAX_RETRIES;
     let initial_retries = retries;
 

@@ -41,8 +41,8 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to send message to laser actor: {0} ({1})")]
     ChainLaserActorSendError(String, String),
 
-    #[error("Timed out waiting for pubsub actor during {0}")]
-    ChainPubsubActorTimeout(String),
+    #[error("Timed out waiting for laser actor during {0}")]
+    ChainLaserActorTimeout(String),
 
     #[error("Missing API key for: {0}")]
     MissingApiKey(String),

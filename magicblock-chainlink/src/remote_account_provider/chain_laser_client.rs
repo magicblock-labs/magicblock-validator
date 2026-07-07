@@ -58,7 +58,7 @@ async fn await_actor_response<T>(
 ) -> RemoteAccountProviderResult<T> {
     match tokio::time::timeout(ACTOR_RESPONSE_TIMEOUT, rx).await {
         Ok(response) => response?,
-        Err(_) => Err(RemoteAccountProviderError::ChainPubsubActorTimeout(
+        Err(_) => Err(RemoteAccountProviderError::ChainLaserActorTimeout(
             op.to_string(),
         )),
     }
@@ -158,7 +158,7 @@ impl ChainLaserClientImpl {
                     format!("{err:#?}"),
                 )
             }),
-            Err(_) => Err(RemoteAccountProviderError::ChainPubsubActorTimeout(
+            Err(_) => Err(RemoteAccountProviderError::ChainLaserActorTimeout(
                 "send_msg".to_string(),
             )),
         }
