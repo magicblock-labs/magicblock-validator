@@ -52,10 +52,14 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     options.set_use_direct_io_for_flush_and_compaction(true);
     options.set_compaction_readahead_size(4 * 1024 * 1024);
 
-    // Throttle background compaction/flush IO to avoid starving foreground ops
+    // Throttle background compaction/flush IO to avoid starving foreground ops.
+    // This also caps the full-column manual compactions the LedgerTruncator
+    // triggers each truncation cycle (a rewrite of the largest columns): at
+    // 128 MiB/s those saturated the ledger disk at ~275 MB/s combined R+W for
+    // over an hour per cycle. 48 MiB/s keeps combined disk throughput under
+    // ~100 MB/s; the same rewrite just spreads over a longer window.
     // RateLimiter parameters: rate_bytes_per_sec, refill_period_us, fairness
-    // Start with a conservative 128 MiB/s, adjustable via config later if needed
-    options.set_ratelimiter(128 * 1024 * 1024, 100 * 1000, 10);
+    options.set_ratelimiter(48 * 1024 * 1024, 100 * 1000, 10);
 
     // Dynamic level bytes is a good default to balance levels
     options.set_level_compaction_dynamic_level_bytes(true);
