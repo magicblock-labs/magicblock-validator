@@ -31,7 +31,10 @@ impl PubsubClientConfig {
             if pubsub_url.to_lowercase().contains("helius") {
                 Some(HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT)
             } else {
-                None
+                // Unlimited would funnel every subscription through a single
+                // websocket connection; cap it so large subscription sets fan
+                // out across the connection pool.
+                Some(DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT)
             };
         Self {
             pubsub_url,
@@ -184,6 +187,7 @@ pub enum ChainPubsubActorMessage {
 }
 
 pub const HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 80;
+pub const DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 500;
 
 pub const SUBSCRIPTION_UPDATE_CHANNEL_SIZE: usize = 5_000;
 pub const MESSAGE_CHANNEL_SIZE: usize = 1_000;

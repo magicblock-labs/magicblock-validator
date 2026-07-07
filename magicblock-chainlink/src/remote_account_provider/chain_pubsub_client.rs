@@ -113,6 +113,9 @@ pub struct ChainPubsubClientImpl {
     updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
     client_id: String,
     current_resub_delay_ms: Arc<AtomicU64>,
+    /// The configured delay [Self::current_resub_delay_ms] is reset to
+    /// after a resubscription pass completes without failures.
+    initial_resub_delay_ms: u64,
 }
 
 impl ChainPubsubClientImpl {
@@ -130,13 +133,15 @@ impl ChainPubsubClientImpl {
             commitment,
         )
         .await?;
+        let initial_resub_delay_ms = resubscription_delay.as_millis() as u64;
         let current_resub_delay_ms =
-            Arc::new(AtomicU64::new(resubscription_delay.as_millis() as u64));
+            Arc::new(AtomicU64::new(initial_resub_delay_ms));
         Ok(Self {
             actor: Arc::new(actor),
             updates_rcvr: Arc::new(Mutex::new(Some(updates))),
             client_id,
             current_resub_delay_ms,
+            initial_resub_delay_ms,
         })
     }
 }
@@ -258,17 +263,50 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         const RESUB_MULTIPLE_RETRY_PER_PUBKEY: usize = 5;
         let delay_ms = self.current_resub_delay_ms.load(Ordering::SeqCst);
         let delay = Duration::from_millis(delay_ms);
-        let pubkeys_vec: Vec<Pubkey> = pubkeys.into_iter().collect();
+        // Skip pubkeys that are already subscribed (survived the reconnect or
+        // were restored by a previous partial pass) so retry passes only pay
+        // for what is still missing.
+        let subscribed = self.subscriptions_union();
+        let pubkeys_vec: Vec<Pubkey> = pubkeys
+            .into_iter()
+            .filter(|pk| !subscribed.contains(pk))
+            .collect();
+        let total_subs = pubkeys_vec.len();
+        let mut failed = 0usize;
+        let mut last_err = None;
         for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
-            if let Err(err) = self
+            // Best effort: a failed key does not abort the pass. It stays
+            // unsubscribed and is retried on the next reconnect attempt or
+            // repaired by the subscription reconciler.
+            match self
                 .subscribe(*pubkey, Some(RESUB_MULTIPLE_RETRY_PER_PUBKEY))
                 .await
             {
-                // Report the number of subscriptions we managed before failing
-                metrics::set_pubsub_client_resubscribed_count(
-                    &self.client_id,
-                    idx + 1,
-                );
+                Ok(()) => {
+                    // Pace only successful subscribes; failed ones either
+                    // never reached the RPC or already backed off internally.
+                    if idx < total_subs - 1 {
+                        tokio::time::sleep(delay).await;
+                    }
+                }
+                Err(err) => {
+                    failed += 1;
+                    debug!(
+                        error = ?err,
+                        pubkey = %pubkey,
+                        "Re-subscription failed for pubkey",
+                    );
+                    last_err = Some(err);
+                }
+            }
+        }
+        // Report the number of subscriptions restored in this pass
+        metrics::set_pubsub_client_resubscribed_count(
+            &self.client_id,
+            total_subs - failed,
+        );
+        match last_err {
+            Some(err) => {
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
                 // in order to avoid overwhelming the RPC with requests
@@ -276,26 +314,20 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                     delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
                 self.current_resub_delay_ms
                     .store(new_delay, Ordering::SeqCst);
-                debug!(
-                    error = ?err,
-                    total_subs = pubkeys_vec.len(),
-                    processed_subs = idx + 1,
-                    pubkey = %pubkey,
-                    "Re-subscription for multiple pubkeys failed to complete",
+                warn!(
+                    total_subs,
+                    failed, "Re-subscription pass completed with failures",
                 );
-                return Err(err);
+                Err(err)
             }
-            // Only sleep between subscriptions, not after the final one
-            if idx < pubkeys_vec.len() - 1 {
-                tokio::time::sleep(delay).await;
+            None => {
+                // Clean pass: restore the configured pacing so one bad
+                // stretch doesn't throttle all future reconnects.
+                self.current_resub_delay_ms
+                    .store(self.initial_resub_delay_ms, Ordering::SeqCst);
+                Ok(())
             }
         }
-        // Report successful resubscription of all pubkeys
-        metrics::set_pubsub_client_resubscribed_count(
-            &self.client_id,
-            pubkeys_vec.len(),
-        );
-        Ok(())
     }
 
     fn current_resub_delay_ms(&self) -> Option<u64> {

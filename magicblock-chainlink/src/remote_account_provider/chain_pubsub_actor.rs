@@ -650,14 +650,12 @@ impl ChainPubsubActor {
                             "Failed to subscribe to account after retrying multiple times",
                         );
                     }
-                    Self::abort_and_signal_connection_issue(
-                        client_id,
-                        subs.clone(),
-                        program_subs.clone(),
-                        abort_sender,
-                        is_connected.clone(),
-                        &format!("Failed to subscribe to account {pubkey} after {initial_tries} retries")
-                    );
+                    // Fail only this subscription. Tearing the connection
+                    // down here would cancel every other (healthy)
+                    // subscription, which made mass resubscription after a
+                    // reconnect self-destruct on the first failed key.
+                    // Genuine connection loss is detected by the listener
+                    // tasks when their streams end.
                     subs.lock()
                         .expect("subscriptions lock poisoned")
                         .remove(&pubkey);
@@ -846,14 +844,8 @@ impl ChainPubsubActor {
                     100,
                     &SUBSCRIPTION_FAILURE_COUNT,
                 );
-                Self::abort_and_signal_connection_issue(
-                    client_id,
-                    subs.clone(),
-                    program_subs.clone(),
-                    abort_sender,
-                    is_connected.clone(),
-                    &format!("Failed to subscribe to program {program_pubkey}"),
-                );
+                // Fail only this subscription; see the account subscribe
+                // failure path for why we don't tear the connection down.
                 program_subs
                     .lock()
                     .expect("program_subs lock poisoned")

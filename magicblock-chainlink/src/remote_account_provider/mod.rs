@@ -16,10 +16,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
-use futures_util::{
-    future::{join_all, try_join_all},
-    stream::{FuturesUnordered, StreamExt},
-};
+use futures_util::future::{join_all, try_join_all};
 pub use lru_cache::{AccountsLruCache, AddAccountOutcome};
 use magicblock_config::config::GrpcConfig;
 pub(crate) use remote_account::RemoteAccount;
@@ -189,51 +186,70 @@ fn spawn_deferred_pubsub_clients(
     subscribed_accounts: Arc<AccountsLruCache>,
     subscription_transition_lock: Arc<AsyncMutex<()>>,
 ) {
-    tokio::spawn(async move {
-        let mut pubsub_futs = endpoints
-            .into_iter()
-            .map(|ep| {
-                connect_pubsub_client(
-                    ep,
+    // Deferred clients are the fallback update sources; retry connect/attach
+    // with capped backoff instead of dropping them permanently on failure.
+    const INITIAL_ATTACH_RETRY_DELAY: Duration = Duration::from_secs(1);
+    const MAX_ATTACH_RETRY_DELAY: Duration = Duration::from_secs(300);
+    for ep in endpoints {
+        let rpc_client = rpc_client.clone();
+        let chain_slot = chain_slot.clone();
+        let grpc_cfg = grpc_cfg.clone();
+        let submux = submux.clone();
+        let subscribed_accounts = subscribed_accounts.clone();
+        let subscription_transition_lock = subscription_transition_lock.clone();
+        tokio::spawn(async move {
+            let mut retry_delay = INITIAL_ATTACH_RETRY_DELAY;
+            loop {
+                let (label, result) = connect_pubsub_client(
+                    ep.clone(),
                     commitment,
                     rpc_client.clone(),
                     chain_slot.clone(),
                     resubscription_delay,
                     grpc_cfg.clone(),
                 )
-            })
-            .collect::<FuturesUnordered<_>>();
-        while let Some((label, result)) = pubsub_futs.next().await {
-            let (client, abort_rx) = match result {
-                Ok(client) => client,
-                Err(err) => {
-                    warn!(
+                .await;
+                match result {
+                    Ok((client, abort_rx)) => {
+                        let add_result = {
+                            let _transition_guard =
+                                subscription_transition_lock.lock().await;
+                            submux
+                                .add_client(
+                                    client,
+                                    abort_rx,
+                                    subscribed_accounts.clone(),
+                                )
+                                .await
+                        };
+                        match add_result {
+                            Ok(()) => {
+                                debug!(
+                                    endpoint = %label,
+                                    "Attached deferred pubsub client"
+                                );
+                                return;
+                            }
+                            Err(err) => warn!(
+                                endpoint = %label,
+                                error = %err,
+                                retry_in = ?retry_delay,
+                                "Deferred pubsub client failed to attach"
+                            ),
+                        }
+                    }
+                    Err(err) => warn!(
                         endpoint = %label,
                         error = %err,
-                        "Skipping deferred pubsub client that failed to connect"
-                    );
-                    continue;
+                        retry_in = ?retry_delay,
+                        "Deferred pubsub client failed to connect"
+                    ),
                 }
-            };
-
-            let add_result = {
-                let _transition_guard =
-                    subscription_transition_lock.lock().await;
-                submux
-                    .add_client(client, abort_rx, subscribed_accounts.clone())
-                    .await
-            };
-            if let Err(err) = add_result {
-                warn!(
-                    endpoint = %label,
-                    error = %err,
-                    "Skipping deferred pubsub client that failed to attach"
-                );
-                continue;
+                tokio::time::sleep(retry_delay).await;
+                retry_delay = (retry_delay * 2).min(MAX_ATTACH_RETRY_DELAY);
             }
-            debug!(endpoint = %label, "Attached deferred pubsub client");
-        }
-    });
+        });
+    }
 }
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
