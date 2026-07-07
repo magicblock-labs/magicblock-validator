@@ -195,18 +195,24 @@ fn spawn_deferred_pubsub_clients(
         let grpc_cfg = grpc_cfg.clone();
         let submux = submux.clone();
         let subscribed_accounts = subscribed_accounts.clone();
+        // Stop retrying when the owning mux shuts down so an unavailable
+        // endpoint doesn't leak this task past the provider's lifetime
+        let shutdown = submux.shutdown_token();
         tokio::spawn(async move {
             let mut retry_delay = INITIAL_ATTACH_RETRY_DELAY;
             loop {
-                let (label, result) = connect_pubsub_client(
+                let connect = connect_pubsub_client(
                     ep.clone(),
                     commitment,
                     rpc_client.clone(),
                     chain_slot.clone(),
                     resubscription_delay,
                     grpc_cfg.clone(),
-                )
-                .await;
+                );
+                let (label, result) = tokio::select! {
+                    _ = shutdown.cancelled() => return,
+                    connected = connect => connected,
+                };
                 match result {
                     Ok((client, abort_rx)) => {
                         // Attach without the subscription transition lock:
@@ -256,7 +262,10 @@ fn spawn_deferred_pubsub_clients(
                         "Deferred pubsub client failed to connect"
                     ),
                 }
-                tokio::time::sleep(retry_delay).await;
+                tokio::select! {
+                    _ = shutdown.cancelled() => return,
+                    _ = tokio::time::sleep(retry_delay) => {}
+                }
                 retry_delay = (retry_delay * 2).min(MAX_ATTACH_RETRY_DELAY);
             }
         });

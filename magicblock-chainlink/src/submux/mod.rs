@@ -299,6 +299,12 @@ where
         me
     }
 
+    /// Token cancelled when the owning mux shuts down; ties background
+    /// tasks to this mux's lifetime.
+    pub(crate) fn shutdown_token(&self) -> CancellationToken {
+        self.shutdown_token.clone()
+    }
+
     // -----------------
     // Reconnection
     // -----------------
