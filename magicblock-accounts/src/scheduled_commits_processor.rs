@@ -173,7 +173,6 @@ impl ScheduledCommitsProcessorImpl {
                     continue;
                 }
             };
-
             for request in requests {
                 Self::process_observed_undelegation_request_with_retries(
                     request,
