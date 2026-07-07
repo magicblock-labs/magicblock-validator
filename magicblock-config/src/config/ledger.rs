@@ -29,6 +29,12 @@ pub struct LedgerConfig {
     /// ledger truncation logic kicks in, when the disk space
     /// used by the ledger approaches this number.
     pub size: u64,
+
+    /// Capacity in bytes of the RocksDB block cache shared by all ledger
+    /// columns. This is the only read caching layer since the ledger
+    /// bypasses the OS page cache, so production nodes should set 16 GB
+    /// or more. Default: 512 MB.
+    pub block_cache_size: u64,
 }
 
 impl Default for LedgerConfig {
@@ -42,6 +48,7 @@ impl Default for LedgerConfig {
             reset: false,
             verify_keypair: true,
             size: consts::DEFAULT_LEDGER_SIZE,
+            block_cache_size: consts::DEFAULT_LEDGER_BLOCK_CACHE_SIZE,
         }
     }
 }
