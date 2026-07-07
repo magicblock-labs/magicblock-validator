@@ -1,5 +1,3 @@
-use rocksdb::DBCompressionType as RocksCompressionType;
-
 // -----------------
 // AccessType
 // -----------------
@@ -27,6 +25,10 @@ pub struct LedgerOptions {
     // desired open file descriptor limit cannot be configured. Default: true.
     pub enforce_ulimit_nofile: bool,
     pub column_options: LedgerColumnOptions,
+    // Capacity in bytes of the block cache shared by all column families.
+    // The only read caching layer since direct reads bypass the OS page
+    // cache. Default: 512MB, production nodes should configure much more.
+    pub block_cache_size: usize,
 }
 
 impl Default for LedgerOptions {
@@ -38,6 +40,7 @@ impl Default for LedgerOptions {
             access_type: AccessType::Primary,
             enforce_ulimit_nofile: true,
             column_options: LedgerColumnOptions::default(),
+            block_cache_size: crate::database::consts::BLOCK_CACHE_CAPACITY,
         }
     }
 }
@@ -122,15 +125,4 @@ pub enum LedgerCompressionType {
     Snappy,
     Lz4,
     Zlib,
-}
-
-impl LedgerCompressionType {
-    pub(crate) fn to_rocksdb_compression_type(&self) -> RocksCompressionType {
-        match self {
-            Self::None => RocksCompressionType::None,
-            Self::Snappy => RocksCompressionType::Snappy,
-            Self::Lz4 => RocksCompressionType::Lz4,
-            Self::Zlib => RocksCompressionType::Zlib,
-        }
-    }
 }
