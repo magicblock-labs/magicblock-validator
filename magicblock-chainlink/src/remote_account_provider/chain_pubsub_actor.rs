@@ -868,21 +868,20 @@ impl ChainPubsubActor {
                     100,
                     &SUBSCRIPTION_FAILURE_COUNT,
                 );
-                // Server-side rejections fail only this subscription;
-                // see the account subscribe failure path for details.
-                if is_connection_level_error(&err) {
-                    Self::abort_and_signal_connection_issue(
-                        client_id,
-                        subs.clone(),
-                        program_subs.clone(),
-                        abort_sender,
-                        is_connected.clone(),
-                        &format!(
-                            "Connection error subscribing to \
-                             program {program_pubkey}"
-                        ),
-                    );
-                }
+                // Unlike accounts, program subscriptions have no reconciler
+                // repair path, so any failure here would leave this client
+                // permanently missing the program stream. Signal the
+                // reconnector unconditionally: program subs are few and
+                // critical, and the reconnect path restores them with
+                // bounded backoff.
+                Self::abort_and_signal_connection_issue(
+                    client_id,
+                    subs.clone(),
+                    program_subs.clone(),
+                    abort_sender,
+                    is_connected.clone(),
+                    &format!("Failed to subscribe to program {program_pubkey}"),
+                );
                 program_subs
                     .lock()
                     .expect("program_subs lock poisoned")
