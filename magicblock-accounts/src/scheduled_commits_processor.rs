@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    fmt,
-    sync::{Arc, Mutex, MutexGuard},
-    time::Duration,
-};
+use std::{fmt, sync::Arc, time::Duration};
 
 use dlp_api::pda::undelegation_request_pda_from_delegated_account;
 use magicblock_account_cloner::ChainlinkCloner;
@@ -26,37 +21,16 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-const POISONED_MUTEX_MSG: &str =
-    "Mutex of ScheduledCommitsProcessorImpl internal state is poisoned";
 const UNDELEGATION_REQUEST_MAX_ATTEMPTS: usize = 3;
 const UNDELEGATION_REQUEST_RETRY_BASE_DELAY: Duration =
     Duration::from_millis(100);
 
 pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ObservedUndelegationRequestIdentity {
-    expires_at_slot: u64,
-}
-
-impl From<&ObservedUndelegationRequest>
-    for ObservedUndelegationRequestIdentity
-{
-    fn from(request: &ObservedUndelegationRequest) -> Self {
-        Self {
-            expires_at_slot: request.expires_at_slot,
-        }
-    }
-}
-
-type ObservedUndelegationRequests =
-    HashMap<Pubkey, ObservedUndelegationRequestIdentity>;
-
 #[derive(Debug)]
 enum ObservedUndelegationRequestError {
     Transient(&'static str),
     Schedule(TransactionError),
-    PoisonedMutex(&'static str),
 }
 
 impl ObservedUndelegationRequestError {
@@ -72,7 +46,6 @@ impl fmt::Display for ObservedUndelegationRequestError {
             Self::Schedule(err) => {
                 write!(f, "failed to schedule request: {err}")
             }
-            Self::PoisonedMutex(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -83,7 +56,6 @@ pub struct ScheduledCommitsProcessorImpl {
     internal_transaction_scheduler: TransactionSchedulerHandle,
     validator_authority: Arc<Keypair>,
     latest_block_reader: Arc<dyn LatestBlockReader>,
-    observed_undelegation_requests: Arc<Mutex<ObservedUndelegationRequests>>,
 }
 
 trait LatestBlockReader: Send + Sync {
@@ -112,7 +84,6 @@ impl ScheduledCommitsProcessorImpl {
             internal_transaction_scheduler,
             validator_authority: Arc::new(validator_authority),
             latest_block_reader: Arc::new(latest_block.clone()),
-            observed_undelegation_requests: Arc::new(Mutex::default()),
         }
     }
 
@@ -123,7 +94,6 @@ impl ScheduledCommitsProcessorImpl {
         internal_transaction_scheduler: TransactionSchedulerHandle,
         validator_authority: Arc<Keypair>,
         latest_block: Arc<dyn LatestBlockReader>,
-        observed_requests: Arc<Mutex<ObservedUndelegationRequests>>,
     ) {
         loop {
             let request = tokio::select! {
@@ -156,7 +126,6 @@ impl ScheduledCommitsProcessorImpl {
                 &internal_transaction_scheduler,
                 validator_authority.as_ref(),
                 latest_block.as_ref(),
-                &observed_requests,
                 &cancellation_token,
             )
             .await;
@@ -169,7 +138,6 @@ impl ScheduledCommitsProcessorImpl {
         internal_transaction_scheduler: &TransactionSchedulerHandle,
         validator_authority: &Keypair,
         latest_block: &dyn LatestBlockReader,
-        observed_requests: &Arc<Mutex<ObservedUndelegationRequests>>,
         cancellation_token: &CancellationToken,
     ) {
         let mut attempt = 1;
@@ -180,7 +148,6 @@ impl ScheduledCommitsProcessorImpl {
                 internal_transaction_scheduler,
                 validator_authority,
                 latest_block,
-                observed_requests,
             )
             .await;
             match result {
@@ -235,7 +202,6 @@ impl ScheduledCommitsProcessorImpl {
         internal_transaction_scheduler: &TransactionSchedulerHandle,
         validator_authority: &Keypair,
         latest_block: &dyn LatestBlockReader,
-        observed_requests: &Arc<Mutex<ObservedUndelegationRequests>>,
     ) -> Result<(), ObservedUndelegationRequestError> {
         if request.observed_slot >= request.expires_at_slot {
             warn!(
@@ -261,21 +227,6 @@ impl ScheduledCommitsProcessorImpl {
             return Ok(());
         }
 
-        let request_identity =
-            ObservedUndelegationRequestIdentity::from(&request);
-        {
-            let mut observed = Self::lock_observed_requests(observed_requests)?;
-            if observed.get(&request.request_pda) == Some(&request_identity) {
-                debug!(
-                    request_pda = %request.request_pda,
-                    delegated_account = %request.delegated_account,
-                    "Skipping already observed undelegation request"
-                );
-                return Ok(());
-            }
-            observed.insert(request.request_pda, request_identity);
-        }
-
         let delegated = match chainlink
             .accounts_delegated_on_base_and_er(
                 &[request.delegated_account],
@@ -285,10 +236,6 @@ impl ScheduledCommitsProcessorImpl {
         {
             Ok(value) => value.into_iter().next().unwrap_or(false),
             Err(err) => {
-                Self::remove_observed_request(
-                    observed_requests,
-                    &request.request_pda,
-                )?;
                 error!(
                     request_pda = %request.request_pda,
                     delegated_account = %request.delegated_account,
@@ -301,10 +248,6 @@ impl ScheduledCommitsProcessorImpl {
             }
         };
         if !delegated {
-            Self::remove_observed_request(
-                observed_requests,
-                &request.request_pda,
-            )?;
             debug!(
                 request_pda = %request.request_pda,
                 delegated_account = %request.delegated_account,
@@ -337,10 +280,6 @@ impl ScheduledCommitsProcessorImpl {
         );
 
         if let Err(err) = internal_transaction_scheduler.execute(tx).await {
-            Self::remove_observed_request(
-                observed_requests,
-                &request.request_pda,
-            )?;
             return Err(ObservedUndelegationRequestError::Schedule(err));
         }
 
@@ -349,25 +288,6 @@ impl ScheduledCommitsProcessorImpl {
             delegated_account = %request.delegated_account,
             "Scheduled requested undelegation via ScheduleCommitAndUndelegate"
         );
-        Ok(())
-    }
-
-    fn lock_observed_requests<'a>(
-        observed_requests: &'a Arc<Mutex<ObservedUndelegationRequests>>,
-    ) -> Result<
-        MutexGuard<'a, ObservedUndelegationRequests>,
-        ObservedUndelegationRequestError,
-    > {
-        observed_requests.lock().map_err(|_| {
-            ObservedUndelegationRequestError::PoisonedMutex(POISONED_MUTEX_MSG)
-        })
-    }
-
-    fn remove_observed_request(
-        observed_requests: &Arc<Mutex<ObservedUndelegationRequests>>,
-        request_pda: &Pubkey,
-    ) -> Result<(), ObservedUndelegationRequestError> {
-        Self::lock_observed_requests(observed_requests)?.remove(request_pda);
         Ok(())
     }
 
@@ -398,7 +318,6 @@ impl ScheduledCommitsProcessorImpl {
             self.internal_transaction_scheduler.clone(),
             self.validator_authority.clone(),
             self.latest_block_reader.clone(),
-            self.observed_undelegation_requests.clone(),
         ));
     }
 

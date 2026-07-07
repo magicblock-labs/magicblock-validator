@@ -229,8 +229,6 @@ Do not replace this with an ordinary per-instance queue unless the Magic Program
 
 `intents_meta_map` is protected by a standard `Mutex`. Current critical sections are intentionally small: insert metadata and remove metadata by intent ID. Avoid holding this lock across `.await`, committor calls, Chainlink calls, scheduler execution, or expensive logging/formatting.
 
-The code uses `expect(POISONED_MUTEX_MSG)` in the normal processing paths. One recovery cleanup path handles poisoning by logging and taking the inner map. Treat mutex poisoning as a serious invariant violation.
-
 ### Owner-program undelegation requests
 
 `magicblock-api` starts `ScheduledCommitsProcessorImpl::spawn_undelegation_request_processor` for non-replica validators. That observer consumes Chainlink's observed Delegation Program `UndelegationRequest` updates and synthesizes the commit/finalize opportunity for owner-program requested undelegation. The request account carries the delegated account and expiry slot only, so validator logic must verify the request PDA against the delegated account and must not depend on request-local owner, rent payer, or commit nonce fields. Current DLP finalize instructions do not undelegate; the committor finalizes state and then sends standalone DLP `Undelegate`. When `DelegationMetadata.undelegation_requester = OwnerProgram`, the committor includes the derived request PDA in `Undelegate`; DLP validates it and uses the delegation metadata rent payer to close both delegation and request accounts.
