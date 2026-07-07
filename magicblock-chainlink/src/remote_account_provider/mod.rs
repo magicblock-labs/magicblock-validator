@@ -184,7 +184,6 @@ fn spawn_deferred_pubsub_clients(
     grpc_cfg: GrpcConfig,
     submux: SubMuxClient<ChainUpdatesClient>,
     subscribed_accounts: Arc<AccountsLruCache>,
-    subscription_transition_lock: Arc<AsyncMutex<()>>,
 ) {
     // Deferred clients are the fallback update sources; retry connect/attach
     // with capped backoff instead of dropping them permanently on failure.
@@ -196,7 +195,6 @@ fn spawn_deferred_pubsub_clients(
         let grpc_cfg = grpc_cfg.clone();
         let submux = submux.clone();
         let subscribed_accounts = subscribed_accounts.clone();
-        let subscription_transition_lock = subscription_transition_lock.clone();
         tokio::spawn(async move {
             let mut retry_delay = INITIAL_ATTACH_RETRY_DELAY;
             loop {
@@ -211,17 +209,20 @@ fn spawn_deferred_pubsub_clients(
                 .await;
                 match result {
                     Ok((client, abort_rx)) => {
-                        let add_result = {
-                            let _transition_guard =
-                                subscription_transition_lock.lock().await;
-                            submux
-                                .add_client(
-                                    client.clone(),
-                                    abort_rx,
-                                    subscribed_accounts.clone(),
-                                )
-                                .await
-                        };
+                        // Attach without holding the subscription transition
+                        // lock: resubscribing a large set is paced and can
+                        // take minutes, which would starve foreground
+                        // subscription transitions. The reconnect path
+                        // already resubscribes lock-free; concurrent
+                        // transitions are reconciled via add_sub dedup and
+                        // the subscription reconciler.
+                        let add_result = submux
+                            .add_client(
+                                client.clone(),
+                                abort_rx,
+                                subscribed_accounts.clone(),
+                            )
+                            .await;
                         match add_result {
                             Ok(()) => {
                                 debug!(
@@ -871,7 +872,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         config.grpc().clone(),
                         provider.pubsub_client.clone(),
                         provider.lrucache_subscribed_accounts.clone(),
-                        provider.subscription_transition_lock.clone(),
                     );
                 }
                 Ok(provider)
