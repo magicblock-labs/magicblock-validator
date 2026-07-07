@@ -48,9 +48,8 @@ use crate::remote_account_provider::{
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
 
-/// Errors that indicate the websocket connection itself is broken, as
-/// opposed to the server rejecting an individual request over a healthy
-/// connection.
+/// Errors indicating the websocket connection itself is broken, as opposed
+/// to the server rejecting an individual request.
 fn is_connection_level_error(err: &PubsubClientError) -> bool {
     matches!(
         err,
@@ -663,14 +662,11 @@ impl ChainPubsubActor {
                             "Failed to subscribe to account after retrying multiple times",
                         );
                     }
-                    // A server-side rejection fails only this subscription.
-                    // Tearing the connection down for it would cancel every
-                    // other (healthy) subscription, which made mass
-                    // resubscription after a reconnect self-destruct on the
-                    // first failed key. A broken connection however must be
-                    // signaled here: with no live listener yet (e.g. right
-                    // after a reconnect) nothing else would detect it and
-                    // the client would stay attached but dead forever.
+                    // Server-side rejections fail only this subscription:
+                    // tearing the connection down would cancel every other
+                    // healthy one. A broken connection must be signaled
+                    // though - without a live listener yet (e.g. right
+                    // after a reconnect) nothing else detects it.
                     if is_connection_level_error(&err) {
                         Self::abort_and_signal_connection_issue(
                             client_id,

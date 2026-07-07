@@ -31,9 +31,8 @@ impl PubsubClientConfig {
             if pubsub_url.to_lowercase().contains("helius") {
                 Some(HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT)
             } else {
-                // Unlimited would funnel every subscription through a single
-                // websocket connection; cap it so large subscription sets fan
-                // out across the connection pool.
+                // Cap so large subscription sets fan out across the
+                // connection pool instead of serializing on one socket
                 Some(DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT)
             };
         Self {

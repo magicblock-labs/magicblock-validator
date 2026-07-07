@@ -261,13 +261,10 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
         const RESUB_MULTIPLE_RETRY_PER_PUBKEY: usize = 5;
-        // Failed keys are retried here over just the remainder. Returning an
-        // error instead would send the caller into a full reconnect, which
-        // drains every subscription and would destroy restored progress.
+        // Failed keys are retried over just the remainder: erroring out
+        // instead triggers a full reconnect that drains every subscription.
         const MAX_PASSES: usize = 3;
-        // Skip pubkeys that are already subscribed (survived the reconnect or
-        // were restored by a previous partial pass) so retry passes only pay
-        // for what is still missing.
+        // Only resubscribe what is still missing
         let subscribed = self.subscriptions_union();
         let had_active_subs = !subscribed.is_empty();
         let mut remaining: Vec<Pubkey> = pubkeys
@@ -291,9 +288,8 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                     .await
                 {
                     Ok(()) => {
-                        // Pace only successful subscribes (skipping the
-                        // trailing sleep); failed ones either never reached
-                        // the RPC or already backed off internally.
+                        // Pace successful subscribes only; failures
+                        // already backed off internally
                         if idx + 1 < remaining.len() {
                             tokio::time::sleep(delay).await;
                         }
@@ -322,11 +318,8 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             remaining = failed;
             if no_progress {
                 // Further passes won't do better. Error out (triggering a
-                // full reconnect) only if the client has nothing to lose:
-                // no key restored in this call and no pre-existing
-                // subscription that the reconnect drain would destroy.
-                // Otherwise keep the partial progress and leave the
-                // remainder to the reconciler.
+                // full reconnect) only when there is nothing to lose:
+                // nothing restored here and no pre-existing subscriptions.
                 if remaining.len() == total_subs && !had_active_subs {
                     fatal_err = last_err;
                 }
@@ -334,7 +327,6 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             }
         }
 
-        // Report the number of subscriptions restored in this call
         metrics::set_pubsub_client_resubscribed_count(
             &self.client_id,
             total_subs - remaining.len(),
@@ -344,13 +336,11 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             return Err(err);
         }
         if remaining.is_empty() {
-            // Clean outcome: restore the configured pacing so one bad
-            // stretch doesn't throttle all future reconnects.
+            // Clean pass: restore the configured pacing
             self.current_resub_delay_ms
                 .store(self.initial_resub_delay_ms, Ordering::SeqCst);
         } else {
-            // Keep the client attached; the subscription reconciler repairs
-            // the leftover subscriptions in the background.
+            // Leftovers are repaired by the subscription reconciler
             warn!(
                 total_subs,
                 failed = remaining.len(),

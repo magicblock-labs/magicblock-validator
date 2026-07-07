@@ -209,13 +209,10 @@ fn spawn_deferred_pubsub_clients(
                 .await;
                 match result {
                     Ok((client, abort_rx)) => {
-                        // Attach without holding the subscription transition
-                        // lock: resubscribing a large set is paced and can
-                        // take minutes, which would starve foreground
-                        // subscription transitions. The reconnect path
-                        // already resubscribes lock-free; concurrent
-                        // transitions are reconciled via add_sub dedup and
-                        // the subscription reconciler.
+                        // Attach without the subscription transition lock:
+                        // a paced resub of a large set can take minutes and
+                        // would starve foreground transitions. The reconnect
+                        // path already resubscribes lock-free.
                         let add_result = submux
                             .add_client(
                                 client.clone(),
@@ -238,10 +235,9 @@ fn spawn_deferred_pubsub_clients(
                                     retry_in = ?retry_delay,
                                     "Deferred pubsub client failed to attach"
                                 );
-                                // Shut the client down so subscriptions that
-                                // were established before the failure don't
-                                // leak listener tasks; the retry starts over
-                                // with a fresh client.
+                                // Shut down so partially established
+                                // subscriptions don't leak listener tasks
+                                // before retrying with a fresh client
                                 if let Err(err) = client.shutdown().await {
                                     debug!(
                                         endpoint = %label,
