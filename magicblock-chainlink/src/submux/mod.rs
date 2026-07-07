@@ -455,33 +455,8 @@ where
             );
         }
 
-        let client_key = Self::client_key(&client);
         Self::connected_client_ids_lock(&self.connected_client_ids)
-            .insert(client_key);
-
-        // Catch-up pass, mirroring reconnect_client: subscriptions added
-        // after the snapshots above but before this client became visible
-        // in connected_clients_snapshot() would otherwise be missed.
-        // Already-subscribed keys dedup, so this is cheap.
-        let programs =
-            self.program_subs_lock().iter().copied().collect::<Vec<_>>();
-        for program_id in programs {
-            if let Err(err) = client.subscribe_program(program_id).await {
-                Self::connected_client_ids_lock(&self.connected_client_ids)
-                    .remove(&client_key);
-                self.remove_client(&client);
-                return Err(err);
-            }
-        }
-        let mut account_subs =
-            subscribed_accounts_tracker.subscribed_accounts();
-        account_subs.extend(self.never_debounce.iter().copied());
-        if let Err(err) = client.resub_multiple(account_subs).await {
-            Self::connected_client_ids_lock(&self.connected_client_ids)
-                .remove(&client_key);
-            self.remove_client(&client);
-            return Err(err);
-        }
+            .insert(Self::client_key(&client));
 
         let connected = self
             .connected_clients
@@ -503,13 +478,46 @@ where
         }
 
         Self::spawn_reconnectors(
-            vec![(client, abort_rx)],
-            subscribed_accounts_tracker,
+            vec![(client.clone(), abort_rx)],
+            subscribed_accounts_tracker.clone(),
             self.program_subs.clone(),
             self.connected_client_ids.clone(),
             self.connected_clients.clone(),
             self.connected_clients_subscribing_immediately.clone(),
         );
+
+        // Catch-up pass, mirroring reconnect_client: subscriptions added
+        // after the snapshots above but before this client became visible
+        // in connected_clients_snapshot() would otherwise be missed.
+        // Already-subscribed keys dedup, so this is cheap. Failures don't
+        // roll the client back - foreground subscribes may already count
+        // it toward their confirmations - recovery is owned by the
+        // standard machinery: connection-level failures signal the
+        // reconnector spawned above, account stragglers are repaired by
+        // the reconciler.
+        let programs =
+            self.program_subs_lock().iter().copied().collect::<Vec<_>>();
+        for program_id in programs {
+            if let Err(err) = client.subscribe_program(program_id).await {
+                warn!(
+                    client_id = %client.id(),
+                    program_id = %program_id,
+                    error = %err,
+                    "Catch-up program subscription failed after attach"
+                );
+            }
+        }
+        let mut account_subs =
+            subscribed_accounts_tracker.subscribed_accounts();
+        account_subs.extend(self.never_debounce.iter().copied());
+        if let Err(err) = client.resub_multiple(account_subs).await {
+            warn!(
+                client_id = %client.id(),
+                error = %err,
+                "Catch-up account resubscription failed after attach"
+            );
+        }
+
         Ok(())
     }
 
