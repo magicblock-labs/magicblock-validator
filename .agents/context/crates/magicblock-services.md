@@ -2,28 +2,31 @@
 
 ## Purpose
 
-`magicblock-services` contains small reusable service adapters that run alongside the validator and communicate through existing validator/RPC contracts. Its current responsibility is the action-callback adapter used by the committor pipeline to notify user callback programs about Magic Action results.
+`magicblock-services` contains small reusable service adapters that run alongside the validator and communicate through existing validator/RPC contracts. It owns background adapters that bridge existing services, but not the underlying protocol execution engines.
 
 High-level responsibilities:
 
 - implement `magicblock_core::traits::ActionsCallbackScheduler` for validator-runtime use;
 - turn `BaseActionCallback` payloads from committed Magic Actions into local callback transactions;
 - wrap callback results in the `magicblock-magic-program-api` `MagicResponse::V1` wire shape;
-- submit callback transactions asynchronously through Solana's nonblocking `RpcClient`.
+- submit callback transactions asynchronously through Solana's nonblocking `RpcClient`;
+- observe DLP `UndelegationRequest` accounts through Chainlink subscription and polling APIs;
+- submit validator-signed local `ScheduleCommitAndUndelegate` transactions for valid requests.
 
-This crate is settlement-adjacent and can affect Magic Action user experience. It is not the committor itself, does not own intent execution or persistence, and must stay generic enough to be used as a service adapter rather than a protocol owner.
+This crate is settlement-adjacent and can affect Magic Action user experience and undelegation liveness. It is not the committor itself, does not own base-layer intent execution or persistence, and must stay generic enough to be used as a service adapter rather than a protocol owner.
 
-End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns fire-and-forget local Magic Action callback transaction construction and scheduling.
+End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns fire-and-forget local Magic Action callback transaction construction and DLP undelegation request ingestion.
 
 ## Update requirement
 
 Update this guide in the same change whenever behavior or contracts in `magicblock-services` change. In particular, update it for changes to:
 
-- exported modules or public constructors in `magicblock-services/src/lib.rs` or `actions_callback_service.rs`;
+- exported modules or public constructors in `magicblock-services/src/lib.rs`, `actions_callback_service.rs`, or `undelegation_request_service.rs`;
 - the `ActionsCallbackService` transaction layout, signer handling, blockhash source, or callback response encoding;
 - how callback signatures, errors, receipts, discriminators, payloads, or account metas are propagated;
 - asynchronous send behavior, logging, retry/confirmation semantics, or Tokio runtime assumptions;
 - call-site wiring in `magicblock-api` or committor expectations around `ActionsCallbackScheduler`;
+- DLP undelegation request subscription, polling, validation, retry, or internal transaction scheduling behavior;
 - validation commands or integration suites relevant to action callbacks.
 
 Because callbacks are a cross-crate contract between Magic Program scheduling, committor execution, and user callback programs, also update this file when another crate changes `BaseActionCallback`, `MagicResponse`, `CallbackInstruction`, or `ActionsCallbackScheduler` semantics.
@@ -34,10 +37,11 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 
 | Path | Role |
 |---|---|
-| `magicblock-services/Cargo.toml` | Package metadata and dependencies. Depends on `magicblock-core`, `magicblock-magic-program-api`, Solana transaction/RPC crates, Tokio, and tracing. |
-| `magicblock-services/src/lib.rs` | Public module surface. Currently exports only `actions_callback_service`. |
+| `magicblock-services/Cargo.toml` | Package metadata and dependencies. Depends on Chainlink, account-cloner aliases, core, metrics, Magic Program/API, Solana transaction/RPC crates, Tokio, and tracing. |
+| `magicblock-services/src/lib.rs` | Public module surface. Exports service adapters. |
 | `magicblock-services/src/actions_callback_service.rs` | Implements `ActionsCallbackService<L>` and `ActionsCallbackScheduler`. Builds and sends callback transactions. |
-| `magicblock-api/src/magic_validator.rs` | Runtime wiring. `init_committor_service` creates `ActionsCallbackService` with the validator keypair, local latest-block provider, and an RPC client pointed at the validator aperture HTTP endpoint. |
+| `magicblock-services/src/undelegation_request_service.rs` | Implements `UndelegationRequestService`. Consumes Chainlink-observed DLP request accounts, validates them, and schedules local `ScheduleCommitAndUndelegate` transactions. |
+| `magicblock-api/src/magic_validator.rs` | Runtime wiring. Creates `ActionsCallbackService` for the committor and starts/stops `UndelegationRequestService` for non-replica validators. |
 | `magicblock-core/src/traits.rs` | Defines `ActionsCallbackScheduler`, `ActionResult`, `ActionError`, and `CallbackScheduleError`. |
 | `magicblock-core/src/intent.rs` | Defines `BaseActionCallback`, the callback payload this crate consumes. |
 | `magicblock-committor-service/src/intent_executor/utils.rs` | Extracts callbacks from action tasks and invokes the scheduler after success, action failure, or timeout. |
@@ -45,9 +49,10 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 
 Main consumers:
 
-- `magicblock-api`, which constructs the concrete callback service for the validator;
+- `magicblock-api`, which constructs the concrete services for the validator;
 - `magicblock-committor-service`, which is generic over `ActionsCallbackScheduler` and calls it from intent execution;
-- callback-capable Magic Action flows scheduled through `programs/magicblock`.
+- callback-capable Magic Action flows scheduled through `programs/magicblock`;
+- Chainlink DLP request observation APIs consumed by `UndelegationRequestService`.
 
 There are no crate-local tests or README files for `magicblock-services` at the time of writing. Use the committor integration tests when callback behavior changes.
 
@@ -57,9 +62,10 @@ There are no crate-local tests or README files for `magicblock-services` at the 
 
 `src/lib.rs` exposes:
 
-- `pub mod actions_callback_service`.
+- `pub mod actions_callback_service`;
+- `pub mod undelegation_request_service`.
 
-Keep this surface small. New shared services should be added only when they are truly generic validator service adapters and not better owned by API orchestration, committor, RPC-client, or Magic Program crates.
+Keep this surface small. New shared services should be added only when they are truly validator service adapters and not better owned by API orchestration, committor, RPC-client, Chainlink, or Magic Program crates.
 
 ### `ActionsCallbackService<L>`
 
@@ -87,6 +93,35 @@ The service implements `Clone` when `L: Clone`. Cloning uses `authority.insecure
 
 The return value reports scheduling/build success, not confirmed on-chain callback execution. The spawned task logs send failures but does not retry or update the returned result after the fact.
 
+### `UndelegationRequestService`
+
+`UndelegationRequestService` stores:
+
+- `Arc<ProdChainlink<ChainlinkCloner>>` for DLP request subscription, polling, delegated-state checks, and undelegation tracking;
+- `TransactionSchedulerHandle` for validator-signed local `ScheduleCommitAndUndelegate` submission;
+- validator authority keypair used as transaction payer/signer;
+- a `LatestBlockProvider`-backed blockhash reader;
+- a cancellation token and configured polling interval.
+
+Public constructor:
+
+```rust
+UndelegationRequestService::new(
+    chainlink,
+    internal_transaction_scheduler,
+    validator_authority,
+    latest_block,
+    poll_interval,
+)
+```
+
+Runtime methods:
+
+- `start()` starts the Chainlink subscription consumer and, when configured, the polling backfill loop;
+- `stop()` cancels both background loops.
+
+The service schedules local ER transactions only. The committor service remains responsible for accepting resulting Magic Program intents and executing base-layer settlement.
+
 ## Runtime flows
 
 ### Validator startup wiring
@@ -97,6 +132,19 @@ The return value reports scheduling/build success, not confirmed on-chain callba
 4. The committor keeps using the trait boundary; it does not depend directly on this crate's concrete type.
 
 Preserve this separation. `magicblock-services` should not reach back into validator orchestration or committor internals.
+
+### DLP undelegation request processing
+
+```text
+Chainlink DLP request subscription or backfill scan
+  -> UndelegationRequestService validates request PDA
+  -> verify delegated account is delegated on base and ER
+  -> notify Chainlink that undelegation was requested
+  -> submit validator-signed ScheduleCommitAndUndelegate locally
+  -> committor service later accepts and executes the scheduled intent
+```
+
+Live subscription updates are the low-latency path. Polling is a backfill path controlled by `chainlink.undelegation-request-poll-interval`; a zero duration disables polling. Processing retries transient delegated-state checks and internal scheduling failures up to the configured in-code attempt count.
 
 ### Callback scheduling and transaction construction
 
@@ -169,6 +217,9 @@ The callback instruction data combines a program-specific discriminator with a b
 6. The `Noop(counter)` uniqueness instruction must keep otherwise duplicate callback transactions from producing identical signatures.
 7. Do not add blocking RPC confirmation or retry loops to the committor hot path without an explicit architecture decision and performance review.
 8. Keep the crate dependency-light. Generic service adapters should not pull in validator orchestration, persistence, or large protocol owners.
+9. DLP request processing must verify the request PDA against the delegated account before scheduling.
+10. DLP request processing must not bypass the Magic Program or committor pipeline; it should only submit local validator-signed scheduling transactions.
+11. DLP request processing must stay off RPC, scheduler/executor, and account-sync hot paths except for the intentional background Chainlink calls.
 
 ## Common change areas and what to inspect
 
@@ -208,13 +259,25 @@ Be explicit about whether callbacks should be sent to local aperture or base-lay
 
 Start with `magicblock-services/src/lib.rs` and ask whether the new adapter belongs here. Prefer this crate only for small generic services that implement shared traits. Put orchestration in `magicblock-api`, settlement logic in `magicblock-committor-service`, RPC policy in `magicblock-rpc-client`, and protocol wire types in `magicblock-magic-program-api`.
 
+### Changing DLP undelegation request processing
+
+Start with:
+
+- `magicblock-services/src/undelegation_request_service.rs`;
+- `magicblock-chainlink` DLP request subscription and scan APIs;
+- Magic Program `ScheduleCommitAndUndelegate`;
+- `magicblock-committor-service` intent acceptance/execution flow.
+
+Check request PDA validation, base-and-ER delegated-state checks, retry behavior, cancellation, and that the service still schedules through the local transaction scheduler rather than calling committor internals directly.
+
 ## Tests and validation
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-services`.
 - Consumer validation intent: because this crate has no crate-local tests, include relevant `magicblock-committor-service` checks for callback behavior changes.
 - Relevant integration suites: committor suites that exercise action callbacks and timeouts; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
-- Performance-risk validation intent: report any added synchronous RPC work, retries, confirmation, persistence, extra serialization, or unbounded spawning/logging and its effect on committor throughput and callback latency.
+- DLP request validation intent: include `cargo check -p magicblock-api` when validator wiring changes, and include Chainlink/committor focused tests when request observation or scheduled intent execution behavior changes.
+- Performance-risk validation intent: report any added synchronous RPC work, retries, confirmation, persistence, extra serialization, or unbounded spawning/logging and its effect on committor throughput, callback latency, or DLP request processing.
 
 
 ## Adjacent implementation references

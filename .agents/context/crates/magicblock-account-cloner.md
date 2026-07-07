@@ -54,9 +54,9 @@ Main consumers:
 
 - `magicblock-api` creates `ChainlinkCloner::new(transaction_scheduler, latest_block)` during validator startup unless Chainlink is disabled for replica mode.
 - `magicblock-chainlink` owns clone decisions and invokes this crate through `Arc<dyn Cloner>`-style generic wiring.
-- `magicblock-accounts` aliases `ProdChainlink<ChainlinkCloner>` for scheduled commit / undelegation integration.
+- `magicblock-services` aliases `ProdChainlink<ChainlinkCloner>` for DLP undelegation request integration.
 - `magicblock-aperture` stores the same production Chainlink alias in shared RPC state; it reaches the cloner indirectly through Chainlink.
-- `magicblock-api` and `magicblock-accounts` convert `AccountClonerError` where committor diagnostic helpers are used.
+- `magicblock-api` converts `AccountClonerError` where committor diagnostic helpers are used.
 
 Important upstream/downstream relationships:
 
@@ -299,7 +299,7 @@ Risks:
 Inspect first:
 
 - `magicblock-api/src/magic_validator.rs::init_chainlink`;
-- type aliases `InnerChainlinkImpl` / `ChainlinkImpl` in `magicblock-api` and `magicblock-accounts`;
+- type aliases `InnerChainlinkImpl` / `ChainlinkImpl` in `magicblock-api`, `magicblock-chainlink`, and `magicblock-services`;
 - `magicblock-chainlink` production aliases and disabled replication mode behavior.
 
 Risks:
@@ -316,7 +316,7 @@ Inspect first:
 - `magicblock-account-cloner/src/util.rs::get_tx_diagnostics`;
 - `magicblock-committor-service` error types;
 - `magicblock-rpc-client` transaction log/CU helpers;
-- `magicblock-api/src/errors.rs` and `magicblock-accounts/src/errors.rs` conversions.
+- `magicblock-api/src/errors.rs` conversions.
 
 Risks:
 

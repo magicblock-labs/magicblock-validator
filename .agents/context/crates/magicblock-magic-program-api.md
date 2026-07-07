@@ -17,7 +17,7 @@ High-level responsibilities:
 - define callback response types (`MagicResponse`, `MagicResponseV1`, `ActionReceipt`) delivered to base-layer callback programs;
 - provide a `compat` boundary so public API users can opt into Solana 2.x-compatible types through the `backward-compat` feature while the default uses workspace Solana 3.x types.
 
-Do not put Magic Program execution logic, validation policy, persistence, RPC behavior, or committor delivery logic in this crate. Those belong in `programs/magicblock`, `magicblock-core`, `magicblock-accounts`, and the committor/service crates.
+Do not put Magic Program execution logic, validation policy, persistence, RPC behavior, or committor delivery logic in this crate. Those belong in `programs/magicblock`, `magicblock-core`, and the committor/service crates.
 
 ## Update requirement
 

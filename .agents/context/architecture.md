@@ -60,7 +60,7 @@ Architecture rule: the RPC layer should route work to account sync and execution
 
 ### 3. Account synchronization
 
-Owned primarily by `magicblock-chainlink`, `magicblock-account-cloner`, and `magicblock-accounts`.
+Owned primarily by `magicblock-chainlink` and `magicblock-account-cloner`.
 
 Responsibilities:
 
@@ -69,7 +69,7 @@ Responsibilities:
 - subscribe to remote changes where needed,
 - materialize local account/program state,
 - provide account availability to RPC and transaction execution,
-- hand scheduled commit work toward settlement.
+- expose DLP request observations to background services that schedule settlement work.
 
 Architecture rule: this layer prepares local state for execution. It should not decide post-execution account access rules; those belong to the execution/SVM path. Avoid fetch amplification, duplicate clone work, subscription churn, and unnecessary serialization in account availability paths.
 
@@ -106,11 +106,11 @@ Architecture rule: maintenance operations that can race execution must be coordi
 
 ### 6. Base-layer settlement
 
-Owned primarily by `magicblock-program`, `magicblock-magic-program-api`, `magicblock-committor-service`, `magicblock-committor-program`, `magicblock-table-mania`, and `magicblock-rpc-client`.
+Owned primarily by `magicblock-program`, `magicblock-magic-program-api`, `magicblock-services`, `magicblock-committor-service`, `magicblock-committor-program`, `magicblock-table-mania`, and `magicblock-rpc-client`.
 
 Responsibilities:
 
-- let programs schedule commits, commit-and-undelegate operations, intent bundles, and Magic Actions,
+- let programs and validator background services schedule commits, commit-and-undelegate operations, intent bundles, and Magic Actions,
 - persist and recover pending settlement work,
 - build valid base-layer transactions,
 - handle address lookup tables and large changesets,
@@ -128,7 +128,8 @@ Responsibilities:
 - execute scheduled program tasks,
 - replicate primary output to replicas,
 - expose metrics/admin/operator hooks,
-- provide reusable service infrastructure.
+- provide reusable service infrastructure,
+- ingest DLP undelegation requests and submit local scheduling transactions.
 
 Architecture rule: background services should integrate through shared channels/service APIs rather than reaching through unrelated crate internals.
 
@@ -160,7 +161,7 @@ base-layer delegation exists
 ```text
 program invokes Magic Program in ER
   -> MagicContext records scheduled intent
-  -> validator-side processing picks up intent
+  -> validator-side services pick up or create the intent
   -> committor builds/sends base-layer transaction(s)
   -> commit keeps delegation active OR undelegation returns ownership after settlement
 ```

@@ -19,7 +19,7 @@ test-laser:
 	$(HELIUS_LASER_SH_DIR)/03_create-config.sh
 	@echo
 	@echo "## Starting validator in background..."
-	RUST_LOG=warn,magicblock=info,magicblock_chainlink=debug,magicblock_accounts=debug \
+	RUST_LOG=warn,magicblock=info,magicblock_chainlink=debug,magicblock_services=debug \
 			cargo run --bin magicblock-validator --manifest-path=$(DIR)../Cargo.toml \
 			-- /tmp/mb-test-laser.toml \
 			> /tmp/validator.log 2>&1 &

@@ -278,7 +278,7 @@ Inspect first:
 - `magicblock-config/src/config/chain.rs` and `grpc.rs`;
 - `magicblock-api/src/magic_validator.rs::init_chainlink`;
 - `magicblock-chainlink/src/remote_account_provider/`;
-- `magicblock-accounts/src/scheduled_commits_processor.rs` for DLP undelegation-request polling;
+- `magicblock-services/src/undelegation_request_service.rs` for DLP undelegation-request polling;
 - `magicblock-aml` Range risk usage;
 - allowed-program filtering tests in Chainlink.
 

@@ -57,7 +57,7 @@ Main consumers:
 - `magicblock-processor` records slot, transaction count, failed transaction count, and maximum lock-contention queue size.
 - `magicblock-ledger` records ledger column counts, storage size, shutdown/compaction/truncation timers, and RPC API column-family metrics.
 - `magicblock-chainlink` records account fetch outcomes, chain slot, monitored/evicted accounts, pubsub/gRPC subscription state, undelegation lifecycle counts, and some investigation counters.
-- `magicblock-accounts` records scheduled committor-intent count.
+- `magicblock-committor-service` records scheduled committor-intent count.
 - `magicblock-committor-service` records intent backlog, failed intents, busy executors, execution times, CU usage, task/ALT preparation timing, task-info fetcher state, and commit nonce wait time via `magicblock-api`.
 - `magicblock-rpc-client` records signature-subscribe and signature-status confirmation counters.
 - `magicblock-table-mania` records lookup-table fetch/close investigation counters.

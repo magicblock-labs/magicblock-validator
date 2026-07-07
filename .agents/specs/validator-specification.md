@@ -268,7 +268,7 @@ record/metadata. Validators must still verify that the request PDA matches the
 delegated account before scheduling.
 
 The validator observes owner-program `UndelegationRequest` PDAs through
-Chainlink and `magicblock-accounts`. Live request-account subscription updates
+Chainlink and `magicblock-services`. Live request-account subscription updates
 are the low-latency path. A background backfill loop also scans DLP-owned
 accounts with a filtered `getProgramAccounts` every configured interval
 (`chainlink.undelegation-request-poll-interval`, default `5m`) and feeds the
@@ -309,7 +309,7 @@ The committor service realizes scheduled base-layer intents. Its inputs are sche
 The documented commit pipeline is:
 
 1. Magic Program schedules intents in MagicContext.
-2. `magicblock-accounts` / scheduled commit processing picks up intents each slot.
+2. `magicblock-committor-service::IntentExecutionService` accepts scheduled intents from ER state and schedules execution.
 3. `magicblock-committor-service` schedules and executes intents.
 4. Task building creates atomic base-layer tasks such as commit, undelegate, finalize, and action.
 5. Task strategy packs tasks into valid transactions.

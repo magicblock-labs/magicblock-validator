@@ -50,13 +50,13 @@ impl fmt::Display for ObservedUndelegationRequestError {
     }
 }
 
-pub struct ScheduledCommitsProcessorImpl {
+pub struct UndelegationRequestService {
     chainlink: Arc<ChainlinkImpl>,
     cancellation_token: CancellationToken,
     internal_transaction_scheduler: TransactionSchedulerHandle,
     validator_authority: Arc<Keypair>,
     latest_block_reader: Arc<dyn LatestBlockReader>,
-    undelegation_request_poll_interval: Duration,
+    poll_interval: Duration,
 }
 
 trait LatestBlockReader: Send + Sync {
@@ -72,13 +72,13 @@ where
     }
 }
 
-impl ScheduledCommitsProcessorImpl {
+impl UndelegationRequestService {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
         internal_transaction_scheduler: TransactionSchedulerHandle,
         validator_authority: Keypair,
         latest_block: impl LatestBlockProvider,
-        undelegation_request_poll_interval: Duration,
+        poll_interval: Duration,
     ) -> Self {
         Self {
             chainlink,
@@ -86,11 +86,11 @@ impl ScheduledCommitsProcessorImpl {
             internal_transaction_scheduler,
             validator_authority: Arc::new(validator_authority),
             latest_block_reader: Arc::new(latest_block.clone()),
-            undelegation_request_poll_interval,
+            poll_interval,
         }
     }
 
-    async fn undelegation_request_processor(
+    async fn subscription_processor(
         mut requests: broadcast::Receiver<ObservedUndelegationRequest>,
         cancellation_token: CancellationToken,
         chainlink: Arc<ChainlinkImpl>,
@@ -135,7 +135,7 @@ impl ScheduledCommitsProcessorImpl {
         }
     }
 
-    async fn undelegation_request_poll_processor(
+    async fn poll_processor(
         poll_interval: Duration,
         cancellation_token: CancellationToken,
         chainlink: Arc<ChainlinkImpl>,
@@ -361,18 +361,18 @@ impl ScheduledCommitsProcessorImpl {
         )
     }
 
-    pub fn spawn_undelegation_request_processor(self: &Arc<Self>) {
+    pub fn start(self: &Arc<Self>) {
         let Some(requests) = self.chainlink.subscribe_undelegation_requests()
         else {
-            if !self.undelegation_request_poll_interval.is_zero() {
+            if !self.poll_interval.is_zero() {
                 warn!(
                     "Cannot subscribe to DLP undelegation requests; falling back to polling only"
                 );
             }
-            self.spawn_undelegation_request_poll_processor();
+            self.spawn_poll_processor();
             return;
         };
-        tokio::spawn(Self::undelegation_request_processor(
+        tokio::spawn(Self::subscription_processor(
             requests,
             self.cancellation_token.clone(),
             self.chainlink.clone(),
@@ -380,16 +380,16 @@ impl ScheduledCommitsProcessorImpl {
             self.validator_authority.clone(),
             self.latest_block_reader.clone(),
         ));
-        self.spawn_undelegation_request_poll_processor();
+        self.spawn_poll_processor();
     }
 
-    fn spawn_undelegation_request_poll_processor(self: &Arc<Self>) {
-        if self.undelegation_request_poll_interval.is_zero() {
+    fn spawn_poll_processor(self: &Arc<Self>) {
+        if self.poll_interval.is_zero() {
             debug!("Skipping DLP undelegation request poll processor");
             return;
         }
-        tokio::spawn(Self::undelegation_request_poll_processor(
-            self.undelegation_request_poll_interval,
+        tokio::spawn(Self::poll_processor(
+            self.poll_interval,
             self.cancellation_token.clone(),
             self.chainlink.clone(),
             self.internal_transaction_scheduler.clone(),

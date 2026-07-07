@@ -54,7 +54,7 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 Main consumers:
 
 - `magicblock-committor-service`, which re-exports `ChangedAccount`, `Changeset`, and `ChangesetMeta`, builds buffer tasks, and sends committor-program instructions;
-- `magicblock-accounts`, which uses `ChangesetMeta` in scheduled-commit error paths;
+- `magicblock-committor-service`, which uses changeset metadata in scheduled-commit persistence and error paths;
 - integration tests under `test-integration/test-committor-service` and config tests that allow/deny the committor program id;
 - the workspace root, which depends on this crate with `features = ["no-entrypoint"]` for client-side/library use.
 
@@ -214,7 +214,7 @@ Inspect `src/pdas.rs`, the `verified_seeds_and_pda!` macro, all instruction buil
 
 ### Changing commit/change-set metadata
 
-Inspect `src/state/changeset.rs`, `magicblock-committor-service/src/tasks/task_builder.rs`, `magicblock-accounts/src/errors.rs`, and any recovery/persistence code that stores commit metadata. Preserve owner, slot, undelegation, and bundle semantics.
+Inspect `src/state/changeset.rs`, `magicblock-committor-service/src/tasks/task_builder.rs`, and recovery/persistence code that stores commit metadata. Preserve owner, slot, undelegation, and bundle semantics.
 
 ### Changing cleanup behavior
 

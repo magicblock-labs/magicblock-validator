@@ -28,7 +28,7 @@ Whenever behavior in `magicblock-chainlink` changes, or another crate changes Ch
 - ATA/eATA projection,
 - post-delegation action dependency handling,
 - lifecycle-mode behavior,
-- public APIs used by `magicblock-api`, `magicblock-aperture`, `magicblock-accounts`, `magicblock-account-cloner`, or `programs/magicblock`,
+- public APIs used by `magicblock-api`, `magicblock-aperture`, `magicblock-services`, `magicblock-account-cloner`, or `programs/magicblock`,
 - tests or validation commands relevant to this crate,
 - performance characteristics of fetch/clone, deduplication, subscription, LRU/eviction, or update-ordering paths.
 
@@ -54,7 +54,7 @@ Main consumers:
 
 - `magicblock-api` constructs the production Chainlink stack during validator startup.
 - `magicblock-aperture` uses Chainlink for RPC read misses and transaction submission account availability.
-- `magicblock-accounts` uses Chainlink/account cloning glue for account-manager flows and scheduled commit integration.
+- `magicblock-services` consumes Chainlink DLP request subscription/scan APIs for undelegation request processing.
 - `magicblock-account-cloner` implements the `Cloner` trait and submits clone/program/evict transactions into the local validator.
 - `programs/magicblock` uses `dev-context` Chainlink helpers in tests and validator-only program flows.
 
@@ -76,7 +76,7 @@ Important methods:
 - `fetch_accounts(pubkeys, fetch_origin)`: ensures accounts and then reads them from the local bank.
 - `accounts_delegated_on_base_and_er(pubkeys, fetch_origin)`: checks that each account is DLP-owned on base and represented as delegated/DLP-owned locally.
 - `undelegation_requested(pubkey)`: called by committor/account flows before an account is undelegated so Chainlink keeps watching for base-layer completion.
-- `fetch_undelegation_requests()`: scans base-layer Delegation Program accounts for active `UndelegationRequest` PDAs using filtered `getProgramAccounts` and returns decoded `ObservedUndelegationRequest`s for `magicblock-accounts`.
+- `fetch_undelegation_requests()`: scans base-layer Delegation Program accounts for active `UndelegationRequest` PDAs using filtered `getProgramAccounts` and returns decoded `ObservedUndelegationRequest`s for `magicblock-services`.
 - `fetch_count()` / `is_watching()`: mainly observability/testing helpers.
 
 Disabled replication mode is intentionally conservative:
@@ -282,7 +282,7 @@ Owner-program undelegation requests are discovered in two ways:
 - Live updates: DLP-owned `UndelegationRequest` account subscription/program-subscription updates are decoded in `FetchCloner::process_subscription_update` and broadcast as `ObservedUndelegationRequest`.
 - Backfill scans: `FetchCloner::fetch_undelegation_requests` calls `getProgramAccounts` for `dlp_api::id()` with a `DataSize(UndelegationRequest::size_with_discriminator())` filter and a discriminator `memcmp` at offset `0`, then decodes each returned account with `UndelegationRequest::try_from_bytes_with_discriminator`.
 
-The scan uses Base64Zstd account encoding and gets a nearby base-chain slot for `observed_slot`. Malformed matching accounts are logged and skipped; a bad account must not abort the whole scan. Polling cadence is controlled by `chainlink.undelegation-request-poll-interval` in `magicblock-config` and consumed by `magicblock-accounts`.
+The scan uses Base64Zstd account encoding and gets a nearby base-chain slot for `observed_slot`. Malformed matching accounts are logged and skipped; a bad account must not abort the whole scan. Polling cadence is controlled by `chainlink.undelegation-request-poll-interval` in `magicblock-config` and consumed by `magicblock-services`.
 
 ### Greedy discovery
 
@@ -378,7 +378,7 @@ Changing SubMux behavior can affect ordering, duplicate clone submissions, and p
 
 ## Lifecycle mode and configuration
 
-`ChainlinkConfig` wraps `RemoteAccountProviderConfig` and includes settings such as `remove_confined_accounts`, allowed program filters, resubscription delay, Range risk checks, and `undelegation_request_poll_interval` for the DLP request backfill consumer in `magicblock-accounts`.
+`ChainlinkConfig` wraps `RemoteAccountProviderConfig` and includes settings such as `remove_confined_accounts`, allowed program filters, resubscription delay, Range risk checks, and `undelegation_request_poll_interval` for the DLP request backfill consumer in `magicblock-services`.
 
 `RemoteAccountProviderConfig` includes:
 
@@ -494,7 +494,7 @@ Start with:
 ## Adjacent implementation references
 
 - `.agents/context/crates/magicblock-account-cloner.md` — clone request materialization boundary implemented by the production cloner.
-- `.agents/context/crates/magicblock-accounts.md` — scheduled commit integration and undelegation notification consumer.
+- `.agents/context/crates/magicblock-services.md` — DLP undelegation request consumer.
 - `.agents/context/crates/magicblock-aperture.md` — RPC read and transaction submission account-ensure caller.
 - `.agents/context/crates/magicblock-aml.md` — signer risk-check integration for post-delegation actions.
 - `magicblock-chainlink/src/cloner/mod.rs` — `Cloner`, `AccountCloneRequest`, and `DelegationActions` boundary.

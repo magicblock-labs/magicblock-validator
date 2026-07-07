@@ -12,7 +12,7 @@ We can't directly spawn a bunch of **IntentExecutor**s. The reason is that one m
 Details: Once message make it to `CommittorProcessor::schedule_base_intents` it outsources intent to tokio task `IntentExecutionEngine` which figures out a scheduling.
 
 ## IntentExecutionEngine
-Accepts new messages, schedules them, and spawns up to `MAX_EXECUTORS`(50) parallel **IntentExecutor**s for each Intent. Once a particular **IntentExecutor** finishes execution we broadcast result to subscribers, like: `RemoteScheduledCommitsProcessor` or `ExternalAccountsManager`
+Accepts new messages, schedules them, and spawns up to `MAX_EXECUTORS`(50) parallel **IntentExecutor**s for each Intent. Once a particular **IntentExecutor** finishes execution we broadcast result to subscribers, such as `IntentExecutionService` result handling or test/external managers.
 
 Details: For scheduling logic see **IntentScheduler**.  Number of parallel **IntentExecutor** is controller by Semaphore.
 

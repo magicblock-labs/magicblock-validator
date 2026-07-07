@@ -25,7 +25,7 @@ flowchart TB
     subgraph delegation["Base-chain delegation"]
         chainlink[magicblock-chainlink]
         cloner[magicblock-account-cloner]
-        accounts[magicblock-accounts]
+        services[magicblock-services]
         committor[magicblock-committor-service]
         tablemania[magicblock-table-mania]
         tasksched[magicblock-task-scheduler]
@@ -63,7 +63,8 @@ snapshot) → init committor service → init chainlink → genesis accounts →
 load programs → spawn transaction scheduler (in `StartingUp` mode) → spawn RPC
 thread → init task scheduler. `start()` then optionally replays the ledger,
 defragments accountsdb, resets stale accounts, recovers pending commit intents, and
-finally flips the scheduler to `Primary`/`Replica` mode.
+finally flips the scheduler to `Primary`/`Replica` mode and starts background DLP
+undelegation request processing for non-replica validators.
 
 **Shutdown ordering matters** (`stop()`): cancellation tokens first, committor
 service stopped *last* among services (in-flight intents), then threads joined, then
@@ -179,9 +180,11 @@ loader-specific paths (V1→V3 conversion, V4 buffer + deploy).
    in the 5 MB `MagicContext` account. A second validator-signed instruction
    (`AcceptScheduleCommits`) moves staged intents to a global map — a deliberate
    two-stage flow across slot boundaries.
-2. [`magicblock-accounts`](../magicblock-accounts)
-   (`ScheduledCommitsProcessorImpl`) picks intents up each slot (driven by the slot
-   ticker) and feeds [`magicblock-committor-service`](../magicblock-committor-service).
+2. [`magicblock-committor-service`](../magicblock-committor-service)
+   (`IntentExecutionService`) accepts scheduled intents from ER state and executes
+   them. [`magicblock-services`](../magicblock-services) observes DLP
+   `UndelegationRequest` accounts and submits local `ScheduleCommitAndUndelegate`
+   transactions that feed the same scheduled-intent path.
 3. The committor service builds base-chain transactions:
    [`tasks/task_strategist.rs`](../magicblock-committor-service/src/tasks/task_strategist.rs)
    packs commit tasks under CPI-depth limits (falling back to a two-stage
@@ -250,8 +253,8 @@ flowchart TB
     events --> ep[EventProcessor → WS subs / geyser]
     svm --> tasks[tasks channel → task-scheduler]
     sched -->|"slot boundary: streaming blockhash"| repl[Replicator → NATS replicas]
-    magicprog["magic program ScheduleCommit"] --> scp[ScheduledCommitsProcessor]
-    scp --> commsvc["committor-service<br/>TaskStrategist + TableMania"]
+    magicprog["magic program ScheduleCommit"] --> commsvc["committor-service<br/>IntentExecutionService + TaskStrategist + TableMania"]
+    services2["services DLP request processor"] --> magicprog
     commsvc -->|commit txs| remote
 ```
 
