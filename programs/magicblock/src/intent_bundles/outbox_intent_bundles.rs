@@ -1,8 +1,11 @@
 use std::ops::Deref;
 
 use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
-use magicblock_magic_program_api::outbox::{ExecutionStage, TwoStageProgress};
+use magicblock_magic_program_api::outbox::{
+    ExecutionStage, PendingTransaction, TwoStageProgress,
+};
 use serde::{Deserialize, Serialize};
+use solana_hash::Hash;
 use solana_signature::Signature;
 
 use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
@@ -82,7 +85,10 @@ impl OutboxIntentBundleStatus {
         Self::Executing(ExecutionStage::TwoStage(
             TwoStageProgress::Finalizing {
                 commit: Signature::default(),
-                finalize: Signature::default(),
+                finalize: PendingTransaction {
+                    signature: Signature::default(),
+                    blockhash: Hash::default(),
+                },
             },
         ))
     }

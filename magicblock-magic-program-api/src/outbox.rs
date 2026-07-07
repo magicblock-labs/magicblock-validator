@@ -1,18 +1,29 @@
 use serde::{Deserialize, Serialize};
+use solana_hash::Hash;
 use solana_signature::Signature;
+
+/// A transaction that was sent but not yet confirmed, along with the
+/// blockhash it was built with. The blockhash is needed on recovery to
+/// tell apart "may still land" (blockhash still valid) from "guaranteed
+/// dead" (blockhash expired) when the signature isn't found on-chain.
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct PendingTransaction {
+    pub signature: Signature,
+    pub blockhash: Hash,
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum ExecutionStage {
-    SingleStage(Signature),
+    SingleStage(PendingTransaction),
     TwoStage(TwoStageProgress),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum TwoStageProgress {
-    Committing(Signature),
+    Committing(PendingTransaction),
     Finalizing {
         commit: Signature,
-        finalize: Signature,
+        finalize: PendingTransaction,
     },
 }
 
@@ -57,10 +68,10 @@ impl ExecutionStage {
         Ok(())
     }
 
-    pub fn pending_signature(&self) -> &Signature {
+    pub fn pending_transaction(&self) -> &PendingTransaction {
         match self {
-            Self::SingleStage(signature) => signature,
-            Self::TwoStage(value) => value.pending_signature(),
+            Self::SingleStage(pending) => pending,
+            Self::TwoStage(value) => value.pending_transaction(),
         }
     }
 }
@@ -77,10 +88,10 @@ impl TwoStageProgress {
             }
             // Commit was successfully executed and now we move on to Finalizing
             (
-                Self::Committing(this_sig),
+                Self::Committing(this_pending),
                 Self::Finalizing { commit, finalize },
             ) => {
-                if this_sig != &commit {
+                if this_pending.signature != commit {
                     return Err(
                         "commit signature mismatch on advance to Finalizing",
                     );
@@ -116,9 +127,9 @@ impl TwoStageProgress {
         Ok(())
     }
 
-    pub fn pending_signature(&self) -> &Signature {
+    pub fn pending_transaction(&self) -> &PendingTransaction {
         match self {
-            Self::Committing(signature) => signature,
+            Self::Committing(pending) => pending,
             Self::Finalizing { finalize, .. } => finalize,
         }
     }

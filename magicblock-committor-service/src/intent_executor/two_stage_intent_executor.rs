@@ -1,7 +1,4 @@
-use std::{
-    ops::ControlFlow,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
@@ -20,7 +17,7 @@ use crate::{
         strategy_executor::{
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
             utils::{
-                check_pending_signature, execute_with_timeout, FinalizeStage,
+                execute_with_timeout, resolve_pending_signature, FinalizeStage,
             },
         },
         utils::{build_commit_finalize_tasks, execute_two_stage_flow},
@@ -176,31 +173,28 @@ where
         intent: ScheduledIntentBundle,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let pending_signature = self.stage.pending_signature();
-        let flow =
-            check_pending_signature(&self.ctx.intent_client, pending_signature)
+        let pending = *self.stage.pending_transaction();
+        let succeeded =
+            resolve_pending_signature(&self.ctx.intent_client, &pending)
                 .await?;
 
-        match (&self.stage, flow) {
+        match (&self.stage, succeeded) {
             // Signature wasn't confirmed - need to reexecute from commit
-            (TwoStageProgress::Committing(_), ControlFlow::Continue(())) => {
+            (TwoStageProgress::Committing(_), false) => {
                 self.execute_committing_intent(intent, execution_report)
                     .await
             }
             // Signature confirmed - commit was executed, finalizing...
-            (TwoStageProgress::Committing(commit), ControlFlow::Break(())) => {
+            (TwoStageProgress::Committing(commit), true) => {
                 self.execute_finalizing_intent(
                     intent,
-                    *commit,
+                    commit.signature,
                     execution_report,
                 )
                 .await
             }
             // Finalize didn't occur - execute
-            (
-                TwoStageProgress::Finalizing { commit, .. },
-                ControlFlow::Continue(()),
-            ) => {
+            (TwoStageProgress::Finalizing { commit, .. }, false) => {
                 self.execute_finalizing_intent(
                     intent,
                     *commit,
@@ -210,13 +204,10 @@ where
             }
             // Finalize was already executed on a previous run - notify the
             // outbox so it isn't left pending and rediscovered again.
-            (
-                TwoStageProgress::Finalizing { commit, finalize },
-                ControlFlow::Break(()),
-            ) => {
+            (TwoStageProgress::Finalizing { commit, finalize }, true) => {
                 let output = Ok(ExecutionOutput::TwoStage {
                     commit_signature: *commit,
-                    finalize_signature: *finalize,
+                    finalize_signature: finalize.signature,
                 });
                 self.ctx
                     .outbox_client

@@ -1,7 +1,9 @@
 use std::{mem, sync::Arc};
 
 use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
-use magicblock_program::outbox::{ExecutionStage, TwoStageProgress};
+use magicblock_program::outbox::{
+    ExecutionStage, PendingTransaction, TwoStageProgress,
+};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -34,9 +36,9 @@ pub struct Initialized {
     commit_strategy: TransactionStrategy,
     /// Finalize stage strategy
     finalize_strategy: TransactionStrategy,
-    /// Signature pending confirmation
+    /// Transaction pending confirmation
     /// Sources: Outbox with status Committing, timeout
-    pending_signature: Option<Signature>,
+    pending_transaction: Option<PendingTransaction>,
     current_attempt: u8,
 }
 
@@ -48,7 +50,7 @@ impl Initialized {
         Self {
             commit_strategy,
             finalize_strategy,
-            pending_signature: None,
+            pending_transaction: None,
             current_attempt: 0,
         }
     }
@@ -61,7 +63,7 @@ pub struct Committed {
     finalize_strategy: TransactionStrategy,
     /// Signature pending confirmation
     /// Sources: Outbox with status Finalizing, timeout
-    pending_signature: Option<Signature>,
+    pending_transaction: Option<PendingTransaction>,
     current_attempt: u8,
 }
 
@@ -73,7 +75,7 @@ impl Committed {
         Self {
             commit_signature,
             finalize_strategy,
-            pending_signature: None,
+            pending_transaction: None,
             current_attempt: 0,
         }
     }
@@ -146,7 +148,7 @@ where
         let execution_state = ExecutionState {
             current_attempt: &mut self.state.current_attempt,
             transaction_strategy: &mut self.state.commit_strategy,
-            pending_signature: &mut self.state.pending_signature,
+            pending_transaction: &mut self.state.pending_transaction,
             execution_report: self.execution_report,
         };
         let commit_stage_patcher = CommitStagePatcher {
@@ -245,7 +247,7 @@ where
             state: Committed {
                 commit_signature,
                 finalize_strategy: self.state.finalize_strategy,
-                pending_signature: None,
+                pending_transaction: None,
                 current_attempt: 0,
             },
         }
@@ -293,7 +295,7 @@ where
         let execution_state = ExecutionState {
             current_attempt: &mut self.state.current_attempt,
             transaction_strategy: &mut self.state.finalize_strategy,
-            pending_signature: &mut self.state.pending_signature,
+            pending_transaction: &mut self.state.pending_transaction,
             execution_report: self.execution_report,
         };
         let finalize_stage_patcher = FinalizeStagePatcher {

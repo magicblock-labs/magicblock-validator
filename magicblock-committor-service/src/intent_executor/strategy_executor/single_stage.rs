@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
-use magicblock_program::outbox::ExecutionStage;
+use magicblock_program::outbox::{ExecutionStage, PendingTransaction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -30,7 +30,7 @@ use crate::{
 
 pub struct SingleStageStrategyExecutor<'a, F, A, O> {
     current_attempt: u8,
-    pending_signature: Option<Signature>,
+    pending_transaction: Option<PendingTransaction>,
     execution_report: &'a mut IntentExecutionReport,
 
     authority: Keypair,
@@ -63,7 +63,7 @@ where
         Self {
             authority,
             intent_id,
-            pending_signature: None,
+            pending_transaction: None,
             intent_client,
             task_info_fetcher,
             outbox_client,
@@ -97,7 +97,7 @@ where
         let execution_state = ExecutionState {
             current_attempt: &mut self.current_attempt,
             transaction_strategy: &mut self.transaction_strategy,
-            pending_signature: &mut self.pending_signature,
+            pending_transaction: &mut self.pending_transaction,
             execution_report: self.execution_report,
         };
         let result = stage_execution_loop(

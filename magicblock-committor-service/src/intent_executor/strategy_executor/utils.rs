@@ -4,14 +4,14 @@ use async_trait::async_trait;
 use magicblock_core::traits::{
     ActionError, ActionResult, ActionsCallbackScheduler,
 };
-use magicblock_program::outbox::ExecutionStage;
+use magicblock_program::outbox::{ExecutionStage, PendingTransaction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
-use tokio::time::timeout;
-use tracing::{error, info, warn};
+use tokio::time::{sleep, timeout};
+use tracing::{error, info};
 
 use crate::{
     intent_executor::{
@@ -39,10 +39,14 @@ use crate::{
 
 const STAGE_LOOP_CEILING: u8 = 10;
 
+/// How long to wait between re-checks of a pending signature that is still
+/// within its blockhash's valid window (i.e. it might still land).
+const PENDING_SIGNATURE_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
 pub(in crate::intent_executor) struct ExecutionState<'a> {
     pub current_attempt: &'a mut u8,
     pub transaction_strategy: &'a mut TransactionStrategy,
-    pub pending_signature: &'a mut Option<Signature>,
+    pub pending_transaction: &'a mut Option<PendingTransaction>,
     pub execution_report: &'a mut IntentExecutionReport,
 }
 
@@ -54,7 +58,7 @@ pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
     transaction_preparator: &T,
     mut patcher: P,
     intent_id: u64,
-    make_outbox_stage: impl Fn(Signature) -> ExecutionStage,
+    make_outbox_stage: impl Fn(PendingTransaction) -> ExecutionStage,
     map_preparation_err: fn(TransactionPreparatorError) -> IntentExecutorError,
     state: ExecutionState<'a>,
 ) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>>
@@ -65,14 +69,20 @@ where
     P: Patcher,
 {
     loop {
-        if let Some(ref sig) = state.pending_signature {
-            let flow = check_pending_signature(intent_client, sig).await?;
-            // Pending signature corresponds to succeeded transaction - break
-            if let ControlFlow::Break(()) = flow {
-                break Ok(Ok(*sig));
+        if let Some(ref pending) = state.pending_transaction {
+            match check_pending_signature(intent_client, pending).await? {
+                PendingSignatureStatus::Succeeded => {
+                    break Ok(Ok(pending.signature));
+                }
+                // May still land - don't resend, just re-check later
+                PendingSignatureStatus::Pending => {
+                    sleep(PENDING_SIGNATURE_POLL_INTERVAL).await;
+                    continue;
+                }
+                PendingSignatureStatus::Rejected => {
+                    *state.pending_transaction = None;
+                }
             }
-
-            *state.pending_signature = None;
         }
 
         *state.current_attempt += 1;
@@ -88,18 +98,19 @@ where
         .map_err(map_preparation_err)?;
 
         // Record in outbox before sending
-        let signature = prepared_transaction.get_signature();
+        let pending = PendingTransaction {
+            signature: *prepared_transaction.get_signature(),
+            blockhash: *prepared_transaction.get_recent_blockhash(),
+        };
         outbox_client
-            .set_intent_execution_stage(
-                intent_id,
-                make_outbox_stage(*signature),
-            )
+            .set_intent_execution_stage(intent_id, make_outbox_stage(pending))
             .await
             .map_err(Into::into)?;
 
         // Now record locally signature of tx we about to send
         // Precaution for timeout in between
-        *state.pending_signature = Some(*signature);
+        *state.pending_transaction = Some(pending);
+        let signature = &pending.signature;
 
         // Send signed tx
         let execution_result = intent_client
@@ -110,7 +121,7 @@ where
             .await;
 
         // Result returned, cleanup pending signature
-        *state.pending_signature = None;
+        *state.pending_transaction = None;
 
         let execution_err = match execution_result {
             Ok(()) => return Ok(Ok(*signature)),
@@ -163,35 +174,85 @@ pub async fn prepare_transaction<T: TransactionPreparator>(
     Ok(transaction)
 }
 
-/// Checks a `pending_signature` loaded from the outbox against the full
-/// transaction history. Returns `Break(sig)` if the tx succeeded — the caller
-/// can short-circuit and skip re-execution. Returns `Continue` for every other
-/// outcome (tx failed, never sent, or RPC returned no entry), letting the
-/// normal execution loop proceed.
+pub(in crate::intent_executor) enum PendingSignatureStatus {
+    /// The transaction landed successfully.
+    Succeeded,
+    /// Not found on-chain yet, but its blockhash is still within its valid
+    /// window - it may still land. Callers must not resend.
+    Pending,
+    /// The transaction landed and failed, or its blockhash has expired
+    /// without landing - guaranteed dead, safe to send a new transaction.
+    Rejected,
+}
+
+/// Checks a pending signature loaded from the outbox against the full
+/// transaction history. A signature that isn't found on-chain is ambiguous
+/// on its own — Solana's RPC can't tell "never sent" apart from "sent but
+/// not yet landed" — so we additionally check whether its blockhash is
+/// still valid to decide between `Pending` (may still land) and `Rejected`
+/// (guaranteed dead).
+///
+/// Blockhash validity is checked *before* signature status, not after.
+/// Validity is monotonic (once expired, it stays expired), so a
+/// slightly-stale "expired" reading is still safe to act on later. But
+/// "signature not found" is a snapshot that can flip to "found" at any
+/// later instant — if we checked it first and the blockhash-expired check
+/// second, the tx could land in the gap between the two calls and we'd
+/// wrongly conclude `Rejected`, causing a double execution.
 pub(in crate::intent_executor) async fn check_pending_signature(
     client: &IntentExecutionClient,
-    sig: &Signature,
-) -> IntentExecutorResult<ControlFlow<()>> {
+    pending: &PendingTransaction,
+) -> IntentExecutorResult<PendingSignatureStatus> {
+    let blockhash_still_valid = client
+        .is_blockhash_valid(&pending.blockhash)
+        .await
+        .map_err(IntentExecutorError::GetPendingSignatureStatusError)?;
+
     let statuses = client
-        .get_signature_statuses_with_history(std::slice::from_ref(sig))
+        .get_signature_statuses_with_history(std::slice::from_ref(
+            &pending.signature,
+        ))
         .await
         .map_err(IntentExecutorError::GetPendingSignatureStatusError)?;
 
     match statuses.first() {
-        Some(Some(Ok(()))) => Ok(ControlFlow::Break(())),
-        None => {
-            // well, that is bizarre one
-            warn!(pending_signature = ?sig, "RPC did not return status for signature");
-            Ok(ControlFlow::Continue(()))
-        }
-        // Any case below means tx failed in execution we continue attempts
-        Some(None) => {
-            info!(pending_signature = ?sig, "Transaction corresponding to pending signature was never sent");
-            Ok(ControlFlow::Continue(()))
-        }
+        Some(Some(Ok(()))) => Ok(PendingSignatureStatus::Succeeded),
         Some(Some(Err(err))) => {
-            info!(pending_signature = ?sig, error = ?err, "Transaction corresponding to pending signature failed");
-            Ok(ControlFlow::Continue(()))
+            info!(pending_signature = ?pending.signature, error = ?err, "Transaction corresponding to pending signature failed");
+            Ok(PendingSignatureStatus::Rejected)
+        }
+        // Not found on-chain: could be genuinely never sent, or simply not
+        // landed yet.
+        None | Some(None) => {
+            if blockhash_still_valid {
+                Ok(PendingSignatureStatus::Pending)
+            } else {
+                info!(pending_signature = ?pending.signature, "Pending transaction's blockhash expired without landing");
+                Ok(PendingSignatureStatus::Rejected)
+            }
+        }
+    }
+}
+
+/// Waits until a pending signature resolves definitively, sleeping and
+/// re-checking while `Pending` (naturally bounded by the blockhash's own
+/// expiry window). Returns `true` if the transaction landed successfully,
+/// `false` if it's guaranteed dead (failed on-chain or blockhash expired).
+/// Callers that don't already sit inside a retry loop (e.g. resuming after
+/// a restart) should use this instead of calling `check_pending_signature`
+/// directly, to avoid acting on a `Pending` result as if it were safe to
+/// resend.
+pub(in crate::intent_executor) async fn resolve_pending_signature(
+    client: &IntentExecutionClient,
+    pending: &PendingTransaction,
+) -> IntentExecutorResult<bool> {
+    loop {
+        match check_pending_signature(client, pending).await? {
+            PendingSignatureStatus::Succeeded => return Ok(true),
+            PendingSignatureStatus::Rejected => return Ok(false),
+            PendingSignatureStatus::Pending => {
+                sleep(PENDING_SIGNATURE_POLL_INTERVAL).await;
+            }
         }
     }
 }

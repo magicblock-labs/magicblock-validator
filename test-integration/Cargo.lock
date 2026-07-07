@@ -3989,6 +3989,7 @@ dependencies = [
  "bincode",
  "const-crypto",
  "serde",
+ "solana-hash 4.2.0",
  "solana-program 3.0.0",
  "solana-signature",
 ]

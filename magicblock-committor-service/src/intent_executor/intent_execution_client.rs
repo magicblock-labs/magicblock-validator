@@ -125,6 +125,21 @@ impl IntentExecutionClient {
             .collect())
     }
 
+    /// Returns whether `blockhash` is still within its valid window, i.e.
+    /// whether a transaction built with it could still land. Used to tell
+    /// apart "not landed yet, may still land" from "guaranteed dead" when
+    /// a pending signature isn't found on-chain.
+    pub(in crate::intent_executor) async fn is_blockhash_valid(
+        &self,
+        blockhash: &Hash,
+    ) -> MagicBlockRpcClientResult<bool> {
+        self.rpc_client
+            .get_inner()
+            .is_blockhash_valid(blockhash, self.rpc_client.commitment())
+            .await
+            .map_err(MagicBlockRpcClientError::from)
+    }
+
     pub(in crate::intent_executor) async fn get_latest_blockhash(
         &self,
     ) -> MagicBlockRpcClientResult<Hash> {

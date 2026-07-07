@@ -330,13 +330,14 @@ async fn test_pickup_executed_intent() {
     let ExecutionOutput::SingleStage(signature) = result.inner.unwrap() else {
         panic!("Unexpected execution strategy");
     };
-    assert_eq!(
-        outbox_bundle.status,
+    match &outbox_bundle.status {
         OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
-            signature
-        )),
-        "Invalid outbox state"
-    );
+            pending,
+        )) => {
+            assert_eq!(pending.signature, signature, "Invalid outbox state");
+        }
+        other => panic!("Invalid outbox state: {other:?}"),
+    }
     // Builder executor
     let executor = build_stage_intent_executor(
         test_env.executor_ctx_builder().build(),
@@ -715,7 +716,7 @@ async fn test_pickup_after_committing() {
         panic!("Expected TwoStage output");
     };
     assert_eq!(
-        commit_signature, commit_sig,
+        commit_signature, commit_sig.signature,
         "Commit sig must not change on recovery"
     );
     cleanup_handle

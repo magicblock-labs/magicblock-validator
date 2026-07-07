@@ -11,7 +11,7 @@ use tokio::sync::{
     mpsc,
     mpsc::{error::TrySendError, Receiver, Sender},
 };
-use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
+use tokio_stream::{wrappers::ReceiverStream, Stream};
 
 use crate::intent_engine::{db, db::BacklogDB};
 

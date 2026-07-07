@@ -1,23 +1,19 @@
-use std::{
-    ops::ControlFlow,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    validator::validator_authority,
+    outbox::PendingTransaction, validator::validator_authority,
 };
 use solana_keypair::Keypair;
-use solana_signature::Signature;
 use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
-        strategy_executor::utils::check_pending_signature,
+        strategy_executor::utils::resolve_pending_signature,
         utils::{build_commit_finalize_tasks, execute_single_stage_flow},
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
@@ -32,8 +28,8 @@ use crate::{
 
 pub struct SingleStageIntentExecutor<T, F, A, O> {
     authority: Keypair,
-    /// Signature of committing
-    pending_signature: Signature,
+    /// data of pending stage
+    pending_transaction: PendingTransaction,
     /// Intent Executor context
     ctx: IntentExecutorCtx<T, F, A, O>,
 
@@ -54,12 +50,12 @@ where
     pub fn new(
         ctx: IntentExecutorCtx<T, F, A, O>,
         actions_timeout: Duration,
-        pending_signature: Signature,
+        pending_transaction: PendingTransaction,
     ) -> Self {
         let authority = validator_authority();
         Self {
             authority,
-            pending_signature,
+            pending_transaction,
             ctx,
 
             actions_timeout,
@@ -76,17 +72,18 @@ where
         intent_bundle: ScheduledIntentBundle,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let flow = check_pending_signature(
+        let succeeded = resolve_pending_signature(
             &self.ctx.intent_client,
-            &self.pending_signature,
+            &self.pending_transaction,
         )
         .await?;
-        match flow {
+        match succeeded {
             // Intent was already executed on a previous run - notify the
             // outbox so it isn't left pending and rediscovered again.
-            ControlFlow::Break(()) => {
-                let output =
-                    Ok(ExecutionOutput::SingleStage(self.pending_signature));
+            true => {
+                let output = Ok(ExecutionOutput::SingleStage(
+                    self.pending_transaction.signature,
+                ));
                 self.ctx
                     .outbox_client
                     .notify_commit_sent(
@@ -99,7 +96,7 @@ where
 
                 output
             }
-            ControlFlow::Continue(()) => {
+            false => {
                 // It we're here so previous run determined this should be single stage
                 let (commit_tasks, finalize_tasks) =
                     build_commit_finalize_tasks(
