@@ -216,7 +216,7 @@ fn spawn_deferred_pubsub_clients(
                                 subscription_transition_lock.lock().await;
                             submux
                                 .add_client(
-                                    client,
+                                    client.clone(),
                                     abort_rx,
                                     subscribed_accounts.clone(),
                                 )
@@ -230,12 +230,26 @@ fn spawn_deferred_pubsub_clients(
                                 );
                                 return;
                             }
-                            Err(err) => warn!(
-                                endpoint = %label,
-                                error = %err,
-                                retry_in = ?retry_delay,
-                                "Deferred pubsub client failed to attach"
-                            ),
+                            Err(err) => {
+                                warn!(
+                                    endpoint = %label,
+                                    error = %err,
+                                    retry_in = ?retry_delay,
+                                    "Deferred pubsub client failed to attach"
+                                );
+                                // Shut the client down so subscriptions that
+                                // were established before the failure don't
+                                // leak listener tasks; the retry starts over
+                                // with a fresh client.
+                                if let Err(err) = client.shutdown().await {
+                                    debug!(
+                                        endpoint = %label,
+                                        error = %err,
+                                        "Failed to shut down partially \
+                                         attached pubsub client"
+                                    );
+                                }
+                            }
                         }
                     }
                     Err(err) => warn!(

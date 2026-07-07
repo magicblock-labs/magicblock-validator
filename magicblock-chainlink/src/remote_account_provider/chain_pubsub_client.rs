@@ -261,52 +261,53 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
         const RESUB_MULTIPLE_RETRY_PER_PUBKEY: usize = 5;
-        let delay_ms = self.current_resub_delay_ms.load(Ordering::SeqCst);
-        let delay = Duration::from_millis(delay_ms);
+        // Failed keys are retried here over just the remainder. Returning an
+        // error instead would send the caller into a full reconnect, which
+        // drains every subscription and would destroy the restored progress,
+        // so we only do that when a whole pass makes zero progress (i.e. the
+        // connection is unusable and there is no progress to lose).
+        const MAX_PASSES: usize = 3;
         // Skip pubkeys that are already subscribed (survived the reconnect or
         // were restored by a previous partial pass) so retry passes only pay
         // for what is still missing.
         let subscribed = self.subscriptions_union();
-        let pubkeys_vec: Vec<Pubkey> = pubkeys
+        let mut remaining: Vec<Pubkey> = pubkeys
             .into_iter()
             .filter(|pk| !subscribed.contains(pk))
             .collect();
-        let total_subs = pubkeys_vec.len();
-        let mut failed = 0usize;
-        let mut last_err = None;
-        for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
-            // Best effort: a failed key does not abort the pass. It stays
-            // unsubscribed and is retried on the next reconnect attempt or
-            // repaired by the subscription reconciler.
-            match self
-                .subscribe(*pubkey, Some(RESUB_MULTIPLE_RETRY_PER_PUBKEY))
-                .await
-            {
-                Ok(()) => {
-                    // Pace only successful subscribes; failed ones either
-                    // never reached the RPC or already backed off internally.
-                    if idx < total_subs - 1 {
+        let total_subs = remaining.len();
+
+        for _ in 0..MAX_PASSES {
+            if remaining.is_empty() {
+                break;
+            }
+            let delay_ms = self.current_resub_delay_ms.load(Ordering::SeqCst);
+            let delay = Duration::from_millis(delay_ms);
+            let mut failed = Vec::new();
+            let mut last_err = None;
+            for pubkey in &remaining {
+                match self
+                    .subscribe(*pubkey, Some(RESUB_MULTIPLE_RETRY_PER_PUBKEY))
+                    .await
+                {
+                    Ok(()) => {
+                        // Pace only successful subscribes; failed ones either
+                        // never reached the RPC or already backed off
+                        // internally.
                         tokio::time::sleep(delay).await;
                     }
-                }
-                Err(err) => {
-                    failed += 1;
-                    debug!(
-                        error = ?err,
-                        pubkey = %pubkey,
-                        "Re-subscription failed for pubkey",
-                    );
-                    last_err = Some(err);
+                    Err(err) => {
+                        debug!(
+                            error = ?err,
+                            pubkey = %pubkey,
+                            "Re-subscription failed for pubkey",
+                        );
+                        failed.push(*pubkey);
+                        last_err = Some(err);
+                    }
                 }
             }
-        }
-        // Report the number of subscriptions restored in this pass
-        metrics::set_pubsub_client_resubscribed_count(
-            &self.client_id,
-            total_subs - failed,
-        );
-        match last_err {
-            Some(err) => {
+            if !failed.is_empty() {
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
                 // in order to avoid overwhelming the RPC with requests
@@ -314,20 +315,43 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                     delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
                 self.current_resub_delay_ms
                     .store(new_delay, Ordering::SeqCst);
+            }
+            if failed.len() == remaining.len() {
+                metrics::set_pubsub_client_resubscribed_count(
+                    &self.client_id,
+                    total_subs - remaining.len(),
+                );
                 warn!(
                     total_subs,
-                    failed, "Re-subscription pass completed with failures",
+                    failed = failed.len(),
+                    "Re-subscription made no progress",
                 );
-                Err(err)
+                return Err(last_err.expect("failed is non-empty"));
             }
-            None => {
-                // Clean pass: restore the configured pacing so one bad
-                // stretch doesn't throttle all future reconnects.
-                self.current_resub_delay_ms
-                    .store(self.initial_resub_delay_ms, Ordering::SeqCst);
-                Ok(())
-            }
+            remaining = failed;
         }
+
+        // Report the number of subscriptions restored in this pass
+        metrics::set_pubsub_client_resubscribed_count(
+            &self.client_id,
+            total_subs - remaining.len(),
+        );
+        if remaining.is_empty() {
+            // Clean outcome: restore the configured pacing so one bad
+            // stretch doesn't throttle all future reconnects.
+            self.current_resub_delay_ms
+                .store(self.initial_resub_delay_ms, Ordering::SeqCst);
+        } else {
+            // Keep the client attached; the subscription reconciler repairs
+            // the leftover subscriptions in the background.
+            warn!(
+                total_subs,
+                failed = remaining.len(),
+                "Re-subscription completed with failures, \
+                 leaving repair to the reconciler",
+            );
+        }
+        Ok(())
     }
 
     fn current_resub_delay_ms(&self) -> Option<u64> {
