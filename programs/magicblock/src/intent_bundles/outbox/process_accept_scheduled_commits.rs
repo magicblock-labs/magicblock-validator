@@ -151,15 +151,22 @@ fn pop_scheduled_intents(
         as usize;
 
     // Assert enough accounts
-    let Some(num_accept_intents) =
-        num_ix_accounts.checked_sub(INTENT_PDAS_OFFSET as usize)
-    else {
-        ic_msg!(
-            invoke_context,
-            "AcceptScheduledCommits ERR: not enough accounts to accept intents ({}), need validator authority, magic context, vault, and at least one outbox intent PDA",
-            num_ix_accounts
-        );
-        return Err(InstructionError::MissingAccount);
+    let num_accept_intents = match num_ix_accounts
+        .checked_sub(INTENT_PDAS_OFFSET as usize)
+    {
+        Some(0) => {
+            // No outbox intent PDAs provided - nothing to accept
+            return Ok(vec![]);
+        }
+        Some(count) => count,
+        None => {
+            ic_msg!(
+                invoke_context,
+                "AcceptScheduledCommits ERR: not enough accounts to accept intents ({}), need validator authority, magic context, vault, and at least one outbox intent PDA",
+                num_ix_accounts
+            );
+            return Err(InstructionError::MissingAccount);
+        }
     };
 
     let magic_context_acc = get_instruction_account_with_idx(

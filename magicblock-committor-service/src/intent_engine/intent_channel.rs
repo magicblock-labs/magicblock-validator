@@ -95,9 +95,12 @@ impl<D: BacklogDB> Stream for IntentStream<D> {
         // That means we have backlog
         // prior to using channel again we have to clean it all first
         if !db.is_empty() {
-            // Before starting to clean backlog we need to clean channel first
-            if let Poll::Ready(item) = this.stream.poll_next(cx) {
-                Poll::Ready(item.map(Ok))
+            // Before starting to clean backlog we need to clean channel first.
+            // A closed channel (`Ready(None)`) must NOT end the stream here -
+            // backlog still has items to drain, and the channel closing
+            // doesn't mean there's no more work left.
+            if let Poll::Ready(Some(item)) = this.stream.poll_next(cx) {
+                Poll::Ready(Some(Ok(item)))
             } else {
                 // Some(T) always will be returned here as per check above
                 let el = db.pop_intent_bundle();
