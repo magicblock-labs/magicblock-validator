@@ -715,12 +715,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
-    /// Creates a background task that periodically updates the active subscriptions gauge
+    /// Creates a background task that periodically reconciles subscriptions
+    /// with the LRU (repairing missing ones, e.g. after a partial
+    /// resubscription) and optionally updates the active subscriptions gauge
     fn start_active_subscriptions_updater<PubsubClient: ChainPubsubClient>(
         subscribed_accounts: Arc<AccountsLruCache>,
         pubsub_client: Arc<PubsubClient>,
         removed_account_tx: mpsc::Sender<Pubkey>,
         subscription_key_locks: SubscriptionKeyLocks,
+        emit_metrics: bool,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(
@@ -741,7 +744,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     .await;
 
                 debug!(count = pubsub_total, "Updating active subscriptions");
-                set_monitored_accounts_count(pubsub_total);
+                if emit_metrics {
+                    set_monitored_accounts_count(pubsub_total);
+                }
             }
         })
     }
@@ -762,17 +767,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let subscription_key_locks: SubscriptionKeyLocks =
             Arc::new(AsyncMutex::new(HashMap::new()));
 
+        // The reconciler always runs: partial resubscriptions rely on it for
+        // repair. The config flag only gates the metrics emission.
         let active_subscriptions_updater =
-            if config.enable_subscription_metrics() {
-                Some(Self::start_active_subscriptions_updater(
-                    lrucache_subscribed_accounts.clone(),
-                    Arc::new(pubsub_client.clone()),
-                    removed_account_tx.clone(),
-                    subscription_key_locks.clone(),
-                ))
-            } else {
-                None
-            };
+            Some(Self::start_active_subscriptions_updater(
+                lrucache_subscribed_accounts.clone(),
+                Arc::new(pubsub_client.clone()),
+                removed_account_tx.clone(),
+                subscription_key_locks.clone(),
+                config.enable_subscription_metrics(),
+            ));
 
         let me = Self {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
