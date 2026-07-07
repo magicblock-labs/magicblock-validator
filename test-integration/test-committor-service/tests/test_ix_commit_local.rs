@@ -189,7 +189,7 @@ async fn test_ix_commit_order_book_change_100_bytes() {
 async fn test_ix_commit_order_book_change_671_bytes() {
     commit_book_order_account(
         671,
-        CommitStrategy::DiffBuffer,
+        CommitStrategy::DiffArgs,
         CommitIntentKind::Commit,
     )
     .await;
@@ -694,7 +694,7 @@ async fn test_ix_execute_intent_bundle_commit_and_commit_finalize_mixed() {
         &[1024, 2048],
         &[1024, 2048],
         &[],
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
     )
     .await;
 }
