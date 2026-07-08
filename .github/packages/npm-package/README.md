@@ -19,7 +19,7 @@ Run any of them with `npx`, e.g. `npx @magicblock-labs/ephemeral-validator mb-st
 
 Boots the full local stack as one supervised process, already connected:
 
-```
+```bash
 client ──► query-filtering-service ──► ephemeral-validator ──► mb-test-validator (base L1)
            http 6699 / ws 6700         http 7799 / ws 7800      http 8899 / ws 8900
            (public entry)              (internal)               (internal)
