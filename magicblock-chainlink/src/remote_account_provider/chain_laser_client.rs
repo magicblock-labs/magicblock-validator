@@ -241,7 +241,21 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     }
 
     fn subscriptions_union(&self) -> HashSet<Pubkey> {
-        self.subscriptions.read().clone()
+        // Map the slot-subscription placeholder back to clock::ID (the
+        // inverse of the mapping in subscribe()) so snapshots are comparable
+        // across client types; otherwise the reconciler sees the clock as
+        // never ensured and resubscribes it on every tick.
+        self.subscriptions
+            .read()
+            .iter()
+            .map(|pk| {
+                if *pk == SLOT_SUBSCRIPTION_DUMMY {
+                    clock::ID
+                } else {
+                    *pk
+                }
+            })
+            .collect()
     }
 
     fn subs_immediately(&self) -> bool {
