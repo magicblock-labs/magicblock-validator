@@ -7,9 +7,8 @@
 //             (public entry)              (internal)              (internal, base L1)
 //
 // It spawns the existing sibling wrapper scripts (mbTestValidator.js,
-// ephemeralValidator.js, queryFilteringService.js) so all binary-resolution and
-// system-PATH fallback logic is reused. It only adds ordering, health gating,
-// an endpoint summary, and supervision.
+// ephemeralValidator.js, queryFilteringService.js). It only adds ordering, health
+// gating, an endpoint summary, and supervision.
 //
 import http from "http";
 import path from "path";
