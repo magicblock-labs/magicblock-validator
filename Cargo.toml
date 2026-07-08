@@ -47,7 +47,7 @@ edition = "2021"
 homepage = "https://www.magicblock.xyz"
 license = "Business Source License 1.1"
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
-version = "0.13.3"
+version = "0.13.4"
 
 [workspace.dependencies]
 agave-geyser-plugin-interface = { version = "4.0" }
