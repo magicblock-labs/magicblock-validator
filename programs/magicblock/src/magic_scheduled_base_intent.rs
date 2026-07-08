@@ -7,8 +7,9 @@ use magicblock_core::{
     intent::{BaseActionCallback, CommittedAccount},
     tls::ExecutionTlsStash,
     token_programs::{
-        try_get_rent_pending_ata_info, RentPendingAtaMaterialization,
-        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+        eata_rent_exempt_balance, try_get_rent_pending_ata_info,
+        RentPendingAtaMaterialization, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+        TOKEN_PROGRAM_ID,
     },
     Slot,
 };
@@ -43,7 +44,8 @@ pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
 /// Fixed fee per commit.
 /// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
 pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
-/// Fixed V1 fee per rent-pending eATA materialization.
+/// Fixed V1 service fee per rent-pending eATA materialization, charged on top
+/// of the base-layer rent the validator fronts to create the eATA account.
 pub const RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS: u64 =
     COMMIT_FEE_LAMPORTS;
 /// Price per compute unit for a BaseAction executed on Solana base chain,
@@ -1310,8 +1312,14 @@ pub(crate) fn calculate_commit_fee(
 pub(crate) fn calculate_rent_pending_ata_materialization_fee(
     count: usize,
 ) -> Result<u64, InstructionError> {
+    // The validator fronts the base-layer rent for every eATA it materializes
+    // and never recovers it (the eATA is not closed at undelegation), so the
+    // delegated payer covers that rent in addition to the flat service fee.
+    let per_ata = eata_rent_exempt_balance()
+        .checked_add(RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS)
+        .ok_or(InstructionError::ArithmeticOverflow)?;
     (count as u64)
-        .checked_mul(RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS)
+        .checked_mul(per_ata)
         .ok_or(InstructionError::ArithmeticOverflow)
 }
 

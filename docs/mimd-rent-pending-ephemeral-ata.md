@@ -205,7 +205,11 @@ matching rent-pending ATAs are not rejected merely because their current balance
 is zero unless they were newly created in the same transaction.
 
 No local creation charge is required in V1. Base materialization cost remains
-charged when the account is committed or undelegated.
+charged when the account is committed or undelegated. The per-ATA charge is the
+base-layer rent-exempt balance of the eATA account (which the validator fronts
+and never recovers, since the eATA is not closed at undelegation) plus a fixed
+service fee (`RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS`), so the validator
+authority never incurs a net loss on materialization.
 
 ## Materialization Metadata
 
@@ -249,8 +253,10 @@ account:
 3. Require the delegated payer path. The payer must be delegated and the magic
    fee vault must be present, writable, and delegated.
 4. Charge the delegated payer and credit lamports to the delegated vault for the
-   materialization cost in local state. Local ATA creation remains free; base
-   eATA materialization is not free.
+   materialization cost in local state: the eATA rent-exempt balance plus the
+   fixed service fee, per rent-pending ATA. Local ATA creation remains free;
+   base eATA materialization is not free, and the charge makes the validator
+   whole for the rent it fronts on base.
 5. Reject duplicate references where the same final eATA appears more than once
    across the normal committed-account set and rent-pending metadata.
 

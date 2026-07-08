@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
+use magicblock_core::token_programs::eata_rent_exempt_balance;
 use magicblock_magic_program_api::{
     args::{
         ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
@@ -1497,6 +1498,10 @@ mod tests {
 
     /// Helper: builds transaction accounts for a delegated-payer commit.
     /// Payer is delegated+writable; fee vault is delegated+writable.
+    /// Funds the delegated payer generously enough to cover commit fees
+    /// plus rent-inclusive rent-pending materialization charges.
+    const DELEGATED_PAYER_LAMPORTS: u64 = 10_000_000;
+
     fn prepare_delegated_payer_transaction(
         payer: &Keypair,
         program: Pubkey,
@@ -1512,8 +1517,11 @@ mod tests {
         let mut account_data = {
             let mut map = HashMap::new();
 
-            let mut payer_acc =
-                AccountSharedData::new(1_000_000, 0, &system_program::id());
+            let mut payer_acc = AccountSharedData::new(
+                DELEGATED_PAYER_LAMPORTS,
+                0,
+                &system_program::id(),
+            );
             payer_acc.set_delegated(true);
             map.insert(payer.pubkey(), payer_acc);
 
@@ -1596,7 +1604,8 @@ mod tests {
         accounts
             .iter()
             .find(|a| {
-                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
+                a.lamports() == DELEGATED_PAYER_LAMPORTS - COMMIT_FEE_LAMPORTS
+                    && a.delegated()
             })
             .expect("payer should have been debited");
     }
@@ -1670,6 +1679,8 @@ mod tests {
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
         let eata = derive_eata(&wallet_owner, &mint);
+        let expected_fee = eata_rent_exempt_balance()
+            + RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS;
 
         let (mut account_data, mut transaction_accounts) =
             prepare_delegated_payer_transaction(
@@ -1703,18 +1714,14 @@ mod tests {
 
         processed_scheduled
             .iter()
-            .find(|a| {
-                a.lamports() == RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS
-                    && a.delegated()
-            })
+            .find(|a| a.lamports() == expected_fee && a.delegated())
             .expect(
                 "fee vault should receive rent-pending materialization fee",
             );
         processed_scheduled
             .iter()
             .find(|a| {
-                a.lamports()
-                    == 1_000_000 - RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS
+                a.lamports() == DELEGATED_PAYER_LAMPORTS - expected_fee
                     && a.delegated()
             })
             .expect("payer should be charged rent-pending materialization fee");
@@ -1751,8 +1758,9 @@ mod tests {
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
         let eata = derive_eata(&wallet_owner, &mint);
-        let expected_fee =
-            COMMIT_FEE_LAMPORTS + RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS;
+        let expected_fee = COMMIT_FEE_LAMPORTS
+            + eata_rent_exempt_balance()
+            + RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS;
 
         let mut per_account = HashMap::new();
         per_account.insert(eata, ACTUAL_COMMIT_LIMIT);
@@ -1792,7 +1800,10 @@ mod tests {
             .expect("fee vault should receive materialization and commit fees");
         processed_scheduled
             .iter()
-            .find(|a| a.lamports() == 1_000_000 - expected_fee && a.delegated())
+            .find(|a| {
+                a.lamports() == DELEGATED_PAYER_LAMPORTS - expected_fee
+                    && a.delegated()
+            })
             .expect("payer should be charged materialization and commit fees");
     }
 
@@ -1844,10 +1855,9 @@ mod tests {
         assert_eq!(vault.lamports(), COMMIT_FEE_LAMPORTS);
 
         // Payer debited by exactly one fee
-        assert!(accounts
-            .iter()
-            .any(|a| a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
-                && a.delegated()));
+        assert!(accounts.iter().any(|a| a.lamports()
+            == DELEGATED_PAYER_LAMPORTS - COMMIT_FEE_LAMPORTS
+            && a.delegated()));
     }
 
     #[test]

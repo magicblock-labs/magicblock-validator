@@ -33,6 +33,14 @@ pub const RENT_PENDING_ATA_CLOSE_AUTHORITY: Pubkey =
 pub const EPHEMERAL_ATA_LEN: usize = 80;
 const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
 
+/// Rent-exempt balance of the base-layer eATA account created when a
+/// rent-pending ATA is materialized. The validator fronts this rent and never
+/// recovers it (the eATA is not closed at undelegation), so the
+/// materialization charge must cover it.
+pub fn eata_rent_exempt_balance() -> u64 {
+    Rent::default().minimum_balance(EPHEMERAL_ATA_LEN)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RentPendingAtaMaterialization {
     pub ata_pubkey: Pubkey,
@@ -635,7 +643,7 @@ impl From<EphemeralAta> for Account {
         data.extend_from_slice(&[0; 7]);
 
         Account {
-            lamports: Rent::default().minimum_balance(data.len()),
+            lamports: eata_rent_exempt_balance(),
             data,
             owner: EATA_PROGRAM_ID,
             executable: false,
