@@ -39,8 +39,20 @@ impl IntentSizeValidator {
     /// both fit within [`MAX_TRANSACTION_WIRE_SIZE`]. If this returns
     /// `false`, the intent can never succeed and should be refused.
     pub fn fits(intent: &MagicIntentBundle) -> bool {
-        Self::tasks_fit(&Self::commit_tasks(intent))
-            && Self::tasks_fit(&Self::finalize_tasks(intent))
+        Self::commit_fits(intent) && Self::finalize_fits(intent)
+    }
+
+    /// Checks the commit-stage tasks fit, including the standalone-action
+    /// noop instruction added when `intent` has no committed accounts.
+    fn commit_fits(intent: &MagicIntentBundle) -> bool {
+        let standalone_action_nonce =
+            (!intent.has_committed_accounts()).then_some(0);
+        Self::tasks_fit(&Self::commit_tasks(intent), standalone_action_nonce)
+    }
+
+    /// Checks the finalize-stage tasks fit; no noop instruction here.
+    fn finalize_fits(intent: &MagicIntentBundle) -> bool {
+        Self::tasks_fit(&Self::finalize_tasks(intent), None)
     }
 
     /// Builds the commit-stage tasks used for the size estimate: real
@@ -184,16 +196,15 @@ impl IntentSizeValidator {
         task.into()
     }
 
+    /// Builds the commit-stage tasks for `commit_type`'s accounts.
+    /// `WithBaseActions` actions are excluded: they run in the finalize
+    /// stage, not the commit stage.
     fn commit_type_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
-        let mut tasks: Vec<BaseTaskImpl> = commit_type
+        commit_type
             .get_committed_accounts()
             .iter()
             .map(Self::commit_task)
-            .collect();
-        if let CommitType::WithBaseActions { base_actions, .. } = commit_type {
-            tasks.extend(create_action_tasks(base_actions));
-        }
-        tasks
+            .collect()
     }
 
     fn commit_finalize_type_tasks(
@@ -210,10 +221,13 @@ impl IntentSizeValidator {
         tasks
     }
 
-    /// Returns `true` if `tasks`, assembled into a single transaction with
-    /// full address-lookup-table coverage, fits within
+    /// Returns `true` if `tasks` plus `standalone_action_nonce` (if any),
+    /// assembled with full ALT coverage, fit within
     /// [`MAX_TRANSACTION_WIRE_SIZE`].
-    fn tasks_fit(tasks: &[BaseTaskImpl]) -> bool {
+    fn tasks_fit(
+        tasks: &[BaseTaskImpl],
+        standalone_action_nonce: Option<u64>,
+    ) -> bool {
         let placeholder = Keypair::new();
         let lookup_table_keys = TaskStrategist::collect_lookup_table_keys(
             &placeholder.pubkey(),
@@ -222,11 +236,12 @@ impl IntentSizeValidator {
         let lookup_tables =
             TransactionUtils::dummy_lookup_table(&lookup_table_keys);
 
-        TransactionUtils::assemble_tasks_tx(
+        TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
             &placeholder,
             tasks,
             0,
             &lookup_tables,
+            standalone_action_nonce,
         )
         .map(|tx| serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE)
         .unwrap_or(false)
