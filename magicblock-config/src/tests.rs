@@ -511,6 +511,19 @@ fn test_example_config_full_coverage() {
         Duration::from_secs(60 * 60)
     );
 
+    // Risk config
+    assert!(!config.chainlink.risk.enabled);
+    assert_eq!(
+        config.chainlink.risk.risk_server_url,
+        consts::DEFAULT_RISK_SERVER_URL
+    );
+    assert_eq!(
+        config.chainlink.risk.request_timeout,
+        std::time::Duration::from_secs(
+            consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC
+        )
+    );
+
     // The example file has the programs section with 2 entries
     assert_eq!(
         config.programs.len(),
@@ -599,6 +612,13 @@ fn test_env_vars_full_coverage() {
             "MBV_TASK_SCHEDULER__FAILED_TASK_CLEANUP_INTERVAL",
             "3m",
         ),
+        // --- Risk ---
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__ENABLED", "true"),
+        EnvVarGuard::new(
+            "MBV_CHAINLINK__RISK__RISK_SERVER_URL",
+            "http://risk.example:3001",
+        ),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__REQUEST_TIMEOUT", "3s"),
         // --- Chain Operation (Optional Section) ---
         // Figment can instantiate optional structs if their fields are present
         EnvVarGuard::new("MBV_CHAIN_OPERATION__COUNTRY_CODE", "DE"),
@@ -683,6 +703,17 @@ fn test_env_vars_full_coverage() {
     assert_eq!(
         config.task_scheduler.failed_task_cleanup_interval,
         Duration::from_secs(3 * 60)
+    );
+
+    // Risk
+    assert!(config.chainlink.risk.enabled);
+    assert_eq!(
+        config.chainlink.risk.risk_server_url,
+        "http://risk.example:3001"
+    );
+    assert_eq!(
+        config.chainlink.risk.request_timeout,
+        Duration::from_secs(3)
     );
 
     // Chain Operation
