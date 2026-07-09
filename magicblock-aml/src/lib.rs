@@ -19,6 +19,8 @@ pub enum RiskError {
     ClientBuild(reqwest::Error),
     #[error("Risk server request failed: {0}")]
     Request(#[from] reqwest::Error),
+    #[error("Invalid risk server config: {0}")]
+    InvalidConfig(String),
     #[error("Addresses {0:?} are high risk")]
     HighRiskAddresses(Vec<String>),
 }
@@ -45,15 +47,22 @@ impl RiskService {
             return Ok(None);
         }
 
+        let base_url = config.risk_server_url.trim_end_matches('/').to_string();
+        if base_url.is_empty()
+            || !base_url.starts_with("http://")
+                && !base_url.starts_with("https://")
+        {
+            return Err(RiskError::InvalidConfig(
+                "risk_server_url must be a valid http(s) URL".to_string(),
+            ));
+        }
+
         let client = Client::builder()
             .timeout(config.request_timeout)
             .build()
             .map_err(RiskError::ClientBuild)?;
 
-        Ok(Some(Self {
-            client,
-            base_url: config.risk_server_url.trim_end_matches('/').to_string(),
-        }))
+        Ok(Some(Self { client, base_url }))
     }
 
     /// Asks the risk server about each address concurrently, returning
