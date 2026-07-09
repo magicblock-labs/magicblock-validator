@@ -3562,13 +3562,8 @@ dependencies = [
  "futures-util",
  "magicblock-config",
  "reqwest",
- "rusqlite",
  "serde",
- "serde_json",
- "solana-pubkey 4.1.0",
  "thiserror 2.0.18",
- "tokio",
- "tracing",
 ]
 
 [[package]]

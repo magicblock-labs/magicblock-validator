@@ -66,7 +66,7 @@ pub struct ChainLinkConfig {
     #[serde(with = "humantime")]
     pub resubscription_delay: Duration,
 
-    /// AML/Risk checks for post-delegation actions via Range API.
+    /// Address risk checks for post-delegation actions via the risk server.
     pub risk: RiskConfig,
 }
 
@@ -84,37 +84,29 @@ impl Default for ChainLinkConfig {
     }
 }
 
-/// Configuration for checking account risk with the Range API and a local sqlite cache.
+/// Configuration for checking address risk against the risk server. The risk
+/// server owns the upstream provider credentials, caching, and threshold; the
+/// validator is a thin client.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RiskConfig {
     /// Enables post-delegation address risk checks.
     pub enabled: bool,
-    /// Base URL for the Range API.
-    pub base_url: String,
-    /// API key used for Range API authorization.
-    pub api_key: Option<String>,
-    /// TTL for cache entries.
-    #[serde(with = "humantime")]
-    pub cache_ttl: Duration,
-    /// Request timeout for Range API calls.
+    /// Base URL of the risk server that performs address risk assessments.
+    pub risk_server_url: String,
+    /// Request timeout for risk server calls.
     #[serde(with = "humantime")]
     pub request_timeout: Duration,
-    /// Threshold on a scale of 0-10 for the risk score.
-    pub risk_score_threshold: u64,
 }
 
 impl Default for RiskConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            base_url: consts::DEFAULT_RISK_BASE_URL.to_string(),
-            api_key: None,
-            cache_ttl: Duration::from_secs(consts::DEFAULT_RISK_CACHE_TTL_SEC),
+            risk_server_url: consts::DEFAULT_RISK_SERVER_URL.to_string(),
             request_timeout: Duration::from_secs(
                 consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC,
             ),
-            risk_score_threshold: consts::DEFAULT_RISK_SCORE_THRESHOLD,
         }
     }
 }

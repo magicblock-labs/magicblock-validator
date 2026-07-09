@@ -1,7 +1,4 @@
-use std::{
-    path::Path,
-    sync::{atomic::AtomicU64, Arc},
-};
+use std::sync::{atomic::AtomicU64, Arc};
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::{ChainlinkError, ChainlinkResult};
@@ -233,7 +230,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         validator_keypair: Keypair,
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
-        ledger_path: &Path,
         chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<
         InnerChainlink<
@@ -256,11 +252,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         .await?;
         let fetch_cloner = if let Some(provider) = account_provider {
             let provider = Arc::new(provider);
-            let risk_service = RiskService::try_from_config(
-                &chainlink_config.risk,
-                ledger_path,
-            )?
-            .map(Arc::new);
+            let risk_service =
+                RiskService::try_from_config(&chainlink_config.risk)?
+                    .map(Arc::new);
             let fetch_cloner = FetchCloner::new(
                 &provider,
                 accounts_bank,

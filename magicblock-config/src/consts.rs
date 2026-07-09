@@ -82,14 +82,9 @@ pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
 /// Default capacity for the LRU cache of subscribed accounts
 pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;
 
-/// Default base URL for Range risk service
-pub const DEFAULT_RISK_BASE_URL: &str = "https://api.range.org/v1";
+/// Default URL of the risk server that performs address risk assessments.
+/// Matches the PER risk server's default `risk_listen_addr` (port 3001).
+pub const DEFAULT_RISK_SERVER_URL: &str = "http://127.0.0.1:3001";
 
-/// Default cache TTL for Range risk service
-pub const DEFAULT_RISK_CACHE_TTL_SEC: u64 = 60 * 60 * 24 * 30;
-
-/// Default request timeout for Range risk service
+/// Default request timeout for risk server calls
 pub const DEFAULT_RISK_REQUEST_TIMEOUT_SEC: u64 = 5;
-
-/// Default risk score threshold for Range risk service
-pub const DEFAULT_RISK_SCORE_THRESHOLD: u64 = 5;

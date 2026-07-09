@@ -1,181 +1,77 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+//! Thin client for the risk server that assesses address risk.
+//!
+//! The validator no longer talks to the upstream AML provider (Range) directly.
+//! Instead it queries the risk server, which owns the provider credentials, the
+//! cache, and the risk threshold. This crate is a small `reqwest` wrapper that
+//! asks the server whether a set of addresses is risky.
 
-use futures_util::future::{try_join_all, BoxFuture, FutureExt, Shared};
+use futures_util::future::try_join_all;
 use magicblock_config::config::RiskConfig;
 use reqwest::Client;
-use rusqlite::{params, Connection};
-use serde_json::Value;
+use serde::Deserialize;
 use thiserror::Error;
-use tokio::sync::{mpsc, Mutex as AsyncMutex};
-use tracing::*;
 
 pub type RiskResult<T> = Result<T, RiskError>;
-pub type PartitionedCache =
-    (Vec<(Option<u64>, String)>, Vec<(Option<u64>, String)>);
-type SharedRiskScoreFuture = Shared<BoxFuture<'static, Result<u64, Arc<str>>>>;
-
-#[derive(Debug, Clone)]
-pub struct AddressRiskAssessment {
-    pub is_high_risk: bool,
-    pub risk_score: u64,
-}
 
 #[derive(Debug, Error)]
 pub enum RiskError {
-    #[error("Range risk service is enabled but api key is missing")]
-    MissingApiKey,
-    #[error("Failed to initialize sqlite cache at {path}: {source}")]
-    SqliteInit {
-        path: PathBuf,
-        source: rusqlite::Error,
-    },
-    #[error("Failed to prepare sqlite cache directory at {path}: {source}")]
-    CacheDirectory {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("Http request to range failed: {0}")]
+    #[error("Failed to build risk server http client: {0}")]
+    ClientBuild(reqwest::Error),
+    #[error("Risk server request failed: {0}")]
     Request(#[from] reqwest::Error),
-    #[error("Range response was not valid json: {0}")]
-    InvalidJson(#[from] serde_json::Error),
-    #[error("Sqlite cache read/write failed: {0}")]
-    Sqlite(#[from] rusqlite::Error),
-    #[error("Risk score not found in response")]
-    RiskScoreNotFound,
     #[error("Addresses {0:?} are high risk")]
     HighRiskAddresses(Vec<String>),
-    #[error("Task join failed: {0}")]
-    Join(#[from] tokio::task::JoinError),
-    #[error("Invalid risk score threshold: {0} > 10")]
-    InvalidRiskScoreThreshold(u64),
-    #[error("Poisoned lock")]
-    PoisonedLock,
-    #[error("In-flight risk fetch failed: {0}")]
-    InFlightFetch(String),
 }
 
+/// The risk server's assessment for a single address. Only `is_risky` is used:
+/// the server owns the threshold, so the client does not re-evaluate the score.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RiskAssessment {
+    is_risky: bool,
+}
+
+/// Thin client over the risk server's `GET /risk?pubkey=<addr>` endpoint.
 pub struct RiskService {
     client: Client,
-    cache: Arc<Mutex<Connection>>,
-    in_flight: Arc<AsyncMutex<HashMap<String, SharedRiskScoreFuture>>>,
-    cache_writer: mpsc::UnboundedSender<Vec<(String, u64)>>,
     base_url: String,
-    api_key: String,
-    cache_ttl: Duration,
-    risk_score_threshold: u64,
 }
 
 impl RiskService {
-    pub fn try_from_config(
-        config: &RiskConfig,
-        ledger_path: &Path,
-    ) -> RiskResult<Option<Self>> {
+    /// Builds the client from config, returning `None` when risk checks are
+    /// disabled.
+    pub fn try_from_config(config: &RiskConfig) -> RiskResult<Option<Self>> {
         if !config.enabled {
             return Ok(None);
         }
-        let Some(api_key) = config.api_key.clone() else {
-            return Err(RiskError::MissingApiKey);
-        };
-        if config.risk_score_threshold > 10 {
-            return Err(RiskError::InvalidRiskScoreThreshold(
-                config.risk_score_threshold,
-            ));
-        }
 
-        let cache_path = ledger_path.join("risk-cache.db");
-        let conn = Connection::open(&cache_path).map_err(|source| {
-            RiskError::SqliteInit {
-                path: cache_path.clone(),
-                source,
-            }
-        })?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS address_risk_cache (
-                address TEXT NOT NULL,
-                risk_score INTEGER NOT NULL,
-                fetched_at_unix_s INTEGER NOT NULL,
-                PRIMARY KEY (address)
-            )",
-        )?;
-
-        let client =
-            Client::builder().timeout(config.request_timeout).build()?;
-
-        let cache = Arc::new(Mutex::new(conn));
-        let in_flight = Arc::new(AsyncMutex::new(HashMap::new()));
-        let (cache_writer, cache_rx) = mpsc::unbounded_channel();
-        spawn_cache_writer(cache.clone(), in_flight.clone(), cache_rx);
+        let client = Client::builder()
+            .timeout(config.request_timeout)
+            .build()
+            .map_err(RiskError::ClientBuild)?;
 
         Ok(Some(Self {
             client,
-            cache,
-            in_flight,
-            cache_writer,
-            base_url: config.base_url.trim_end_matches('/').to_string(),
-            api_key,
-            cache_ttl: config.cache_ttl,
-            risk_score_threshold: config.risk_score_threshold,
+            base_url: config.risk_server_url.trim_end_matches('/').to_string(),
         }))
     }
 
+    /// Asks the risk server about each address concurrently, returning
+    /// `HighRiskAddresses` if the server flags any of them as risky.
     pub async fn check_addresses(
         &self,
         addresses: Vec<String>,
     ) -> RiskResult<()> {
-        let cache = self.read_cache(addresses).await?;
-        let (cached_scores, uncached_addresses): PartitionedCache = cache
+        let assessments = try_join_all(
+            addresses.iter().map(|address| self.assess_address(address)),
+        )
+        .await?;
+
+        let risky_addresses = assessments
             .into_iter()
-            .partition(|(score, _address)| score.is_some());
-
-        let risky_cached_addresses = cached_scores
-            .iter()
-            .filter_map(|(score, address)| {
-                if score.unwrap_or(0) >= self.risk_score_threshold {
-                    Some(address.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        if !risky_cached_addresses.is_empty() {
-            return Err(RiskError::HighRiskAddresses(risky_cached_addresses));
-        }
-
-        let uncached_addresses = uncached_addresses
-            .into_iter()
-            .map(|(_, address)| address)
-            .collect::<Vec<_>>();
-
-        let fetch_result =
-            try_join_all(uncached_addresses.iter().map(|address| async move {
-                let score = self
-                    .get_or_insert_in_flight(address.clone())
-                    .await
-                    .await
-                    .map_err(|err| RiskError::InFlightFetch(err.to_string()))?;
-                Ok::<_, RiskError>((address.to_string(), score))
-            }))
-            .await;
-        if fetch_result.is_err() {
-            self.remove_from_in_flight(&uncached_addresses).await;
-        }
-        let scores = fetch_result?;
-
-        self.write_cache(scores.clone());
-
-        let risky_addresses = scores
-            .iter()
-            .filter_map(|(address, score)| {
-                if *score >= self.risk_score_threshold {
-                    Some(address.to_string())
-                } else {
-                    None
-                }
+            .zip(addresses)
+            .filter_map(|(assessment, address)| {
+                assessment.is_risky.then_some(address)
             })
             .collect::<Vec<_>>();
         if !risky_addresses.is_empty() {
@@ -185,177 +81,39 @@ impl RiskService {
         Ok(())
     }
 
-    async fn get_or_insert_in_flight(
+    async fn assess_address(
         &self,
-        address: String,
-    ) -> SharedRiskScoreFuture {
-        let mut in_flight = self.in_flight.lock().await;
-        if let Some(existing) = in_flight.get(&address) {
-            return existing.clone();
-        }
-
-        let future = self.make_risk_fetch_future(address.clone());
-        in_flight.insert(address, future.clone());
-        future
+        address: &str,
+    ) -> RiskResult<RiskAssessment> {
+        let assessment = self
+            .client
+            .get(format!("{}/risk", self.base_url))
+            .query(&[("pubkey", address)])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<RiskAssessment>()
+            .await?;
+        Ok(assessment)
     }
-
-    fn make_risk_fetch_future(&self, address: String) -> SharedRiskScoreFuture {
-        let client = self.client.clone();
-        let base_url = self.base_url.clone();
-        let api_key = self.api_key.clone();
-        async move {
-            fetch_risk_score(client, base_url, api_key, address).await
-        }
-        .boxed()
-        .shared()
-    }
-
-    async fn remove_from_in_flight(&self, addresses: &[String]) {
-        let mut in_flight = self.in_flight.lock().await;
-        for address in addresses {
-            in_flight.remove(address.as_str());
-        }
-    }
-
-    async fn read_cache(
-        &self,
-        addresses: Vec<String>,
-    ) -> RiskResult<Vec<(Option<u64>, String)>> {
-        let now = now_unix_seconds();
-        let max_age = self.cache_ttl.as_secs() as i64;
-        let addresses = addresses.to_vec();
-        let cache = Arc::clone(&self.cache);
-        tokio::task::spawn_blocking(move || {
-            let conn = cache.lock().map_err(|_| RiskError::PoisonedLock)?;
-            let mut results = Vec::with_capacity(addresses.len());
-            for address in &addresses {
-                let mut stmt = conn.prepare_cached(
-                    "SELECT risk_score, fetched_at_unix_s
-                 FROM address_risk_cache
-                 WHERE address = ?1",
-                )?;
-                let result = stmt.query_row(params![address], |row| {
-                    let risk_score: u64 = row.get(0)?;
-                    let fetched_at: i64 = row.get(1)?;
-                    Ok((risk_score, fetched_at))
-                });
-
-                match result {
-                    Ok((risk_score, fetched_at)) => {
-                        if now.saturating_sub(fetched_at) > max_age {
-                            results.push(None);
-                        } else {
-                            results.push(Some(risk_score));
-                        }
-                    }
-                    Err(rusqlite::Error::QueryReturnedNoRows) => {
-                        results.push(None)
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-            }
-            Ok(results.into_iter().zip(addresses).collect::<Vec<_>>())
-        })
-        .await?
-    }
-
-    fn write_cache(&self, values: Vec<(String, u64)>) {
-        if let Err(e) = self.cache_writer.send(values) {
-            error!(error = %e, "Cache writer channel closed");
-        }
-    }
-}
-
-fn spawn_cache_writer(
-    cache: Arc<Mutex<Connection>>,
-    in_flight: Arc<AsyncMutex<HashMap<String, SharedRiskScoreFuture>>>,
-    mut rx: mpsc::UnboundedReceiver<Vec<(String, u64)>>,
-) {
-    tokio::spawn(async move {
-        while let Some(scores) = rx.recv().await {
-            let addresses: Vec<String> =
-                scores.iter().map(|(a, _)| a.clone()).collect();
-            let now = now_unix_seconds();
-            let db = Arc::clone(&cache);
-            match tokio::task::spawn_blocking(move || {
-                let conn = db.lock().map_err(|_| RiskError::PoisonedLock)?;
-                for (address, risk_score) in &scores {
-                    conn.execute(
-                        "INSERT INTO address_risk_cache
-                            (address, risk_score, fetched_at_unix_s)
-                         VALUES (?1, ?2, ?3)
-                         ON CONFLICT(address) DO UPDATE SET
-                            risk_score = excluded.risk_score,
-                            fetched_at_unix_s = excluded.fetched_at_unix_s",
-                        params![address, risk_score, now],
-                    )?;
-                }
-                Ok::<_, RiskError>(())
-            })
-            .await
-            {
-                Ok(Err(e)) => {
-                    error!(error = ?e, "Failed to write risk score cache")
-                }
-                Err(e) => error!(error = ?e, "Cache writer task panicked"),
-                _ => {}
-            }
-            let mut guard = in_flight.lock().await;
-            for address in &addresses {
-                guard.remove(address.as_str());
-            }
-        }
-    });
-}
-
-async fn fetch_risk_score(
-    client: Client,
-    base_url: String,
-    api_key: String,
-    address: String,
-) -> Result<u64, Arc<str>> {
-    let response = client
-        .get(format!("{}/risk/address", base_url))
-        .query(&[("network", "solana"), ("address", address.as_str())])
-        .bearer_auth(api_key)
-        .send()
-        .await
-        .map_err(|e| Arc::<str>::from(e.to_string()))?
-        .error_for_status()
-        .map_err(|e| Arc::<str>::from(e.to_string()))?
-        .text()
-        .await
-        .map_err(|e| Arc::<str>::from(e.to_string()))?;
-
-    let body: Value = serde_json::from_str(&response)
-        .map_err(|e| Arc::<str>::from(e.to_string()))?;
-    body.get("riskScore")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| {
-            Arc::<str>::from(RiskError::RiskScoreNotFound.to_string())
-        })
-}
-
-fn now_unix_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }
 
 #[cfg(test)]
 mod tests {
-
     use std::{
+        collections::HashMap,
         io::{Read, Write},
         net::TcpListener,
+        time::Duration,
     };
 
-    use tempfile::tempdir;
     use tokio::task::JoinHandle;
 
     use super::*;
 
+    /// Minimal mock of the risk server's `GET /risk?pubkey=` endpoint. Returns
+    /// a camelCase `RiskAssessment` with `isRisky` computed from the seeded
+    /// score against `threshold`, mirroring the real server's contract.
     struct MockRiskServer {
         base_url: String,
         worker: JoinHandle<()>,
@@ -364,6 +122,7 @@ mod tests {
     impl MockRiskServer {
         async fn start(
             address_scores: Vec<(String, u64)>,
+            threshold: u64,
             expected_calls: usize,
         ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0")
@@ -387,40 +146,22 @@ mod tests {
                         .read(&mut buffer)
                         .expect("failed to read request");
                     let request = String::from_utf8_lossy(&buffer[..read]);
-                    let request_lower = request.to_ascii_lowercase();
-                    let address = extract_query_value(&request, "address")
-                        .expect("missing address query");
+                    let pubkey = extract_query_value(&request, "pubkey")
+                        .expect("missing pubkey query");
 
                     assert!(
-                        request.starts_with("GET /risk/address?"),
+                        request.starts_with("GET /risk?"),
                         "unexpected request line: {request}"
                     );
-                    assert!(
-                        request.contains("network=solana"),
-                        "missing network query: {request}"
-                    );
-                    assert!(
-                        request.contains(&format!("address={address}")),
-                        "missing address query: {request}"
-                    );
-                    assert!(
-                        request_lower
-                            .contains("authorization: bearer test-api-key"),
-                        "missing bearer auth header: {request}"
-                    );
 
-                    let score = score_by_address.get(&address);
-                    let (status, body) = match score {
-                        Some(score) => {
-                            ("200 OK", format!(r#"{{"riskScore":{score}}}"#))
-                        }
-                        None => (
-                            "404 Not Found",
-                            r#"{"error":"unknown address"}"#.to_string(),
-                        ),
-                    };
+                    let score =
+                        score_by_address.get(&pubkey).copied().unwrap_or(0);
+                    let is_risky = score > threshold;
+                    let body = format!(
+                        r#"{{"pubkey":"{pubkey}","riskScore":{score},"riskThreshold":{threshold},"isRisky":{is_risky}}}"#
+                    );
                     let response = format!(
-                        "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                         body.len(), body
                     );
                     stream
@@ -429,7 +170,6 @@ mod tests {
                 }
             });
 
-            debug!(address =? addr, "Mock risk server started");
             Self {
                 base_url: format!("http://{addr}"),
                 worker,
@@ -441,149 +181,73 @@ mod tests {
         }
     }
 
-    fn make_risk_config(base_url: String) -> RiskConfig {
-        RiskConfig {
-            enabled: true,
-            base_url,
-            api_key: Some("test-api-key".to_string()),
-            cache_ttl: Duration::from_secs(60),
-            request_timeout: Duration::from_secs(2),
-            risk_score_threshold: 7,
-        }
-    }
-
     fn extract_query_value(request: &str, key: &str) -> Option<String> {
         let first_line = request.lines().next()?;
         let path_and_query =
             first_line.split_whitespace().nth(1)?.split('?').nth(1)?;
         path_and_query.split('&').find_map(|part| {
             let (k, v) = part.split_once('=')?;
-            if k == key {
-                Some(v.to_string())
-            } else {
-                None
-            }
+            (k == key).then(|| v.to_string())
         })
     }
 
-    fn load_cached_scores(cache_path: &std::path::Path) -> Vec<(String, u64)> {
-        let conn =
-            Connection::open(cache_path).expect("failed to open sqlite cache");
-        let mut stmt = conn
-            .prepare(
-                "SELECT address, risk_score
-                 FROM address_risk_cache
-                 ORDER BY address ASC",
-            )
-            .expect("failed to prepare cache read statement");
-        stmt.query_map([], |row| {
-            let address: String = row.get(0)?;
-            let risk_score: u64 = row.get(1)?;
-            Ok((address, risk_score))
-        })
-        .expect("failed to query cache rows")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("failed to collect cache rows")
-    }
-
-    async fn assert_eventually_cached(
-        cache_path: &std::path::Path,
-        expected: &[(String, u64)],
-    ) {
-        for _ in 0..50 {
-            if load_cached_scores(cache_path) == expected {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+    fn make_risk_config(risk_server_url: String) -> RiskConfig {
+        RiskConfig {
+            enabled: true,
+            risk_server_url,
+            request_timeout: Duration::from_secs(2),
         }
-        assert_eq!(load_cached_scores(cache_path), expected);
     }
 
     #[tokio::test]
-    async fn check_addresses_uses_mocked_api_and_persists_cache_in_tempdir() {
+    async fn check_addresses_allows_low_risk_addresses() {
         magicblock_core::logger::init_for_tests();
         let first = "11111111111111111111111111111111".to_string();
         let second = "33333333333333333333333333333333".to_string();
         let addresses = vec![first.clone(), second.clone()];
-        let server = MockRiskServer::start(
-            vec![(first.clone(), 3), (second.clone(), 4)],
-            2,
-        )
-        .await;
+        let server =
+            MockRiskServer::start(vec![(first, 3), (second, 4)], 7, 2).await;
 
-        let temp_ledger = tempdir().expect("failed to create temp dir");
         let config = make_risk_config(server.base_url.clone());
-        let service = RiskService::try_from_config(&config, temp_ledger.path())
+        let service = RiskService::try_from_config(&config)
             .expect("failed to create risk service")
             .expect("risk service should be enabled");
 
-        let cache_path = temp_ledger.path().join("risk-cache.db");
-
-        service
-            .check_addresses(addresses.clone())
-            .await
-            .expect("first lookup should call mocked API");
-        assert_eventually_cached(
-            &cache_path,
-            &[(first.clone(), 3), (second.clone(), 4)],
-        )
-        .await;
         service
             .check_addresses(addresses)
             .await
-            .expect("second lookup should be served from sqlite cache");
+            .expect("low-risk addresses should be allowed");
 
         server.join().await;
-        assert!(cache_path.exists());
-        let rows = load_cached_scores(&cache_path);
-        assert_eq!(rows, vec![(first, 3), (second, 4)]);
     }
 
     #[tokio::test]
-    async fn check_addresses_returns_high_risk_error_for_mocked_response() {
+    async fn check_addresses_returns_high_risk_error() {
         magicblock_core::logger::init_for_tests();
         let address = "22222222222222222222222222222222".to_string();
-        let addresses = vec![address.clone()];
-        let server = MockRiskServer::start(vec![(address.clone(), 9)], 1).await;
+        let server =
+            MockRiskServer::start(vec![(address.clone(), 9)], 7, 1).await;
 
-        let temp_ledger = tempdir().expect("failed to create temp dir");
         let config = make_risk_config(server.base_url.clone());
-        let service = RiskService::try_from_config(&config, temp_ledger.path())
+        let service = RiskService::try_from_config(&config)
             .expect("failed to create risk service")
             .expect("risk service should be enabled");
 
-        let result = service.check_addresses(addresses).await;
+        let result = service.check_addresses(vec![address.clone()]).await;
         assert!(matches!(
             result,
-            Err(RiskError::HighRiskAddresses(ref risky)) if risky == &vec![address.clone()]
+            Err(RiskError::HighRiskAddresses(ref risky)) if risky == &vec![address]
         ));
 
         server.join().await;
-
-        let cache_path = temp_ledger.path().join("risk-cache.db");
-        assert!(cache_path.exists());
-        assert_eventually_cached(&cache_path, &[(address, 9)]).await;
     }
 
     #[tokio::test]
-    async fn check_addresses_deduplicates_inflight_requests_for_same_address() {
-        magicblock_core::logger::init_for_tests();
-        let address = "44444444444444444444444444444444".to_string();
-        let server = MockRiskServer::start(vec![(address.clone(), 3)], 1).await;
-
-        let temp_ledger = tempdir().expect("failed to create temp dir");
-        let config = make_risk_config(server.base_url.clone());
-        let service = RiskService::try_from_config(&config, temp_ledger.path())
-            .expect("failed to create risk service")
-            .expect("risk service should be enabled");
-
-        let first = service.check_addresses(vec![address.clone()]);
-        let second = service.check_addresses(vec![address]);
-        let (first_result, second_result) = tokio::join!(first, second);
-        first_result.expect("first concurrent lookup should succeed");
-        second_result
-            .expect("second concurrent lookup should dedupe and succeed");
-
-        server.join().await;
+    async fn disabled_config_yields_no_service() {
+        let mut config = make_risk_config("http://127.0.0.1:1".to_string());
+        config.enabled = false;
+        assert!(RiskService::try_from_config(&config)
+            .expect("disabled config should not error")
+            .is_none());
     }
 }

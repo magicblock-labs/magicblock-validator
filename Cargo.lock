@@ -3498,14 +3498,9 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "reqwest",
- "rusqlite",
  "serde",
- "serde_json",
- "solana-pubkey 4.1.0",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
 ]
 
 [[package]]

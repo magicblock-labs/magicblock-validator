@@ -269,35 +269,21 @@ remove-confined-accounts = false
 # When enabled, all signers referenced by post-delegation actions are checked
 # against Range API before actions are allowed to execute.
 [chainlink.risk]
-# Enables/disables Range risk checks.
+# Enables/disables address risk checks against the risk server.
 # Default: false
 # Env: MBV_CHAINLINK__RISK__ENABLED
 enabled = false
 
-# Range API base URL.
-# Default: "https://api.range.org/v1"
-# Env: MBV_CHAINLINK__RISK__BASE_URL
-base-url = "https://api.range.org/v1"
+# Base URL of the risk server that performs address risk assessments.
+# The risk server owns the upstream provider credentials, cache, and threshold.
+# Default: "http://127.0.0.1:3001"
+# Env: MBV_CHAINLINK__RISK__RISK_SERVER_URL
+risk-server-url = "http://127.0.0.1:3001"
 
-# Range API bearer token.
-# Default: None
-# Env: MBV_CHAINLINK__RISK__API_KEY
-api-key = "your-api-key"
-
-# Cache TTL.
-# Default: "30 days"
-# Env: MBV_CHAINLINK__RISK__CACHE_TTL
-cache-ttl = "30 days"
-
-# HTTP timeout for Range API calls.
+# HTTP timeout for risk server calls.
 # Default: "5s"
 # Env: MBV_CHAINLINK__RISK__REQUEST_TIMEOUT
 request-timeout = "5s"
-
-# Risk score threshold to consider an address high risk, on scale of 0-10.
-# Default: 5
-# Env: MBV_CHAINLINK__RISK__RISK_SCORE_THRESHOLD
-# risk-score-threshold = 5
 
 # ==============================================================================
 # On-Chain Registration (Optional)

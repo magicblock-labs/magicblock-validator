@@ -23,12 +23,19 @@ use solana_sdk_ids::system_program;
 use test_chainlink::test_context::TestContext;
 use tokio::task::JoinHandle;
 
+/// Threshold the mock risk server uses to decide `isRisky`. The seeded scores
+/// (1 and 9) sit either side of it.
+const RISK_THRESHOLD: u64 = 7;
+
 struct MockRiskServer {
     base_url: String,
     worker: JoinHandle<()>,
 }
 
 impl MockRiskServer {
+    /// Mocks the risk server's `GET /risk?pubkey=` endpoint. `isRisky` is
+    /// computed from the seeded score against `RISK_THRESHOLD`, mirroring the
+    /// real server which owns the threshold.
     async fn start(
         address_scores: Vec<(String, u64)>,
         expected_calls: usize,
@@ -50,15 +57,17 @@ impl MockRiskServer {
                 let mut buffer = [0u8; 4096];
                 let read = stream.read(&mut buffer).expect("read request");
                 let request = String::from_utf8_lossy(&buffer[..read]);
-                let address = extract_query_value(&request, "address")
-                    .expect("missing address query");
-                assert!(request.starts_with("GET /risk/address?"));
-                assert!(request.contains("network=solana"));
+                let pubkey = extract_query_value(&request, "pubkey")
+                    .expect("missing pubkey query");
+                assert!(request.starts_with("GET /risk?"));
 
                 let score = score_by_address
-                    .get(&address)
+                    .get(&pubkey)
                     .expect("unexpected risk address");
-                let body = format!(r#"{{"riskScore":{score}}}"#);
+                let is_risky = *score > RISK_THRESHOLD;
+                let body = format!(
+                    r#"{{"pubkey":"{pubkey}","riskScore":{score},"riskThreshold":{RISK_THRESHOLD},"isRisky":{is_risky}}}"#
+                );
                 let response = format!(
                     "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                     body.len(),
@@ -95,14 +104,11 @@ fn extract_query_value(request: &str, key: &str) -> Option<String> {
     })
 }
 
-fn risk_config(base_url: String) -> RiskConfig {
+fn risk_config(risk_server_url: String) -> RiskConfig {
     RiskConfig {
         enabled: true,
-        base_url,
-        api_key: Some("test-api-key".to_string()),
-        cache_ttl: Duration::from_secs(60),
+        risk_server_url,
         request_timeout: Duration::from_secs(2),
-        risk_score_threshold: 7,
     }
 }
 
@@ -150,22 +156,16 @@ fn add_delegation_record_with_signer_action(
     );
 }
 
-async fn setup(
-    risk_score: u64,
-) -> (TestContext, MockRiskServer, Pubkey, tempfile::TempDir) {
+async fn setup(risk_score: u64) -> (TestContext, MockRiskServer, Pubkey) {
     init_logger();
 
     let signer = Pubkey::new_unique();
     let server =
         MockRiskServer::start(vec![(signer.to_string(), risk_score)], 1).await;
-    // Keep alive for the test: RiskService writes risk-cache.db under this path.
-    let temp_ledger = tempfile::tempdir().expect("temp ledger");
-    let risk_service = RiskService::try_from_config(
-        &risk_config(server.base_url.clone()),
-        temp_ledger.path(),
-    )
-    .expect("risk config should be valid")
-    .expect("risk service should be enabled");
+    let risk_service =
+        RiskService::try_from_config(&risk_config(server.base_url.clone()))
+            .expect("risk config should be valid")
+            .expect("risk service should be enabled");
     let risk_service = Arc::new(risk_service);
 
     let slot = 100;
@@ -191,13 +191,13 @@ async fn setup(
         signer,
     );
 
-    (ctx, server, delegated_pubkey, temp_ledger)
+    (ctx, server, delegated_pubkey)
 }
 
 #[tokio::test]
 async fn post_delegation_aml_rejection_schedules_undelegation_with_high_risk_signer(
 ) {
-    let (ctx, server, delegated_pubkey, _temp_ledger) = setup(9).await;
+    let (ctx, server, delegated_pubkey) = setup(9).await;
 
     ctx.ensure_account(&delegated_pubkey)
         .await
@@ -214,7 +214,7 @@ async fn post_delegation_aml_rejection_schedules_undelegation_with_high_risk_sig
 
 #[tokio::test]
 async fn post_delegation_aml_accepts_low_risk_signer() {
-    let (ctx, server, delegated_pubkey, _temp_ledger) = setup(1).await;
+    let (ctx, server, delegated_pubkey) = setup(1).await;
 
     ctx.ensure_account(&delegated_pubkey)
         .await
