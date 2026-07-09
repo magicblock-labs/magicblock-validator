@@ -64,6 +64,6 @@ pub enum ChainlinkError {
     #[error("account load failed for {0}")]
     AccountLoadFailed(Pubkey),
 
-    #[error("Failed to perform Range risk check: {0}")]
+    #[error("Failed to perform risk check: {0}")]
     RangeRisk(#[from] RiskError),
 }

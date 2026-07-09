@@ -1,5 +1,4 @@
 use std::{
-    path::Path,
     sync::{Arc, atomic::AtomicU64},
     time::Duration,
 };
@@ -192,7 +191,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         validator_keypair: Keypair,
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
-        ledger_path: &Path,
         chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<ProdChainlink> {
         // Extract accounts provider and create fetch cloner while connecting
@@ -209,11 +207,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         let (undelegation_request_sender, _) = broadcast::channel(1024);
         let fetch_cloner = if let Some(provider) = account_provider {
             let provider = Arc::new(provider);
-            let risk_service = RiskService::try_from_config(
-                &chainlink_config.risk,
-                ledger_path,
-            )?
-            .map(Arc::new);
+            let risk_service =
+                RiskService::try_from_config(&chainlink_config.risk)?
+                    .map(Arc::new);
             let fetch_cloner =
                 FetchCloner::new_with_undelegation_request_sender(
                     &provider,
