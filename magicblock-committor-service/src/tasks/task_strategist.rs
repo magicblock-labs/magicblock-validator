@@ -579,6 +579,7 @@ mod tests {
     fn create_test_base_action_task(len: usize) -> BaseActionTask {
         BaseActionTaskV1 {
             action: BaseAction {
+                id: 0,
                 destination_program: Pubkey::new_unique(),
                 source_program: None,
                 escrow_authority: Pubkey::new_unique(),

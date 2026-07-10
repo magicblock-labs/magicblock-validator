@@ -180,6 +180,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     // Create test data
     let committed_account = create_committed_account(&[1, 2, 3]);
     let base_action = BaseAction {
+        id: 0,
         compute_units: 30_000,
         destination_program: system_program::id(),
         source_program: None,

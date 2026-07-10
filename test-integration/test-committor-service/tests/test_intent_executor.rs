@@ -1480,6 +1480,7 @@ fn succeeding_commit_action(
         },
     ];
     BaseAction {
+        id: 0,
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
@@ -1523,6 +1524,7 @@ fn succeeding_undelegate_action(
     ];
 
     UndelegateType::WithBaseActions(vec![BaseAction {
+        id: 0,
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
@@ -1566,6 +1568,7 @@ fn failing_undelegate_action(
     ];
 
     UndelegateType::WithBaseActions(vec![BaseAction {
+        id: 0,
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
