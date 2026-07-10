@@ -10,8 +10,8 @@ use magicblock_metrics::metrics::{
     chainlink_pending_fetch_waiters_value,
     chainlink_subscription_cleanup_accounts_value,
     chainlink_subscription_registration_accounts_value,
-    chainlink_subscription_release_accounts_value, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome,
+    chainlink_subscription_release_accounts_value, AccountFetchOrigin,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
 };
 use solana_account::Account;
 use solana_system_interface::program as system_program;

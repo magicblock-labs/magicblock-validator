@@ -1177,12 +1177,11 @@ pub fn inc_chainlink_clone_materialization_accounts_total(
     );
 }
 
-pub fn inc_chainlink_empty_placeholder_accounts_total(
-    origin: AccountFetchOrigin,
+pub fn inc_chainlink_empty_placeholder_accounts_total_with_context(
+    context: AccountFetchContext,
     stage: ChainlinkEmptyPlaceholderStage,
     outcome: Outcome,
 ) {
-    let context = AccountFetchContext::from(origin);
     CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL
         .with_label_values(&[
             context.entrypoint().value(),
@@ -1191,6 +1190,18 @@ pub fn inc_chainlink_empty_placeholder_accounts_total(
             outcome.value(),
         ])
         .inc();
+}
+
+pub fn inc_chainlink_empty_placeholder_accounts_total(
+    origin: AccountFetchOrigin,
+    stage: ChainlinkEmptyPlaceholderStage,
+    outcome: Outcome,
+) {
+    inc_chainlink_empty_placeholder_accounts_total_with_context(
+        origin.into(),
+        stage,
+        outcome,
+    );
 }
 
 pub fn inc_program_subscription_account_updates_count(
