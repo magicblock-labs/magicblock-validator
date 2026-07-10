@@ -9,7 +9,7 @@ use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_metrics::metrics::AccountFetchOrigin;
+use magicblock_metrics::metrics::AccountFetchContext;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -100,15 +100,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
+        let fetch_context = fetch_context.into();
         match self {
             Self::Enabled(chainlink) => {
                 chainlink
                     .ensure_accounts(
                         pubkeys,
                         mark_empty_if_not_found,
-                        fetch_origin,
+                        fetch_context,
                     )
                     .await
             }
@@ -131,11 +132,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
+        let fetch_context = fetch_context.into();
         match self {
             Self::Enabled(chainlink) => {
-                chainlink.fetch_accounts(pubkeys, fetch_origin).await
+                chainlink.fetch_accounts(pubkeys, fetch_context).await
             }
             Self::Disabled => Ok(vec![None; pubkeys.len()]),
         }
@@ -144,12 +146,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub async fn accounts_delegated_on_base_and_er(
         &self,
         pubkeys: &[Pubkey],
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> ChainlinkResult<Vec<bool>> {
+        let fetch_context = fetch_context.into();
         match self {
             Self::Enabled(chainlink) => {
                 chainlink
-                    .accounts_delegated_on_base_and_er(pubkeys, fetch_origin)
+                    .accounts_delegated_on_base_and_er(pubkeys, fetch_context)
                     .await
             }
             Self::Disabled => Ok(vec![false; pubkeys.len()]),
@@ -423,7 +426,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .ensure_accounts(
                 &pubkeys,
                 mark_empty_if_not_found,
-                AccountFetchOrigin::SendTransaction(*tx.signature()),
+                AccountFetchContext::send_transaction(*tx.signature()),
             )
             .await?;
 
@@ -433,13 +436,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// Same as fetch accounts, but does not return the accounts, just
     /// ensures were cloned into our validator if they exist on chain.
     /// If we're offline and not syncing accounts then this is a no-op.
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found))]
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, fetch_context))]
     pub async fn ensure_accounts(
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
+        let fetch_context = fetch_context.into();
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(FetchAndCloneResult::default());
         };
@@ -447,7 +451,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             fetch_cloner,
             pubkeys,
             mark_empty_if_not_found,
-            fetch_origin,
+            fetch_context,
         )
         .await
     }
@@ -456,12 +460,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// Otherwise ensures that the accounts exist on chain and were cloned into our validator
     /// and returns their state from the bank (which may be None if the account does not
     /// exist locally or on chain).
-    #[instrument(skip(self, pubkeys))]
+    #[instrument(skip(self, pubkeys, fetch_context))]
     pub async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
+        let fetch_context = fetch_context.into();
         if tracing::enabled!(tracing::Level::TRACE) {
             let count = pubkeys.len();
             trace!(count, "Fetching accounts");
@@ -474,7 +479,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 .collect());
         };
         let _ = self
-            .fetch_accounts_common(fetch_cloner, pubkeys, None, fetch_origin)
+            .fetch_accounts_common(fetch_cloner, pubkeys, None, fetch_context)
             .await?;
 
         let accounts = pubkeys
@@ -484,17 +489,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(accounts)
     }
 
-    #[instrument(skip(self, pubkeys))]
+    #[instrument(skip(self, pubkeys, fetch_context))]
     pub async fn accounts_delegated_on_base_and_er(
         &self,
         pubkeys: &[Pubkey],
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> ChainlinkResult<Vec<bool>> {
+        let fetch_context = fetch_context.into();
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(vec![false; pubkeys.len()]);
         };
         let remote_accounts = fetch_cloner
-            .fetch_remote_accounts(pubkeys, fetch_origin)
+            .fetch_remote_accounts(pubkeys, fetch_context)
             .await?;
         if remote_accounts.len() != pubkeys.len() {
             return Err(ChainlinkError::UnexpectedAccountCount(format!(
@@ -528,7 +534,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         fetch_cloner: &FetchCloner<T, U, V, C>,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if tracing::enabled!(tracing::Level::TRACE) {
             let count = pubkeys.len();
@@ -547,7 +553,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 pubkeys,
                 mark_empty_if_not_found,
                 None,
-                fetch_origin,
+                fetch_context,
             )
             .await?;
         trace!("Fetched and cloned accounts");
@@ -605,7 +611,7 @@ mod tests {
     use std::{sync::Arc, time::Duration};
 
     use magicblock_accounts_db::traits::AccountsBank;
-    use magicblock_metrics::metrics::AccountFetchOrigin;
+    use magicblock_metrics::metrics::AccountFetchContext;
     use solana_account::AccountSharedData;
     use solana_message::legacy::Message;
     use solana_pubkey::Pubkey;
@@ -691,7 +697,11 @@ mod tests {
         let pubkey = Pubkey::new_unique();
 
         let result = chainlink
-            .ensure_accounts(&[pubkey], None, AccountFetchOrigin::GetAccount)
+            .ensure_accounts(
+                &[pubkey],
+                None,
+                AccountFetchContext::rpc_get_account(),
+            )
             .await;
 
         assert!(result
@@ -708,7 +718,10 @@ mod tests {
         let pubkeys = vec![Pubkey::new_unique(), Pubkey::new_unique()];
 
         let result = chainlink
-            .fetch_accounts(&pubkeys, AccountFetchOrigin::GetMultipleAccounts)
+            .fetch_accounts(
+                &pubkeys,
+                AccountFetchContext::rpc_get_multiple_accounts(),
+            )
             .await;
 
         let accounts = result.expect("disabled fetch_accounts should succeed");

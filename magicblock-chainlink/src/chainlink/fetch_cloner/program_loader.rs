@@ -1,5 +1,5 @@
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_metrics::metrics::AccountFetchOrigin;
+use magicblock_metrics::metrics::AccountFetchContext;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tracing::*;
@@ -67,7 +67,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
             this,
             pubkey,
             account.remote_slot(),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         {
@@ -129,7 +129,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
     if let Err(err) = this
         .clone_program_with_ownership(
             loaded_program,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
     {
