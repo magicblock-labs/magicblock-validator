@@ -1534,3 +1534,148 @@ pub fn set_grpc_total_streams_gauge(client_id: &str, count: usize) {
         .with_label_values(&[client_id])
         .set(count as i64);
 }
+
+#[cfg(test)]
+mod fetch_context_metric_tests {
+    use super::*;
+
+    fn counter_value(counter: &IntCounterVec, labels: &[&str]) -> u64 {
+        counter
+            .get_metric_with_label_values(labels)
+            .map(|m| m.get())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn fetch_context_metrics_keep_entrypoint_and_reason_separate() {
+        let action_context = AccountFetchContext::rpc_get_account()
+            .with_reason(AccountFetchReason::ActionDependencyMissing);
+        let forced_context = AccountFetchContext::rpc_get_account()
+            .with_reason(AccountFetchReason::ActionDependencyForcedRefresh);
+        let sub_context = AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        );
+        let record_context = AccountFetchContext::subscription_update(
+            AccountFetchReason::DelegationRecord,
+        );
+        let program_context = AccountFetchContext::subscription_update(
+            AccountFetchReason::ProgramData,
+        );
+        let undelegating_context = AccountFetchContext::rpc_get_account()
+            .with_reason(AccountFetchReason::UndelegatingRefresh);
+
+        let action_labels = &[
+            "rpc_get_account",
+            "action_dependency_missing",
+            "remote_account_provider",
+            "owned",
+        ];
+        let before_action = counter_value(
+            &CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL,
+            action_labels,
+        );
+        inc_chainlink_pending_fetch_accounts_with_context(
+            action_context,
+            ChainlinkPendingFetchLayer::RemoteAccountProvider,
+            ChainlinkPendingFetchOutcome::Owned,
+            1,
+        );
+        assert_eq!(
+            counter_value(
+                &CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL,
+                action_labels
+            ),
+            before_action + 1
+        );
+
+        let forced_labels = &[
+            "rpc_get_account",
+            "action_dependency_forced_refresh",
+            "forced_refresh_remote_required",
+            "forced_refresh",
+        ];
+        let before_forced = counter_value(
+            &CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL,
+            forced_labels,
+        );
+        inc_chainlink_bank_precheck_accounts_with_context(
+            forced_context,
+            BankPrecheckOutcome::ForcedRefreshRemoteRequired,
+            BankPrecheckReason::ForcedRefresh,
+            1,
+        );
+        assert_eq!(
+            counter_value(
+                &CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL,
+                forced_labels
+            ),
+            before_forced + 1
+        );
+
+        let sub_labels = &[
+            "subscription_update",
+            "subscription_update_clone",
+            "found",
+            "normal_account",
+            "clone_succeeded",
+        ];
+        let before_sub =
+            counter_value(&CHAINLINK_CLONE_ACCOUNTS_TOTAL, sub_labels);
+        inc_chainlink_clone_accounts_total_with_context(
+            sub_context,
+            ChainlinkCloneRemoteResult::Found,
+            ChainlinkCloneIntent::NormalAccount,
+            ChainlinkCloneOutcome::CloneSucceeded,
+        );
+        assert_eq!(
+            counter_value(&CHAINLINK_CLONE_ACCOUNTS_TOTAL, sub_labels),
+            before_sub + 1
+        );
+
+        let record_labels = &[
+            "subscription_update",
+            "delegation_record",
+            "direct_account",
+            "added_below_capacity",
+        ];
+        let before_record = counter_value(
+            &CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL,
+            record_labels,
+        );
+        inc_chainlink_subscription_registration_accounts(
+            SubscriptionRegistrationOrigin::Fetch(record_context),
+            SubscriptionReasonLabel::DirectAccount,
+            SubscriptionRegistrationOutcome::AddedBelowCapacity,
+        );
+        assert_eq!(
+            counter_value(
+                &CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL,
+                record_labels,
+            ),
+            before_record + 1
+        );
+
+        let program_labels = &["subscription_update", "program_data"];
+        let before_program =
+            counter_value(&ACCOUNT_FETCHES_FOUND_COUNT, program_labels);
+        inc_account_fetches_found_with_context(program_context, 1);
+        assert_eq!(
+            counter_value(&ACCOUNT_FETCHES_FOUND_COUNT, program_labels),
+            before_program + 1
+        );
+
+        let undelegating_labels = &["rpc_get_account", "undelegating_refresh"];
+        let before_undelegating = counter_value(
+            &ACCOUNT_FETCHES_NOT_FOUND_COUNT,
+            undelegating_labels,
+        );
+        inc_account_fetches_not_found_with_context(undelegating_context, 1);
+        assert_eq!(
+            counter_value(
+                &ACCOUNT_FETCHES_NOT_FOUND_COUNT,
+                undelegating_labels
+            ),
+            before_undelegating + 1
+        );
+    }
+}
