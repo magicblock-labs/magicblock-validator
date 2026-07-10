@@ -123,6 +123,7 @@ impl TaskStrategist {
     /// Builds execution strategy from [`BaseTask`]s
     /// 1. Optimizes tasks to fit in TX
     /// 2. Chooses the fastest execution mode for Tasks
+    ///
     /// `uniqueness_nonce` is rendered as a constant-size noop instruction on
     /// every produced strategy, and is accounted for in all fit decisions.
     pub fn build_execution_strategy<P: IntentPersister>(
