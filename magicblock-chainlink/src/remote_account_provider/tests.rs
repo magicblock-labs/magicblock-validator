@@ -2287,7 +2287,9 @@ async fn test_registration_metric_preserves_fetch_origin() {
         setup_provider(pubkey, account).await;
 
     let before = registration_metric_value(
-        SubscriptionRegistrationOrigin::Fetch(AccountFetchOrigin::GetAccount),
+        SubscriptionRegistrationOrigin::Fetch(
+            AccountFetchOrigin::GetAccount.into(),
+        ),
         SubscriptionReasonLabel::DirectAccount,
         SubscriptionRegistrationOutcome::AddedBelowCapacity,
     );
@@ -2296,7 +2298,9 @@ async fn test_registration_metric_preserves_fetch_origin() {
         .await
         .unwrap();
     let after = registration_metric_value(
-        SubscriptionRegistrationOrigin::Fetch(AccountFetchOrigin::GetAccount),
+        SubscriptionRegistrationOrigin::Fetch(
+            AccountFetchOrigin::GetAccount.into(),
+        ),
         SubscriptionReasonLabel::DirectAccount,
         SubscriptionRegistrationOutcome::AddedBelowCapacity,
     );

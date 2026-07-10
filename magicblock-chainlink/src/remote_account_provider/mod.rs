@@ -1638,7 +1638,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 self.acquire_subscription_with_origin(
                     pubkey,
                     SubscriptionReason::DirectAccount,
-                    SubscriptionRegistrationOrigin::Fetch(fetch_origin),
+                    SubscriptionRegistrationOrigin::Fetch(fetch_origin.into()),
                 )
                 .await
             }))

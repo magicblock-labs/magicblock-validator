@@ -175,7 +175,7 @@ lazy_static::lazy_static! {
                 "chainlink_bank_precheck_accounts_total",
                 "Account entries by FetchCloner bank precheck outcome before remote fetch",
             ),
-            &["origin", "outcome", "reason"],
+            &["entrypoint", "fetch_reason", "outcome", "bank_reason"],
         )
         .unwrap();
     static ref CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL: IntCounterVec =
@@ -184,7 +184,7 @@ lazy_static::lazy_static! {
                 "chainlink_subscription_registration_accounts_total",
                 "Account subscription registration attempts by origin, reason, and terminal outcome",
             ),
-            &["origin", "subscription_reason", "outcome"],
+            &["entrypoint", "fetch_reason", "subscription_reason", "outcome"],
         )
         .unwrap();
 
@@ -247,7 +247,7 @@ lazy_static::lazy_static! {
                 "chainlink_pending_fetch_accounts_total",
                 "Account fetch/clone requests by origin, pending-dedup layer, and owner/waiter outcome",
             ),
-            &["origin", "layer", "outcome"],
+            &["entrypoint", "fetch_reason", "layer", "outcome"],
         )
         .unwrap();
 
@@ -257,7 +257,7 @@ lazy_static::lazy_static! {
                 "chainlink_pending_fetch_waiters_total",
                 "Account fetch/clone requests that joined existing pending work by origin and pending-dedup layer",
             ),
-            &["origin", "layer"],
+            &["entrypoint", "fetch_reason", "layer"],
         )
         .unwrap();
 
@@ -284,7 +284,7 @@ lazy_static::lazy_static! {
                 MILLIS_100_900.iter()).chain(
                 SECONDS_1_9.iter()).cloned().collect()
             ),
-            &["origin", "layer", "outcome"],
+            &["entrypoint", "fetch_reason", "layer", "outcome"],
         )
         .unwrap();
 
@@ -364,7 +364,7 @@ lazy_static::lazy_static! {
             "account_fetches_found_count",
             "Total number of network account fetches that found an account",
         ),
-        &["origin"],
+        &["entrypoint", "fetch_reason"],
     )
     .unwrap();
 
@@ -373,7 +373,7 @@ lazy_static::lazy_static! {
             "account_fetches_not_found_count",
             "Total number of network account fetches where account was not found",
         ),
-        &["origin"],
+        &["entrypoint", "fetch_reason"],
     )
     .unwrap();
 
@@ -383,7 +383,7 @@ lazy_static::lazy_static! {
                 "chainlink_clone_accounts_total",
                 "Total number of Chainlink clone attempts and outcomes",
             ),
-            &["origin", "remote_result", "clone_intent", "outcome"],
+            &["entrypoint", "fetch_reason", "remote_result", "clone_intent", "outcome"],
         )
         .unwrap();
 
@@ -393,7 +393,7 @@ lazy_static::lazy_static! {
                 "chainlink_clone_materialization_accounts_total",
                 "Total number of post-clone bank materialization checks",
             ),
-            &["origin", "remote_result", "outcome"],
+            &["entrypoint", "fetch_reason", "remote_result", "outcome"],
         )
         .unwrap();
 
@@ -903,10 +903,10 @@ pub fn inc_evicted_accounts_count() {
     EVICTED_ACCOUNTS_COUNT.inc();
 }
 
-pub fn inc_chainlink_bank_precheck_accounts(
-    fetch_origin: AccountFetchOrigin,
+pub fn inc_chainlink_bank_precheck_accounts_with_context(
+    context: AccountFetchContext,
     outcome: BankPrecheckOutcome,
-    reason: BankPrecheckReason,
+    bank_reason: BankPrecheckReason,
     count: u64,
 ) {
     if count == 0 {
@@ -914,11 +914,26 @@ pub fn inc_chainlink_bank_precheck_accounts(
     }
     CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL
         .with_label_values(&[
-            fetch_origin.value(),
+            context.entrypoint().value(),
+            context.reason().value(),
             outcome.value(),
-            reason.value(),
+            bank_reason.value(),
         ])
         .inc_by(count);
+}
+
+pub fn inc_chainlink_bank_precheck_accounts(
+    fetch_origin: AccountFetchOrigin,
+    outcome: BankPrecheckOutcome,
+    reason: BankPrecheckReason,
+    count: u64,
+) {
+    inc_chainlink_bank_precheck_accounts_with_context(
+        fetch_origin.into(),
+        outcome,
+        reason,
+        count,
+    );
 }
 
 pub fn inc_chainlink_subscription_registration_accounts(
@@ -928,7 +943,8 @@ pub fn inc_chainlink_subscription_registration_accounts(
 ) {
     CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL
         .with_label_values(&[
-            origin.value(),
+            origin.entrypoint_str(),
+            origin.fetch_reason_str(),
             subscription_reason.value(),
             outcome.value(),
         ])
@@ -961,7 +977,8 @@ pub fn chainlink_subscription_registration_accounts_value(
 ) -> u64 {
     CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL
         .get_metric_with_label_values(&[
-            origin.value(),
+            origin.entrypoint_str(),
+            origin.fetch_reason_str(),
             subscription_reason.value(),
             outcome.value(),
         ])
@@ -1067,9 +1084,31 @@ pub fn inc_account_fetches_failed(count: u64) {
     ACCOUNT_FETCHES_FAILED_COUNT.inc_by(count);
 }
 
-pub fn inc_account_fetches_found(fetch_origin: AccountFetchOrigin, count: u64) {
+pub fn inc_account_fetches_found_with_context(
+    context: AccountFetchContext,
+    count: u64,
+) {
     ACCOUNT_FETCHES_FOUND_COUNT
-        .with_label_values(&[fetch_origin.value()])
+        .with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+        ])
+        .inc_by(count);
+}
+
+pub fn inc_account_fetches_found(fetch_origin: AccountFetchOrigin, count: u64) {
+    inc_account_fetches_found_with_context(fetch_origin.into(), count);
+}
+
+pub fn inc_account_fetches_not_found_with_context(
+    context: AccountFetchContext,
+    count: u64,
+) {
+    ACCOUNT_FETCHES_NOT_FOUND_COUNT
+        .with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+        ])
         .inc_by(count);
 }
 
@@ -1077,9 +1116,24 @@ pub fn inc_account_fetches_not_found(
     fetch_origin: AccountFetchOrigin,
     count: u64,
 ) {
-    ACCOUNT_FETCHES_NOT_FOUND_COUNT
-        .with_label_values(&[fetch_origin.value()])
-        .inc_by(count);
+    inc_account_fetches_not_found_with_context(fetch_origin.into(), count);
+}
+
+pub fn inc_chainlink_clone_accounts_total_with_context(
+    context: AccountFetchContext,
+    remote_result: ChainlinkCloneRemoteResult,
+    clone_intent: ChainlinkCloneIntent,
+    outcome: ChainlinkCloneOutcome,
+) {
+    CHAINLINK_CLONE_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            remote_result.value(),
+            clone_intent.value(),
+            outcome.value(),
+        ])
+        .inc();
 }
 
 pub fn inc_chainlink_clone_accounts_total(
@@ -1088,11 +1142,24 @@ pub fn inc_chainlink_clone_accounts_total(
     clone_intent: ChainlinkCloneIntent,
     outcome: ChainlinkCloneOutcome,
 ) {
-    CHAINLINK_CLONE_ACCOUNTS_TOTAL
+    inc_chainlink_clone_accounts_total_with_context(
+        origin.into(),
+        remote_result,
+        clone_intent,
+        outcome,
+    );
+}
+
+pub fn inc_chainlink_clone_materialization_accounts_total_with_context(
+    context: AccountFetchContext,
+    remote_result: ChainlinkCloneRemoteResult,
+    outcome: ChainlinkCloneMaterializationOutcome,
+) {
+    CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL
         .with_label_values(&[
-            origin.value(),
+            context.entrypoint().value(),
+            context.reason().value(),
             remote_result.value(),
-            clone_intent.value(),
             outcome.value(),
         ])
         .inc();
@@ -1103,13 +1170,11 @@ pub fn inc_chainlink_clone_materialization_accounts_total(
     remote_result: ChainlinkCloneRemoteResult,
     outcome: ChainlinkCloneMaterializationOutcome,
 ) {
-    CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL
-        .with_label_values(&[
-            origin.value(),
-            remote_result.value(),
-            outcome.value(),
-        ])
-        .inc();
+    inc_chainlink_clone_materialization_accounts_total_with_context(
+        origin.into(),
+        remote_result,
+        outcome,
+    );
 }
 
 pub fn inc_chainlink_empty_placeholder_accounts_total(
@@ -1117,8 +1182,14 @@ pub fn inc_chainlink_empty_placeholder_accounts_total(
     stage: ChainlinkEmptyPlaceholderStage,
     outcome: Outcome,
 ) {
+    let context = AccountFetchContext::from(origin);
     CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL
-        .with_label_values(&[origin.value(), stage.value(), outcome.value()])
+        .with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            stage.value(),
+            outcome.value(),
+        ])
         .inc();
 }
 
@@ -1144,14 +1215,47 @@ pub fn inc_account_subscription_activations_count(client_id: &impl LabelValue) {
         .inc();
 }
 
+pub fn inc_chainlink_pending_fetch_accounts_with_context(
+    context: AccountFetchContext,
+    layer: ChainlinkPendingFetchLayer,
+    outcome: ChainlinkPendingFetchOutcome,
+    count: u64,
+) {
+    CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL
+        .with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            layer.value(),
+            outcome.value(),
+        ])
+        .inc_by(count);
+}
+
 pub fn inc_chainlink_pending_fetch_accounts(
     origin: AccountFetchOrigin,
     layer: ChainlinkPendingFetchLayer,
     outcome: ChainlinkPendingFetchOutcome,
     count: u64,
 ) {
-    CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL
-        .with_label_values(&[origin.value(), layer.value(), outcome.value()])
+    inc_chainlink_pending_fetch_accounts_with_context(
+        origin.into(),
+        layer,
+        outcome,
+        count,
+    );
+}
+
+pub fn inc_chainlink_pending_fetch_waiters_with_context(
+    context: AccountFetchContext,
+    layer: ChainlinkPendingFetchLayer,
+    count: u64,
+) {
+    CHAINLINK_PENDING_FETCH_WAITERS_TOTAL
+        .with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            layer.value(),
+        ])
         .inc_by(count);
 }
 
@@ -1160,9 +1264,11 @@ pub fn inc_chainlink_pending_fetch_waiters(
     layer: ChainlinkPendingFetchLayer,
     count: u64,
 ) {
-    CHAINLINK_PENDING_FETCH_WAITERS_TOTAL
-        .with_label_values(&[origin.value(), layer.value()])
-        .inc_by(count);
+    inc_chainlink_pending_fetch_waiters_with_context(
+        origin.into(),
+        layer,
+        count,
+    );
 }
 
 pub fn inc_chainlink_pending_fetch_waiters_gauge(
@@ -1181,26 +1287,47 @@ pub fn dec_chainlink_pending_fetch_waiters_gauge(
         .dec();
 }
 
+pub fn observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+    context: AccountFetchContext,
+    layer: ChainlinkPendingFetchLayer,
+    outcome: ChainlinkPendingFetchOutcome,
+    seconds: f64,
+) {
+    CHAINLINK_PENDING_FETCH_OWNER_DURATION_SECONDS
+        .with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            layer.value(),
+            outcome.value(),
+        ])
+        .observe(seconds);
+}
+
 pub fn observe_chainlink_pending_fetch_owner_duration_seconds(
     origin: AccountFetchOrigin,
     layer: ChainlinkPendingFetchLayer,
     outcome: ChainlinkPendingFetchOutcome,
     seconds: f64,
 ) {
-    CHAINLINK_PENDING_FETCH_OWNER_DURATION_SECONDS
-        .with_label_values(&[origin.value(), layer.value(), outcome.value()])
-        .observe(seconds);
+    observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+        origin.into(),
+        layer,
+        outcome,
+        seconds,
+    );
 }
 
 #[cfg(any(test, feature = "dev-context"))]
 pub fn chainlink_pending_fetch_accounts_value(
-    origin: AccountFetchOrigin,
+    context: impl Into<AccountFetchContext>,
     layer: ChainlinkPendingFetchLayer,
     outcome: ChainlinkPendingFetchOutcome,
 ) -> u64 {
+    let context = context.into();
     CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL
         .get_metric_with_label_values(&[
-            origin.value(),
+            context.entrypoint().value(),
+            context.reason().value(),
             layer.value(),
             outcome.value(),
         ])
@@ -1209,14 +1336,36 @@ pub fn chainlink_pending_fetch_accounts_value(
 }
 
 #[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_pending_fetch_accounts_value_by_origin(
+    origin: AccountFetchOrigin,
+    layer: ChainlinkPendingFetchLayer,
+    outcome: ChainlinkPendingFetchOutcome,
+) -> u64 {
+    chainlink_pending_fetch_accounts_value(origin, layer, outcome)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
 pub fn chainlink_pending_fetch_waiters_value(
+    context: impl Into<AccountFetchContext>,
+    layer: ChainlinkPendingFetchLayer,
+) -> u64 {
+    let context = context.into();
+    CHAINLINK_PENDING_FETCH_WAITERS_TOTAL
+        .get_metric_with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            layer.value(),
+        ])
+        .map(|m| m.get())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_pending_fetch_waiters_value_by_origin(
     origin: AccountFetchOrigin,
     layer: ChainlinkPendingFetchLayer,
 ) -> u64 {
-    CHAINLINK_PENDING_FETCH_WAITERS_TOTAL
-        .get_metric_with_label_values(&[origin.value(), layer.value()])
-        .map(|m| m.get())
-        .unwrap_or(0)
+    chainlink_pending_fetch_waiters_value(origin, layer)
 }
 
 #[cfg(any(test, feature = "dev-context"))]

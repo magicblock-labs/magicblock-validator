@@ -127,7 +127,7 @@ pub enum AccountFetchEntrypoint {
 }
 
 impl AccountFetchEntrypoint {
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::RpcGetAccount => "rpc_get_account",
             Self::RpcGetMultipleAccounts => "rpc_get_multiple_accounts",
@@ -174,7 +174,7 @@ pub enum AccountFetchReason {
 }
 
 impl AccountFetchReason {
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::RequestedAccount => "requested_account",
             Self::DelegationRecord => "delegation_record",
@@ -597,28 +597,23 @@ impl LabelValue for ChainlinkEmptyPlaceholderStage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscriptionRegistrationOrigin {
-    Fetch(AccountFetchOrigin),
+    Fetch(AccountFetchContext),
     Internal,
 }
 
 impl SubscriptionRegistrationOrigin {
-    pub fn as_str(&self) -> &str {
+    pub fn entrypoint_str(&self) -> &str {
         match self {
-            Self::Fetch(origin) => origin.as_str(),
-            Self::Internal => "internal",
+            Self::Fetch(context) => context.entrypoint().as_str(),
+            Self::Internal => AccountFetchEntrypoint::Internal.as_str(),
         }
     }
-}
 
-impl fmt::Display for SubscriptionRegistrationOrigin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl LabelValue for SubscriptionRegistrationOrigin {
-    fn value(&self) -> &str {
-        self.as_str()
+    pub fn fetch_reason_str(&self) -> &str {
+        match self {
+            Self::Fetch(context) => context.reason().as_str(),
+            Self::Internal => AccountFetchReason::RequestedAccount.as_str(),
+        }
     }
 }
 
