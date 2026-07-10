@@ -4,8 +4,8 @@ use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::{
-    self, AccountFetchContext, ChainlinkCloneIntent, ChainlinkCloneOutcome,
-    ChainlinkCloneRemoteResult,
+    self, AccountFetchContext, AccountFetchReason, ChainlinkCloneIntent,
+    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
 };
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -501,7 +501,7 @@ where
                     min_context_slot: batch_min_context_slot,
                     ..Default::default()
                 }),
-                fetch_context,
+                fetch_context.with_reason(AccountFetchReason::ProgramData),
             )
             .await
     } else {

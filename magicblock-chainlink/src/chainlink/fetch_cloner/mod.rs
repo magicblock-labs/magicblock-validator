@@ -20,11 +20,11 @@ use magicblock_core::token_programs::{
     try_derive_supported_ata_pubkeys, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{
-    self, AccountFetchContext, BankPrecheckOutcome, BankPrecheckReason,
-    ChainlinkCloneIntent, ChainlinkCloneMaterializationOutcome,
-    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
-    ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome, Outcome,
+    self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
+    BankPrecheckReason, ChainlinkCloneIntent,
+    ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
+    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome, Outcome,
 };
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
@@ -1028,6 +1028,7 @@ where
                 request.pubkey,
                 request.account.remote_slot(),
                 &request.delegation_actions,
+                fetch_context,
             )
             .await?;
 
@@ -1589,7 +1590,9 @@ where
                         delegated_to_other,
                         needs_undelegation: false,
                     },
-                    AccountFetchContext::rpc_get_account(),
+                    AccountFetchContext::subscription_update(
+                        AccountFetchReason::SubscriptionUpdateClone,
+                    ),
                 )
                 .await
             {
@@ -1620,6 +1623,7 @@ where
         pubkey: Pubkey,
         remote_slot: u64,
         delegation_actions: &DelegationActions,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<()> {
         if delegation_actions.is_empty() {
             return Ok(());
@@ -1655,7 +1659,9 @@ where
                 &dependencies_to_fetch,
                 None,
                 Some(remote_slot),
-                AccountFetchContext::rpc_get_account(),
+                fetch_context.with_reason(
+                    AccountFetchReason::ActionDependencyForcedRefresh,
+                ),
                 &writable_dependencies,
             )
             .await?;
@@ -1776,11 +1782,17 @@ where
             return false;
         }
 
+        let discovery_context = AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateGreedyDiscovery,
+        );
+        let record_context =
+            discovery_context.with_reason(AccountFetchReason::DelegationRecord);
+
         let Some((deleg_record, delegation_actions)) = self
             .fetch_and_parse_delegation_record(
                 pubkey,
                 account.remote_slot(),
-                AccountFetchContext::rpc_get_account(),
+                record_context,
             )
             .await
         else {
@@ -1833,7 +1845,7 @@ where
                 &pubkeys_to_clone,
                 None,
                 Some(account.remote_slot()),
-                AccountFetchContext::rpc_get_account(),
+                discovery_context,
             )
             .await
         } else {
@@ -1841,7 +1853,7 @@ where
                 &pubkeys_to_clone,
                 None,
                 Some(account.remote_slot()),
-                AccountFetchContext::rpc_get_account(),
+                discovery_context,
             )
             .await
         };
@@ -2060,7 +2072,9 @@ where
                         pubkey,
                         delegation_record_pubkey,
                         account.remote_slot(),
-                        AccountFetchContext::rpc_get_account(),
+                        AccountFetchContext::subscription_update(
+                            AccountFetchReason::DelegationRecord,
+                        ),
                     )
                     .await
                 {
@@ -2390,7 +2404,7 @@ where
             accs,
             mark_empty_if_not_found,
             slot,
-            fetch_context,
+            fetch_context.with_reason(AccountFetchReason::DelegationRecord),
         )
         .await
     }
@@ -2638,12 +2652,14 @@ where
                 action_dependencies_to_fetch.len() as u64,
                 Ordering::Relaxed,
             );
+            let action_dependency_context = fetch_context
+                .with_reason(AccountFetchReason::ActionDependencyMissing);
             let action_dep_accs = self
                 .remote_account_provider
                 .try_get_multi(
                     &action_dependencies_to_fetch,
                     None,
-                    fetch_context,
+                    action_dependency_context,
                     min_context_slot,
                 )
                 .await?;
@@ -2678,7 +2694,7 @@ where
                 owned_by_deleg,
                 plain,
                 min_context_slot,
-                fetch_context,
+                action_dependency_context,
             )
             .await
             {
@@ -2728,7 +2744,7 @@ where
                 self,
                 programs,
                 min_context_slot,
-                fetch_context,
+                action_dependency_context,
             )
             .await
             {
@@ -2759,7 +2775,7 @@ where
                     self,
                     atas,
                     min_context_slot,
-                    fetch_context,
+                    action_dependency_context,
                 )
                 .await;
 
@@ -2821,7 +2837,9 @@ where
                     .fetch_and_parse_delegation_record(
                         eata_pubkey,
                         self.remote_account_provider.chain_slot(),
-                        fetch_context,
+                        fetch_context.with_reason(
+                            AccountFetchReason::UndelegatingRefresh,
+                        ),
                     )
                     .await;
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
@@ -2841,7 +2859,8 @@ where
                 .fetch_and_parse_delegation_record(
                     *pubkey,
                     self.remote_account_provider.chain_slot(),
-                    fetch_context,
+                    fetch_context
+                        .with_reason(AccountFetchReason::UndelegatingRefresh),
                 )
                 .await;
 
@@ -3058,7 +3077,7 @@ where
             bank_hit_no_fetch_undelegating_timeout_count,
         );
         metrics::inc_chainlink_bank_precheck_accounts_with_context(
-            fetch_context,
+            fetch_context.with_reason(AccountFetchReason::UndelegatingRefresh),
             BankPrecheckOutcome::BankHitUndelegatingRefreshRequired,
             BankPrecheckReason::UndelegatingRefresh,
             bank_hit_undelegating_refresh_required_count,
@@ -3171,7 +3190,7 @@ where
             pubkey,
             delegation_record_pubkey,
             slot,
-            fetch_context,
+            fetch_context.with_reason(AccountFetchReason::ProgramData),
         )
     }
 

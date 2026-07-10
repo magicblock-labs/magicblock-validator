@@ -403,7 +403,12 @@ lazy_static::lazy_static! {
                 "chainlink_empty_placeholder_accounts_total",
                 "Total number of Chainlink empty-placeholder lifecycle events",
             ),
-            &["origin", "stage", "outcome"],
+            &[
+                "entrypoint",
+                "fetch_reason",
+                "stage",
+                "outcome",
+            ],
         )
         .unwrap();
 
