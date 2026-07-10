@@ -6,7 +6,8 @@ use prometheus::{
     IntGauge, IntGaugeVec, Opts, Registry,
 };
 pub use types::{
-    AccountClone, AccountCommit, AccountFetchOrigin, BankPrecheckOutcome,
+    AccountClone, AccountCommit, AccountFetchContext, AccountFetchEntrypoint,
+    AccountFetchOrigin, AccountFetchReason, BankPrecheckOutcome,
     BankPrecheckReason, ChainlinkCloneIntent,
     ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
     ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage,

@@ -117,6 +117,179 @@ impl LabelValue for AccountFetchOrigin {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountFetchEntrypoint {
+    RpcGetAccount,
+    RpcGetMultipleAccounts,
+    SendTransaction(Signature),
+    SubscriptionUpdate,
+    ProjectAta,
+    Internal,
+}
+
+impl AccountFetchEntrypoint {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::RpcGetAccount => "rpc_get_account",
+            Self::RpcGetMultipleAccounts => "rpc_get_multiple_accounts",
+            Self::SendTransaction(_) => "send_transaction",
+            Self::SubscriptionUpdate => "subscription_update",
+            Self::ProjectAta => "project_ata",
+            Self::Internal => "internal",
+        }
+    }
+
+    pub fn signature(&self) -> Option<&Signature> {
+        match self {
+            Self::SendTransaction(sig) => Some(sig),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for AccountFetchEntrypoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for AccountFetchEntrypoint {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountFetchReason {
+    RequestedAccount,
+    DelegationRecord,
+    ProgramData,
+    ActionDependencyMissing,
+    ActionDependencyForcedRefresh,
+    UndelegatingRefresh,
+    SubscriptionUpdateClone,
+    SubscriptionUpdateGreedyDiscovery,
+    AtaProjection,
+    ProgramLoad,
+    Clock,
+}
+
+impl AccountFetchReason {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::RequestedAccount => "requested_account",
+            Self::DelegationRecord => "delegation_record",
+            Self::ProgramData => "program_data",
+            Self::ActionDependencyMissing => "action_dependency_missing",
+            Self::ActionDependencyForcedRefresh => {
+                "action_dependency_forced_refresh"
+            }
+            Self::UndelegatingRefresh => "undelegating_refresh",
+            Self::SubscriptionUpdateClone => "subscription_update_clone",
+            Self::SubscriptionUpdateGreedyDiscovery => {
+                "subscription_update_greedy_discovery"
+            }
+            Self::AtaProjection => "ata_projection",
+            Self::ProgramLoad => "program_load",
+            Self::Clock => "clock",
+        }
+    }
+}
+
+impl fmt::Display for AccountFetchReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for AccountFetchReason {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AccountFetchContext {
+    entrypoint: AccountFetchEntrypoint,
+    reason: AccountFetchReason,
+}
+
+impl AccountFetchContext {
+    pub fn new(
+        entrypoint: AccountFetchEntrypoint,
+        reason: AccountFetchReason,
+    ) -> Self {
+        Self { entrypoint, reason }
+    }
+
+    pub fn rpc_get_account() -> Self {
+        Self::new(
+            AccountFetchEntrypoint::RpcGetAccount,
+            AccountFetchReason::RequestedAccount,
+        )
+    }
+
+    pub fn rpc_get_multiple_accounts() -> Self {
+        Self::new(
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
+            AccountFetchReason::RequestedAccount,
+        )
+    }
+
+    pub fn send_transaction(signature: Signature) -> Self {
+        Self::new(
+            AccountFetchEntrypoint::SendTransaction(signature),
+            AccountFetchReason::RequestedAccount,
+        )
+    }
+
+    pub fn subscription_update(reason: AccountFetchReason) -> Self {
+        Self::new(AccountFetchEntrypoint::SubscriptionUpdate, reason)
+    }
+
+    pub fn project_ata() -> Self {
+        Self::new(
+            AccountFetchEntrypoint::ProjectAta,
+            AccountFetchReason::AtaProjection,
+        )
+    }
+
+    pub fn internal(reason: AccountFetchReason) -> Self {
+        Self::new(AccountFetchEntrypoint::Internal, reason)
+    }
+
+    pub fn entrypoint(&self) -> AccountFetchEntrypoint {
+        self.entrypoint
+    }
+
+    pub fn reason(&self) -> AccountFetchReason {
+        self.reason
+    }
+
+    pub fn with_reason(self, reason: AccountFetchReason) -> Self {
+        Self { reason, ..self }
+    }
+
+    pub fn signature(&self) -> Option<&Signature> {
+        self.entrypoint.signature()
+    }
+}
+
+impl From<AccountFetchOrigin> for AccountFetchContext {
+    fn from(origin: AccountFetchOrigin) -> Self {
+        match origin {
+            AccountFetchOrigin::GetMultipleAccounts => {
+                Self::rpc_get_multiple_accounts()
+            }
+            AccountFetchOrigin::GetAccount => Self::rpc_get_account(),
+            AccountFetchOrigin::SendTransaction(sig) => {
+                Self::send_transaction(sig)
+            }
+            AccountFetchOrigin::ProjectAta => Self::project_ata(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChainlinkPendingFetchLayer {
     FetchCloner,
     RemoteAccountProvider,
@@ -645,6 +818,100 @@ where
         match self {
             Ok(ok) => ok.value(),
             Err(err) => err.value(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_fetch_entrypoint_labels_are_static() {
+        let signature = Signature::from([1u8; 64]);
+        let cases = [
+            (AccountFetchEntrypoint::RpcGetAccount, "rpc_get_account"),
+            (
+                AccountFetchEntrypoint::RpcGetMultipleAccounts,
+                "rpc_get_multiple_accounts",
+            ),
+            (
+                AccountFetchEntrypoint::SendTransaction(signature),
+                "send_transaction",
+            ),
+            (
+                AccountFetchEntrypoint::SubscriptionUpdate,
+                "subscription_update",
+            ),
+            (AccountFetchEntrypoint::ProjectAta, "project_ata"),
+            (AccountFetchEntrypoint::Internal, "internal"),
+        ];
+
+        for (entrypoint, expected) in cases {
+            assert_eq!(entrypoint.as_str(), expected);
+            assert_eq!(entrypoint.to_string(), expected);
+            assert_eq!(entrypoint.value(), expected);
+        }
+    }
+
+    #[test]
+    fn account_fetch_reason_labels_are_static() {
+        let cases = [
+            (AccountFetchReason::RequestedAccount, "requested_account"),
+            (AccountFetchReason::DelegationRecord, "delegation_record"),
+            (AccountFetchReason::ProgramData, "program_data"),
+            (
+                AccountFetchReason::ActionDependencyMissing,
+                "action_dependency_missing",
+            ),
+            (
+                AccountFetchReason::ActionDependencyForcedRefresh,
+                "action_dependency_forced_refresh",
+            ),
+            (
+                AccountFetchReason::UndelegatingRefresh,
+                "undelegating_refresh",
+            ),
+            (
+                AccountFetchReason::SubscriptionUpdateClone,
+                "subscription_update_clone",
+            ),
+            (
+                AccountFetchReason::SubscriptionUpdateGreedyDiscovery,
+                "subscription_update_greedy_discovery",
+            ),
+            (AccountFetchReason::AtaProjection, "ata_projection"),
+            (AccountFetchReason::ProgramLoad, "program_load"),
+            (AccountFetchReason::Clock, "clock"),
+        ];
+
+        for (reason, expected) in cases {
+            assert_eq!(reason.as_str(), expected);
+            assert_eq!(reason.to_string(), expected);
+            assert_eq!(reason.value(), expected);
+        }
+    }
+
+    #[test]
+    fn account_fetch_context_signature_is_only_for_send_transaction() {
+        let signature = Signature::from([1u8; 64]);
+        let send_context = AccountFetchContext::send_transaction(signature);
+        assert_eq!(send_context.signature(), Some(&signature));
+        assert_eq!(send_context.entrypoint().signature(), Some(&signature));
+
+        let contexts = [
+            AccountFetchContext::rpc_get_account(),
+            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchContext::subscription_update(
+                AccountFetchReason::SubscriptionUpdateClone,
+            ),
+            AccountFetchContext::project_ata(),
+            AccountFetchContext::internal(AccountFetchReason::Clock),
+        ];
+
+        for context in contexts {
+            assert_eq!(context.signature(), None);
+            assert_eq!(context.entrypoint().signature(), None);
         }
     }
 }
