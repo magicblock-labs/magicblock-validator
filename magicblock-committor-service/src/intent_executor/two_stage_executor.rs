@@ -198,6 +198,13 @@ where
                     self.intent_id,
                 )
                     .await?;
+                // If recovery re-tagged the commit stage as a first commit,
+                // the finalize stage aliases the same way and must carry the
+                // uniqueness noop too.
+                if self.state.finalize_strategy.uniqueness_nonce.is_none() {
+                    self.state.finalize_strategy.uniqueness_nonce =
+                        self.state.commit_strategy.uniqueness_nonce;
+                }
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             err
