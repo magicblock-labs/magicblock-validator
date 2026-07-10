@@ -186,9 +186,9 @@ async fn test_ix_commit_order_book_change_100_bytes() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_order_book_change_671_bytes() {
+async fn test_ix_commit_order_book_change_636_bytes() {
     commit_book_order_account(
-        671,
+        636,
         CommitStrategy::DiffArgs,
         CommitIntentKind::Commit,
     )
@@ -196,12 +196,12 @@ async fn test_ix_commit_order_book_change_671_bytes() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_order_book_change_681_bytes() {
-    // 680 bytes still produces a raw tx within the 1232-byte packet
-    // limit. 681 bytes crosses it by one byte, even though both raw sizes
-    // encode to a 1644-byte base64 string.
+async fn test_ix_commit_order_book_change_637_bytes() {
+    // 636 bytes still produces a raw tx within the 1232-byte packet limit
+    // (including the first-commit uniqueness noop). 637 bytes crosses it
+    // by one byte.
     commit_book_order_account(
-        681,
+        637,
         CommitStrategy::DiffBuffer,
         CommitIntentKind::Commit,
     )

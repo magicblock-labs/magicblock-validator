@@ -51,7 +51,7 @@ async fn test_prepare_commit_tx_with_single_account() {
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -122,7 +122,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -217,7 +217,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -294,11 +294,12 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
     let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
         &fixture.authority.pubkey(),
         &tasks,
+        None,
     );
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys,
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation

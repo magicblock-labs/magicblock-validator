@@ -28,6 +28,7 @@ use crate::{
 
 pub struct SingleStageExecutor<'a, F, A> {
     current_attempt: u8,
+    intent_id: u64,
     execution_report: &'a mut IntentExecutionReport,
 
     authority: Keypair,
@@ -49,9 +50,11 @@ where
         transaction_strategy: TransactionStrategy,
         callback_scheduler: A,
         execution_report: &'a mut IntentExecutionReport,
+        intent_id: u64,
     ) -> Self {
         Self {
             current_attempt: 0,
+            intent_id,
             authority,
             intent_client,
             task_info_fetcher,
@@ -204,6 +207,7 @@ where
                         &self.task_info_fetcher,
                         committed_pubkeys,
                         &mut self.transaction_strategy,
+                        self.intent_id,
                     )
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
@@ -284,7 +288,7 @@ where
             &mut TransactionStrategy {
                 optimized_tasks: vec![finalize_task],
                 lookup_tables_keys: vec![],
-                standalone_action_nonce: None,
+                uniqueness_nonce: None,
             },
             &None::<IntentPersisterImpl>,
         )
@@ -299,7 +303,7 @@ where
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
+            uniqueness_nonce: None,
         }))
     }
 }
