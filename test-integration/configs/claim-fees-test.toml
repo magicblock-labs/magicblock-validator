@@ -20,3 +20,7 @@ block-time = "50ms"
 [[programs]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 path = "../schedulecommit/elfs/dlp.so"
+
+[[programs]]
+id = "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+path = "../schedulecommit/elfs/noop.so"
