@@ -177,7 +177,7 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     let commit_strategy = TransactionStrategy {
         optimized_tasks: commit_stage_tasks,
         lookup_tables_keys: commit_alt_pubkeys,
-        standalone_action_nonce: None,
+        standalone_action_nonce: strategy.standalone_action_nonce,
     };
 
     let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
@@ -191,7 +191,7 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     let finalize_strategy = TransactionStrategy {
         optimized_tasks: finalize_stage_tasks,
         lookup_tables_keys: finalize_alt_pubkeys,
-        standalone_action_nonce: None,
+        standalone_action_nonce: strategy.standalone_action_nonce,
     };
 
     // We clean up only ALTs

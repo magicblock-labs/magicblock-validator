@@ -279,8 +279,12 @@ impl TaskStrategist {
             TransactionUtils::dummy_lookup_table(&unique_involved_pubkeys);
 
         // Create final tx
-        let instructions =
+        let mut instructions =
             TransactionUtils::tasks_instructions(&placeholder.pubkey(), tasks);
+        // Reserve space for the constant-size uniqueness noop so fit decisions
+        // match the assembled transaction when the nonce is set.
+        instructions
+            .push(TransactionUtils::standalone_action_noop_instruction(0));
         let alt_tx = if let Ok(tx) = TransactionUtils::assemble_tx_raw(
             &placeholder,
             &instructions,
@@ -395,11 +399,14 @@ impl TaskStrategist {
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[BaseTaskImpl]| {
-            match TransactionUtils::assemble_tasks_tx(
+            // Reserve space for the constant-size uniqueness noop so fit
+            // decisions match the assembled transaction when the nonce is set.
+            match TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
                 &Keypair::new(), // placeholder
                 tasks,
                 u64::default(), // placeholder
                 &[],
+                Some(0), // placeholder
             ) {
                 Ok(tx) => Ok(serialized_transaction_size(&tx)),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
@@ -760,8 +767,9 @@ mod tests {
 
     #[test]
     fn test_build_strategy_with_lookup_tables_when_needed() {
-        // Also max number of committed accounts fit with ALTs!
-        const NUM_COMMITS: u64 = 22;
+        // Also max number of committed accounts fit with ALTs
+        // (one slot is reserved for the per-intent uniqueness noop)!
+        const NUM_COMMITS: u64 = 21;
 
         let validator = Pubkey::new_unique();
 
@@ -788,7 +796,7 @@ mod tests {
 
     #[test]
     fn test_build_strategy_fails_when_cant_fit() {
-        const NUM_COMMITS: u64 = 23;
+        const NUM_COMMITS: u64 = 22;
 
         let validator = Pubkey::new_unique();
 
@@ -806,6 +814,45 @@ mod tests {
             &None::<IntentPersisterImpl>,
         );
         assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
+    }
+
+    #[test]
+    fn test_uniqueness_nonce_renders_distinct_noop_instruction() {
+        use solana_transaction::versioned::VersionedTransaction;
+
+        let noop_program = solana_pubkey::pubkey!(
+            "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+        );
+        let authority = Keypair::new();
+        let assemble = |nonce: Option<u64>| {
+            TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
+                &authority,
+                &[create_test_commit_task(1, 100, 0).into()],
+                u64::default(),
+                &[],
+                nonce,
+            )
+            .expect("assembles")
+        };
+
+        let without_nonce = assemble(None);
+        assert!(!without_nonce
+            .message
+            .static_account_keys()
+            .contains(&noop_program));
+
+        let extract_noop_data = |tx: &VersionedTransaction| {
+            let keys = tx.message.static_account_keys();
+            tx.message
+                .instructions()
+                .iter()
+                .find(|ix| keys[ix.program_id_index as usize] == noop_program)
+                .expect("noop instruction present")
+                .data
+                .clone()
+        };
+        assert_eq!(extract_noop_data(&assemble(Some(1))), 1u64.to_le_bytes());
+        assert_eq!(extract_noop_data(&assemble(Some(2))), 2u64.to_le_bytes());
     }
 
     #[test]

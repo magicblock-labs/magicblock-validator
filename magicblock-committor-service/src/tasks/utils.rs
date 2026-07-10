@@ -149,7 +149,7 @@ impl TransactionUtils {
         Ok(tx)
     }
 
-    fn standalone_action_noop_instruction(id: u64) -> Instruction {
+    pub(crate) fn standalone_action_noop_instruction(id: u64) -> Instruction {
         // TODO(GabrielePicco): replace this temporary transaction-level
         // uniqueness padding with protocol-level standalone action nonces.
         Instruction {
