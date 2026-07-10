@@ -2,7 +2,9 @@ use std::{fmt, sync::Arc, time::Duration};
 
 use dlp_api::pda::undelegation_request_pda_from_delegated_account;
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_chainlink::{ObservedUndelegationRequest, ProdChainlink};
+use magicblock_chainlink::{
+    AccountStatusOnEr, ObservedUndelegationRequest, ProdChainlink,
+};
 use magicblock_core::{
     link::transactions::TransactionSchedulerHandle, traits::LatestBlockProvider,
 };
@@ -111,6 +113,7 @@ impl UndelegationRequestService {
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
                             error!(
                                 skipped_count = skipped,
+                                skip_reason = "broadcast_receiver_lagged",
                                 "Lagged behind undelegation request updates"
                             );
                             continue;
@@ -278,33 +281,14 @@ impl UndelegationRequestService {
             return Ok(());
         }
 
-        if let Err(err) = chainlink
-            .ensure_accounts(
-                &[request.delegated_account],
-                None,
-                AccountFetchOrigin::GetAccount,
-            )
-            .await
-        {
-            error!(
-                request_pda = %request.request_pda,
-                delegated_account = %request.delegated_account,
-                error = ?err,
-                "Failed to materialize requested undelegation account"
-            );
-            return Err(ObservedUndelegationRequestError::Transient(
-                "failed to materialize requested undelegation account",
-            ));
-        }
-
-        let delegated = match chainlink
-            .accounts_delegated_on_base_and_er(
+        let mut delegation_status = match chainlink
+            .account_delegation_statuses(
                 &[request.delegated_account],
                 AccountFetchOrigin::GetAccount,
             )
             .await
         {
-            Ok(value) => value.into_iter().next().unwrap_or(false),
+            Ok(value) => value.into_iter().next().unwrap_or_default(),
             Err(err) => {
                 error!(
                     request_pda = %request.request_pda,
@@ -317,11 +301,63 @@ impl UndelegationRequestService {
                 ));
             }
         };
-        if !delegated {
-            debug!(
+
+        if delegation_status.delegated_on_base
+            && delegation_status.account_on_er == AccountStatusOnEr::Missing
+        {
+            if let Err(err) = chainlink
+                .ensure_accounts(
+                    &[request.delegated_account],
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
+            {
+                error!(
+                    request_pda = %request.request_pda,
+                    delegated_account = %request.delegated_account,
+                    error = ?err,
+                    "Failed to materialize requested undelegation account"
+                );
+                return Err(ObservedUndelegationRequestError::Transient(
+                    "failed to materialize requested undelegation account",
+                ));
+            }
+
+            delegation_status = match chainlink
+                .account_delegation_statuses(
+                    &[request.delegated_account],
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
+            {
+                Ok(value) => value.into_iter().next().unwrap_or_default(),
+                Err(err) => {
+                    error!(
+                        request_pda = %request.request_pda,
+                        delegated_account = %request.delegated_account,
+                        error = ?err,
+                        "Failed to verify materialized undelegation account"
+                    );
+                    return Err(ObservedUndelegationRequestError::Transient(
+                        "failed to verify materialized undelegation account",
+                    ));
+                }
+            };
+        }
+
+        let delegated_on_base_and_er = delegation_status.delegated_on_base
+            && delegation_status.account_on_er.is_delegated();
+        if !delegated_on_base_and_er {
+            warn!(
                 request_pda = %request.request_pda,
                 delegated_account = %request.delegated_account,
-                "Skipping request because account is not delegated on base and ER"
+                delegated_on_base = delegation_status.delegated_on_base,
+                account_on_er = delegation_status.account_on_er.as_str(),
+                skip_reason = delegation_status
+                    .not_ready_reason()
+                    .unwrap_or("delegation_status_ready"),
+                "Skipping observed undelegation request because delegated account is not ready"
             );
             return Ok(());
         }

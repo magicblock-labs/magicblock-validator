@@ -67,6 +67,66 @@ pub struct ObservedUndelegationRequest {
     pub observed_slot: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AccountStatusOnEr {
+    /// The account is missing from the ER bank, so its ER delegation state is unknown.
+    #[default]
+    Missing,
+    /// The account is present on ER and represented as delegated.
+    Delegated,
+    /// The account is present on ER and is not represented as delegated.
+    NotDelegated,
+}
+
+impl AccountStatusOnEr {
+    pub fn is_delegated(&self) -> bool {
+        matches!(self, Self::Delegated)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::Delegated => "delegated",
+            Self::NotDelegated => "not_delegated",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AccountDelegationStatus {
+    pub delegated_on_base: bool,
+    pub account_on_er: AccountStatusOnEr,
+}
+
+impl AccountDelegationStatus {
+    #[deprecated(
+        note = "use AccountDelegationStatus directly; this bool treats missing-on-ER as not delegated"
+    )]
+    pub fn delegated_on_base_and_er(&self) -> bool {
+        self.delegated_on_base && self.account_on_er.is_delegated()
+    }
+
+    pub fn not_ready_reason(&self) -> Option<&'static str> {
+        #[allow(deprecated)]
+        let delegated_on_base_and_er = self.delegated_on_base_and_er();
+        if delegated_on_base_and_er {
+            None
+        } else if !self.delegated_on_base {
+            Some("not_delegated_on_base")
+        } else {
+            Some(match self.account_on_er {
+                AccountStatusOnEr::Missing => "delegated_on_base_missing_on_er",
+                AccountStatusOnEr::Delegated => {
+                    "delegated_on_base_and_er_mismatch"
+                }
+                AccountStatusOnEr::NotDelegated => {
+                    "delegated_on_base_not_delegated_on_er"
+                }
+            })
+        }
+    }
+}
+
 // -----------------
 // Chainlink
 // -----------------
@@ -153,18 +213,41 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    #[deprecated(
+        note = "use AccountDelegationStatus directly; this bool treats missing-on-ER as not delegated"
+    )]
     pub async fn accounts_delegated_on_base_and_er(
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<Vec<bool>> {
+        Ok(self
+            .account_delegation_statuses(pubkeys, fetch_origin)
+            .await?
+            .into_iter()
+            .map(|status| {
+                #[allow(deprecated)]
+                let delegated_on_base_and_er =
+                    status.delegated_on_base_and_er();
+                delegated_on_base_and_er
+            })
+            .collect())
+    }
+
+    pub async fn account_delegation_statuses(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<AccountDelegationStatus>> {
         match self {
             Self::Enabled(chainlink) => {
                 chainlink
-                    .accounts_delegated_on_base_and_er(pubkeys, fetch_origin)
+                    .account_delegation_statuses(pubkeys, fetch_origin)
                     .await
             }
-            Self::Disabled => Ok(vec![false; pubkeys.len()]),
+            Self::Disabled => {
+                Ok(vec![AccountDelegationStatus::default(); pubkeys.len()])
+            }
         }
     }
 
@@ -542,13 +625,35 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     }
 
     #[instrument(skip(self, pubkeys))]
+    #[deprecated(
+        note = "use AccountDelegationStatus directly; this bool treats missing-on-ER as not delegated"
+    )]
     pub async fn accounts_delegated_on_base_and_er(
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<Vec<bool>> {
+        Ok(self
+            .account_delegation_statuses(pubkeys, fetch_origin)
+            .await?
+            .into_iter()
+            .map(|status| {
+                #[allow(deprecated)]
+                let delegated_on_base_and_er =
+                    status.delegated_on_base_and_er();
+                delegated_on_base_and_er
+            })
+            .collect())
+    }
+
+    #[instrument(skip(self, pubkeys))]
+    pub async fn account_delegation_statuses(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<AccountDelegationStatus>> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
-            return Ok(vec![false; pubkeys.len()]);
+            return Ok(vec![AccountDelegationStatus::default(); pubkeys.len()]);
         };
         let remote_accounts = fetch_cloner
             .fetch_remote_accounts(pubkeys, fetch_origin)
@@ -567,14 +672,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .map(|(pubkey, remote_account)| {
                 let delegated_on_base =
                     remote_account.is_owned_by_delegation_program();
-                let delegated_on_er = self
-                    .accounts_bank
-                    .get_account(pubkey)
-                    .is_some_and(|account| {
-                        account.delegated()
+                let account_on_er = match self.accounts_bank.get_account(pubkey)
+                {
+                    None => AccountStatusOnEr::Missing,
+                    Some(account) => {
+                        // Q: do we need to compare the owner? isn't delegated() alone enough?
+                        if account.delegated()
                             || account.owner().eq(&dlp_api::id())
-                    });
-                delegated_on_base && delegated_on_er
+                        {
+                            AccountStatusOnEr::Delegated
+                        } else {
+                            AccountStatusOnEr::NotDelegated
+                        }
+                    }
+                };
+                AccountDelegationStatus {
+                    delegated_on_base,
+                    account_on_er,
+                }
             })
             .collect())
     }
