@@ -228,12 +228,12 @@ where
             .await?;
 
             // Standalone actions executed in single stage
-            let mut strategy = TaskStrategist::build_strategy(
+            let strategy = TaskStrategist::build_strategy(
                 commit_tasks,
                 &self.authority.pubkey(),
                 persister,
+                Some(intent_bundle.id),
             )?;
-            strategy.standalone_action_nonce = Some(intent_bundle.id);
             return self
                 .single_stage_execution_flow(
                     intent_bundle,
@@ -270,10 +270,10 @@ where
             finalize_tasks,
             &self.authority.pubkey(),
             persister,
+            uniqueness_nonce,
         )? {
-            StrategyExecutionMode::SingleStage(mut strategy) => {
+            StrategyExecutionMode::SingleStage(strategy) => {
                 trace!("Single stage execution");
-                strategy.standalone_action_nonce = uniqueness_nonce;
                 self.single_stage_execution_flow(
                     intent_bundle,
                     strategy,
@@ -283,12 +283,10 @@ where
                 .await
             }
             StrategyExecutionMode::TwoStage {
-                mut commit_stage,
-                mut finalize_stage,
+                commit_stage,
+                finalize_stage,
             } => {
                 trace!("Two stage execution");
-                commit_stage.standalone_action_nonce = uniqueness_nonce;
-                finalize_stage.standalone_action_nonce = uniqueness_nonce;
                 self.two_stage_execution_flow(
                     &all_committed_pubkeys,
                     commit_stage,

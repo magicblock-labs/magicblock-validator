@@ -123,11 +123,14 @@ impl TaskStrategist {
     /// Builds execution strategy from [`BaseTask`]s
     /// 1. Optimizes tasks to fit in TX
     /// 2. Chooses the fastest execution mode for Tasks
+    /// `uniqueness_nonce` is rendered as a constant-size noop instruction on
+    /// every produced strategy, and is accounted for in all fit decisions.
     pub fn build_execution_strategy<P: IntentPersister>(
         commit_tasks: Vec<BaseTaskImpl>,
         finalize_tasks: Vec<BaseTaskImpl>,
         authority: &Pubkey,
         persister: &Option<P>,
+        uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<StrategyExecutionMode> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
 
@@ -143,6 +146,7 @@ impl TaskStrategist {
                 finalize_tasks,
                 authority,
                 persister,
+                uniqueness_nonce,
             );
         }
 
@@ -154,6 +158,7 @@ impl TaskStrategist {
             single_stage_tasks,
             authority,
             persister,
+            uniqueness_nonce,
         ) {
             Ok(strategy) => StrategyExecutionMode::SingleStage(strategy),
             Err(TaskStrategistError::FailedToFitError) => {
@@ -163,6 +168,7 @@ impl TaskStrategist {
                     finalize_tasks,
                     authority,
                     persister,
+                    uniqueness_nonce,
                 );
             }
             Err(TaskStrategistError::SignerError(err)) => {
@@ -183,6 +189,7 @@ impl TaskStrategist {
             finalize_tasks,
             authority,
             persister,
+            uniqueness_nonce,
         )?;
         if two_stage.uses_alts() {
             Ok(single_stage_strategy)
@@ -196,16 +203,22 @@ impl TaskStrategist {
         finalize_tasks: Vec<BaseTaskImpl>,
         authority: &Pubkey,
         persister: &Option<P>,
+        uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<StrategyExecutionMode> {
         // Build strategy for Commit stage
-        let commit_strategy =
-            TaskStrategist::build_strategy(commit_tasks, authority, persister)?;
+        let commit_strategy = TaskStrategist::build_strategy(
+            commit_tasks,
+            authority,
+            persister,
+            uniqueness_nonce,
+        )?;
 
         // Build strategy for Finalize stage
         let finalize_strategy = TaskStrategist::build_strategy(
             finalize_tasks,
             authority,
             persister,
+            uniqueness_nonce,
         )?;
 
         Ok(StrategyExecutionMode::TwoStage {
@@ -220,9 +233,10 @@ impl TaskStrategist {
         mut tasks: Vec<BaseTaskImpl>,
         validator: &Pubkey,
         persistor: &Option<P>,
+        uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
-        if Self::try_optimize_tx_size_if_needed(&mut tasks)?
+        if Self::try_optimize_tx_size_if_needed(&mut tasks, uniqueness_nonce)?
             <= MAX_TRANSACTION_WIRE_SIZE
         {
             // Persist tasks strategy
@@ -233,12 +247,12 @@ impl TaskStrategist {
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys: vec![],
-                standalone_action_nonce: None,
+                standalone_action_nonce: uniqueness_nonce,
             })
         }
         // In case task optimization didn't work
         // attempt using lookup tables for all keys involved in tasks
-        else if Self::attempt_lookup_tables(&tasks) {
+        else if Self::attempt_lookup_tables(&tasks, uniqueness_nonce) {
             // Persist tasks strategy
             if let Some(persistor) = persistor {
                 Self::persist_tasks_strategy(persistor, &tasks, true);
@@ -250,7 +264,7 @@ impl TaskStrategist {
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys,
-                standalone_action_nonce: None,
+                standalone_action_nonce: uniqueness_nonce,
             })
         } else {
             Err(TaskStrategistError::FailedToFitError)
@@ -260,7 +274,10 @@ impl TaskStrategist {
     /// Attempt to use ALTs for ALL keys in tx
     /// Returns `true` if ALTs make tx fit, otherwise `false`
     /// TODO(edwin): optimize to use only necessary amount of pubkeys
-    pub fn attempt_lookup_tables(tasks: &[BaseTaskImpl]) -> bool {
+    pub fn attempt_lookup_tables(
+        tasks: &[BaseTaskImpl],
+        uniqueness_nonce: Option<u64>,
+    ) -> bool {
         let placeholder = Keypair::new();
         // Gather all involved keys in tx
         let budgets = TransactionUtils::tasks_compute_units(tasks);
@@ -282,9 +299,12 @@ impl TaskStrategist {
         let mut instructions =
             TransactionUtils::tasks_instructions(&placeholder.pubkey(), tasks);
         // Reserve space for the constant-size uniqueness noop so fit decisions
-        // match the assembled transaction when the nonce is set.
-        instructions
-            .push(TransactionUtils::standalone_action_noop_instruction(0));
+        // match the assembled transaction.
+        if let Some(nonce) = uniqueness_nonce {
+            instructions.push(
+                TransactionUtils::standalone_action_noop_instruction(nonce),
+            );
+        }
         let alt_tx = if let Ok(tx) = TransactionUtils::assemble_tx_raw(
             &placeholder,
             &instructions,
@@ -396,17 +416,18 @@ impl TaskStrategist {
     /// the limit MAX_TRANSACTION_WIRE_SIZE. The caller needs to check and make decision accordingly.
     fn try_optimize_tx_size_if_needed(
         tasks: &mut [BaseTaskImpl],
+        uniqueness_nonce: Option<u64>,
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[BaseTaskImpl]| {
-            // Reserve space for the constant-size uniqueness noop so fit
-            // decisions match the assembled transaction when the nonce is set.
+            // Include the constant-size uniqueness noop so fit decisions
+            // match the assembled transaction.
             match TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
                 &Keypair::new(), // placeholder
                 tasks,
                 u64::default(), // placeholder
                 &[],
-                Some(0), // placeholder
+                uniqueness_nonce,
             ) {
                 Ok(tx) => Ok(serialized_transaction_size(&tx)),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
@@ -628,6 +649,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Should build strategy");
 
@@ -646,6 +668,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -667,6 +690,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -689,6 +713,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -709,6 +734,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -728,6 +754,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -756,6 +783,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -767,9 +795,8 @@ mod tests {
 
     #[test]
     fn test_build_strategy_with_lookup_tables_when_needed() {
-        // Also max number of committed accounts fit with ALTs
-        // (one slot is reserved for the per-intent uniqueness noop)!
-        const NUM_COMMITS: u64 = 21;
+        // Also max number of committed accounts fit with ALTs!
+        const NUM_COMMITS: u64 = 22;
 
         let validator = Pubkey::new_unique();
 
@@ -785,6 +812,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Should build strategy with buffer optimization");
 
@@ -795,8 +823,39 @@ mod tests {
     }
 
     #[test]
-    fn test_build_strategy_fails_when_cant_fit() {
+    fn test_build_strategy_reserves_space_for_uniqueness_nonce() {
+        // 22 large commits are the max that fit with ALTs (see test above);
+        // with the uniqueness noop reserved they no longer fit.
         const NUM_COMMITS: u64 = 22;
+
+        let validator = Pubkey::new_unique();
+
+        let tasks: Vec<BaseTaskImpl> = (0..NUM_COMMITS)
+            .map(|i| create_test_commit_task(i, 10000, 0).into())
+            .collect();
+
+        let result = TaskStrategist::build_strategy(
+            tasks.clone(),
+            &validator,
+            &None::<IntentPersisterImpl>,
+            Some(42),
+        );
+        assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
+
+        // One commit fewer fits again, and the nonce lands on the strategy
+        let strategy = TaskStrategist::build_strategy(
+            tasks[..NUM_COMMITS as usize - 1].to_vec(),
+            &validator,
+            &None::<IntentPersisterImpl>,
+            Some(42),
+        )
+        .expect("should fit with one task fewer");
+        assert_eq!(strategy.standalone_action_nonce, Some(42));
+    }
+
+    #[test]
+    fn test_build_strategy_fails_when_cant_fit() {
+        const NUM_COMMITS: u64 = 23;
 
         let validator = Pubkey::new_unique();
 
@@ -812,6 +871,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         );
         assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
     }
@@ -863,7 +923,8 @@ mod tests {
             create_test_commit_task(3, 1000, 0).into(), // Larger task
         ];
 
-        let _ = TaskStrategist::try_optimize_tx_size_if_needed(&mut tasks);
+        let _ =
+            TaskStrategist::try_optimize_tx_size_if_needed(&mut tasks, None);
         // The larger task should have been optimized first
         assert!(matches!(tasks[0].strategy(), TaskStrategy::Args));
         assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));
@@ -883,6 +944,7 @@ mod tests {
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Should build strategy");
 
@@ -932,6 +994,7 @@ mod tests {
             finalize_task,
             &Pubkey::new_unique(),
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Execution mode created");
 
@@ -964,6 +1027,7 @@ mod tests {
             finalize_task,
             &Pubkey::new_unique(),
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Execution mode created");
 
@@ -1001,6 +1065,7 @@ mod tests {
             finalize_task,
             &Pubkey::new_unique(),
             &None::<IntentPersisterImpl>,
+            None,
         )
         .expect("Execution mode created");
 

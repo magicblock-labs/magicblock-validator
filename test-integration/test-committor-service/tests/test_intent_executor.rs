@@ -1439,12 +1439,14 @@ async fn create_two_stage_executor<'a>(
         commit_tasks,
         authority,
         &None::<IntentPersisterImpl>,
+        None,
     )
     .unwrap();
     let finalize_strategy = TaskStrategist::build_strategy(
         finalize_tasks,
         authority,
         &None::<IntentPersisterImpl>,
+        None,
     )
     .unwrap();
     TwoStageExecutor::new(
@@ -1710,6 +1712,7 @@ async fn single_flow_transaction_strategy(
         tasks,
         authority,
         &None::<IntentPersisterImpl>,
+        None,
     )
     .unwrap()
 }
