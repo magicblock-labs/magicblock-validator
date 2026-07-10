@@ -69,6 +69,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     task_info_fetcher: &CacheTaskInfoFetcher<T>,
     committed_pubkeys: &[Pubkey],
     strategy: &mut TransactionStrategy,
+    intent_id: u64,
 ) -> Result<TransactionStrategy, TaskBuilderError> {
     let min_context_slot = strategy
         .optimized_tasks
@@ -130,11 +131,19 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
         }
     }
 
+    // Re-fetched nonces land back on 1 after a re-delegation; such a retry is
+    // a first-commit transaction and must carry the uniqueness noop.
+    if strategy.uniqueness_nonce.is_none()
+        && super::requires_uniqueness_nonce(&strategy.optimized_tasks)
+    {
+        strategy.uniqueness_nonce = Some(intent_id);
+    }
+
     let old_alts = strategy.dummy_revaluate_alts(authority);
     Ok(TransactionStrategy {
         optimized_tasks: to_cleanup,
         lookup_tables_keys: old_alts,
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     })
 }
 
@@ -172,12 +181,13 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         TaskStrategist::collect_lookup_table_keys(
             authority,
             &commit_stage_tasks,
+            strategy.uniqueness_nonce,
         )
     };
     let commit_strategy = TransactionStrategy {
         optimized_tasks: commit_stage_tasks,
         lookup_tables_keys: commit_alt_pubkeys,
-        standalone_action_nonce: strategy.standalone_action_nonce,
+        uniqueness_nonce: strategy.uniqueness_nonce,
     };
 
     let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
@@ -186,19 +196,20 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         TaskStrategist::collect_lookup_table_keys(
             authority,
             &finalize_stage_tasks,
+            strategy.uniqueness_nonce,
         )
     };
     let finalize_strategy = TransactionStrategy {
         optimized_tasks: finalize_stage_tasks,
         lookup_tables_keys: finalize_alt_pubkeys,
-        standalone_action_nonce: strategy.standalone_action_nonce,
+        uniqueness_nonce: strategy.uniqueness_nonce,
     };
 
     // We clean up only ALTs
     let to_cleanup = TransactionStrategy {
         optimized_tasks: vec![],
         lookup_tables_keys: strategy.lookup_tables_keys,
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     (commit_strategy, finalize_strategy, to_cleanup)
@@ -222,13 +233,13 @@ pub(in crate::intent_executor) fn handle_undelegation_error(
         TransactionStrategy {
             optimized_tasks: removed_task,
             lookup_tables_keys: old_alts,
-            standalone_action_nonce: None,
+            uniqueness_nonce: None,
         }
     } else {
         TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
+            uniqueness_nonce: None,
         }
     }
 }
@@ -419,5 +430,93 @@ where
         result: ActionResult,
     ) {
         self.inner.execute_callbacks(signature, result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use async_trait::async_trait;
+    use magicblock_core::intent::CommittedAccount;
+    use solana_account::Account;
+
+    use super::*;
+    use crate::{
+        intent_executor::task_info_fetcher::TaskInfoFetcherResult,
+        tasks::task_builder::TaskBuilderImpl,
+    };
+
+    /// Reports the fresh-delegation nonce (next commit id 1) for every pubkey.
+    struct FreshDelegationFetcher;
+
+    #[async_trait]
+    impl TaskInfoFetcher for FreshDelegationFetcher {
+        async fn fetch_next_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 1)).collect())
+        }
+
+        async fn fetch_current_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        }
+
+        async fn fetch_rent_reimbursements(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
+        }
+
+        async fn get_base_accounts(
+            &self,
+            _: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+            Ok(Default::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_commit_id_recovery_sets_uniqueness_nonce() {
+        let pubkey = Pubkey::new_unique();
+        // Stale cache produced commit id 5; on chain the account was
+        // re-delegated, so the correct commit id is 1.
+        let stale_task = TaskBuilderImpl::create_commit_task(
+            5,
+            false,
+            CommittedAccount {
+                pubkey,
+                account: Account::default(),
+                remote_slot: Default::default(),
+            },
+            None,
+        );
+        let mut strategy = TransactionStrategy {
+            optimized_tasks: vec![stale_task.into()],
+            lookup_tables_keys: vec![],
+            uniqueness_nonce: None,
+        };
+
+        let fetcher = CacheTaskInfoFetcher::new(FreshDelegationFetcher);
+        handle_commit_id_error(
+            &Pubkey::new_unique(),
+            &fetcher,
+            &[pubkey],
+            &mut strategy,
+            42,
+        )
+        .await
+        .expect("commit id recovery succeeds");
+
+        assert_eq!(strategy.uniqueness_nonce, Some(42));
     }
 }

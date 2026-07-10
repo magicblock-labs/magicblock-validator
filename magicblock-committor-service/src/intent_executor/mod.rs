@@ -293,6 +293,7 @@ where
                     finalize_stage,
                     execution_report,
                     persister,
+                    intent_bundle.id,
                 )
                 .await
             }
@@ -320,6 +321,7 @@ where
             transaction_strategy,
             self.actions_callback_executor.clone(),
             execution_report,
+            base_intent.id,
         );
         let res = execute_with_timeout(
             self.time_left(),
@@ -372,6 +374,7 @@ where
             finalize_strategy,
             execution_report,
             persister,
+            base_intent.id,
         )
         .await
     }
@@ -383,6 +386,7 @@ where
         finalize_strategy: TransactionStrategy,
         execution_report: &mut IntentExecutionReport,
         persister: &Option<P>,
+        intent_id: u64,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let mut executor = TwoStageExecutor::new(
             self.authority.insecure_clone(),
@@ -391,6 +395,7 @@ where
             self.intent_client.clone(),
             self.actions_callback_executor.clone(),
             execution_report,
+            intent_id,
         );
 
         let commit_signature = execute_with_timeout(

@@ -20,7 +20,7 @@ pub struct TransactionStrategy {
     pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,
     // TODO(edwin): remove this
-    pub standalone_action_nonce: Option<u64>,
+    pub uniqueness_nonce: Option<u64>,
 }
 
 impl TransactionStrategy {
@@ -36,6 +36,7 @@ impl TransactionStrategy {
                 TaskStrategist::collect_lookup_table_keys(
                     authority,
                     &self.optimized_tasks,
+                    self.uniqueness_nonce,
                 ),
             )
         }
@@ -74,7 +75,7 @@ impl TransactionStrategy {
         TransactionStrategy {
             optimized_tasks: action_tasks,
             lookup_tables_keys: old_alts,
-            standalone_action_nonce: self.standalone_action_nonce,
+            uniqueness_nonce: self.uniqueness_nonce,
         }
     }
 
@@ -248,7 +249,7 @@ impl TaskStrategist {
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys: vec![],
-                standalone_action_nonce: uniqueness_nonce,
+                uniqueness_nonce,
             })
         }
         // In case task optimization didn't work
@@ -260,12 +261,15 @@ impl TaskStrategist {
             }
 
             // Get lookup table keys
-            let lookup_tables_keys =
-                Self::collect_lookup_table_keys(validator, &tasks);
+            let lookup_tables_keys = Self::collect_lookup_table_keys(
+                validator,
+                &tasks,
+                uniqueness_nonce,
+            );
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys,
-                standalone_action_nonce: uniqueness_nonce,
+                uniqueness_nonce,
             })
         } else {
             Err(TaskStrategistError::FailedToFitError)
@@ -280,63 +284,53 @@ impl TaskStrategist {
         uniqueness_nonce: Option<u64>,
     ) -> bool {
         let placeholder = Keypair::new();
-        // Gather all involved keys in tx
-        let budgets = TransactionUtils::tasks_compute_units(tasks);
-        let size_budgets = TransactionUtils::tasks_accounts_size_budget(tasks);
-        let budget_instructions = TransactionUtils::budget_instructions(
-            budgets,
-            u64::default(),
-            size_budgets,
+        let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
+            &Self::collect_lookup_table_keys(
+                &placeholder.pubkey(),
+                tasks,
+                uniqueness_nonce,
+            ),
         );
-        let unique_involved_pubkeys = TransactionUtils::unique_involved_pubkeys(
-            tasks,
-            &placeholder.pubkey(),
-            &budget_instructions,
-        );
-        let dummy_lookup_tables =
-            TransactionUtils::dummy_lookup_table(&unique_involved_pubkeys);
 
-        // Create final tx
-        let mut instructions =
-            TransactionUtils::tasks_instructions(&placeholder.pubkey(), tasks);
-        // Reserve space for the constant-size uniqueness noop so fit decisions
-        // match the assembled transaction.
-        if let Some(nonce) = uniqueness_nonce {
-            instructions.push(
-                TransactionUtils::standalone_action_noop_instruction(nonce),
-            );
-        }
-        let alt_tx = if let Ok(tx) = TransactionUtils::assemble_tx_raw(
+        // Assemble through the same path used for the real transaction so
+        // fit decisions cannot diverge from the assembled message.
+        match TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
             &placeholder,
-            &instructions,
-            &budget_instructions,
+            tasks,
+            u64::default(),
             &dummy_lookup_tables,
+            uniqueness_nonce,
         ) {
-            tx
-        } else {
+            Ok(tx) => {
+                serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE
+            }
             // Transaction doesn't fit, see CompileError
-            return false;
-        };
-
-        serialized_transaction_size(&alt_tx) <= MAX_TRANSACTION_WIRE_SIZE
+            Err(_) => false,
+        }
     }
 
     pub fn collect_lookup_table_keys(
         authority: &Pubkey,
         tasks: &[BaseTaskImpl],
+        uniqueness_nonce: Option<u64>,
     ) -> Vec<Pubkey> {
         let budgets = TransactionUtils::tasks_compute_units(tasks);
         let size_budgets = TransactionUtils::tasks_accounts_size_budget(tasks);
-        let budget_instructions = TransactionUtils::budget_instructions(
+        let mut service_instructions = TransactionUtils::budget_instructions(
             budgets,
             u64::default(),
             size_budgets,
-        );
+        )
+        .to_vec();
+        if let Some(nonce) = uniqueness_nonce {
+            service_instructions
+                .push(TransactionUtils::uniqueness_noop_instruction(nonce));
+        }
 
         TransactionUtils::unique_involved_pubkeys(
             tasks,
             authority,
-            &budget_instructions,
+            &service_instructions,
         )
     }
 
@@ -423,7 +417,7 @@ impl TaskStrategist {
         let calculate_tx_length = |tasks: &[BaseTaskImpl]| {
             // Include the constant-size uniqueness noop so fit decisions
             // match the assembled transaction.
-            match TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
+            match TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
                 &Keypair::new(), // placeholder
                 tasks,
                 u64::default(), // placeholder
@@ -851,7 +845,7 @@ mod tests {
             Some(42),
         )
         .expect("should fit with one task fewer");
-        assert_eq!(strategy.standalone_action_nonce, Some(42));
+        assert_eq!(strategy.uniqueness_nonce, Some(42));
     }
 
     #[test]
@@ -886,7 +880,7 @@ mod tests {
         );
         let authority = Keypair::new();
         let assemble = |nonce: Option<u64>| {
-            TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
+            TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
                 &authority,
                 &[create_test_commit_task(1, 100, 0).into()],
                 u64::default(),

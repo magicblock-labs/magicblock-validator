@@ -1456,6 +1456,7 @@ async fn create_two_stage_executor<'a>(
         IntentExecutionClient::new(fixture.rpc_client.clone()),
         callback_executor.clone(),
         execution_report,
+        intent.id,
     )
 }
 
