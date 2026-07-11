@@ -6509,6 +6509,54 @@ async fn test_failed_plain_clone_accepts_concurrent_active_delegation() {
 }
 
 #[tokio::test]
+async fn test_other_validator_delegation_does_not_accept_active_local_account()
+{
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut local_account = non_empty_account();
+    local_account.set_remote_slot(CURRENT_SLOT);
+    local_account.set_delegated(true);
+    accounts_bank.insert(account_pubkey, local_account);
+
+    let mut remote_account = non_empty_account();
+    remote_account.set_remote_slot(CURRENT_SLOT + 1);
+    let mut request = account_clone_request(remote_account);
+    request.pubkey = account_pubkey;
+    request.delegated_to_other = Some(random_pubkey());
+    cloner.set_fail_next_clone(true);
+
+    fetch_cloner
+        .clone_account_with_ownership(request, AccountFetchOrigin::GetAccount)
+        .await
+        .expect_err(
+            "another validator's delegation must not accept local state",
+        );
+
+    assert_eq!(cloner.clone_request_count(), 1);
+    assert!(
+        accounts_bank
+            .get_account(&account_pubkey)
+            .is_some_and(|account| account.delegated()),
+        "failed clone must not be reconciled as success"
+    );
+}
+
+#[tokio::test]
 async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
     init_logger();
     let validator_keypair = Keypair::new();

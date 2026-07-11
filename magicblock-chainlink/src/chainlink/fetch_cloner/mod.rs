@@ -610,6 +610,7 @@ where
     ) -> bool {
         let active_delegation_satisfies_request =
             request.delegation_actions.is_empty()
+                && request.delegated_to_other.is_none()
                 && !request.needs_undelegation;
         self.accounts_bank
             .get_account(&request.pubkey)
@@ -797,6 +798,7 @@ where
                     };
                     let active_delegation_satisfies_request =
                         owned_request.delegation_actions.is_empty()
+                            && owned_request.delegated_to_other.is_none()
                             && !owned_request.needs_undelegation;
                     let is_empty_placeholder =
                         Self::is_empty_placeholder_account(
