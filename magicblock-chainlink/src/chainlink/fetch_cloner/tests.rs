@@ -6454,6 +6454,61 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
 }
 
 #[tokio::test]
+async fn test_failed_plain_clone_accepts_concurrent_active_delegation() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+    cloner.set_clone_delay(Duration::from_millis(200));
+    cloner.set_fail_next_clone(true);
+
+    let mut remote_account = non_empty_account();
+    remote_account.set_remote_slot(CURRENT_SLOT + 1);
+    let mut request = account_clone_request(remote_account);
+    request.pubkey = account_pubkey;
+
+    let clone_task = tokio::spawn(async move {
+        fetch_cloner
+            .clone_account_with_ownership(
+                request,
+                AccountFetchOrigin::GetAccount,
+            )
+            .await
+    });
+    cloner.wait_for_account_clone_count(1).await;
+
+    let mut local_account = non_empty_account();
+    local_account.set_remote_slot(CURRENT_SLOT);
+    local_account.set_delegated(true);
+    accounts_bank.insert(account_pubkey, local_account);
+
+    clone_task
+        .await
+        .expect("clone task should complete")
+        .expect("active local delegation should satisfy the failed clone");
+
+    assert_eq!(cloner.clone_request_count(), 1);
+    let account = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("delegated account should remain in bank");
+    assert!(account.delegated());
+    assert_eq!(account.remote_slot(), CURRENT_SLOT);
+    assert_eq!(account.data(), &[1, 2, 3, 4]);
+}
+
+#[tokio::test]
 async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
     init_logger();
     let validator_keypair = Keypair::new();
