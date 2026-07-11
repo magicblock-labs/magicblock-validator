@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use dlp_api::state::{DelegationMetadata, UndelegationRequester};
@@ -140,6 +143,12 @@ impl TaskBuilderImpl {
     fn get_finalize_stage_metadata_pubkeys(
         intent_bundle: &ScheduledIntentBundle,
     ) -> Vec<Pubkey> {
+        intent_bundle.get_all_committed_pubkeys()
+    }
+
+    fn explicit_undelegation_pubkeys(
+        intent_bundle: &ScheduledIntentBundle,
+    ) -> HashSet<Pubkey> {
         [
             intent_bundle.get_undelegate_intent_pubkeys(),
             intent_bundle
@@ -377,6 +386,35 @@ impl TasksBuilder for TaskBuilderImpl {
             Ok(tasks)
         }
 
+        fn create_owner_program_undelegate_tasks(
+            intent_bundle: &ScheduledIntentBundle,
+            delegation_metadata: &HashMap<Pubkey, DelegationMetadata>,
+            explicit_undelegation_pubkeys: &HashSet<Pubkey>,
+        ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+            let mut tasks = Vec::new();
+            for account in intent_bundle
+                .get_all_committed_accounts()
+                .iter()
+                .filter(|a| !explicit_undelegation_pubkeys.contains(&a.pubkey))
+            {
+                let metadata = delegation_metadata_for_pubkey(
+                    account.pubkey,
+                    delegation_metadata,
+                )?;
+
+                if metadata.undelegation_requester
+                    == UndelegationRequester::OwnerProgram
+                {
+                    tasks.push(undelegate_task(
+                        account,
+                        &metadata.rent_payer,
+                        true,
+                    ));
+                }
+            }
+            Ok(tasks)
+        }
+
         let mut tasks = Vec::new();
         let finalize_metadata_pubkeys =
             Self::get_finalize_stage_metadata_pubkeys(intent_bundle);
@@ -393,6 +431,8 @@ impl TasksBuilder for TaskBuilderImpl {
             )
             .await
             .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+        let explicit_undelegation_pubkeys =
+            Self::explicit_undelegation_pubkeys(intent_bundle);
 
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
             tasks.extend(create_finalize_tasks(value));
@@ -410,6 +450,12 @@ impl TasksBuilder for TaskBuilderImpl {
         {
             tasks.extend(create_undelegate_tasks(value, &delegation_metadata)?);
         }
+
+        tasks.extend(create_owner_program_undelegate_tasks(
+            intent_bundle,
+            &delegation_metadata,
+            &explicit_undelegation_pubkeys,
+        )?);
 
         Ok(tasks)
     }
