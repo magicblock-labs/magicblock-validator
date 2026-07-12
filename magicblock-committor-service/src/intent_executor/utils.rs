@@ -443,7 +443,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        intent_executor::task_info_fetcher::TaskInfoFetcherResult,
+        intent_executor::task_info_fetcher::{
+            CommitNonceFetchResult, TaskInfoFetcherResult,
+        },
         tasks::task_builder::TaskBuilderImpl,
     };
 
@@ -458,6 +460,17 @@ mod tests {
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 1)).collect())
+        }
+
+        async fn fetch_next_commit_nonces_with_missing_as_zero(
+            &self,
+            pubkeys: &[Pubkey],
+            min_context_slot: u64,
+            _: &[Pubkey],
+        ) -> TaskInfoFetcherResult<CommitNonceFetchResult> {
+            self.fetch_next_commit_nonces(pubkeys, min_context_slot)
+                .await
+                .map(CommitNonceFetchResult::from_nonces)
         }
 
         async fn fetch_current_commit_nonces(
