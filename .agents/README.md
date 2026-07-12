@@ -19,6 +19,10 @@ window small.
 
 ## Non-negotiable (always applies)
 
+Read `rules/invariants.md` before making or reviewing any repository change or
+pull request. Verify that the proposed or current diff does not break any
+applicable invariant; an invariant violation blocks the change.
+
 Security outranks performance; read `rules/validator-goals.md` and
 `specs/validator-specification.md` before behavioral or protocol changes.
 
@@ -26,6 +30,7 @@ Security outranks performance; read `rules/validator-goals.md` and
 
 | Read this | When you need to |
 |---|---|
+| `rules/invariants.md` | Check every repository change or pull request against the validator and runtime correctness invariants. |
 | `context/overview.md` | Orient on what the validator is and its core concepts. |
 | `rules/validator-goals.md` | Decide whether a change aligns with system goals and correctness/security constraints. |
 | `specs/validator-specification.md` | Change protocol behavior: delegation, cloning, execution, commits, undelegation, Magic Actions, ephemeral accounts, RPC/router, recovery. |
