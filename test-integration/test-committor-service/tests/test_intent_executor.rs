@@ -1440,12 +1440,14 @@ async fn create_two_stage_executor<'a>(
         commit_tasks,
         authority,
         &None::<IntentPersisterImpl>,
+        None,
     )
     .unwrap();
     let finalize_strategy = TaskStrategist::build_strategy(
         finalize_tasks,
         authority,
         &None::<IntentPersisterImpl>,
+        None,
     )
     .unwrap();
     TwoStageExecutor::new(
@@ -1455,6 +1457,7 @@ async fn create_two_stage_executor<'a>(
         IntentExecutionClient::new(fixture.rpc_client.clone()),
         callback_executor.clone(),
         execution_report,
+        intent.id,
     )
 }
 
@@ -1712,6 +1715,7 @@ async fn single_flow_transaction_strategy(
         tasks,
         authority,
         &None::<IntentPersisterImpl>,
+        None,
     )
     .unwrap()
 }

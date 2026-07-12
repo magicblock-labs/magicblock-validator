@@ -291,6 +291,11 @@ impl TransactionScheduler {
                         }
                         SchedulerMode::Replica => {
                             self.coordinator.switch_to_replica_mode_globally();
+                            // A node that starts directly in replica mode may
+                            // have rebooted mid-slot: rebuild the in-memory
+                            // streaming-blockhash accumulator from the ledger so
+                            // the first reconstructed block verifies correctly.
+                            self.reconstruct_inprogress_hasher();
                         }
                     }
                 }
@@ -602,12 +607,52 @@ impl TransactionScheduler {
             // to recover from it, right now the log is used
             // for debugging purposes only
             // NOTE:
-            // This error will always be logged once
-            // when replica starts up with an empty ledger
+            // This may still be logged once when a replica starts up with an
+            // empty ledger (no previous blockhash to seed from). A mid-slot
+            // restart no longer triggers it: reconstruct_inprogress_hasher
+            // rebuilds the accumulator from the persisted in-progress slot.
             error!(
                 slot = block.slot,
                 "replication blockhash has diverged from local"
             )
+        }
+    }
+
+    /// Rebuilds the streaming-blockhash accumulator for the in-progress slot
+    /// after a mid-slot replica restart.
+    ///
+    /// At this point the hasher holds only the previous (finalized) blockhash
+    /// seed and `self.slot` is the not-yet-finalized slot. Its transactions may
+    /// already be persisted in the ledger (with `persist: true`) even though no
+    /// block header exists for it, so ledger replay never re-fed them. Hash
+    /// their signatures back in, in scheduled (ascending index) order, so the
+    /// first reconstructed block verifies against the authoritative hash.
+    ///
+    /// The replica's deduplication (initialized from the ledger's last persisted
+    /// position) skips redelivery of these same transactions, so they are hashed
+    /// exactly once.
+    fn reconstruct_inprogress_hasher(&mut self) {
+        let slot = self.slot;
+        match self.ledger.get_transaction_signatures_for_slot(slot) {
+            Ok(signatures) => {
+                for signature in &signatures {
+                    self.hasher.update(signature.as_ref());
+                }
+                if !signatures.is_empty() {
+                    info!(
+                        slot,
+                        count = signatures.len(),
+                        "reconstructed streaming blockhash for in-progress slot"
+                    );
+                }
+            }
+            Err(error) => {
+                warn!(
+                    %error,
+                    slot,
+                    "failed to reconstruct streaming blockhash from ledger"
+                );
+            }
         }
     }
 

@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use arc_swap::{ArcSwapAny, Guard};
 pub use database::{
-    meta::PerfSample, options::BLOCKSTORE_DIRECTORY_ROCKS_LEVEL,
+    meta::PerfSample,
+    options::{LedgerOptions, BLOCKSTORE_DIRECTORY_ROCKS_LEVEL},
 };
 use magicblock_core::traits::LatestBlockProvider;
 use solana_clock::Clock;

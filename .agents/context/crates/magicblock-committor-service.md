@@ -192,6 +192,7 @@ IntentExecutorImpl::execute
      -> fetch next commit nonces and diffable base accounts using max(remote_slot)
      -> persist commit_id for each committed account
      -> create commit, commit-finalize, undelegate, finalize, and action tasks
+  -> tag intents whose commit uses nonce <= 1 with a per-intent uniqueness noop
   -> TaskStrategist::build_execution_strategy
      -> try single transaction when total task count <= 22 and it fits
      -> optimize large tasks to buffers when needed
@@ -261,6 +262,10 @@ SQLite rows are used by operator/status APIs and by restart recovery. Updating s
 
 `TaskStrategist` first tries args, then buffer optimization, then ALTs. It chooses two-stage execution in cases where a single-stage ALT transaction would be slower than two no-ALT transactions. Altering thresholds such as `MAX_UNITED_TASKS_LEN = 22`, `COMMIT_STATE_SIZE_THRESHOLD = 256`, transaction-size constants, or buffer chunking changes latency, RPC transaction counts, and fit behavior.
 
+### Per-intent uniqueness noop
+
+Intent transactions are otherwise built from fully deterministic inputs. After an undelegate/re-delegate cycle the delegation metadata nonce restarts, so a first commit (nonce 1) can be byte-identical to a prior instance's landed transaction: identical bytes yield the identical signature, the skip-preflight send is deduped by the network, and the status-based confirmer matches the old transaction — the intent reports success without executing. `IntentExecutorImpl::execute_inner` therefore passes `Some(intent_id)` as `uniqueness_nonce` to `TaskStrategist` for intents whose commit uses nonce <= 1 (and always for standalone actions). The strategist renders it as a constant-size spl-noop instruction carrying the intent id on every produced stage — the finalize stage needs the same protection, since without the noop its bytes contain nothing per-instance — and includes it in all fit checks. Retries of the same intent keep the same id, preserving intentional dedup. Commit-id recovery (`handle_commit_id_error`) re-tags the strategy when a stale-cache retry lands back on nonce 1. The noop program must exist on the base layer (deployed on mainnet/devnet; loaded from `test-integration/schedulecommit/elfs/noop.so` in integration configs).
+
 ### Actions and callbacks
 
 Standalone actions are currently built through commit-task paths even when there are no committed accounts. Base actions with callbacks are extracted and scheduled through the `ActionsCallbackScheduler`. `actions_timeout` applies across action-related execution work. If action execution fails with recoverable CPI/limit errors, the executor can strip actions or move from single-stage to two-stage depending on the path; preserve error visibility through `patched_errors` and callback reports.
@@ -282,6 +287,7 @@ The public service API uses nonblocking `try_send`. If the service channel is fu
 9. Failed intent cleanup must not race with retries using the same buffer PDAs; current cleanup is success-only for that reason.
 10. Transaction-size and compute-budget choices must keep produced transactions under Solana wire limits.
 11. Base-layer sends must preserve explicit processed/committed confirmation semantics from `magicblock-rpc-client`.
+12. Intents whose commit uses nonce <= 1 must carry the per-intent uniqueness noop on every stage; otherwise their transactions can alias a prior delegation instance's landed signature and report success without executing.
 12. Signer/authority requirements for validator-signed commits, committor-program buffers, ALTs, callbacks, and base-layer instructions must not be relaxed.
 13. Persistence status/signature updates must continue to expose enough information for diagnostics, retries, and recovery.
 14. Avoid adding blocking I/O or unbounded work to service actor, scheduler, executor, task-preparation, or RPC hot paths.
