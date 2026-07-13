@@ -756,11 +756,17 @@ where
         let mut request = Some(request);
 
         loop {
-            if self.local_account_satisfies_clone_request(
-                request
-                    .as_ref()
-                    .expect("request must be present before ownership claim"),
-            ) {
+            let Some(request_ref) = request.as_ref() else {
+                return Err(ClonerError::FailedToCloneRegularAccount(
+                    pubkey,
+                    Box::new(ClonerError::CommittorServiceError(
+                        "missing clone request before ownership claim"
+                            .to_string(),
+                    )),
+                ));
+            };
+
+            if self.local_account_satisfies_clone_request(request_ref) {
                 metrics::inc_chainlink_clone_accounts_total_with_context(
                     fetch_context,
                     remote_result,
