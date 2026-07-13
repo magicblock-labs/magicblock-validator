@@ -26,7 +26,7 @@ async fn test_prepare_10kb_buffer() {
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![create_buffer_commit_task(&data).into()],
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -96,7 +96,7 @@ async fn test_prepare_multiple_buffers() {
     let mut strategy = TransactionStrategy {
         optimized_tasks: buffer_tasks,
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -176,11 +176,12 @@ async fn test_lookup_tables() {
     let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
         &fixture.authority.pubkey(),
         &tasks,
+        None,
     );
     let mut strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys,
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     let result = preparator
@@ -216,7 +217,7 @@ async fn test_already_initialized_error_handled() {
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![commit_task.clone().into()],
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -258,7 +259,7 @@ async fn test_already_initialized_error_handled() {
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![commit_task.into()],
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -316,7 +317,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             commit_b.clone().into(),
         ],
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // --- Step 1: initial prepare ---
@@ -420,7 +421,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             commit_b.clone().into(),
         ],
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     let res2 = preparator

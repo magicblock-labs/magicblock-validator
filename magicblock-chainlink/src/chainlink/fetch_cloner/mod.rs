@@ -600,19 +600,28 @@ where
             .fetch_add(1, Ordering::Relaxed)
     }
 
+    fn account_is_actively_delegated(account: &AccountSharedData) -> bool {
+        account.delegated() && !account.undelegating()
+    }
+
     fn local_account_satisfies_clone_request(
         &self,
-        pubkey: &Pubkey,
-        request_account: &AccountSharedData,
+        request: &AccountCloneRequest,
     ) -> bool {
+        let active_delegation_satisfies_request =
+            request.delegation_actions.is_empty()
+                && request.delegated_to_other.is_none()
+                && !request.needs_undelegation;
         self.accounts_bank
-            .get_account(pubkey)
+            .get_account(&request.pubkey)
             .is_some_and(|account| {
                 let local_slot = account.remote_slot();
-                let request_slot = request_account.remote_slot();
-                local_slot > request_slot
+                let request_slot = request.account.remote_slot();
+                (active_delegation_satisfies_request
+                    && Self::account_is_actively_delegated(&account))
+                    || local_slot > request_slot
                     || (local_slot == request_slot
-                        && account == *request_account)
+                        && account.eq(&request.account))
             })
     }
 
@@ -748,11 +757,9 @@ where
 
         loop {
             if self.local_account_satisfies_clone_request(
-                &pubkey,
-                &request
+                request
                     .as_ref()
-                    .expect("request must be present before ownership claim")
-                    .account,
+                    .expect("request must be present before ownership claim"),
             ) {
                 metrics::inc_chainlink_clone_accounts_total_with_context(
                     fetch_context,
@@ -789,6 +796,10 @@ where
                             Box::new(err),
                         ));
                     };
+                    let active_delegation_satisfies_request =
+                        owned_request.delegation_actions.is_empty()
+                            && owned_request.delegated_to_other.is_none()
+                            && !owned_request.needs_undelegation;
                     let is_empty_placeholder =
                         Self::is_empty_placeholder_account(
                             &owned_request.account,
@@ -801,7 +812,26 @@ where
                         Outcome::Success,
                     );
                     let result = self.cloner.clone_account(owned_request).await;
-                    if result.is_ok() {
+                    let reconciled_active_delegation = result.is_err()
+                        && active_delegation_satisfies_request
+                        && self.accounts_bank.get_account(&pubkey).is_some_and(
+                            |account| {
+                                Self::account_is_actively_delegated(&account)
+                            },
+                        );
+                    if reconciled_active_delegation {
+                        debug!(
+                            pubkey = %pubkey,
+                            error = ?result,
+                            "Clone request satisfied by concurrently active local delegation"
+                        );
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context,
+                            remote_result,
+                            clone_intent,
+                            ChainlinkCloneOutcome::Skipped,
+                        );
+                    } else if result.is_ok() {
                         metrics::inc_chainlink_clone_accounts_total_with_context(
                             fetch_context,
                             remote_result,
@@ -840,14 +870,19 @@ where
                             Outcome::Error,
                         );
                     }
-                    let completion = if result.is_ok() {
-                        CloneCompletion::Success
-                    } else {
-                        CloneCompletion::Failed
-                    };
+                    let completion =
+                        if result.is_ok() || reconciled_active_delegation {
+                            CloneCompletion::Success
+                        } else {
+                            CloneCompletion::Failed
+                        };
                     self.finish_pending_clone(pubkey, completion);
                     guard.dismiss();
-                    return result;
+                    return if reconciled_active_delegation {
+                        Ok(Signature::default())
+                    } else {
+                        result
+                    };
                 }
                 CloneClaim::Waiter(rx) => match rx.await {
                     Ok(CloneCompletion::Success) => continue,

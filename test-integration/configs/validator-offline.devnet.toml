@@ -40,3 +40,7 @@ path = "../target/deploy/program_schedulecommit_security.so"
 
 [metrics]
 address = "0.0.0.0:9000"
+
+[[programs]]
+id = "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+path = "../schedulecommit/elfs/noop.so"
