@@ -3231,7 +3231,7 @@ where
             pubkey,
             delegation_record_pubkey,
             slot,
-            fetch_context.with_reason(AccountFetchReason::ProgramData),
+            fetch_context.with_reason(AccountFetchReason::DelegationRecord),
         )
     }
 
