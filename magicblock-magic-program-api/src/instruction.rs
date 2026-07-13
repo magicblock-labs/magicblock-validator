@@ -386,14 +386,8 @@ pub enum PostDelegationActionExecutorInstruction {
     ScheduleUndelegation { cloned_account_pubkey: Pubkey },
 }
 
-/// Instruction(s) for the ephemeral system builtin-program.
-///
-/// Backed by the same processing code as [`MagicBlockInstruction`]'s
-/// `CreateEphemeralAccount`/`ResizeEphemeralAccount`/`CloseEphemeralAccount`
-/// variants, exposed under a separate program ID so other programs can CPI
-/// into ephemeral account management without targeting [`crate::ID`]
-/// (relevant when the caller itself was reached via CPI from
-/// [`crate::ID`], since Solana disallows indirect reentrancy).
+/// Instruction(s) for the ephemeral system builtin-program: creates,
+/// resizes, and closes ephemeral accounts.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum EphemeralSystemInstruction {
     /// # Account references

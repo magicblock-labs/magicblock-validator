@@ -17,13 +17,7 @@ pub const CALLBACK_PROGRAM_ID: Pubkey =
 pub const POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID: Pubkey =
     pubkey!("PostAct111111111111111111111111111111111111");
 
-/// Separate program ID for ephemeral-account instructions, so CPI callers
-/// (e.g. an outbox-intent program) can target ephemeral account creation
-/// without re-entering `ID` (which Solana's reentrancy rules forbid once
-/// that program is already on the call stack). Backed by the same
-/// `ephemeral_accounts` processing code as `ID`'s own
-/// `CreateEphemeralAccount`/`ResizeEphemeralAccount`/`CloseEphemeralAccount`
-/// instructions, kept there for backward compatibility.
+/// Program ID for the ephemeral system builtin-program.
 pub const EPHEMERAL_SYSTEM_PROGRAM_ID: Pubkey =
     pubkey!("EphSystem1111111111111111111111111111111111");
 
