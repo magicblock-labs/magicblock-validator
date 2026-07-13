@@ -7,12 +7,12 @@ use prometheus::{
 };
 pub use types::{
     AccountClone, AccountCommit, AccountFetchContext, AccountFetchEntrypoint,
-    AccountFetchOrigin, AccountFetchReason, BankPrecheckOutcome,
-    BankPrecheckReason, ChainlinkCloneIntent,
-    ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
-    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage,
-    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome, LabelValue,
-    Outcome, SubscriptionCleanupOutcome, SubscriptionCleanupSource,
+    AccountFetchReason, BankPrecheckOutcome, BankPrecheckReason,
+    ChainlinkCloneIntent, ChainlinkCloneMaterializationOutcome,
+    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
+    ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome, LabelValue, Outcome,
+    SubscriptionCleanupOutcome, SubscriptionCleanupSource,
     SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
     SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
 };
@@ -927,20 +927,6 @@ pub fn inc_chainlink_bank_precheck_accounts_with_context(
         .inc_by(count);
 }
 
-pub fn inc_chainlink_bank_precheck_accounts(
-    fetch_origin: AccountFetchOrigin,
-    outcome: BankPrecheckOutcome,
-    reason: BankPrecheckReason,
-    count: u64,
-) {
-    inc_chainlink_bank_precheck_accounts_with_context(
-        fetch_origin.into(),
-        outcome,
-        reason,
-        count,
-    );
-}
-
 pub fn inc_chainlink_subscription_registration_accounts(
     origin: SubscriptionRegistrationOrigin,
     subscription_reason: SubscriptionReasonLabel,
@@ -1101,10 +1087,6 @@ pub fn inc_account_fetches_found_with_context(
         .inc_by(count);
 }
 
-pub fn inc_account_fetches_found(fetch_origin: AccountFetchOrigin, count: u64) {
-    inc_account_fetches_found_with_context(fetch_origin.into(), count);
-}
-
 pub fn inc_account_fetches_not_found_with_context(
     context: AccountFetchContext,
     count: u64,
@@ -1115,13 +1097,6 @@ pub fn inc_account_fetches_not_found_with_context(
             context.reason().value(),
         ])
         .inc_by(count);
-}
-
-pub fn inc_account_fetches_not_found(
-    fetch_origin: AccountFetchOrigin,
-    count: u64,
-) {
-    inc_account_fetches_not_found_with_context(fetch_origin.into(), count);
 }
 
 pub fn inc_chainlink_clone_accounts_total_with_context(
@@ -1141,20 +1116,6 @@ pub fn inc_chainlink_clone_accounts_total_with_context(
         .inc();
 }
 
-pub fn inc_chainlink_clone_accounts_total(
-    origin: AccountFetchOrigin,
-    remote_result: ChainlinkCloneRemoteResult,
-    clone_intent: ChainlinkCloneIntent,
-    outcome: ChainlinkCloneOutcome,
-) {
-    inc_chainlink_clone_accounts_total_with_context(
-        origin.into(),
-        remote_result,
-        clone_intent,
-        outcome,
-    );
-}
-
 pub fn inc_chainlink_clone_materialization_accounts_total_with_context(
     context: AccountFetchContext,
     remote_result: ChainlinkCloneRemoteResult,
@@ -1170,18 +1131,6 @@ pub fn inc_chainlink_clone_materialization_accounts_total_with_context(
         .inc();
 }
 
-pub fn inc_chainlink_clone_materialization_accounts_total(
-    origin: AccountFetchOrigin,
-    remote_result: ChainlinkCloneRemoteResult,
-    outcome: ChainlinkCloneMaterializationOutcome,
-) {
-    inc_chainlink_clone_materialization_accounts_total_with_context(
-        origin.into(),
-        remote_result,
-        outcome,
-    );
-}
-
 pub fn inc_chainlink_empty_placeholder_accounts_total_with_context(
     context: AccountFetchContext,
     stage: ChainlinkEmptyPlaceholderStage,
@@ -1195,18 +1144,6 @@ pub fn inc_chainlink_empty_placeholder_accounts_total_with_context(
             outcome.value(),
         ])
         .inc();
-}
-
-pub fn inc_chainlink_empty_placeholder_accounts_total(
-    origin: AccountFetchOrigin,
-    stage: ChainlinkEmptyPlaceholderStage,
-    outcome: Outcome,
-) {
-    inc_chainlink_empty_placeholder_accounts_total_with_context(
-        origin.into(),
-        stage,
-        outcome,
-    );
 }
 
 pub fn inc_program_subscription_account_updates_count(
@@ -1247,20 +1184,6 @@ pub fn inc_chainlink_pending_fetch_accounts_with_context(
         .inc_by(count);
 }
 
-pub fn inc_chainlink_pending_fetch_accounts(
-    origin: AccountFetchOrigin,
-    layer: ChainlinkPendingFetchLayer,
-    outcome: ChainlinkPendingFetchOutcome,
-    count: u64,
-) {
-    inc_chainlink_pending_fetch_accounts_with_context(
-        origin.into(),
-        layer,
-        outcome,
-        count,
-    );
-}
-
 pub fn inc_chainlink_pending_fetch_waiters_with_context(
     context: AccountFetchContext,
     layer: ChainlinkPendingFetchLayer,
@@ -1273,18 +1196,6 @@ pub fn inc_chainlink_pending_fetch_waiters_with_context(
             layer.value(),
         ])
         .inc_by(count);
-}
-
-pub fn inc_chainlink_pending_fetch_waiters(
-    origin: AccountFetchOrigin,
-    layer: ChainlinkPendingFetchLayer,
-    count: u64,
-) {
-    inc_chainlink_pending_fetch_waiters_with_context(
-        origin.into(),
-        layer,
-        count,
-    );
 }
 
 pub fn inc_chainlink_pending_fetch_waiters_gauge(
@@ -1319,20 +1230,6 @@ pub fn observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
         .observe(seconds);
 }
 
-pub fn observe_chainlink_pending_fetch_owner_duration_seconds(
-    origin: AccountFetchOrigin,
-    layer: ChainlinkPendingFetchLayer,
-    outcome: ChainlinkPendingFetchOutcome,
-    seconds: f64,
-) {
-    observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
-        origin.into(),
-        layer,
-        outcome,
-        seconds,
-    );
-}
-
 #[cfg(any(test, feature = "dev-context"))]
 pub fn chainlink_pending_fetch_accounts_value(
     context: impl Into<AccountFetchContext>,
@@ -1352,15 +1249,6 @@ pub fn chainlink_pending_fetch_accounts_value(
 }
 
 #[cfg(any(test, feature = "dev-context"))]
-pub fn chainlink_pending_fetch_accounts_value_by_origin(
-    origin: AccountFetchOrigin,
-    layer: ChainlinkPendingFetchLayer,
-    outcome: ChainlinkPendingFetchOutcome,
-) -> u64 {
-    chainlink_pending_fetch_accounts_value(origin, layer, outcome)
-}
-
-#[cfg(any(test, feature = "dev-context"))]
 pub fn chainlink_pending_fetch_waiters_value(
     context: impl Into<AccountFetchContext>,
     layer: ChainlinkPendingFetchLayer,
@@ -1374,14 +1262,6 @@ pub fn chainlink_pending_fetch_waiters_value(
         ])
         .map(|m| m.get())
         .unwrap_or(0)
-}
-
-#[cfg(any(test, feature = "dev-context"))]
-pub fn chainlink_pending_fetch_waiters_value_by_origin(
-    origin: AccountFetchOrigin,
-    layer: ChainlinkPendingFetchLayer,
-) -> u64 {
-    chainlink_pending_fetch_waiters_value(origin, layer)
 }
 
 #[cfg(any(test, feature = "dev-context"))]

@@ -78,45 +78,6 @@ pub enum AccountCommit<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccountFetchOrigin {
-    GetMultipleAccounts,
-    GetAccount,
-    SendTransaction(Signature),
-    ProjectAta,
-}
-
-impl AccountFetchOrigin {
-    pub fn as_str(&self) -> &str {
-        use AccountFetchOrigin::*;
-        match self {
-            GetMultipleAccounts => "get_multiple_accounts",
-            GetAccount => "get_account",
-            SendTransaction(_) => "send_transaction",
-            ProjectAta => "project_ata",
-        }
-    }
-
-    pub fn signature(&self) -> Option<&Signature> {
-        match self {
-            Self::SendTransaction(sig) => Some(sig),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for AccountFetchOrigin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl LabelValue for AccountFetchOrigin {
-    fn value(&self) -> &str {
-        self.as_str()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountFetchEntrypoint {
     RpcGetAccount,
     RpcGetMultipleAccounts,
@@ -271,21 +232,6 @@ impl AccountFetchContext {
 
     pub fn signature(&self) -> Option<&Signature> {
         self.entrypoint.signature()
-    }
-}
-
-impl From<AccountFetchOrigin> for AccountFetchContext {
-    fn from(origin: AccountFetchOrigin) -> Self {
-        match origin {
-            AccountFetchOrigin::GetMultipleAccounts => {
-                Self::rpc_get_multiple_accounts()
-            }
-            AccountFetchOrigin::GetAccount => Self::rpc_get_account(),
-            AccountFetchOrigin::SendTransaction(sig) => {
-                Self::send_transaction(sig)
-            }
-            AccountFetchOrigin::ProjectAta => Self::project_ata(),
-        }
     }
 }
 
