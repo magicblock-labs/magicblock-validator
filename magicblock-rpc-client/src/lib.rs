@@ -5,6 +5,8 @@ pub mod utils;
 
 use std::{
     collections::HashMap,
+    future::Future,
+    pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -19,6 +21,9 @@ use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_address_lookup_table_interface::state::{
     AddressLookupTable, LookupTableMeta,
+};
+use solana_client::{
+    nonblocking::tpu_client::TpuClient, tpu_client::TpuClientConfig,
 };
 use solana_clock::Slot;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
@@ -41,7 +46,7 @@ use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
-use tokio::sync::Mutex as TMutex;
+use tokio::sync::{Mutex as TMutex, OnceCell};
 use tracing::*;
 
 /// The encoding to use when sending transactions
@@ -89,6 +94,9 @@ pub enum MagicBlockRpcClientError {
     #[error("Sent transaction {1} but got error: {0:?}")]
     SentTransactionError(TransactionError, Signature),
 }
+
+type TpuSendFuture<'a> = Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+type TpuSendFn = Arc<dyn Fn(Vec<u8>) -> TpuSendFuture<'static> + Send + Sync>;
 
 impl From<solana_rpc_client_api::client_error::Error>
     for MagicBlockRpcClientError
@@ -276,6 +284,8 @@ pub struct MagicblockRpcClient {
     cache: Arc<RpcClientCache>,
     chain_slot: Option<Arc<AtomicU64>>,
     confirmer: Arc<SignatureConfirmer>,
+    tpu_sender: Arc<OnceCell<Option<TpuSendFn>>>,
+    websocket_url: Option<String>,
 }
 
 impl From<RpcClient> for MagicblockRpcClient {
@@ -319,14 +329,47 @@ impl MagicblockRpcClient {
     ) -> Self {
         let confirmer = Arc::new(SignatureConfirmer::new(
             client.clone(),
-            SignatureConfirmerConfig::with_websocket_url(websocket_url),
+            SignatureConfirmerConfig::with_websocket_url(websocket_url.clone()),
         ));
         Self {
             client,
             cache: Arc::new(RpcClientCache::default()),
             chain_slot,
             confirmer,
+            tpu_sender: Arc::new(OnceCell::new()),
+            websocket_url,
         }
+    }
+
+    async fn tpu_sender(&self) -> Option<&TpuSendFn> {
+        self.tpu_sender
+            .get_or_init(|| async {
+                let websocket_url = self.websocket_url.as_deref()?;
+                match TpuClient::new(
+                    "magicblock-rpc-client",
+                    self.client.clone(),
+                    websocket_url,
+                    TpuClientConfig::default(),
+                )
+                .await
+                {
+                    Ok(client) => {
+                        let client = Arc::new(client);
+                        Some(Arc::new(move |wire_transaction| {
+                            let client = client.clone();
+                            Box::pin(async move {
+                                client.send_wire_transaction(wire_transaction).await
+                            }) as TpuSendFuture<'static>
+                        }) as TpuSendFn)
+                    }
+                    Err(err) => {
+                        warn!(?err, "Failed to initialize leader TPU client; continuing with RPC delivery");
+                        None
+                    }
+                }
+            })
+            .await
+            .as_ref()
     }
 
     pub async fn get_latest_blockhash(
@@ -650,13 +693,38 @@ impl MagicblockRpcClient {
         tx: &impl SerializableTransaction,
         config: &MagicBlockSendTransactionConfig,
     ) -> MagicBlockRpcClientResult<MagicBlockSendTransactionOutcome> {
-        let sig = self
+        let wire_transaction = bincode::serialize(tx).ok();
+        let rpc_send = self
             .client
-            .send_transaction_with_config(tx, SEND_TRANSACTION_CONFIG)
-            .await
-            .map_err(|e| {
-                MagicBlockRpcClientError::SendTransaction(Box::new(e))
-            })?;
+            .send_transaction_with_config(tx, SEND_TRANSACTION_CONFIG);
+        // Type-erase this future so every generic transaction caller does not
+        // inherit the deeply nested TPU client future in its async state machine.
+        let tpu_send: TpuSendFuture<'_> = Box::pin(async {
+            let Some(wire_transaction) = wire_transaction else {
+                warn!(
+                    "Failed to serialize transaction for leader TPU delivery"
+                );
+                return false;
+            };
+            let Some(tpu_sender) = self.tpu_sender().await else {
+                return false;
+            };
+            tpu_sender(wire_transaction).await
+        });
+
+        let (rpc_result, tpu_sent) = tokio::join!(rpc_send, tpu_send);
+        let sig = match rpc_result {
+            Ok(signature) => signature,
+            Err(err) if tpu_sent => {
+                warn!(?err, "RPC transaction delivery failed after leader TPU delivery succeeded");
+                *tx.get_signature()
+            }
+            Err(err) => {
+                return Err(MagicBlockRpcClientError::SendTransaction(
+                    Box::new(err),
+                ));
+            }
+        };
 
         let MagicBlockSendTransactionConfig::SendAndConfirm {
             wait_for_processed_level,

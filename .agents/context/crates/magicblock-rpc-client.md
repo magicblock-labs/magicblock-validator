@@ -7,7 +7,7 @@
 High-level responsibilities:
 
 - wrap an existing `Arc<solana_rpc_client::nonblocking::rpc_client::RpcClient>` in a cheap-to-clone `MagicblockRpcClient`;
-- send base-layer transactions with MagicBlock defaults (`skip_preflight: true`, base64 encoding) and optional processed/committed confirmation;
+- send base-layer transactions concurrently through JSON-RPC and, when a WebSocket URL is configured, directly to current/upcoming leader TPUs, with optional processed/committed confirmation;
 - coalesce concurrent signature-status polling and optionally use `signatureSubscribe` websocket notifications before falling back to batched polling;
 - cache recent blockhashes and slots briefly to reduce base-layer RPC load in high-volume settlement flows;
 - batch `getMultipleAccounts` requests so callers do not exceed RPC provider input limits;
@@ -81,6 +81,7 @@ The crate name is `magicblock-rpc-client`; the main type is spelled `MagicblockR
 - an internal blockhash/slot cache protected by Tokio mutexes;
 - optional `Arc<AtomicU64>` `chain_slot` for sharing the highest observed base-layer slot with other services;
 - an internal `SignatureConfirmer` for send confirmation.
+- a lazily initialized Solana TPU client when a WebSocket URL is available.
 
 Constructors:
 
@@ -141,7 +142,10 @@ Retry policy is intentionally conservative: IO errors, HTTP 5xx send errors, lat
 ```text
 caller builds/signs tx
   -> MagicblockRpcClient::send_transaction(tx, config)
-  -> RpcClient::send_transaction_with_config(tx, SEND_TRANSACTION_CONFIG)
+  -> concurrently:
+       RpcClient::send_transaction_with_config(tx, SEND_TRANSACTION_CONFIG)
+       TpuClient::send_wire_transaction(serialized tx)
+  -> accept either successful delivery (RPC is preferred when both succeed)
   -> if config == Send: return signature-only outcome
   -> wait_for_processed_status(signature, tx.recent_blockhash, ...)
   -> optionally wait_for_confirmed_status(signature, client.commitment(), ...)
@@ -151,10 +155,11 @@ caller builds/signs tx
 Important details:
 
 1. `send_transaction` always submits with `skip_preflight: true`; validation must come from callers, transaction construction, and post-send status checks.
-2. The processed wait uses `CommitmentConfig::processed()` regardless of the underlying client commitment.
-3. The committed wait uses `self.client.commitment()`, so construction sites must choose the desired commitment level on the underlying Solana `RpcClient`.
-4. Durable nonce transactions are explicitly unsupported by this helper because confirmation uses the transaction's recent blockhash.
-5. If processed status returns a transaction error, `send_transaction` returns `SentTransactionError` immediately and does not continue to the committed wait.
+2. A configured WebSocket URL enables lazy TPU leader discovery. TPU initialization or delivery failure is non-fatal while RPC delivery succeeds; if RPC delivery fails after TPU delivery succeeds, confirmation continues using the transaction's existing signature.
+3. The processed wait uses `CommitmentConfig::processed()` regardless of the underlying client commitment.
+4. The committed wait uses `self.client.commitment()`, so construction sites must choose the desired commitment level on the underlying Solana `RpcClient`.
+5. Durable nonce transactions are explicitly unsupported by this helper because confirmation uses the transaction's recent blockhash.
+6. If processed status returns a transaction error, `send_transaction` returns `SentTransactionError` immediately and does not continue to the committed wait.
 
 ### Signature confirmation with websocket fallback
 
@@ -212,6 +217,10 @@ Slot reads are cached for `400ms` in `get_cached_slot()`, and both fetched slots
 
 Avoid holding the `PollState` mutex across RPC calls. The current implementation snapshots signatures while locked, drops the lock for network I/O, then re-locks to apply statuses. Preserve that shape to avoid blocking new waiters and timeout cleanup behind remote RPC latency.
 
+### TPU future type erasure
+
+The TPU send future in `MagicblockRpcClient::send_transaction` is deliberately boxed behind `TpuSendFuture`. Do not inline the concrete Solana TPU leader-discovery/QUIC future into this generic async method: doing so makes every committor caller's state machine deeply nested and causes rustc query-depth overflow while compiling `magicblock-committor-service`.
+
 ### Commitment handling
 
 `status_result_for_commitment` only returns a result when the fetched `TransactionStatus` satisfies the requested commitment. This applies to errors as well as successes: a processed transaction error does not satisfy a confirmed waiter until Solana reports a status that satisfies confirmed commitment. Unit coverage exists for this behavior in `transaction_errors_wait_for_requested_commitment`.
@@ -238,9 +247,10 @@ This crate owns local confirmation and signature-status instrumentation call sit
 6. Do not hold async mutexes across Solana RPC/pubsub network calls.
 7. Blockhash and slot caches must be short-lived and monotonic where applicable; `chain_slot` updates must never move the observed slot backward.
 8. `get_multiple_accounts*` must preserve input order and output cardinality after chunking.
-9. `get_account` must continue to map Solana `AccountNotFound` user errors to `Ok(None)` rather than a hard error.
-10. ALT helpers must fail loudly on deserialization errors instead of treating malformed accounts as missing.
-11. Retry helpers must preserve caller-owned domain error mapping and must not hide unrecoverable transaction errors behind infinite retries.
+9. Direct TPU delivery must remain additive to RPC delivery: an unavailable TPU path must not prevent the existing RPC path, and either successful transport must be eligible for the existing confirmation flow.
+10. `get_account` must continue to map Solana `AccountNotFound` user errors to `Ok(None)` rather than a hard error.
+11. ALT helpers must fail loudly on deserialization errors instead of treating malformed accounts as missing.
+12. Retry helpers must preserve caller-owned domain error mapping and must not hide unrecoverable transaction errors behind infinite retries.
 12. Public error variants that carry signatures must continue to return them from `MagicBlockRpcClientError::signature()`.
 
 ## Common change areas and what to inspect
