@@ -1445,6 +1445,10 @@ where
         let Some(account) = resolved_account else {
             return;
         };
+        let subscription_clone_context =
+            AccountFetchContext::subscription_update(
+                AccountFetchReason::SubscriptionUpdateClone,
+            );
         let projected_ata_clone_request = self
             .maybe_build_projected_ata_clone_request_from_subscription_update(
                 pubkey,
@@ -1493,6 +1497,7 @@ where
                     if let Err(err) = self
                         .clone_projected_ata_request(
                             projected_ata_clone_request,
+                            subscription_clone_context,
                         )
                         .await
                     {
@@ -1631,9 +1636,7 @@ where
                         delegated_to_other,
                         needs_undelegation: false,
                     },
-                    AccountFetchContext::subscription_update(
-                        AccountFetchReason::SubscriptionUpdateClone,
-                    ),
+                    subscription_clone_context,
                 )
                 .await
             {
@@ -1646,7 +1649,10 @@ where
                 projected_ata_clone_request
             {
                 if let Err(err) = self
-                    .clone_projected_ata_request(projected_ata_clone_request)
+                    .clone_projected_ata_request(
+                        projected_ata_clone_request,
+                        subscription_clone_context,
+                    )
                     .await
                 {
                     error!(
@@ -1790,6 +1796,7 @@ where
     async fn clone_projected_ata_request(
         &self,
         request: AccountCloneRequest,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<Signature> {
         if self
             .accounts_bank
@@ -1801,7 +1808,7 @@ where
 
         self.clone_account_with_post_delegation_action_invariants(
             request,
-            AccountFetchContext::project_ata(),
+            fetch_context.with_reason(AccountFetchReason::AtaProjection),
         )
         .await
     }
@@ -1936,6 +1943,7 @@ where
                     if let Err(err) = self
                         .clone_projected_ata_request(
                             projected_ata_clone_request,
+                            discovery_context,
                         )
                         .await
                     {
