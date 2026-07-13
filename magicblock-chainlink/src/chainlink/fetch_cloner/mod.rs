@@ -2445,7 +2445,7 @@ where
             accs,
             mark_empty_if_not_found,
             slot,
-            fetch_context.with_reason(AccountFetchReason::DelegationRecord),
+            fetch_context,
         )
         .await
     }
