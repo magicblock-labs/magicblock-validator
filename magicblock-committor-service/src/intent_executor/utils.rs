@@ -143,7 +143,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     Ok(TransactionStrategy {
         optimized_tasks: to_cleanup,
         lookup_tables_keys: old_alts,
-        uniqueness_nonce: None,
+        uniqueness_nonce: strategy.uniqueness_nonce,
     })
 }
 
@@ -447,8 +447,8 @@ mod tests {
         tasks::task_builder::TaskBuilderImpl,
     };
 
-    /// Reports the fresh-delegation nonce (next commit id 1) for every pubkey.
-    struct FreshDelegationFetcher;
+    /// Reports commit id 1 except for one unchanged account at commit id 5.
+    struct FreshDelegationFetcher(Option<Pubkey>);
 
     #[async_trait]
     impl TaskInfoFetcher for FreshDelegationFetcher {
@@ -457,7 +457,12 @@ mod tests {
             pubkeys: &[Pubkey],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 1)).collect())
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (*pubkey, if self.0 == Some(*pubkey) { 5 } else { 1 })
+                })
+                .collect())
         }
 
         async fn fetch_current_commit_nonces(
@@ -465,7 +470,12 @@ mod tests {
             pubkeys: &[Pubkey],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (*pubkey, if self.0 == Some(*pubkey) { 4 } else { 0 })
+                })
+                .collect())
         }
 
         async fn fetch_rent_reimbursements(
@@ -486,8 +496,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_commit_id_recovery_sets_uniqueness_nonce() {
+    async fn test_mixed_commit_id_recovery_sets_uniqueness_nonce() {
         let pubkey = Pubkey::new_unique();
+        let unchanged_pubkey = Pubkey::new_unique();
         // Stale cache produced commit id 5; on chain the account was
         // re-delegated, so the correct commit id is 1.
         let stale_task = TaskBuilderImpl::create_commit_task(
@@ -501,16 +512,31 @@ mod tests {
             None,
         );
         let mut strategy = TransactionStrategy {
-            optimized_tasks: vec![stale_task.into()],
+            optimized_tasks: vec![
+                stale_task.into(),
+                TaskBuilderImpl::create_commit_task(
+                    5,
+                    false,
+                    CommittedAccount {
+                        pubkey: unchanged_pubkey,
+                        account: Account::default(),
+                        remote_slot: Default::default(),
+                    },
+                    None,
+                )
+                .into(),
+            ],
             lookup_tables_keys: vec![],
             uniqueness_nonce: None,
         };
 
-        let fetcher = CacheTaskInfoFetcher::new(FreshDelegationFetcher);
-        handle_commit_id_error(
+        let fetcher = CacheTaskInfoFetcher::new(FreshDelegationFetcher(Some(
+            unchanged_pubkey,
+        )));
+        let cleanup = handle_commit_id_error(
             &Pubkey::new_unique(),
             &fetcher,
-            &[pubkey],
+            &[pubkey, unchanged_pubkey],
             &mut strategy,
             42,
         )
@@ -518,5 +544,7 @@ mod tests {
         .expect("commit id recovery succeeds");
 
         assert_eq!(strategy.uniqueness_nonce, Some(42));
+        assert_eq!(cleanup.uniqueness_nonce, Some(42));
+        assert_eq!(cleanup.optimized_tasks.len(), 1);
     }
 }
