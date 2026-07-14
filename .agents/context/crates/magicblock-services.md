@@ -120,7 +120,7 @@ For each observed request, the service:
 1. verifies the request PDA matches the delegated account;
 2. checks the delegated account is delegated on base and ER;
 3. best-effort notifies Chainlink with `undelegation_requested`;
-4. submits a local validator-signed `ScheduleCommitAndUndelegate` transaction with payer, `MAGIC_CONTEXT_PUBKEY`, and delegated account.
+4. submits a local validator-signed `ScheduleCommitAndUndelegate` transaction with the validator as payer/signer, `MAGIC_CONTEXT_PUBKEY`, and each delegated account as writable non-signer.
 
 Transient delegation-check and local-scheduling failures are retried three times with short exponential backoff. Invalid request PDAs and non-delegated accounts are skipped.
 

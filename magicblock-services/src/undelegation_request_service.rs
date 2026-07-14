@@ -264,7 +264,7 @@ impl UndelegationRequestService {
             );
         }
 
-        let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
+        let ix = InstructionUtils::validator_schedule_commit_and_undelegate_instruction(
             &validator_authority.pubkey(),
             vec![request.delegated_account],
         );
