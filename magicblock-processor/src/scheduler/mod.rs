@@ -56,6 +56,7 @@ use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::{
+        blocks::LatestBlockInner,
         replication::{self, Message, SuperBlock},
         transactions::{
             ProcessableTransaction, SchedulerCommand, SchedulerCommandResult,
@@ -64,7 +65,7 @@ use magicblock_core::{
     },
     Slot,
 };
-use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
+use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_metrics::metrics;
 use solana_account::{from_account, to_account};
 use solana_program::{clock::Clock, hash::Hash, slot_hashes::SlotHashes};
