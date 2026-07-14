@@ -385,3 +385,24 @@ pub enum PostDelegationActionExecutorInstruction {
     /// - **3.**   `[WRITE]`   Magic Context account
     ScheduleUndelegation { cloned_account_pubkey: Pubkey },
 }
+
+/// Instruction(s) for the ephemeral system builtin-program: creates,
+/// resizes, and closes ephemeral accounts.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum EphemeralSystemInstruction {
+    /// # Account references
+    /// - 0. [WRITE] Sponsor account (pays rent, can be PDA or oncurve)
+    /// - 1. [WRITE] Ephemeral account to create (must have 0 lamports)
+    /// - 2. [WRITE] Vault account (receives rent payment)
+    CreateEphemeralAccount { data_len: u32 },
+
+    /// - 0. [WRITE] Sponsor account (pays/receives rent difference)
+    /// - 1. [WRITE] Ephemeral account to resize
+    /// - 2. [WRITE] Vault account (holds/receives lamports for rent transfer)
+    ResizeEphemeralAccount { new_data_len: u32 },
+
+    /// - 0. [WRITE] Sponsor account (receives rent refund)
+    /// - 1. [WRITE] Ephemeral account to close
+    /// - 2. [WRITE] Vault account (source of rent refund)
+    CloseEphemeralAccount,
+}
