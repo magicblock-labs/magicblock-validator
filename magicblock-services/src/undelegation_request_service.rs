@@ -324,6 +324,15 @@ impl UndelegationRequestService {
                 ));
             }
 
+            error!(
+                request_pda = %request.request_pda,
+                delegated_account = %request.delegated_account,
+                delegated_on_base = delegation_status.delegated_on_base,
+                account_on_er = delegation_status.account_on_er.as_str(),
+                alert = "materialized_missing_er_account_for_undelegation_request",
+                "Materialized delegated account for undelegation request because it was delegated on base but missing on ER"
+            );
+
             delegation_status = match chainlink
                 .account_delegation_statuses(
                     &[request.delegated_account],
@@ -392,7 +401,9 @@ impl UndelegationRequestService {
         info!(
             request_pda = %request.request_pda,
             delegated_account = %request.delegated_account,
-            "Scheduled requested undelegation via ScheduleCommitAndUndelegate"
+            delegated_on_base = delegation_status.delegated_on_base,
+            account_on_er = delegation_status.account_on_er.as_str(),
+            "Processed observed undelegation request and scheduled undelegation"
         );
         Ok(())
     }

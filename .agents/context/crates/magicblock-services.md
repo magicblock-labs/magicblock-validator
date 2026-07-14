@@ -218,11 +218,11 @@ The undelegation request service is a trigger: it only schedules the local Magic
 
 The service validates the request PDA from delegated account before scheduling. It must not trust request-local owner, rent payer, or commit nonce fields; current request data carries the delegated account and expiry slot only.
 
-Before deciding whether base/ER delegation readiness is terminally false, the service calls Chainlink `ensure_accounts` for accounts that are delegated on base but missing in the ER bank. This lets polling recover valid requests for accounts that are delegated on base but not yet present locally, instead of skipping the request until unrelated traffic clones the account.
+Before deciding whether base/ER delegation readiness is terminally false, the service calls Chainlink `ensure_accounts` for accounts that are delegated on base but missing in the ER bank. This lets polling recover valid requests for accounts that are delegated on base but not yet present locally, instead of skipping the request until unrelated traffic clones the account. Successful materialization of this missing-on-ER case is intentionally logged at error level with an `alert` field because it should be rare and operator-visible.
 
 The service logs expired requests but still schedules normal undelegation when the delegated account is still valid. This preserves the best chance of committing ER state and clearing lifecycle state instead of leaving timeout/rollback handling to a stale request.
 
-When the delegated-account readiness check fails, the service logs `delegated_on_base`, `account_on_er`, and a bounded `skip_reason`. `delegated_on_base_missing_on_er` indicates a valid-looking base delegation whose ER account was absent at request-processing time; `delegated_on_base_not_delegated_on_er` indicates the account was present on ER but not represented as delegated/DLP-owned; `not_delegated_on_base` indicates an invalid or stale request from the validator's current base-layer view.
+When the delegated-account readiness check fails, the service logs `delegated_on_base`, `account_on_er`, and a bounded `skip_reason`. `delegated_on_base_missing_on_er` indicates a valid-looking base delegation whose ER account was absent at request-processing time; `delegated_on_base_not_delegated_on_er` indicates the account was present on ER but not represented as delegated/DLP-owned; `not_delegated_on_base` indicates an invalid or stale request from the validator's current base-layer view. Successfully scheduled requests log at info level with the request PDA, delegated account, and final readiness fields.
 
 ## Important invariants
 
