@@ -832,8 +832,7 @@ async fn test_cpi_limits_error_recovery() {
     let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
         transaction_preparator.cleanup_for_strategy(
             &fixture.authority,
-            &to_cleanup.optimized_tasks,
-            &to_cleanup.lookup_tables_keys,
+            to_cleanup,
             true,
         )
     });
@@ -980,8 +979,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
         transaction_preparator.cleanup_for_strategy(
             &fixture.authority,
-            &to_cleanup.optimized_tasks,
-            &to_cleanup.lookup_tables_keys,
+            to_cleanup,
             true,
         )
     });

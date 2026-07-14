@@ -4,7 +4,6 @@ use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
-use solana_pubkey::Pubkey;
 
 use crate::{
     persist::IntentPersister,
@@ -40,8 +39,7 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
-        tasks: &[BaseTaskImpl],
-        lookup_table_keys: &[Pubkey],
+        transaction_strategy: &TransactionStrategy,
         close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError>;
 }
@@ -120,11 +118,11 @@ impl TransactionPreparator for TransactionPreparatorImpl {
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
-        tasks: &[BaseTaskImpl],
-        lookup_table_keys: &[Pubkey],
+        transaction_strategy: &TransactionStrategy,
         close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
-        let cleanup_tasks: Vec<_> = tasks
+        let cleanup_tasks: Vec<_> = transaction_strategy
+            .optimized_tasks
             .iter()
             .filter_map(|task| match task {
                 BaseTaskImpl::Commit(commit_task) => commit_task.stage(),
@@ -144,7 +142,8 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .cleanup(
                 authority,
                 &cleanup_tasks,
-                lookup_table_keys,
+                &transaction_strategy.lookup_tables_keys,
+                transaction_strategy.uniqueness_nonce,
                 close_buffers,
             )
             .await
