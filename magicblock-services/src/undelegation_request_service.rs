@@ -278,6 +278,25 @@ impl UndelegationRequestService {
             return Ok(());
         }
 
+        if let Err(err) = chainlink
+            .ensure_accounts(
+                &[request.delegated_account],
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
+            .await
+        {
+            error!(
+                request_pda = %request.request_pda,
+                delegated_account = %request.delegated_account,
+                error = ?err,
+                "Failed to materialize requested undelegation account"
+            );
+            return Err(ObservedUndelegationRequestError::Transient(
+                "failed to materialize requested undelegation account",
+            ));
+        }
+
         let delegated = match chainlink
             .accounts_delegated_on_base_and_er(
                 &[request.delegated_account],

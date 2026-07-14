@@ -118,9 +118,10 @@ service.stop()
 For each observed request, the service:
 
 1. verifies the request PDA matches the delegated account;
-2. checks the delegated account is delegated on base and ER;
-3. best-effort notifies Chainlink with `undelegation_requested`;
-4. submits a local validator-signed `ScheduleCommitAndUndelegate` transaction with the validator as payer/signer, `MAGIC_CONTEXT_PUBKEY`, and each delegated account as writable non-signer.
+2. asks Chainlink to materialize the delegated account if it is missing locally;
+3. checks the delegated account is delegated on base and ER;
+4. best-effort notifies Chainlink with `undelegation_requested`;
+5. submits a local validator-signed `ScheduleCommitAndUndelegate` transaction with the validator as payer/signer, `MAGIC_CONTEXT_PUBKEY`, and each delegated account as writable non-signer.
 
 Transient delegation-check and local-scheduling failures are retried three times with short exponential backoff. Invalid request PDAs and non-delegated accounts are skipped.
 
@@ -215,6 +216,8 @@ The callback instruction data combines a program-specific discriminator with a b
 The undelegation request service is a trigger: it only schedules the local Magic Program intent. It does not build or send base-layer commit/undelegate transactions, persist intent rows, or decide committor task strategy. After local scheduling, the normal committor intent service accepts and executes the resulting scheduled intent.
 
 The service validates the request PDA from delegated account before scheduling. It must not trust request-local owner, rent payer, or commit nonce fields; current request data carries the delegated account and expiry slot only.
+
+Before checking base/ER delegation readiness, the service calls Chainlink `ensure_accounts` for the delegated account. This lets polling recover valid requests for accounts that are delegated on base but not yet present in the ER bank, instead of skipping the request until unrelated traffic clones the account.
 
 The service logs expired requests but still schedules normal undelegation when the delegated account is still valid. This preserves the best chance of committing ER state and clearing lifecycle state instead of leaving timeout/rollback handling to a stale request.
 
