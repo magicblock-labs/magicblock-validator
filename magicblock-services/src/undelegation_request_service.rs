@@ -7,13 +7,9 @@ use magicblock_core::{
     link::transactions::TransactionSchedulerHandle, traits::LatestBlockProvider,
 };
 use magicblock_metrics::metrics::AccountFetchOrigin;
-use magicblock_program::{
-    instruction::MagicBlockInstruction, MAGIC_CONTEXT_PUBKEY,
-};
+use magicblock_program::instruction_utils::InstructionUtils;
 use solana_hash::Hash;
-use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
-use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
@@ -268,9 +264,9 @@ impl UndelegationRequestService {
             );
         }
 
-        let ix = Self::schedule_commit_and_undelegate_instruction(
+        let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
             &validator_authority.pubkey(),
-            request.delegated_account,
+            vec![request.delegated_account],
         );
         let tx = Transaction::new_signed_with_payer(
             &[ix],
@@ -289,21 +285,6 @@ impl UndelegationRequestService {
             "Scheduled requested undelegation via ScheduleCommitAndUndelegate"
         );
         Ok(())
-    }
-
-    fn schedule_commit_and_undelegate_instruction(
-        payer: &Pubkey,
-        delegated_account: Pubkey,
-    ) -> Instruction {
-        Instruction::new_with_bincode(
-            magicblock_program::id(),
-            &MagicBlockInstruction::ScheduleCommitAndUndelegate,
-            vec![
-                AccountMeta::new(*payer, true),
-                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-                AccountMeta::new(delegated_account, false),
-            ],
-        )
     }
 
     pub fn start(self: &Arc<Self>) {
