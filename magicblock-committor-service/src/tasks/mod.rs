@@ -551,7 +551,7 @@ fn test_close_buffer_limit() {
     use tracing::info;
 
     use crate::{
-        tasks::commit_stage_task::CleanupTask,
+        tasks::{commit_stage_task::CleanupTask, utils::TransactionUtils},
         test_utils,
         transactions::{
             serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
@@ -582,6 +582,7 @@ fn test_close_buffer_limit() {
         .into_iter()
         .chain(ixs_iter)
         .collect();
+    ixs.push(TransactionUtils::uniqueness_noop_instruction(42));
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
     let tx_size = serialized_transaction_size(&tx);
@@ -594,7 +595,9 @@ fn test_close_buffer_limit() {
             + CleanupTask::max_tx_fit_count_with_budget() as u64,
         pubkey: Pubkey::new_unique(),
     };
+    let uniqueness_noop = ixs.pop().expect("uniqueness noop");
     ixs.push(overflow_task.instruction(&authority.pubkey()));
+    ixs.push(uniqueness_noop);
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
     assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);

@@ -192,6 +192,7 @@ IntentExecutorImpl::execute
      -> fetch next commit nonces and diffable base accounts using max(remote_slot)
      -> persist commit_id for each committed account
      -> create commit, commit-finalize, undelegate, finalize, and action tasks
+  -> tag intents whose commit uses nonce <= 1 with a per-intent uniqueness noop
   -> TaskStrategist::build_execution_strategy
      -> try single transaction when total task count <= 22 and it fits
      -> optimize large tasks to buffers when needed
@@ -200,7 +201,7 @@ IntentExecutorImpl::execute
   -> TransactionPreparator prepares buffers/ALTs and assembles VersionedMessage
   -> SingleStageExecutor or TwoStageExecutor sends base-layer transactions
   -> persist final status/signatures and schedule callbacks
-  -> reset nonce cache on errors or undelegation
+  -> reset nonce cache for all committed pubkeys on errors, or only undelegated pubkeys on successful undelegation
 ```
 
 For committed accounts with `data.len() > COMMIT_STATE_SIZE_THRESHOLD` (`256`), the task builder fetches the base account and may use diff-in-args delivery. If the base-account fetch fails, it falls back to full state args and logs a warning. This can increase transaction size and trigger buffer/ALT strategy later.
@@ -221,7 +222,9 @@ Cleanup closes prepared buffers and releases TableMania pubkeys. `IntentExecutio
 
 ### Commit nonce cache
 
-`CacheTaskInfoFetcher` caches commit nonces in a 1,000-entry LRU. It uses per-pubkey async mutexes acquired in sorted order to avoid A→B / B→A deadlocks, and a `retiring` map to keep evicted locks alive while in-flight requests still hold them. `fetch_next_commit_nonces` increments cached values and reserves the next nonce; `fetch_current_commit_nonces` reads/stores the current value without incrementing. After a failed commit or undelegation, `IntentExecutorImpl` resets the cache for affected pubkeys.
+`CacheTaskInfoFetcher` caches commit nonces in a 10,000-entry LRU. It uses per-pubkey async mutexes acquired in sorted order to avoid A->B / B->A deadlocks, and a `retiring` map to keep evicted locks alive while in-flight requests still hold them. `fetch_next_commit_nonces` increments cached values and reserves the next nonce; `fetch_current_commit_nonces` reads/stores the current value without incrementing.
+
+`IntentExecutorImpl` resets cached nonces according to execution certainty. On any execution error, it resets all committed pubkeys because it cannot know what landed on chain. On successful undelegation paths, it resets only the pubkeys returned by `get_undelegate_intent_pubkeys()` and `get_commit_finalize_and_undelegate_intent_pubkeys()`. Other successfully committed pubkeys keep their incremented cached nonce, which avoids a chain re-fetch racing the just-landed finalize and reusing a stale nonce/buffer PDA.
 
 Do not remove sorted lock acquisition or the retiring map without replacing the deadlock/race prevention. Commit nonce races can cause base-layer commit failures and stuck undelegations.
 
@@ -237,6 +240,12 @@ SQLite rows are used by operator/status APIs and by restart recovery. Updating s
 
 `TaskStrategist` first tries args, then buffer optimization, then ALTs. It chooses two-stage execution in cases where a single-stage ALT transaction would be slower than two no-ALT transactions. Altering thresholds such as `MAX_UNITED_TASKS_LEN = 22`, `COMMIT_STATE_SIZE_THRESHOLD = 256`, transaction-size constants, or buffer chunking changes latency, RPC transaction counts, and fit behavior.
 
+### Per-intent uniqueness noop
+
+Intent transactions are otherwise built from fully deterministic inputs. After an undelegate/re-delegate cycle the delegation metadata nonce restarts, so a first commit (nonce 1) can be byte-identical to a prior instance's landed transaction: identical bytes yield the identical signature, the skip-preflight send is deduped by the network, and the status-based confirmer matches the old transaction — the intent reports success without executing. `IntentExecutorImpl::execute_inner` therefore passes `Some(intent_id)` as `uniqueness_nonce` to `TaskStrategist` for intents whose commit uses nonce <= 1 (and always for standalone actions). The strategist renders it as a constant-size spl-noop instruction carrying the intent id on every produced stage — the finalize stage needs the same protection, since without the noop its bytes contain nothing per-instance — and includes it in all fit checks. Retries of the same intent keep the same id, preserving intentional dedup. Commit-id recovery (`handle_commit_id_error`) re-tags the strategy when a stale-cache retry lands back on nonce 1. The noop program must exist on the base layer (deployed on mainnet/devnet; loaded from `test-integration/schedulecommit/elfs/noop.so` in integration configs).
+
+The same uniqueness nonce is appended to every independently signed buffer init, realloc, write, and cleanup transaction sent by `DeliveryPreparator`. Buffer PDAs are keyed by authority, account pubkey, and commit id; because the commit id restarts at 1 after re-delegation, those transactions could otherwise alias a prior delegation instance under the same cached base-layer blockhash. Reusing the intent id keeps retries of one intent idempotent while ensuring a later delegation instance produces distinct signatures. Keep the noop in every buffer lifecycle stage: protecting only initialization still allows an old resize, chunk write, or close status to be mistaken for the current operation.
+
 ### Actions and callbacks
 
 Standalone actions are currently built through commit-task paths even when there are no committed accounts. Base actions with callbacks are extracted and scheduled through the `ActionsCallbackScheduler`. `actions_timeout` applies across action-related execution work. If action execution fails with recoverable CPI/limit errors, the executor can strip actions or move from single-stage to two-stage depending on the path; preserve error visibility through `patched_errors` and callback reports.
@@ -251,13 +260,14 @@ The public service API uses nonblocking `try_send`. If the service channel is fu
 2. Preserve FIFO blocking semantics across indirectly blocked intents; later intents must not bypass an earlier blocked intent sharing any key.
 3. Do not schedule duplicate intent ids in the same scheduler/execution-extension context.
 4. Commit nonces must be fetched with base-layer freshness (`min_context_slot`) and incremented atomically per account.
-5. A failed or undelegating intent must reset cached nonces for affected accounts.
+5. Execution errors must reset cached nonces for all committed pubkeys; successful undelegation must reset only the undelegated pubkeys and preserve other committed-account cache entries.
 6. Fresh intent scheduling must persist rows before execution when possible; recovered scheduling must not reinsert rows.
 7. Pending-intent recovery must reconstruct only rows inside the recovery window and skip inconsistent or incomplete persisted groups.
 8. Buffer accounts and ALTs must be prepared before transaction assembly uses them, and released/closed only when safe.
 9. Failed intent cleanup must not race with retries using the same buffer PDAs; current cleanup is success-only for that reason.
 10. Transaction-size and compute-budget choices must keep produced transactions under Solana wire limits.
 11. Base-layer sends must preserve explicit processed/committed confirmation semantics from `magicblock-rpc-client`.
+12. Intents whose commit uses nonce <= 1 must carry the per-intent uniqueness noop on every stage; otherwise their transactions can alias a prior delegation instance's landed signature and report success without executing.
 12. Signer/authority requirements for validator-signed commits, committor-program buffers, ALTs, callbacks, and base-layer instructions must not be relaxed.
 13. Persistence status/signature updates must continue to expose enough information for diagnostics, retries, and recovery.
 14. Avoid adding blocking I/O or unbounded work to service actor, scheduler, executor, task-preparation, or RPC hot paths.

@@ -3,7 +3,10 @@ use std::{collections::HashSet, sync::atomic::Ordering};
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::is_ata;
-use magicblock_metrics::metrics::AccountFetchOrigin;
+use magicblock_metrics::metrics::{
+    self, AccountFetchOrigin, ChainlinkCloneIntent, ChainlinkCloneOutcome,
+    ChainlinkCloneRemoteResult,
+};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
@@ -691,6 +694,7 @@ pub(crate) async fn clone_accounts_and_programs<T, U, V, C>(
     loaded_programs: Vec<
         crate::remote_account_provider::program_account::LoadedProgram,
     >,
+    fetch_origin: AccountFetchOrigin,
 ) -> ChainlinkResult<()>
 where
     T: ChainRpcClient,
@@ -703,12 +707,20 @@ where
     let mut program_join_set = JoinSet::new();
     for acc in loaded_programs {
         if !this.is_program_allowed(&acc.program_id) {
+            metrics::inc_chainlink_clone_accounts_total(
+                fetch_origin,
+                ChainlinkCloneRemoteResult::Found,
+                ChainlinkCloneIntent::ProgramData,
+                ChainlinkCloneOutcome::Skipped,
+            );
             debug!(program_id = %acc.program_id, "Skipping clone of program");
             continue;
         }
         let this_clone = this.clone();
         program_join_set.spawn(async move {
-            this_clone.clone_program_with_ownership(acc).await
+            this_clone
+                .clone_program_with_ownership(acc, fetch_origin)
+                .await
         });
     }
     program_join_set
@@ -738,7 +750,10 @@ where
         let this_clone = this.clone();
         accounts_join_set.spawn(async move {
             this_clone
-                .clone_account_with_post_delegation_action_invariants(request)
+                .clone_account_with_post_delegation_action_invariants(
+                    request,
+                    fetch_origin,
+                )
                 .await
         });
     }
@@ -763,7 +778,10 @@ where
         let this_clone = this.clone();
         action_accounts_join_set.spawn(async move {
             this_clone
-                .clone_account_with_post_delegation_action_invariants(request)
+                .clone_account_with_post_delegation_action_invariants(
+                    request,
+                    fetch_origin,
+                )
                 .await
         });
     }

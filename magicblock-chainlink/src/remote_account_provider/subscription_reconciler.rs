@@ -1,6 +1,10 @@
 use std::{collections::HashSet, sync::atomic::AtomicU16};
 
 use magicblock_core::logger::log_trace_warn;
+use magicblock_metrics::metrics::{
+    inc_chainlink_subscription_cleanup_accounts, SubscriptionCleanupOutcome,
+    SubscriptionCleanupSource,
+};
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 use tracing::*;
@@ -24,11 +28,21 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
     pubkey: Pubkey,
     pubsub_client: &T,
     removed_account_tx: &mpsc::Sender<Pubkey>,
+    cleanup_source: SubscriptionCleanupSource,
 ) -> bool {
     match pubsub_client.unsubscribe(pubkey).await {
         Ok(()) => {
             if let Err(err) = removed_account_tx.send(pubkey).await {
                 warn!(error = ?err, "Failed to send removal update");
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                );
+            } else {
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::Unsubscribed,
+                );
             }
             true
         }
@@ -38,8 +52,16 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
                 RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
             ) {
                 debug!(error = ?err, "Failed to unsubscribe");
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::AlreadyAbsent,
+                );
             } else {
                 warn!(error = ?err, "Failed to unsubscribe");
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::UnsubscribeFailed,
+                );
             }
             false
         }
@@ -95,6 +117,15 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         return lru_count + never_evicted.len();
     };
 
+    // Never-evicted keys (e.g. the clock sysvar) are not tracked in the LRU,
+    // so the LRU diff below cannot repair them - collect the ones missing
+    // from any client to resubscribe them directly.
+    let missing_never_evicted: Vec<Pubkey> = never_evicted
+        .iter()
+        .filter(|pk| !pubsub_snapshot.intersection.contains(pk))
+        .copied()
+        .collect();
+
     let ensured_subs_without_never_evict: HashSet<_> = pubsub_snapshot
         .intersection
         .into_iter()
@@ -123,6 +154,27 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         extra_in_pubsub_count = extra_in_pubsub.len(),
         "Reconciling subscriptions between LRU and pubsub client"
     );
+
+    // Resubscribe never-evicted keys missing from any client. Clients that
+    // already hold the subscription dedup the call.
+    if !missing_never_evicted.is_empty() {
+        warn!(
+            pubkeys = ?missing_never_evicted,
+            "Resubscribing missing never-evicted accounts"
+        );
+        for pubkey in missing_never_evicted {
+            let _subscription_guard =
+                acquire_subscription_key_guard(subscription_key_locks, pubkey)
+                    .await;
+            if let Err(e) = pubsub_client.subscribe(pubkey, None).await {
+                warn!(
+                    pubkey = %pubkey,
+                    error = ?e,
+                    "Failed to resubscribe never-evicted account"
+                );
+            }
+        }
+    }
 
     // For any sub that is in the LRU but not ensured by all clients we resubscribe.
     // This may call subscribe on some clients that already have the subscription and
@@ -228,6 +280,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 pubkey,
                 pubsub_client,
                 removed_account_tx,
+                SubscriptionCleanupSource::Reconciler,
             )
             .await;
         }

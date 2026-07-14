@@ -6,9 +6,11 @@ use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
+use tokio::sync::broadcast;
 
 use crate::{
     intent::{types::CommittedAccount, BaseActionCallback, MagicIntentBundle},
+    link::blocks::LatestBlockInner,
     Slot,
 };
 
@@ -39,6 +41,7 @@ pub trait LatestBlockProvider: Send + Sync + Clone + 'static {
     fn slot(&self) -> Slot;
     fn blockhash(&self) -> Hash;
     fn clock(&self) -> Clock;
+    fn subscribe(&self) -> broadcast::Receiver<LatestBlockInner>;
 }
 
 /// Interface for service handling callback execution/scheduling

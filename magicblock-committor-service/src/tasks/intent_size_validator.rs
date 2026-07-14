@@ -42,17 +42,15 @@ impl IntentSizeValidator {
         Self::commit_fits(intent) && Self::finalize_fits(intent)
     }
 
-    /// Checks the commit-stage tasks fit, including the standalone-action
-    /// noop instruction added when `intent` has no committed accounts.
+    /// Checks the commit-stage tasks fit. Always assumes a uniqueness noop
+    /// is present - worst case, since we can't rule it out ahead of time.
     fn commit_fits(intent: &MagicIntentBundle) -> bool {
-        let standalone_action_nonce =
-            (!intent.has_committed_accounts()).then_some(0);
-        Self::tasks_fit(&Self::commit_tasks(intent), standalone_action_nonce)
+        Self::tasks_fit(&Self::commit_tasks(intent), Some(0))
     }
 
-    /// Checks the finalize-stage tasks fit; no noop instruction here.
+    /// Checks the finalize-stage tasks fit; same worst-case noop assumption.
     fn finalize_fits(intent: &MagicIntentBundle) -> bool {
-        Self::tasks_fit(&Self::finalize_tasks(intent), None)
+        Self::tasks_fit(&Self::finalize_tasks(intent), Some(0))
     }
 
     /// Builds the commit-stage tasks used for the size estimate: real
@@ -221,27 +219,27 @@ impl IntentSizeValidator {
         tasks
     }
 
-    /// Returns `true` if `tasks` plus `standalone_action_nonce` (if any),
-    /// assembled with full ALT coverage, fit within
-    /// [`MAX_TRANSACTION_WIRE_SIZE`].
+    /// Returns `true` if `tasks` plus `uniqueness_nonce` (if any), assembled
+    /// with full ALT coverage, fit within [`MAX_TRANSACTION_WIRE_SIZE`].
     fn tasks_fit(
         tasks: &[BaseTaskImpl],
-        standalone_action_nonce: Option<u64>,
+        uniqueness_nonce: Option<u64>,
     ) -> bool {
         let placeholder = Keypair::new();
         let lookup_table_keys = TaskStrategist::collect_lookup_table_keys(
             &placeholder.pubkey(),
             tasks,
+            uniqueness_nonce,
         );
         let lookup_tables =
             TransactionUtils::dummy_lookup_table(&lookup_table_keys);
 
-        TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
+        TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
             &placeholder,
             tasks,
             0,
             &lookup_tables,
-            standalone_action_nonce,
+            uniqueness_nonce,
         )
         .map(|tx| serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE)
         .unwrap_or(false)

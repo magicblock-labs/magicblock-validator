@@ -19,6 +19,9 @@ pub enum ChainlinkError {
     #[error("Cloner error: {0}")]
     ClonerError(#[from] crate::cloner::errors::ClonerError),
 
+    #[error("Timed out ensuring accounts after {0}s")]
+    EnsureAccountsTimeout(u64),
+
     #[error("Delegation record could not be decoded: {0} ({1:?})")]
     InvalidDelegationRecord(Pubkey, ProgramError),
 

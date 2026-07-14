@@ -54,6 +54,7 @@ pub struct Finalized {
 
 pub struct TwoStageExecutor<'a, A, S: Sealed> {
     state: S,
+    intent_id: u64,
     authority: Keypair,
     intent_client: IntentExecutionClient,
     callback_scheduler: A,
@@ -73,8 +74,10 @@ where
         intent_client: IntentExecutionClient,
         callback_scheduler: A,
         execution_report: &'a mut IntentExecutionReport,
+        intent_id: u64,
     ) -> Self {
         Self {
+            intent_id,
             authority,
             intent_client,
             execution_report,
@@ -191,9 +194,17 @@ where
                     &self.authority.pubkey(),
                     task_info_fetcher,
                     committed_pubkeys,
-                    &mut self.state.commit_strategy
+                    &mut self.state.commit_strategy,
+                    self.intent_id,
                 )
                     .await?;
+                // If recovery re-tagged the commit stage as a first commit,
+                // the finalize stage aliases the same way and must carry the
+                // uniqueness noop too.
+                if self.state.finalize_strategy.uniqueness_nonce.is_none() {
+                    self.state.finalize_strategy.uniqueness_nonce =
+                        self.state.commit_strategy.uniqueness_nonce;
+                }
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             err
@@ -289,7 +300,7 @@ where
             &mut TransactionStrategy {
                 optimized_tasks: vec![finalize_task],
                 lookup_tables_keys: vec![],
-                standalone_action_nonce: None,
+                uniqueness_nonce: None,
             },
             &None::<IntentPersisterImpl>,
         )
@@ -303,7 +314,7 @@ where
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
+            uniqueness_nonce: None,
         }))
     }
 
@@ -351,6 +362,7 @@ where
         commit_signature: Signature,
     ) -> TwoStageExecutor<'a, A, Committed> {
         TwoStageExecutor {
+            intent_id: self.intent_id,
             authority: self.authority,
             intent_client: self.intent_client,
             callback_scheduler: self.callback_scheduler,

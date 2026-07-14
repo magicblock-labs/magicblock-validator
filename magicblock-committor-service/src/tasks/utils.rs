@@ -115,7 +115,7 @@ pub fn create_commit_finalize_task(
 
 pub struct TransactionUtils;
 impl TransactionUtils {
-    const STANDALONE_ACTION_NOOP_PROGRAM_ID: Pubkey =
+    const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
     pub fn dummy_lookup_table(
@@ -166,7 +166,7 @@ impl TransactionUtils {
         compute_unit_price: u64,
         lookup_tables: &[AddressLookupTableAccount],
     ) -> TaskStrategistResult<VersionedTransaction> {
-        Self::assemble_tasks_tx_with_standalone_action_nonce(
+        Self::assemble_tasks_tx_with_uniqueness_nonce(
             authority,
             tasks,
             compute_unit_price,
@@ -175,12 +175,12 @@ impl TransactionUtils {
         )
     }
 
-    pub fn assemble_tasks_tx_with_standalone_action_nonce(
+    pub fn assemble_tasks_tx_with_uniqueness_nonce(
         authority: &Keypair,
         tasks: &[BaseTaskImpl],
         compute_unit_price: u64,
         lookup_tables: &[AddressLookupTableAccount],
-        standalone_action_nonce: Option<u64>,
+        uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<VersionedTransaction> {
         let budget_instructions = Self::budget_instructions(
             Self::tasks_compute_units(tasks),
@@ -188,8 +188,8 @@ impl TransactionUtils {
             Self::tasks_accounts_size_budget(tasks),
         );
         let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
-        if let Some(nonce) = standalone_action_nonce {
-            ixs.push(Self::standalone_action_noop_instruction(nonce));
+        if let Some(nonce) = uniqueness_nonce {
+            ixs.push(Self::uniqueness_noop_instruction(nonce));
         }
         Self::assemble_tx_raw(
             authority,
@@ -246,11 +246,11 @@ impl TransactionUtils {
         Ok(tx)
     }
 
-    fn standalone_action_noop_instruction(id: u64) -> Instruction {
+    pub(crate) fn uniqueness_noop_instruction(id: u64) -> Instruction {
         // TODO(GabrielePicco): replace this temporary transaction-level
         // uniqueness padding with protocol-level standalone action nonces.
         Instruction {
-            program_id: Self::STANDALONE_ACTION_NOOP_PROGRAM_ID,
+            program_id: Self::UNIQUENESS_NOOP_PROGRAM_ID,
             accounts: vec![],
             data: id.to_le_bytes().to_vec(),
         }

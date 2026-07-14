@@ -293,3 +293,66 @@ impl CleanupTask {
         .0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use solana_hash::Hash;
+    use solana_keypair::Keypair;
+    use solana_message::{v0::Message, VersionedMessage};
+    use solana_pubkey::Pubkey;
+    use solana_signer::Signer;
+    use solana_transaction::versioned::VersionedTransaction;
+    use tracing::info;
+
+    use super::*;
+    use crate::{
+        tasks::utils::TransactionUtils,
+        test_utils,
+        transactions::{
+            serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
+        },
+        ComputeBudgetConfig,
+    };
+
+    #[test]
+    fn test_max_write_with_uniqueness_nonce_fits() {
+        test_utils::init_test_logger();
+
+        let authority = Keypair::new();
+        let data = vec![0; MAX_WRITE_CHUNK_SIZE as usize];
+        let mut prepared = false;
+        let preparation_task = PreparationTask {
+            commit_id: 1,
+            pubkey: Pubkey::new_unique(),
+            chunks: Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE),
+            buffer_data: data,
+            prepared: &mut prepared,
+        };
+        let write_instruction = preparation_task
+            .write_instructions(&authority.pubkey())
+            .into_iter()
+            .next()
+            .expect("write instruction");
+        let mut instructions = ComputeBudgetConfig::new(1_000_000)
+            .buffer_write
+            .instructions(write_instruction.data.len());
+        instructions.push(write_instruction);
+        instructions.push(TransactionUtils::uniqueness_noop_instruction(42));
+
+        let message = Message::try_compile(
+            &authority.pubkey(),
+            &instructions,
+            &[],
+            Hash::new_unique(),
+        )
+        .expect("compile write transaction");
+        let transaction = VersionedTransaction::try_new(
+            VersionedMessage::V0(message),
+            &[&authority],
+        )
+        .expect("sign write transaction");
+        let transaction_size = serialized_transaction_size(&transaction);
+        info!(transaction_size, "Buffer write transaction size");
+        assert!(transaction_size <= MAX_TRANSACTION_WIRE_SIZE);
+    }
+}

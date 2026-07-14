@@ -56,6 +56,7 @@ use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::{
+        blocks::LatestBlockInner,
         replication::{self, Message, SuperBlock},
         transactions::{
             ProcessableTransaction, SchedulerCommand, SchedulerCommandResult,
@@ -64,7 +65,7 @@ use magicblock_core::{
     },
     Slot,
 };
-use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
+use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_metrics::metrics;
 use solana_account::{from_account, to_account};
 use solana_program::{clock::Clock, hash::Hash, slot_hashes::SlotHashes};
@@ -118,6 +119,8 @@ pub struct TransactionScheduler {
     pause_permit: Arc<Semaphore>,
     /// Streaming blockhash state
     hasher: Hasher,
+    /// Whether the next replicated block is the first one after startup.
+    is_initial_replica_block: bool,
     /// Time interval between consecutive slots
     slot_ticker: Interval,
     /// Number of slots to elapse, before we perform snapshot/checksum operations
@@ -181,6 +184,7 @@ impl TransactionScheduler {
             pause_permit: state.pause_permit,
             superblock_size: state.superblock_size,
             hasher,
+            is_initial_replica_block: true,
             slot_ticker,
             slot,
             index: 0,
@@ -291,6 +295,11 @@ impl TransactionScheduler {
                         }
                         SchedulerMode::Replica => {
                             self.coordinator.switch_to_replica_mode_globally();
+                            // A node that starts directly in replica mode may
+                            // have rebooted mid-slot: rebuild the in-memory
+                            // streaming-blockhash accumulator from the ledger so
+                            // the first reconstructed block verifies correctly.
+                            self.reconstruct_inprogress_hasher();
                         }
                     }
                 }
@@ -595,19 +604,53 @@ impl TransactionScheduler {
     }
 
     /// Checks that the blockhash received from replication stream matches the local
-    fn verify_block_as_replica(&self, block: &LatestBlockInner) {
-        if block.blockhash.as_ref() != self.hasher.finalize().as_bytes() {
-            // TODO(bmuddha):
-            // this should never happen, and it's unclear how
-            // to recover from it, right now the log is used
-            // for debugging purposes only
-            // NOTE:
-            // This error will always be logged once
-            // when replica starts up with an empty ledger
+    fn verify_block_as_replica(&mut self, block: &LatestBlockInner) {
+        let is_initial = std::mem::take(&mut self.is_initial_replica_block);
+        if !is_initial
+            && block.blockhash.as_ref() != self.hasher.finalize().as_bytes()
+        {
             error!(
                 slot = block.slot,
                 "replication blockhash has diverged from local"
             )
+        }
+    }
+
+    /// Rebuilds the streaming-blockhash accumulator for the in-progress slot
+    /// after a mid-slot replica restart.
+    ///
+    /// At this point the hasher holds only the previous (finalized) blockhash
+    /// seed and `self.slot` is the not-yet-finalized slot. Its transactions may
+    /// already be persisted in the ledger (with `persist: true`) even though no
+    /// block header exists for it, so ledger replay never re-fed them. Hash
+    /// their signatures back in, in scheduled (ascending index) order, so the
+    /// first reconstructed block verifies against the authoritative hash.
+    ///
+    /// The replica's deduplication (initialized from the ledger's last persisted
+    /// position) skips redelivery of these same transactions, so they are hashed
+    /// exactly once.
+    fn reconstruct_inprogress_hasher(&mut self) {
+        let slot = self.slot;
+        match self.ledger.get_transaction_signatures_for_slot(slot) {
+            Ok(signatures) => {
+                for signature in &signatures {
+                    self.hasher.update(signature.as_ref());
+                }
+                if !signatures.is_empty() {
+                    info!(
+                        slot,
+                        count = signatures.len(),
+                        "reconstructed streaming blockhash for in-progress slot"
+                    );
+                }
+            }
+            Err(error) => {
+                warn!(
+                    %error,
+                    slot,
+                    "failed to reconstruct streaming blockhash from ledger"
+                );
+            }
         }
     }
 
