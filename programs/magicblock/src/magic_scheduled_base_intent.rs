@@ -51,6 +51,10 @@ pub struct ConstructionContext<'a, 'ic, 'ix_data> {
     /// to the delegation program. Legacy `ScheduleBaseIntent` sets this to
     /// `false` for backward compatibility with old deployed contracts.
     pub secure: bool,
+    /// Next id to assign to a `BaseAction` being constructed. Incremented
+    /// as actions are built, so each action in a bundle gets a unique,
+    /// stable id in construction order.
+    next_action_id: u64,
 }
 
 impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
@@ -65,11 +69,18 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
             signers,
             invoke_context,
             secure,
+            next_action_id: 0,
         }
     }
 
     pub fn transaction_context(&self) -> &TransactionContext<'ix_data> {
         &*self.invoke_context.transaction_context
+    }
+
+    fn next_action_id(&mut self) -> u64 {
+        let id = self.next_action_id;
+        self.next_action_id += 1;
+        id
     }
 }
 
@@ -94,7 +105,7 @@ impl ScheduledIntentBundle {
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<ScheduledIntentBundle, InstructionError> {
         let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
         let blockhash = context.invoke_context.environment_config.blockhash;
@@ -246,10 +257,11 @@ impl From<MagicBaseIntent> for MagicIntentBundle {
 impl MagicIntentBundle {
     pub fn try_from_args(
         args: MagicIntentBundleArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<Self, InstructionError> {
         Self::validate(&args, context)?;
 
+        // NOTE: Order shall be identical to AddActionCallback's action ordering.
         let commit = args
             .commit
             .map(|value| CommitType::try_from_args(value, context))
@@ -260,6 +272,12 @@ impl MagicIntentBundle {
             .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
 
+        let actions = args
+            .standalone_actions
+            .into_iter()
+            .map(|args| BaseAction::try_from_args(args, context))
+            .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
+
         let commit_finalize = args
             .commit_finalize
             .map(|value| CommitType::try_from_args(value, context))
@@ -269,12 +287,6 @@ impl MagicIntentBundle {
             .commit_finalize_and_undelegate
             .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
-
-        let actions = args
-            .standalone_actions
-            .into_iter()
-            .map(|args| BaseAction::try_from_args(args, context))
-            .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
 
         let this = Self {
             commit,
@@ -569,33 +581,45 @@ impl MagicIntentBundle {
         x || y || z
     }
 
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        let mut offset = 0usize;
-
+    pub fn get_action_mut(&mut self, id: u64) -> Option<&mut BaseAction> {
         if let Some(commit) = self.commit.as_mut() {
-            let count = commit.action_count();
-            if index < offset + count {
-                return commit.get_action_mut(index - offset);
+            if let Some(action) = commit.get_action_mut(id) {
+                return Some(action);
             }
-            offset += count;
         }
 
         if let Some(cau) = self.commit_and_undelegate.as_mut() {
-            let count = cau.action_count();
-            if index < offset + count {
-                return cau.get_action_mut(index - offset);
+            if let Some(action) = cau.get_action_mut(id) {
+                return Some(action);
             }
-            offset += count;
         }
 
-        self.standalone_actions.get_mut(index.checked_sub(offset)?)
+        if let Some(action) =
+            self.standalone_actions.iter_mut().find(|a| a.id == id)
+        {
+            return Some(action);
+        }
+
+        if let Some(commit_finalize) = self.commit_finalize.as_mut() {
+            if let Some(action) = commit_finalize.get_action_mut(id) {
+                return Some(action);
+            }
+        }
+
+        if let Some(cfau) = self.commit_finalize_and_undelegate.as_mut() {
+            if let Some(action) = cfau.get_action_mut(id) {
+                return Some(action);
+            }
+        }
+
+        None
     }
 }
 
 impl MagicBaseIntent {
     pub fn try_from_args(
         args: MagicBaseIntentArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<MagicBaseIntent, InstructionError> {
         match args {
             MagicBaseIntentArgs::BaseActions(base_actions) => {
@@ -708,7 +732,7 @@ pub struct CommitAndUndelegate {
 impl CommitAndUndelegate {
     pub fn try_from_args(
         args: CommitAndUndelegateArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<CommitAndUndelegate, InstructionError> {
         let account_indices = args.commit_type.committed_accounts_indices();
         Self::validate(account_indices.as_slice(), context)?;
@@ -791,17 +815,12 @@ impl CommitAndUndelegate {
         x || y
     }
 
-    pub fn action_count(&self) -> usize {
-        self.commit_action.action_count()
-            + self.undelegate_action.action_count()
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        let commit_count = self.commit_action.action_count();
-        if index < commit_count {
-            return self.commit_action.get_action_mut(index);
+    pub fn get_action_mut(&mut self, id: u64) -> Option<&mut BaseAction> {
+        if let Some(action) = self.commit_action.get_action_mut(id) {
+            Some(action)
+        } else {
+            self.undelegate_action.get_action_mut(id)
         }
-        self.undelegate_action.get_action_mut(index - commit_count)
     }
 }
 
@@ -828,6 +847,9 @@ impl From<&ActionArgs> for ProgramArgs {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaseAction {
+    /// Stable identity of this action within its intent bundle, used to
+    /// address it independently of its position (e.g. for patch removal).
+    pub id: u64,
     pub compute_units: u32,
     pub destination_program: Pubkey,
     pub source_program: Option<Pubkey>,
@@ -840,15 +862,15 @@ pub struct BaseAction {
 impl BaseAction {
     pub fn try_from_args(
         args: BaseActionArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<BaseAction, InstructionError> {
         // Since action on Base layer performed on behalf of some escrow
         // We need to ensure that action was authorized by legit owner
-        let authority_pubkey = get_instruction_pubkey_with_idx(
+        let authority_pubkey = *get_instruction_pubkey_with_idx(
             context.transaction_context(),
             args.escrow_authority as u16,
         )?;
-        if !context.signers.contains(authority_pubkey) {
+        if !context.signers.contains(&authority_pubkey) {
             ic_msg!(
                 context.invoke_context,
                 &format!(
@@ -881,10 +903,11 @@ impl BaseAction {
         };
 
         Ok(BaseAction {
+            id: context.next_action_id(),
             compute_units: args.compute_units,
             destination_program: args.destination_program,
             source_program,
-            escrow_authority: *authority_pubkey,
+            escrow_authority: authority_pubkey,
             data_per_program: args.args.into(),
             account_metas_per_program: args.accounts,
             callback: None,
@@ -980,7 +1003,7 @@ impl CommitType {
 
     pub fn try_from_args(
         args: CommitTypeArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<CommitType, InstructionError> {
         match args {
             CommitTypeArgs::Standalone(accounts) => {
@@ -1013,10 +1036,6 @@ impl CommitType {
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;
 
-                let base_actions = base_actions
-                    .into_iter()
-                    .map(|args| BaseAction::try_from_args(args, context))
-                    .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
@@ -1028,6 +1047,10 @@ impl CommitType {
                         ))
                     })
                     .collect::<Result<_, InstructionError>>()?;
+                let base_actions = base_actions
+                    .into_iter()
+                    .map(|args| BaseAction::try_from_args(args, context))
+                    .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
 
                 Ok(CommitType::WithBaseActions {
                     committed_accounts,
@@ -1107,16 +1130,9 @@ impl CommitType {
         }
     }
 
-    pub fn action_count(&self) -> usize {
-        match self {
-            Self::Standalone(_) => 0,
-            Self::WithBaseActions { base_actions, .. } => base_actions.len(),
-        }
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+    pub fn get_action_mut(&mut self, id: u64) -> Option<&mut BaseAction> {
         if let Self::WithBaseActions { base_actions, .. } = self {
-            base_actions.get_mut(index)
+            base_actions.iter_mut().find(|a| a.id == id)
         } else {
             None
         }
@@ -1131,16 +1147,9 @@ pub enum UndelegateType {
 }
 
 impl UndelegateType {
-    pub fn action_count(&self) -> usize {
-        match self {
-            Self::Standalone => 0,
-            Self::WithBaseActions(actions) => actions.len(),
-        }
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+    pub fn get_action_mut(&mut self, id: u64) -> Option<&mut BaseAction> {
         if let Self::WithBaseActions(actions) = self {
-            actions.get_mut(index)
+            actions.iter_mut().find(|a| a.id == id)
         } else {
             None
         }
@@ -1148,7 +1157,7 @@ impl UndelegateType {
 
     pub fn try_from_args(
         args: UndelegateTypeArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<UndelegateType, InstructionError> {
         match args {
             UndelegateTypeArgs::Standalone => Ok(UndelegateType::Standalone),
@@ -1275,6 +1284,7 @@ mod tests {
 
     fn make_base_action(compute_units: u32) -> BaseAction {
         BaseAction {
+            id: 0,
             compute_units,
             destination_program: Pubkey::new_unique(),
             source_program: None,

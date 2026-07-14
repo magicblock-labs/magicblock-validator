@@ -619,6 +619,7 @@ mod serialization_safety_test {
         // Test BaseAction V1 variant
         let base_action: BaseTaskImpl = BaseActionTask::V1(BaseActionTaskV1 {
             action: BaseAction {
+                id: 0,
                 destination_program: Pubkey::new_unique(),
                 source_program: None,
                 escrow_authority: Pubkey::new_unique(),
@@ -641,6 +642,7 @@ mod serialization_safety_test {
         let base_action_v2: BaseTaskImpl =
             BaseActionTask::V2(BaseActionTaskV2 {
                 action: BaseAction {
+                    id: 0,
                     destination_program: Pubkey::new_unique(),
                     source_program: Some(Pubkey::new_unique()),
                     escrow_authority: Pubkey::new_unique(),
