@@ -294,6 +294,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     task_info_fetcher: &CacheTaskInfoFetcher<T>,
     committed_pubkeys: &[Pubkey],
     strategy: &mut TransactionStrategy,
+    intent_id: u64,
 ) -> Result<TransactionStrategy, TaskBuilderError> {
     let min_context_slot = strategy
         .optimized_tasks
@@ -355,11 +356,30 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
         }
     }
 
+    // Re-fetched nonces land back on 1 after a re-delegation; such a retry is
+    // a first-commit transaction and must carry the uniqueness noop.
+    if requires_uniqueness_nonce(&strategy.optimized_tasks) {
+        strategy.uniqueness_nonce = Some(intent_id);
+    }
+
     let old_alts = strategy.dummy_revaluate_alts(authority);
     Ok(TransactionStrategy {
         optimized_tasks: to_cleanup,
         lookup_tables_keys: old_alts,
-        standalone_action_nonce: None,
+        uniqueness_nonce: strategy.uniqueness_nonce,
+    })
+}
+
+/// On the first commit of a delegation instance the nonce restarts at 1, so the
+/// transaction can be byte-identical to a prior instance's landed commit and
+/// alias its signature. Such intents must carry a per-intent uniqueness noop.
+pub(in crate::intent_executor) fn requires_uniqueness_nonce(
+    commit_tasks: &[BaseTaskImpl],
+) -> bool {
+    commit_tasks.iter().any(|task| match task {
+        BaseTaskImpl::Commit(task) => task.commit_id <= 1,
+        BaseTaskImpl::CommitFinalize(task) => task.commit_id <= 1,
+        _ => false,
     })
 }
 
@@ -397,12 +417,13 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         TaskStrategist::collect_lookup_table_keys(
             authority,
             &commit_stage_tasks,
+            strategy.uniqueness_nonce,
         )
     };
     let commit_strategy = TransactionStrategy {
         optimized_tasks: commit_stage_tasks,
         lookup_tables_keys: commit_alt_pubkeys,
-        standalone_action_nonce: None,
+        uniqueness_nonce: strategy.uniqueness_nonce,
     };
 
     let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
@@ -411,19 +432,20 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         TaskStrategist::collect_lookup_table_keys(
             authority,
             &finalize_stage_tasks,
+            strategy.uniqueness_nonce,
         )
     };
     let finalize_strategy = TransactionStrategy {
         optimized_tasks: finalize_stage_tasks,
         lookup_tables_keys: finalize_alt_pubkeys,
-        standalone_action_nonce: None,
+        uniqueness_nonce: strategy.uniqueness_nonce,
     };
 
     // We clean up only ALTs
     let to_cleanup = TransactionStrategy {
         optimized_tasks: vec![],
         lookup_tables_keys: strategy.lookup_tables_keys,
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     (commit_strategy, finalize_strategy, to_cleanup)
@@ -447,13 +469,13 @@ pub(in crate::intent_executor) fn handle_undelegation_error(
         TransactionStrategy {
             optimized_tasks: removed_task,
             lookup_tables_keys: old_alts,
-            standalone_action_nonce: None,
+            uniqueness_nonce: None,
         }
     } else {
         TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
+            uniqueness_nonce: None,
         }
     }
 }

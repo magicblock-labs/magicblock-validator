@@ -14,7 +14,9 @@ use crate::{
     intent_executor::{
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
-        strategy_executor::two_stage::Initialized,
+        strategy_executor::{
+            two_stage::Initialized, utils::requires_uniqueness_nonce,
+        },
         utils::{
             build_commit_finalize_tasks, execute_single_stage_flow,
             execute_two_stage_flow,
@@ -86,11 +88,11 @@ where
             .await?;
 
             // Standalone actions executed in single stage
-            let mut strategy = TaskStrategist::build_strategy(
+            let strategy = TaskStrategist::build_strategy(
                 commit_tasks,
                 &self.authority.pubkey(),
+                Some(intent_bundle.id),
             )?;
-            strategy.standalone_action_nonce = Some(intent_bundle.id);
             return self
                 .single_stage_execution_flow(
                     intent_bundle,
@@ -107,11 +109,15 @@ where
         )
         .await?;
 
+        let uniqueness_nonce = requires_uniqueness_nonce(&commit_tasks)
+            .then_some(intent_bundle.id);
+
         // Build execution strategy
         match TaskStrategist::build_execution_strategy(
             commit_tasks,
             finalize_tasks,
             &self.authority.pubkey(),
+            uniqueness_nonce,
         )? {
             StrategyExecutionMode::SingleStage(strategy) => {
                 trace!("Single stage execution");

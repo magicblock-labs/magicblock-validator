@@ -396,8 +396,7 @@ mod tests {
         async fn cleanup_for_strategy(
             &self,
             _authority: &Keypair,
-            _tasks: &[crate::tasks::BaseTaskImpl],
-            _lookup_table_keys: &[Pubkey],
+            _transaction_strategy: &TransactionStrategy,
             _close_buffers: bool,
         ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
             Ok(())

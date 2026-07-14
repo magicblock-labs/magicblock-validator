@@ -1,9 +1,8 @@
 mod common;
 use std::{sync::Arc, time::Duration};
 
-use magicblock_ledger::{
-    ledger_truncator::LedgerTruncator, LatestBlockInner, Ledger,
-};
+use magicblock_core::link::blocks::LatestBlockInner;
+use magicblock_ledger::{ledger_truncator::LedgerTruncator, Ledger};
 use solana_hash::Hash;
 use solana_signature::Signature;
 use test_kit::init_logger;

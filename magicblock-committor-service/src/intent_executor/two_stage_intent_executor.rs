@@ -17,7 +17,8 @@ use crate::{
         strategy_executor::{
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
             utils::{
-                execute_with_timeout, resolve_pending_signature, FinalizeStage,
+                execute_with_timeout, requires_uniqueness_nonce,
+                resolve_pending_signature, FinalizeStage,
             },
         },
         utils::{build_commit_finalize_tasks, execute_two_stage_flow},
@@ -88,6 +89,9 @@ where
         )
         .await?;
 
+        let uniqueness_nonce = requires_uniqueness_nonce(&commit_tasks)
+            .then_some(intent_bundle.id);
+
         // As strategy was chosen build two stage
         let TwoStageExecutionMode {
             commit_stage,
@@ -96,6 +100,7 @@ where
             commit_tasks,
             finalize_tasks,
             &self.authority.pubkey(),
+            uniqueness_nonce,
         )?;
 
         let state = Initialized::new(commit_stage, finalize_stage);
@@ -129,6 +134,7 @@ where
         let finalize_strategy = TaskStrategist::build_strategy(
             finalize_tasks,
             &self.authority.pubkey(),
+            None,
         )?;
 
         let committed_state =

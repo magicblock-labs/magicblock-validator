@@ -831,8 +831,7 @@ async fn test_cpi_limits_error_recovery() {
     let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
         transaction_preparator.cleanup_for_strategy(
             &fixture.authority,
-            &to_cleanup.optimized_tasks,
-            &to_cleanup.lookup_tables_keys,
+            to_cleanup,
             true,
         )
     });
@@ -978,8 +977,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
         transaction_preparator.cleanup_for_strategy(
             &fixture.authority,
-            &to_cleanup.optimized_tasks,
-            &to_cleanup.lookup_tables_keys,
+            to_cleanup,
             true,
         )
     });
@@ -1432,9 +1430,10 @@ async fn create_two_stage_executor<'a>(
             .await
             .unwrap();
     let commit_strategy =
-        TaskStrategist::build_strategy(commit_tasks, authority).unwrap();
+        TaskStrategist::build_strategy(commit_tasks, authority, None).unwrap();
     let finalize_strategy =
-        TaskStrategist::build_strategy(finalize_tasks, authority).unwrap();
+        TaskStrategist::build_strategy(finalize_tasks, authority, None)
+            .unwrap();
     let state = Initialized::new(commit_strategy, finalize_strategy);
     TwoStageStrategyExecutor::new(
         state,
@@ -1692,7 +1691,7 @@ async fn single_flow_transaction_strategy(
             .unwrap();
     tasks.extend(finalize_tasks);
 
-    TaskStrategist::build_strategy(tasks, authority).unwrap()
+    TaskStrategist::build_strategy(tasks, authority, None).unwrap()
 }
 
 async fn verify_committed_accounts_state(

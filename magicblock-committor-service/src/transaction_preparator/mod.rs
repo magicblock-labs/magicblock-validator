@@ -4,7 +4,6 @@ use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
-use solana_pubkey::Pubkey;
 
 use crate::{
     tasks::{
@@ -38,8 +37,7 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
-        tasks: &[BaseTaskImpl],
-        lookup_table_keys: &[Pubkey],
+        transaction_strategy: &TransactionStrategy,
         close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError>;
 }
@@ -84,12 +82,12 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
                 &tx_strategy.lookup_tables_keys,
             );
-            let _ = TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
+            let _ = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
                 authority,
                 &tx_strategy.optimized_tasks,
                 self.compute_budget_config.compute_unit_price,
                 &dummy_lookup_tables,
-                tx_strategy.standalone_action_nonce,
+                tx_strategy.uniqueness_nonce,
             )?;
         }
 
@@ -101,12 +99,12 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         metrics::observe_committor_intent_alt_count(lookup_tables.len());
 
         let message =
-            TransactionUtils::assemble_tasks_tx_with_standalone_action_nonce(
+            TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
                 authority,
                 &tx_strategy.optimized_tasks,
                 self.compute_budget_config.compute_unit_price,
                 &lookup_tables,
-                tx_strategy.standalone_action_nonce,
+                tx_strategy.uniqueness_nonce,
             )
             .expect("Possibility to assemble checked above")
             .message;
@@ -117,11 +115,11 @@ impl TransactionPreparator for TransactionPreparatorImpl {
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
-        tasks: &[BaseTaskImpl],
-        lookup_table_keys: &[Pubkey],
+        transaction_strategy: &TransactionStrategy,
         close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
-        let cleanup_tasks: Vec<_> = tasks
+        let cleanup_tasks: Vec<_> = transaction_strategy
+            .optimized_tasks
             .iter()
             .filter_map(|task| match task {
                 BaseTaskImpl::Commit(commit_task) => commit_task.stage(),
@@ -141,7 +139,8 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .cleanup(
                 authority,
                 &cleanup_tasks,
-                lookup_table_keys,
+                &transaction_strategy.lookup_tables_keys,
+                transaction_strategy.uniqueness_nonce,
                 close_buffers,
             )
             .await

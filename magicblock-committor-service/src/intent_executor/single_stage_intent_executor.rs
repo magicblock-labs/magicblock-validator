@@ -13,7 +13,9 @@ use crate::{
     intent_executor::{
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
-        strategy_executor::utils::resolve_pending_signature,
+        strategy_executor::utils::{
+            requires_uniqueness_nonce, resolve_pending_signature,
+        },
         utils::{build_commit_finalize_tasks, execute_single_stage_flow},
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
@@ -107,9 +109,13 @@ where
 
                 let single_stage_tasks =
                     [commit_tasks, finalize_tasks].concat();
+                let uniqueness_nonce =
+                    requires_uniqueness_nonce(&single_stage_tasks)
+                        .then_some(intent_bundle.id);
                 let transaction_strategy = TaskStrategist::build_strategy(
                     single_stage_tasks,
                     &self.authority.pubkey(),
+                    uniqueness_nonce,
                 )?;
 
                 execute_single_stage_flow(

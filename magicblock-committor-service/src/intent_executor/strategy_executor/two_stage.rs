@@ -153,6 +153,7 @@ where
         };
         let commit_stage_patcher = CommitStagePatcher {
             authority: &self.authority,
+            intent_id: self.intent_id,
             intent_client: &self.intent_client,
             callback_scheduler: &self.callback_scheduler,
             task_info_fetcher,
@@ -177,6 +178,11 @@ where
             execution_state,
         )
         .await?;
+        // A commit-id retry may have re-tagged the commit stage as a first
+        // commit; the finalize stage aliases the same way and must carry
+        // the same uniqueness noop.
+        self.state.finalize_strategy.uniqueness_nonce =
+            self.state.commit_strategy.uniqueness_nonce;
         self.execute_callbacks(
             commit_result.as_ref().ok().copied(),
             commit_result.as_ref().map(|_| ()),

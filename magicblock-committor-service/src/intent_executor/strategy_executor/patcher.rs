@@ -43,6 +43,7 @@ pub(in crate::intent_executor) trait Patcher {
 
 pub(in crate::intent_executor) struct SingleStagePatcher<'a, F, A, T> {
     pub authority: &'a Keypair,
+    pub intent_id: u64,
     pub intent_client: &'a IntentExecutionClient,
     pub callback_scheduler: &'a A,
     pub task_info_fetcher: &'a CacheTaskInfoFetcher<F>,
@@ -70,7 +71,7 @@ where
             &mut TransactionStrategy {
                 optimized_tasks: vec![finalize_task],
                 lookup_tables_keys: vec![],
-                standalone_action_nonce: None,
+                uniqueness_nonce: None,
             },
         )
         .await
@@ -84,7 +85,7 @@ where
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
+            uniqueness_nonce: None,
         }))
     }
 }
@@ -137,6 +138,7 @@ where
                     self.task_info_fetcher,
                     self.committed_pubkeys,
                     strategy,
+                    self.intent_id,
                 )
                 .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
@@ -199,6 +201,7 @@ where
 
 pub(in crate::intent_executor) struct CommitStagePatcher<'a, F, A, T> {
     pub authority: &'a Keypair,
+    pub intent_id: u64,
     pub intent_client: &'a IntentExecutionClient,
     pub callback_scheduler: &'a A,
     pub task_info_fetcher: &'a CacheTaskInfoFetcher<F>,
@@ -226,7 +229,7 @@ where
             &mut TransactionStrategy {
                 optimized_tasks: vec![finalize_task],
                 lookup_tables_keys: vec![],
-                standalone_action_nonce: None,
+                uniqueness_nonce: None,
             },
         )
         .await
@@ -239,7 +242,7 @@ where
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
-            standalone_action_nonce: None,
+            uniqueness_nonce: None,
         }))
     }
 }
@@ -271,6 +274,7 @@ where
                     self.task_info_fetcher,
                     self.committed_pubkeys,
                     strategy,
+                    self.intent_id,
                 )
                 .await?;
                 Ok(ControlFlow::Continue(to_cleanup))

@@ -9,7 +9,7 @@ use std::{
 };
 
 use bincode::{deserialize, serialize};
-use magicblock_core::link::blocks::BlockHash;
+use magicblock_core::link::blocks::{BlockHash, LatestBlockInner};
 use magicblock_metrics::metrics::{
     start_ledger_disable_compactions_timer, start_ledger_shutdown_timer,
     HistogramTimer,
@@ -42,7 +42,7 @@ use crate::{
     errors::{LedgerError, LedgerResult},
     metrics::LedgerRpcApiMetrics,
     store::utils::adjust_ulimit_nofile,
-    LatestBlock, LatestBlockInner,
+    LatestBlock,
 };
 
 #[derive(Default, Debug)]
