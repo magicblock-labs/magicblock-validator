@@ -5,7 +5,7 @@ use std::sync::Arc;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::{
-        replication::{Block, Message, SuperBlock},
+        replication::{Block, Message, SuperBlock, BLOCK_INDEX},
         transactions::{SchedulerMode, TransactionSchedulerHandle},
     },
     Slot, TransactionIndex,
@@ -52,6 +52,19 @@ pub struct ReplicationContext {
     validator_identity: Pubkey,
 }
 
+/// Where a restarting replica resumes deduplicating the stream: whichever of the
+/// last applied block or the last persisted transaction is further ahead.
+pub(crate) fn resume_position(
+    accountsdb: &AccountsDb,
+    ledger: &Ledger,
+) -> Result<(Slot, TransactionIndex)> {
+    let applied = accountsdb.slot().max(ledger.latest_block().load().slot);
+    Ok(ledger
+        .get_last_persisted_transaction_position()?
+        .filter(|(txn_slot, _)| *txn_slot > applied)
+        .unwrap_or((applied, BLOCK_INDEX)))
+}
+
 impl ReplicationContext {
     /// Creates context from ledger state.
     #[allow(clippy::too_many_arguments)]
@@ -68,18 +81,9 @@ impl ReplicationContext {
         let producer_id = format!("{node_id}-producer");
         let consumer_id = format!("{node_id}-consumer");
 
-        // Resume deduplication from the ledger's last persisted transaction,
-        // which may live in an in-progress (not-yet-finalized) slot ahead of
-        // `accountsdb.slot()`. Using the true last position ensures redelivered
-        // already-applied transactions of that slot are skipped (not re-applied
-        // and not re-hashed) after a mid-slot restart.
-        let (slot, index) =
-            match ledger.get_last_persisted_transaction_position()? {
-                Some(position) => position,
-                None => (accountsdb.slot(), 0),
-            };
+        let (slot, index) = resume_position(&accountsdb, &ledger)?;
 
-        info!(%node_id, %producer_id, %consumer_id, slot, "context initialized");
+        info!(%node_id, %producer_id, %consumer_id, slot, index, "context initialized");
         Ok(Self {
             producer_id,
             consumer_id,
