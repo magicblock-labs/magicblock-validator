@@ -6,7 +6,7 @@
 //! asks the server whether a set of addresses is risky.
 
 use futures_util::future::try_join_all;
-use magicblock_config::config::RiskConfig;
+use magicblock_config::config::{AmlCheckStrategy, RiskConfig};
 use reqwest::{Client, redirect};
 use serde::Deserialize;
 use thiserror::Error;
@@ -68,6 +68,7 @@ fn validate_base_url(base_url: &str) -> RiskResult<()> {
 pub struct RiskService {
     client: Client,
     base_url: String,
+    check_strategy: AmlCheckStrategy,
 }
 
 impl RiskService {
@@ -90,7 +91,17 @@ impl RiskService {
             .build()
             .map_err(RiskError::ClientBuild)?;
 
-        Ok(Some(Self { client, base_url }))
+        Ok(Some(Self {
+            client,
+            base_url,
+            check_strategy: config.check_strategy,
+        }))
+    }
+
+    /// The configured strategy for deciding which post-delegation action
+    /// signers to risk check.
+    pub fn check_strategy(&self) -> AmlCheckStrategy {
+        self.check_strategy
     }
 
     /// Asks the risk server about each address concurrently, returning
@@ -234,6 +245,7 @@ mod tests {
             enabled: true,
             risk_server_url,
             request_timeout: Duration::from_secs(2),
+            check_strategy: AmlCheckStrategy::AllSigners,
         }
     }
 
