@@ -269,6 +269,13 @@ owner, rent payer, and commit nonce information must come from the delegation
 record/metadata. Validators must still verify that the request PDA matches the
 delegated account before scheduling.
 
+The validator observes owner-program `UndelegationRequest` PDAs through
+Chainlink and `magicblock-accounts`. Live request-account subscription updates
+are the low-latency path. A background backfill loop also scans DLP-owned
+accounts with a filtered `getProgramAccounts` every configured interval
+(`chainlink.undelegation-request-poll-interval`, default `5m`) and feeds the
+decoded requests into the same `ScheduleCommitAndUndelegate` scheduling path.
+
 The current Delegation Program does not undelegate from finalize instructions.
 Commit/finalize-style instructions only commit/finalize state and record or
 preserve `DelegationMetadata.undelegation_requester`. The validator-side
@@ -280,7 +287,8 @@ and request account cleanup. When metadata says `Validator` or is still `None`
 at task-build time, no request account is passed. `None` can be valid for
 validator-requested undelegation because commit and finalize task lists are
 built before the commit-stage transaction records the validator requester on
-base.
+base. `AlreadyUndelegated` remains a conflict for validator-requested
+undelegation state, not a reason to drop an owner-program request.
 
 ### Callback discriminator
 

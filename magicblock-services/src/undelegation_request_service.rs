@@ -13,7 +13,7 @@ use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
-use tokio::sync::broadcast;
+use tokio::{sync::broadcast, time::MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -52,6 +52,7 @@ pub struct UndelegationRequestService {
     internal_transaction_scheduler: TransactionSchedulerHandle,
     validator_authority: Arc<Keypair>,
     latest_block_reader: Arc<dyn LatestBlockReader>,
+    undelegation_request_poll_interval: Duration,
 }
 
 trait LatestBlockReader: Send + Sync {
@@ -73,6 +74,7 @@ impl UndelegationRequestService {
         internal_transaction_scheduler: TransactionSchedulerHandle,
         validator_authority: Keypair,
         latest_block: impl LatestBlockProvider,
+        undelegation_request_poll_interval: Duration,
     ) -> Self {
         Self {
             chainlink,
@@ -80,6 +82,7 @@ impl UndelegationRequestService {
             internal_transaction_scheduler,
             validator_authority: Arc::new(validator_authority),
             latest_block_reader: Arc::new(latest_block.clone()),
+            undelegation_request_poll_interval,
         }
     }
 
@@ -125,6 +128,58 @@ impl UndelegationRequestService {
                 &cancellation_token,
             )
             .await;
+        }
+    }
+
+    async fn undelegation_request_poll_processor(
+        poll_interval: Duration,
+        cancellation_token: CancellationToken,
+        chainlink: Arc<ChainlinkImpl>,
+        internal_transaction_scheduler: TransactionSchedulerHandle,
+        validator_authority: Arc<Keypair>,
+        latest_block: Arc<dyn LatestBlockReader>,
+    ) {
+        if poll_interval.is_zero() {
+            debug!(
+                "DLP undelegation request polling is disabled by configuration"
+            );
+            return;
+        }
+
+        let mut interval = tokio::time::interval(poll_interval);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancellation_token.cancelled() => {
+                    info!("Shutting down undelegation request poll processor");
+                    return;
+                }
+                _ = interval.tick() => {}
+            }
+
+            let requests = match chainlink.fetch_undelegation_requests().await {
+                Ok(requests) => requests,
+                Err(err) => {
+                    error!(
+                        error = ?err,
+                        "Failed to scan DLP undelegation requests"
+                    );
+                    continue;
+                }
+            };
+            for request in requests {
+                Self::process_observed_undelegation_request_with_retries(
+                    request,
+                    &chainlink,
+                    &internal_transaction_scheduler,
+                    validator_authority.as_ref(),
+                    latest_block.as_ref(),
+                    &cancellation_token,
+                )
+                .await;
+            }
         }
     }
 
@@ -223,6 +278,25 @@ impl UndelegationRequestService {
             return Ok(());
         }
 
+        if let Err(err) = chainlink
+            .ensure_accounts(
+                &[request.delegated_account],
+                None,
+                AccountFetchOrigin::GetAccount,
+            )
+            .await
+        {
+            error!(
+                request_pda = %request.request_pda,
+                delegated_account = %request.delegated_account,
+                error = ?err,
+                "Failed to materialize requested undelegation account"
+            );
+            return Err(ObservedUndelegationRequestError::Transient(
+                "failed to materialize requested undelegation account",
+            ));
+        }
+
         let delegated = match chainlink
             .accounts_delegated_on_base_and_er(
                 &[request.delegated_account],
@@ -290,10 +364,32 @@ impl UndelegationRequestService {
     pub fn start(self: &Arc<Self>) {
         let Some(requests) = self.chainlink.subscribe_undelegation_requests()
         else {
+            if !self.undelegation_request_poll_interval.is_zero() {
+                warn!(
+                    "Cannot subscribe to DLP undelegation requests; falling back to polling only"
+                );
+            }
+            self.spawn_undelegation_request_poll_processor();
             return;
         };
         tokio::spawn(Self::undelegation_request_processor(
             requests,
+            self.cancellation_token.clone(),
+            self.chainlink.clone(),
+            self.internal_transaction_scheduler.clone(),
+            self.validator_authority.clone(),
+            self.latest_block_reader.clone(),
+        ));
+        self.spawn_undelegation_request_poll_processor();
+    }
+
+    fn spawn_undelegation_request_poll_processor(self: &Arc<Self>) {
+        if self.undelegation_request_poll_interval.is_zero() {
+            debug!("Skipping DLP undelegation request poll processor");
+            return;
+        }
+        tokio::spawn(Self::undelegation_request_poll_processor(
+            self.undelegation_request_poll_interval,
             self.cancellation_token.clone(),
             self.chainlink.clone(),
             self.internal_transaction_scheduler.clone(),
