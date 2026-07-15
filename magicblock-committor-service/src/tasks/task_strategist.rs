@@ -498,10 +498,13 @@ mod tests {
     use dlp_api::state::{DelegationMetadata, UndelegationRequester};
     use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
-        BaseAction, ProgramArgs,
+        BaseAction, CommitType, MagicIntentBundle, ProgramArgs,
+        ScheduledIntentBundle,
     };
     use solana_account::Account;
+    use solana_hash::Hash;
     use solana_pubkey::Pubkey;
+    use solana_transaction::Transaction;
 
     use super::*;
     use crate::{
@@ -655,6 +658,35 @@ mod tests {
             owner_program: Pubkey::default(),
             rent_reimbursement: Pubkey::new_unique(),
             include_undelegation_request: false,
+        }
+    }
+
+    fn create_test_commit_finalize_intent(
+        id: u64,
+        pubkeys: &[Pubkey],
+    ) -> ScheduledIntentBundle {
+        let committed_accounts = pubkeys
+            .iter()
+            .copied()
+            .map(|pubkey| CommittedAccount {
+                pubkey,
+                account: Account::default(),
+                remote_slot: Default::default(),
+            })
+            .collect();
+
+        ScheduledIntentBundle {
+            id,
+            slot: 0,
+            blockhash: Hash::default(),
+            sent_transaction: Transaction::default(),
+            payer: Pubkey::default(),
+            intent_bundle: MagicIntentBundle {
+                commit_finalize: Some(CommitType::Standalone(
+                    committed_accounts,
+                )),
+                ..Default::default()
+            },
         }
     }
 
@@ -1013,6 +1045,89 @@ mod tests {
         assert_eq!(task.delegated_account, delegated_account);
         assert_eq!(task.rent_reimbursement, delegated_account);
         assert!(task.include_undelegation_request);
+        assert_eq!(
+            tasks
+                .iter()
+                .filter(|task| matches!(task, BaseTaskImpl::Undelegate(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_finalize_tasks_auto_undelegate_owner_program_commit() {
+        let delegated_account = Pubkey::new_unique();
+        let rent_payer = Pubkey::new_unique();
+        let intent = create_test_intent(0, &[delegated_account], false);
+        let info_fetcher = Arc::new(MockInfoFetcher {
+            delegation_metadata: HashMap::from([(
+                delegated_account,
+                (UndelegationRequester::OwnerProgram, rent_payer),
+            )]),
+        });
+
+        let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
+
+        assert_eq!(tasks.len(), 2);
+        assert!(matches!(
+            &tasks[0],
+            BaseTaskImpl::Finalize(task)
+                if task.delegated_account == delegated_account
+        ));
+        let BaseTaskImpl::Undelegate(task) = &tasks[1] else {
+            panic!("expected implicit undelegate task");
+        };
+        assert_eq!(task.delegated_account, delegated_account);
+        assert_eq!(task.rent_reimbursement, rent_payer);
+        assert!(task.include_undelegation_request);
+    }
+
+    #[tokio::test]
+    async fn test_finalize_tasks_auto_undelegate_owner_program_commit_finalize()
+    {
+        let delegated_account = Pubkey::new_unique();
+        let rent_payer = Pubkey::new_unique();
+        let intent =
+            create_test_commit_finalize_intent(0, &[delegated_account]);
+        let info_fetcher = Arc::new(MockInfoFetcher {
+            delegation_metadata: HashMap::from([(
+                delegated_account,
+                (UndelegationRequester::OwnerProgram, rent_payer),
+            )]),
+        });
+
+        let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
+
+        assert_eq!(tasks.len(), 1);
+        let BaseTaskImpl::Undelegate(task) = &tasks[0] else {
+            panic!("expected implicit undelegate task");
+        };
+        assert_eq!(task.delegated_account, delegated_account);
+        assert_eq!(task.rent_reimbursement, rent_payer);
+        assert!(task.include_undelegation_request);
+    }
+
+    #[tokio::test]
+    async fn test_finalize_tasks_do_not_auto_undelegate_without_owner_request()
+    {
+        let delegated_account = Pubkey::new_unique();
+        let intent = create_test_intent(0, &[delegated_account], false);
+        let info_fetcher = Arc::new(MockInfoFetcher::default());
+
+        let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
+
+        assert_eq!(tasks.len(), 1);
+        assert!(matches!(
+            &tasks[0],
+            BaseTaskImpl::Finalize(task)
+                if task.delegated_account == delegated_account
+        ));
     }
 
     #[tokio::test]

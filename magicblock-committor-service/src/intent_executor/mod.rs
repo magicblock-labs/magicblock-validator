@@ -116,6 +116,8 @@ pub struct IntentExecutionReport {
     patched_errors: Vec<TransactionStrategyExecutionError>,
     /// Report of scheduled callbacks
     callbacks_report: Vec<Result<Signature, CallbackScheduleError>>,
+    /// Accounts planned to be undelegated by built base-layer tasks
+    planned_undelegated_pubkeys: Vec<Pubkey>,
 }
 
 impl IntentExecutionReport {
@@ -144,6 +146,25 @@ impl IntentExecutionReport {
     pub fn junk(&self) -> &Vec<TransactionStrategy> {
         &self.junk
     }
+
+    fn record_planned_undelegations(&mut self, tasks: &[BaseTaskImpl]) {
+        self.planned_undelegated_pubkeys
+            .extend(planned_undelegated_pubkeys(tasks));
+    }
+
+    fn planned_undelegated_pubkeys(&self) -> &[Pubkey] {
+        &self.planned_undelegated_pubkeys
+    }
+}
+
+fn planned_undelegated_pubkeys(tasks: &[BaseTaskImpl]) -> Vec<Pubkey> {
+    tasks
+        .iter()
+        .filter_map(|task| match task {
+            BaseTaskImpl::Undelegate(task) => Some(task.delegated_account),
+            _ => None,
+        })
+        .collect()
 }
 
 pub struct IntentExecutorImpl<T, F, A> {
@@ -258,7 +279,10 @@ where
             let (commit_tasks, finalize_tasks) =
                 join(commit_tasks_fut, finalize_tasks_fut).await;
 
-            (commit_tasks?, finalize_tasks?)
+            let commit_tasks = commit_tasks?;
+            let finalize_tasks = finalize_tasks?;
+            execution_report.record_planned_undelegations(&finalize_tasks);
+            (commit_tasks, finalize_tasks)
         };
 
         let uniqueness_nonce = requires_uniqueness_nonce(&commit_tasks)
@@ -555,17 +579,6 @@ where
         self.started_at = Instant::now();
         let message_id = base_intent.id;
         let pubkeys = base_intent.get_all_committed_pubkeys();
-        let undelegated_pubkeys: Vec<Pubkey> = base_intent
-            .intent_bundle
-            .get_undelegate_intent_pubkeys()
-            .into_iter()
-            .chain(
-                base_intent
-                    .intent_bundle
-                    .get_commit_finalize_and_undelegate_intent_pubkeys(),
-            )
-            .flatten()
-            .collect();
 
         let mut execution_report = IntentExecutionReport::default();
         let result = self
@@ -576,14 +589,16 @@ where
             if result.is_err() {
                 // We can't know what landed on chain, resync everything
                 self.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
-            } else if !undelegated_pubkeys.is_empty() {
+            } else if !execution_report.planned_undelegated_pubkeys().is_empty()
+            {
                 // Only undelegated accounts' nonces become stale. Keep the
                 // rest cached: a chain re-fetch can race the just-landed
                 // finalize and reuse a nonce (buffer PDA collision).
                 // NOTE: if undelegation was removed - we still reset
                 // We assume its safe since all consecutive commits will fail
-                self.task_info_fetcher
-                    .reset(ResetType::Specific(&undelegated_pubkeys));
+                self.task_info_fetcher.reset(ResetType::Specific(
+                    execution_report.planned_undelegated_pubkeys(),
+                ));
             }
 
             // Write result of intent into Persister
@@ -637,9 +652,13 @@ fn requires_uniqueness_nonce(commit_tasks: &[BaseTaskImpl]) -> bool {
 mod tests {
     use magicblock_core::intent::CommittedAccount;
     use solana_account::Account;
+    use solana_pubkey::Pubkey;
 
-    use super::*;
-    use crate::tasks::{task_builder::TaskBuilderImpl, FinalizeTask};
+    use super::{planned_undelegated_pubkeys, requires_uniqueness_nonce};
+    use crate::tasks::{
+        task_builder::TaskBuilderImpl, BaseTaskImpl, FinalizeTask,
+        UndelegateTask,
+    };
 
     fn commit_task(commit_id: u64) -> BaseTaskImpl {
         TaskBuilderImpl::create_commit_task(
@@ -666,5 +685,30 @@ mod tests {
         assert!(!requires_uniqueness_nonce(&[commit_task(2)]));
         assert!(!requires_uniqueness_nonce(&[finalize]));
         assert!(!requires_uniqueness_nonce(&[]));
+    }
+
+    #[test]
+    fn planned_undelegated_pubkeys_returns_built_undelegate_tasks() {
+        let first = Pubkey::new_unique();
+        let second = Pubkey::new_unique();
+        let tasks = vec![
+            BaseTaskImpl::Finalize(FinalizeTask {
+                delegated_account: Pubkey::new_unique(),
+            }),
+            BaseTaskImpl::Undelegate(UndelegateTask {
+                delegated_account: first,
+                owner_program: Pubkey::new_unique(),
+                rent_reimbursement: Pubkey::new_unique(),
+                include_undelegation_request: true,
+            }),
+            BaseTaskImpl::Undelegate(UndelegateTask {
+                delegated_account: second,
+                owner_program: Pubkey::new_unique(),
+                rent_reimbursement: Pubkey::new_unique(),
+                include_undelegation_request: false,
+            }),
+        ];
+
+        assert_eq!(planned_undelegated_pubkeys(&tasks), vec![first, second]);
     }
 }
