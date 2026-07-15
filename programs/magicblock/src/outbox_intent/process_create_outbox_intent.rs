@@ -93,8 +93,7 @@ fn validate(
         return Err(InstructionError::IncorrectProgramId);
     }
 
-    let pda =
-        *get_instruction_pubkey_with_idx(transaction_context, PDA_IDX)?;
+    let pda = *get_instruction_pubkey_with_idx(transaction_context, PDA_IDX)?;
     let vault =
         *get_instruction_pubkey_with_idx(transaction_context, VAULT_IDX)?;
 

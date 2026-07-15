@@ -20,7 +20,9 @@ pub use magic_sys::init_magic_sys;
 pub use magicblock_magic_program_api::*;
 pub use outbox_intent::{
     outbox_intent_bundles,
-    process_scheduled_commit_sent::{register_scheduled_commit_sent, SentCommit},
+    process_scheduled_commit_sent::{
+        register_scheduled_commit_sent, SentCommit,
+    },
 };
 pub use schedule_transactions::transaction_scheduler::TransactionScheduler;
 pub use utils::instruction_utils;

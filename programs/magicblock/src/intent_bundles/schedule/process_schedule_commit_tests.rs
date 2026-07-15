@@ -21,10 +21,10 @@ use solana_sdk_ids::{system_program, sysvar::clock};
 use solana_signer::Signer;
 
 use crate::{
-    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     magic_context::MagicContext,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     magic_sys::COMMIT_LIMIT,
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     schedule_transactions::magic_fee_vault_pubkey,
     test_utils::{
         ensure_started_validator, process_instruction,

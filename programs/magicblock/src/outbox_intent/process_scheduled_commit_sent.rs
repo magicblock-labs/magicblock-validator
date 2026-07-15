@@ -191,7 +191,9 @@ fn validate(
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
     // Assert outbox intent program
-    if ix_ctx.get_program_key()? != &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID {
+    if ix_ctx.get_program_key()?
+        != &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID
+    {
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: outbox intent program account not found"
@@ -340,6 +342,7 @@ fn close_outbox_account_cpi(
 
 #[cfg(test)]
 mod tests {
+    use magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
     use solana_account::AccountSharedData;
     use solana_instruction::{error::InstructionError, Instruction};
     use solana_keypair::Keypair;
@@ -349,7 +352,9 @@ mod tests {
     use super::*;
     use crate::{
         instruction_utils::InstructionUtils,
-        test_utils::{ensure_started_validator, process_instruction},
+        test_utils::{
+            ensure_started_validator, process_outbox_intent_instruction,
+        },
     };
 
     fn single_acc_commit(commit_id: u64) -> SentCommit {
@@ -408,7 +413,7 @@ mod tests {
 
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -442,7 +447,7 @@ mod tests {
         ix.accounts[0].pubkey = fake_validator.pubkey();
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -477,7 +482,7 @@ mod tests {
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
 
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -495,7 +500,8 @@ mod tests {
         let commit = setup_registered_commit();
 
         let pda = outbox_intent_pda(commit.message_id);
-        let mut pda_account = AccountSharedData::new(0, 0, &crate::id());
+        let mut pda_account =
+            AccountSharedData::new(0, 0, &OUTBOX_INTENT_PROGRAM_ID);
         pda_account.set_ephemeral(true);
 
         let mut account_data = {
@@ -517,7 +523,7 @@ mod tests {
 
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
