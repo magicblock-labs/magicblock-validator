@@ -324,7 +324,14 @@ impl ChainPubsubActor {
             .subscriptions
             .lock()
             .expect("subscriptions lock poisoned");
-        subs.keys().copied().collect()
+        // Dead or winding-down listeners are not live coverage.
+        subs.iter()
+            .filter(|(_, sub)| {
+                !sub.cancellation_token.is_cancelled()
+                    && !sub.completion_token.is_cancelled()
+            })
+            .map(|(pubkey, _)| *pubkey)
+            .collect()
     }
 
     pub async fn send_msg(
@@ -577,14 +584,24 @@ impl ChainPubsubActor {
         retries: Option<usize>,
         client_id: &str,
     ) {
-        if subs
-            .lock()
-            .expect("subscriptions lock poisoned")
-            .contains_key(&pubkey)
         {
-            trace!("Subscription already exists");
-            let _ = sub_response.send(Ok(()));
-            return;
+            let mut subs_lock =
+                subs.lock().expect("subscriptions lock poisoned");
+            match subs_lock.get(&pubkey) {
+                Some(sub) if sub.completion_token.is_cancelled() => {
+                    // Listener already finished: replace the orphaned entry
+                    // with a fresh subscription.
+                    subs_lock.remove(&pubkey);
+                }
+                Some(_) => {
+                    // Active or winding down; a lost winding-down sub is
+                    // repaired by the reconciler.
+                    trace!("Subscription already exists");
+                    let _ = sub_response.send(Ok(()));
+                    return;
+                }
+                None => {}
+            }
         }
 
         trace!("Adding subscription");
