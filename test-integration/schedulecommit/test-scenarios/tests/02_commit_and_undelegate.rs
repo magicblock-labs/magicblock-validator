@@ -1,3 +1,9 @@
+use std::{
+    thread::sleep,
+    time::{Duration, Instant},
+};
+
+use dlp_api::pda::undelegation_request_pda_from_delegated_account;
 use integration_test_tools::{
     conversions::stringify_simulation_result, run_test,
     scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
@@ -5,14 +11,15 @@ use integration_test_tools::{
 };
 use program_schedulecommit::{
     api::{
-        increase_count_instruction,
+        increase_count_instruction, request_undelegation_cpi_instruction,
         schedule_commit_and_undelegate_cpi_instruction,
         schedule_commit_and_undelegate_cpi_twice,
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
         schedule_commit_instruction_for_order_book, set_count_instruction,
         update_order_book_instruction, UserSeeds,
     },
-    BookUpdate, OrderLevel, ScheduleCommitType, FAIL_UNDELEGATION_COUNT,
+    BookUpdate, MainAccount, OrderLevel, ScheduleCommitType,
+    FAIL_UNDELEGATION_COUNT,
 };
 use rand::{RngCore, SeedableRng};
 use schedulecommit_client::{
@@ -48,6 +55,9 @@ use crate::utils::{
 };
 
 mod utils;
+
+const REQUESTED_UNDELEGATION_MAX_WAIT: Duration = Duration::from_secs(30);
+const REQUESTED_UNDELEGATION_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 fn commit_and_undelegate_one_account(
     modify_after: bool,
@@ -285,6 +295,52 @@ fn commit_and_undelegate_two_accounts_twice() -> (
     (ctx, *sig, tx_res)
 }
 
+fn wait_for_requested_undelegation_on_chain(
+    ctx: &ScheduleCommitTestContext,
+    pda: Pubkey,
+    request_pda: Pubkey,
+    expected_count: u64,
+) {
+    let start = Instant::now();
+    let mut last_state = String::new();
+
+    while start.elapsed() < REQUESTED_UNDELEGATION_MAX_WAIT {
+        let owner_result = ctx.fetch_chain_account_owner(pda);
+        let owner_restored = matches!(
+            &owner_result,
+            Ok(owner) if *owner == program_schedulecommit::id()
+        );
+        let owner_state = owner_result
+            .map(|owner| owner.to_string())
+            .unwrap_or_else(|err| format!("error: {err:?}"));
+
+        let request_exists = ctx.fetch_chain_account(request_pda).is_ok();
+        let count_result = ctx
+            .fetch_chain_account_data(pda)
+            .map_err(|err| err.to_string())
+            .and_then(|data| {
+                MainAccount::try_decode(&data)
+                    .map(|account| account.count)
+                    .map_err(|err| err.to_string())
+            });
+        let count_matches =
+            matches!(&count_result, Ok(count) if *count == expected_count);
+
+        if owner_restored && !request_exists && count_matches {
+            return;
+        }
+
+        last_state = format!(
+            "owner={owner_state}, request_exists={request_exists}, count={count_result:?}"
+        );
+        sleep(REQUESTED_UNDELEGATION_RETRY_DELAY);
+    }
+
+    panic!(
+        "timed out waiting for requested undelegation of {pda}; last state: {last_state}"
+    );
+}
+
 #[test]
 fn test_committing_and_undelegating_one_account() {
     run_test!({
@@ -301,14 +357,85 @@ fn test_committing_and_undelegating_one_account() {
 }
 
 #[test]
+fn test_request_undelegation_commits_and_undelegates_one_account() {
+    run_test!({
+        let ctx = get_context_with_delegated_committees(
+            1,
+            UserSeeds::MagicScheduleCommit,
+        );
+        let ScheduleCommitTestContextFields {
+            payer_ephem,
+            payer_chain,
+            committees,
+            commitment,
+            ephem_client,
+            ..
+        } = ctx.fields();
+        let (player, committee_pda) = &committees[0];
+        let request_pda =
+            undelegation_request_pda_from_delegated_account(committee_pda);
+
+        assert!(
+            ctx.fetch_chain_account(request_pda).is_err(),
+            "request PDA should not exist before request"
+        );
+
+        assert_can_increase_committee_count(
+            *committee_pda,
+            payer_ephem,
+            ephem_client,
+            commitment,
+        );
+
+        let ix = request_undelegation_cpi_instruction(
+            payer_chain.pubkey(),
+            player.pubkey(),
+            *committee_pda,
+        );
+        let request_tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer_chain.pubkey()),
+            &[payer_chain],
+            ctx.try_chain_blockhash().unwrap(),
+        );
+        let request_sig = *request_tx.get_signature();
+        let request_res = ctx
+            .try_chain_client()
+            .unwrap()
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &request_tx,
+                *commitment,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            );
+        ctx.dump_chain_logs(request_sig);
+        assert!(
+            request_res.is_ok(),
+            "request undelegation transaction failed: {request_res:?}"
+        );
+
+        wait_for_requested_undelegation_on_chain(
+            &ctx,
+            *committee_pda,
+            request_pda,
+            1,
+        );
+    });
+}
+
+#[test]
 fn test_commit_huge_order_book_account() {
-    run_test_for_commit_huge_order_book_account(ScheduleCommitType::Commit);
+    run_test_for_commit_huge_order_book_account(
+        ScheduleCommitType::CommitFinalize,
+    );
 }
 
 #[test]
 fn test_commit_and_undelegate_huge_order_book_account() {
     run_test_for_commit_huge_order_book_account(
-        ScheduleCommitType::CommitAndUndelegate,
+        ScheduleCommitType::CommitFinalizeAndUndelegate,
     );
 }
 
@@ -381,6 +508,12 @@ fn run_test_for_commit_huge_order_book_account(
                 assert_one_committee_account_was_not_undelegated_on_chain(&ctx);
             }
             ScheduleCommitType::CommitAndUndelegate => {
+                assert_one_committee_account_was_undelegated_on_chain(&ctx);
+            }
+            ScheduleCommitType::CommitFinalize => {
+                assert_one_committee_account_was_not_undelegated_on_chain(&ctx);
+            }
+            ScheduleCommitType::CommitFinalizeAndUndelegate => {
                 assert_one_committee_account_was_undelegated_on_chain(&ctx);
             }
         }

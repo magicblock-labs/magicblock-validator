@@ -2,29 +2,32 @@
 
 ## Purpose
 
-`magicblock-services` contains small reusable service adapters that run alongside the validator and communicate through existing validator/RPC contracts. Its current responsibility is the action-callback adapter used by the committor pipeline to notify user callback programs about Magic Action results.
+`magicblock-services` contains small reusable services and adapters that run alongside the validator and communicate through existing validator/RPC contracts. It currently owns the action-callback adapter used by the committor pipeline and the owner-program undelegation request service that turns observed Delegation Program requests into local `ScheduleCommitAndUndelegate` transactions.
 
 High-level responsibilities:
 
 - implement `magicblock_core::traits::ActionsCallbackScheduler` for validator-runtime use;
 - turn `BaseActionCallback` payloads from committed Magic Actions into local callback transactions;
 - wrap callback results in the `magicblock-magic-program-api` `MagicResponse::V1` wire shape;
-- submit callback transactions asynchronously through Solana's nonblocking `RpcClient`.
+- submit callback transactions asynchronously through Solana's nonblocking `RpcClient`;
+- subscribe to Chainlink-observed Delegation Program `UndelegationRequest` accounts;
+- validate request PDAs and delegated-account state before scheduling local validator-signed `ScheduleCommitAndUndelegate` transactions.
 
-This crate is settlement-adjacent and can affect Magic Action user experience. It is not the committor itself, does not own intent execution or persistence, and must stay generic enough to be used as a service adapter rather than a protocol owner.
+This crate is settlement-adjacent and can affect Magic Action user experience and undelegation liveness. It is not the committor itself, does not own base-layer intent execution or persistence, and should stay limited to service/adaptor boundaries rather than becoming a protocol owner.
 
-End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns fire-and-forget local Magic Action callback transaction construction and scheduling.
+End-to-end commit/undelegation semantics live in .agents/specs/validator-specification.md; this crate owns callback transaction construction/scheduling and request-observer submission of local schedule transactions.
 
 ## Update requirement
 
 Update this guide in the same change whenever behavior or contracts in `magicblock-services` change. In particular, update it for changes to:
 
-- exported modules or public constructors in `magicblock-services/src/lib.rs` or `actions_callback_service.rs`;
+- exported modules or public constructors in `magicblock-services/src/lib.rs`, `actions_callback_service.rs`, or `undelegation_request_service.rs`;
 - the `ActionsCallbackService` transaction layout, signer handling, blockhash source, or callback response encoding;
+- the `UndelegationRequestService` request validation, retry policy, Chainlink checks, transaction layout, signer handling, blockhash source, or subscription/polling behavior;
 - how callback signatures, errors, receipts, discriminators, payloads, or account metas are propagated;
 - asynchronous send behavior, logging, retry/confirmation semantics, or Tokio runtime assumptions;
-- call-site wiring in `magicblock-api` or committor expectations around `ActionsCallbackScheduler`;
-- validation commands or integration suites relevant to action callbacks.
+- call-site wiring in `magicblock-api`, committor expectations around `ActionsCallbackScheduler`, or Chainlink observer contracts consumed by the undelegation request service;
+- validation commands or integration suites relevant to action callbacks or owner-program undelegation requests.
 
 Because callbacks are a cross-crate contract between Magic Program scheduling, committor execution, and user callback programs, also update this file when another crate changes `BaseActionCallback`, `MagicResponse`, `CallbackInstruction`, or `ActionsCallbackScheduler` semantics.
 
@@ -34,19 +37,23 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 
 | Path | Role |
 |---|---|
-| `magicblock-services/Cargo.toml` | Package metadata and dependencies. Depends on `magicblock-core`, `magicblock-magic-program-api`, Solana transaction/RPC crates, Tokio, and tracing. |
-| `magicblock-services/src/lib.rs` | Public module surface. Currently exports only `actions_callback_service`. |
+| `magicblock-services/Cargo.toml` | Package metadata and dependencies. Depends on shared core/Magic Program types, Chainlink/cloner wiring, Solana transaction/RPC crates, Tokio, and tracing. |
+| `magicblock-services/src/lib.rs` | Public module surface. Exports `actions_callback_service` and `undelegation_request_service`. |
 | `magicblock-services/src/actions_callback_service.rs` | Implements `ActionsCallbackService<L>` and `ActionsCallbackScheduler`. Builds and sends callback transactions. |
-| `magicblock-api/src/magic_validator.rs` | Runtime wiring. `init_committor_service` creates `ActionsCallbackService` with the validator keypair, local latest-block provider, and an RPC client pointed at the validator aperture HTTP endpoint. |
+| `magicblock-services/src/undelegation_request_service.rs` | Implements `UndelegationRequestService`. Consumes observed DLP request accounts and schedules local `ScheduleCommitAndUndelegate` transactions. |
+| `magicblock-api/src/magic_validator.rs` | Runtime wiring. `init_committor_processor` creates `ActionsCallbackService`; validator startup creates and starts `UndelegationRequestService` for non-replica validators. |
 | `magicblock-core/src/traits.rs` | Defines `ActionsCallbackScheduler`, `ActionResult`, `ActionError`, and `CallbackScheduleError`. |
 | `magicblock-core/src/intent.rs` | Defines `BaseActionCallback`, the callback payload this crate consumes. |
+| `magicblock-chainlink` | Supplies `subscribe_undelegation_requests`, delegation-state checks, and `undelegation_requested` lifecycle notification. |
 | `magicblock-committor-service/src/intent_executor/utils.rs` | Extracts callbacks from action tasks and invokes the scheduler after success, action failure, or timeout. |
 | `programs/magicblock/src/schedule_transactions/process_add_action_callback.rs` | Magic Program path that attaches callbacks to scheduled base actions. |
+| `programs/magicblock/src/schedule_transactions/process_schedule_commit.rs` | Magic Program path reached by the local `ScheduleCommitAndUndelegate` transaction. |
 
 Main consumers:
 
-- `magicblock-api`, which constructs the concrete callback service for the validator;
+- `magicblock-api`, which constructs the concrete callback service and undelegation request service for the validator;
 - `magicblock-committor-service`, which is generic over `ActionsCallbackScheduler` and calls it from intent execution;
+- Chainlink, which publishes observed undelegation request updates consumed by this crate;
 - callback-capable Magic Action flows scheduled through `programs/magicblock`.
 
 There are no crate-local tests or README files for `magicblock-services` at the time of writing. Use the committor integration tests when callback behavior changes.
@@ -58,8 +65,9 @@ There are no crate-local tests or README files for `magicblock-services` at the 
 `src/lib.rs` exposes:
 
 - `pub mod actions_callback_service`.
+- `pub mod undelegation_request_service`.
 
-Keep this surface small. New shared services should be added only when they are truly generic validator service adapters and not better owned by API orchestration, committor, RPC-client, or Magic Program crates.
+Keep this surface small. New shared services should be added only when they are truly validator background services/adapters and not better owned by API orchestration, committor, RPC-client, Chainlink, or Magic Program crates.
 
 ### `ActionsCallbackService<L>`
 
@@ -87,6 +95,36 @@ The service implements `Clone` when `L: Clone`. Cloning uses `authority.insecure
 
 The return value reports scheduling/build success, not confirmed on-chain callback execution. The spawned task logs send failures but does not retry or update the returned result after the fact.
 
+### `UndelegationRequestService`
+
+`UndelegationRequestService` stores:
+
+- `Arc<ProdChainlink<ChainlinkCloner>>` for observed request subscription, delegation checks, and undelegation tracking notification;
+- `TransactionSchedulerHandle` for submitting local validator transactions;
+- validator `Keypair` authority used as payer and signer;
+- a `LatestBlockProvider` wrapper used to sign each local transaction with a fresh ER blockhash;
+- a `CancellationToken` used by `stop`.
+
+Public API:
+
+```rust
+UndelegationRequestService::new(chainlink, scheduler, authority, latest_block)
+service.start()
+service.stop()
+```
+
+`start` subscribes to Chainlink observed undelegation requests and spawns one background task. The service does not own request discovery itself; Chainlink owns base-layer subscription/scanning and emits `ObservedUndelegationRequest` values.
+
+For each observed request, the service:
+
+1. verifies the request PDA matches the delegated account;
+2. asks Chainlink to materialize the delegated account if it is missing locally;
+3. checks the delegated account is delegated on base and ER;
+4. best-effort notifies Chainlink with `undelegation_requested`;
+5. submits a local validator-signed `ScheduleCommitAndUndelegate` transaction with the validator as payer/signer, `MAGIC_CONTEXT_PUBKEY`, and each delegated account as writable non-signer.
+
+Transient delegation-check and local-scheduling failures are retried three times with short exponential backoff. Invalid request PDAs and non-delegated accounts are skipped.
+
 ## Runtime flows
 
 ### Validator startup wiring
@@ -97,6 +135,20 @@ The return value reports scheduling/build success, not confirmed on-chain callba
 4. The committor keeps using the trait boundary; it does not depend directly on this crate's concrete type.
 
 Preserve this separation. `magicblock-services` should not reach back into validator orchestration or committor internals.
+
+### Undelegation Request Service Startup
+
+```text
+magicblock-api::MagicValidator::try_from_config
+  -> create UndelegationRequestService for non-replica validators
+magicblock-api::MagicValidator::start
+  -> service.start()
+  -> Chainlink observed request subscription
+  -> local ScheduleCommitAndUndelegate transaction
+  -> committor scheduled-intent service handles the resulting Magic Program intent
+```
+
+Replica validators do not start this service because replica Chainlink is disabled and ownership/lifecycle decisions should come from primary state replication.
 
 ### Callback scheduling and transaction construction
 
@@ -159,6 +211,16 @@ The callback instruction data combines a program-specific discriminator with a b
 
 `CallbackScheduleError` only covers local serialization/signing failures. RPC send failures are logged asynchronously with the callback transaction signature and do not flow back into `IntentExecutionReport` after `schedule` returns.
 
+### Undelegation request observer boundary
+
+The undelegation request service is a trigger: it only schedules the local Magic Program intent. It does not build or send base-layer commit/undelegate transactions, persist intent rows, or decide committor task strategy. After local scheduling, the normal committor intent service accepts and executes the resulting scheduled intent.
+
+The service validates the request PDA from delegated account before scheduling. It must not trust request-local owner, rent payer, or commit nonce fields; current request data carries the delegated account and expiry slot only.
+
+Before checking base/ER delegation readiness, the service calls Chainlink `ensure_accounts` for the delegated account. This lets polling recover valid requests for accounts that are delegated on base but not yet present in the ER bank, instead of skipping the request until unrelated traffic clones the account.
+
+The service logs expired requests but still schedules normal undelegation when the delegated account is still valid. This preserves the best chance of committing ER state and clearing lifecycle state instead of leaving timeout/rollback handling to a stale request.
+
 ## Important invariants
 
 1. `schedule` must return exactly one `Result<Signature, CallbackScheduleError>` for each input callback, preserving input order.
@@ -168,7 +230,13 @@ The callback instruction data combines a program-specific discriminator with a b
 5. Inner account meta writability must be propagated from `BaseActionCallback`; this crate should not reinterpret callback account authorization.
 6. The `Noop(counter)` uniqueness instruction must keep otherwise duplicate callback transactions from producing identical signatures.
 7. Do not add blocking RPC confirmation or retry loops to the committor hot path without an explicit architecture decision and performance review.
-8. Keep the crate dependency-light. Generic service adapters should not pull in validator orchestration, persistence, or large protocol owners.
+8. Keep service dependencies scoped to the adapter. Do not pull validator orchestration or persistence into this crate.
+9. `UndelegationRequestService` must verify the request PDA before scheduling.
+10. `UndelegationRequestService` must schedule only when the delegated account is delegated on both base and ER.
+11. `UndelegationRequestService` must use the validator authority as local transaction payer and signer.
+12. Request observation must remain non-replica-only unless replica lifecycle semantics are redesigned.
+13. The request service must not bypass the Magic Program scheduled-intent path or call the committor directly for owner-program requests.
+14. Missing Chainlink `undelegation_requested` notification should be logged but must not prevent local scheduling under the current best-effort policy.
 
 ## Common change areas and what to inspect
 
@@ -199,10 +267,23 @@ Do not make `schedule` block on network confirmation unless the committor timeou
 Start with:
 
 - `magicblock-api/src/magic_validator.rs::init_committor_service`;
+- `magicblock-api/src/magic_validator.rs` construction/start/stop of `UndelegationRequestService`;
 - `magicblock-config` endpoint settings used by `config.aperture.listen.http()` and `config.rpc_url()`;
 - `magicblock-committor-service::CommittorService::try_start` generic bounds.
 
 Be explicit about whether callbacks should be sent to local aperture or base-layer RPC.
+
+### Changing owner-program undelegation request handling
+
+Start with:
+
+- `magicblock-services/src/undelegation_request_service.rs`;
+- `magicblock-chainlink` observed undelegation request subscription and delegation checks;
+- `programs/magicblock/src/schedule_transactions/process_schedule_commit.rs`;
+- `magicblock-committor-service/src/service.rs` and task building for accepted commit-and-undelegate intents;
+- DLP request PDA and metadata semantics in `magicblock-delegation-program-api`.
+
+Check PDA validation, replica gating, retry behavior, local transaction accounts, blockhash freshness, and whether failures should be skipped, retried, or surfaced.
 
 ### Adding another shared service adapter
 
@@ -212,8 +293,8 @@ Start with `magicblock-services/src/lib.rs` and ask whether the new adapter belo
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-services`.
-- Consumer validation intent: because this crate has no crate-local tests, include relevant `magicblock-committor-service` checks for callback behavior changes.
-- Relevant integration suites: committor suites that exercise action callbacks and timeouts; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
+- Consumer validation intent: because this crate has limited crate-local coverage, include relevant `magicblock-committor-service` checks for callback behavior changes and request-driven undelegation integration checks for undelegation request changes.
+- Relevant integration suites: committor suites that exercise action callbacks/timeouts, plus schedule-commit or undelegation request suites when `UndelegationRequestService` changes; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance-risk validation intent: report any added synchronous RPC work, retries, confirmation, persistence, extra serialization, or unbounded spawning/logging and its effect on committor throughput and callback latency.
 
 
@@ -221,7 +302,10 @@ Start with `magicblock-services/src/lib.rs` and ask whether the new adapter belo
 
 - `.agents/context/crates/magicblock-core.md` — `ActionsCallbackScheduler`, `BaseActionCallback`, and related shared trait/type contracts.
 - `.agents/context/crates/magicblock-api.md` — validator startup and service wiring.
+- `.agents/context/crates/magicblock-chainlink.md` — observed undelegation request subscription and delegation lifecycle checks.
+- `.agents/context/crates/magicblock-committor-service.md` — scheduled intent acceptance/execution after request service submits the local schedule transaction.
 - `.agents/context/crates/magicblock-magic-program-api.md` — callback instruction and response wire types.
 - `.agents/context/crates/magicblock-rpc-client.md` — relevant if callback delivery begins using shared send/confirm helpers.
 - `magicblock-committor-service/src/intent_executor/utils.rs` — committor callback scheduling call site.
 - `programs/magicblock/src/schedule_transactions/process_add_action_callback.rs` — Magic Program callback attachment path.
+- `programs/magicblock/src/schedule_transactions/process_schedule_commit.rs` — Magic Program schedule path used by owner-program undelegation requests.

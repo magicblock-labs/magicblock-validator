@@ -7,6 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use dlp_api::state::{DelegationMetadata, UndelegationRequester};
 use magicblock_committor_service::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
@@ -32,7 +33,7 @@ use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
-    intent::{BaseActionCallback, CommittedAccount},
+    intent::{types::CommittedAccount, BaseActionCallback},
     traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use magicblock_program::{
@@ -263,12 +264,25 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }
 
-    async fn fetch_rent_reimbursements(
+    async fn fetch_delegation_metadata(
         &self,
         pubkeys: &[Pubkey],
         _: u64,
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        Ok(pubkeys.to_vec())
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        Ok(pubkeys
+            .iter()
+            .map(|pubkey| {
+                (
+                    *pubkey,
+                    DelegationMetadata {
+                        last_commit_id: 0,
+                        undelegation_requester: UndelegationRequester::None,
+                        seeds: vec![],
+                        rent_payer: *pubkey,
+                    },
+                )
+            })
+            .collect())
     }
 
     async fn get_base_accounts(
@@ -324,9 +338,8 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
 #[allow(dead_code)]
 pub fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
     let task = create_commit_task(data);
-    let stage = task.state_preparation_stage();
     CommitTask {
-        delivery_details: CommitDelivery::StateInBuffer { stage },
+        delivery_details: CommitDelivery::StateInBuffer { prepared: false },
         ..task
     }
 }

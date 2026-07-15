@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
+use magicblock_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
 use magicblock_magic_program_api::{
     args::{
         ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
@@ -22,9 +23,7 @@ use solana_signer::Signer;
 use crate::{
     intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
     magic_context::MagicContext,
-    magic_scheduled_base_intent::{
-        ScheduledIntentBundle, ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
-    },
+    magic_scheduled_base_intent::ScheduledIntentBundle,
     magic_sys::COMMIT_LIMIT,
     schedule_transactions::magic_fee_vault_pubkey,
     test_utils::{

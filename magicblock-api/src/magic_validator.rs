@@ -58,7 +58,10 @@ use magicblock_program::{
     TransactionScheduler as ActionTransactionScheduler,
 };
 use magicblock_replicator::{nats::Broker, BrokerSource, ReplicationService};
-use magicblock_services::actions_callback_service::ActionsCallbackService;
+use magicblock_services::{
+    actions_callback_service::ActionsCallbackService,
+    undelegation_request_service::UndelegationRequestService,
+};
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_validator_admin::claim_fees::{claim_fees, ClaimFeesTask};
 use mdp::state::{
@@ -118,6 +121,7 @@ pub struct MagicValidator {
     ledger_truncator: LedgerTruncator,
     intent_execution_service: IntentExecutionServiceImpl,
     replication_service: Option<ReplicationService>,
+    undelegation_request_service: Option<Arc<UndelegationRequestService>>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -337,6 +341,20 @@ impl MagicValidator {
         );
         log_timing("startup", "system_metrics_ticker_start", step_start);
 
+        let undelegation_request_service = (!matches!(
+            config.validator.replication_mode,
+            ReplicationMode::Replica { .. }
+        ))
+        .then(|| {
+            Arc::new(UndelegationRequestService::new(
+                chainlink.clone(),
+                dispatch.transaction_scheduler.clone(),
+                identity_keypair.insecure_clone(),
+                ledger.latest_block().clone(),
+                config.chainlink.undelegation_request_poll_interval,
+            ))
+        });
+
         let step_start = Instant::now();
         load_upgradeable_programs(
             &accountsdb,
@@ -458,6 +476,7 @@ impl MagicValidator {
             _metrics: (metrics_service, system_metrics_ticker),
             intent_execution_service,
             replication_service,
+            undelegation_request_service,
             token,
             ledger,
             ledger_truncator,
@@ -1043,6 +1062,15 @@ impl MagicValidator {
             }
         }
 
+        if !matches!(
+            self.config.validator.replication_mode,
+            ReplicationMode::Replica { .. }
+        ) {
+            if let Some(service) = self.undelegation_request_service.as_ref() {
+                service.start();
+            }
+        }
+
         // Now we are ready to start all services and are ready to accept transactions
         if let Some(frequency) = self
             .config
@@ -1128,9 +1156,20 @@ impl MagicValidator {
         self.start_unregister_validator_on_chain().await;
         self.exit.store(true, Ordering::Relaxed);
 
-        // Ordering is important here
-        // Commitor service shall be stopped last
+        // Stop request ingress before stopping intent execution so shutdown
+        // does not admit new local undelegation scheduling work.
         self.token.cancel();
+        if let Some(ref undelegation_request_service) =
+            self.undelegation_request_service
+        {
+            let step_start = Instant::now();
+            undelegation_request_service.stop();
+            log_timing(
+                "shutdown",
+                "undelegation_request_service_stop",
+                step_start,
+            );
+        }
 
         let step_start = Instant::now();
         if let Err(err) = self.intent_execution_service.stop().await {

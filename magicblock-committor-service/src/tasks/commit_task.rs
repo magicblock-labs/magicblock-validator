@@ -3,25 +3,12 @@ use dlp_api::{
     diff::compute_diff,
     AccountSizeClass,
 };
-use magicblock_committor_program::Chunks;
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::intent::types::CommittedAccount;
 use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
-use crate::{
-    tasks::{BaseTask, BaseTaskImpl, CleanupTask, PreparationTask},
-    utils::MAX_WRITE_CHUNK_SIZE,
-};
-
-/// Lifecycle stage of a buffer used for commit delivery.
-/// Tracks whether the on-chain buffer still needs to be initialized
-/// or is ready to be cleaned up after a successful commit.
-#[derive(Clone, Debug)]
-pub enum CommitBufferStage {
-    Preparation(PreparationTask),
-    Cleanup(CleanupTask),
-}
+use crate::tasks::{BaseTask, BaseTaskImpl};
 
 /// Describes how commit data is delivered to the base layer.
 ///
@@ -32,14 +19,14 @@ pub enum CommitBufferStage {
 pub enum CommitDelivery {
     StateInArgs,
     StateInBuffer {
-        stage: CommitBufferStage,
+        prepared: bool,
     },
     DiffInArgs {
         base_account: Account,
     },
     DiffInBuffer {
         base_account: Account,
-        stage: CommitBufferStage,
+        prepared: bool,
     },
 }
 
@@ -139,32 +126,6 @@ impl CommitTask {
         )
     }
 
-    pub fn stage(&self) -> Option<&CommitBufferStage> {
-        match &self.delivery_details {
-            CommitDelivery::DiffInBuffer {
-                base_account: _,
-                stage,
-            }
-            | CommitDelivery::StateInBuffer { stage } => Some(stage),
-            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
-                None
-            }
-        }
-    }
-
-    pub fn stage_mut(&mut self) -> Option<&mut CommitBufferStage> {
-        match &mut self.delivery_details {
-            CommitDelivery::DiffInBuffer {
-                base_account: _,
-                stage,
-            }
-            | CommitDelivery::StateInBuffer { stage } => Some(stage),
-            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
-                None
-            }
-        }
-    }
-
     pub fn is_buffer(&self) -> bool {
         matches!(
             self.delivery_details,
@@ -173,57 +134,15 @@ impl CommitTask {
         )
     }
 
-    pub fn state_preparation_stage(&self) -> CommitBufferStage {
-        let committed_data = self.committed_account.account.data.clone();
-        self.preparation_stage(committed_data)
-    }
-
-    fn diff_preparation_stage(&self, base_data: &[u8]) -> CommitBufferStage {
-        let diff =
-            compute_diff(base_data, &self.committed_account.account.data)
-                .to_vec();
-        self.preparation_stage(diff)
-    }
-
-    fn preparation_stage(&self, buffer_data: Vec<u8>) -> CommitBufferStage {
-        let chunks =
-            Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
-        CommitBufferStage::Preparation(PreparationTask {
-            commit_id: self.commit_id,
-            pubkey: self.committed_account.pubkey,
-            buffer_data,
-            chunks,
-        })
-    }
-
     pub fn reset_commit_id(&mut self, commit_id: u64) {
         self.commit_id = commit_id;
-        let new_stage = match &self.delivery_details {
-            CommitDelivery::StateInBuffer { .. } => {
-                self.state_preparation_stage()
-            }
-            CommitDelivery::DiffInBuffer {
-                base_account,
-                stage: _,
-            } => {
-                let slice = base_account.data.as_slice();
-                self.diff_preparation_stage(slice)
-            }
-            _ => return,
-        };
-
         match &mut self.delivery_details {
-            CommitDelivery::StateInBuffer { stage } => {
-                *stage = new_stage;
-            }
-            CommitDelivery::DiffInBuffer {
-                base_account: _,
-                stage,
-            } => {
-                *stage = new_stage;
+            CommitDelivery::StateInBuffer { prepared }
+            | CommitDelivery::DiffInBuffer { prepared, .. } => {
+                *prepared = false
             }
             _ => {}
-        }
+        };
     }
 }
 
@@ -254,15 +173,14 @@ impl BaseTask for CommitTask {
         );
         match details {
             CommitDelivery::StateInArgs => {
-                let stage = self.state_preparation_stage();
-                self.delivery_details = CommitDelivery::StateInBuffer { stage };
+                self.delivery_details =
+                    CommitDelivery::StateInBuffer { prepared: false };
                 true
             }
             CommitDelivery::DiffInArgs { base_account } => {
-                let stage = self.diff_preparation_stage(base_account.data());
                 self.delivery_details = CommitDelivery::DiffInBuffer {
                     base_account,
-                    stage,
+                    prepared: false,
                 };
                 true
             }
