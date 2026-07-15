@@ -49,16 +49,16 @@ fn write(ledger_path: &Path) -> (Child, Keypair, FlexiCounter) {
 
     let observed = fetch_counter_ephem(&ctx, &payer.pubkey(), &mut validator);
     debug!(
-        "✅ Recorded high precision clock: nanos={}, unix_timestamp={}",
+        "✅ Recorded high precision clock: millis={}, unix_timestamp={}",
         observed.count, observed.updates
     );
 
     // Sanity: the sub-second component (stored in `count`) must be a valid
     // fraction of a second, confirming a real HighPrecisionClock was read.
     assert!(
-        observed.count < 1_000_000_000,
+        observed.count < 1_000,
         cleanup(&mut validator),
-        "nanos out of range: {}",
+        "millis out of range: {}",
         observed.count
     );
     assert!(
@@ -95,7 +95,7 @@ fn read(ledger_path: &Path, payer: &Keypair, expected: &FlexiCounter) -> Child {
     let restored = fetch_counter_ephem(&ctx, &payer.pubkey(), &mut validator);
     assert_eq!(restored, *expected, cleanup(&mut validator));
     debug!(
-        "✅ Verified high precision clock reproduced after replay: nanos={}, unix_timestamp={}",
+        "✅ Verified high precision clock reproduced after replay: millis={}, unix_timestamp={}",
         restored.count, restored.updates
     );
 
@@ -106,26 +106,28 @@ fn read(ledger_path: &Path, payer: &Keypair, expected: &FlexiCounter) -> Child {
 
     let observed = fetch_counter_ephem(&ctx, &payer.pubkey(), &mut validator);
     debug!(
-        "✅ Recorded high precision clock after restart: nanos={}, unix_timestamp={}",
+        "✅ Recorded high precision clock after restart: millis={}, unix_timestamp={}",
         observed.count, observed.updates
     );
 
     // Sanity: the sub-second component (stored in `count`) must be a valid
     // fraction of a second, confirming a real HighPrecisionClock was read.
     assert!(
-        observed.count < 1_000_000_000,
+        observed.count < 1_000,
         cleanup(&mut validator),
-        "nanos out of range: {}",
+        "millis out of range: {}",
         observed.count
     );
     assert_eq!(observed.label, COUNTER.to_string(), cleanup(&mut validator));
 
+    let before = expected.updates * 1000 + expected.count;
+    let after = observed.updates * 1000 + observed.count;
     assert!(
-        observed.updates > expected.updates || observed.count > expected.count,
+        after > before,
         cleanup(&mut validator),
         "high precision clock should advance after restart: before={}, after={}",
-        expected.updates,
-        observed.updates
+        before,
+        after
     );
     debug!("✅ Verified high precision clock advances after restart");
 
