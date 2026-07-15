@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use dlp_api::state::DelegationRecord;
+use dlp_api::{
+    pda::undelegation_request_pda_from_delegated_account,
+    state::{DelegationRecord, UndelegationRequest},
+};
 use magicblock_metrics::metrics::{
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
@@ -217,6 +220,29 @@ where
         fetch_cloner,
         subscription_tx,
         cloner,
+    }
+}
+
+fn undelegation_request_data(
+    delegated_account: Pubkey,
+    expires_at_slot: u64,
+) -> Vec<u8> {
+    let request = UndelegationRequest {
+        delegated_account,
+        expires_at_slot,
+    };
+    let mut data = vec![0; UndelegationRequest::size_with_discriminator()];
+    request.to_bytes_with_discriminator(&mut data).unwrap();
+    data
+}
+
+fn dlp_account(data: Vec<u8>) -> Account {
+    Account {
+        lamports: 1_000_000,
+        data,
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
     }
 }
 
@@ -575,6 +601,52 @@ fn pending_waiters_gauge_value() -> i64 {
     chainlink_pending_fetch_waiters_gauge_value(
         ChainlinkPendingFetchLayer::FetchCloner,
     )
+}
+
+#[tokio::test]
+async fn fetch_undelegation_requests_scans_filtered_dlp_accounts() {
+    let delegated_account = random_pubkey();
+    let request_pda =
+        undelegation_request_pda_from_delegated_account(&delegated_account);
+    let request_data = undelegation_request_data(delegated_account, 20);
+
+    let ctx = setup(
+        vec![
+            (request_pda, dlp_account(request_data.clone())),
+            (
+                random_pubkey(),
+                dlp_account(vec![
+                    0;
+                    UndelegationRequest::size_with_discriminator()
+                ]),
+            ),
+            (
+                random_pubkey(),
+                Account {
+                    owner: system_program::id(),
+                    data: request_data,
+                    ..Default::default()
+                },
+            ),
+        ],
+        42,
+        Keypair::new(),
+    )
+    .await;
+
+    let requests = ctx
+        .fetch_cloner
+        .fetch_undelegation_requests()
+        .await
+        .unwrap();
+
+    assert_eq!(ctx.rpc_client.program_account_fetches(), 1);
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(request.request_pda, request_pda);
+    assert_eq!(request.delegated_account, delegated_account);
+    assert_eq!(request.expires_at_slot, 20);
+    assert_eq!(request.observed_slot, 42);
 }
 
 // -----------------
@@ -6451,6 +6523,109 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
     assert_eq!(target.remote_slot(), CURRENT_SLOT);
     assert_eq!(target.lamports(), 1_000_000);
     assert_eq!(target.data(), &[1, 2, 3, 4]);
+}
+
+#[tokio::test]
+async fn test_failed_plain_clone_accepts_concurrent_active_delegation() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+    cloner.set_clone_delay(Duration::from_millis(200));
+    cloner.set_fail_next_clone(true);
+
+    let mut remote_account = non_empty_account();
+    remote_account.set_remote_slot(CURRENT_SLOT + 1);
+    let mut request = account_clone_request(remote_account);
+    request.pubkey = account_pubkey;
+
+    let clone_task = tokio::spawn(async move {
+        fetch_cloner
+            .clone_account_with_ownership(
+                request,
+                AccountFetchOrigin::GetAccount,
+            )
+            .await
+    });
+    cloner.wait_for_account_clone_count(1).await;
+
+    let mut local_account = non_empty_account();
+    local_account.set_remote_slot(CURRENT_SLOT);
+    local_account.set_delegated(true);
+    accounts_bank.insert(account_pubkey, local_account);
+
+    clone_task
+        .await
+        .expect("clone task should complete")
+        .expect("active local delegation should satisfy the failed clone");
+
+    assert_eq!(cloner.clone_request_count(), 1);
+    let account = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("delegated account should remain in bank");
+    assert!(account.delegated());
+    assert_eq!(account.remote_slot(), CURRENT_SLOT);
+    assert_eq!(account.data(), &[1, 2, 3, 4]);
+}
+
+#[tokio::test]
+async fn test_other_validator_delegation_does_not_accept_active_local_account()
+{
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut local_account = non_empty_account();
+    local_account.set_remote_slot(CURRENT_SLOT);
+    local_account.set_delegated(true);
+    accounts_bank.insert(account_pubkey, local_account);
+
+    let mut remote_account = non_empty_account();
+    remote_account.set_remote_slot(CURRENT_SLOT + 1);
+    let mut request = account_clone_request(remote_account);
+    request.pubkey = account_pubkey;
+    request.delegated_to_other = Some(random_pubkey());
+    cloner.set_fail_next_clone(true);
+
+    fetch_cloner
+        .clone_account_with_ownership(request, AccountFetchOrigin::GetAccount)
+        .await
+        .expect_err(
+            "another validator's delegation must not accept local state",
+        );
+
+    assert_eq!(cloner.clone_request_count(), 1);
+    assert!(
+        accounts_bank
+            .get_account(&account_pubkey)
+            .is_some_and(|account| account.delegated()),
+        "failed clone must not be reconciled as success"
+    );
 }
 
 #[tokio::test]

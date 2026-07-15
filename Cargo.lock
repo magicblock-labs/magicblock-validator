@@ -280,7 +280,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -291,7 +291,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -902,13 +902,36 @@ dependencies = [
 
 [[package]]
 name = "borsh"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115e54d64eb62cdebad391c19efc9dce4981c690c85a33a12199d99bb9546fee"
+dependencies = [
+ "borsh-derive 0.10.4",
+ "hashbrown 0.13.2",
+]
+
+[[package]]
+name = "borsh"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfd1e3f8955a5d7de9fab72fc8373fade9fb8a703968cb200ae3dc6cf08e185a"
 dependencies = [
- "borsh-derive",
+ "borsh-derive 1.6.1",
  "bytes",
  "cfg_aliases",
+]
+
+[[package]]
+name = "borsh-derive"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "831213f80d9423998dd696e2c5345aba6be7a0bd8cd19e31c5243e13df1cef89"
+dependencies = [
+ "borsh-derive-internal",
+ "borsh-schema-derive-internal",
+ "proc-macro-crate 0.1.5",
+ "proc-macro2",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -918,10 +941,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfcfdc083699101d5a7965e49925975f2f55060f94f9a05e7187be95d530ca59"
 dependencies = [
  "once_cell",
- "proc-macro-crate",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "borsh-derive-internal"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65d6ba50644c98714aa2a70d13d7df3cd75cd2b523a2b452bf010443800976b3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "borsh-schema-derive-internal"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "276691d96f063427be83e6692b86148e488ebba9f48f77788724ca027ba3b6d4"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2021,7 +2066,7 @@ dependencies = [
  "atomic",
  "pear",
  "serde",
- "toml",
+ "toml 0.8.23",
  "uncased",
  "version_check",
 ]
@@ -2389,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "bincode",
  "magicblock-magic-program-api",
@@ -3422,7 +3467,7 @@ name = "magic-domain-program"
 version = "0.3.0"
 source = "git+https://github.com/magicblock-labs/magic-domain-program.git?rev=6cb903d#6cb903da837ebafeecb59a3861a457b7a2092e55"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "bytemuck_derive",
  "solana-program 3.0.0",
  "solana-system-interface 3.1.0",
@@ -3430,7 +3475,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3457,7 +3502,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "async-trait",
  "magicblock-committor-service",
@@ -3470,7 +3515,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "flate2",
  "lmdb-rkv",
@@ -3492,7 +3537,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3510,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "agave-feature-set",
  "agave-geyser-plugin-interface",
@@ -3561,15 +3606,14 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "agave-feature-set",
  "anyhow",
- "borsh",
+ "borsh 1.6.1",
  "fd-lock",
  "magic-domain-program",
  "magicblock-account-cloner",
- "magicblock-accounts",
  "magicblock-accounts-db",
  "magicblock-aperture",
  "magicblock-chainlink",
@@ -3624,14 +3668,14 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
  "assert_matches",
  "async-trait",
  "bincode",
- "borsh",
+ "borsh 1.6.1",
  "futures-util",
  "helius-laserstream",
  "lru 0.16.4",
@@ -3682,9 +3726,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "paste",
  "solana-account 3.4.0",
  "solana-account-info 3.1.1",
@@ -3697,11 +3741,11 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "async-trait",
  "bincode",
- "borsh",
+ "borsh 1.6.1",
  "futures-util",
  "lru 0.16.4",
  "magicblock-account-cloner",
@@ -3744,7 +3788,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "clap",
  "derive_more",
@@ -3758,13 +3802,13 @@ dependencies = [
  "solana-pubkey 4.1.0",
  "solana-signer",
  "tempfile",
- "toml",
+ "toml 0.8.23",
  "url",
 ]
 
 [[package]]
 name = "magicblock-core"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "bincode",
  "bytes",
@@ -3794,11 +3838,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-delegation-program-api"
-version = "0.3.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b#25386a7c1d406d06b8d07a4d5b0fd37d5e74213b"
+version = "3.1.0"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?tag=v3.1.0#27f7fd8178630b88e2be45d92b174b8f2ef4661e"
 dependencies = [
  "bincode",
- "borsh",
+ "borsh 0.10.4",
+ "borsh 1.6.1",
  "bytemuck",
  "const-crypto",
  "libsodium-rs",
@@ -3813,6 +3858,7 @@ dependencies = [
  "solana-instruction 3.3.0",
  "solana-loader-v3-interface 6.1.1",
  "solana-program 3.0.0",
+ "solana-pubkey 2.4.0",
  "solana-sdk",
  "solana-sdk-ids 3.1.0",
  "solana-sha256-hasher 3.1.0",
@@ -3824,7 +3870,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -3866,7 +3912,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "bincode",
  "const-crypto",
@@ -3881,7 +3927,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -3896,7 +3942,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -3949,7 +3995,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -3990,7 +4036,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "async-nats",
  "bincode",
@@ -4016,7 +4062,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4043,12 +4089,18 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "bincode",
  "futures-util",
+ "magicblock-account-cloner",
+ "magicblock-chainlink",
  "magicblock-core",
+ "magicblock-delegation-program-api",
  "magicblock-magic-program-api",
+ "magicblock-metrics",
+ "magicblock-program",
+ "solana-hash 4.2.0",
  "solana-instruction 3.3.0",
  "solana-keypair",
  "solana-message 3.1.0",
@@ -4057,14 +4109,16 @@ dependencies = [
  "solana-signature 3.3.0",
  "solana-signer",
  "solana-transaction",
+ "solana-transaction-error 3.1.0",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -4091,7 +4145,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "bincode",
  "chrono",
@@ -4118,7 +4172,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-tui-client"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "chrono",
  "clap",
@@ -4140,7 +4194,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "console-subscriber",
  "magicblock-api",
@@ -4156,7 +4210,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "magicblock-delegation-program-api",
  "magicblock-program",
@@ -4173,7 +4227,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "agave-feature-set",
  "git-version",
@@ -4404,7 +4458,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4555,7 +4609,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -4907,6 +4961,15 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "proc-macro-crate"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d6ea3c4595b96363c13943497db34af4460fb474a95c43f4446ad341b8c9785"
+dependencies = [
+ "toml 0.5.11",
 ]
 
 [[package]]
@@ -6249,7 +6312,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6390,7 +6453,7 @@ version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f08236dacd0e6dc8234becef58e27c8567856644ef509d7e97957d55a91dc72"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "bytemuck",
  "bytemuck_derive",
  "curve25519-dalek 4.1.3",
@@ -6570,7 +6633,7 @@ version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c04abbae16f57178a163125805637b8a076175bb5c0002fb04f4792bea901cf7"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
 ]
 
 [[package]]
@@ -6702,7 +6765,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8292c436b269ad23cecc8b24f7da3ab07ca111661e25e00ce0e1d22771951ab9"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "solana-instruction 3.3.0",
  "solana-sdk-ids 3.1.0",
 ]
@@ -7118,7 +7181,7 @@ version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8064ea1d591ec791be95245058ca40f4f5345d390c200069d0f79bbf55bfae55"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "bytemuck",
  "bytemuck_derive",
  "five8 1.0.0",
@@ -7164,7 +7227,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a97881335fc698deb46c6571945969aae6d93a14e2fff792a368b4fac872f116"
 dependencies = [
  "bincode",
- "borsh",
+ "borsh 1.6.1",
  "serde",
  "serde_derive",
  "solana-define-syscall 5.1.0",
@@ -7792,7 +7855,7 @@ version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f04fa578707b3612b095f0c8e19b66a1233f7c42ca8082fcb3b745afcc0add6"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "serde",
  "serde_derive",
 ]
@@ -7896,6 +7959,8 @@ version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b62adb9c3261a052ca1f999398c388f1daf558a1b492f60a6d9e64857db4ff1"
 dependencies = [
+ "borsh 0.10.4",
+ "borsh 1.6.1",
  "bytemuck",
  "bytemuck_derive",
  "curve25519-dalek 4.1.3",
@@ -8521,7 +8586,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "bincode",
  "bs58",
@@ -8906,7 +8971,7 @@ dependencies = [
  "agave-reserved-account-keys",
  "base64 0.22.1",
  "bincode",
- "borsh",
+ "borsh 1.6.1",
  "bs58",
  "log",
  "serde",
@@ -9067,7 +9132,7 @@ version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ea15126ebdc7e270c50d43884369af9f51d2308156d46a18e351522a164844d"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "bytemuck",
  "bytemuck_derive",
 ]
@@ -9224,7 +9289,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6433917b60441d68d99a17e121d9db0ea15a9a69c0e5afa34649cf5ba12612f"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "solana-instruction 3.3.0",
  "solana-pubkey 3.0.0",
 ]
@@ -9291,7 +9356,7 @@ version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f9c6e142cdf1e7e77f480053ec9f0ce989890768ddf91f619b50f39d1b456f5"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "bytemuck",
  "bytemuck_derive",
  "num-derive",
@@ -9409,7 +9474,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c467c7c3bd056f8fe60119e7ec34ddd6f23052c2fa8f1f51999098063b72676"
 dependencies = [
- "borsh",
+ "borsh 1.6.1",
  "num-derive",
  "num-traits",
  "solana-borsh",
@@ -9601,7 +9666,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.13.3"
+version = "0.13.7"
 dependencies = [
  "guinea",
  "magicblock-accounts-db",
@@ -9852,6 +9917,15 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "toml"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

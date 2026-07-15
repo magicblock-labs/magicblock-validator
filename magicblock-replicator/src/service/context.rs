@@ -68,10 +68,16 @@ impl ReplicationContext {
         let producer_id = format!("{node_id}-producer");
         let consumer_id = format!("{node_id}-consumer");
 
-        let slot = accountsdb.slot();
-        let index = ledger
-            .get_highest_transaction_index_for_slot(slot)?
-            .unwrap_or_default();
+        // Resume deduplication from the ledger's last persisted transaction,
+        // which may live in an in-progress (not-yet-finalized) slot ahead of
+        // `accountsdb.slot()`. Using the true last position ensures redelivered
+        // already-applied transactions of that slot are skipped (not re-applied
+        // and not re-hashed) after a mid-slot restart.
+        let (slot, index) =
+            match ledger.get_last_persisted_transaction_position()? {
+                Some(position) => position,
+                None => (accountsdb.slot(), 0),
+            };
 
         info!(%node_id, %producer_id, %consumer_id, slot, "context initialized");
         Ok(Self {

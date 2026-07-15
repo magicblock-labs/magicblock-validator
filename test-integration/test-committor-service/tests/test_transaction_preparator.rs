@@ -3,18 +3,16 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        commit_task::CommitBufferStage,
+        commit_stage_task::CleanupTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
-        utils::TransactionUtils,
+        utils::{create_commit_task, TransactionUtils},
         BaseActionTask, BaseActionTaskV1, BaseTaskImpl, FinalizeTask,
-        TaskBuilderImpl, UndelegateTask,
+        UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
 };
-use magicblock_program::{
-    args::ShortAccountMeta,
-    magic_scheduled_base_intent::{BaseAction, ProgramArgs},
-};
+use magicblock_core::intent::{BaseAction, ProgramArgs};
+use magicblock_program::args::ShortAccountMeta;
 use solana_pubkey::Pubkey;
 use solana_sdk::signer::Signer;
 use solana_sdk_ids::system_program;
@@ -36,13 +34,7 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks: Vec<BaseTaskImpl> = vec![
-        TaskBuilderImpl::create_commit_task(
-            1,
-            true,
-            committed_account.clone(),
-            None,
-        )
-        .into(),
+        create_commit_task(1, true, committed_account.clone(), None).into(),
         FinalizeTask {
             delegated_account: committed_account.pubkey,
         }
@@ -51,7 +43,7 @@ async fn test_prepare_commit_tx_with_single_account() {
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -99,13 +91,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     // Create test data
     let tasks: Vec<BaseTaskImpl> = vec![
         // account 1
-        TaskBuilderImpl::create_commit_task(
-            1,
-            true,
-            committed_account1.clone(),
-            None,
-        )
-        .into(),
+        create_commit_task(1, true, committed_account1.clone(), None).into(),
         // account 2
         buffer_commit_task.into(),
         // finalize account 1
@@ -122,7 +108,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -154,9 +140,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
             BaseTaskImpl::Commit(ct) => ct,
             _ => continue,
         };
-        let Some(CommitBufferStage::Cleanup(cleanup_task)) =
-            commit_task.stage()
-        else {
+        let Some(cleanup_task) = CleanupTask::from_commit(commit_task) else {
             continue;
         };
         let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
@@ -180,6 +164,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     // Create test data
     let committed_account = create_committed_account(&[1, 2, 3]);
     let base_action = BaseAction {
+        id: 0,
         compute_units: 30_000,
         destination_program: system_program::id(),
         source_program: None,
@@ -217,7 +202,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation
@@ -250,9 +235,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
             BaseTaskImpl::Commit(ct) => ct,
             _ => continue,
         };
-        let Some(CommitBufferStage::Cleanup(cleanup_task)) =
-            commit_task.stage()
-        else {
+        let Some(cleanup_task) = CleanupTask::from_commit(commit_task) else {
             continue;
         };
         let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
@@ -287,6 +270,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
             delegated_account: committed_account.pubkey,
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
+            include_undelegation_request: false,
         }
         .into(),
     ];
@@ -294,11 +278,12 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
     let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
         &fixture.authority.pubkey(),
         &tasks,
+        None,
     );
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys,
-        standalone_action_nonce: None,
+        uniqueness_nonce: None,
     };
 
     // Test preparation

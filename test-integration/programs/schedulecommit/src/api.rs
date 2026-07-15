@@ -1,4 +1,11 @@
-use dlp_api::args::{DelegateArgs, DelegateEphemeralBalanceArgs};
+use dlp_api::{
+    args::{DelegateArgs, DelegateEphemeralBalanceArgs},
+    pda::{
+        delegation_metadata_pda_from_delegated_account,
+        delegation_record_pda_from_delegated_account,
+        undelegation_request_pda_from_delegated_account,
+    },
+};
 use ephemeral_rollups_sdk::delegate_args::{
     DelegateAccountMetas, DelegateAccounts,
 };
@@ -160,6 +167,37 @@ pub fn delegate_account_cpi_instruction(
                 )
             }
         },
+        account_metas,
+    )
+}
+
+pub fn request_undelegation_cpi_instruction(
+    payer: Pubkey,
+    player: Pubkey,
+    committee: Pubkey,
+) -> Instruction {
+    let program_id = crate::id();
+    let request_pda =
+        undelegation_request_pda_from_delegated_account(&committee);
+    let delegation_record =
+        delegation_record_pda_from_delegated_account(&committee);
+    let delegation_metadata =
+        delegation_metadata_pda_from_delegated_account(&committee);
+
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(committee, false),
+        AccountMeta::new_readonly(program_id, false),
+        AccountMeta::new(request_pda, false),
+        AccountMeta::new_readonly(delegation_record, false),
+        AccountMeta::new(delegation_metadata, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new_readonly(dlp_api::id(), false),
+    ];
+
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::RequestUndelegationCpi(player),
         account_metas,
     )
 }
@@ -329,7 +367,7 @@ pub fn schedule_commit_with_payer_cpi_instruction(
         players,
         committees,
         true,
-        ScheduleCommitType::Commit,
+        ScheduleCommitType::CommitFinalize,
     )
 }
 
@@ -349,7 +387,7 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
         players,
         committees,
         false,
-        ScheduleCommitType::CommitAndUndelegate,
+        ScheduleCommitType::CommitFinalizeAndUndelegate,
     )
 }
 

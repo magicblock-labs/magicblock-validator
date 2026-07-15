@@ -49,6 +49,7 @@ use crate::{
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
+        BaseTaskImpl,
     },
     transaction_preparator::{
         delivery_preparator::BufferExecutionError,
@@ -227,12 +228,12 @@ where
             .await?;
 
             // Standalone actions executed in single stage
-            let mut strategy = TaskStrategist::build_strategy(
+            let strategy = TaskStrategist::build_strategy(
                 commit_tasks,
                 &self.authority.pubkey(),
                 persister,
+                Some(intent_bundle.id),
             )?;
-            strategy.standalone_action_nonce = Some(intent_bundle.id);
             return self
                 .single_stage_execution_flow(
                     intent_bundle,
@@ -260,12 +261,16 @@ where
             (commit_tasks?, finalize_tasks?)
         };
 
+        let uniqueness_nonce = requires_uniqueness_nonce(&commit_tasks)
+            .then_some(intent_bundle.id);
+
         // Build execution strategy
         match TaskStrategist::build_execution_strategy(
             commit_tasks,
             finalize_tasks,
             &self.authority.pubkey(),
             persister,
+            uniqueness_nonce,
         )? {
             StrategyExecutionMode::SingleStage(strategy) => {
                 trace!("Single stage execution");
@@ -288,6 +293,7 @@ where
                     finalize_stage,
                     execution_report,
                     persister,
+                    intent_bundle.id,
                 )
                 .await
             }
@@ -315,6 +321,7 @@ where
             transaction_strategy,
             self.actions_callback_executor.clone(),
             execution_report,
+            base_intent.id,
         );
         let res = execute_with_timeout(
             self.time_left(),
@@ -367,6 +374,7 @@ where
             finalize_strategy,
             execution_report,
             persister,
+            base_intent.id,
         )
         .await
     }
@@ -378,6 +386,7 @@ where
         finalize_strategy: TransactionStrategy,
         execution_report: &mut IntentExecutionReport,
         persister: &Option<P>,
+        intent_id: u64,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let mut executor = TwoStageExecutor::new(
             self.authority.insecure_clone(),
@@ -386,6 +395,7 @@ where
             self.intent_client.clone(),
             self.actions_callback_executor.clone(),
             execution_report,
+            intent_id,
         );
 
         let commit_signature = execute_with_timeout(
@@ -603,12 +613,58 @@ where
         let cleanup_futs = self.junk.iter().map(|to_cleanup| {
             self.transaction_preparator.cleanup_for_strategy(
                 &self.authority,
-                &to_cleanup.optimized_tasks,
-                &to_cleanup.lookup_tables_keys,
+                to_cleanup,
                 close_buffers,
             )
         });
 
         try_join_all(cleanup_futs).await.map(|_| ())
+    }
+}
+
+/// On the first commit of a delegation instance the nonce restarts at 1, so the
+/// transaction can be byte-identical to a prior instance's landed commit and
+/// alias its signature. Such intents must carry a per-intent uniqueness noop.
+fn requires_uniqueness_nonce(commit_tasks: &[BaseTaskImpl]) -> bool {
+    commit_tasks.iter().any(|task| match task {
+        BaseTaskImpl::Commit(task) => task.commit_id <= 1,
+        BaseTaskImpl::CommitFinalize(task) => task.commit_id <= 1,
+        _ => false,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use magicblock_core::intent::types::CommittedAccount;
+    use solana_account::Account;
+
+    use super::*;
+    use crate::tasks::{utils::create_commit_task, FinalizeTask};
+
+    fn commit_task(commit_id: u64) -> BaseTaskImpl {
+        create_commit_task(
+            commit_id,
+            false,
+            CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: Account::default(),
+                remote_slot: Default::default(),
+            },
+            None,
+        )
+        .into()
+    }
+
+    #[test]
+    fn test_requires_uniqueness_nonce_on_first_commit_only() {
+        let finalize = BaseTaskImpl::Finalize(FinalizeTask {
+            delegated_account: Pubkey::new_unique(),
+        });
+
+        assert!(requires_uniqueness_nonce(&[commit_task(1)]));
+        assert!(requires_uniqueness_nonce(&[commit_task(5), commit_task(1)]));
+        assert!(!requires_uniqueness_nonce(&[commit_task(2)]));
+        assert!(!requires_uniqueness_nonce(&[finalize]));
+        assert!(!requires_uniqueness_nonce(&[]));
     }
 }

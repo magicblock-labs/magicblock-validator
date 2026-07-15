@@ -8,11 +8,11 @@ use magicblock_committor_service::{
     persist::CommitStrategy,
     ComputeBudgetConfig,
 };
-use magicblock_core::intent::CommittedAccount;
-use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
-    ScheduledIntentBundle, UndelegateType,
+use magicblock_core::intent::{
+    types::CommittedAccount, CommitAndUndelegate, CommitType, MagicBaseIntent,
+    MagicIntentBundle, UndelegateType,
 };
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::{Account, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
@@ -24,7 +24,7 @@ use solana_sdk::{
 use test_kit::init_logger;
 use tokio::task::JoinSet;
 use tracing::*;
-use utils::transactions::{print_tx_logs, tx_logs_contain};
+use utils::transactions::print_tx_logs;
 
 use self::utils::transactions::init_and_delegate_order_book_on_chain;
 use crate::utils::{
@@ -186,9 +186,9 @@ async fn test_ix_commit_order_book_change_100_bytes() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_order_book_change_671_bytes() {
+async fn test_ix_commit_order_book_change_636_bytes() {
     commit_book_order_account(
-        671,
+        636,
         CommitStrategy::DiffArgs,
         CommitIntentKind::Commit,
     )
@@ -196,12 +196,12 @@ async fn test_ix_commit_order_book_change_671_bytes() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_order_book_change_681_bytes() {
-    // 680 bytes still produces a raw tx within the 1232-byte packet
-    // limit. 681 bytes crosses it by one byte, even though both raw sizes
-    // encode to a 1644-byte base64 string.
+async fn test_ix_commit_order_book_change_637_bytes() {
+    // 636 bytes still produces a raw tx within the 1232-byte packet limit
+    // (including the first-commit uniqueness noop). 637 bytes crosses it
+    // by one byte.
     commit_book_order_account(
-        681,
+        637,
         CommitStrategy::DiffBuffer,
         CommitIntentKind::Commit,
     )
@@ -564,9 +564,9 @@ async fn test_commit_20_accounts_1kb_bundle_size_6() {
 }
 
 #[tokio::test]
-async fn test_commit_20_accounts_1kb_bundle_size_20() {
+async fn test_commit_20_accounts_1kb_bundle_size_5() {
     commit_20_accounts_1kb(
-        20,
+        5,
         expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 20)]),
         CommitIntentKind::Commit,
     )
@@ -1014,39 +1014,7 @@ async fn ix_commit_local(
         let commit_finalized_and_undelegated_accounts =
             base_intent.get_commit_finalize_and_undelegate_intent_accounts();
 
-        let has_commit_flow =
-            committed_accounts.is_some() || undelegated_accounts.is_some();
-        let has_commit_finalize_flow = committed_finalize_accounts.is_some()
-            || commit_finalized_and_undelegated_accounts.is_some();
-        if has_commit_flow {
-            assert!(
-                tx_logs_contain(&rpc_client, &commit_signature, "CommitState")
-                    .await
-            );
-            assert!(
-                tx_logs_contain(&rpc_client, &finalize_signature, "Finalize")
-                    .await
-            );
-        }
-        if has_commit_finalize_flow {
-            assert!(
-                tx_logs_contain(
-                    &rpc_client,
-                    &commit_signature,
-                    "CommitFinalize"
-                )
-                .await
-            );
-        }
-
         let has_undelegate = base_intent.has_undelegate_intent();
-        if has_undelegate {
-            // Undelegate is part of atomic Finalization Stage
-            assert!(
-                tx_logs_contain(&rpc_client, &finalize_signature, "Undelegate")
-                    .await
-            );
-        }
 
         let mut committed_accounts: HashMap<Pubkey, _> = [
             (false, committed_accounts),

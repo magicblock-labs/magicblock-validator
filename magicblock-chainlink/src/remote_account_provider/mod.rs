@@ -16,10 +16,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
-use futures_util::{
-    future::{join_all, try_join_all},
-    stream::{FuturesUnordered, StreamExt},
-};
+use futures_util::future::{join_all, try_join_all};
 pub use lru_cache::{AccountsLruCache, AddAccountOutcome};
 use magicblock_config::config::GrpcConfig;
 pub(crate) use remote_account::RemoteAccount;
@@ -29,7 +26,8 @@ use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
-    client_error::ErrorKind, config::RpcAccountInfoConfig,
+    client_error::ErrorKind,
+    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
     request::RpcError,
 };
@@ -187,53 +185,99 @@ fn spawn_deferred_pubsub_clients(
     grpc_cfg: GrpcConfig,
     submux: SubMuxClient<ChainUpdatesClient>,
     subscribed_accounts: Arc<AccountsLruCache>,
-    subscription_transition_lock: Arc<AsyncMutex<()>>,
 ) {
-    tokio::spawn(async move {
-        let mut pubsub_futs = endpoints
-            .into_iter()
-            .map(|ep| {
-                connect_pubsub_client(
-                    ep,
+    // Deferred clients are the fallback update sources; retry connect/attach
+    // with capped backoff instead of dropping them permanently on failure.
+    const INITIAL_ATTACH_RETRY_DELAY: Duration = Duration::from_secs(1);
+    const MAX_ATTACH_RETRY_DELAY: Duration = Duration::from_secs(300);
+    for ep in endpoints {
+        let rpc_client = rpc_client.clone();
+        let chain_slot = chain_slot.clone();
+        let grpc_cfg = grpc_cfg.clone();
+        let submux = submux.clone();
+        let subscribed_accounts = subscribed_accounts.clone();
+        // Stop retrying when the owning mux shuts down so an unavailable
+        // endpoint doesn't leak this task past the provider's lifetime
+        let shutdown = submux.shutdown_token();
+        tokio::spawn(async move {
+            let mut retry_delay = INITIAL_ATTACH_RETRY_DELAY;
+            loop {
+                let connect = connect_pubsub_client(
+                    ep.clone(),
                     commitment,
                     rpc_client.clone(),
                     chain_slot.clone(),
                     resubscription_delay,
                     grpc_cfg.clone(),
-                )
-            })
-            .collect::<FuturesUnordered<_>>();
-        while let Some((label, result)) = pubsub_futs.next().await {
-            let (client, abort_rx) = match result {
-                Ok(client) => client,
-                Err(err) => {
-                    warn!(
+                );
+                let (label, result) = tokio::select! {
+                    _ = shutdown.cancelled() => return,
+                    connected = connect => connected,
+                };
+                match result {
+                    Ok((client, abort_rx)) => {
+                        // Attach without the subscription transition lock:
+                        // a paced resub of a large set can take minutes and
+                        // would starve foreground transitions. The reconnect
+                        // path already resubscribes lock-free.
+                        let attach = submux.add_client(
+                            client.clone(),
+                            abort_rx,
+                            subscribed_accounts.clone(),
+                        );
+                        let add_result = tokio::select! {
+                            _ = shutdown.cancelled() => {
+                                // Stop the partial client's subscription
+                                // work; the mux is gone anyway
+                                let _ = client.shutdown().await;
+                                return;
+                            }
+                            res = attach => res,
+                        };
+                        match add_result {
+                            Ok(()) => {
+                                debug!(
+                                    endpoint = %label,
+                                    "Attached deferred pubsub client"
+                                );
+                                return;
+                            }
+                            Err(err) => {
+                                warn!(
+                                    endpoint = %label,
+                                    error = %err,
+                                    retry_in = ?retry_delay,
+                                    "Deferred pubsub client failed to attach"
+                                );
+                                // Shut down so partially established
+                                // subscriptions don't leak listener tasks
+                                // before retrying with a fresh client
+                                if let Err(err) = client.shutdown().await {
+                                    debug!(
+                                        endpoint = %label,
+                                        error = %err,
+                                        "Failed to shut down partially \
+                                         attached pubsub client"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(err) => warn!(
                         endpoint = %label,
                         error = %err,
-                        "Skipping deferred pubsub client that failed to connect"
-                    );
-                    continue;
+                        retry_in = ?retry_delay,
+                        "Deferred pubsub client failed to connect"
+                    ),
                 }
-            };
-
-            let add_result = {
-                let _transition_guard =
-                    subscription_transition_lock.lock().await;
-                submux
-                    .add_client(client, abort_rx, subscribed_accounts.clone())
-                    .await
-            };
-            if let Err(err) = add_result {
-                warn!(
-                    endpoint = %label,
-                    error = %err,
-                    "Skipping deferred pubsub client that failed to attach"
-                );
-                continue;
+                tokio::select! {
+                    _ = shutdown.cancelled() => return,
+                    _ = tokio::time::sleep(retry_delay) => {}
+                }
+                retry_delay = (retry_delay * 2).min(MAX_ATTACH_RETRY_DELAY);
             }
-            debug!(endpoint = %label, "Attached deferred pubsub client");
-        }
-    });
+        });
+    }
 }
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
@@ -472,7 +516,9 @@ unsafe impl Sync for ForwardedSubscriptionUpdate {}
 
 // Not sure why helius uses a different code for this error
 const HELIUS_CONTEXT_SLOT_NOT_REACHED: i64 = -32603;
-const RPC_FETCH_MAX_RETRIES: u64 = 3;
+// Retries must ride out the RPC lagging the pubsub tip by several seconds (15 = ~5.6s),
+// otherwise one-shot subscription updates (e.g. program upgrades) could be dropped
+const RPC_FETCH_MAX_RETRIES: u64 = 15;
 const RPC_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
 const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
@@ -554,8 +600,21 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
 
     subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
 
-    /// Task that periodically updates the active subscriptions gauge
+    /// Task that periodically reconciles subscriptions and updates the
+    /// active subscriptions gauge
     _active_subscriptions_task_handle: Option<task::JoinHandle<()>>,
+}
+
+impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
+    for RemoteAccountProvider<T, U>
+{
+    fn drop(&mut self) {
+        // The reconciler loops forever; abort it so a dropped provider
+        // doesn't leak the task and the state it holds
+        if let Some(handle) = &self._active_subscriptions_task_handle {
+            handle.abort();
+        }
+    }
 }
 
 // -----------------
@@ -679,12 +738,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
-    /// Creates a background task that periodically updates the active subscriptions gauge
+    /// Creates a background task that periodically reconciles subscriptions
+    /// with the LRU (repairing missing ones, e.g. after a partial
+    /// resubscription) and optionally updates the active subscriptions gauge
     fn start_active_subscriptions_updater<PubsubClient: ChainPubsubClient>(
         subscribed_accounts: Arc<AccountsLruCache>,
         pubsub_client: Arc<PubsubClient>,
         removed_account_tx: mpsc::Sender<Pubkey>,
         subscription_key_locks: SubscriptionKeyLocks,
+        emit_metrics: bool,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(
@@ -705,7 +767,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     .await;
 
                 debug!(count = pubsub_total, "Updating active subscriptions");
-                set_monitored_accounts_count(pubsub_total);
+                if emit_metrics {
+                    set_monitored_accounts_count(pubsub_total);
+                }
             }
         })
     }
@@ -726,17 +790,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let subscription_key_locks: SubscriptionKeyLocks =
             Arc::new(AsyncMutex::new(HashMap::new()));
 
+        // The reconciler always runs: partial resubscriptions rely on it for
+        // repair. The config flag only gates the metrics emission.
         let active_subscriptions_updater =
-            if config.enable_subscription_metrics() {
-                Some(Self::start_active_subscriptions_updater(
-                    lrucache_subscribed_accounts.clone(),
-                    Arc::new(pubsub_client.clone()),
-                    removed_account_tx.clone(),
-                    subscription_key_locks.clone(),
-                ))
-            } else {
-                None
-            };
+            Some(Self::start_active_subscriptions_updater(
+                lrucache_subscribed_accounts.clone(),
+                Arc::new(pubsub_client.clone()),
+                removed_account_tx.clone(),
+                subscription_key_locks.clone(),
+                config.enable_subscription_metrics(),
+            ));
 
         let me = Self {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
@@ -841,7 +904,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         config.grpc().clone(),
                         provider.pubsub_client.clone(),
                         provider.lrucache_subscribed_accounts.clone(),
-                        provider.subscription_transition_lock.clone(),
                     );
                 }
                 Ok(provider)
@@ -959,6 +1021,48 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
         self.lrucache_subscribed_accounts.promote_multi(pubkeys);
+    }
+
+    pub(crate) async fn get_slot(&self) -> RemoteAccountProviderResult<u64> {
+        tokio::time::timeout(RPC_FETCH_TIMEOUT, self.rpc_client.get_slot())
+            .await
+            .map_err(|_| {
+                RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                    "RPC call timeout fetching slot after {}ms",
+                    RPC_FETCH_TIMEOUT.as_millis()
+                ))
+            })?
+            .map_err(|err| {
+                RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                    "RpcError fetching slot: {err:?}"
+                ))
+            })
+    }
+
+    pub(crate) async fn get_program_accounts_with_config(
+        &self,
+        pubkey: &Pubkey,
+        mut config: RpcProgramAccountsConfig,
+    ) -> RemoteAccountProviderResult<Vec<(Pubkey, Account)>> {
+        config.account_config.commitment = Some(self.rpc_client.commitment());
+
+        tokio::time::timeout(RPC_FETCH_TIMEOUT, async {
+            self.rpc_client
+                .get_program_accounts_with_config(pubkey, config)
+                .await
+        })
+        .await
+        .map_err(|_| {
+            RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                "RPC call timeout fetching program accounts for {pubkey} after {}ms",
+                RPC_FETCH_TIMEOUT.as_millis()
+            ))
+        })?
+        .map_err(|err| {
+            RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                "RpcError fetching program accounts for {pubkey}: {err:?}"
+            ))
+        })
     }
 
     pub(crate) fn set_capacity_eviction_protection<F>(&self, predicate: F)

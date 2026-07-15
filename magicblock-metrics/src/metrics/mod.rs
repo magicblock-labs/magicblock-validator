@@ -492,6 +492,43 @@ lazy_static::lazy_static! {
         "committor_intent_cu_usage_gauge", "Compute units used for Intent"
     ).unwrap();
 
+    static ref COMMITTOR_INTENT_TASK_PREPARATION_TIME: HistogramVec = HistogramVec::new(
+        HistogramOpts::new(
+            "committor_intent_task_preparation_time",
+            "Time in seconds spent on task preparation"
+        )
+        .buckets(
+            vec![0.1, 1.0, 2.0, 3.0, 5.0]
+        ),
+        &["task_type"],
+    ).unwrap();
+
+    static ref COMMITTOR_INTENT_ALT_PREPARATION_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_intent_alt_preparation_time",
+            "Time in seconds spent on ALTs preparation"
+        )
+        .buckets(
+            vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
+        ),
+    ).unwrap();
+
+    static ref COMMITTOR_INTENT_ALT_COUNT: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_intent_alt_count",
+            "Number of address lookup tables used per intent transaction (only recorded when ALTs are present)"
+        )
+        .buckets(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0])
+    ).unwrap();
+
+    static ref COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_fetch_commit_nonces_wait_time_second",
+            "Time in seconds spent waiting for fetch_current_commit_nonces response"
+        )
+        .buckets(vec![0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0]),
+    ).unwrap();
+
     // GetMultiplAccount investigation
     static ref REMOTE_ACCOUNT_PROVIDER_A_COUNT: IntCounter = IntCounter::new(
         "remote_account_provider_a_count", "Get mupltiple account count"
@@ -537,44 +574,6 @@ lazy_static::lazy_static! {
     static ref RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT: IntCounter = IntCounter::new(
         "rpc_client_signature_status_batch_signatures_count",
         "Number of signatures included in batched getSignatureStatuses requests"
-    ).unwrap();
-
-
-    static ref COMMITTOR_INTENT_TASK_PREPARATION_TIME: HistogramVec = HistogramVec::new(
-        HistogramOpts::new(
-            "committor_intent_task_preparation_time",
-            "Time in seconds spent on task preparation"
-        )
-        .buckets(
-            vec![0.1, 1.0, 2.0, 3.0, 5.0]
-        ),
-        &["task_type"],
-    ).unwrap();
-
-    static ref COMMITTOR_INTENT_ALT_PREPARATION_TIME: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "committor_intent_alt_preparation_time",
-            "Time in seconds spent on ALTs preparation"
-        )
-        .buckets(
-            vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
-        ),
-    ).unwrap();
-
-    static ref COMMITTOR_INTENT_ALT_COUNT: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "committor_intent_alt_count",
-            "Number of address lookup tables used per intent transaction (only recorded when ALTs are present)"
-        )
-        .buckets(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0])
-    ).unwrap();
-
-    static ref COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "committor_fetch_commit_nonces_wait_time_second",
-            "Time in seconds spent waiting for fetch_current_commit_nonces response"
-        )
-        .buckets(vec![0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0]),
     ).unwrap();
 
     // -----------------

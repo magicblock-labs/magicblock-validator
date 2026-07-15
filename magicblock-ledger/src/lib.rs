@@ -5,19 +5,13 @@ pub use database::{
     meta::PerfSample,
     options::{LedgerOptions, BLOCKSTORE_DIRECTORY_ROCKS_LEVEL},
 };
-use magicblock_core::traits::LatestBlockProvider;
+use magicblock_core::{
+    link::blocks::LatestBlockInner, traits::LatestBlockProvider,
+};
 use solana_clock::Clock;
 use solana_hash::Hash;
 pub use store::api::{Ledger, SignatureInfosForAddress};
 use tokio::sync::broadcast;
-
-#[derive(Default, Clone)]
-pub struct LatestBlockInner {
-    pub slot: u64,
-    pub blockhash: Hash,
-    pub clock: Clock,
-    pub timestamp_millis: i64,
-}
 
 /// Atomically updated, shared, latest block information
 /// The instances of this type can be used by various components
@@ -34,34 +28,6 @@ pub struct LatestBlock {
     inner: Arc<ArcSwapAny<Arc<LatestBlockInner>>>,
     /// Notification mechanism to signal that the block has been modified,
     notifier: broadcast::Sender<LatestBlockInner>,
-}
-
-impl LatestBlockInner {
-    /// Creates a block from a whole-second timestamp. The millisecond timestamp
-    /// is that value with a zero sub-second component.
-    pub fn new(slot: u64, blockhash: Hash, timestamp: i64) -> Self {
-        Self::new_with_millis(slot, blockhash, timestamp * 1000)
-    }
-
-    /// Creates a block from a millisecond-accurate timestamp, deriving the
-    /// whole-second `Clock::unix_timestamp` from it.
-    pub fn new_with_millis(
-        slot: u64,
-        blockhash: Hash,
-        timestamp_millis: i64,
-    ) -> Self {
-        let clock = Clock {
-            slot: slot + 1,
-            unix_timestamp: timestamp_millis.div_euclid(1000),
-            ..Default::default()
-        };
-        Self {
-            slot,
-            blockhash,
-            clock,
-            timestamp_millis,
-        }
-    }
 }
 
 impl Default for LatestBlock {
@@ -106,6 +72,10 @@ impl LatestBlockProvider for LatestBlock {
 
     fn clock(&self) -> Clock {
         self.inner.load().clock.clone()
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<LatestBlockInner> {
+        self.subscribe()
     }
 }
 

@@ -47,7 +47,7 @@ edition = "2021"
 homepage = "https://www.magicblock.xyz"
 license = "Business Source License 1.1"
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
-version = "0.13.3"
+version = "0.13.7"
 
 [workspace.dependencies]
 agave-geyser-plugin-interface = { version = "4.0" }
@@ -116,7 +116,7 @@ magicblock-committor-program = { path = "./magicblock-committor-program", featur
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "25386a7c1d406d06b8d07a4d5b0fd37d5e74213b" }
+magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", tag = "v3.1.0" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-metrics = { path = "./magicblock-metrics" }

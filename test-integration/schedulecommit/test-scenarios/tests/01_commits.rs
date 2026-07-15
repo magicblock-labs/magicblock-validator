@@ -70,7 +70,7 @@ fn test_committing_one_account() {
                 .map(|(player, _)| player.pubkey())
                 .collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
-            program_schedulecommit::ScheduleCommitType::Commit,
+            program_schedulecommit::ScheduleCommitType::CommitFinalize,
         );
 
         let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
@@ -126,7 +126,7 @@ fn test_committing_two_accounts() {
                 .map(|(player, _)| player.pubkey())
                 .collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
-            program_schedulecommit::ScheduleCommitType::Commit,
+            program_schedulecommit::ScheduleCommitType::CommitFinalize,
         );
 
         let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
@@ -335,9 +335,9 @@ fn schedule_commit_cpi_illegal_owner(
     let ix = ScheduleCommitInstruction::ScheduleCommitCpi(
         cpi_args,
         if is_undelegate {
-            ScheduleCommitType::CommitAndUndelegate
+            ScheduleCommitType::CommitFinalizeAndUndelegate
         } else {
-            ScheduleCommitType::Commit
+            ScheduleCommitType::CommitFinalize
         },
     );
     Instruction::new_with_borsh(program_id, &ix, account_metas)

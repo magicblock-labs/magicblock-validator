@@ -9,6 +9,7 @@ use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::{
         accounts::AccountUpdateTx,
+        blocks::LatestBlockInner,
         transactions::{
             ProcessableTransaction, ScheduledTasksTx,
             TransactionProcessingMode, TransactionStatusTx,
@@ -16,7 +17,7 @@ use magicblock_core::{
     },
     Slot,
 };
-use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
+use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_program::sysvar::HighPrecisionClock;
 use solana_feature_set::FeatureSet;
 use solana_program::slot_hashes::SlotHashes;
