@@ -4,7 +4,7 @@ use magicblock_magic_program_api::args::{ActionArgs, ShortAccountMeta};
 use serde::{Deserialize, Serialize};
 use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
-use types::CommittedAccount;
+pub use types::CommittedAccount;
 pub mod types;
 
 /// Commits that are covered by User's dlp PDAs

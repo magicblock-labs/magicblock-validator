@@ -129,8 +129,8 @@ The periodic task uses the validator's configured RPC URL. Do not move it onto t
 
 ```text
 MagicValidator::stop
-  -> stop scheduled-commit processor
-  -> stop committor service
+  -> stop undelegation request service
+  -> stop intent execution service
   -> claim_fees_task.stop().await
   -> join RPC thread and remaining validator services
 ```

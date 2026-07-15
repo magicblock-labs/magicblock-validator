@@ -515,7 +515,9 @@ unsafe impl Sync for ForwardedSubscriptionUpdate {}
 
 // Not sure why helius uses a different code for this error
 const HELIUS_CONTEXT_SLOT_NOT_REACHED: i64 = -32603;
-const RPC_FETCH_MAX_RETRIES: u64 = 3;
+// Retries must ride out the RPC lagging the pubsub tip by several seconds (15 = ~5.6s),
+// otherwise one-shot subscription updates (e.g. program upgrades) could be dropped
+const RPC_FETCH_MAX_RETRIES: u64 = 15;
 const RPC_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
 const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);

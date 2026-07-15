@@ -85,10 +85,16 @@ impl BaseTask for BaseTaskImpl {
                     AccountSizeClass::Huge,
                 )
             }
-            Self::Undelegate(_) => {
-                dlp_api::instruction_builder::undelegate_size_budget(
-                    AccountSizeClass::Huge,
-                )
+            Self::Undelegate(value) => {
+                if value.include_undelegation_request {
+                    dlp_api::instruction_builder::undelegate_with_request_size_budget(
+                        AccountSizeClass::Huge,
+                    )
+                } else {
+                    dlp_api::instruction_builder::undelegate_size_budget(
+                        AccountSizeClass::Huge,
+                    )
+                }
             }
         }
     }
@@ -167,16 +173,26 @@ pub struct UndelegateTask {
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
+    pub include_undelegation_request: bool,
 }
 
 impl UndelegateTask {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        dlp_api::instruction_builder::undelegate(
-            *validator,
-            self.delegated_account,
-            self.owner_program,
-            self.rent_reimbursement,
-        )
+        if self.include_undelegation_request {
+            dlp_api::instruction_builder::undelegate_with_request(
+                *validator,
+                self.delegated_account,
+                self.owner_program,
+                self.rent_reimbursement,
+            )
+        } else {
+            dlp_api::instruction_builder::undelegate(
+                *validator,
+                self.delegated_account,
+                self.owner_program,
+                self.rent_reimbursement,
+            )
+        }
     }
 }
 
@@ -378,6 +394,10 @@ impl From<BaseActionTaskV2> for BaseActionTask {
 #[cfg(test)]
 mod serialization_safety_test {
 
+    use dlp_api::{
+        discriminator::DlpDiscriminator,
+        pda::undelegation_request_pda_from_delegated_account,
+    };
     use magicblock_core::intent::{types::CommittedAccount, ProgramArgs};
     use magicblock_program::args::ShortAccountMeta;
     use solana_account::Account;
@@ -441,6 +461,7 @@ mod serialization_safety_test {
             delegated_account: Pubkey::new_unique(),
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
+            include_undelegation_request: false,
         }
         .into();
         assert_serializable(&undelegate_task.instruction(&validator));
@@ -490,6 +511,29 @@ mod serialization_safety_test {
             })
             .into();
         assert_serializable(&base_action_v2.instruction(&validator));
+    }
+
+    #[test]
+    fn test_undelegate_task_uses_request_account_when_included() {
+        let delegated_account = Pubkey::new_unique();
+
+        let ix = UndelegateTask {
+            delegated_account,
+            owner_program: Pubkey::new_unique(),
+            rent_reimbursement: Pubkey::new_unique(),
+            include_undelegation_request: true,
+        }
+        .instruction(&Pubkey::new_unique());
+
+        assert_eq!(ix.program_id, dlp_api::id());
+        assert_eq!(ix.data, DlpDiscriminator::Undelegate.to_vec());
+        assert_eq!(ix.accounts.len(), 13);
+        assert_eq!(
+            ix.accounts[12].pubkey,
+            undelegation_request_pda_from_delegated_account(&delegated_account)
+        );
+        assert!(ix.accounts[12].is_writable);
+        assert!(!ix.accounts[12].is_signer);
     }
 
     fn make_buffer_commit_task(

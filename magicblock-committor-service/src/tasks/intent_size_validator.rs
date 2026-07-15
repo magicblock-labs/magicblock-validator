@@ -94,6 +94,8 @@ impl IntentSizeValidator {
                 owner_program: account.account.owner,
                 // Real reimbursement pubkey is unknown here; doesn't affect size.
                 rent_reimbursement: Pubkey::default(),
+                // We lack context here so let's assume worst case scenario
+                include_undelegation_request: true,
             }
             .into()
         }

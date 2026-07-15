@@ -1,7 +1,9 @@
 use dlp_api::{
     args::CommitFinalizeArgs,
     diff::compute_diff,
-    instruction_builder::{commit_diff_size_budget, commit_size_budget},
+    instruction_builder::{
+        commit_finalize_from_buffer_size_budget, commit_finalize_size_budget,
+    },
     AccountSizeClass,
 };
 use magicblock_core::intent::types::CommittedAccount;
@@ -165,16 +167,16 @@ impl BaseTask for CommitFinalizeTask {
     fn accounts_size_budget(&self) -> u32 {
         match &self.delivery {
             CommitDelivery::StateInArgs => {
-                commit_size_budget(AccountSizeClass::Dynamic(
+                commit_finalize_size_budget(AccountSizeClass::Dynamic(
                     self.committed_account.account.data.len() as u32,
                 ))
             }
             CommitDelivery::StateInBuffer { .. }
             | CommitDelivery::DiffInBuffer { .. } => {
-                commit_size_budget(AccountSizeClass::Huge)
+                commit_finalize_from_buffer_size_budget(AccountSizeClass::Huge)
             }
             CommitDelivery::DiffInArgs { .. } => {
-                commit_diff_size_budget(AccountSizeClass::Dynamic(
+                commit_finalize_size_budget(AccountSizeClass::Dynamic(
                     self.committed_account.account.data.len() as u32,
                 ))
             }
