@@ -23,7 +23,7 @@ use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
-    intent::{BaseActionCallback, CommittedAccount},
+    intent::{types::CommittedAccount, BaseActionCallback},
     traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use magicblock_rpc_client::MagicblockRpcClient;
@@ -259,9 +259,8 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
 #[allow(dead_code)]
 pub fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
     let task = create_commit_task(data);
-    let stage = task.state_preparation_stage();
     CommitTask {
-        delivery_details: CommitDelivery::StateInBuffer { stage },
+        delivery_details: CommitDelivery::StateInBuffer { prepared: false },
         ..task
     }
 }

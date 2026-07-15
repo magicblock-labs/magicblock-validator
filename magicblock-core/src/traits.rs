@@ -9,7 +9,7 @@ use solana_transaction_error::TransactionError;
 use tokio::sync::broadcast;
 
 use crate::{
-    intent::{BaseActionCallback, CommittedAccount},
+    intent::{types::CommittedAccount, BaseActionCallback, MagicIntentBundle},
     link::blocks::LatestBlockInner,
     Slot,
 };
@@ -21,6 +21,17 @@ pub trait MagicSys: Sync + Send + 'static {
         &self,
         commits: &[CommittedAccount],
     ) -> Result<HashMap<Pubkey, u64>, InstructionError>;
+
+    /// Returns `Ok(())` if `intent` could ever fit on the base layer, even
+    /// under the smallest possible task representation (buffer-mode commits,
+    /// address lookup tables, 2-stage execution). If it can never fit no
+    /// matter how it gets optimized at execution time, returns `Err` so the
+    /// intent can be refused up front instead of failing later during
+    /// commit/finalize.
+    fn validate_intent_size(
+        &self,
+        intent: &MagicIntentBundle,
+    ) -> Result<(), InstructionError>;
 }
 
 /// Provides read access to the latest confirmed block's metadata.

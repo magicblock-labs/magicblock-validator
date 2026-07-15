@@ -427,13 +427,15 @@ fn test_request_undelegation_commits_and_undelegates_one_account() {
 
 #[test]
 fn test_commit_huge_order_book_account() {
-    run_test_for_commit_huge_order_book_account(ScheduleCommitType::Commit);
+    run_test_for_commit_huge_order_book_account(
+        ScheduleCommitType::CommitFinalize,
+    );
 }
 
 #[test]
 fn test_commit_and_undelegate_huge_order_book_account() {
     run_test_for_commit_huge_order_book_account(
-        ScheduleCommitType::CommitAndUndelegate,
+        ScheduleCommitType::CommitFinalizeAndUndelegate,
     );
 }
 
@@ -506,6 +508,12 @@ fn run_test_for_commit_huge_order_book_account(
                 assert_one_committee_account_was_not_undelegated_on_chain(&ctx);
             }
             ScheduleCommitType::CommitAndUndelegate => {
+                assert_one_committee_account_was_undelegated_on_chain(&ctx);
+            }
+            ScheduleCommitType::CommitFinalize => {
+                assert_one_committee_account_was_not_undelegated_on_chain(&ctx);
+            }
+            ScheduleCommitType::CommitFinalizeAndUndelegate => {
                 assert_one_committee_account_was_undelegated_on_chain(&ctx);
             }
         }

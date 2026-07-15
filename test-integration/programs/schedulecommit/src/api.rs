@@ -367,7 +367,7 @@ pub fn schedule_commit_with_payer_cpi_instruction(
         players,
         committees,
         true,
-        ScheduleCommitType::Commit,
+        ScheduleCommitType::CommitFinalize,
     )
 }
 
@@ -387,7 +387,7 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
         players,
         committees,
         false,
-        ScheduleCommitType::CommitAndUndelegate,
+        ScheduleCommitType::CommitFinalizeAndUndelegate,
     )
 }
 
