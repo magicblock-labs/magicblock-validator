@@ -11,7 +11,7 @@ use tracing::{error, info, instrument, warn};
 
 use super::{ReplicationContext, LOCK_REFRESH_INTERVAL};
 use crate::{
-    nats::{Producer, Subjects},
+    nats::{Confirm, Producer, Subjects},
     watcher::SnapshotWatcher,
     Result,
 };
@@ -179,24 +179,21 @@ impl Primary {
         let _timing = ShutdownTiming::new("replication_service_drain");
 
         let deadline = Instant::now() + SHUTDOWN_DRAIN_TIMEOUT;
+        // Counts messages handed to the broker, not messages known to have
+        // landed: only the confirmed kinds report that (see `confirmation_for`).
         let mut drained = 0_u64;
-        let mut acked = 0_u64;
 
         if let Some(msg) = pending.take() {
             if !self.publish_with_retry_until(&msg, Some(deadline)).await {
-                warn!(
-                    drained,
-                    acked, "failed to drain pending replication message"
-                );
+                warn!(drained, "failed to drain pending replication message");
                 return;
             }
             drained += 1;
-            acked += msg.requires_ack() as u64;
         }
 
         loop {
             if Instant::now() >= deadline {
-                warn!(drained, acked, "replication shutdown drain timed out");
+                warn!(drained, "replication shutdown drain timed out");
                 return;
             }
 
@@ -208,24 +205,19 @@ impl Primary {
                     {
                         warn!(
                             drained,
-                            acked, "failed to drain queued replication message"
+                            "failed to drain queued replication message"
                         );
                         return;
                     }
                     drained += 1;
-                    acked += msg.requires_ack() as u64;
                 }
                 Err(TryRecvError::Empty) => {
-                    info!(
-                        drained,
-                        acked, "replication shutdown drain complete"
-                    );
+                    info!(drained, "replication shutdown drain complete");
                     return;
                 }
                 Err(TryRecvError::Disconnected) => {
                     info!(
                         drained,
-                        acked,
                         "replication channel closed during shutdown drain"
                     );
                     return;
@@ -255,11 +247,15 @@ impl Primary {
         let subject = Subjects::from_message(msg);
         let (slot, index) = msg.slot_and_index();
         let msg_id = message_id(slot, index);
-        let ack = msg.requires_ack();
 
         self.ctx
             .broker
-            .publish(subject, payload.into(), Some(msg_id.as_str()), ack)
+            .publish(
+                subject,
+                payload.into(),
+                Some(msg_id.as_str()),
+                confirmation_for(msg),
+            )
             .await?;
         self.ctx.update_position(slot, index);
         Ok(())
@@ -362,4 +358,24 @@ fn remaining_until(deadline: Instant) -> Option<Duration> {
 
 fn message_id(slot: u64, index: u32) -> String {
     format!("{slot}:{index}")
+}
+
+/// How far each kind of message waits for the server.
+///
+/// Publishes are issued one at a time, so confirming one costs a round-trip of
+/// publish throughput: affordable only for the rare kinds, and only worth it
+/// where the leader is the last chance to notice the loss.
+pub(crate) fn confirmation_for(msg: &Message) -> Confirm {
+    match msg {
+        // Hundreds per second, and a lost one is loud regardless: it diverges
+        // accountsdb, which the replica's index check and the superblock
+        // checksum both catch.
+        Message::Transaction(_) => Confirm::No,
+        // A few per second, and a lost one is near-silent: nothing goes
+        // unapplied, so no checksum trips, but replicas seed the next slot from
+        // the wrong blockhash.
+        Message::Block(_) => Confirm::Yes,
+        // Rare, and they double as a consumer's resume point after a snapshot.
+        Message::SuperBlock(_) | Message::Reset(_) => Confirm::AndTrackSequence,
+    }
 }
