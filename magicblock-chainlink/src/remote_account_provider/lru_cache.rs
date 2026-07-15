@@ -1,4 +1,4 @@
-use std::{collections::HashSet, num::NonZeroUsize};
+use std::{collections::HashSet, num::NonZeroUsize, sync::Arc};
 
 use lru::LruCache;
 use magicblock_metrics::metrics::inc_evicted_accounts_count;
@@ -160,6 +160,24 @@ impl AccountsLruCache {
         }
     }
 
+    pub fn can_add_with_evict_filter<F>(
+        &self,
+        pubkey: &Pubkey,
+        is_evictable: F,
+    ) -> bool
+    where
+        F: Fn(&Pubkey) -> bool,
+    {
+        if self.accounts_to_never_evict.contains(pubkey) {
+            return true;
+        }
+
+        let subs = self.subscribed_accounts.lock();
+        subs.contains(pubkey)
+            || subs.len() < subs.cap().get()
+            || subs.iter().any(|(candidate, _)| is_evictable(candidate))
+    }
+
     pub fn contains(&self, pubkey: &Pubkey) -> bool {
         let subs = self.subscribed_accounts.lock();
         subs.contains(pubkey)
@@ -206,6 +224,31 @@ impl SubscribedAccountsTracker for AccountsLruCache {
     fn subscribed_accounts(&self) -> HashSet<Pubkey> {
         let subs = self.subscribed_accounts.lock();
         subs.iter().map(|(k, _)| *k).collect()
+    }
+}
+
+/// Authoritative account set used by SubMux reconnects. Transport policy is
+/// applied by SubMux; this tracker only exposes every account that must retain
+/// some subscription coverage.
+pub(crate) struct TieredSubscribedAccountsTracker {
+    primary: Arc<AccountsLruCache>,
+    secondary: Arc<AccountsLruCache>,
+}
+
+impl TieredSubscribedAccountsTracker {
+    pub(crate) fn new(
+        primary: Arc<AccountsLruCache>,
+        secondary: Arc<AccountsLruCache>,
+    ) -> Self {
+        Self { primary, secondary }
+    }
+}
+
+impl SubscribedAccountsTracker for TieredSubscribedAccountsTracker {
+    fn subscribed_accounts(&self) -> HashSet<Pubkey> {
+        let mut subscriptions = self.primary.pubkeys();
+        subscriptions.extend(self.secondary.pubkeys());
+        subscriptions
     }
 }
 

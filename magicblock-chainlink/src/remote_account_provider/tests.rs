@@ -175,6 +175,330 @@ async fn wait_for_pending_account_delta_at_least(
     }
 }
 
+async fn wait_until(what: &str, condition: impl Fn() -> bool) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    loop {
+        if condition() {
+            break;
+        }
+        assert!(start.elapsed() < timeout, "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Accounts that do not exist on chain stay in the secondary LRU and move to
+/// the primary LRU once they are created.
+#[tokio::test]
+async fn test_not_found_account_stays_secondary_and_promotes_on_creation() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(
+        existing,
+        Account {
+            lamports: 500,
+            ..Default::default()
+        },
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    let res = ctx
+        .provider
+        .try_get(missing, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap();
+    assert!(!res.is_found());
+    let fetch_slot = res.slot();
+
+    // The account remains in the secondary tier after the fetch resolves.
+    let provider = ctx.provider.clone();
+    wait_until("account to enter secondary tier", || {
+        provider.secondary_subscriptions.contains(&missing)
+    })
+    .await;
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+    assert!(ctx.provider.is_watching(&missing));
+    assert!(ctx.pubsub_client.subscriptions_union().contains(&missing));
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+
+    // An older update must not undo the newer not-found classification.
+    let transition_guard =
+        ctx.provider.subscription_transition_lock.lock().await;
+    let updates_before = ctx.provider.received_updates_count();
+    ctx.pubsub_client
+        .send_account_update(
+            missing,
+            fetch_slot.saturating_sub(1),
+            &Account {
+                lamports: 900,
+                ..Default::default()
+            },
+        )
+        .await;
+    let provider = ctx.provider.clone();
+    wait_until("older subscription update to be processed", || {
+        provider.received_updates_count() > updates_before
+    })
+    .await;
+    drop(transition_guard);
+    let transition_guard =
+        ctx.provider.subscription_transition_lock.lock().await;
+    drop(transition_guard);
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+
+    // A newer creation update promotes the account to the primary LRU.
+    ctx.pubsub_client
+        .send_account_update(
+            missing,
+            fetch_slot + 1,
+            &Account {
+                lamports: 1_000,
+                ..Default::default()
+            },
+        )
+        .await;
+    let provider = ctx.provider.clone();
+    wait_until("account to be promoted", || {
+        provider.lrucache_subscribed_accounts.contains(&missing)
+            && !provider.secondary_subscriptions.contains(&missing)
+    })
+    .await;
+    assert!(!ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+}
+
+#[tokio::test]
+async fn test_repeated_not_found_fetch_preserves_primary_working_set() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        existing,
+        Account {
+            lamports: 500,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    assert!(ctx
+        .provider
+        .try_get(existing, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&existing));
+
+    for _ in 0..2 {
+        assert!(!ctx
+            .provider
+            .try_get(missing, AccountFetchOrigin::GetAccount)
+            .await
+            .unwrap()
+            .is_found());
+    }
+
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&existing));
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&existing));
+}
+
+#[tokio::test]
+async fn test_manual_unsubscribe_removes_secondary_account() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(existing, Account::default()).await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
+
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+
+    ctx.provider.unsubscribe(&missing).await.unwrap();
+
+    assert!(!ctx.provider.is_watching(&missing));
+    assert!(!ctx.pubsub_client.subscriptions_union().contains(&missing));
+    assert!(
+        !ctx.provider
+            .has_subscription_reason(
+                &missing,
+                SubscriptionReason::DirectAccount
+            )
+            .await
+    );
+    assert_eq!(removed_rx.recv().await, Some(missing));
+}
+
+#[tokio::test]
+async fn test_failed_membership_repair_rolls_back_new_reason() {
+    init_logger();
+
+    let pubkey = random_pubkey();
+    let ctx = setup_provider(pubkey, Account::default()).await;
+    ctx.provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    ctx.provider.lrucache_subscribed_accounts.remove(&pubkey);
+    ctx.pubsub_client.simulate_disconnect();
+    assert!(ctx
+        .provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DelegationRecord)
+        .await
+        .is_err());
+
+    assert!(
+        ctx.provider
+            .has_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+            .await
+    );
+    assert!(
+        !ctx.provider
+            .has_subscription_reason(
+                &pubkey,
+                SubscriptionReason::DelegationRecord,
+            )
+            .await
+    );
+}
+
+#[tokio::test]
+async fn test_secondary_capacity_preserves_protected_account() {
+    init_logger();
+
+    let primary = random_pubkey();
+    let protected_missing = random_pubkey();
+    let rejected_missing = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        primary,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    ctx.provider
+        .acquire_subscription(
+            &primary,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    assert!(!ctx
+        .provider
+        .try_get(protected_missing, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap()
+        .is_found());
+    ctx.provider
+        .acquire_subscription(
+            &protected_missing,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    let subscribe_attempts = ctx.pubsub_client.subscribe_attempts();
+    ctx.pubsub_client.fail_next_unsubscriptions(1);
+    let err = ctx
+        .provider
+        .try_get(rejected_missing, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::NoEvictableSubscriptionCapacity { .. }
+    ));
+    assert!(ctx
+        .provider
+        .secondary_subscriptions
+        .contains(&protected_missing));
+    assert!(ctx.provider.is_watching(&protected_missing));
+    assert!(!ctx.provider.is_watching(&rejected_missing));
+    assert!(!ctx
+        .pubsub_client
+        .subscriptions_union()
+        .contains(&rejected_missing));
+    assert_eq!(ctx.pubsub_client.subscribe_attempts(), subscribe_attempts);
+}
+
+#[tokio::test]
+async fn test_secondary_eviction_failure_restores_previous_account() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let first_missing = random_pubkey();
+    let second_missing = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        existing,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    assert!(!ctx
+        .provider
+        .try_get(first_missing, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap()
+        .is_found());
+    ctx.pubsub_client.fail_next_unsubscriptions(1);
+
+    assert!(ctx
+        .provider
+        .try_get(second_missing, AccountFetchOrigin::GetAccount)
+        .await
+        .is_err());
+    assert!(ctx
+        .provider
+        .secondary_subscriptions
+        .contains(&first_missing));
+    assert!(ctx.provider.is_watching(&first_missing));
+    assert!(ctx
+        .pubsub_client
+        .subscriptions_union()
+        .contains(&first_missing));
+    assert!(!ctx.provider.is_watching(&second_missing));
+}
+
 struct TestSlotConfig {
     current_slot: u64,
     account1_slot: u64,
@@ -352,7 +676,10 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
         .expect("owner task should complete")
         .expect("owner task should not panic");
     let err = result.expect_err("setup_subscriptions should fail");
-    assert!(err.to_string().contains("subscription(s) failed"));
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
+    ));
     assert!(!provider.is_pending(&pubkey));
 
     pubsub_client.try_reconnect().await.unwrap();
@@ -451,8 +778,14 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
 
     let first_err = first_result.expect_err("owner should fail");
     let second_err = second_result.expect_err("waiter should fail");
-    assert!(first_err.to_string().contains("subscription(s) failed"));
-    assert!(second_err.to_string().contains("subscription(s) failed"));
+    assert!(matches!(
+        first_err,
+        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
+    ));
+    assert!(matches!(
+        second_err,
+        RemoteAccountProviderError::AccountResolutionsFailed(_)
+    ));
     assert!(!provider.is_pending(&pubkey));
 }
 
@@ -1248,7 +1581,6 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
     let rpc_client = ChainRpcClientMockBuilder::new()
         .slot(CURRENT_SLOT)
         .clock_sysvar_for_slot(CURRENT_SLOT)
-        .account(pubkey, account)
         .build();
     let (updates_sender, updates_receiver) = mpsc::channel(1_000);
     let pubsub_client =
@@ -1331,6 +1663,8 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         1,
     )
     .await;
+    assert!(provider.lrucache_subscribed_accounts.contains(&pubkey));
+    assert!(!provider.secondary_subscriptions.contains(&pubkey));
 }
 
 #[tokio::test]
@@ -1978,7 +2312,7 @@ async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
 }
 
 #[tokio::test]
-async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
+async fn test_capacity_eviction_unsubscribe_failure_restores_previous_owner() {
     init_logger();
     let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
@@ -2025,16 +2359,9 @@ async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
         err,
         RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
     ));
-    assert!(provider.is_watching(&pubkey2));
-    assert!(
-        provider
-            .has_subscription_reason(
-                &pubkey2,
-                SubscriptionReason::DirectAccount
-            )
-            .await
-    );
-    assert!(provider
+    assert!(provider.is_watching(&pubkey1));
+    assert!(!provider.is_watching(&pubkey2));
+    assert!(!provider
         .pubsub_client()
         .subscriptions_union()
         .contains(&pubkey2));
@@ -2150,11 +2477,7 @@ async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribin
     let registration_before = registration_metric_value(
         SubscriptionRegistrationOrigin::Internal,
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::RejectedAndUnsubscribed,
-    );
-    let cleanup_before = cleanup_metric_value(
-        SubscriptionCleanupSource::RejectedNewSubscription,
-        SubscriptionCleanupOutcome::Unsubscribed,
+        SubscriptionRegistrationOutcome::RejectedNoCapacity,
     );
 
     let err = provider
@@ -2165,14 +2488,9 @@ async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribin
     let registration_after = registration_metric_value(
         SubscriptionRegistrationOrigin::Internal,
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::RejectedAndUnsubscribed,
-    );
-    let cleanup_after = cleanup_metric_value(
-        SubscriptionCleanupSource::RejectedNewSubscription,
-        SubscriptionCleanupOutcome::Unsubscribed,
+        SubscriptionRegistrationOutcome::RejectedNoCapacity,
     );
     assert_eq!(registration_after - registration_before, 1);
-    assert_eq!(cleanup_after - cleanup_before, 1);
 
     assert!(matches!(
         err,
@@ -2520,6 +2838,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             self.lrucache_subscribed_accounts.never_evicted_accounts();
         subscription_reconciler::reconcile_subscriptions(
             &self.lrucache_subscribed_accounts,
+            &self.secondary_subscriptions,
+            &self.confirmed_missing_subscriptions,
             &self.pubsub_client,
             &never_evicted,
             &self.removed_account_tx,
