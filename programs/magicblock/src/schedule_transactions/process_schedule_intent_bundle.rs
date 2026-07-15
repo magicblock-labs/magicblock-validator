@@ -9,7 +9,7 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
-        CommitType, ConstructionContext, ScheduledIntentBundle,
+        extract_commit_accounts, ConstructionContext, ScheduledIntentBundle,
     },
     magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
@@ -113,7 +113,7 @@ pub(crate) fn process_schedule_intent_bundle(
         // Change owner to dlp and set undelegating flag.
         // Once account is undelegated we need to make it immutable in our validator.
         let transaction_context = construction_context.transaction_context();
-        let undelegated_accounts_ref = CommitType::extract_commit_accounts(
+        let undelegated_accounts_ref = extract_commit_accounts(
             &undelegated_account_indices,
             transaction_context,
         )?;

@@ -1,23 +1,13 @@
 use dlp_api::{args::CallHandlerArgs, AccountSizeClass};
-use magicblock_committor_program::{
-    instruction_builder::{
-        close_buffer::{create_close_ix, CreateCloseIxArgs},
-        init_buffer::{create_init_ix, CreateInitIxArgs},
-        realloc_buffer::{
-            create_realloc_buffer_ixs, CreateReallocBufferIxArgs,
-        },
-        write_buffer::{create_write_ix, CreateWriteIxArgs},
-    },
-    pdas, ChangesetChunks, Chunks,
-};
-use magicblock_core::intent::BaseActionCallback;
+use magicblock_core::intent::{BaseAction, BaseActionCallback};
 use magicblock_metrics::metrics::LabelValue;
-use magicblock_program::magic_scheduled_base_intent::BaseAction;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
 pub mod commit_finalize_task;
+pub mod commit_stage_task;
 pub mod commit_task;
+pub mod intent_size_validator;
 pub mod task_builder;
 pub mod task_strategist;
 pub mod utils;
@@ -401,166 +391,6 @@ impl From<BaseActionTaskV2> for BaseActionTask {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct PreparationTask {
-    pub commit_id: u64,
-    pub pubkey: Pubkey,
-    pub chunks: Chunks,
-
-    // TODO(edwin): replace with reference once done
-    pub buffer_data: Vec<u8>,
-}
-
-impl PreparationTask {
-    /// Returns initialization [`Instruction`]
-    pub fn init_instruction(&self, authority: &Pubkey) -> Instruction {
-        // // SAFETY: as object_length internally uses only already allocated or static buffers,
-        // // and we don't use any fs writers, so the only error that may occur here is of kind
-        // // OutOfMemory or WriteZero. This is impossible due to:
-        // // Chunks::new panics if its size exceeds MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE or 10_240
-        // // https://github.com/near/borsh-rs/blob/f1b75a6b50740bfb6231b7d0b1bd93ea58ca5452/borsh/src/ser/helpers.rs#L59
-        let chunks_account_size =
-            borsh::object_length(&self.chunks).unwrap() as u64;
-        let buffer_account_size = self.buffer_data.len() as u64;
-
-        let (instruction, _, _) = create_init_ix(CreateInitIxArgs {
-            authority: *authority,
-            pubkey: self.pubkey,
-            chunks_account_size,
-            buffer_account_size,
-            commit_id: self.commit_id,
-            chunk_count: self.chunks.count(),
-            chunk_size: self.chunks.chunk_size(),
-        });
-
-        instruction
-    }
-
-    /// Returns compute units required for realloc instruction
-    pub fn init_compute_units(&self) -> u32 {
-        12_000
-    }
-
-    /// Returns realloc instruction required for Buffer preparation
-    #[allow(clippy::let_and_return)]
-    pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
-        let buffer_account_size = self.buffer_data.len() as u64;
-        let realloc_instructions =
-            create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
-                authority: *authority,
-                pubkey: self.pubkey,
-                buffer_account_size,
-                commit_id: self.commit_id,
-            });
-
-        realloc_instructions
-    }
-
-    /// Returns compute units required for realloc instruction
-    pub fn realloc_compute_units(&self) -> u32 {
-        6_000
-    }
-
-    /// Returns realloc instruction required for Buffer preparation
-    #[allow(clippy::let_and_return)]
-    pub fn write_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
-        let chunks_iter =
-            ChangesetChunks::new(&self.chunks, self.chunks.chunk_size())
-                .iter(&self.buffer_data);
-        let write_instructions = chunks_iter
-            .map(|chunk| {
-                create_write_ix(CreateWriteIxArgs {
-                    authority: *authority,
-                    pubkey: self.pubkey,
-                    offset: chunk.offset,
-                    data_chunk: chunk.data_chunk,
-                    commit_id: self.commit_id,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        write_instructions
-    }
-
-    pub fn write_compute_units(&self, bytes_count: usize) -> u32 {
-        const PER_BYTE: u32 = 3;
-
-        u32::try_from(bytes_count)
-            .ok()
-            .and_then(|bytes_count| bytes_count.checked_mul(PER_BYTE))
-            .unwrap_or(u32::MAX)
-    }
-
-    pub fn chunks_pda(&self, authority: &Pubkey) -> Pubkey {
-        pdas::chunks_pda(
-            authority,
-            &self.pubkey,
-            self.commit_id.to_le_bytes().as_slice(),
-        )
-        .0
-    }
-
-    pub fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
-        pdas::buffer_pda(
-            authority,
-            &self.pubkey,
-            self.commit_id.to_le_bytes().as_slice(),
-        )
-        .0
-    }
-
-    pub fn cleanup_task(&self) -> CleanupTask {
-        CleanupTask {
-            pubkey: self.pubkey,
-            commit_id: self.commit_id,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct CleanupTask {
-    pub pubkey: Pubkey,
-    pub commit_id: u64,
-}
-
-impl CleanupTask {
-    pub fn instruction(&self, authority: &Pubkey) -> Instruction {
-        create_close_ix(CreateCloseIxArgs {
-            authority: *authority,
-            pubkey: self.pubkey,
-            commit_id: self.commit_id,
-        })
-    }
-
-    /// Returns compute units required to execute [`CleanupTask`]
-    pub fn compute_units(&self) -> u32 {
-        30_000
-    }
-
-    /// Returns a number of [`CleanupTask`]s that is possible to fit in single
-    pub const fn max_tx_fit_count_with_budget() -> usize {
-        8
-    }
-
-    pub fn chunks_pda(&self, authority: &Pubkey) -> Pubkey {
-        pdas::chunks_pda(
-            authority,
-            &self.pubkey,
-            self.commit_id.to_le_bytes().as_slice(),
-        )
-        .0
-    }
-
-    pub fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
-        pdas::buffer_pda(
-            authority,
-            &self.pubkey,
-            self.commit_id.to_le_bytes().as_slice(),
-        )
-        .0
-    }
-}
-
 #[cfg(test)]
 mod serialization_safety_test {
 
@@ -568,15 +398,14 @@ mod serialization_safety_test {
         discriminator::DlpDiscriminator,
         pda::undelegation_request_pda_from_delegated_account,
     };
-    use magicblock_core::intent::CommittedAccount;
-    use magicblock_program::{
-        args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
-    };
+    use magicblock_core::intent::{types::CommittedAccount, ProgramArgs};
+    use magicblock_program::args::ShortAccountMeta;
     use solana_account::Account;
 
     use crate::{
         tasks::{
-            commit_task::{CommitBufferStage, CommitDelivery, CommitTask},
+            commit_stage_task::PreparationTask,
+            commit_task::{CommitDelivery, CommitTask},
             *,
         },
         test_utils,
@@ -715,9 +544,8 @@ mod serialization_safety_test {
     ) -> CommitTask {
         let task =
             make_commit_task(commit_id, allow_undelegation, data, lamports);
-        let stage = task.state_preparation_stage();
         CommitTask {
-            delivery_details: CommitDelivery::StateInBuffer { stage },
+            delivery_details: CommitDelivery::StateInBuffer { prepared: false },
             ..task
         }
     }
@@ -736,11 +564,11 @@ mod serialization_safety_test {
     fn test_preparation_instructions_serialization() {
         let authority = Pubkey::new_unique();
 
-        let commit_task =
+        let mut commit_task =
             make_buffer_commit_task(789, true, vec![0; 1024], 3000);
 
-        let Some(CommitBufferStage::Preparation(preparation_task)) =
-            commit_task.stage()
+        let Some(preparation_task) =
+            PreparationTask::from_commit(&mut commit_task)
         else {
             panic!("invalid preparation state on creation!");
         };
@@ -769,7 +597,7 @@ fn test_close_buffer_limit() {
     use tracing::info;
 
     use crate::{
-        tasks::utils::TransactionUtils,
+        tasks::{commit_stage_task::CleanupTask, utils::TransactionUtils},
         test_utils,
         transactions::{
             serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
@@ -819,61 +647,4 @@ fn test_close_buffer_limit() {
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
     assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);
-}
-
-#[test]
-fn test_max_write_with_uniqueness_nonce_fits() {
-    use solana_hash::Hash;
-    use solana_keypair::Keypair;
-    use solana_message::{v0::Message, VersionedMessage};
-    use solana_signer::Signer;
-    use solana_transaction::versioned::VersionedTransaction;
-    use tracing::info;
-
-    use crate::{
-        consts::MAX_WRITE_CHUNK_SIZE,
-        tasks::utils::TransactionUtils,
-        test_utils,
-        transactions::{
-            serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
-        },
-        ComputeBudgetConfig,
-    };
-
-    test_utils::init_test_logger();
-
-    let authority = Keypair::new();
-    let data = vec![0; MAX_WRITE_CHUNK_SIZE as usize];
-    let preparation_task = PreparationTask {
-        commit_id: 1,
-        pubkey: Pubkey::new_unique(),
-        chunks: Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE),
-        buffer_data: data,
-    };
-    let write_instruction = preparation_task
-        .write_instructions(&authority.pubkey())
-        .into_iter()
-        .next()
-        .expect("write instruction");
-    let mut instructions = ComputeBudgetConfig::new(1_000_000)
-        .buffer_write
-        .instructions(write_instruction.data.len());
-    instructions.push(write_instruction);
-    instructions.push(TransactionUtils::uniqueness_noop_instruction(42));
-
-    let message = Message::try_compile(
-        &authority.pubkey(),
-        &instructions,
-        &[],
-        Hash::new_unique(),
-    )
-    .expect("compile write transaction");
-    let transaction = VersionedTransaction::try_new(
-        VersionedMessage::V0(message),
-        &[&authority],
-    )
-    .expect("sign write transaction");
-    let transaction_size = serialized_transaction_size(&transaction);
-    info!(transaction_size, "Buffer write transaction size");
-    assert!(transaction_size <= MAX_TRANSACTION_WIRE_SIZE);
 }

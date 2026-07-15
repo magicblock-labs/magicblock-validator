@@ -439,13 +439,13 @@ mod tests {
 
     use async_trait::async_trait;
     use dlp_api::state::{DelegationMetadata, UndelegationRequester};
-    use magicblock_core::intent::CommittedAccount;
+    use magicblock_core::intent::types::CommittedAccount;
     use solana_account::Account;
 
     use super::*;
     use crate::{
         intent_executor::task_info_fetcher::TaskInfoFetcherResult,
-        tasks::task_builder::TaskBuilderImpl,
+        tasks::utils::create_commit_task,
     };
 
     /// Reports commit id 1 except for one unchanged account at commit id 5.
@@ -516,7 +516,7 @@ mod tests {
         let unchanged_pubkey = Pubkey::new_unique();
         // Stale cache produced commit id 5; on chain the account was
         // re-delegated, so the correct commit id is 1.
-        let stale_task = TaskBuilderImpl::create_commit_task(
+        let stale_task = create_commit_task(
             5,
             false,
             CommittedAccount {
@@ -529,7 +529,7 @@ mod tests {
         let mut strategy = TransactionStrategy {
             optimized_tasks: vec![
                 stale_task.into(),
-                TaskBuilderImpl::create_commit_task(
+                create_commit_task(
                     5,
                     false,
                     CommittedAccount {

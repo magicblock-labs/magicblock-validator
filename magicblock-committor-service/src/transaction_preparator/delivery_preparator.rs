@@ -30,8 +30,10 @@ use tracing::{error, info};
 use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        commit_task::CommitBufferStage, task_strategist::TransactionStrategy,
-        utils::TransactionUtils, BaseTaskImpl, CleanupTask, PreparationTask,
+        commit_stage_task::{CleanupTask, PreparationTask},
+        task_strategist::TransactionStrategy,
+        utils::TransactionUtils,
+        BaseTaskImpl,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -107,17 +109,16 @@ impl DeliveryPreparator {
         persister: &Option<P>,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let stage = match task {
-            BaseTaskImpl::Commit(commit_task) => commit_task.stage_mut(),
+        let preparation_task = match task {
+            BaseTaskImpl::Commit(commit_task) => {
+                PreparationTask::from_commit(commit_task)
+            }
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                commit_finalize_task.stage_mut()
+                PreparationTask::from_commit_finalize(commit_finalize_task)
             }
             _ => None,
         };
-        let Some(stage) = stage else {
-            return Ok(());
-        };
-        let CommitBufferStage::Preparation(preparation_task) = stage else {
+        let Some(preparation_task) = preparation_task else {
             return Ok(());
         };
 
@@ -133,7 +134,7 @@ impl DeliveryPreparator {
         // Initialize buffer account. Init + reallocs
         self.initialize_buffer_account(
             authority,
-            preparation_task,
+            &preparation_task,
             uniqueness_nonce,
         )
         .await?;
@@ -150,7 +151,7 @@ impl DeliveryPreparator {
         // Writing chunks with some retries
         self.write_buffer_with_retries(
             authority,
-            preparation_task,
+            &preparation_task,
             uniqueness_nonce,
         )
         .await?;
@@ -163,8 +164,7 @@ impl DeliveryPreparator {
             update_status,
         );
 
-        let cleanup_task = preparation_task.cleanup_task();
-        *stage = CommitBufferStage::Cleanup(cleanup_task);
+        preparation_task.done();
         Ok(())
     }
 
@@ -193,30 +193,27 @@ impl DeliveryPreparator {
             res => return res,
         }
 
-        // Prepare cleanup task - set stage to Cleanup before calling cleanup
-        let stage = match task {
-            BaseTaskImpl::Commit(commit_task) => commit_task.stage_mut(),
+        // Preparation failed due to buffer existing - cleanup and retry
+        let preparation_task = match task {
+            BaseTaskImpl::Commit(commit_task) => {
+                PreparationTask::from_commit(commit_task)
+            }
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                commit_finalize_task.stage_mut()
+                PreparationTask::from_commit_finalize(commit_finalize_task)
             }
             _ => None,
         };
-        let Some(stage) = stage else {
+        let Some(preparation_task) = preparation_task else {
             return Ok(());
         };
-        let CommitBufferStage::Preparation(preparation_task) = stage else {
-            return Ok(());
-        };
-        let preparation_task = preparation_task.clone();
-        let cleanup_task = preparation_task.cleanup_task();
 
+        // Cleanup
+        let cleanup_task = preparation_task.cleanup_task();
         self.cleanup_buffers(authority, &[cleanup_task], uniqueness_nonce)
             .await?;
         self.rpc_client.invalidate_cached_blockhash().await;
 
-        // Restore preparation stage for retry
-        *stage = CommitBufferStage::Preparation(preparation_task);
-
+        // Retry preparation
         self.prepare_task(authority, task, persister, uniqueness_nonce)
             .await
     }
@@ -226,7 +223,7 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask,
+        preparation_task: &PreparationTask<'_>,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let authority_pubkey = authority.pubkey();
@@ -290,7 +287,7 @@ impl DeliveryPreparator {
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask,
+        preparation_task: &PreparationTask<'_>,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();

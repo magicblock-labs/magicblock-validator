@@ -635,14 +635,14 @@ fn requires_uniqueness_nonce(commit_tasks: &[BaseTaskImpl]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::CommittedAccount;
+    use magicblock_core::intent::types::CommittedAccount;
     use solana_account::Account;
 
     use super::*;
-    use crate::tasks::{task_builder::TaskBuilderImpl, FinalizeTask};
+    use crate::tasks::{utils::create_commit_task, FinalizeTask};
 
     fn commit_task(commit_id: u64) -> BaseTaskImpl {
-        TaskBuilderImpl::create_commit_task(
+        create_commit_task(
             commit_id,
             false,
             CommittedAccount {
