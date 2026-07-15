@@ -56,6 +56,7 @@ use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::{
+        blocks::LatestBlockInner,
         replication::{self, Message, SuperBlock},
         transactions::{
             ProcessableTransaction, SchedulerCommand, SchedulerCommandResult,
@@ -64,7 +65,7 @@ use magicblock_core::{
     },
     Slot,
 };
-use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
+use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_metrics::metrics;
 use solana_account::{from_account, to_account};
 use solana_program::{clock::Clock, hash::Hash, slot_hashes::SlotHashes};
@@ -118,6 +119,8 @@ pub struct TransactionScheduler {
     pause_permit: Arc<Semaphore>,
     /// Streaming blockhash state
     hasher: Hasher,
+    /// Whether the next replicated block is the first one after startup.
+    is_initial_replica_block: bool,
     /// Time interval between consecutive slots
     slot_ticker: Interval,
     /// Number of slots to elapse, before we perform snapshot/checksum operations
@@ -181,6 +184,7 @@ impl TransactionScheduler {
             pause_permit: state.pause_permit,
             superblock_size: state.superblock_size,
             hasher,
+            is_initial_replica_block: true,
             slot_ticker,
             slot,
             index: 0,
@@ -600,17 +604,11 @@ impl TransactionScheduler {
     }
 
     /// Checks that the blockhash received from replication stream matches the local
-    fn verify_block_as_replica(&self, block: &LatestBlockInner) {
-        if block.blockhash.as_ref() != self.hasher.finalize().as_bytes() {
-            // TODO(bmuddha):
-            // this should never happen, and it's unclear how
-            // to recover from it, right now the log is used
-            // for debugging purposes only
-            // NOTE:
-            // This may still be logged once when a replica starts up with an
-            // empty ledger (no previous blockhash to seed from). A mid-slot
-            // restart no longer triggers it: reconstruct_inprogress_hasher
-            // rebuilds the accumulator from the persisted in-progress slot.
+    fn verify_block_as_replica(&mut self, block: &LatestBlockInner) {
+        let is_initial = std::mem::take(&mut self.is_initial_replica_block);
+        if !is_initial
+            && block.blockhash.as_ref() != self.hasher.finalize().as_bytes()
+        {
             error!(
                 slot = block.slot,
                 "replication blockhash has diverged from local"

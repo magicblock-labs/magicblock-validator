@@ -23,6 +23,17 @@ Currently available:
 
 Only load a skill (read its `SKILL.md`) when the task actually calls for it.
 
+## Required invariant review
+
+Before making or reviewing any repository change, including a new pull request
+or follow-up changes to an existing pull request, read
+`.agents/rules/invariants.md`. Check the proposed or current diff against every
+applicable invariant. An invariant violation is blocking: do not create,
+approve, or recommend merging the pull request until the violation is resolved.
+
+In the final reply, explicitly state whether the invariant review found any
+violation and identify the validation or evidence used for that conclusion.
+
 ## Directory layout
 
 - `.agents/rules/` — invariant behavioral and decision-making rules agents must follow.

@@ -181,28 +181,26 @@ impl ScheduleCommitTestContext {
         })
     }
 
-    // -----------------
-    // Schedule Commit specific Transactions
-    // -----------------
-    pub fn init_committees(&self) -> Result<Signature> {
+    pub fn init_committees_chunk(
+        &self,
+        committees: &[(Keypair, Pubkey)],
+    ) -> Result<Signature> {
         let mut ixs = vec![
             ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
             ComputeBudgetInstruction::set_compute_unit_price(10_000),
         ];
         match self.user_seed {
             UserSeeds::MagicScheduleCommit => {
-                ixs.extend(self.committees.iter().map(
-                    |(player, committee)| {
-                        init_account_instruction(
-                            self.payer_chain.pubkey(),
-                            player.pubkey(),
-                            *committee,
-                        )
-                    },
-                ));
+                ixs.extend(committees.iter().map(|(player, committee)| {
+                    init_account_instruction(
+                        self.payer_chain.pubkey(),
+                        player.pubkey(),
+                        *committee,
+                    )
+                }));
             }
             UserSeeds::OrderBook => {
-                ixs.extend(self.committees.iter().map(
+                ixs.extend(committees.iter().map(
                     |(book_manager, committee)| {
                         init_order_book_instruction(
                             self.payer_chain.pubkey(),
@@ -229,8 +227,7 @@ impl ScheduleCommitTestContext {
             }
         };
 
-        let mut signers = self
-            .committees
+        let mut signers = committees
             .iter()
             .map(|(payer, _)| payer)
             .collect::<Vec<_>>();
@@ -262,6 +259,16 @@ impl ScheduleCommitTestContext {
         Ok(sig)
     }
 
+    pub fn init_committees(&self) -> Result<Vec<Signature>> {
+        /// Needed to fit in tx size
+        const COMMITTEES_INIT_CHUNK_SIZE: usize = 7;
+
+        self.committees
+            .chunks(COMMITTEES_INIT_CHUNK_SIZE)
+            .map(|committees| self.init_committees_chunk(committees))
+            .collect()
+    }
+
     pub fn escrow_lamports_for_payer(&self) -> Result<Signature> {
         let ixs = init_payer_escrow(self.payer_ephem.pubkey());
 
@@ -284,9 +291,12 @@ impl ScheduleCommitTestContext {
             .with_context(|| "Failed to escrow fund for payer")
     }
 
-    pub fn delegate_committees(&self) -> Result<Signature> {
+    fn delegate_committees_chunk(
+        &self,
+        committees: &[(Keypair, Pubkey)],
+    ) -> Result<Signature> {
         let mut ixs = vec![];
-        for (player, _) in &self.committees {
+        for (player, _) in committees {
             let ix = delegate_account_cpi_instruction(
                 self.payer_chain.pubkey(),
                 self.ephem_validator_identity,
@@ -322,6 +332,17 @@ impl ScheduleCommitTestContext {
             })?;
         debug!("Delegated committees: {sig}");
         Ok(sig)
+    }
+
+    pub fn delegate_committees(&self) -> Result<Vec<Signature>> {
+        // Delegate instructions carry more accounts (and a larger args
+        // payload) than an init instruction, so fewer fit per transaction.
+        const COMMITTEES_DELEGATE_CHUNK_SIZE: usize = 4;
+
+        self.committees
+            .chunks(COMMITTEES_DELEGATE_CHUNK_SIZE)
+            .map(|committees| self.delegate_committees_chunk(committees))
+            .collect()
     }
 
     // -----------------

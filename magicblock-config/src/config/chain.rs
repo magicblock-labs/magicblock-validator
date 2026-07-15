@@ -66,6 +66,11 @@ pub struct ChainLinkConfig {
     #[serde(with = "humantime")]
     pub resubscription_delay: Duration,
 
+    /// Period for polling DLP-owned UndelegationRequest accounts.
+    /// Set to 0s to disable the polling backfill loop.
+    #[serde(with = "humantime")]
+    pub undelegation_request_poll_interval: Duration,
+
     /// Address risk checks for post-delegation actions via the risk server.
     pub risk: RiskConfig,
 }
@@ -78,6 +83,9 @@ impl Default for ChainLinkConfig {
             allowed_programs: None,
             resubscription_delay: Duration::from_millis(
                 consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,
+            ),
+            undelegation_request_poll_interval: Duration::from_secs(
+                consts::DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS,
             ),
             risk: RiskConfig::default(),
         }

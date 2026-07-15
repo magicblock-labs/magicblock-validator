@@ -10,7 +10,7 @@ Crate guides should name relevant packages/suites and validation intent, but exa
 
 The validator is performance-sensitive. When a change touches critical RPC, account synchronization, scheduler/executor, AccountsDb/ledger, replication, or committor paths, validation should include the smallest available test or measurement that can reveal latency, throughput, contention, allocation, or I/O regressions. If no practical performance validation is run, say so and explain the residual risk.
 
-For security and protocol invariants, read `.agents/rules/validator-goals.md` and `.agents/specs/validator-specification.md`; this file only defines how to validate changes against those invariants. When a change touches signer/authority checks, account-sync correctness, lock acquisition/ordering, or any path driven by untrusted RPC/transaction input, add or run the test that exercises the security-relevant behavior (for example concurrency/race tests, delegation/sync ordering tests, or auth-rejection tests). If you cannot validate a security-relevant path, say so and call out the residual risk explicitly — do not treat it as low priority.
+For correctness, security, and protocol invariants, read `.agents/rules/invariants.md`, `.agents/rules/validator-goals.md`, and `.agents/specs/validator-specification.md`; this file only defines how to validate changes against those invariants. When a change touches signer/authority checks, account-sync correctness, lock acquisition/ordering, or any path driven by untrusted RPC/transaction input, add or run the test that exercises the security-relevant behavior (for example concurrency/race tests, delegation/sync ordering tests, or auth-rejection tests). If you cannot validate a security-relevant path, say so and call out the residual risk explicitly — do not treat it as low priority.
 
 Until or unless the skill provides a more specific command set, treat the required baseline as:
 
@@ -97,6 +97,19 @@ RUN_TESTS=committor_intent_executor make test
 ```
 
 The integration runner builds required SBF programs via `make programs` as dependencies of `make test`.
+
+When updating `magicblock-delegation-program-api` to a new Delegation Program
+commit, also update the DLP program binary used by integration validators:
+`test-integration/schedulecommit/elfs/dlp.so`. A mismatched API/ELF can compile
+but fail at runtime when instruction account layouts change, for example DLP
+`TooManyAccountKeys` on `CommitFinalize`.
+
+Avoid using DLP transaction log strings as the primary success oracle in
+committor integration tests. Local validator transaction history/log retrieval
+can be inconsistent across DLP or validator revisions, and DLP may change opcode
+logging without changing validator behavior. Prefer persisted committor status,
+strategy, signatures, and final account owner/data checks; keep log fetches for
+diagnostics on failure.
 
 ## Isolating one integration test
 

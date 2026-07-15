@@ -613,7 +613,7 @@ mod complex_blocking_test {
 
 #[cfg(test)]
 mod edge_cases_test {
-    use magicblock_program::magic_scheduled_base_intent::MagicIntentBundle;
+    use magicblock_core::intent::MagicIntentBundle;
 
     use super::*;
     use crate::test_utils;
@@ -637,7 +637,7 @@ mod edge_cases_test {
 
 #[cfg(test)]
 mod complete_error_test {
-    use magicblock_core::intent::CommittedAccount;
+    use magicblock_core::intent::types::CommittedAccount;
     use solana_account::Account;
     use solana_pubkey::pubkey;
 
@@ -854,11 +854,11 @@ pub(crate) fn create_test_intent(
     pubkeys: &[Pubkey],
     is_undelegate: bool,
 ) -> ScheduledIntentBundle {
-    use magicblock_core::intent::CommittedAccount;
-    use magicblock_program::magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, MagicIntentBundle,
-        ScheduledIntentBundle, UndelegateType,
+    use magicblock_core::intent::{
+        types::CommittedAccount, CommitAndUndelegate, CommitType,
+        MagicIntentBundle, UndelegateType,
     };
+    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
     use solana_account::Account;
     use solana_hash::Hash;
     use solana_transaction::Transaction;
@@ -904,11 +904,11 @@ pub(crate) fn create_test_intent_bundle(
     commit_pubkeys: &[Pubkey],
     commit_and_undelegate_pubkeys: &[Pubkey],
 ) -> ScheduledIntentBundle {
-    use magicblock_core::intent::CommittedAccount;
-    use magicblock_program::magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, MagicIntentBundle,
-        ScheduledIntentBundle, UndelegateType,
+    use magicblock_core::intent::{
+        types::CommittedAccount, CommitAndUndelegate, CommitType,
+        MagicIntentBundle, UndelegateType,
     };
+    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
     use solana_account::Account;
     use solana_hash::Hash;
     use solana_transaction::Transaction;
