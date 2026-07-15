@@ -11,7 +11,7 @@ use tracing::*;
 
 use super::{
     subscription_key_owned_guard_from_map, AccountsLruCache, ChainPubsubClient,
-    SubscriptionKeyLocks, SubscriptionOwnershipMap,
+    SubscriptionKeyLocks, SubscriptionOwnershipMap, SubscriptionReason,
 };
 use crate::remote_account_provider::RemoteAccountProviderError;
 
@@ -241,6 +241,16 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 .is_some_and(|s| s.union.contains(&pubkey));
             if delivered_somewhere {
                 continue;
+            }
+
+            // Undelegation tracking must stay watched until undelegation
+            // completes; keep the entry and retry next cycle.
+            if let Some(ownership) = subscription_ownership {
+                if ownership.lock().await.get(&pubkey).is_some_and(|own| {
+                    own.contains(SubscriptionReason::UndelegationTracking)
+                }) {
+                    continue;
+                }
             }
 
             // No client holds the subscription: evict so the account is
@@ -557,6 +567,44 @@ mod tests {
         assert!(!mock_client.subscriptions_union().contains(&pk));
         assert!(!lru.contains(&pk));
         assert_eq!(removed_rx.try_recv(), Ok(pk));
+    }
+
+    /// Accounts owned for undelegation tracking must never be evicted; they
+    /// are kept and retried on the next cycle.
+    #[tokio::test]
+    async fn test_undelegation_tracked_subscription_is_not_evicted() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk = create_test_pubkey(1);
+        lru.add(pk);
+
+        let ownership: SubscriptionOwnershipMap = Default::default();
+        ownership
+            .lock()
+            .await
+            .entry(pk)
+            .or_default()
+            .acquire(SubscriptionReason::UndelegationTracking);
+
+        mock_client.silently_noop_next_subscriptions(1);
+
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+        reconcile_subscriptions(
+            &lru,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            Some(&ownership),
+        )
+        .await;
+
+        assert!(lru.contains(&pk));
+        assert!(removed_rx.try_recv().is_err());
     }
 
     /// Test case: Empty LRU should cause resubscribe of all LRU accounts if missing
