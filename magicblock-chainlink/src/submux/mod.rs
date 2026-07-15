@@ -2271,7 +2271,8 @@ mod tests {
         let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
 
         let count =
-            reconcile_subscriptions(&lru, &mux, &[], &removed_tx, None).await;
+            reconcile_subscriptions(&lru, &mux, &[], &removed_tx, None, None)
+                .await;
 
         assert_eq!(count, 1);
         assert_eq!(client1.subscribe_attempts(), before_client1_attempts);
