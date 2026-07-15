@@ -495,6 +495,7 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
+    use dlp_api::state::{DelegationMetadata, UndelegationRequester};
     use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, ProgramArgs,
@@ -520,7 +521,10 @@ mod tests {
         test_utils,
     };
 
-    struct MockInfoFetcher;
+    #[derive(Default)]
+    struct MockInfoFetcher {
+        delegation_metadata: HashMap<Pubkey, (UndelegationRequester, Pubkey)>,
+    }
 
     #[async_trait::async_trait]
     impl TaskInfoFetcher for MockInfoFetcher {
@@ -540,12 +544,31 @@ mod tests {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
         }
 
-        async fn fetch_rent_reimbursements(
+        async fn fetch_delegation_metadata(
             &self,
             pubkeys: &[Pubkey],
             _: u64,
-        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
+        {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    let (undelegation_requester, rent_payer) = self
+                        .delegation_metadata
+                        .get(pubkey)
+                        .copied()
+                        .unwrap_or((UndelegationRequester::None, *pubkey));
+                    (
+                        *pubkey,
+                        DelegationMetadata {
+                            last_commit_id: 0,
+                            undelegation_requester,
+                            seeds: vec![],
+                            rent_payer,
+                        },
+                    )
+                })
+                .collect())
         }
 
         async fn get_base_accounts(
@@ -631,6 +654,7 @@ mod tests {
             delegated_account: Pubkey::new_unique(),
             owner_program: Pubkey::default(),
             rent_reimbursement: Pubkey::new_unique(),
+            include_undelegation_request: false,
         }
     }
 
@@ -968,11 +992,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_finalize_tasks_include_request_for_owner_program_undelegate()
+    {
+        let delegated_account = Pubkey::new_unique();
+        let intent = create_test_intent(0, &[delegated_account], true);
+        let info_fetcher = Arc::new(MockInfoFetcher {
+            delegation_metadata: HashMap::from([(
+                delegated_account,
+                (UndelegationRequester::OwnerProgram, delegated_account),
+            )]),
+        });
+
+        let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
+
+        let BaseTaskImpl::Undelegate(task) = &tasks[1] else {
+            panic!("expected undelegate task");
+        };
+        assert_eq!(task.delegated_account, delegated_account);
+        assert_eq!(task.rent_reimbursement, delegated_account);
+        assert!(task.include_undelegation_request);
+    }
+
+    #[tokio::test]
     async fn test_build_single_stage_mode() {
         let pubkey = [Pubkey::new_unique()];
         let intent = create_test_intent(0, &pubkey, false);
 
-        let info_fetcher = Arc::new(MockInfoFetcher);
+        let info_fetcher = Arc::new(MockInfoFetcher::default());
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
@@ -1001,11 +1049,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_two_stage_mode_no_alts() {
-        let pubkeys: [_; 3] = std::array::from_fn(|_| Pubkey::new_unique());
+    async fn test_build_two_stage_mode_when_task_count_exceeds_single_stage_limit(
+    ) {
+        let pubkeys: [_; 8] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent(0, &pubkeys, true);
 
-        let info_fetcher = Arc::new(MockInfoFetcher);
+        let info_fetcher = Arc::new(MockInfoFetcher::default());
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
@@ -1027,15 +1076,9 @@ mod tests {
         )
         .expect("Execution mode created");
 
-        let StrategyExecutionMode::TwoStage {
-            commit_stage,
-            finalize_stage,
-        } = execution_mode
-        else {
+        let StrategyExecutionMode::TwoStage { .. } = execution_mode else {
             panic!("Unexpected execution mode");
         };
-        assert!(!commit_stage.uses_alts());
-        assert!(!finalize_stage.uses_alts());
     }
 
     #[tokio::test]
@@ -1043,7 +1086,7 @@ mod tests {
         let pubkeys: [_; 8] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent(0, &pubkeys, false);
 
-        let info_fetcher = Arc::new(MockInfoFetcher);
+        let info_fetcher = Arc::new(MockInfoFetcher::default());
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,

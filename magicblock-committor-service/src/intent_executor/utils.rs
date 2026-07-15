@@ -438,6 +438,7 @@ mod tests {
     use std::collections::HashMap;
 
     use async_trait::async_trait;
+    use dlp_api::state::{DelegationMetadata, UndelegationRequester};
     use magicblock_core::intent::CommittedAccount;
     use solana_account::Account;
 
@@ -478,12 +479,26 @@ mod tests {
                 .collect())
         }
 
-        async fn fetch_rent_reimbursements(
+        async fn fetch_delegation_metadata(
             &self,
             pubkeys: &[Pubkey],
             _: u64,
-        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
+        {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (
+                        *pubkey,
+                        DelegationMetadata {
+                            last_commit_id: 0,
+                            undelegation_requester: UndelegationRequester::None,
+                            seeds: vec![],
+                            rent_payer: *pubkey,
+                        },
+                    )
+                })
+                .collect())
         }
 
         async fn get_base_accounts(
