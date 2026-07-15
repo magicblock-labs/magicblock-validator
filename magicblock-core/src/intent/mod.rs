@@ -274,42 +274,38 @@ impl MagicIntentBundle {
         x || y || cf || cfau || z
     }
 
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        let mut offset = 0usize;
-
+    pub fn get_action_mut(&mut self, id: u64) -> Option<&mut BaseAction> {
         if let Some(commit) = self.commit.as_mut() {
-            let count = commit.action_count();
-            if index < offset + count {
-                return commit.get_action_mut(index - offset);
+            if let Some(action) = commit.get_action_mut(id) {
+                return Some(action);
             }
-            offset += count;
         }
 
         if let Some(cau) = self.commit_and_undelegate.as_mut() {
-            let count = cau.action_count();
-            if index < offset + count {
-                return cau.get_action_mut(index - offset);
+            if let Some(action) = cau.get_action_mut(id) {
+                return Some(action);
             }
-            offset += count;
+        }
+
+        if let Some(action) =
+            self.standalone_actions.iter_mut().find(|a| a.id == id)
+        {
+            return Some(action);
         }
 
         if let Some(commit_finalize) = self.commit_finalize.as_mut() {
-            let count = commit_finalize.action_count();
-            if index < offset + count {
-                return commit_finalize.get_action_mut(index - offset);
+            if let Some(action) = commit_finalize.get_action_mut(id) {
+                return Some(action);
             }
-            offset += count;
         }
 
         if let Some(cfau) = self.commit_finalize_and_undelegate.as_mut() {
-            let count = cfau.action_count();
-            if index < offset + count {
-                return cfau.get_action_mut(index - offset);
+            if let Some(action) = cfau.get_action_mut(id) {
+                return Some(action);
             }
-            offset += count;
         }
 
-        self.standalone_actions.get_mut(index.checked_sub(offset)?)
+        None
     }
 }
 
@@ -431,17 +427,12 @@ impl CommitAndUndelegate {
         x || y
     }
 
-    pub fn action_count(&self) -> usize {
-        self.commit_action.action_count()
-            + self.undelegate_action.action_count()
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        let commit_count = self.commit_action.action_count();
-        if index < commit_count {
-            return self.commit_action.get_action_mut(index);
+    pub fn get_action_mut(&mut self, id: u64) -> Option<&mut BaseAction> {
+        if let Some(action) = self.commit_action.get_action_mut(id) {
+            Some(action)
+        } else {
+            self.undelegate_action.get_action_mut(id)
         }
-        self.undelegate_action.get_action_mut(index - commit_count)
     }
 }
 
@@ -468,6 +459,9 @@ impl From<&ActionArgs> for ProgramArgs {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaseAction {
+    /// Stable identity of this action within its intent bundle, used to
+    /// address it independently of its position (e.g. for patch removal).
+    pub id: u64,
     pub compute_units: u32,
     pub destination_program: Pubkey,
     pub source_program: Option<Pubkey>,
@@ -569,16 +563,9 @@ impl CommitType {
         }
     }
 
-    pub fn action_count(&self) -> usize {
-        match self {
-            Self::Standalone(_) => 0,
-            Self::WithBaseActions { base_actions, .. } => base_actions.len(),
-        }
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+    pub fn get_action_mut(&mut self, id: u64) -> Option<&mut BaseAction> {
         if let Self::WithBaseActions { base_actions, .. } = self {
-            base_actions.get_mut(index)
+            base_actions.iter_mut().find(|a| a.id == id)
         } else {
             None
         }
@@ -593,16 +580,9 @@ pub enum UndelegateType {
 }
 
 impl UndelegateType {
-    pub fn action_count(&self) -> usize {
-        match self {
-            Self::Standalone => 0,
-            Self::WithBaseActions(actions) => actions.len(),
-        }
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+    pub fn get_action_mut(&mut self, id: u64) -> Option<&mut BaseAction> {
         if let Self::WithBaseActions(actions) = self {
-            actions.get_mut(index)
+            actions.iter_mut().find(|a| a.id == id)
         } else {
             None
         }
@@ -672,6 +652,7 @@ mod tests {
 
     fn make_base_action(compute_units: u32) -> BaseAction {
         BaseAction {
+            id: 0,
             compute_units,
             destination_program: Pubkey::new_unique(),
             source_program: None,
@@ -842,23 +823,30 @@ mod tests {
     }
 
     #[test]
-    fn test_get_action_mut_indexes_commit_finalize_variants() {
+    fn test_get_action_mut_finds_by_id_across_commit_finalize_variants() {
+        let mut commit_action = make_base_action(111);
+        commit_action.id = 10;
+        let mut commit_finalize_action = make_base_action(222);
+        commit_finalize_action.id = 20;
+        let mut standalone_action = make_base_action(333);
+        standalone_action.id = 30;
+
         let mut bundle = MagicIntentBundle {
             commit: Some(CommitType::WithBaseActions {
                 committed_accounts: vec![],
-                base_actions: vec![make_base_action(111)],
+                base_actions: vec![commit_action],
             }),
             commit_finalize: Some(CommitType::WithBaseActions {
                 committed_accounts: vec![],
-                base_actions: vec![make_base_action(222)],
+                base_actions: vec![commit_finalize_action],
             }),
-            standalone_actions: vec![make_base_action(333)],
+            standalone_actions: vec![standalone_action],
             ..Default::default()
         };
 
-        assert_eq!(bundle.get_action_mut(0).unwrap().compute_units, 111);
-        assert_eq!(bundle.get_action_mut(1).unwrap().compute_units, 222);
-        assert_eq!(bundle.get_action_mut(2).unwrap().compute_units, 333);
-        assert!(bundle.get_action_mut(3).is_none());
+        assert_eq!(bundle.get_action_mut(10).unwrap().compute_units, 111);
+        assert_eq!(bundle.get_action_mut(20).unwrap().compute_units, 222);
+        assert_eq!(bundle.get_action_mut(30).unwrap().compute_units, 333);
+        assert!(bundle.get_action_mut(999).is_none());
     }
 }

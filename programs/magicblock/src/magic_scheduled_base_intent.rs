@@ -47,6 +47,10 @@ pub struct ConstructionContext<'a, 'ic, 'ix_data> {
     /// to the delegation program. Legacy `ScheduleBaseIntent` sets this to
     /// `false` for backward compatibility with old deployed contracts.
     pub secure: bool,
+    /// Next id to assign to a `BaseAction` being constructed. Incremented
+    /// as actions are built, so each action in a bundle gets a unique,
+    /// stable id in construction order.
+    next_action_id: u64,
 }
 
 impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
@@ -61,11 +65,18 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
             signers,
             invoke_context,
             secure,
+            next_action_id: 0,
         }
     }
 
     pub fn transaction_context(&self) -> &TransactionContext<'ix_data> {
         &*self.invoke_context.transaction_context
+    }
+
+    fn next_action_id(&mut self) -> u64 {
+        let id = self.next_action_id;
+        self.next_action_id += 1;
+        id
     }
 }
 
@@ -90,7 +101,7 @@ impl ScheduledIntentBundle {
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<ScheduledIntentBundle, InstructionError> {
         let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
         let blockhash = context.invoke_context.environment_config.blockhash;
@@ -205,17 +216,18 @@ impl ScheduledIntentBundle {
 pub trait TryFromArgs<A>: Sized {
     fn try_from_args(
         args: A,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<Self, InstructionError>;
 }
 
 impl TryFromArgs<MagicIntentBundleArgs> for MagicIntentBundle {
     fn try_from_args(
         args: MagicIntentBundleArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<Self, InstructionError> {
         validate_magic_intent_bundle_args(&args, context)?;
 
+        // NOTE: Order shall be identical to AddActionCallback's action ordering.
         let commit = args
             .commit
             .map(|value| CommitType::try_from_args(value, context))
@@ -226,6 +238,12 @@ impl TryFromArgs<MagicIntentBundleArgs> for MagicIntentBundle {
             .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
 
+        let actions = args
+            .standalone_actions
+            .into_iter()
+            .map(|args| BaseAction::try_from_args(args, context))
+            .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
+
         let commit_finalize = args
             .commit_finalize
             .map(|value| CommitType::try_from_args(value, context))
@@ -235,12 +253,6 @@ impl TryFromArgs<MagicIntentBundleArgs> for MagicIntentBundle {
             .commit_finalize_and_undelegate
             .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
-
-        let actions = args
-            .standalone_actions
-            .into_iter()
-            .map(|args| BaseAction::try_from_args(args, context))
-            .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
 
         let this = Self {
             commit,
@@ -349,7 +361,7 @@ fn post_validate_magic_intent_bundle(
 impl TryFromArgs<MagicBaseIntentArgs> for MagicBaseIntent {
     fn try_from_args(
         args: MagicBaseIntentArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<MagicBaseIntent, InstructionError> {
         match args {
             MagicBaseIntentArgs::BaseActions(base_actions) => {
@@ -386,7 +398,7 @@ impl TryFromArgs<MagicBaseIntentArgs> for MagicBaseIntent {
 impl TryFromArgs<CommitAndUndelegateArgs> for CommitAndUndelegate {
     fn try_from_args(
         args: CommitAndUndelegateArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<CommitAndUndelegate, InstructionError> {
         let account_indices = args.commit_type.committed_accounts_indices();
         validate_commit_and_undelegate_accounts(
@@ -437,15 +449,15 @@ fn validate_commit_and_undelegate_accounts(
 impl TryFromArgs<BaseActionArgs> for BaseAction {
     fn try_from_args(
         args: BaseActionArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<BaseAction, InstructionError> {
         // Since action on Base layer performed on behalf of some escrow
         // We need to ensure that action was authorized by legit owner
-        let authority_pubkey = get_instruction_pubkey_with_idx(
+        let authority_pubkey = *get_instruction_pubkey_with_idx(
             context.transaction_context(),
             args.escrow_authority as u16,
         )?;
-        if !context.signers.contains(authority_pubkey) {
+        if !context.signers.contains(&authority_pubkey) {
             ic_msg!(
                 context.invoke_context,
                 &format!(
@@ -478,10 +490,11 @@ impl TryFromArgs<BaseActionArgs> for BaseAction {
         };
 
         Ok(BaseAction {
+            id: context.next_action_id(),
             compute_units: args.compute_units,
             destination_program: args.destination_program,
             source_program,
-            escrow_authority: *authority_pubkey,
+            escrow_authority: authority_pubkey,
             data_per_program: args.args.into(),
             account_metas_per_program: args.accounts,
             callback: None,
@@ -566,7 +579,7 @@ pub(crate) fn extract_commit_accounts<'a, 'ix_data>(
 impl TryFromArgs<CommitTypeArgs> for CommitType {
     fn try_from_args(
         args: CommitTypeArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<CommitType, InstructionError> {
         match args {
             CommitTypeArgs::Standalone(accounts) => {
@@ -605,10 +618,6 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                     context,
                 )?;
 
-                let base_actions = base_actions
-                    .into_iter()
-                    .map(|args| BaseAction::try_from_args(args, context))
-                    .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
@@ -620,6 +629,10 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                         ))
                     })
                     .collect::<Result<_, InstructionError>>()?;
+                let base_actions = base_actions
+                    .into_iter()
+                    .map(|args| BaseAction::try_from_args(args, context))
+                    .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
 
                 Ok(CommitType::WithBaseActions {
                     committed_accounts,
@@ -633,7 +646,7 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
 impl TryFromArgs<UndelegateTypeArgs> for UndelegateType {
     fn try_from_args(
         args: UndelegateTypeArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<UndelegateType, InstructionError> {
         match args {
             UndelegateTypeArgs::Standalone => Ok(UndelegateType::Standalone),
@@ -719,6 +732,7 @@ mod tests {
 
     fn make_base_action(compute_units: u32) -> BaseAction {
         BaseAction {
+            id: 0,
             compute_units,
             destination_program: Pubkey::new_unique(),
             source_program: None,

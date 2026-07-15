@@ -269,6 +269,7 @@ mod tests {
 
     fn make_base_action(data_len: usize) -> BaseAction {
         BaseAction {
+            id: 0,
             compute_units: 10_000,
             destination_program: Pubkey::new_unique(),
             source_program: None,
