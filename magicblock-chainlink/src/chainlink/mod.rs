@@ -389,15 +389,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             let risk_service =
                 RiskService::try_from_config(&chainlink_config.risk)?
                     .map(Arc::new);
-            let fetch_cloner = FetchCloner::new(
-                &provider,
-                accounts_bank,
-                cloner,
-                validator_keypair,
-                rx,
-                chainlink_config.allowed_programs.clone(),
-                risk_service,
-            );
+            let fetch_cloner =
+                FetchCloner::new_with_undelegation_request_sender(
+                    &provider,
+                    accounts_bank,
+                    cloner,
+                    validator_keypair,
+                    rx,
+                    chainlink_config.allowed_programs.clone(),
+                    risk_service,
+                    undelegation_request_sender.clone(),
+                );
             Some(fetch_cloner)
         } else {
             None
