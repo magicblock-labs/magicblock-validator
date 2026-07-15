@@ -2317,6 +2317,9 @@ where
                                 warn!(
                                     request_pda = %observed.request_pda,
                                     delegated_account = %observed.delegated_account,
+                                    observed_slot = observed.observed_slot,
+                                    expires_at_slot = observed.expires_at_slot,
+                                    drop_reason = "no_active_subscribers",
                                     "Dropped observed DLP undelegation request because no subscribers are active"
                                 );
                             }
