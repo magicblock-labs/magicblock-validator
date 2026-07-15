@@ -3,7 +3,7 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        commit_stage_task::CleanupTask,
+        commit_stage_task::{CleanupTask, PreparationTask},
         commit_task::CommitDelivery,
         task_strategist::{TaskStrategist, TransactionStrategy},
         BaseTaskImpl,
@@ -353,8 +353,7 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
     let data = generate_random_bytes(112);
     let mut commit_task = create_buffer_commit_task(&data);
     commit_task.reset_commit_id(1);
-    let CommitBufferStage::Preparation(preparation_task) =
-        commit_task.state_preparation_stage()
+    let Some(preparation_task) = PreparationTask::from_commit(&mut commit_task)
     else {
         panic!("expected preparation stage");
     };
@@ -425,8 +424,8 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
         .expect("second buffer preparation");
 
     let second_cleanup = match &second_strategy.optimized_tasks[0] {
-        BaseTaskImpl::Commit(task) => match task.stage() {
-            Some(CommitBufferStage::Cleanup(cleanup)) => cleanup.clone(),
+        BaseTaskImpl::Commit(task) => match CleanupTask::from_commit(task) {
+            Some(cleanup) => cleanup.clone(),
             _ => panic!("expected cleanup stage"),
         },
         _ => panic!("expected commit task"),
