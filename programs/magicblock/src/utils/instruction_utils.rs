@@ -5,11 +5,13 @@ use magicblock_magic_program_api::{
     args::ScheduleTaskArgs,
     instruction::{
         AccountModification, AccountModificationForInstruction,
-        MagicBlockInstruction, PostDelegationActionExecutorInstruction,
+        MagicBlockInstruction, OutboxIntentInstruction,
+        PostDelegationActionExecutorInstruction,
     },
     outbox,
     pda::crank_signer_pda,
-    CRANK_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY, MAGIC_CONTEXT_PUBKEY,
+    CRANK_PROGRAM_ID, EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY,
+    MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
 };
 use solana_hash::Hash;
@@ -157,13 +159,13 @@ impl InstructionUtils {
     ) -> Instruction {
         let account_metas = vec![
             AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new_readonly(crate::id(), false),
+            AccountMeta::new_readonly(EPHEMERAL_SYSTEM_PROGRAM_ID, false),
             AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
             AccountMeta::new(outbox_intent_pda(scheduled_commit_id), false),
         ];
         Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
+            OUTBOX_INTENT_PROGRAM_ID,
+            &OutboxIntentInstruction::ScheduledCommitSent(scheduled_commit_id),
             account_metas,
         )
     }
@@ -184,9 +186,10 @@ impl InstructionUtils {
     ) -> Instruction {
         let mut account_metas = vec![
             AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new_readonly(crate::id(), false),
+            AccountMeta::new_readonly(OUTBOX_INTENT_PROGRAM_ID, false),
             AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
             AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+            AccountMeta::new_readonly(EPHEMERAL_SYSTEM_PROGRAM_ID, false),
         ];
 
         // Add outbox intent accounts
@@ -225,8 +228,8 @@ impl InstructionUtils {
             AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
         Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::SetIntentExecutionStage {
+            OUTBOX_INTENT_PROGRAM_ID,
+            &OutboxIntentInstruction::SetIntentExecutionStage {
                 intent_id,
                 stage,
             },

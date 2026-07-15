@@ -11,12 +11,15 @@ use magicblock_core::{
     intent::{types::CommittedAccount, MagicIntentBundle},
     traits::MagicSys,
 };
-use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};
+use magicblock_magic_program_api::{
+    id, EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY,
+    OUTBOX_INTENT_PROGRAM_ID,
+};
 use solana_account::AccountSharedData;
 use solana_instruction::{error::InstructionError, AccountMeta};
 use solana_program_runtime::invoke_context::mock_process_instruction;
 use solana_pubkey::Pubkey;
-use solana_sdk_ids::system_program;
+use solana_sdk_ids::{native_loader, system_program};
 
 use self::magicblock_processor::Entrypoint;
 use super::*;
@@ -41,6 +44,16 @@ pub fn ensure_started_validator(
         let mut vault = AccountSharedData::new(0, 0, &id());
         vault.set_ephemeral(true);
         vault
+    });
+
+    // Ensure the sibling builtin programs CPI'd into from the main
+    // entrypoint are resolvable as accounts (mock_process_instruction only
+    // auto-injects the entrypoint under test, not its CPI targets)
+    map.entry(EPHEMERAL_SYSTEM_PROGRAM_ID).or_insert_with(|| {
+        AccountSharedData::new(0, 0, &native_loader::id())
+    });
+    map.entry(OUTBOX_INTENT_PROGRAM_ID).or_insert_with(|| {
+        AccountSharedData::new(0, 0, &native_loader::id())
     });
 
     let stub = Arc::new(match nonces {

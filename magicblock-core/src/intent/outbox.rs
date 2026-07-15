@@ -9,7 +9,7 @@ pub const OUTBOX_INTENT_DISCRIMINATOR: [u8; 8] = *b"obintent";
 pub fn outbox_intent_pda(id: u64) -> Pubkey {
     Pubkey::find_program_address(
         &[OUTBOX_INTENT_SEED, &id.to_le_bytes()],
-        &magicblock_magic_program_api::ID,
+        &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID,
     )
     .0
 }

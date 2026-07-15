@@ -28,6 +28,7 @@ pub(crate) fn protected_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     accounts.insert(magic_program::CALLBACK_PROGRAM_ID);
     accounts.insert(magic_program::POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID);
     accounts.insert(magic_program::EPHEMERAL_SYSTEM_PROGRAM_ID);
+    accounts.insert(magic_program::OUTBOX_INTENT_PROGRAM_ID);
     accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
     accounts.insert(magic_program::EPHEMERAL_VAULT_PUBKEY);
     accounts.insert(*validator_id);

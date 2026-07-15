@@ -80,7 +80,7 @@ impl InternalOutboxIntentBundlesReader {
         }
 
         let outbox_candidates_iter = self.accounts_db.get_program_accounts(
-            &magicblock_program::ID,
+            &magicblock_program::OUTBOX_INTENT_PROGRAM_ID,
             Self::outbox_accounts_filter,
         )?;
 
@@ -239,8 +239,11 @@ mod tests {
     fn insert_bundle(db: &AccountsDb, bundle: &OutboxIntentBundle) {
         let bytes = bundle.try_to_bytes().expect("serialize");
         let pubkey = outbox_intent_pda(bundle.inner.id);
-        let mut account =
-            AccountSharedData::new(1, bytes.len(), &magicblock_program::ID);
+        let mut account = AccountSharedData::new(
+            1,
+            bytes.len(),
+            &magicblock_program::OUTBOX_INTENT_PROGRAM_ID,
+        );
         account.data_as_mut_slice().copy_from_slice(&bytes);
         db.insert_account(&pubkey, &account).expect("insert");
     }

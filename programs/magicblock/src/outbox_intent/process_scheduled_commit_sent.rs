@@ -6,7 +6,8 @@ use std::{
 use lazy_static::lazy_static;
 use magicblock_core::{coordination_mode, intent::outbox::outbox_intent_pda};
 use magicblock_magic_program_api::{
-    instruction::MagicBlockInstruction, EPHEMERAL_VAULT_PUBKEY,
+    instruction::EphemeralSystemInstruction, EPHEMERAL_SYSTEM_PROGRAM_ID,
+    EPHEMERAL_VAULT_PUBKEY,
 };
 use solana_clock::Slot;
 use solana_hash::Hash;
@@ -182,18 +183,18 @@ fn validate(
     intent_id: u64,
 ) -> Result<(Pubkey, Pubkey), InstructionError> {
     const VALIDATOR_IDX: u16 = 0;
-    const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
-    const MAGIC_VAULT_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
+    const ESP_IDX: u16 = VALIDATOR_IDX + 1;
+    const MAGIC_VAULT_IDX: u16 = ESP_IDX + 1;
     const CLOSING_PDA_IDX: u16 = MAGIC_VAULT_IDX + 1;
 
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
-    // Assert MagicBlock program
-    if ix_ctx.get_program_key()? != &crate::id() {
+    // Assert outbox intent program
+    if ix_ctx.get_program_key()? != &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent ERR: Magic program account not found"
+            "ScheduleCommitSent ERR: outbox intent program account not found"
         );
         return Err(InstructionError::UnsupportedProgramId);
     }
@@ -211,18 +212,16 @@ fn validate(
         return Err(InstructionError::IncorrectAuthority);
     }
 
-    // Assert magic program account
-    let magic_program_pubkey = get_instruction_pubkey_with_idx(
-        transaction_context,
-        MAGIC_PROGRAM_IDX,
-    )?;
-    if *magic_program_pubkey != crate::id() {
+    // Assert ephemeral system program account (CPI target for the close)
+    let esp_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, ESP_IDX)?;
+    if *esp_pubkey != EPHEMERAL_SYSTEM_PROGRAM_ID {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent ERR: account at idx {} is {}, expected magic program {}",
-            MAGIC_PROGRAM_IDX,
-            magic_program_pubkey,
-            crate::id()
+            "ScheduleCommitSent ERR: account at idx {} is {}, expected ephemeral system program {}",
+            ESP_IDX,
+            esp_pubkey,
+            EPHEMERAL_SYSTEM_PROGRAM_ID
         );
         return Err(InstructionError::IncorrectProgramId);
     }
@@ -325,13 +324,13 @@ fn close_outbox_account_cpi(
 ) -> Result<(), InstructionError> {
     invoke_context.native_invoke(
         Instruction {
-            program_id: crate::id(),
+            program_id: EPHEMERAL_SYSTEM_PROGRAM_ID,
             accounts: vec![
                 AccountMeta::new(sponsor, true),
                 AccountMeta::new(pda, false),
                 AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
             ],
-            data: MagicBlockInstruction::CloseEphemeralAccount
+            data: EphemeralSystemInstruction::CloseEphemeralAccount
                 .try_to_vec()
                 .map_err(|_| InstructionError::InvalidInstructionData)?,
         },
