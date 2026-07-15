@@ -442,6 +442,10 @@ where
 
     let mut accounts_to_clone = vec![];
     let mut ata_join_set = JoinSet::new();
+    let ata_projection_context =
+        fetch_context.with_reason(metrics::AccountFetchReason::AtaProjection);
+    let delegation_record_context = fetch_context
+        .with_reason(metrics::AccountFetchReason::DelegationRecord);
 
     // Collect all pubkeys to subscribe to and spawn fetch tasks
     let mut pubkeys_to_subscribe = vec![];
@@ -467,7 +471,7 @@ where
                 *ata_pubkey,
                 eata,
                 effective_slot,
-                fetch_context,
+                ata_projection_context,
             ));
         } else {
             // eATA derivation failed, but still queue the ATA for cloning
@@ -479,7 +483,7 @@ where
                 *ata_pubkey,
                 Pubkey::default(), // Dummy companion - will be marked as NotFound
                 effective_slot,
-                fetch_context,
+                ata_projection_context,
             ));
         }
     }
@@ -550,7 +554,7 @@ where
                 this,
                 input.eata_pubkey,
                 this.remote_account_provider.chain_slot(),
-                fetch_context,
+                delegation_record_context,
             )
         })
     });
