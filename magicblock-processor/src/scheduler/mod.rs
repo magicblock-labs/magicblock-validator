@@ -322,9 +322,6 @@ impl TransactionScheduler {
 
     /// Sends a replication message, logging any errors.
     async fn send_replication(&self, msg: Message) {
-        if self.replication_tx.is_closed() {
-            return;
-        }
         let kind = msg.kind();
         if let Err(error) = self.replication_tx.send(msg).await {
             error!(

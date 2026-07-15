@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use magicblock_core::link::replication::Message;
 use tokio::{
-    sync::mpsc::{error::TryRecvError, Receiver},
+    sync::mpsc::Receiver,
     time::{timeout, Instant},
 };
 use tracing::{error, info, instrument, warn};
@@ -179,12 +179,14 @@ impl Primary {
         let _timing = ShutdownTiming::new("replication_service_drain");
 
         let deadline = Instant::now() + SHUTDOWN_DRAIN_TIMEOUT;
-        // Counts messages handed to the broker, not messages known to have
-        // landed: only the confirmed kinds report that (see `confirmation_for`).
+        // Every message is confirmed here, so this counts messages known to be
+        // persisted. `confirmation_for` trades confirmation for publish
+        // throughput, but there is no throughput left to protect once we are
+        // stopping, and this is the last chance to notice a loss.
         let mut drained = 0_u64;
 
         if let Some(msg) = pending.take() {
-            if !self.publish_with_retry_until(&msg, Some(deadline)).await {
+            if !self.drain_publish(&msg, deadline).await {
                 warn!(drained, "failed to drain pending replication message");
                 return;
             }
@@ -192,17 +194,9 @@ impl Primary {
         }
 
         loop {
-            if Instant::now() >= deadline {
-                warn!(drained, "replication shutdown drain timed out");
-                return;
-            }
-
-            match self.messages.try_recv() {
-                Ok(msg) => {
-                    if !self
-                        .publish_with_retry_until(&msg, Some(deadline))
-                        .await
-                    {
+            match next_to_drain(&mut self.messages, deadline).await {
+                DrainNext::Publish(msg) => {
+                    if !self.drain_publish(&msg, deadline).await {
                         warn!(
                             drained,
                             "failed to drain queued replication message"
@@ -211,19 +205,26 @@ impl Primary {
                     }
                     drained += 1;
                 }
-                Err(TryRecvError::Empty) => {
+                DrainNext::ProducerFinished => {
                     info!(drained, "replication shutdown drain complete");
                     return;
                 }
-                Err(TryRecvError::Disconnected) => {
-                    info!(
-                        drained,
-                        "replication channel closed during shutdown drain"
-                    );
+                DrainNext::TimedOut => {
+                    warn!(drained, "replication shutdown drain timed out");
                     return;
                 }
             }
         }
+    }
+
+    /// Publishes during shutdown, confirming regardless of message kind.
+    async fn drain_publish(
+        &mut self,
+        msg: &Message,
+        deadline: Instant,
+    ) -> bool {
+        self.publish_with_retry_until(msg, Some(deadline), Confirm::Yes)
+            .await
     }
 
     async fn release_producer_lock(&self, lock_state: LockState) {
@@ -236,7 +237,8 @@ impl Primary {
         }
     }
 
-    async fn publish(&mut self, msg: &Message) -> Result<()> {
+    /// Publishes `msg`, waiting for the server as far as `confirm` demands.
+    async fn publish(&mut self, msg: &Message, confirm: Confirm) -> Result<()> {
         let payload = match bincode::serialize(msg) {
             Ok(p) => p,
             Err(error) => {
@@ -250,25 +252,22 @@ impl Primary {
 
         self.ctx
             .broker
-            .publish(
-                subject,
-                payload.into(),
-                Some(msg_id.as_str()),
-                confirmation_for(msg),
-            )
+            .publish(subject, payload.into(), Some(msg_id.as_str()), confirm)
             .await?;
         self.ctx.update_position(slot, index);
         Ok(())
     }
 
     async fn publish_with_retry(&mut self, msg: &Message) -> bool {
-        self.publish_with_retry_until(msg, None).await
+        self.publish_with_retry_until(msg, None, confirmation_for(msg))
+            .await
     }
 
     async fn publish_with_retry_until(
         &mut self,
         msg: &Message,
         deadline: Option<Instant>,
+        confirm: Confirm,
     ) -> bool {
         let mut delay = PUBLISH_RETRY_BASE_DELAY;
 
@@ -282,7 +281,7 @@ impl Primary {
                     let Some(remaining) = remaining_until(deadline) else {
                         return false;
                     };
-                    match timeout(remaining, self.publish(msg)).await {
+                    match timeout(remaining, self.publish(msg, confirm)).await {
                         Ok(result) => result,
                         Err(_) => {
                             warn!("timed out publishing the message");
@@ -290,7 +289,7 @@ impl Primary {
                         }
                     }
                 }
-                None => self.publish(msg).await,
+                None => self.publish(msg, confirm).await,
             };
 
             match result {
@@ -358,6 +357,37 @@ fn remaining_until(deadline: Instant) -> Option<Duration> {
 
 fn message_id(slot: u64, index: u32) -> String {
     format!("{slot}:{index}")
+}
+
+/// The next step of a shutdown drain.
+#[derive(Debug)]
+pub(crate) enum DrainNext {
+    Publish(Message),
+    /// Every sender is gone: the producer has finished and nothing more is coming.
+    ProducerFinished,
+    TimedOut,
+}
+
+/// Waits for the next message to drain.
+///
+/// Waits for the producer to *finish*, not merely to go quiet. The scheduler and
+/// this service observe the same shutdown signal, and the scheduler still has to
+/// assemble its final block — awaiting executors, a ledger write, sometimes a
+/// snapshot — before sending it. An empty channel at this moment means only that
+/// it has not got there yet, so treating empty as done drops that block, and
+/// `send_replication` finds the receiver gone and discards it.
+pub(crate) async fn next_to_drain(
+    messages: &mut Receiver<Message>,
+    deadline: Instant,
+) -> DrainNext {
+    let Some(remaining) = remaining_until(deadline) else {
+        return DrainNext::TimedOut;
+    };
+    match timeout(remaining, messages.recv()).await {
+        Ok(Some(msg)) => DrainNext::Publish(msg),
+        Ok(None) => DrainNext::ProducerFinished,
+        Err(_) => DrainNext::TimedOut,
+    }
 }
 
 /// How far each kind of message waits for the server.
