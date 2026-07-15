@@ -6,7 +6,10 @@ use solana_keypair::Keypair;
 use tempfile::TempDir;
 
 use crate::{
-    config::{validator::ReplicationConfig, BlockSize, LifecycleMode},
+    config::{
+        validator::ReplicationConfig, AmlCheckStrategy, BlockSize,
+        LifecycleMode,
+    },
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
     types::network::{BindAddress, Remote},
     ValidatorParams,
@@ -308,6 +311,7 @@ fn test_chainlink_config() {
         cache-ttl = "20m"
         request-timeout = "2s"
         risk-score-threshold = 8
+        check-strategy = "all-signers"
         "#,
     );
 
@@ -336,6 +340,10 @@ fn test_chainlink_config() {
         std::time::Duration::from_secs(2)
     );
     assert_eq!(config.chainlink.risk.risk_score_threshold, 8);
+    assert_eq!(
+        config.chainlink.risk.check_strategy,
+        AmlCheckStrategy::AllSigners
+    );
 }
 
 // ============================================================================
@@ -504,6 +512,10 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
     assert!(!config.chainlink.risk.enabled);
+    assert_eq!(
+        config.chainlink.risk.check_strategy,
+        AmlCheckStrategy::RelevantPrograms
+    );
 
     // ========================================================================
     // 10. Aperture

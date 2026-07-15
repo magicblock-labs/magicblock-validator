@@ -9240,3 +9240,87 @@ async fn test_delegated_account_owned_by_token_program_does_not_subscribe_progra
         subscribed_programs
     );
 }
+
+mod aml_check_strategy {
+    use super::*;
+
+    fn action_for_program(program_id: Pubkey) -> Instruction {
+        Instruction::new_with_bytes(program_id, &[], vec![])
+    }
+
+    fn action_referencing(program_id: Pubkey, account: Pubkey) -> Instruction {
+        Instruction::new_with_bytes(
+            program_id,
+            &[],
+            vec![AccountMeta::new_readonly(account, false)],
+        )
+    }
+
+    #[test]
+    fn all_signers_strategy_always_requires_check() {
+        // An action that touches no risk-relevant program still gets checked.
+        let actions: DelegationActions =
+            vec![action_for_program(Pubkey::new_unique())].into();
+        assert!(delegation_actions_require_risk_check(
+            AmlCheckStrategy::AllSigners,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn relevant_programs_strategy_skips_unrelated_actions() {
+        let actions: DelegationActions = vec![
+            action_for_program(Pubkey::new_unique()),
+            action_for_program(Pubkey::new_unique()),
+        ]
+        .into();
+        assert!(!delegation_actions_require_risk_check(
+            AmlCheckStrategy::RelevantPrograms,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn relevant_programs_strategy_matches_each_relevant_program() {
+        for program in [
+            TOKEN_PROGRAM_ID,
+            TOKEN_2022_PROGRAM_ID,
+            EATA_PROGRAM_ID,
+            magicblock_magic_program_api::ID,
+        ] {
+            let actions: DelegationActions =
+                vec![action_for_program(program)].into();
+            assert!(
+                delegation_actions_require_risk_check(
+                    AmlCheckStrategy::RelevantPrograms,
+                    &actions,
+                ),
+                "program {program} invoked as program_id should require check",
+            );
+
+            // Referenced as a CPI target account, not the invoked program.
+            let actions: DelegationActions =
+                vec![action_referencing(Pubkey::new_unique(), program)].into();
+            assert!(
+                delegation_actions_require_risk_check(
+                    AmlCheckStrategy::RelevantPrograms,
+                    &actions,
+                ),
+                "program {program} referenced as account should require check",
+            );
+        }
+    }
+
+    #[test]
+    fn relevant_programs_strategy_matches_when_any_action_is_relevant() {
+        let actions: DelegationActions = vec![
+            action_for_program(Pubkey::new_unique()),
+            action_for_program(EATA_PROGRAM_ID),
+        ]
+        .into();
+        assert!(delegation_actions_require_risk_check(
+            AmlCheckStrategy::RelevantPrograms,
+            &actions,
+        ));
+    }
+}

@@ -92,6 +92,23 @@ impl Default for ChainLinkConfig {
     }
 }
 
+/// Strategy for deciding which post-delegation action signers get AML/risk
+/// checked.
+#[derive(
+    Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum AmlCheckStrategy {
+    /// Check every signer of every post-delegation action, regardless of which
+    /// programs the action invokes.
+    AllSigners,
+    /// Only check signers when a post-delegation action involves the SPL Token,
+    /// ephemeral SPL (eATA/ESPL), or Magic program. Actions touching none of
+    /// these programs skip the risk check entirely.
+    #[default]
+    RelevantPrograms,
+}
+
 /// Configuration for checking account risk with the Range API and a local sqlite cache.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
@@ -110,6 +127,8 @@ pub struct RiskConfig {
     pub request_timeout: Duration,
     /// Threshold on a scale of 0-10 for the risk score.
     pub risk_score_threshold: u64,
+    /// Which post-delegation action signers to risk check.
+    pub check_strategy: AmlCheckStrategy,
 }
 
 impl Default for RiskConfig {
@@ -123,6 +142,7 @@ impl Default for RiskConfig {
                 consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC,
             ),
             risk_score_threshold: consts::DEFAULT_RISK_SCORE_THRESHOLD,
+            check_strategy: AmlCheckStrategy::default(),
         }
     }
 }

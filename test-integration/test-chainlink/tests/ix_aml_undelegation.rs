@@ -16,7 +16,7 @@ use dlp_api::{
 };
 use magicblock_aml::RiskService;
 use magicblock_chainlink::testing::init_logger;
-use magicblock_config::config::RiskConfig;
+use magicblock_config::config::{AmlCheckStrategy, RiskConfig};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
@@ -103,6 +103,7 @@ fn risk_config(base_url: String) -> RiskConfig {
         cache_ttl: Duration::from_secs(60),
         request_timeout: Duration::from_secs(2),
         risk_score_threshold: 7,
+        check_strategy: AmlCheckStrategy::AllSigners,
     }
 }
 
