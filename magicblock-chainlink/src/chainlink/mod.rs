@@ -180,6 +180,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    pub async fn fetch_undelegation_requests(
+        &self,
+    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink.fetch_undelegation_requests().await
+            }
+            Self::Disabled => Ok(Vec::new()),
+        }
+    }
+
     pub fn fetch_count(&self) -> Option<u64> {
         match self {
             Self::Enabled(chainlink) => chainlink.fetch_count(),
@@ -625,6 +636,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
         debug!(pubkey = %pubkey, "Successfully subscribed for undelegation tracking");
         Ok(())
+    }
+
+    pub async fn fetch_undelegation_requests(
+        &self,
+    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
+        let Some(fetch_cloner) = self.fetch_cloner() else {
+            return Ok(Vec::new());
+        };
+        fetch_cloner.fetch_undelegation_requests().await
     }
 
     pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
