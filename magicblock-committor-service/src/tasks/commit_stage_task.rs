@@ -308,9 +308,9 @@ mod tests {
     use crate::{
         tasks::utils::TransactionUtils,
         test_utils,
+        utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
         ComputeBudgetConfig,
     };
-    use crate::utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE};
 
     #[test]
     fn test_max_write_with_uniqueness_nonce_fits() {

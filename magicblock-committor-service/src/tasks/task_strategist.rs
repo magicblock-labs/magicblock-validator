@@ -424,16 +424,14 @@ mod tests {
         intent_engine::intent_scheduler::create_test_intent,
         tasks::{
             commit_task::CommitTask,
-            task_builder::{
-                TaskBuilderImpl, TasksBuilder,
-            },
+            task_builder::{TaskBuilderImpl, TasksBuilder},
             task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+            utils::{create_commit_task, COMMIT_STATE_SIZE_THRESHOLD},
             BaseActionTask, BaseActionTaskV1, FinalizeTask, TaskStrategy,
             UndelegateTask,
         },
         test_utils,
     };
-    use crate::tasks::utils::{create_commit_task, COMMIT_STATE_SIZE_THRESHOLD};
 
     #[derive(Default)]
     struct MockInfoFetcher {

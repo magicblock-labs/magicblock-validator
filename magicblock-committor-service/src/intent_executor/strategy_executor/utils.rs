@@ -666,3 +666,133 @@ where
         self.inner.execute_callbacks(signature, result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use async_trait::async_trait;
+    use dlp_api::state::{DelegationMetadata, UndelegationRequester};
+    use magicblock_core::intent::types::CommittedAccount;
+    use solana_account::Account;
+
+    use super::*;
+    use crate::tasks::{
+        task_info_fetcher::TaskInfoFetcherResult, utils::create_commit_task,
+    };
+
+    /// Reports commit id 1 except for one unchanged account at commit id 5.
+    struct FreshDelegationFetcher(Option<Pubkey>);
+
+    #[async_trait]
+    impl TaskInfoFetcher for FreshDelegationFetcher {
+        async fn fetch_next_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (*pubkey, if self.0 == Some(*pubkey) { 5 } else { 1 })
+                })
+                .collect())
+        }
+
+        async fn fetch_current_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (*pubkey, if self.0 == Some(*pubkey) { 4 } else { 0 })
+                })
+                .collect())
+        }
+
+        async fn fetch_delegation_metadata(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
+        {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (
+                        *pubkey,
+                        DelegationMetadata {
+                            last_commit_id: 0,
+                            undelegation_requester: UndelegationRequester::None,
+                            seeds: vec![],
+                            rent_payer: *pubkey,
+                        },
+                    )
+                })
+                .collect())
+        }
+
+        async fn get_base_accounts(
+            &self,
+            _: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+            Ok(Default::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mixed_commit_id_recovery_sets_uniqueness_nonce() {
+        let pubkey = Pubkey::new_unique();
+        let unchanged_pubkey = Pubkey::new_unique();
+        // Stale cache produced commit id 5; on chain the account was
+        // re-delegated, so the correct commit id is 1.
+        let stale_task = create_commit_task(
+            5,
+            false,
+            CommittedAccount {
+                pubkey,
+                account: Account::default(),
+                remote_slot: Default::default(),
+            },
+            None,
+        );
+        let mut strategy = TransactionStrategy {
+            optimized_tasks: vec![
+                stale_task.into(),
+                create_commit_task(
+                    5,
+                    false,
+                    CommittedAccount {
+                        pubkey: unchanged_pubkey,
+                        account: Account::default(),
+                        remote_slot: Default::default(),
+                    },
+                    None,
+                )
+                .into(),
+            ],
+            lookup_tables_keys: vec![],
+            uniqueness_nonce: None,
+        };
+
+        let fetcher = CacheTaskInfoFetcher::new(FreshDelegationFetcher(Some(
+            unchanged_pubkey,
+        )));
+        let cleanup = handle_commit_id_error(
+            &Pubkey::new_unique(),
+            &fetcher,
+            &[pubkey, unchanged_pubkey],
+            &mut strategy,
+            42,
+        )
+        .await
+        .expect("commit id recovery succeeds");
+
+        assert_eq!(strategy.uniqueness_nonce, Some(42));
+        assert_eq!(cleanup.uniqueness_nonce, Some(42));
+        assert_eq!(cleanup.optimized_tasks.len(), 1);
+    }
+}
