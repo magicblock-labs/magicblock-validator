@@ -379,14 +379,17 @@ where
         let results = join_all(
             bundles.iter().map(|b| b.get_all_committed_pubkeys()).map(
                 |pubkeys| async move {
-                    self.chainlink
+                    #[allow(deprecated)]
+                    let result = self
+                        .chainlink
                         .accounts_delegated_on_base_and_er(
                             &pubkeys,
                             AccountFetchContext::internal(
                                 AccountFetchReason::RequestedAccount,
                             ),
                         )
-                        .await
+                        .await;
+                    result
                 },
             ),
         )

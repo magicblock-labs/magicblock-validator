@@ -3,7 +3,8 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        commit_task::{CommitBufferStage, CommitDelivery},
+        commit_stage_task::{CleanupTask, PreparationTask},
+        commit_task::CommitDelivery,
         task_strategist::{TaskStrategist, TransactionStrategy},
         BaseTaskImpl,
     },
@@ -45,8 +46,7 @@ async fn test_prepare_10kb_buffer() {
     else {
         panic!("unexpected task type");
     };
-    let Some(CommitBufferStage::Cleanup(cleanup_task)) = commit_task.stage()
-    else {
+    let Some(cleanup_task) = CleanupTask::from_commit(commit_task) else {
         panic!("unexpected CommitStage");
     };
 
@@ -96,7 +96,7 @@ async fn test_prepare_multiple_buffers() {
     let mut strategy = TransactionStrategy {
         optimized_tasks: buffer_tasks,
         lookup_tables_keys: vec![],
-        uniqueness_nonce: None,
+        uniqueness_nonce: Some(42),
     };
 
     // Test preparation
@@ -115,11 +115,9 @@ async fn test_prepare_multiple_buffers() {
         .optimized_tasks
         .iter()
         .filter_map(|el| match el {
-            BaseTaskImpl::Commit(commit_task) => commit_task.stage(),
-            _ => None,
-        })
-        .filter_map(|stage| match stage {
-            CommitBufferStage::Cleanup(cleanup_task) => Some(cleanup_task),
+            BaseTaskImpl::Commit(commit_task) => {
+                CleanupTask::from_commit(commit_task)
+            }
             _ => None,
         })
         .collect();
@@ -234,7 +232,7 @@ async fn test_already_initialized_error_handled() {
     let BaseTaskImpl::Commit(ref ct) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
-    let Some(CommitBufferStage::Cleanup(cleanup_task)) = ct.stage() else {
+    let Some(cleanup_task) = CleanupTask::from_commit(ct) else {
         panic!("unexpected CommitStage");
     };
     // Check buffer account exists
@@ -253,9 +251,8 @@ async fn test_already_initialized_error_handled() {
         commit_task.committed_account.account.data.len() - 2,
     );
     commit_task.committed_account.account.data = data.clone();
-    commit_task.delivery_details = CommitDelivery::StateInBuffer {
-        stage: commit_task.state_preparation_stage(),
-    };
+    commit_task.delivery_details =
+        CommitDelivery::StateInBuffer { prepared: false };
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![commit_task.into()],
         lookup_tables_keys: vec![],
@@ -276,7 +273,7 @@ async fn test_already_initialized_error_handled() {
     let BaseTaskImpl::Commit(ref ct) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
-    let Some(CommitBufferStage::Cleanup(cleanup_task)) = ct.stage() else {
+    let Some(cleanup_task) = CleanupTask::from_commit(ct) else {
         panic!("unexpected CommitStage");
     };
 
@@ -289,6 +286,190 @@ async fn test_already_initialized_error_handled() {
         .unwrap()
         .expect("Buffer account should exist");
     assert_eq!(account.data.as_slice(), data, "Unexpected account data");
+}
+
+#[tokio::test]
+async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
+    const SECOND_INTENT_ID: u64 = 124_027;
+
+    async fn send_with_blockhash(
+        fixture: &TestFixture,
+        instructions: &[solana_sdk::instruction::Instruction],
+        blockhash: solana_sdk::hash::Hash,
+    ) -> solana_sdk::signature::Signature {
+        use magicblock_rpc_client::MagicBlockSendTransactionConfig;
+        use solana_sdk::{
+            message::{v0::Message, VersionedMessage},
+            transaction::VersionedTransaction,
+        };
+
+        let message = Message::try_compile(
+            &fixture.authority.pubkey(),
+            instructions,
+            &[],
+            blockhash,
+        )
+        .expect("compile transaction");
+        let transaction = VersionedTransaction::try_new(
+            VersionedMessage::V0(message),
+            &[&fixture.authority],
+        )
+        .expect("sign transaction");
+        fixture
+            .rpc_client
+            .send_transaction(
+                &transaction,
+                &MagicBlockSendTransactionConfig::Send,
+            )
+            .await
+            .expect("send transaction")
+            .into_signature()
+    }
+
+    async fn wait_for_processed(
+        fixture: &TestFixture,
+        signature: &solana_sdk::signature::Signature,
+        blockhash: &solana_sdk::hash::Hash,
+    ) {
+        use std::time::Duration;
+
+        fixture
+            .rpc_client
+            .wait_for_processed_status(
+                signature,
+                blockhash,
+                Duration::from_secs(4),
+                Duration::from_millis(10),
+                &None,
+            )
+            .await
+            .expect("fetch transaction status")
+            .expect("transaction execution");
+    }
+
+    let fixture = TestFixture::new().await;
+    let preparator = fixture.create_delivery_preparator();
+
+    let data = generate_random_bytes(112);
+    let mut commit_task = create_buffer_commit_task(&data);
+    commit_task.reset_commit_id(1);
+    let Some(preparation_task) = PreparationTask::from_commit(&mut commit_task)
+    else {
+        panic!("expected preparation stage");
+    };
+
+    // Recreate the historical buffer lifecycle without a uniqueness noop. The
+    // next preparation uses the same authority, account, commit id, and cached
+    // blockhash, so ignoring its intent nonce would reproduce the old init
+    // signature after the buffer has already been closed.
+    let cached_blockhash = fixture
+        .rpc_client
+        .get_latest_blockhash()
+        .await
+        .expect("blockhash");
+    let mut init_instructions =
+        fixture.compute_budget_config.buffer_init.instructions(1);
+    init_instructions
+        .push(preparation_task.init_instruction(&fixture.authority.pubkey()));
+    send_with_blockhash(&fixture, &init_instructions, cached_blockhash).await;
+
+    let write_instruction = preparation_task
+        .write_instructions(&fixture.authority.pubkey())
+        .into_iter()
+        .next()
+        .expect("write instruction");
+    let mut write_instructions = fixture
+        .compute_budget_config
+        .buffer_write
+        .instructions(write_instruction.data.len());
+    write_instructions.push(write_instruction);
+    let write_signature =
+        send_with_blockhash(&fixture, &write_instructions, cached_blockhash)
+            .await;
+    wait_for_processed(&fixture, &write_signature, &cached_blockhash).await;
+
+    let historical_cleanup = preparation_task.cleanup_task();
+    // Three realloc budget units produce the same 30k limit used by cleanup.
+    let mut close_instructions =
+        fixture.compute_budget_config.buffer_init.instructions(3);
+    close_instructions
+        .push(historical_cleanup.instruction(&fixture.authority.pubkey()));
+    let close_signature =
+        send_with_blockhash(&fixture, &close_instructions, cached_blockhash)
+            .await;
+    wait_for_processed(&fixture, &close_signature, &cached_blockhash).await;
+
+    assert_eq!(
+        fixture
+            .rpc_client
+            .get_latest_blockhash()
+            .await
+            .expect("cached blockhash"),
+        cached_blockhash,
+        "test setup exceeded the blockhash cache lifetime"
+    );
+
+    let mut second_strategy = TransactionStrategy {
+        optimized_tasks: vec![commit_task.into()],
+        lookup_tables_keys: vec![],
+        uniqueness_nonce: Some(SECOND_INTENT_ID),
+    };
+    preparator
+        .prepare_for_delivery(
+            &fixture.authority,
+            &mut second_strategy,
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .expect("second buffer preparation");
+
+    let second_cleanup = match &second_strategy.optimized_tasks[0] {
+        BaseTaskImpl::Commit(task) => match CleanupTask::from_commit(task) {
+            Some(cleanup) => cleanup.clone(),
+            _ => panic!("expected cleanup stage"),
+        },
+        _ => panic!("expected commit task"),
+    };
+    let buffer = fixture
+        .rpc_client
+        .get_account(&second_cleanup.buffer_pda(&fixture.authority.pubkey()))
+        .await
+        .expect("buffer lookup")
+        .expect("buffer account");
+    assert_eq!(buffer.data, data);
+
+    let chunks = fixture
+        .rpc_client
+        .get_account(&second_cleanup.chunks_pda(&fixture.authority.pubkey()))
+        .await
+        .expect("chunks lookup")
+        .expect("chunks account");
+    let chunks =
+        Chunks::try_from_slice(&chunks.data).expect("deserialize chunks");
+    assert!(chunks.is_complete());
+
+    preparator
+        .cleanup(
+            &fixture.authority,
+            std::slice::from_ref(&second_cleanup),
+            &[],
+            Some(SECOND_INTENT_ID),
+            true,
+        )
+        .await
+        .expect("second buffer cleanup");
+    assert!(fixture
+        .rpc_client
+        .get_account(&second_cleanup.buffer_pda(&fixture.authority.pubkey()))
+        .await
+        .expect("closed buffer lookup")
+        .is_none());
+    assert!(fixture
+        .rpc_client
+        .get_account(&second_cleanup.chunks_pda(&fixture.authority.pubkey()))
+        .await
+        .expect("closed chunks lookup")
+        .is_none());
 }
 
 #[tokio::test]
@@ -335,11 +516,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
         .optimized_tasks
         .iter()
         .filter_map(|t| match t {
-            BaseTaskImpl::Commit(ct) => ct.stage(),
-            _ => None,
-        })
-        .filter_map(|stage| match stage {
-            CommitBufferStage::Cleanup(c) => Some(c),
+            BaseTaskImpl::Commit(ct) => CleanupTask::from_commit(ct),
             _ => None,
         })
         .collect();
@@ -406,12 +583,10 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     }
 
     // Rebuild buffer stages with mutated data
-    commit_a.delivery_details = CommitDelivery::StateInBuffer {
-        stage: commit_a.state_preparation_stage(),
-    };
-    commit_b.delivery_details = CommitDelivery::StateInBuffer {
-        stage: commit_b.state_preparation_stage(),
-    };
+    commit_a.delivery_details =
+        CommitDelivery::StateInBuffer { prepared: false };
+    commit_b.delivery_details =
+        CommitDelivery::StateInBuffer { prepared: false };
 
     // --- Step 4: re-prepare with the same logical tasks (same commit IDs, mutated data) ---
     let mut strategy2 = TransactionStrategy {
@@ -442,11 +617,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
         .optimized_tasks
         .iter()
         .filter_map(|t| match t {
-            BaseTaskImpl::Commit(ct) => ct.stage(),
-            _ => None,
-        })
-        .filter_map(|stage| match stage {
-            CommitBufferStage::Cleanup(c) => Some(c),
+            BaseTaskImpl::Commit(ct) => CleanupTask::from_commit(ct),
             _ => None,
         })
         .collect();

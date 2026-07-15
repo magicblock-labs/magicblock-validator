@@ -9,7 +9,11 @@ use std::{
 };
 
 use dlp_api::{
-    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+    pda::delegation_record_pda_from_delegated_account,
+    state::{
+        discriminator::AccountDiscriminator, DelegationRecord,
+        UndelegationRequest,
+    },
 };
 use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
@@ -29,13 +33,18 @@ use magicblock_metrics::metrics::{
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
 use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::{
+    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    filter::{Memcmp, RpcFilterType},
+};
 use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
-    sync::{mpsc, oneshot, Semaphore},
+    sync::{broadcast, mpsc, oneshot, Semaphore},
     task,
     task::JoinSet,
 };
@@ -76,6 +85,7 @@ use crate::{
         blacklisted_accounts::{
             blacklisted_accounts, programs_not_to_subscribe,
         },
+        ObservedUndelegationRequest,
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
@@ -145,6 +155,8 @@ where
 
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
+
+    undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
 }
 
 struct PendingUndelegationGuard {
@@ -209,6 +221,9 @@ where
                 .pending_operation_timeout_ms
                 .clone(),
             risk_service: self.risk_service.clone(),
+            undelegation_request_sender: self
+                .undelegation_request_sender
+                .clone(),
         }
     }
 }
@@ -230,6 +245,33 @@ where
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
+    ) -> Arc<Self> {
+        let (undelegation_request_sender, _) = broadcast::channel(1024);
+        Self::new_with_undelegation_request_sender(
+            remote_account_provider,
+            accounts_bank,
+            cloner,
+            validator_keypair,
+            subscription_updates_rx,
+            allowed_programs,
+            risk_service,
+            undelegation_request_sender,
+        )
+    }
+
+    /// Create FetchCloner with subscription updates and request notifications connected.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_undelegation_request_sender(
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        accounts_bank: &Arc<V>,
+        cloner: &Arc<C>,
+        validator_keypair: Keypair,
+        subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
+        allowed_programs: Option<Vec<AllowedProgram>>,
+        risk_service: Option<Arc<RiskService>>,
+        undelegation_request_sender: broadcast::Sender<
+            ObservedUndelegationRequest,
+        >,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts = blacklisted_accounts(&validator_pubkey);
@@ -258,6 +300,7 @@ where
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
             risk_service,
+            undelegation_request_sender,
         });
 
         let accounts_bank_for_eviction = accounts_bank.clone();
@@ -297,6 +340,58 @@ where
             .remote_account_provider
             .try_get_multi(pubkeys, None, fetch_context, None)
             .await?)
+    }
+
+    pub async fn fetch_undelegation_requests(
+        &self,
+    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
+        let observed_slot = self.remote_account_provider.get_slot().await?;
+        let config = RpcProgramAccountsConfig {
+            filters: Some(vec![
+                RpcFilterType::DataSize(
+                    UndelegationRequest::size_with_discriminator() as u64,
+                ),
+                RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                    0,
+                    AccountDiscriminator::UndelegationRequest
+                        .to_bytes()
+                        .to_vec(),
+                )),
+            ]),
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(UiAccountEncoding::Base64Zstd),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let accounts = self
+            .remote_account_provider
+            .get_program_accounts_with_config(&dlp_api::id(), config)
+            .await?;
+
+        let mut requests = Vec::with_capacity(accounts.len());
+        for (request_pda, account) in accounts {
+            let Ok(request) =
+                UndelegationRequest::try_from_bytes_with_discriminator(
+                    &account.data,
+                )
+            else {
+                warn!(
+                    request_pda = %request_pda,
+                    data_len = account.data.len(),
+                    "Skipping malformed DLP undelegation request account"
+                );
+                continue;
+            };
+            requests.push(ObservedUndelegationRequest {
+                request_pda,
+                delegated_account: request.delegated_account,
+                expires_at_slot: request.expires_at_slot,
+                observed_slot,
+            });
+        }
+
+        Ok(requests)
     }
 
     pub fn cloner(&self) -> &Arc<C> {
@@ -2227,6 +2322,40 @@ where
                                 // use, etc.
                                 (None, None, DelegationActions::default())
                             }
+                        } else if let Ok(request) =
+                            UndelegationRequest::try_from_bytes_with_discriminator(
+                                account.data(),
+                            )
+                        {
+                            let observed = ObservedUndelegationRequest {
+                                request_pda: pubkey,
+                                delegated_account: request.delegated_account,
+                                expires_at_slot: request.expires_at_slot,
+                                observed_slot: account.remote_slot(),
+                            };
+                            trace!(
+                                request_pda = %observed.request_pda,
+                                delegated_account = %observed.delegated_account,
+                                expires_at_slot = observed.expires_at_slot,
+                                "Observed DLP undelegation request"
+                            );
+                            if let Err(broadcast::error::SendError(observed)) =
+                                self.undelegation_request_sender.send(observed)
+                            {
+                                warn!(
+                                    request_pda = %observed.request_pda,
+                                    delegated_account = %observed.delegated_account,
+                                    observed_slot = observed.observed_slot,
+                                    expires_at_slot = observed.expires_at_slot,
+                                    drop_reason = "no_active_subscribers",
+                                    "Dropped observed DLP undelegation request because no subscribers are active"
+                                );
+                            }
+                            (
+                                Some(account.into_account_shared_data()),
+                                None,
+                                DelegationActions::default(),
+                            )
                         } else if is_internal_dlp_account_data(account.data()) {
                             (
                                 Some(account.into_account_shared_data()),
