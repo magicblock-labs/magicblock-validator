@@ -68,9 +68,11 @@ use magicblock_core::{
 use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_metrics::metrics;
 use magicblock_program::sysvar::{HighPrecisionClock, HIGH_PRECISION_CLOCK_ID};
+use serde::Serialize;
 use solana_account::{from_account, to_account};
 use solana_program::{clock::Clock, hash::Hash, slot_hashes::SlotHashes};
 use solana_program_runtime::loaded_programs::ProgramCache;
+use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::{clock, slot_hashes};
 use state::TransactionSchedulerState;
 use tokio::{
@@ -704,25 +706,18 @@ impl TransactionScheduler {
 
     /// Updates the Clock sysvar account.
     fn update_clock_sysvar(&self, clock: &Clock) {
-        if let Some(mut account) = self.accountsdb.get_account(&clock::ID) {
-            let _ = account.serialize_data(clock);
-            let _ = self.accountsdb.insert_account(&clock::ID, &account);
-        }
+        self.update_sysvar_account(&clock::ID, clock);
     }
 
     /// Updates the HighPrecisionClock sysvar account.
     fn update_high_precision_clock_sysvar(&self, block: &LatestBlockInner) {
-        if let Some(mut account) =
-            self.accountsdb.get_account(&HIGH_PRECISION_CLOCK_ID)
-        {
-            let high_precision_clock = HighPrecisionClock {
-                unix_timestamp_millis: block.timestamp_millis,
-            };
-            let _ = account.serialize_data(&high_precision_clock);
-            let _ = self
-                .accountsdb
-                .insert_account(&HIGH_PRECISION_CLOCK_ID, &account);
-        }
+        let high_precision_clock = HighPrecisionClock {
+            unix_timestamp_millis: block.timestamp_millis,
+        };
+        self.update_sysvar_account(
+            &HIGH_PRECISION_CLOCK_ID,
+            &high_precision_clock,
+        );
     }
 
     /// Updates the SlotHashes sysvar account with the new slot/blockhash pair.
@@ -737,6 +732,13 @@ impl TransactionScheduler {
                 warn!("failed to write slot hashes to account");
             }
             let _ = self.accountsdb.insert_account(&slot_hashes::ID, &acc);
+        }
+    }
+
+    fn update_sysvar_account<T: Serialize>(&self, id: &Pubkey, data: &T) {
+        if let Some(mut account) = self.accountsdb.get_account(id) {
+            let _ = account.serialize_data(data);
+            let _ = self.accountsdb.insert_account(id, &account);
         }
     }
 }
