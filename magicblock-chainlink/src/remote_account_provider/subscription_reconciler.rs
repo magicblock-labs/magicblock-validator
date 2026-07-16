@@ -14,8 +14,9 @@ use tracing::*;
 
 use super::{
     subscription_key_owned_guard_from_map, AccountsLruCache, ChainPubsubClient,
-    PubsubTransport, SubscriptionKeyLocks, SubscriptionOwnershipMap,
-    SubscriptionReason,
+    FetchingAccounts, PubsubTransport,
+    SharedCapacityEvictionProtectionPredicate, SubscriptionKeyLocks,
+    SubscriptionOwnershipMap, SubscriptionReason,
 };
 use crate::remote_account_provider::RemoteAccountProviderError;
 
@@ -110,6 +111,10 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     removed_account_tx: &mpsc::Sender<Pubkey>,
     subscription_key_locks: Option<&SubscriptionKeyLocks>,
     subscription_ownership: Option<&SubscriptionOwnershipMap>,
+    fetching_accounts: Option<&FetchingAccounts>,
+    capacity_eviction_protection: Option<
+        &SharedCapacityEvictionProtectionPredicate,
+    >,
 ) -> usize {
     let lru_pubkeys = subscribed_accounts.pubkeys();
     let lru_count = lru_pubkeys.len();
@@ -395,17 +400,77 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             .unwrap_or_else(|poison| poison.into_inner())
             .contains(&pubkey);
         let has_grpc = grpc_snapshot.is_some();
-        let result = if grpc_preferred && has_grpc {
+        let preferred_result = if grpc_preferred && has_grpc {
             pubsub_client.prefer_grpc_subscription(pubkey).await
         } else {
             pubsub_client.subscribe(pubkey, None).await
         };
-        if let Err(err) = result {
-            // Never leave the account unwatched.
+        if let Err(err) = &preferred_result {
             debug!(pubkey = %pubkey, error = ?err, "Secondary repair failed; restoring full coverage");
+        }
+        let preferred_covered = pubsub_client
+            .subscription_reconciliation_snapshot()
+            .is_some_and(|snapshot| snapshot.union.contains(&pubkey));
+        if preferred_result.is_err() || !preferred_covered {
             if let Err(err) = pubsub_client.subscribe(pubkey, None).await {
                 warn!(pubkey = %pubkey, error = ?err, "Failed to repair secondary account subscription");
             }
+        }
+
+        let covered = pubsub_client
+            .subscription_reconciliation_snapshot()
+            .is_some_and(|snapshot| snapshot.union.contains(&pubkey));
+        if covered {
+            continue;
+        }
+
+        if fetching_accounts.is_some_and(|fetching_accounts| {
+            fetching_accounts
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .contains_key(&pubkey)
+        }) {
+            continue;
+        }
+
+        if capacity_eviction_protection.is_some_and(|protection| {
+            protection
+                .read()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .as_ref()
+                .is_some_and(|predicate| predicate(&pubkey).is_protected())
+        }) {
+            continue;
+        }
+
+        if let Some(ownership) = subscription_ownership {
+            if ownership.lock().await.get(&pubkey).is_some_and(|own| {
+                own.contains(SubscriptionReason::UndelegationTracking)
+            }) {
+                continue;
+            }
+        }
+
+        warn!(pubkey = %pubkey, "Secondary repair did not take effect on any client; evicting account to prevent stale state");
+        secondary_subscriptions.remove(&pubkey);
+        confirmed_missing_subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(&pubkey);
+        if let Some(ownership) = subscription_ownership {
+            ownership.lock().await.remove(&pubkey);
+        }
+        if let Err(err) = removed_account_tx.send(pubkey).await {
+            warn!(pubkey = %pubkey, error = ?err, "Failed to send removal update for dead secondary subscription");
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::Reconciler,
+                SubscriptionCleanupOutcome::RemovalUpdateFailed,
+            );
+        } else {
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::Reconciler,
+                SubscriptionCleanupOutcome::Unsubscribed,
+            );
         }
     }
 
@@ -446,8 +511,10 @@ mod tests {
             },
             lru_cache::AccountsLruCache,
             pubsub_common::SubscriptionUpdate,
+            CapacityEvictionProtection, FetchingAccountState,
         },
         testing::init_logger,
+        AccountFetchOrigin,
     };
 
     fn create_test_pubkey(seed: u8) -> Pubkey {
@@ -483,6 +550,8 @@ mod tests {
             &removed_tx,
             None,
             None,
+            None,
+            None,
         )
         .await;
 
@@ -514,11 +583,119 @@ mod tests {
             &removed_tx,
             None,
             None,
+            None,
+            None,
         )
         .await;
 
         assert!(mock_client.subscriptions_union().contains(&pk));
         assert!(removed_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_secondary_noop_repair_respects_protections_then_evicts() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        mock_client.set_transport(PubsubTransport::Grpc);
+
+        let pk = create_test_pubkey(1);
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        secondary.add(pk);
+        let confirmed_missing = Mutex::new(HashSet::from([pk]));
+        let ownership: SubscriptionOwnershipMap = Default::default();
+        ownership
+            .lock()
+            .await
+            .entry(pk)
+            .or_default()
+            .acquire(SubscriptionReason::DirectAccount);
+        let fetching_accounts = FetchingAccounts::default();
+        let capacity_eviction_protection:
+            SharedCapacityEvictionProtectionPredicate = Default::default();
+        fetching_accounts.lock().unwrap().insert(
+            pk,
+            FetchingAccountState {
+                generation: 1,
+                fetch_start_slot: 0,
+                fetch_origin: AccountFetchOrigin::GetAccount,
+                owner_started_at: std::time::Instant::now(),
+                waiters: Vec::new(),
+            },
+        );
+        mock_client.silently_noop_next_subscriptions(2);
+
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+        reconcile_subscriptions(
+            &lru,
+            &secondary,
+            &confirmed_missing,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&capacity_eviction_protection),
+        )
+        .await;
+
+        assert!(secondary.contains(&pk));
+        assert!(confirmed_missing.lock().unwrap().contains(&pk));
+        assert!(ownership.lock().await.contains_key(&pk));
+        assert!(removed_rx.try_recv().is_err());
+        assert_eq!(mock_client.subscribe_attempts(), 2);
+
+        fetching_accounts.lock().unwrap().remove(&pk);
+        *capacity_eviction_protection.write().unwrap() =
+            Some(Arc::new(|_| CapacityEvictionProtection {
+                delegated: true,
+                undelegating: false,
+            }));
+        mock_client.silently_noop_next_subscriptions(2);
+        reconcile_subscriptions(
+            &lru,
+            &secondary,
+            &confirmed_missing,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&capacity_eviction_protection),
+        )
+        .await;
+
+        assert!(secondary.contains(&pk));
+        assert!(confirmed_missing.lock().unwrap().contains(&pk));
+        assert!(ownership.lock().await.contains_key(&pk));
+        assert!(removed_rx.try_recv().is_err());
+        assert_eq!(mock_client.subscribe_attempts(), 4);
+
+        *capacity_eviction_protection.write().unwrap() = None;
+        mock_client.silently_noop_next_subscriptions(2);
+        reconcile_subscriptions(
+            &lru,
+            &secondary,
+            &confirmed_missing,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&capacity_eviction_protection),
+        )
+        .await;
+
+        assert!(!secondary.contains(&pk));
+        assert!(!confirmed_missing.lock().unwrap().contains(&pk));
+        assert!(!ownership.lock().await.contains_key(&pk));
+        assert_eq!(removed_rx.try_recv(), Ok(pk));
+        assert_eq!(mock_client.subscribe_attempts(), 6);
     }
 
     #[tokio::test]
@@ -749,6 +926,8 @@ mod tests {
             &removed_tx,
             None,
             Some(&ownership),
+            None,
+            None,
         )
         .await;
 
@@ -1027,6 +1206,8 @@ mod tests {
             pubsub_client,
             never_evicted,
             removed_account_tx,
+            None,
+            None,
             None,
             None,
         )

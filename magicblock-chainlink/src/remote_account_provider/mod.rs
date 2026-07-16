@@ -286,7 +286,7 @@ fn spawn_deferred_pubsub_clients(
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
 type FetchingAccountGeneration = u64;
 
-struct FetchingAccountState {
+pub(crate) struct FetchingAccountState {
     generation: FetchingAccountGeneration,
     fetch_start_slot: u64,
     fetch_origin: AccountFetchOrigin,
@@ -294,7 +294,7 @@ struct FetchingAccountState {
     waiters: Vec<oneshot::Sender<FetchResult>>,
 }
 
-type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
+pub(crate) type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
 
 struct PendingFetchWaiterGaugeGuard {
     layer: ChainlinkPendingFetchLayer,
@@ -332,6 +332,8 @@ impl Drop for PendingFetchWaiterGaugeGuard {
 
 struct ClaimedSubscriptionSetupGuard {
     fetching_accounts: Arc<FetchingAccounts>,
+    subscription_ownership: SubscriptionOwnershipMap,
+    subscription_transition_lock: Arc<AsyncMutex<()>>,
     claimed_pubkeys: Vec<Pubkey>,
     claimed_generations: HashMap<Pubkey, FetchingAccountGeneration>,
     cancellation_error_text: Option<String>,
@@ -340,11 +342,15 @@ struct ClaimedSubscriptionSetupGuard {
 impl ClaimedSubscriptionSetupGuard {
     fn new(
         fetching_accounts: Arc<FetchingAccounts>,
+        subscription_ownership: SubscriptionOwnershipMap,
+        subscription_transition_lock: Arc<AsyncMutex<()>>,
         claimed_pubkeys: Vec<Pubkey>,
         claimed_generations: HashMap<Pubkey, FetchingAccountGeneration>,
     ) -> Self {
         Self {
             fetching_accounts,
+            subscription_ownership,
+            subscription_transition_lock,
             claimed_pubkeys,
             claimed_generations,
             cancellation_error_text: Some(
@@ -353,7 +359,7 @@ impl ClaimedSubscriptionSetupGuard {
         }
     }
 
-    fn cleanup_with_error(&mut self, waiter_error_text: String) {
+    fn cleanup_fetching_with_error(&self, waiter_error_text: &str) {
         {
             let mut fetching = self
                 .fetching_accounts
@@ -381,13 +387,23 @@ impl ClaimedSubscriptionSetupGuard {
                     for sender in state.waiters {
                         let _ = sender.send(Err(
                             RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                                waiter_error_text.clone(),
+                                waiter_error_text.to_string(),
                             ),
                         ));
                     }
                 }
             }
         }
+    }
+
+    async fn cleanup_with_error(&mut self, waiter_error_text: String) {
+        self.cleanup_fetching_with_error(&waiter_error_text);
+        cleanup_classification_placeholders(
+            &self.subscription_ownership,
+            &self.subscription_transition_lock,
+            &self.claimed_generations,
+        )
+        .await;
         self.disarm();
     }
 
@@ -404,7 +420,38 @@ impl Drop for ClaimedSubscriptionSetupGuard {
         else {
             return;
         };
-        self.cleanup_with_error(waiter_error_text);
+        self.cleanup_fetching_with_error(&waiter_error_text);
+
+        let subscription_ownership = self.subscription_ownership.clone();
+        let subscription_transition_lock =
+            self.subscription_transition_lock.clone();
+        let claimed_generations = std::mem::take(&mut self.claimed_generations);
+        task::spawn(async move {
+            cleanup_classification_placeholders(
+                &subscription_ownership,
+                &subscription_transition_lock,
+                &claimed_generations,
+            )
+            .await;
+        });
+    }
+}
+
+async fn cleanup_classification_placeholders(
+    subscription_ownership: &SubscriptionOwnershipMap,
+    subscription_transition_lock: &Arc<AsyncMutex<()>>,
+    claimed_generations: &HashMap<Pubkey, FetchingAccountGeneration>,
+) {
+    let _transition_guard = subscription_transition_lock.lock().await;
+    let mut ownership = subscription_ownership.lock().await;
+    for (pubkey, generation) in claimed_generations {
+        if ownership.get(pubkey).is_some_and(|entry| {
+            entry.is_empty()
+                && entry.classification_placeholder_generation
+                    == Some(*generation)
+        }) {
+            ownership.remove(pubkey);
+        }
     }
 }
 
@@ -463,10 +510,12 @@ struct SubscriptionClassification {
 pub(crate) struct SubscriptionOwnership {
     reasons: HashMap<SubscriptionReason, usize>,
     last_classification: Option<SubscriptionClassification>,
+    classification_placeholder_generation: Option<FetchingAccountGeneration>,
 }
 
 impl SubscriptionOwnership {
     fn acquire(&mut self, reason: SubscriptionReason) {
+        self.classification_placeholder_generation = None;
         *self.reasons.entry(reason).or_default() += 1;
     }
 
@@ -570,13 +619,16 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         pubkey: Pubkey,
         slot: u64,
         source: SubscriptionClassificationSource,
+        generation: FetchingAccountGeneration,
     ) -> bool {
         let mut ownership = self.subscription_ownership.lock().await;
-        Self::record_classification_entry(
-            ownership.entry(pubkey).or_default(),
-            slot,
-            source,
-        )
+        let ownership = ownership.entry(pubkey).or_default();
+        let apply_classification =
+            Self::record_classification_entry(ownership, slot, source);
+        if ownership.is_empty() {
+            ownership.classification_placeholder_generation = Some(generation);
+        }
+        apply_classification
     }
 
     fn record_classification_entry(
@@ -974,9 +1026,9 @@ impl CapacityEvictionProtection {
     }
 }
 
-type CapacityEvictionProtectionPredicate =
+pub(crate) type CapacityEvictionProtectionPredicate =
     dyn Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync;
-type SharedCapacityEvictionProtectionPredicate =
+pub(crate) type SharedCapacityEvictionProtectionPredicate =
     Arc<RwLock<Option<Arc<CapacityEvictionProtectionPredicate>>>>;
 
 pub struct ForwardedSubscriptionUpdate {
@@ -1237,6 +1289,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         removed_account_tx: mpsc::Sender<Pubkey>,
         subscription_key_locks: SubscriptionKeyLocks,
         subscription_ownership: SubscriptionOwnershipMap,
+        fetching_accounts: Arc<FetchingAccounts>,
+        capacity_eviction_protection: SharedCapacityEvictionProtectionPredicate,
         emit_metrics: bool,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
@@ -1257,6 +1311,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         &removed_account_tx,
                         Some(&subscription_key_locks),
                         Some(&subscription_ownership),
+                        Some(fetching_accounts.as_ref()),
+                        Some(&capacity_eviction_protection),
                     )
                     .await;
 
@@ -1313,6 +1369,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             Arc::new(Mutex::new(HashSet::new()));
         let subscription_ownership: SubscriptionOwnershipMap =
             Arc::new(AsyncMutex::new(HashMap::new()));
+        let fetching_accounts = Arc::<FetchingAccounts>::default();
+        let capacity_eviction_protection:
+            SharedCapacityEvictionProtectionPredicate =
+            Arc::new(RwLock::new(None));
 
         // The reconciler always runs: partial resubscriptions rely on it for
         // repair. The config flag only gates the metrics emission.
@@ -1325,11 +1385,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 removed_account_tx.clone(),
                 subscription_key_locks.clone(),
                 subscription_ownership.clone(),
+                fetching_accounts.clone(),
+                capacity_eviction_protection.clone(),
                 config.enable_subscription_metrics(),
             ));
 
         let me = Self {
-            fetching_accounts: Arc::<FetchingAccounts>::default(),
+            fetching_accounts,
             next_fetching_account_generation: AtomicU64::default(),
             subscription_ownership,
             subscription_transition_lock: Arc::new(AsyncMutex::new(())),
@@ -1342,7 +1404,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             lrucache_subscribed_accounts,
             secondary_subscriptions,
             confirmed_missing_subscriptions,
-            capacity_eviction_protection: Arc::new(RwLock::new(None)),
+            capacity_eviction_protection,
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
@@ -1744,6 +1806,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     SubscriptionClassificationSource::Subscription,
                                 )
                                 .await;
+                            let mut resolved_generation = None;
                             let result = if classification_is_current {
                                 let mut fetching = fetching_accounts
                                     .lock()
@@ -1762,6 +1825,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     // If subscription update is newer than when we started fetching,
                                     // resolve with the subscription data instead
                                     if slot >= state.fetch_start_slot {
+                                        resolved_generation = Some(generation);
                                         trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Using subscription update instead of fetch");
                                         metrics::observe_chainlink_pending_fetch_owner_duration_seconds(
                                             state.fetch_origin,
@@ -1814,6 +1878,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                             update.pubkey,
                                             slot,
                                             SubscriptionClassificationSource::Subscription,
+                                            resolved_generation.expect("resolved fetch generation should exist"),
                                         )
                                         .await
                                 } else {
@@ -2119,6 +2184,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let mut subscription_setup_guard =
                 ClaimedSubscriptionSetupGuard::new(
                     self.fetching_accounts.clone(),
+                    self.subscription_ownership.clone(),
+                    self.subscription_transition_lock.clone(),
                     claimed_pubkeys.clone(),
                     claimed_generations.clone(),
                 );
@@ -2126,7 +2193,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .setup_subscriptions(&claimed_pubkeys, fetch_origin)
                 .await
             {
-                subscription_setup_guard.cleanup_with_error(err.to_string());
+                subscription_setup_guard
+                    .cleanup_with_error(err.to_string())
+                    .await;
                 return Err(err);
             }
             subscription_setup_guard.disarm();
@@ -2339,16 +2408,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         if !errors.is_empty() {
-            // A pending-fetch classification may have created an ownership
-            // entry the failed acquisition never adopted; drop it.
-            {
-                let mut ownership = self.subscription_ownership.lock().await;
-                for (pubkey, _) in &errors {
-                    if ownership.get(pubkey).is_some_and(|own| own.is_empty()) {
-                        ownership.remove(pubkey);
-                    }
-                }
-            }
             for pubkey in &acquired {
                 if let Err(unsub_err) = self
                     .release_single_subscription(
@@ -2649,6 +2708,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let mut ownership = self.subscription_ownership.lock().await;
         if let Some(existing) = ownership.get_mut(pubkey) {
+            let classification_placeholder_generation =
+                existing.classification_placeholder_generation;
             let acquired_reason =
                 !skip_existing_reason || !existing.contains(reason);
             if acquired_reason {
@@ -2684,7 +2745,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     if let Some(existing) =
                         self.subscription_ownership.lock().await.get_mut(pubkey)
                     {
-                        existing.release(reason);
+                        if existing.release(reason) {
+                            existing.classification_placeholder_generation =
+                                classification_placeholder_generation;
+                        }
                     }
                 }
                 return Err(err);
@@ -3352,23 +3416,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
                             1,
                         );
-                        // The resolving update may have raced ownership
-                        // creation; reconcile the tier if still current. A
-                        // remaining entry means a newer generation owns the
-                        // key and this result must not touch tiers.
-                        let replaced_by_newer = fetching_accounts
-                            .lock()
-                            .expect("fetching_accounts lock poisoned")
-                            .contains_key(pubkey);
-                        if !replaced_by_newer {
-                            subscription_tiers
-                                .apply_fetch_classification(
-                                    pubkey,
-                                    response_slot,
-                                    not_found_pubkeys.contains(pubkey),
-                                )
-                                .await;
-                        }
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
                                 "Account {pubkey} generation {generation} was already resolved or replaced"

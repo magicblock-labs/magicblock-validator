@@ -628,6 +628,150 @@ async fn setup_matching_slots(
 }
 
 #[tokio::test]
+async fn test_classification_placeholder_cleanup_is_generation_scoped() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let subscription_ownership: SubscriptionOwnershipMap = Default::default();
+    let subscription_transition_lock = Arc::new(AsyncMutex::new(()));
+    let placeholder = SubscriptionOwnership {
+        classification_placeholder_generation: Some(2),
+        ..Default::default()
+    };
+    subscription_ownership
+        .lock()
+        .await
+        .insert(pubkey, placeholder);
+
+    cleanup_classification_placeholders(
+        &subscription_ownership,
+        &subscription_transition_lock,
+        &HashMap::from([(pubkey, 1)]),
+    )
+    .await;
+    assert!(subscription_ownership.lock().await.contains_key(&pubkey));
+
+    cleanup_classification_placeholders(
+        &subscription_ownership,
+        &subscription_transition_lock,
+        &HashMap::from([(pubkey, 2)]),
+    )
+    .await;
+    assert!(!subscription_ownership.lock().await.contains_key(&pubkey));
+}
+
+#[tokio::test]
+async fn test_cancelled_subscription_setup_cleans_classification_placeholder() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let generation = 1;
+    let (sender, receiver) = oneshot::channel();
+    let fetching_accounts = Arc::new(Mutex::new(HashMap::from([(
+        pubkey,
+        FetchingAccountState {
+            generation,
+            fetch_start_slot: 0,
+            fetch_origin: AccountFetchOrigin::GetAccount,
+            owner_started_at: std::time::Instant::now(),
+            waiters: vec![sender],
+        },
+    )])));
+    let subscription_ownership: SubscriptionOwnershipMap = Default::default();
+    let subscription_transition_lock = Arc::new(AsyncMutex::new(()));
+    let placeholder = SubscriptionOwnership {
+        classification_placeholder_generation: Some(generation),
+        ..Default::default()
+    };
+    subscription_ownership
+        .lock()
+        .await
+        .insert(pubkey, placeholder);
+
+    let transition_guard = subscription_transition_lock.lock().await;
+    let guard = ClaimedSubscriptionSetupGuard::new(
+        fetching_accounts.clone(),
+        subscription_ownership.clone(),
+        subscription_transition_lock.clone(),
+        vec![pubkey],
+        HashMap::from([(pubkey, generation)]),
+    );
+    drop(guard);
+
+    assert!(!fetching_accounts.lock().unwrap().contains_key(&pubkey));
+    assert!(receiver.await.unwrap().is_err());
+    assert!(subscription_ownership.lock().await.contains_key(&pubkey));
+    drop(transition_guard);
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while subscription_ownership.lock().await.contains_key(&pubkey) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("classification placeholder cleanup should complete");
+}
+
+#[tokio::test]
+async fn test_failed_placeholder_adoption_preserves_generation_for_cleanup() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let ProviderTestCtx {
+        provider,
+        pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+    let generation = 1;
+    let placeholder = SubscriptionOwnership {
+        classification_placeholder_generation: Some(generation),
+        ..Default::default()
+    };
+    provider
+        .subscription_ownership
+        .lock()
+        .await
+        .insert(pubkey, placeholder);
+
+    pubsub_client.simulate_disconnect();
+    assert!(provider
+        .acquire_subscription_with_origin(
+            &pubkey,
+            SubscriptionReason::DirectAccount,
+            SubscriptionRegistrationOrigin::Fetch(
+                AccountFetchOrigin::GetAccount,
+            ),
+        )
+        .await
+        .is_err());
+
+    let ownership = provider.subscription_ownership.lock().await;
+    let placeholder = ownership
+        .get(&pubkey)
+        .expect("failed adoption should retain the placeholder for cleanup");
+    assert!(placeholder.is_empty());
+    assert_eq!(
+        placeholder.classification_placeholder_generation,
+        Some(generation)
+    );
+    drop(ownership);
+
+    cleanup_classification_placeholders(
+        &provider.subscription_ownership,
+        &provider.subscription_transition_lock,
+        &HashMap::from([(pubkey, generation)]),
+    )
+    .await;
+    assert!(!provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey));
+}
+
+#[tokio::test]
 async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
 ) {
     let _metrics_guard =
@@ -1655,6 +1799,9 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         "remote provider subscription-resolution metric should increase by at least 1; got {resolved_delta}"
     );
 
+    // A discarded result must not reclassify the account even when its
+    // response slot is newer than the subscription update that won.
+    rpc_client.set_current_slot(fetch_start_slot + 1);
     rpc_client.allow_fetches();
     wait_for_pending_account_delta_at_least(
         fetch_origin,
@@ -1663,6 +1810,8 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         1,
     )
     .await;
+    let transition_guard = provider.subscription_transition_lock.lock().await;
+    drop(transition_guard);
     assert!(provider.lrucache_subscribed_accounts.contains(&pubkey));
     assert!(!provider.secondary_subscriptions.contains(&pubkey));
 }
@@ -2845,6 +2994,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             &self.removed_account_tx,
             Some(&self.subscription_key_locks),
             Some(&self.subscription_ownership),
+            Some(self.fetching_accounts.as_ref()),
+            Some(&self.capacity_eviction_protection),
         )
         .await
     }

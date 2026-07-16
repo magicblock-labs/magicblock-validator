@@ -165,6 +165,9 @@ the primary LRU. Results discarded by fetch/subscription generation arbitration
 must not change tiers. Per-account classification retains the winning slot and
 source while the subscription is owned: older updates are ignored for tier
 movement, and subscription data wins an equal-slot tie over RPC data.
+Classification-only ownership created before subscription acquisition is tagged
+with the fetch generation and removed on setup failure or cancellation, so stale
+cleanup cannot delete a newer generation's state.
 
 The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="remote_account_provider"`. Claimed pubkeys record `owned`; calls that join existing `fetching_accounts` work record `joined_existing`, waiter total, and active waiter gauge. Subscription-update wins record `resolved_by_subscription_update`, while late RPC completions after such a win or replacement record `rpc_fetch_completed_after_update`. `FetchingAccountState` stores bounded metric metadata (`AccountFetchOrigin` and owner start time) so subscription-update completion uses the original origin without adding pubkey/signature labels.
 
@@ -380,6 +383,10 @@ restore those keys on gRPC clients and exclude them from websocket
 clients; reconciliation compares transports separately so a lingering
 websocket leg cannot mask missing gRPC coverage. If every gRPC client is down,
 reconciliation restores full fallback coverage until gRPC returns.
+Repair is verified against a fresh subscription snapshot; a secondary entry
+without protected ownership, live delegated/undelegating state, or an in-flight
+fetch is evicted if neither preferred nor fallback subscription establishes
+coverage.
 
 Laserstream `Status` items are left to the SDK's replaying reconnect path;
 terminal stream errors and fallen-behind errors still trigger a full actor

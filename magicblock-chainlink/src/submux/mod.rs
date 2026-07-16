@@ -2559,6 +2559,8 @@ mod tests {
             &removed_tx,
             None,
             None,
+            None,
+            None,
         )
         .await;
 
@@ -2598,6 +2600,8 @@ mod tests {
             &mux,
             &[],
             &removed_tx,
+            None,
+            None,
             None,
             None,
         )
@@ -2671,6 +2675,8 @@ mod tests {
             &mux,
             &[],
             &removed_tx,
+            None,
+            None,
             None,
             None,
         )
