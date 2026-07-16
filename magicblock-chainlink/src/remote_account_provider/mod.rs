@@ -763,19 +763,6 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         Ok(())
     }
 
-    async fn prefer_secondary_coverage(
-        &self,
-        pubkey: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
-        if let Err(err) =
-            self.pubsub_client.prefer_grpc_subscription(pubkey).await
-        {
-            debug!(pubkey = %pubkey, error = ?err, "gRPC coverage unavailable; retaining full subscription coverage");
-            self.pubsub_client.subscribe(pubkey, None).await?;
-        }
-        Ok(())
-    }
-
     async fn cleanup_rejected_subscription(
         &self,
         pubkey: Pubkey,
@@ -830,7 +817,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         }
 
         // Keep full redundancy until the RPC result confirms the account is
-        // missing. Confirmed misses are switched to gRPC-only below.
+        // missing. The reconciler switches confirmed misses to gRPC-only.
         self.pubsub_client.subscribe(*pubkey, None).await?;
 
         match self.add_with_protection(&self.secondary, *pubkey).await {
@@ -913,9 +900,6 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
 
         if self.secondary.contains(&pubkey) {
             self.set_confirmed_missing(pubkey, true);
-            if let Err(err) = self.prefer_secondary_coverage(pubkey).await {
-                warn!(pubkey = %pubkey, error = ?err, "Failed to apply secondary subscription coverage");
-            }
             return;
         }
         if !self.primary.contains(&pubkey) {
@@ -937,10 +921,9 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         }
 
         self.primary.remove(&pubkey);
+        // The reconciler applies the gRPC-only transport policy off the
+        // locked path.
         self.set_confirmed_missing(pubkey, true);
-        if let Err(err) = self.prefer_secondary_coverage(pubkey).await {
-            warn!(pubkey = %pubkey, error = ?err, "Failed to apply secondary subscription coverage");
-        }
     }
 
     async fn try_promote_found_to_primary_locked(
@@ -2356,6 +2339,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         if !errors.is_empty() {
+            // A pending-fetch classification may have created an ownership
+            // entry the failed acquisition never adopted; drop it.
+            {
+                let mut ownership = self.subscription_ownership.lock().await;
+                for (pubkey, _) in &errors {
+                    if ownership.get(pubkey).is_some_and(|own| own.is_empty()) {
+                        ownership.remove(pubkey);
+                    }
+                }
+            }
             for pubkey in &acquired {
                 if let Err(unsub_err) = self
                     .release_single_subscription(
@@ -3360,14 +3353,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             1,
                         );
                         // The resolving update may have raced ownership
-                        // creation; reconcile the tier if still current.
-                        subscription_tiers
-                            .apply_fetch_classification(
-                                pubkey,
-                                response_slot,
-                                not_found_pubkeys.contains(pubkey),
-                            )
-                            .await;
+                        // creation; reconcile the tier if still current. A
+                        // remaining entry means a newer generation owns the
+                        // key and this result must not touch tiers.
+                        let replaced_by_newer = fetching_accounts
+                            .lock()
+                            .expect("fetching_accounts lock poisoned")
+                            .contains_key(pubkey);
+                        if !replaced_by_newer {
+                            subscription_tiers
+                                .apply_fetch_classification(
+                                    pubkey,
+                                    response_slot,
+                                    not_found_pubkeys.contains(pubkey),
+                                )
+                                .await;
+                        }
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
                                 "Account {pubkey} generation {generation} was already resolved or replaced"

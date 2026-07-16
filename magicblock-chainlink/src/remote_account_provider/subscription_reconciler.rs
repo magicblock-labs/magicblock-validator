@@ -401,7 +401,11 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             pubsub_client.subscribe(pubkey, None).await
         };
         if let Err(err) = result {
-            warn!(pubkey = %pubkey, error = ?err, "Failed to repair secondary account subscription");
+            // Never leave the account unwatched.
+            debug!(pubkey = %pubkey, error = ?err, "Secondary repair failed; restoring full coverage");
+            if let Err(err) = pubsub_client.subscribe(pubkey, None).await {
+                warn!(pubkey = %pubkey, error = ?err, "Failed to repair secondary account subscription");
+            }
         }
     }
 

@@ -1340,6 +1340,14 @@ where
                 Err(err) => last_err = Some(err),
             }
         }
+        // A no-op subscribe can mask lost coverage; trust only the snapshot.
+        if grpc_covered {
+            grpc_covered = self
+                .subscription_reconciliation_snapshot_for_transport(
+                    PubsubTransport::Grpc,
+                )
+                .is_some_and(|snapshot| snapshot.union.contains(&pubkey));
+        }
         if !grpc_covered {
             return Err(last_err.unwrap_or_else(|| {
                 RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
