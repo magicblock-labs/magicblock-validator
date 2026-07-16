@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures_util::future::{try_join_all, BoxFuture, FutureExt, Shared};
-use magicblock_config::config::RiskConfig;
+use magicblock_config::config::{AmlCheckStrategy, RiskConfig};
 use reqwest::Client;
 use rusqlite::{params, Connection};
 use serde_json::Value;
@@ -68,6 +68,7 @@ pub struct RiskService {
     api_key: String,
     cache_ttl: Duration,
     risk_score_threshold: u64,
+    check_strategy: AmlCheckStrategy,
 }
 
 impl RiskService {
@@ -120,7 +121,14 @@ impl RiskService {
             api_key,
             cache_ttl: config.cache_ttl,
             risk_score_threshold: config.risk_score_threshold,
+            check_strategy: config.check_strategy,
         }))
+    }
+
+    /// The configured strategy for deciding which post-delegation action
+    /// signers to risk check.
+    pub fn check_strategy(&self) -> AmlCheckStrategy {
+        self.check_strategy
     }
 
     pub async fn check_addresses(
@@ -449,6 +457,7 @@ mod tests {
             cache_ttl: Duration::from_secs(60),
             request_timeout: Duration::from_secs(2),
             risk_score_threshold: 7,
+            check_strategy: AmlCheckStrategy::AllSigners,
         }
     }
 
