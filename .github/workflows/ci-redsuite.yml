@@ -32,7 +32,7 @@ on:
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: fe39bef7ea85a7b2b68ff2c9a2836b6e80f9ade2
+  REDSUITE_REV: 41ba7e24f6d3518dbb0a829d3760346e2b79abcb
   SOLANA_VERSION: v4.0.3
   RUST_TOOLCHAIN: "1.94.1"
   BENCHER_PROJECT: magicblock-validator-redsuite
