@@ -10,6 +10,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
@@ -30,7 +31,7 @@ pub fn process_create_outbox_intent(
     invoke_context: &mut InvokeContext,
     data: Vec<u8>,
 ) -> Result<(), InstructionError> {
-    let (sponsor, pda, vault) = validate(&signers, invoke_context)?;
+    let (sponsor, pda, vault) = validate(&signers, invoke_context, &data)?;
 
     create_ephemeral_account_cpi(
         invoke_context,
@@ -54,7 +55,16 @@ pub fn process_create_outbox_intent(
 fn validate(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
+    data: &[u8],
 ) -> Result<(Pubkey, Pubkey, Pubkey), InstructionError> {
+    OutboxIntentBundle::try_from_bytes(data).map_err(|_| {
+        ic_msg!(
+            invoke_context,
+            "CreateOutboxIntent ERR: data is not a valid OutboxIntentBundle"
+        );
+        InstructionError::InvalidInstructionData
+    })?;
+
     let transaction_context = &*invoke_context.transaction_context;
 
     let sponsor =
@@ -67,7 +77,7 @@ fn validate(
             sponsor,
             validator_auth
         );
-        return Err(InstructionError::InvalidArgument);
+        return Err(InstructionError::IncorrectAuthority);
     }
     if !signers.contains(&validator_auth) {
         ic_msg!(
