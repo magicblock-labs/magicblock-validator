@@ -4091,6 +4091,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
+ "magicblock-metrics",
  "notify",
  "serde",
  "solana-hash 4.2.0",

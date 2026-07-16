@@ -29,6 +29,18 @@ pub struct Broker {
     pub(crate) sequence: u64,
 }
 
+/// How far a publish waits for the server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Confirm {
+    /// Don't wait; a rejection goes unobserved.
+    No,
+    /// Wait, and fail the publish if the message was not persisted.
+    Yes,
+    /// As `Yes`, and record the sequence as the resume point for consumers
+    /// created with `reset`.
+    AndTrackSequence,
+}
+
 impl Broker {
     /// Connects to NATS and initializes all JetStream resources.
     ///
@@ -110,14 +122,12 @@ impl Broker {
     }
 
     /// Publishes a serialized message to the stream.
-    ///
-    /// If `ack` is true, waits for server acknowledgment and updates internal sequence.
     pub async fn publish(
         &mut self,
         subject: Subject,
         payload: Bytes,
         msg_id: Option<&str>,
-        ack: bool,
+        confirm: Confirm,
     ) -> Result<()> {
         let f = if let Some(msg_id) = msg_id {
             let mut headers = HeaderMap::new();
@@ -128,8 +138,22 @@ impl Broker {
         } else {
             self.ctx.publish(subject, payload).await?
         };
-        if ack {
-            self.sequence = f.await?.sequence;
+        if confirm == Confirm::No {
+            return Ok(());
+        }
+
+        let ack = f.await?;
+        // An identical id landed inside the dedupe window, so the server dropped
+        // this one. Ids are "{slot}:{index}": the producer rewound its slot.
+        if ack.duplicate {
+            error!(
+                msg_id,
+                sequence = ack.sequence,
+                "message rejected as duplicate and was not persisted"
+            );
+        }
+        if confirm == Confirm::AndTrackSequence {
+            self.sequence = ack.sequence;
         }
         Ok(())
     }
