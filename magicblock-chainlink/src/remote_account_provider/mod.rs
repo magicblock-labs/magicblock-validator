@@ -530,6 +530,13 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         )
     }
 
+    fn is_confirmed_missing(&self, pubkey: &Pubkey) -> bool {
+        self.confirmed_missing_subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .contains(pubkey)
+    }
+
     fn set_confirmed_missing(&self, pubkey: Pubkey, confirmed: bool) {
         let mut subscriptions = self
             .confirmed_missing_subscriptions
@@ -1176,6 +1183,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Creates a background task that periodically reconciles subscriptions
     /// with the LRU (repairing missing ones, e.g. after a partial
     /// resubscription) and optionally updates the active subscriptions gauge
+    #[allow(clippy::too_many_arguments)]
     fn start_active_subscriptions_updater<PubsubClient: ChainPubsubClient>(
         subscribed_accounts: Arc<AccountsLruCache>,
         secondary_subscriptions: Arc<AccountsLruCache>,
@@ -1653,6 +1661,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     // RPC result cannot overwrite this subscription update.
                     let (forward_update, _accepted_update, resolved_waiters) =
                         if !needs_tier_handling {
+                            // Record so a lagging RPC result cannot later win
+                            // classification against this newer update.
+                            if account_is_found {
+                                subscription_tiers
+                                    .record_classification(
+                                        update.pubkey,
+                                        slot,
+                                        SubscriptionClassificationSource::Subscription,
+                                    )
+                                    .await;
+                            }
                             (
                                 Some(ForwardedSubscriptionUpdate {
                                     pubkey: update.pubkey,
@@ -1673,8 +1692,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     update.pubkey,
                                 )
                                 .await;
-                            let classification_is_current = !account_is_found
-                            || subscription_tiers
+                            let classification_is_current = subscription_tiers
                                 .classification_is_current(
                                     update.pubkey,
                                     slot,
@@ -3265,11 +3283,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 .move_not_found_to_secondary_locked(*pubkey)
                                 .await;
                         } else if apply_classification {
+                            // A confirmed miss that exists after all is
+                            // gRPC-only; restore full coverage on promotion.
+                            let restore_full_coverage =
+                                subscription_tiers.is_confirmed_missing(pubkey);
                             subscription_tiers
                                 .set_confirmed_missing(*pubkey, false);
                             if let Err(err) = subscription_tiers
                                 .try_promote_found_to_primary_locked(
-                                    *pubkey, false,
+                                    *pubkey,
+                                    restore_full_coverage,
                                 )
                                 .await
                             {

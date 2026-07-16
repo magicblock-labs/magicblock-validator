@@ -856,11 +856,11 @@ fn is_fallen_behind_error(err: &LaserstreamError) -> bool {
 }
 
 /// Mid-stream status errors are informational: the SDK yields them and then
-/// reconnects the stream itself with slot replay. Terminal errors (e.g.
-/// [LaserstreamError::MaxReconnectAttempts], [LaserstreamError::StreamEnded])
-/// end the stream and require a full resubscribe.
+/// reconnects the stream itself with slot replay. Fallen-behind errors and
+/// terminal errors (e.g. [LaserstreamError::MaxReconnectAttempts],
+/// [LaserstreamError::StreamEnded]) require a full resubscribe.
 fn is_sdk_reconnectable_status(err: &LaserstreamError) -> bool {
-    matches!(err, LaserstreamError::Status(_))
+    matches!(err, LaserstreamError::Status(_)) && !is_fallen_behind_error(err)
 }
 
 #[cfg(test)]
@@ -879,8 +879,8 @@ mod tests {
             Code::DataLoss,
             "client has fallen behind",
         ));
-        assert!(!is_fallen_behind_error(&transient));
         assert!(is_fallen_behind_error(&fallen_behind));
+        assert!(!is_sdk_reconnectable_status(&fallen_behind));
 
         let terminal = LaserstreamError::MaxReconnectAttempts(
             tonic::Status::cancelled("Connection failed after 10 attempts"),

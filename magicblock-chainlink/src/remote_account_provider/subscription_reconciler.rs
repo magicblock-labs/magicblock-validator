@@ -100,6 +100,7 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
 ///
 /// Returns the expected total number of monitored accounts: LRU-tracked accounts
 /// plus never-evicted accounts.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &AccountsLruCache,
     secondary_subscriptions: &AccountsLruCache,
@@ -393,11 +394,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .contains(&pubkey);
-        let has_grpc = pubsub_client
-            .subscription_reconciliation_snapshot_for_transport(
-                PubsubTransport::Grpc,
-            )
-            .is_some();
+        let has_grpc = grpc_snapshot.is_some();
         let result = if grpc_preferred && has_grpc {
             pubsub_client.prefer_grpc_subscription(pubkey).await
         } else {
@@ -481,6 +478,7 @@ mod tests {
             &[],
             &removed_tx,
             None,
+            None,
         )
         .await;
 
@@ -510,6 +508,7 @@ mod tests {
             &mock_client,
             &[],
             &removed_tx,
+            None,
             None,
         )
         .await;
@@ -739,6 +738,8 @@ mod tests {
         let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
         reconcile_subscriptions(
             &lru,
+            &AccountsLruCache::new(NonZeroUsize::new(10).unwrap()),
+            &Mutex::new(HashSet::new()),
             &mock_client,
             &[],
             &removed_tx,
