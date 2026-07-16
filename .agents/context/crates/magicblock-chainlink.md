@@ -388,9 +388,12 @@ without protected ownership, live delegated/undelegating state, or an in-flight
 fetch is evicted if neither preferred nor fallback subscription establishes
 coverage.
 
-Laserstream `Status` items are left to the SDK's replaying reconnect path;
-terminal stream errors and fallen-behind errors still trigger a full actor
-rebuild. This avoids bulk resubscription churn on routine provider resets.
+Laserstream `Status` items are left to the pinned SDK's replaying reconnect
+path. The SDK retains write-updated account/program filters and its internal
+slot tracker across reconnects, and resets its retry budget only after stream
+progress. Exhausted retries, terminal stream errors, and fallen-behind errors
+still trigger a full actor rebuild. This avoids bulk resubscription churn on
+routine provider resets without silently losing dynamic subscriptions.
 
 ## SubMuxClient internals
 

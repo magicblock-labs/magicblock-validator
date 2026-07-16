@@ -1766,7 +1766,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                     // Serialize fetch arbitration and tier movement so a late
                     // RPC result cannot overwrite this subscription update.
-                    let (forward_update, _accepted_update, resolved_waiters) =
+                    let (forward_update, _accepted_update, resolved_fetch) =
                         if !needs_tier_handling {
                             // Record so a lagging RPC result cannot later win
                             // classification against this newer update.
@@ -1806,7 +1806,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     SubscriptionClassificationSource::Subscription,
                                 )
                                 .await;
-                            let mut resolved_generation = None;
                             let result = if classification_is_current {
                                 let mut fetching = fetching_accounts
                                     .lock()
@@ -1825,7 +1824,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     // If subscription update is newer than when we started fetching,
                                     // resolve with the subscription data instead
                                     if slot >= state.fetch_start_slot {
-                                        resolved_generation = Some(generation);
                                         trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Using subscription update instead of fetch");
                                         metrics::observe_chainlink_pending_fetch_owner_duration_seconds(
                                             state.fetch_origin,
@@ -1840,7 +1838,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                             1,
                                         );
 
-                                        (None, true, Some(state.waiters))
+                                        (None, true, Some((generation, state.waiters)))
                                     } else {
                                         // Subscription is stale, put the fetch tracking back
                                         debug!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Received stale subscription update");
@@ -1869,26 +1867,28 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             // The in-flight acquisition may not have created
                             // the ownership entry yet; record so the later
                             // RPC result loses arbitration.
-                            let resolved_pending_fetch = result.2.is_some();
                             let apply_classification = result.1
                                 && account_is_found
-                                && if resolved_pending_fetch {
-                                    subscription_tiers
-                                        .record_classification_for_pending_fetch(
-                                            update.pubkey,
-                                            slot,
-                                            SubscriptionClassificationSource::Subscription,
-                                            resolved_generation.expect("resolved fetch generation should exist"),
-                                        )
-                                        .await
-                                } else {
-                                    subscription_tiers
-                                        .record_classification(
-                                            update.pubkey,
-                                            slot,
-                                            SubscriptionClassificationSource::Subscription,
-                                        )
-                                        .await
+                                && match result.2.as_ref() {
+                                    Some((generation, _)) => {
+                                        subscription_tiers
+                                            .record_classification_for_pending_fetch(
+                                                update.pubkey,
+                                                slot,
+                                                SubscriptionClassificationSource::Subscription,
+                                                *generation,
+                                            )
+                                            .await
+                                    }
+                                    None => {
+                                        subscription_tiers
+                                            .record_classification(
+                                                update.pubkey,
+                                                slot,
+                                                SubscriptionClassificationSource::Subscription,
+                                            )
+                                            .await
+                                    }
                                 };
                             if apply_classification
                                 && subscription_tiers
@@ -1908,7 +1908,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             result
                         };
 
-                    if let Some(waiters) = resolved_waiters {
+                    if let Some((_, waiters)) = resolved_fetch {
                         for sender in waiters {
                             let _ = sender.send(Ok(remote_account.clone()));
                         }
