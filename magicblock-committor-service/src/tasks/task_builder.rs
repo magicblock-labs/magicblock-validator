@@ -103,7 +103,7 @@ impl TaskBuilderImpl {
             .await
     }
 
-    fn rent_pending_materialization_tasks(
+    pub(super) fn rent_pending_materialization_tasks(
         materializations: impl IntoIterator<Item = RentPendingAtaMaterialization>,
     ) -> Vec<BaseTaskImpl> {
         let mut seen = HashSet::new();

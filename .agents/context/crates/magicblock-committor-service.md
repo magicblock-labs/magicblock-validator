@@ -214,9 +214,12 @@ For committed accounts with `data.len() > COMMIT_STATE_SIZE_THRESHOLD` (`256`), 
 Rent-pending ATA materialization metadata is handled before normal DLP commit
 tasks. For each metadata entry, `TaskBuilderImpl::commit_tasks` prepends an
 e-token initialize-eATA task and a delegate-eATA-to-this-validator task. The
-task builder still fetches the eATA commit nonce; it defaults missing base DLP
-metadata to current nonce `0` only for rent-pending eATAs, otherwise it uses the
-fetched base nonce. If an eATA already exists and is delegated to another
+pre-acceptance `IntentSizeValidator` reuses the same task constructor, so both
+materialization tasks are included in transaction fit checks before the intent
+can be accepted or persisted; rejection rolls back the in-transaction charge.
+The task builder still fetches the eATA commit nonce and defaults missing base
+DLP metadata to current nonce `0` only for rent-pending eATAs; otherwise it uses
+the fetched base nonce. If an eATA already exists and is delegated to another
 validator, the e-token delegate task is the expected validator-mismatch failure
 gate before any DLP commit/undelegation task is allowed to succeed.
 Only explicit scheduled materialization metadata authorizes this path; eATA

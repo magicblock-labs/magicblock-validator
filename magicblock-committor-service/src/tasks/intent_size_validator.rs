@@ -8,6 +8,7 @@ use solana_signer::Signer;
 use crate::{
     tasks::{
         commit_task::CommitDelivery,
+        task_builder::TaskBuilderImpl,
         task_strategist::TaskStrategist,
         utils::{
             create_action_tasks, create_commit_finalize_task,
@@ -54,11 +55,15 @@ impl IntentSizeValidator {
     }
 
     /// Builds the commit-stage tasks used for the size estimate: real
-    /// standalone/base actions, and the smallest-by-default
-    /// `Commit`/`CommitFinalize` task for each committed account.
+    /// standalone/base actions and rent-pending materializations, plus the
+    /// smallest-by-default `Commit`/`CommitFinalize` task for each committed
+    /// account.
     fn commit_tasks(intent: &MagicIntentBundle) -> Vec<BaseTaskImpl> {
         let mut tasks: Vec<BaseTaskImpl> =
             create_action_tasks(&intent.standalone_actions).collect();
+        tasks.extend(TaskBuilderImpl::rent_pending_materialization_tasks(
+            intent.rent_pending_ata_materializations.iter().cloned(),
+        ));
 
         if let Some(ref commit) = intent.commit {
             tasks.extend(Self::commit_type_tasks(commit));
@@ -250,7 +255,10 @@ impl IntentSizeValidator {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::{BaseAction, ProgramArgs};
+    use magicblock_core::{
+        intent::{BaseAction, ProgramArgs},
+        token_programs::RentPendingAtaMaterialization,
+    };
     use solana_account::Account;
 
     use super::*;
@@ -285,6 +293,32 @@ mod tests {
         }
     }
 
+    fn make_rent_pending_intent(count: usize) -> MagicIntentBundle {
+        let mut committed_accounts = Vec::with_capacity(count);
+        let mut materializations = Vec::with_capacity(count);
+        for _ in 0..count {
+            let account = make_committed_account(10);
+            materializations.push(RentPendingAtaMaterialization {
+                ata_pubkey: Pubkey::new_unique(),
+                eata_pubkey: account.pubkey,
+                token_program: Pubkey::new_unique(),
+                wallet_owner: Pubkey::new_unique(),
+                mint: Pubkey::new_unique(),
+                token_account_data_len: 165,
+                validator: Pubkey::new_unique(),
+                delegated_payer: Pubkey::new_unique(),
+                delegated_vault: Pubkey::new_unique(),
+            });
+            committed_accounts.push(account);
+        }
+
+        MagicIntentBundle {
+            commit_finalize: Some(CommitType::Standalone(committed_accounts)),
+            rent_pending_ata_materializations: materializations,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn test_empty_intent_fits() {
         assert!(IntentSizeValidator::fits(&MagicIntentBundle::default()));
@@ -312,6 +346,37 @@ mod tests {
             ..Default::default()
         };
         assert!(IntentSizeValidator::fits(&intent));
+    }
+
+    #[test]
+    fn test_rent_pending_materialization_tasks_are_counted() {
+        let intent = make_rent_pending_intent(1);
+        let tasks = IntentSizeValidator::commit_tasks(&intent);
+
+        assert!(matches!(
+            tasks.as_slice(),
+            [
+                BaseTaskImpl::InitializeRentPendingAta(_),
+                BaseTaskImpl::DelegateRentPendingAta(_),
+                BaseTaskImpl::CommitFinalize(_),
+            ]
+        ));
+    }
+
+    #[test]
+    fn test_rent_pending_materializations_can_exceed_commit_stage_size() {
+        let has_fit_boundary = (1..=64).any(|count| {
+            let intent = make_rent_pending_intent(count);
+            let mut without_materializations = intent.clone();
+            without_materializations
+                .rent_pending_ata_materializations
+                .clear();
+
+            IntentSizeValidator::fits(&without_materializations)
+                && !IntentSizeValidator::fits(&intent)
+        });
+
+        assert!(has_fit_boundary);
     }
 
     #[test]
