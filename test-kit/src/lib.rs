@@ -12,6 +12,7 @@ pub use guinea;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::{
+        blocks::LatestBlockInner,
         link,
         transactions::{
             ReplayPosition, SanitizeableTransaction, SchedulerMode,
@@ -21,7 +22,7 @@ use magicblock_core::{
     },
     Slot,
 };
-use magicblock_ledger::{LatestBlockInner, Ledger};
+use magicblock_ledger::Ledger;
 use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,

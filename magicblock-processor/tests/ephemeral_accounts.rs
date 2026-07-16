@@ -3,7 +3,8 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{derive_ata, TOKEN_PROGRAM_ID};
 use magicblock_magic_program_api::{
     instruction::MagicBlockInstruction, EPHEMERAL_RENT_PER_BYTE,
-    EPHEMERAL_VAULT_PUBKEY, ID as MAGIC_PROGRAM_ID,
+    EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY,
+    ID as MAGIC_PROGRAM_ID,
 };
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
@@ -93,7 +94,7 @@ fn init_sponsor(env: &ExecutionTestEnv, sponsor: Pubkey) {
 
 /// Helper to create an instruction that calls guinea to create an ephemeral account
 fn create_ephemeral_account_ix(
-    magic_program: Pubkey,
+    program: Pubkey,
     sponsor: Pubkey,
     ephemeral: Pubkey,
     vault: Pubkey,
@@ -103,7 +104,7 @@ fn create_ephemeral_account_ix(
         guinea::ID,
         &GuineaInstruction::CreateEphemeralAccount { data_len },
         vec![
-            AccountMeta::new_readonly(magic_program, false),
+            AccountMeta::new_readonly(program, false),
             AccountMeta::new(sponsor, true),
             AccountMeta::new(ephemeral, true),
             AccountMeta::new(vault, false),
@@ -155,7 +156,7 @@ fn create_rent_pending_ata_ix(
 
 /// Helper to create an instruction that calls guinea to resize an ephemeral account
 fn resize_ephemeral_account_ix(
-    magic_program: Pubkey,
+    program: Pubkey,
     sponsor: Pubkey,
     ephemeral: Pubkey,
     vault: Pubkey,
@@ -165,7 +166,7 @@ fn resize_ephemeral_account_ix(
         guinea::ID,
         &GuineaInstruction::ResizeEphemeralAccount { new_data_len },
         vec![
-            AccountMeta::new_readonly(magic_program, false),
+            AccountMeta::new_readonly(program, false),
             AccountMeta::new(sponsor, true),
             AccountMeta::new(ephemeral, false),
             AccountMeta::new(vault, false),
@@ -175,7 +176,7 @@ fn resize_ephemeral_account_ix(
 
 /// Helper to create an instruction that calls guinea to close an ephemeral account
 fn close_ephemeral_account_ix(
-    magic_program: Pubkey,
+    program: Pubkey,
     sponsor: Pubkey,
     ephemeral: Pubkey,
     vault: Pubkey,
@@ -184,7 +185,7 @@ fn close_ephemeral_account_ix(
         guinea::ID,
         &GuineaInstruction::CloseEphemeralAccount,
         vec![
-            AccountMeta::new_readonly(magic_program, false),
+            AccountMeta::new_readonly(program, false),
             AccountMeta::new(sponsor, true),
             AccountMeta::new(ephemeral, false),
             AccountMeta::new(vault, false),
@@ -610,6 +611,177 @@ async fn test_resize_smaller_via_cpi() {
         sponsor_before_resize.lamports() + rent_refund,
         "Sponsor should receive exactly {} lamports refund",
         rent_refund
+    );
+}
+
+#[tokio::test]
+async fn test_create_resize_close_via_esp_cpi() {
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    init_vault(&env);
+
+    let sponsor = env.get_payer().pubkey;
+    init_sponsor(&env, sponsor);
+    let ephemeral = env.create_account(0);
+
+    let data_len = 1000;
+    let expected_rent = rent_for(data_len);
+
+    let sponsor_before = env.get_account(sponsor);
+    let vault_before = env.get_account(EPHEMERAL_VAULT_PUBKEY);
+
+    let create_ix = create_ephemeral_account_ix(
+        EPHEMERAL_SYSTEM_PROGRAM_ID,
+        sponsor,
+        ephemeral.pubkey(),
+        EPHEMERAL_VAULT_PUBKEY,
+        data_len,
+    );
+    let txn = env.build_transaction_with_signers(&[create_ix], &[&ephemeral]);
+    let result = env.execute_transaction(txn).await;
+    assert!(
+        result.is_ok(),
+        "create via esp should succeed: {:?}",
+        result
+    );
+
+    let ephemeral_after_create = env.get_account(ephemeral.pubkey());
+    assert!(
+        ephemeral_after_create.ephemeral(),
+        "account should be marked ephemeral"
+    );
+    assert_eq!(
+        *ephemeral_after_create.owner(),
+        guinea::ID,
+        "owner should be the CPI caller (guinea), same inference as via magic_program::ID"
+    );
+    assert_eq!(ephemeral_after_create.data().len(), data_len as usize);
+
+    let vault_after_create = env.get_account(EPHEMERAL_VAULT_PUBKEY);
+    assert_eq!(
+        vault_after_create.lamports(),
+        vault_before.lamports() + expected_rent,
+        "vault should be debited via the shared EPHEMERAL_VAULT_PUBKEY"
+    );
+    assert_eq!(
+        env.get_account(sponsor).lamports(),
+        sponsor_before.lamports() - expected_rent
+    );
+
+    // Resize (grow) via esp
+    let new_data_len = 2000;
+    let resize_ix = resize_ephemeral_account_ix(
+        EPHEMERAL_SYSTEM_PROGRAM_ID,
+        sponsor,
+        ephemeral.pubkey(),
+        EPHEMERAL_VAULT_PUBKEY,
+        new_data_len,
+    );
+    let txn = env.build_transaction(&[resize_ix]);
+    assert!(env.execute_transaction(txn).await.is_ok());
+    assert_eq!(
+        env.get_account(ephemeral.pubkey()).data().len(),
+        new_data_len as usize
+    );
+
+    // Close via esp
+    let close_ix = close_ephemeral_account_ix(
+        EPHEMERAL_SYSTEM_PROGRAM_ID,
+        sponsor,
+        ephemeral.pubkey(),
+        EPHEMERAL_VAULT_PUBKEY,
+    );
+    let txn = env.build_transaction(&[close_ix]);
+    let result = env.execute_transaction(txn).await;
+    assert!(result.is_ok(), "close via esp should succeed: {:?}", result);
+    assert!(
+        env.try_get_account(ephemeral.pubkey()).is_none(),
+        "closed ephemeral account should be removed from DB"
+    );
+
+    // Total lamports conserved across the whole lifecycle
+    let total_after = env.get_account(sponsor).lamports()
+        + env.get_account(EPHEMERAL_VAULT_PUBKEY).lamports();
+    let total_before = sponsor_before.lamports() + vault_before.lamports();
+    assert_eq!(total_after, total_before);
+}
+
+#[tokio::test]
+async fn test_esp_direct_call_rejected() {
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    init_vault(&env);
+
+    let sponsor = env.get_payer().pubkey;
+    init_sponsor(&env, sponsor);
+    let ephemeral = env.create_account(0);
+
+    // Call EPHEMERAL_SYSTEM_PROGRAM_ID directly (NOT via CPI) - should fail
+    // the same way a direct call to magic_program::ID does, since both reuse
+    // the same CPI-caller inference in get_caller_program_id.
+    let ix = Instruction::new_with_bincode(
+        EPHEMERAL_SYSTEM_PROGRAM_ID,
+        &magicblock_magic_program_api::instruction::EphemeralSystemInstruction::CreateEphemeralAccount { data_len: 1000 },
+        vec![
+            AccountMeta::new(sponsor, true),
+            AccountMeta::new(ephemeral.pubkey(), false),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+        ],
+    );
+    let txn = env.build_transaction(&[ix]);
+
+    let result = env.execute_transaction(txn).await;
+    assert!(result.is_err(), "direct call to esp should be rejected");
+}
+
+#[tokio::test]
+async fn test_create_via_magic_program_close_via_esp() {
+    // The two program IDs are just two doors into the same
+    // process_*_ephemeral_account logic and the same vault - an account
+    // created through one should be manageable through the other.
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    init_vault(&env);
+
+    let sponsor = env.get_payer().pubkey;
+    init_sponsor(&env, sponsor);
+    let ephemeral = env.create_account(0);
+
+    let data_len = 1000;
+    let expected_rent = rent_for(data_len);
+
+    let create_ix = create_ephemeral_account_ix(
+        MAGIC_PROGRAM_ID,
+        sponsor,
+        ephemeral.pubkey(),
+        EPHEMERAL_VAULT_PUBKEY,
+        data_len,
+    );
+    let txn = env.build_transaction_with_signers(&[create_ix], &[&ephemeral]);
+    assert!(env.execute_transaction(txn).await.is_ok());
+
+    let sponsor_before_close = env.get_account(sponsor);
+    let vault_before_close = env.get_account(EPHEMERAL_VAULT_PUBKEY);
+
+    let close_ix = close_ephemeral_account_ix(
+        EPHEMERAL_SYSTEM_PROGRAM_ID,
+        sponsor,
+        ephemeral.pubkey(),
+        EPHEMERAL_VAULT_PUBKEY,
+    );
+    let txn = env.build_transaction(&[close_ix]);
+    let result = env.execute_transaction(txn).await;
+    assert!(
+        result.is_ok(),
+        "closing via esp an account created via magic_program::ID should succeed: {:?}",
+        result
+    );
+
+    assert!(env.try_get_account(ephemeral.pubkey()).is_none());
+    assert_eq!(
+        env.get_account(sponsor).lamports(),
+        sponsor_before_close.lamports() + expected_rent
+    );
+    assert_eq!(
+        env.get_account(EPHEMERAL_VAULT_PUBKEY).lamports(),
+        vault_before_close.lamports() - expected_rent
     );
 }
 

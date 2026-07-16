@@ -85,7 +85,7 @@ pub fn process_instruction<'a>(
                 commit_payer: false,
                 has_magic_vault: false,
             },
-            ScheduleCommitType::Commit,
+            ScheduleCommitType::CommitFinalize,
         ),
     }
 }
@@ -126,7 +126,7 @@ fn process_sibling_schedule_cpis(
             None,
             players,
             &pdas,
-            ScheduleCommitType::Commit,
+            ScheduleCommitType::CommitFinalize,
         );
         let mut account_infos = account_infos
             .clone()

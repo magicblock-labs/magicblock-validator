@@ -617,8 +617,7 @@ where
         let cleanup_futs = self.junk.iter().map(|to_cleanup| {
             self.transaction_preparator.cleanup_for_strategy(
                 &self.authority,
-                &to_cleanup.optimized_tasks,
-                &to_cleanup.lookup_tables_keys,
+                to_cleanup,
                 close_buffers,
             )
         });
@@ -640,14 +639,14 @@ fn requires_uniqueness_nonce(commit_tasks: &[BaseTaskImpl]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::CommittedAccount;
+    use magicblock_core::intent::types::CommittedAccount;
     use solana_account::Account;
 
     use super::*;
-    use crate::tasks::{task_builder::TaskBuilderImpl, FinalizeTask};
+    use crate::tasks::{utils::create_commit_task, FinalizeTask};
 
     fn commit_task(commit_id: u64) -> BaseTaskImpl {
-        TaskBuilderImpl::create_commit_task(
+        create_commit_task(
             commit_id,
             false,
             CommittedAccount {

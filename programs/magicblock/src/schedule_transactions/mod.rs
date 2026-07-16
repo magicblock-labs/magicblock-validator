@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
 };
 
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::intent::types::CommittedAccount;
 use magicblock_magic_program_api::{
     pda::CALLBACK_SIGNER, MAGIC_CONTEXT_PUBKEY,
 };

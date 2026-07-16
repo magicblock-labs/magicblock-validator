@@ -51,6 +51,27 @@ lazy_static::lazy_static! {
         "chain_slot_gauge", "Chain Slot Gauge",
     ).unwrap();
 
+    // The replica's view of a slot differed from the leader's: it missed a
+    // message, or applied one the leader did not. Reseeding from the leader's
+    // hash each slot makes this self-heal, leaving one log line as its trace.
+    static ref REPLICA_BLOCKHASH_DIVERGENCE_COUNTER: IntCounter = IntCounter::new(
+        "replica_blockhash_divergence_count",
+        "Replica blocks whose local blockhash diverged from the leader's",
+    ).unwrap();
+
+    static ref REPLICA_STREAM_GAP_COUNTER: IntCounter = IntCounter::new(
+        "replica_stream_gap_count",
+        "Holes detected in the replicated message sequence",
+    ).unwrap();
+
+    // Legitimate only for a transaction that had not reached the ledger as a
+    // mode switch rebuilt the accumulator. More than rare means the rebuild is
+    // wrong, and that the allowance is masking real divergence.
+    static ref REPLICA_INITIAL_BLOCKHASH_MISMATCH_COUNTER: IntCounter = IntCounter::new(
+        "replica_initial_blockhash_mismatch_count",
+        "First-block-after-mode-switch blockhash mismatches on a replica",
+    ).unwrap();
+
     // -----------------
     // Ledger
     // -----------------
@@ -492,6 +513,43 @@ lazy_static::lazy_static! {
         "committor_intent_cu_usage_gauge", "Compute units used for Intent"
     ).unwrap();
 
+    static ref COMMITTOR_INTENT_TASK_PREPARATION_TIME: HistogramVec = HistogramVec::new(
+        HistogramOpts::new(
+            "committor_intent_task_preparation_time",
+            "Time in seconds spent on task preparation"
+        )
+        .buckets(
+            vec![0.1, 1.0, 2.0, 3.0, 5.0]
+        ),
+        &["task_type"],
+    ).unwrap();
+
+    static ref COMMITTOR_INTENT_ALT_PREPARATION_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_intent_alt_preparation_time",
+            "Time in seconds spent on ALTs preparation"
+        )
+        .buckets(
+            vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
+        ),
+    ).unwrap();
+
+    static ref COMMITTOR_INTENT_ALT_COUNT: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_intent_alt_count",
+            "Number of address lookup tables used per intent transaction (only recorded when ALTs are present)"
+        )
+        .buckets(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0])
+    ).unwrap();
+
+    static ref COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_fetch_commit_nonces_wait_time_second",
+            "Time in seconds spent waiting for fetch_current_commit_nonces response"
+        )
+        .buckets(vec![0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0]),
+    ).unwrap();
+
     // GetMultiplAccount investigation
     static ref REMOTE_ACCOUNT_PROVIDER_A_COUNT: IntCounter = IntCounter::new(
         "remote_account_provider_a_count", "Get mupltiple account count"
@@ -537,44 +595,6 @@ lazy_static::lazy_static! {
     static ref RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT: IntCounter = IntCounter::new(
         "rpc_client_signature_status_batch_signatures_count",
         "Number of signatures included in batched getSignatureStatuses requests"
-    ).unwrap();
-
-
-    static ref COMMITTOR_INTENT_TASK_PREPARATION_TIME: HistogramVec = HistogramVec::new(
-        HistogramOpts::new(
-            "committor_intent_task_preparation_time",
-            "Time in seconds spent on task preparation"
-        )
-        .buckets(
-            vec![0.1, 1.0, 2.0, 3.0, 5.0]
-        ),
-        &["task_type"],
-    ).unwrap();
-
-    static ref COMMITTOR_INTENT_ALT_PREPARATION_TIME: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "committor_intent_alt_preparation_time",
-            "Time in seconds spent on ALTs preparation"
-        )
-        .buckets(
-            vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
-        ),
-    ).unwrap();
-
-    static ref COMMITTOR_INTENT_ALT_COUNT: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "committor_intent_alt_count",
-            "Number of address lookup tables used per intent transaction (only recorded when ALTs are present)"
-        )
-        .buckets(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0])
-    ).unwrap();
-
-    static ref COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "committor_fetch_commit_nonces_wait_time_second",
-            "Time in seconds spent waiting for fetch_current_commit_nonces response"
-        )
-        .buckets(vec![0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0]),
     ).unwrap();
 
     // -----------------
@@ -707,6 +727,9 @@ pub(crate) fn register() {
         }
         register!(SLOT_GAUGE);
         register!(CHAIN_SLOT_GAUGE);
+        register!(REPLICA_BLOCKHASH_DIVERGENCE_COUNTER);
+        register!(REPLICA_STREAM_GAP_COUNTER);
+        register!(REPLICA_INITIAL_BLOCKHASH_MISMATCH_COUNTER);
         register!(LEDGER_SIZE_GAUGE);
         register!(LEDGER_BLOCK_TIMES_GAUGE);
         register!(LEDGER_BLOCKHASHES_GAUGE);
@@ -802,6 +825,18 @@ pub fn set_slot(slot: u64) {
 
 pub fn set_chain_slot(value: u64) {
     CHAIN_SLOT_GAUGE.set(value as i64);
+}
+
+pub fn inc_replica_blockhash_divergence() {
+    REPLICA_BLOCKHASH_DIVERGENCE_COUNTER.inc();
+}
+
+pub fn inc_replica_stream_gap() {
+    REPLICA_STREAM_GAP_COUNTER.inc();
+}
+
+pub fn inc_replica_initial_blockhash_mismatch() {
+    REPLICA_INITIAL_BLOCKHASH_MISMATCH_COUNTER.inc();
 }
 
 pub fn set_ledger_size(size: u64) {

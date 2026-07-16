@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use magicblock_config::config::ApertureConfig;
 use magicblock_core::link::{
-    accounts::AccountUpdateRx, blocks::BlockUpdateRx,
-    transactions::TransactionStatusRx, DispatchEndpoints,
+    accounts::AccountUpdateRx,
+    blocks::{BlockUpdateRx, LatestBlockInner},
+    transactions::TransactionStatusRx,
+    DispatchEndpoints,
 };
-use magicblock_ledger::LatestBlockInner;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 

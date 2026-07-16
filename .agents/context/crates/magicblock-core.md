@@ -55,7 +55,7 @@ Main consumers include:
 - `magicblock-processor`, which consumes `ValidatorChannelEndpoints`, executes `SchedulerCommand`s, drains `ExecutionTlsStash`, and emits account/status/replication messages;
 - `magicblock-replicator`, which consumes and publishes `link::replication::Message` and uses `wait_for_idle()` during checksum/reset operations;
 - `magicblock-ledger`, which replays persisted transactions through `TransactionSchedulerHandle::replay`;
-- `magicblock-accounts`, `magicblock-account-cloner`, and `magicblock-task-scheduler`, which submit validator-internal transactions or consume scheduled tasks;
+- `magicblock-committor-service`, `magicblock-services`, `magicblock-account-cloner`, and `magicblock-task-scheduler`, which submit validator-internal transactions, consume scheduled intents, or consume scheduled tasks;
 - `programs/magicblock`, which uses `MagicSys`, `CommittedAccount`, `BaseActionCallback`, coordination mode, and `ExecutionTlsStash`;
 - `magicblock-committor-service`, which consumes committed-account/action types and callback scheduling traits;
 - `magicblock-chainlink`, which uses token/eATA helpers and consolidated logging helpers.
@@ -347,7 +347,8 @@ Start with:
 - `magicblock-core/src/traits.rs`
 - `programs/magicblock/src/magic_sys.rs`
 - `programs/magicblock/src/magic_scheduled_base_intent.rs`
-- `magicblock-accounts/src/scheduled_commits_processor.rs`
+- `magicblock-committor-service/src/service/intent_client.rs`
+- `magicblock-services/src/undelegation_request_service.rs`
 - `magicblock-committor-service/src/`
 
 Check serialization, persistence, commit nonce behavior, callback error mapping, and base-layer settlement compatibility.
@@ -390,6 +391,7 @@ Avoid adding high-cardinality or noisy logs to hot loops. Keep test logging idem
 - `.agents/context/crates/magicblock-api.md` — service wiring consumer of core endpoints.
 - `.agents/context/crates/magicblock-aperture.md` — RPC/account/status event consumer.
 - `.agents/context/crates/magicblock-account-cloner.md` — internal transaction submission consumer.
-- `.agents/context/crates/magicblock-accounts.md` — scheduled commit consumer of core payloads.
+- `.agents/context/crates/magicblock-committor-service.md` — scheduled intent consumer of core payloads.
+- `.agents/context/crates/magicblock-services.md` — service adapters that submit validator-internal transactions.
 - `.agents/context/crates/magicblock-chainlink.md` — token/eATA helper and logging consumer.
 - `.agents/context/crates/magicblock-config.md` — config types that drive startup mode and service wiring.

@@ -56,49 +56,23 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
-    /// Fetches rent reimbursement address for pubkeys
-    async fn fetch_rent_reimbursements(
+    /// Fetches delegation metadata keyed by delegated account pubkey.
+    async fn fetch_delegation_metadata(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>;
 
-    /// Fetches rent reimbursement addresses, using caller-provided defaults
-    /// when allowed metadata is missing on base.
-    async fn fetch_rent_reimbursements_with_missing_as(
+    /// Fetches delegation metadata, using caller-provided fallbacks only when
+    /// the corresponding metadata account is missing on base.
+    async fn fetch_delegation_metadata_with_fallbacks(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
-        missing_metadata_as: &HashMap<Pubkey, Pubkey>,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Pubkey>> {
-        let reimbursements = self
-            .fetch_rent_reimbursements(pubkeys, min_context_slot)
-            .await?;
-        let result = pubkeys
-            .iter()
-            .copied()
-            .zip(reimbursements)
-            .collect::<HashMap<_, _>>();
-        if result.len() == pubkeys.len() {
-            return Ok(result);
-        }
-
-        let missing_pubkeys = pubkeys
-            .iter()
-            .copied()
-            .filter(|pubkey| !result.contains_key(pubkey))
-            .collect::<Vec<_>>();
-        let mut result = result;
-        for missing_pubkey in missing_pubkeys {
-            if let Some(default) = missing_metadata_as.get(&missing_pubkey) {
-                result.insert(missing_pubkey, *default);
-            } else {
-                return Err(TaskInfoFetcherError::AccountNotFoundError(
-                    missing_pubkey,
-                ));
-            }
-        }
-        Ok(result)
+        _metadata_fallbacks: HashMap<Pubkey, DelegationMetadata>,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        self.fetch_delegation_metadata(pubkeys, min_context_slot)
+            .await
     }
 
     async fn get_base_accounts(
@@ -229,7 +203,7 @@ impl RpcTaskInfoFetcher {
                     .map_err(|_| {
                         TaskInfoFetcherError::InvalidAccountDataError(pda)
                     })?
-                    .last_update_nonce
+                    .last_commit_id
                 }
                 None if zero_defaults.contains(&delegated_pubkey) => {
                     missing_metadata.insert(delegated_pubkey);
@@ -250,13 +224,13 @@ impl RpcTaskInfoFetcher {
         })
     }
 
-    async fn fetch_rent_reimbursements_map_with_missing_as(
+    async fn fetch_delegation_metadata_map_with_fallbacks(
         rpc_client: &MagicblockRpcClient,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
         max_retries: NonZeroUsize,
-        missing_metadata_as: &HashMap<Pubkey, Pubkey>,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Pubkey>> {
+        mut metadata_fallbacks: HashMap<Pubkey, DelegationMetadata>,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
         if pubkeys.is_empty() {
             return Ok(HashMap::new());
         }
@@ -282,11 +256,11 @@ impl RpcTaskInfoFetcher {
         )
         .await?;
 
-        let mut reimbursements = HashMap::with_capacity(pubkeys.len());
+        let mut metadata = HashMap::with_capacity(pubkeys.len());
         for ((delegated_pubkey, pda), account) in
             pubkeys.iter().copied().zip(pda_accounts).zip(accounts)
         {
-            let reimbursement = match account {
+            let value = match account {
                 Some(account) => {
                     DelegationMetadata::try_from_bytes_with_discriminator(
                         &account.data,
@@ -294,13 +268,12 @@ impl RpcTaskInfoFetcher {
                     .map_err(|_| {
                         TaskInfoFetcherError::InvalidAccountDataError(pda)
                     })?
-                    .rent_payer
                 }
                 None => {
-                    if let Some(default) =
-                        missing_metadata_as.get(&delegated_pubkey)
+                    if let Some(fallback) =
+                        metadata_fallbacks.remove(&delegated_pubkey)
                     {
-                        *default
+                        fallback
                     } else {
                         return Err(
                             TaskInfoFetcherError::AccountNotFoundError(pda),
@@ -308,10 +281,10 @@ impl RpcTaskInfoFetcher {
                     }
                 }
             };
-            reimbursements.insert(delegated_pubkey, reimbursement);
+            metadata.insert(delegated_pubkey, value);
         }
 
-        Ok(reimbursements)
+        Ok(metadata)
     }
 
     /// Fetches [`Account`]s with some num of retries
@@ -573,48 +546,37 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         )
         .await?
         .into_iter()
-        .map(|m| m.last_update_nonce);
+        .map(|m| m.last_commit_id);
         Ok(pubkeys.iter().copied().zip(nonces).collect())
     }
 
-    async fn fetch_rent_reimbursements(
+    async fn fetch_delegation_metadata(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        let reimbursements =
-            Self::fetch_rent_reimbursements_map_with_missing_as(
-                &self.rpc_client,
-                pubkeys,
-                min_context_slot,
-                NUM_FETCH_RETRIES,
-                &HashMap::new(),
-            )
-            .await?;
-
-        pubkeys
-            .iter()
-            .map(|pubkey| {
-                reimbursements
-                    .get(pubkey)
-                    .copied()
-                    .ok_or(TaskInfoFetcherError::AccountNotFoundError(*pubkey))
-            })
-            .collect()
-    }
-
-    async fn fetch_rent_reimbursements_with_missing_as(
-        &self,
-        pubkeys: &[Pubkey],
-        min_context_slot: u64,
-        missing_metadata_as: &HashMap<Pubkey, Pubkey>,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Pubkey>> {
-        Self::fetch_rent_reimbursements_map_with_missing_as(
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        Self::fetch_delegation_metadata_map_with_fallbacks(
             &self.rpc_client,
             pubkeys,
             min_context_slot,
             NUM_FETCH_RETRIES,
-            missing_metadata_as,
+            HashMap::new(),
+        )
+        .await
+    }
+
+    async fn fetch_delegation_metadata_with_fallbacks(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        metadata_fallbacks: HashMap<Pubkey, DelegationMetadata>,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        Self::fetch_delegation_metadata_map_with_fallbacks(
+            &self.rpc_client,
+            pubkeys,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+            metadata_fallbacks,
         )
         .await
     }
@@ -1000,27 +962,27 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         Ok(result)
     }
 
-    async fn fetch_rent_reimbursements(
+    async fn fetch_delegation_metadata(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
         self.inner
-            .fetch_rent_reimbursements(pubkeys, min_context_slot)
+            .fetch_delegation_metadata(pubkeys, min_context_slot)
             .await
     }
 
-    async fn fetch_rent_reimbursements_with_missing_as(
+    async fn fetch_delegation_metadata_with_fallbacks(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
-        missing_metadata_as: &HashMap<Pubkey, Pubkey>,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Pubkey>> {
+        metadata_fallbacks: HashMap<Pubkey, DelegationMetadata>,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
         self.inner
-            .fetch_rent_reimbursements_with_missing_as(
+            .fetch_delegation_metadata_with_fallbacks(
                 pubkeys,
                 min_context_slot,
-                missing_metadata_as,
+                metadata_fallbacks,
             )
             .await
     }
@@ -1479,12 +1441,27 @@ mod tests {
                 .collect())
         }
 
-        async fn fetch_rent_reimbursements(
+        async fn fetch_delegation_metadata(
             &self,
-            _: &[Pubkey],
+            pubkeys: &[Pubkey],
             _: u64,
-        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            unimplemented!()
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
+        {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (
+                        *pubkey,
+                        DelegationMetadata {
+                            last_commit_id: 0,
+                            undelegation_requester:
+                                dlp_api::state::UndelegationRequester::None,
+                            seeds: vec![],
+                            rent_payer: *pubkey,
+                        },
+                    )
+                })
+                .collect())
         }
 
         async fn get_base_accounts(

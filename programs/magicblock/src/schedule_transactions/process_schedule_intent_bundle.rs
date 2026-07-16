@@ -9,8 +9,8 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
-        calculate_rent_pending_ata_materialization_fee, CommitType,
-        ConstructionContext, ScheduledIntentBundle,
+        calculate_rent_pending_ata_materialization_fee,
+        extract_commit_accounts, ConstructionContext, ScheduledIntentBundle,
     },
     schedule_transactions::{
         check_commit_limits, check_magic_context_id,
@@ -105,7 +105,7 @@ pub(crate) fn process_schedule_intent_bundle(
 
     // Determine id and slot
     let (undelegated_pubkeys, scheduled_intent) = {
-        let construction_context = ConstructionContext::new(
+        let mut construction_context = ConstructionContext::new(
             parent_program_id,
             &signers,
             invoke_context,
@@ -113,28 +113,24 @@ pub(crate) fn process_schedule_intent_bundle(
             rent_pending_materialization_accounts,
         );
 
-        // Collect all undelegated account refs.
-        let undelegated_accounts_ref = [
+        // Collect all undelegated account indices.
+        let undelegated_account_indices: Vec<u8> = [
             args.commit_and_undelegate.as_ref(),
             args.commit_finalize_and_undelegate.as_ref(),
         ]
         .into_iter()
         .flatten()
-        .map(|el| el.committed_accounts_indices())
-        .try_fold(vec![], |mut acc, indices| {
-            acc.extend(CommitType::extract_commit_accounts(
-                indices,
-                construction_context.transaction_context(),
-            )?);
-            Ok::<_, InstructionError>(acc)
-        })?;
+        .flat_map(|el| el.committed_accounts_indices())
+        .copied()
+        .collect();
 
+        // Recreate intent
         let scheduled_intent = ScheduledIntentBundle::try_new(
             args,
             intent_id,
             clock.slot,
             &payer_pubkey,
-            &construction_context,
+            &mut construction_context,
         )?;
 
         if rent_pending_materialization_accounts.is_some() {
@@ -180,10 +176,15 @@ pub(crate) fn process_schedule_intent_bundle(
             )?;
         }
 
-        let mut undelegated_pubkeys =
-            Vec::with_capacity(undelegated_accounts_ref.len());
         // Change owner to dlp and set undelegating flag.
         // Once account is undelegated we need to make it immutable in our validator.
+        let transaction_context = construction_context.transaction_context();
+        let undelegated_accounts_ref = extract_commit_accounts(
+            &undelegated_account_indices,
+            transaction_context,
+        )?;
+        let mut undelegated_pubkeys =
+            Vec::with_capacity(undelegated_accounts_ref.len());
         for (pubkey, account_ref) in undelegated_accounts_ref.iter() {
             undelegated_pubkeys.push(pubkey.to_string());
             mark_account_as_undelegated(account_ref)?;

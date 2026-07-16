@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
 use magicblock_core::{
-    intent::CommittedAccount,
+    intent::{
+        calculate_commit_fee, types::CommittedAccount, CommitAndUndelegate,
+        CommitType, MagicBaseIntent, MagicIntentBundle, UndelegateType,
+    },
     tls::ExecutionTlsStash,
     token_programs::{
         try_get_rent_pending_ata_info, RentPendingAtaMaterialization,
@@ -16,11 +19,10 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
-        calculate_commit_fee, calculate_rent_pending_ata_materialization_fee,
-        validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
-        MagicBaseIntent, MagicIntentBundle, ScheduledIntentBundle,
-        UndelegateType,
+        calculate_rent_pending_ata_materialization_fee,
+        validate_commit_schedule_permissions, ScheduledIntentBundle,
     },
+    magic_sys::validate_intent_size,
     schedule_transactions::{
         self, check_commit_limits, fetch_commit_nonces_with_missing_as_zero,
         magic_fee_vault_pubkey, try_get_fee_vault,
@@ -363,6 +365,12 @@ pub(crate) fn process_schedule_commit(
     .into();
     base_intent.rent_pending_ata_materializations =
         rent_pending_ata_materializations;
+    validate_intent_size(&base_intent).inspect_err(|_| {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit ERR: intent is too large to ever fit into transaction",
+        );
+    })?;
 
     let scheduled_base_intent = ScheduledIntentBundle {
         id: intent_id,

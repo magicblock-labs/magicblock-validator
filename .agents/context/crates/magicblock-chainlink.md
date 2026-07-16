@@ -75,7 +75,9 @@ Important methods:
 - `ensure_accounts(pubkeys, mark_empty_if_not_found, fetch_origin)`: fetches/clones accounts but returns only fetch/clone status.
 - `fetch_accounts(pubkeys, fetch_origin)`: ensures accounts and then reads them from the local bank.
 - `accounts_delegated_on_base_and_er(pubkeys, fetch_origin)`: checks that each account is DLP-owned on base and represented as delegated/DLP-owned locally.
+- `account_delegation_statuses(pubkeys, fetch_origin)`: returns base-layer delegation plus explicit account-on-ER status (`missing`, `delegated`, or `not_delegated`) for owner-program undelegation request logs.
 - `undelegation_requested(pubkey)`: called by committor/account flows before an account is undelegated so Chainlink keeps watching for base-layer completion.
+- `fetch_undelegation_requests()`: scans base-layer Delegation Program accounts for active `UndelegationRequest` PDAs using filtered `getProgramAccounts` and returns decoded `ObservedUndelegationRequest`s for `magicblock-accounts`.
 - `fetch_count()` / `is_watching()`: mainly observability/testing helpers.
 
 Disabled replication mode is intentionally conservative:
@@ -275,6 +277,15 @@ Key behavior:
 - Non-advancing updates are ignored unless they represent a same-slot delegated refresh needed for undelegate/redelegate recovery.
 - Delegated updates cause direct subscription cleanup; undelegation-completion updates retain/directly ensure subscriptions as appropriate and release `UndelegationTracking` ownership.
 
+### DLP undelegation request scanning
+
+Owner-program undelegation requests are discovered in two ways:
+
+- Live updates: DLP-owned `UndelegationRequest` account subscription/program-subscription updates are decoded in `FetchCloner::process_subscription_update` and broadcast as `ObservedUndelegationRequest`.
+- Backfill scans: `FetchCloner::fetch_undelegation_requests` calls `getProgramAccounts` for `dlp_api::id()` with a `DataSize(UndelegationRequest::size_with_discriminator())` filter and a discriminator `memcmp` at offset `0`, then decodes each returned account with `UndelegationRequest::try_from_bytes_with_discriminator`.
+
+The scan uses Base64Zstd account encoding and gets a nearby base-chain slot for `observed_slot`. Malformed matching accounts are logged and skipped; a bad account must not abort the whole scan. Polling cadence is controlled by `chainlink.undelegation-request-poll-interval` in `magicblock-config` and consumed by `magicblock-accounts`.
+
 ### Greedy discovery
 
 If a subscription update discovers a DLP-owned account absent from the bank, Chainlink may greedily fetch and clone it if the delegation record says it belongs to this validator (or is confined). This is especially important for delegated eATA discovery and owner-program subscriptions.
@@ -369,7 +380,7 @@ Changing SubMux behavior can affect ordering, duplicate clone submissions, and p
 
 ## Lifecycle mode and configuration
 
-`ChainlinkConfig` wraps `RemoteAccountProviderConfig` and currently includes `remove_confined_accounts`.
+`ChainlinkConfig` wraps `RemoteAccountProviderConfig` and includes settings such as `remove_confined_accounts`, allowed program filters, resubscription delay, Range risk checks, and `undelegation_request_poll_interval` for the DLP request backfill consumer in `magicblock-accounts`.
 
 `RemoteAccountProviderConfig` includes:
 

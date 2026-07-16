@@ -3,8 +3,14 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
+pub use magicblock_core::intent::{
+    calculate_commit_fee, BaseAction, CommitAndUndelegate, CommitType,
+    MagicBaseIntent, MagicIntentBundle, ProgramArgs, UndelegateType,
+    ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
+    COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
+};
 use magicblock_core::{
-    intent::{BaseActionCallback, CommittedAccount},
+    intent::types::CommittedAccount,
     tls::ExecutionTlsStash,
     token_programs::{
         eata_rent_exempt_balance, try_get_rent_pending_ata_info,
@@ -14,9 +20,8 @@ use magicblock_core::{
     Slot,
 };
 use magicblock_magic_program_api::args::{
-    ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
-    MagicBaseIntentArgs, MagicIntentBundleArgs, ShortAccountMeta,
-    UndelegateTypeArgs,
+    BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
+    MagicBaseIntentArgs, MagicIntentBundleArgs, UndelegateTypeArgs,
 };
 use serde::{Deserialize, Serialize};
 use solana_account::ReadableAccount;
@@ -31,7 +36,7 @@ use solana_transaction::Transaction;
 
 use crate::{
     instruction_utils::InstructionUtils,
-    magic_sys::MISSING_COMMIT_NONCE_ERR,
+    magic_sys::validate_intent_size,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx, InstructionAccount,
@@ -39,19 +44,10 @@ use crate::{
     validator::effective_validator_authority_id,
 };
 
-/// Commits that are covered by User's dlp PDAs
-pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
-/// Fixed fee per commit.
-/// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
-pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
 /// Fixed V1 service fee per rent-pending eATA materialization, charged on top
 /// of the base-layer rent the validator fronts to create the eATA account.
 pub const RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS: u64 =
     COMMIT_FEE_LAMPORTS;
-/// Price per compute unit for a BaseAction executed on Solana base chain,
-/// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
-pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
-
 /// Context necessary for construction of Schedule Action
 pub struct ConstructionContext<'a, 'ic, 'ix_data> {
     parent_program_id: Option<Pubkey>,
@@ -63,6 +59,10 @@ pub struct ConstructionContext<'a, 'ic, 'ix_data> {
     pub secure: bool,
     pub rent_pending_materialization_accounts: Option<(Pubkey, Pubkey)>,
     rent_pending_materializations: RefCell<Vec<RentPendingAtaMaterialization>>,
+    /// Next id to assign to a `BaseAction` being constructed. Incremented
+    /// as actions are built, so each action in a bundle gets a unique,
+    /// stable id in construction order.
+    next_action_id: u64,
 }
 
 impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
@@ -80,6 +80,7 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
             secure,
             rent_pending_materialization_accounts,
             rent_pending_materializations: RefCell::new(Vec::new()),
+            next_action_id: 0,
         }
     }
 
@@ -126,6 +127,12 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
         }
         Ok(())
     }
+
+    fn next_action_id(&mut self) -> u64 {
+        let id = self.next_action_id;
+        self.next_action_id += 1;
+        id
+    }
 }
 
 type CommitAccountRef<'a, 'ix_data> =
@@ -149,7 +156,7 @@ impl ScheduledIntentBundle {
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<ScheduledIntentBundle, InstructionError> {
         let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
         let blockhash = context.invoke_context.environment_config.blockhash;
@@ -254,58 +261,28 @@ impl ScheduledIntentBundle {
     }
 }
 
-// BaseIntent user wants to send to base layer
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MagicBaseIntent {
-    /// Actions without commitment or undelegation
-    BaseActions(Vec<BaseAction>),
-    Commit(CommitType),
-    CommitAndUndelegate(CommitAndUndelegate),
-    CommitFinalize(CommitType),
-    CommitFinalizeAndUndelegate(CommitAndUndelegate),
+/// Constructs a type from its wire [`Args`] representation.
+///
+/// The corresponding data types live in [`magicblock_core::intent::types`]
+/// since they need to be shared with `MagicSys` implementors, but the
+/// construction logic stays here since it depends on [`ConstructionContext`]
+/// (`InvokeContext`, `ic_msg!`, etc.) which only exists on-chain. A local
+/// trait lets us `impl` construction for those foreign types.
+pub trait TryFromArgs<A>: Sized {
+    fn try_from_args(
+        args: A,
+        context: &mut ConstructionContext<'_, '_, '_>,
+    ) -> Result<Self, InstructionError>;
 }
 
-// Bundle of BaseIntents
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MagicIntentBundle {
-    pub commit: Option<CommitType>,
-    pub commit_and_undelegate: Option<CommitAndUndelegate>,
-    pub commit_finalize: Option<CommitType>,
-    pub commit_finalize_and_undelegate: Option<CommitAndUndelegate>,
-    pub standalone_actions: Vec<BaseAction>,
-    pub rent_pending_ata_materializations: Vec<RentPendingAtaMaterialization>,
-}
-
-impl From<MagicBaseIntent> for MagicIntentBundle {
-    fn from(value: MagicBaseIntent) -> Self {
-        let mut this = Self::default();
-        match value {
-            MagicBaseIntent::BaseActions(value) => {
-                this.standalone_actions.extend(value)
-            }
-            MagicBaseIntent::Commit(value) => this.commit = Some(value),
-            MagicBaseIntent::CommitAndUndelegate(value) => {
-                this.commit_and_undelegate = Some(value)
-            }
-            MagicBaseIntent::CommitFinalize(value) => {
-                this.commit_finalize = Some(value)
-            }
-            MagicBaseIntent::CommitFinalizeAndUndelegate(value) => {
-                this.commit_finalize_and_undelegate = Some(value)
-            }
-        }
-
-        this
-    }
-}
-
-impl MagicIntentBundle {
-    pub fn try_from_args(
+impl TryFromArgs<MagicIntentBundleArgs> for MagicIntentBundle {
+    fn try_from_args(
         args: MagicIntentBundleArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<Self, InstructionError> {
-        Self::validate(&args, context)?;
+        validate_magic_intent_bundle_args(&args, context)?;
 
+        // NOTE: Order shall be identical to AddActionCallback's action ordering.
         let commit = args
             .commit
             .map(|value| CommitType::try_from_args(value, context))
@@ -316,6 +293,12 @@ impl MagicIntentBundle {
             .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
 
+        let actions = args
+            .standalone_actions
+            .into_iter()
+            .map(|args| BaseAction::try_from_args(args, context))
+            .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
+
         let commit_finalize = args
             .commit_finalize
             .map(|value| CommitType::try_from_args(value, context))
@@ -325,12 +308,6 @@ impl MagicIntentBundle {
             .commit_finalize_and_undelegate
             .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
-
-        let actions = args
-            .standalone_actions
-            .into_iter()
-            .map(|args| BaseAction::try_from_args(args, context))
-            .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
 
         let this = Self {
             commit,
@@ -343,319 +320,107 @@ impl MagicIntentBundle {
                 .borrow()
                 .clone(),
         };
-        this.post_validation(context)?;
+        post_validate_magic_intent_bundle(&this, context)?;
+        validate_intent_size(&this).inspect_err(|_| {
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: intent is too large to ever fit into transaction",
+            );
+        })?;
 
         Ok(this)
     }
-
-    /// Cross intent validation:
-    /// 1. Set of committed accounts shall not overlap with
-    ///    set of undelegated accounts
-    /// 2. None for now :)
-    fn validate(
-        args: &MagicIntentBundleArgs,
-        context: &ConstructionContext<'_, '_, '_>,
-    ) -> Result<(), InstructionError> {
-        let committed_set: Option<HashSet<_>> =
-            args.commit.as_ref().map(|el| {
-                el.committed_accounts_indices().iter().copied().collect()
-            });
-        let Some(committed_set) = committed_set else {
-            return Ok(());
-        };
-
-        args.commit_and_undelegate
-            .as_ref()
-            .map(|el| {
-                let has_cross_reference = el
-                    .committed_accounts_indices()
-                    .iter()
-                    .any(|ind| committed_set.contains(ind));
-                if has_cross_reference {
-                    ic_msg!(
-                        context.invoke_context,
-                        "ScheduleCommit ERR: duplicate committed account across bundle",
-                    );
-                    Err(InstructionError::InvalidInstructionData)
-                } else {
-                    Ok(())
-                }
-            })
-            .unwrap_or(Ok(()))
-    }
-
-    /// Post cross intent validation:
-    /// 1. Validates that all committed accounts across the entire intent bundle
-    ///    are globally unique by pubkey.
-    fn post_validation(
-        &self,
-        context: &ConstructionContext<'_, '_, '_>,
-    ) -> Result<(), InstructionError> {
-        if self.is_empty() {
-            ic_msg!(
-                context.invoke_context,
-                "ScheduleCommit ERR: intent bundle must not be empty.",
-            );
-            return Err(InstructionError::InvalidInstructionData);
-        }
-
-        let mut seen = HashSet::<Pubkey>::new();
-        let mut check =
-            |accounts: &Vec<CommittedAccount>| -> Result<(), InstructionError> {
-                for el in accounts {
-                    if !seen.insert(el.pubkey) {
-                        ic_msg!(
-                            context.invoke_context,
-                            "ScheduleCommit ERR: duplicate committed account pubkey across bundle: {}",
-                            el.pubkey
-                        );
-                        return Err(InstructionError::InvalidInstructionData);
-                    }
-                }
-                Ok(())
-            };
-
-        if let Some(commit) = &self.commit {
-            check(commit.get_committed_accounts())?;
-        }
-        if let Some(cau) = &self.commit_and_undelegate {
-            check(cau.get_committed_accounts())?;
-        }
-        if let Some(commit_finalize) = &self.commit_finalize {
-            check(commit_finalize.get_committed_accounts())?;
-        }
-        if let Some(commit_finalize_and_undelegate) =
-            &self.commit_finalize_and_undelegate
-        {
-            check(commit_finalize_and_undelegate.get_committed_accounts())?;
-        }
-
-        Ok(())
-    }
-
-    pub fn calculate_fee(
-        &self,
-        commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
-        let mut fee = 0;
-        if let Some(ref commit) = self.commit {
-            fee += commit.calculate_fee(commit_nonces)?;
-        }
-        if let Some(ref cau) = self.commit_and_undelegate {
-            fee += cau.calculate_fee(commit_nonces)?;
-        }
-        fee += calculate_actions_fee(&self.standalone_actions);
-        Ok(fee)
-    }
-
-    pub fn has_undelegate_intent(&self) -> bool {
-        self.commit_and_undelegate.is_some()
-            || self.commit_finalize_and_undelegate.is_some()
-    }
-
-    pub fn has_committed_accounts(&self) -> bool {
-        let has_commit_intent_accounts = self
-            .get_commit_intent_accounts()
-            .map(|el| !el.is_empty())
-            .unwrap_or(false);
-        let has_undelegate_intent_accounts = self
-            .get_undelegate_intent_accounts()
-            .map(|el| !el.is_empty())
-            .unwrap_or(false);
-        let has_commit_finalize_intent_accounts = self
-            .get_commit_finalize_intent_accounts()
-            .map(|el| !el.is_empty())
-            .unwrap_or(false);
-        let has_commit_finalize_and_undelegate_intent_accounts = self
-            .get_commit_finalize_and_undelegate_intent_accounts()
-            .map(|el| !el.is_empty())
-            .unwrap_or(false);
-
-        has_commit_intent_accounts
-            || has_undelegate_intent_accounts
-            || has_commit_finalize_intent_accounts
-            || has_commit_finalize_and_undelegate_intent_accounts
-    }
-
-    /// Returns `[CommitAndUndelegate]` intent's accounts
-    pub fn get_undelegate_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        Some(
-            self.commit_and_undelegate
-                .as_ref()?
-                .get_committed_accounts(),
-        )
-    }
-
-    /// Returns `Commit` intent's accounts
-    pub fn get_commit_intent_accounts(&self) -> Option<&Vec<CommittedAccount>> {
-        Some(self.commit.as_ref()?.get_committed_accounts())
-    }
-
-    /// Returns `[CommitAndUndelegate]` intent's accounts
-    pub fn get_commit_finalize_and_undelegate_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        Some(
-            self.commit_finalize_and_undelegate
-                .as_ref()?
-                .get_committed_accounts(),
-        )
-    }
-
-    /// Returns `Commit` intent's accounts
-    pub fn get_commit_finalize_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        Some(self.commit_finalize.as_ref()?.get_committed_accounts())
-    }
-
-    /// Returns `Commit` intent's accounts
-    pub fn get_commit_intent_accounts_mut(
-        &mut self,
-    ) -> Option<&mut Vec<CommittedAccount>> {
-        Some(self.commit.as_mut()?.get_committed_accounts_mut())
-    }
-
-    /// Returns all the accounts that will be committed,
-    /// including the ones that will be undelegated as well
-    pub fn get_all_committed_accounts(&self) -> Vec<CommittedAccount> {
-        let committed = self.get_commit_intent_accounts();
-        let undelegated = self.get_undelegate_intent_accounts();
-        let commit_finalize = self.get_commit_finalize_intent_accounts();
-        let commit_finalize_and_undelegate =
-            self.get_commit_finalize_and_undelegate_intent_accounts();
-
-        [
-            committed,
-            undelegated,
-            commit_finalize,
-            commit_finalize_and_undelegate,
-        ]
-        .into_iter()
-        .flatten()
-        .flatten()
-        .cloned()
-        .collect()
-    }
-
-    pub fn get_all_committed_pubkeys(&self) -> Vec<Pubkey> {
-        [
-            self.get_commit_intent_pubkeys(),
-            self.get_undelegate_intent_pubkeys(),
-            self.get_commit_finalize_intent_pubkeys(),
-            self.get_commit_finalize_and_undelegate_intent_pubkeys(),
-        ]
-        .into_iter()
-        .flatten()
-        .flatten()
-        .collect()
-    }
-
-    pub fn get_commit_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.commit
-            .as_ref()
-            .map(|value| value.get_committed_pubkeys())
-    }
-
-    pub fn get_undelegate_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.commit_and_undelegate
-            .as_ref()
-            .map(|value| value.get_committed_pubkeys())
-    }
-
-    pub fn get_commit_finalize_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.commit_finalize
-            .as_ref()
-            .map(|value| value.get_committed_pubkeys())
-    }
-
-    pub fn get_commit_finalize_and_undelegate_intent_pubkeys(
-        &self,
-    ) -> Option<Vec<Pubkey>> {
-        self.commit_finalize_and_undelegate
-            .as_ref()
-            .map(|value| value.get_committed_pubkeys())
-    }
-
-    pub fn is_empty(&self) -> bool {
-        let no_committed =
-            self.commit.as_ref().map(|el| el.is_empty()).unwrap_or(true);
-
-        let no_committed_and_undelegated = self
-            .commit_and_undelegate
-            .as_ref()
-            .map(|el| el.is_empty())
-            .unwrap_or(true);
-
-        let no_commit_finalize = self
-            .commit_finalize
-            .as_ref()
-            .map(|el| el.is_empty())
-            .unwrap_or(true);
-
-        let no_commit_finalize_and_undelegate = self
-            .commit_finalize_and_undelegate
-            .as_ref()
-            .map(|el| el.is_empty())
-            .unwrap_or(true);
-
-        let no_actions = self.standalone_actions.is_empty();
-
-        no_committed
-            && no_committed_and_undelegated
-            && no_commit_finalize
-            && no_commit_finalize_and_undelegate
-            && no_actions
-    }
-
-    pub fn has_callbacks(&self) -> bool {
-        let x = self
-            .commit
-            .as_ref()
-            .map(|el| el.has_callbacks())
-            .unwrap_or(false);
-        let y = self
-            .commit_and_undelegate
-            .as_ref()
-            .map(|el| el.has_callbacks())
-            .unwrap_or(false);
-        let z = self
-            .standalone_actions
-            .iter()
-            .any(|el| el.callback.is_some());
-
-        x || y || z
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        let mut offset = 0usize;
-
-        if let Some(commit) = self.commit.as_mut() {
-            let count = commit.action_count();
-            if index < offset + count {
-                return commit.get_action_mut(index - offset);
-            }
-            offset += count;
-        }
-
-        if let Some(cau) = self.commit_and_undelegate.as_mut() {
-            let count = cau.action_count();
-            if index < offset + count {
-                return cau.get_action_mut(index - offset);
-            }
-            offset += count;
-        }
-
-        self.standalone_actions.get_mut(index.checked_sub(offset)?)
-    }
 }
 
-impl MagicBaseIntent {
-    pub fn try_from_args(
+/// Cross intent validation:
+/// 1. Set of committed accounts shall not overlap with
+///    set of undelegated accounts
+/// 2. None for now :)
+fn validate_magic_intent_bundle_args(
+    args: &MagicIntentBundleArgs,
+    context: &ConstructionContext<'_, '_, '_>,
+) -> Result<(), InstructionError> {
+    let committed_set: Option<HashSet<_>> = args
+        .commit
+        .as_ref()
+        .map(|el| el.committed_accounts_indices().iter().copied().collect());
+    let Some(committed_set) = committed_set else {
+        return Ok(());
+    };
+
+    args.commit_and_undelegate
+        .as_ref()
+        .map(|el| {
+            let has_cross_reference = el
+                .committed_accounts_indices()
+                .iter()
+                .any(|ind| committed_set.contains(ind));
+            if has_cross_reference {
+                ic_msg!(
+                    context.invoke_context,
+                    "ScheduleCommit ERR: duplicate committed account across bundle",
+                );
+                Err(InstructionError::InvalidInstructionData)
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_or(Ok(()))
+}
+
+/// Post cross intent validation:
+/// 1. Validates that all committed accounts across the entire intent bundle
+///    are globally unique by pubkey.
+fn post_validate_magic_intent_bundle(
+    bundle: &MagicIntentBundle,
+    context: &ConstructionContext<'_, '_, '_>,
+) -> Result<(), InstructionError> {
+    if bundle.is_empty() {
+        ic_msg!(
+            context.invoke_context,
+            "ScheduleCommit ERR: intent bundle must not be empty.",
+        );
+        return Err(InstructionError::InvalidInstructionData);
+    }
+
+    let mut seen = HashSet::<Pubkey>::new();
+    let mut check =
+        |accounts: &Vec<CommittedAccount>| -> Result<(), InstructionError> {
+            for el in accounts {
+                if !seen.insert(el.pubkey) {
+                    ic_msg!(
+                        context.invoke_context,
+                        "ScheduleCommit ERR: duplicate committed account pubkey across bundle: {}",
+                        el.pubkey
+                    );
+                    return Err(InstructionError::InvalidInstructionData);
+                }
+            }
+            Ok(())
+        };
+
+    if let Some(commit) = &bundle.commit {
+        check(commit.get_committed_accounts())?;
+    }
+    if let Some(cau) = &bundle.commit_and_undelegate {
+        check(cau.get_committed_accounts())?;
+    }
+    if let Some(commit_finalize) = &bundle.commit_finalize {
+        check(commit_finalize.get_committed_accounts())?;
+    }
+    if let Some(commit_finalize_and_undelegate) =
+        &bundle.commit_finalize_and_undelegate
+    {
+        check(commit_finalize_and_undelegate.get_committed_accounts())?;
+    }
+
+    Ok(())
+}
+
+impl TryFromArgs<MagicBaseIntentArgs> for MagicBaseIntent {
+    fn try_from_args(
         args: MagicBaseIntentArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<MagicBaseIntent, InstructionError> {
         match args {
             MagicBaseIntentArgs::BaseActions(base_actions) => {
@@ -687,91 +452,18 @@ impl MagicBaseIntent {
             }
         }
     }
-
-    pub fn is_undelegate(&self) -> bool {
-        match &self {
-            MagicBaseIntent::BaseActions(_) => false,
-            MagicBaseIntent::Commit(_) => false,
-            MagicBaseIntent::CommitAndUndelegate(_) => true,
-            MagicBaseIntent::CommitFinalize(_) => false,
-            MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
-        }
-    }
-
-    pub fn is_commit_finalize(&self) -> bool {
-        match &self {
-            MagicBaseIntent::BaseActions(_) => false,
-            MagicBaseIntent::Commit(_) => false,
-            MagicBaseIntent::CommitAndUndelegate(_) => false,
-            MagicBaseIntent::CommitFinalize(_) => true,
-            MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
-        }
-    }
-
-    pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccount>> {
-        match self {
-            MagicBaseIntent::BaseActions(_) => None,
-            MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts()),
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                Some(t.get_committed_accounts())
-            }
-            MagicBaseIntent::CommitFinalize(t) => {
-                Some(t.get_committed_accounts())
-            }
-            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
-                Some(t.get_committed_accounts())
-            }
-        }
-    }
-
-    pub fn get_committed_accounts_mut(
-        &mut self,
-    ) -> Option<&mut Vec<CommittedAccount>> {
-        match self {
-            MagicBaseIntent::BaseActions(_) => None,
-            MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts_mut()),
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                Some(t.get_committed_accounts_mut())
-            }
-            MagicBaseIntent::CommitFinalize(t) => {
-                Some(t.get_committed_accounts_mut())
-            }
-            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
-                Some(t.get_committed_accounts_mut())
-            }
-        }
-    }
-
-    pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.get_committed_accounts().map(|accounts| {
-            accounts.iter().map(|account| account.pubkey).collect()
-        })
-    }
-
-    pub fn is_empty(&self) -> bool {
-        match self {
-            MagicBaseIntent::BaseActions(actions) => actions.is_empty(),
-            MagicBaseIntent::Commit(t) => t.is_empty(),
-            MagicBaseIntent::CommitAndUndelegate(t) => t.is_empty(),
-            MagicBaseIntent::CommitFinalize(t) => t.is_empty(),
-            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => t.is_empty(),
-        }
-    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommitAndUndelegate {
-    pub commit_action: CommitType,
-    pub undelegate_action: UndelegateType,
-}
-
-impl CommitAndUndelegate {
-    pub fn try_from_args(
+impl TryFromArgs<CommitAndUndelegateArgs> for CommitAndUndelegate {
+    fn try_from_args(
         args: CommitAndUndelegateArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<CommitAndUndelegate, InstructionError> {
         let account_indices = args.commit_type.committed_accounts_indices();
-        Self::validate(account_indices.as_slice(), context)?;
+        validate_commit_and_undelegate_accounts(
+            account_indices.as_slice(),
+            context,
+        )?;
 
         let commit_action =
             CommitType::try_from_args(args.commit_type, context)?;
@@ -783,132 +475,48 @@ impl CommitAndUndelegate {
             undelegate_action,
         })
     }
+}
 
-    pub fn validate(
-        account_indices: &[u8],
-        context: &ConstructionContext<'_, '_, '_>,
-    ) -> Result<(), InstructionError> {
-        account_indices.iter().copied().try_for_each(|idx| {
-            let is_writable =
-                get_writable_with_idx(context.transaction_context(), idx as u16)?;
-            let delegated = get_instruction_account_with_idx(
+fn validate_commit_and_undelegate_accounts(
+    account_indices: &[u8],
+    context: &ConstructionContext<'_, '_, '_>,
+) -> Result<(), InstructionError> {
+    account_indices.iter().copied().try_for_each(|idx| {
+        let is_writable =
+            get_writable_with_idx(context.transaction_context(), idx as u16)?;
+        let delegated = get_instruction_account_with_idx(
+            context.transaction_context(),
+            idx as u16,
+        )?;
+        if is_writable && delegated.borrow()?.delegated() {
+            Ok(())
+        } else {
+            let pubkey = get_instruction_pubkey_with_idx(
                 context.transaction_context(),
                 idx as u16,
             )?;
-            if is_writable && delegated.borrow()?.delegated() {
-                Ok(())
-            } else {
-                let pubkey = get_instruction_pubkey_with_idx(
-                    context.transaction_context(),
-                    idx as u16,
-                )?;
-                ic_msg!(
-                    context.invoke_context,
-                    "ScheduleCommit ERR: account {} is required to be writable and delegated in order to be undelegated",
-                    pubkey
-                );
-                Err(InstructionError::ReadonlyDataModified)
-            }
-        })
-    }
-
-    pub fn calculate_fee(
-        &self,
-        commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
-        let mut fee = 0;
-        fee += self.commit_action.calculate_fee(commit_nonces)?;
-        fee += self.undelegate_action.calculate_fee(commit_nonces)?;
-        Ok(fee)
-    }
-
-    pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
-        self.commit_action.get_committed_accounts()
-    }
-
-    pub fn get_committed_accounts_mut(&mut self) -> &mut Vec<CommittedAccount> {
-        self.commit_action.get_committed_accounts_mut()
-    }
-
-    pub fn get_committed_pubkeys(&self) -> Vec<Pubkey> {
-        self.commit_action.get_committed_pubkeys()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.commit_action.is_empty()
-    }
-
-    pub fn has_callbacks(&self) -> bool {
-        let x = self.commit_action.has_callbacks();
-        let y = if let UndelegateType::WithBaseActions(actions) =
-            &self.undelegate_action
-        {
-            actions.iter().any(|el| el.callback.is_some())
-        } else {
-            false
-        };
-
-        x || y
-    }
-
-    pub fn action_count(&self) -> usize {
-        self.commit_action.action_count()
-            + self.undelegate_action.action_count()
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        let commit_count = self.commit_action.action_count();
-        if index < commit_count {
-            return self.commit_action.get_action_mut(index);
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: account {} is required to be writable and delegated in order to be undelegated",
+                pubkey
+            );
+            Err(InstructionError::ReadonlyDataModified)
         }
-        self.undelegate_action.get_action_mut(index - commit_count)
-    }
+    })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProgramArgs {
-    pub escrow_index: u8,
-    pub data: Vec<u8>,
-}
-
-impl From<ActionArgs> for ProgramArgs {
-    fn from(value: ActionArgs) -> Self {
-        Self {
-            escrow_index: value.escrow_index,
-            data: value.data,
-        }
-    }
-}
-
-impl From<&ActionArgs> for ProgramArgs {
-    fn from(value: &ActionArgs) -> Self {
-        value.clone().into()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BaseAction {
-    pub compute_units: u32,
-    pub destination_program: Pubkey,
-    pub source_program: Option<Pubkey>,
-    pub escrow_authority: Pubkey,
-    pub data_per_program: ProgramArgs,
-    pub account_metas_per_program: Vec<ShortAccountMeta>,
-    pub callback: Option<BaseActionCallback>,
-}
-
-impl BaseAction {
-    pub fn try_from_args(
+impl TryFromArgs<BaseActionArgs> for BaseAction {
+    fn try_from_args(
         args: BaseActionArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<BaseAction, InstructionError> {
         // Since action on Base layer performed on behalf of some escrow
         // We need to ensure that action was authorized by legit owner
-        let authority_pubkey = get_instruction_pubkey_with_idx(
+        let authority_pubkey = *get_instruction_pubkey_with_idx(
             context.transaction_context(),
             args.escrow_authority as u16,
         )?;
-        if !context.signers.contains(authority_pubkey) {
+        if !context.signers.contains(&authority_pubkey) {
             ic_msg!(
                 context.invoke_context,
                 &format!(
@@ -941,10 +549,11 @@ impl BaseAction {
         };
 
         Ok(BaseAction {
+            id: context.next_action_id(),
             compute_units: args.compute_units,
             destination_program: args.destination_program,
             source_program,
-            escrow_authority: *authority_pubkey,
+            escrow_authority: authority_pubkey,
             data_per_program: args.args.into(),
             account_metas_per_program: args.accounts,
             callback: None,
@@ -952,103 +561,95 @@ impl BaseAction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CommitType {
-    /// Regular commit without actions
-    Standalone(Vec<CommittedAccount>), // accounts to commit
-    /// Commits accounts and runs actions
-    WithBaseActions {
-        committed_accounts: Vec<CommittedAccount>,
-        base_actions: Vec<BaseAction>,
-    },
+fn validate_commit_type_accounts(
+    accounts: &[CommitAccountRef<'_, '_>],
+    context: &ConstructionContext<'_, '_, '_>,
+) -> Result<(), InstructionError> {
+    accounts.iter().try_for_each(|(pubkey, account)| {
+        if account.to_account_shared_data()?.confined() {
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: account {} is confined and cannot be committed",
+                pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
+        // Prevent ephemeral accounts from being committed to base chain
+        if account.to_account_shared_data()?.ephemeral() {
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
+                pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
+        if !account.borrow()?.delegated() {
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: account {} is required to be delegated to the current validator, in order to be committed",
+                pubkey
+            );
+            return Err(InstructionError::IllegalOwner)
+        }
+
+        // Validate committed account was scheduled by valid authority
+        let owner = *account.borrow()?.owner();
+        validate_commit_schedule_permissions(
+            &context.invoke_context,
+            &owner,
+            pubkey,
+            context.parent_program_id.as_ref(),
+            context.signers,
+        )
+    })
 }
 
-impl CommitType {
-    fn validate_accounts(
-        accounts: &[CommitAccountRef<'_, '_>],
-        context: &ConstructionContext<'_, '_, '_>,
-    ) -> Result<(), InstructionError> {
-        accounts.iter().try_for_each(|(pubkey, account)| {
-            if account.to_account_shared_data()?.confined() {
-                ic_msg!(
-                    context.invoke_context,
-                    "ScheduleCommit ERR: account {} is confined and cannot be committed",
-                    pubkey
-                );
-                return Err(InstructionError::InvalidAccountData);
-            }
+// I delegated an account, now the owner is delegation program
+// parent_program_id != Some(&acc_owner) should fail. or any modification on ER
+// ER perceives owner as old one, hence for ER those are valid txs
+// On commit_and_undelegate and commit we will set owner to DLP, for latter temporarily
+// The owner shall be real owner on chain
+// So first:
+// 1. Validate
+// 2. Fetch current account states
+pub(crate) fn extract_commit_accounts<'a, 'ix_data>(
+    account_indices: &[u8],
+    transaction_context: &'a TransactionContext<'ix_data>,
+) -> Result<Vec<CommitAccountRef<'a, 'ix_data>>, InstructionError> {
+    account_indices
+        .iter()
+        .map(|i| {
+            let account = get_instruction_account_with_idx(
+                transaction_context,
+                *i as u16,
+            )?;
+            let pubkey = *get_instruction_pubkey_with_idx(
+                transaction_context,
+                *i as u16,
+            )?;
 
-            // Prevent ephemeral accounts from being committed to base chain
-            if account.to_account_shared_data()?.ephemeral() {
-                ic_msg!(
-                    context.invoke_context,
-                    "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
-                    pubkey
-                );
-                return Err(InstructionError::InvalidAccountData);
-            }
-
-            if !account.borrow()?.delegated() {
-                ic_msg!(
-                    context.invoke_context,
-                    "ScheduleCommit ERR: account {} is required to be delegated to the current validator, in order to be committed",
-                    pubkey
-                );
-                return Err(InstructionError::IllegalOwner)
-            }
-
-            // Validate committed account was scheduled by valid authority
-            let owner = *account.borrow()?.owner();
-            validate_commit_schedule_permissions(
-                &context.invoke_context,
-                &owner,
-                pubkey,
-                context.parent_program_id.as_ref(),
-                context.signers,
-            )
+            Ok((pubkey, account))
         })
-    }
+        .collect::<Result<_, InstructionError>>()
+}
 
-    // I delegated an account, now the owner is delegation program
-    // parent_program_id != Some(&acc_owner) should fail. or any modification on ER
-    // ER perceives owner as old one, hence for ER those are valid txs
-    // On commit_and_undelegate and commit we will set owner to DLP, for latter temporarily
-    // The owner shall be real owner on chain
-    // So first:
-    // 1. Validate
-    // 2. Fetch current account states
-    pub(crate) fn extract_commit_accounts<'a, 'ix_data>(
-        account_indices: &[u8],
-        transaction_context: &'a TransactionContext<'ix_data>,
-    ) -> Result<Vec<CommitAccountRef<'a, 'ix_data>>, InstructionError> {
-        account_indices
-            .iter()
-            .map(|i| {
-                let account = get_instruction_account_with_idx(
-                    transaction_context,
-                    *i as u16,
-                )?;
-                let pubkey = *get_instruction_pubkey_with_idx(
-                    transaction_context,
-                    *i as u16,
-                )?;
-
-                Ok((pubkey, account))
-            })
-            .collect::<Result<_, InstructionError>>()
-    }
-
-    pub fn try_from_args(
+impl TryFromArgs<CommitTypeArgs> for CommitType {
+    fn try_from_args(
         args: CommitTypeArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<CommitType, InstructionError> {
         match args {
             CommitTypeArgs::Standalone(accounts) => {
-                let committed_accounts_ref = Self::extract_commit_accounts(
+                let committed_accounts_ref = extract_commit_accounts(
                     &accounts,
                     context.transaction_context(),
                 )?;
-                Self::validate_accounts(&committed_accounts_ref, context)?;
+                validate_commit_type_accounts(
+                    &committed_accounts_ref,
+                    context,
+                )?;
                 context.record_rent_pending_materializations(
                     &committed_accounts_ref,
                 )?;
@@ -1070,19 +671,18 @@ impl CommitType {
                 committed_accounts,
                 base_actions,
             } => {
-                let committed_accounts_ref = Self::extract_commit_accounts(
+                let committed_accounts_ref = extract_commit_accounts(
                     &committed_accounts,
                     context.transaction_context(),
                 )?;
-                Self::validate_accounts(&committed_accounts_ref, context)?;
+                validate_commit_type_accounts(
+                    &committed_accounts_ref,
+                    context,
+                )?;
                 context.record_rent_pending_materializations(
                     &committed_accounts_ref,
                 )?;
 
-                let base_actions = base_actions
-                    .into_iter()
-                    .map(|args| BaseAction::try_from_args(args, context))
-                    .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
@@ -1094,6 +694,10 @@ impl CommitType {
                         ))
                     })
                     .collect::<Result<_, InstructionError>>()?;
+                let base_actions = base_actions
+                    .into_iter()
+                    .map(|args| BaseAction::try_from_args(args, context))
+                    .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
 
                 Ok(CommitType::WithBaseActions {
                     committed_accounts,
@@ -1102,119 +706,12 @@ impl CommitType {
             }
         }
     }
-
-    /// Calculate fee commits
-    pub fn calculate_fee(
-        &self,
-        commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
-        let mut fee = 0;
-        match self {
-            CommitType::Standalone(ref committed_accounts) => {
-                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
-            }
-            CommitType::WithBaseActions {
-                committed_accounts,
-                base_actions,
-            } => {
-                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
-                fee += calculate_actions_fee(base_actions);
-            }
-        }
-
-        Ok(fee)
-    }
-
-    pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
-        match self {
-            Self::Standalone(committed_accounts) => committed_accounts,
-            Self::WithBaseActions {
-                committed_accounts, ..
-            } => committed_accounts,
-        }
-    }
-
-    pub fn get_committed_accounts_mut(&mut self) -> &mut Vec<CommittedAccount> {
-        match self {
-            Self::Standalone(committed_accounts) => committed_accounts,
-            Self::WithBaseActions {
-                committed_accounts, ..
-            } => committed_accounts,
-        }
-    }
-
-    pub fn get_committed_pubkeys(&self) -> Vec<Pubkey> {
-        self.get_committed_accounts()
-            .iter()
-            .map(|account| account.pubkey)
-            .collect()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Self::Standalone(committed_accounts) => {
-                committed_accounts.is_empty()
-            }
-            Self::WithBaseActions {
-                committed_accounts, ..
-            } => committed_accounts.is_empty(),
-        }
-    }
-
-    pub fn has_callbacks(&self) -> bool {
-        if let Self::WithBaseActions {
-            committed_accounts: _,
-            base_actions,
-        } = self
-        {
-            base_actions.iter().any(|el| el.callback.is_some())
-        } else {
-            false
-        }
-    }
-
-    pub fn action_count(&self) -> usize {
-        match self {
-            Self::Standalone(_) => 0,
-            Self::WithBaseActions { base_actions, .. } => base_actions.len(),
-        }
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        if let Self::WithBaseActions { base_actions, .. } = self {
-            base_actions.get_mut(index)
-        } else {
-            None
-        }
-    }
 }
 
-/// No CommitedAccounts since it is only used with CommitAction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum UndelegateType {
-    Standalone,
-    WithBaseActions(Vec<BaseAction>),
-}
-
-impl UndelegateType {
-    pub fn action_count(&self) -> usize {
-        match self {
-            Self::Standalone => 0,
-            Self::WithBaseActions(actions) => actions.len(),
-        }
-    }
-
-    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
-        if let Self::WithBaseActions(actions) = self {
-            actions.get_mut(index)
-        } else {
-            None
-        }
-    }
-
-    pub fn try_from_args(
+impl TryFromArgs<UndelegateTypeArgs> for UndelegateType {
+    fn try_from_args(
         args: UndelegateTypeArgs,
-        context: &ConstructionContext<'_, '_, '_>,
+        context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<UndelegateType, InstructionError> {
         match args {
             UndelegateTypeArgs::Standalone => Ok(UndelegateType::Standalone),
@@ -1226,18 +723,6 @@ impl UndelegateType {
                     })
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 Ok(UndelegateType::WithBaseActions(base_actions))
-            }
-        }
-    }
-
-    pub fn calculate_fee(
-        &self,
-        _commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
-        match self {
-            UndelegateType::Standalone => Ok(0),
-            UndelegateType::WithBaseActions(actions) => {
-                Ok(calculate_actions_fee(actions))
             }
         }
     }
@@ -1292,23 +777,6 @@ pub(crate) fn validate_commit_schedule_permissions(
     }
 }
 
-pub(crate) fn calculate_commit_fee(
-    accounts: &[CommittedAccount],
-    commit_nonces: &HashMap<Pubkey, u64>,
-) -> Result<u64, InstructionError> {
-    accounts.iter().try_fold(0u64, |fee, account| {
-        if let Some(nonce) = commit_nonces.get(&account.pubkey) {
-            if nonce >= &ACTUAL_COMMIT_LIMIT {
-                Ok(fee + COMMIT_FEE_LAMPORTS)
-            } else {
-                Ok(fee)
-            }
-        } else {
-            Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR))
-        }
-    })
-}
-
 pub(crate) fn calculate_rent_pending_ata_materialization_fee(
     count: usize,
 ) -> Result<u64, InstructionError> {
@@ -1322,28 +790,15 @@ pub(crate) fn calculate_rent_pending_ata_materialization_fee(
         .checked_mul(per_ata)
         .ok_or(InstructionError::ArithmeticOverflow)
 }
-
-fn calculate_actions_fee(actions: &[BaseAction]) -> u64 {
-    const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
-    let micro_lamports = actions.iter().fold(0u64, |acc, action| {
-        acc.saturating_add(
-            action.compute_units as u64 * COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
-        )
-    });
-    micro_lamports.div_ceil(MICRO_LAMPORTS_PER_LAMPORT)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
-    use magicblock_core::intent::CommittedAccount;
+    use magicblock_core::intent::types::CommittedAccount;
     use solana_account::Account;
-    use solana_instruction::error::InstructionError;
     use solana_pubkey::Pubkey;
 
     use super::*;
-    use crate::magic_sys::MISSING_COMMIT_NONCE_ERR;
 
     fn make_committed_account(pubkey: Pubkey) -> CommittedAccount {
         CommittedAccount {
@@ -1355,6 +810,7 @@ mod tests {
 
     fn make_base_action(compute_units: u32) -> BaseAction {
         BaseAction {
+            id: 0,
             compute_units,
             destination_program: Pubkey::new_unique(),
             source_program: None,
@@ -1366,77 +822,6 @@ mod tests {
             account_metas_per_program: vec![],
             callback: None,
         }
-    }
-
-    // ---- calculate_commit_fee ----
-
-    #[test]
-    fn test_commit_fee_at_limit_is_zero() {
-        let pk = Pubkey::new_unique();
-        // nonce is commits done so far; nonce+1 is the next commit number.
-        // ACTUAL_COMMIT_LIMIT - 1 means the next commit is exactly at the limit → free.
-        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT - 1)]);
-        let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces)
-            .unwrap();
-        assert_eq!(fee, 0);
-    }
-
-    #[test]
-    fn test_commit_fee_above_limit_charges_per_account() {
-        let pk1 = Pubkey::new_unique();
-        let pk2 = Pubkey::new_unique();
-        let nonces = HashMap::from([
-            (pk1, ACTUAL_COMMIT_LIMIT + 1),
-            (pk2, ACTUAL_COMMIT_LIMIT + 1),
-        ]);
-        let fee = calculate_commit_fee(
-            &[make_committed_account(pk1), make_committed_account(pk2)],
-            &nonces,
-        )
-        .unwrap();
-        assert_eq!(fee, COMMIT_FEE_LAMPORTS * 2);
-    }
-
-    #[test]
-    fn test_commit_fee_mixed_accounts() {
-        let pk_below = Pubkey::new_unique();
-        let pk_above = Pubkey::new_unique();
-        let nonces = HashMap::from([
-            (pk_below, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
-            (pk_above, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
-        ]);
-        let fee = calculate_commit_fee(
-            &[
-                make_committed_account(pk_below),
-                make_committed_account(pk_above),
-            ],
-            &nonces,
-        )
-        .unwrap();
-        assert_eq!(fee, COMMIT_FEE_LAMPORTS);
-    }
-
-    #[test]
-    fn test_commit_fee_missing_nonce_errors() {
-        let pk = Pubkey::new_unique();
-        let err = calculate_commit_fee(
-            &[make_committed_account(pk)],
-            &HashMap::new(),
-        )
-        .unwrap_err();
-        assert_eq!(err, InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
-    }
-
-    /// two actions of 200_000 CUs each → 20_000 lamports
-    #[test]
-    fn test_actions_fee_multiple_actions() {
-        assert_eq!(
-            calculate_actions_fee(&[
-                make_base_action(200_000),
-                make_base_action(200_000)
-            ]),
-            20_000
-        );
     }
 
     // ---- ScheduledIntentBundle::calculate_fee ----

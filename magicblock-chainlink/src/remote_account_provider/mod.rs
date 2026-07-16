@@ -26,7 +26,8 @@ use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
-    client_error::ErrorKind, config::RpcAccountInfoConfig,
+    client_error::ErrorKind,
+    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
     request::RpcError,
 };
@@ -441,8 +442,11 @@ impl From<SubscriptionReason> for SubscriptionReasonLabel {
     }
 }
 
+pub(crate) type SubscriptionOwnershipMap =
+    Arc<AsyncMutex<HashMap<Pubkey, SubscriptionOwnership>>>;
+
 #[derive(Debug, Default, Clone)]
-struct SubscriptionOwnership {
+pub(crate) struct SubscriptionOwnership {
     reasons: HashMap<SubscriptionReason, usize>,
 }
 
@@ -515,7 +519,9 @@ unsafe impl Sync for ForwardedSubscriptionUpdate {}
 
 // Not sure why helius uses a different code for this error
 const HELIUS_CONTEXT_SLOT_NOT_REACHED: i64 = -32603;
-const RPC_FETCH_MAX_RETRIES: u64 = 3;
+// Retries must ride out the RPC lagging the pubsub tip by several seconds (15 = ~5.6s),
+// otherwise one-shot subscription updates (e.g. program upgrades) could be dropped
+const RPC_FETCH_MAX_RETRIES: u64 = 15;
 const RPC_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
 const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
@@ -743,6 +749,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubsub_client: Arc<PubsubClient>,
         removed_account_tx: mpsc::Sender<Pubkey>,
         subscription_key_locks: SubscriptionKeyLocks,
+        subscription_ownership: SubscriptionOwnershipMap,
         emit_metrics: bool,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
@@ -760,6 +767,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         &never_evicted,
                         &removed_account_tx,
                         Some(&subscription_key_locks),
+                        Some(&subscription_ownership),
                     )
                     .await;
 
@@ -786,6 +794,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             tokio::sync::mpsc::channel(100);
         let subscription_key_locks: SubscriptionKeyLocks =
             Arc::new(AsyncMutex::new(HashMap::new()));
+        let subscription_ownership: SubscriptionOwnershipMap =
+            Arc::new(AsyncMutex::new(HashMap::new()));
 
         // The reconciler always runs: partial resubscriptions rely on it for
         // repair. The config flag only gates the metrics emission.
@@ -795,13 +805,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 Arc::new(pubsub_client.clone()),
                 removed_account_tx.clone(),
                 subscription_key_locks.clone(),
+                subscription_ownership.clone(),
                 config.enable_subscription_metrics(),
             ));
 
         let me = Self {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
             next_fetching_account_generation: AtomicU64::default(),
-            subscription_ownership: Arc::new(AsyncMutex::new(HashMap::new())),
+            subscription_ownership,
             subscription_transition_lock: Arc::new(AsyncMutex::new(())),
             subscription_key_locks,
             rpc_client,
@@ -1018,6 +1029,48 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
         self.lrucache_subscribed_accounts.promote_multi(pubkeys);
+    }
+
+    pub(crate) async fn get_slot(&self) -> RemoteAccountProviderResult<u64> {
+        tokio::time::timeout(RPC_FETCH_TIMEOUT, self.rpc_client.get_slot())
+            .await
+            .map_err(|_| {
+                RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                    "RPC call timeout fetching slot after {}ms",
+                    RPC_FETCH_TIMEOUT.as_millis()
+                ))
+            })?
+            .map_err(|err| {
+                RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                    "RpcError fetching slot: {err:?}"
+                ))
+            })
+    }
+
+    pub(crate) async fn get_program_accounts_with_config(
+        &self,
+        pubkey: &Pubkey,
+        mut config: RpcProgramAccountsConfig,
+    ) -> RemoteAccountProviderResult<Vec<(Pubkey, Account)>> {
+        config.account_config.commitment = Some(self.rpc_client.commitment());
+
+        tokio::time::timeout(RPC_FETCH_TIMEOUT, async {
+            self.rpc_client
+                .get_program_accounts_with_config(pubkey, config)
+                .await
+        })
+        .await
+        .map_err(|_| {
+            RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                "RPC call timeout fetching program accounts for {pubkey} after {}ms",
+                RPC_FETCH_TIMEOUT.as_millis()
+            ))
+        })?
+        .map_err(|err| {
+            RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                "RpcError fetching program accounts for {pubkey}: {err:?}"
+            ))
+        })
     }
 
     pub(crate) fn set_capacity_eviction_protection<F>(&self, predicate: F)

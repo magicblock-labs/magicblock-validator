@@ -1,7 +1,10 @@
 use std::str::FromStr;
 
-use magicblock_core::link::transactions::{
-    ReplayPosition, SanitizeableTransaction, TransactionSchedulerHandle,
+use magicblock_core::link::{
+    blocks::LatestBlockInner,
+    transactions::{
+        ReplayPosition, SanitizeableTransaction, TransactionSchedulerHandle,
+    },
 };
 use num_format::{Locale, ToFormattedString};
 use solana_clock::{Slot, UnixTimestamp};
@@ -12,7 +15,7 @@ use tracing::{Level, *};
 
 use crate::{
     errors::{LedgerError, LedgerResult},
-    LatestBlockInner, Ledger,
+    Ledger,
 };
 
 #[derive(Debug)]

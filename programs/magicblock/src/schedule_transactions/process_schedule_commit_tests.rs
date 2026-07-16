@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::token_programs::eata_rent_exempt_balance;
+use magicblock_core::{
+    intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS},
+    token_programs::eata_rent_exempt_balance,
+};
 use magicblock_magic_program_api::{
     args::{
         ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
@@ -23,8 +26,7 @@ use solana_signer::Signer;
 use crate::{
     magic_context::MagicContext,
     magic_scheduled_base_intent::{
-        ScheduledIntentBundle, ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
-        RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS,
+        ScheduledIntentBundle, RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS,
     },
     magic_sys::COMMIT_LIMIT,
     schedule_transactions::{

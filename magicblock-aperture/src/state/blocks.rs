@@ -1,8 +1,10 @@
 use std::{ops::Deref, sync::Arc, time::Duration};
 
 use arc_swap::ArcSwapAny;
-use magicblock_core::{link::blocks::BlockHash, Slot};
-use magicblock_ledger::LatestBlockInner;
+use magicblock_core::{
+    link::blocks::{BlockHash, LatestBlockInner},
+    Slot,
+};
 use solana_rpc_client_api::response::RpcBlockhash;
 
 use super::ExpiringCache;

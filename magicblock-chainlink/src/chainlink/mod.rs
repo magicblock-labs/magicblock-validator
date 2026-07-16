@@ -15,7 +15,10 @@ use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_transaction::sanitized::SanitizedTransaction;
-use tokio::{sync::mpsc, task};
+use tokio::{
+    sync::{broadcast, mpsc},
+    task,
+};
 use tracing::*;
 
 use crate::{
@@ -56,6 +59,74 @@ pub type ProdChainlink<C> = ReplicationModeAwareChainlink<
     C,
 >;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObservedUndelegationRequest {
+    pub request_pda: Pubkey,
+    pub delegated_account: Pubkey,
+    pub expires_at_slot: u64,
+    pub observed_slot: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AccountStatusOnEr {
+    /// The account is missing from the ER bank, so its ER delegation state is unknown.
+    #[default]
+    Missing,
+    /// The account is present on ER and represented as delegated.
+    Delegated,
+    /// The account is present on ER and is not represented as delegated.
+    NotDelegated,
+}
+
+impl AccountStatusOnEr {
+    pub fn is_delegated(&self) -> bool {
+        matches!(self, Self::Delegated)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::Delegated => "delegated",
+            Self::NotDelegated => "not_delegated",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AccountDelegationStatus {
+    pub delegated_on_base: bool,
+    pub account_on_er: AccountStatusOnEr,
+}
+
+impl AccountDelegationStatus {
+    #[deprecated(
+        note = "use AccountDelegationStatus directly; this bool treats missing-on-ER as not delegated"
+    )]
+    pub fn delegated_on_base_and_er(&self) -> bool {
+        self.delegated_on_base && self.account_on_er.is_delegated()
+    }
+
+    pub fn not_ready_reason(&self) -> Option<&'static str> {
+        #[allow(deprecated)]
+        let delegated_on_base_and_er = self.delegated_on_base_and_er();
+        if delegated_on_base_and_er {
+            None
+        } else if !self.delegated_on_base {
+            Some("not_delegated_on_base")
+        } else {
+            Some(match self.account_on_er {
+                AccountStatusOnEr::Missing => "delegated_on_base_missing_on_er",
+                AccountStatusOnEr::Delegated => {
+                    "delegated_on_base_and_er_mismatch"
+                }
+                AccountStatusOnEr::NotDelegated => {
+                    "delegated_on_base_not_delegated_on_er"
+                }
+            })
+        }
+    }
+}
+
 // -----------------
 // Chainlink
 // -----------------
@@ -67,6 +138,7 @@ pub struct InnerChainlink<
 > {
     accounts_bank: Arc<V>,
     fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+    undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
     /// The subscription to events for each account that is removed from
     /// the accounts tracked by the provider.
     /// In that case we also remove it from the bank since it is no longer
@@ -141,18 +213,41 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    #[deprecated(
+        note = "use AccountDelegationStatus directly; this bool treats missing-on-ER as not delegated"
+    )]
     pub async fn accounts_delegated_on_base_and_er(
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<Vec<bool>> {
+        Ok(self
+            .account_delegation_statuses(pubkeys, fetch_origin)
+            .await?
+            .into_iter()
+            .map(|status| {
+                #[allow(deprecated)]
+                let delegated_on_base_and_er =
+                    status.delegated_on_base_and_er();
+                delegated_on_base_and_er
+            })
+            .collect())
+    }
+
+    pub async fn account_delegation_statuses(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<AccountDelegationStatus>> {
         match self {
             Self::Enabled(chainlink) => {
                 chainlink
-                    .accounts_delegated_on_base_and_er(pubkeys, fetch_origin)
+                    .account_delegation_statuses(pubkeys, fetch_origin)
                     .await
             }
-            Self::Disabled => Ok(vec![false; pubkeys.len()]),
+            Self::Disabled => {
+                Ok(vec![AccountDelegationStatus::default(); pubkeys.len()])
+            }
         }
     }
 
@@ -165,6 +260,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 chainlink.undelegation_requested(pubkey).await
             }
             Self::Disabled => Ok(()),
+        }
+    }
+
+    pub async fn fetch_undelegation_requests(
+        &self,
+    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink.fetch_undelegation_requests().await
+            }
+            Self::Disabled => Ok(Vec::new()),
         }
     }
 
@@ -188,6 +294,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             Self::Disabled => false,
         }
     }
+
+    pub fn subscribe_undelegation_requests(
+        &self,
+    ) -> Option<broadcast::Receiver<ObservedUndelegationRequest>> {
+        match self {
+            Self::Enabled(chainlink) => {
+                Some(chainlink.subscribe_undelegation_requests())
+            }
+            Self::Disabled => None,
+        }
+    }
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
@@ -196,6 +313,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub fn try_new(
         accounts_bank: &Arc<V>,
         fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+    ) -> ChainlinkResult<Self> {
+        let (undelegation_request_sender, _) = broadcast::channel(1024);
+        Self::try_new_with_undelegation_request_sender(
+            accounts_bank,
+            fetch_cloner,
+            undelegation_request_sender,
+        )
+    }
+
+    pub fn try_new_with_undelegation_request_sender(
+        accounts_bank: &Arc<V>,
+        fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+        undelegation_request_sender: broadcast::Sender<
+            ObservedUndelegationRequest,
+        >,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
@@ -213,6 +345,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(Self {
             accounts_bank: accounts_bank.clone(),
             fetch_cloner,
+            undelegation_request_sender,
             removed_accounts_sub,
         })
     }
@@ -254,6 +387,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             Some(chain_slot),
         )
         .await?;
+        let (undelegation_request_sender, _) = broadcast::channel(1024);
         let fetch_cloner = if let Some(provider) = account_provider {
             let provider = Arc::new(provider);
             let risk_service = RiskService::try_from_config(
@@ -261,21 +395,27 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 ledger_path,
             )?
             .map(Arc::new);
-            let fetch_cloner = FetchCloner::new(
-                &provider,
-                accounts_bank,
-                cloner,
-                validator_keypair,
-                rx,
-                chainlink_config.allowed_programs.clone(),
-                risk_service,
-            );
+            let fetch_cloner =
+                FetchCloner::new_with_undelegation_request_sender(
+                    &provider,
+                    accounts_bank,
+                    cloner,
+                    validator_keypair,
+                    rx,
+                    chainlink_config.allowed_programs.clone(),
+                    risk_service,
+                    undelegation_request_sender.clone(),
+                );
             Some(fetch_cloner)
         } else {
             None
         };
 
-        InnerChainlink::try_new(accounts_bank, fetch_cloner)
+        InnerChainlink::try_new_with_undelegation_request_sender(
+            accounts_bank,
+            fetch_cloner,
+            undelegation_request_sender,
+        )
     }
 
     fn subscribe_account_removals(
@@ -485,13 +625,35 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     }
 
     #[instrument(skip(self, pubkeys))]
+    #[deprecated(
+        note = "use AccountDelegationStatus directly; this bool treats missing-on-ER as not delegated"
+    )]
     pub async fn accounts_delegated_on_base_and_er(
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchOrigin,
     ) -> ChainlinkResult<Vec<bool>> {
+        Ok(self
+            .account_delegation_statuses(pubkeys, fetch_origin)
+            .await?
+            .into_iter()
+            .map(|status| {
+                #[allow(deprecated)]
+                let delegated_on_base_and_er =
+                    status.delegated_on_base_and_er();
+                delegated_on_base_and_er
+            })
+            .collect())
+    }
+
+    #[instrument(skip(self, pubkeys))]
+    pub async fn account_delegation_statuses(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+    ) -> ChainlinkResult<Vec<AccountDelegationStatus>> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
-            return Ok(vec![false; pubkeys.len()]);
+            return Ok(vec![AccountDelegationStatus::default(); pubkeys.len()]);
         };
         let remote_accounts = fetch_cloner
             .fetch_remote_accounts(pubkeys, fetch_origin)
@@ -510,14 +672,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .map(|(pubkey, remote_account)| {
                 let delegated_on_base =
                     remote_account.is_owned_by_delegation_program();
-                let delegated_on_er = self
-                    .accounts_bank
-                    .get_account(pubkey)
-                    .is_some_and(|account| {
-                        account.delegated()
+                let account_on_er = match self.accounts_bank.get_account(pubkey)
+                {
+                    None => AccountStatusOnEr::Missing,
+                    Some(account) => {
+                        // Q: do we need to compare the owner? isn't delegated() alone enough?
+                        if account.delegated()
                             || account.owner().eq(&dlp_api::id())
-                    });
-                delegated_on_base && delegated_on_er
+                        {
+                            AccountStatusOnEr::Delegated
+                        } else {
+                            AccountStatusOnEr::NotDelegated
+                        }
+                    }
+                };
+                AccountDelegationStatus {
+                    delegated_on_base,
+                    account_on_er,
+                }
             })
             .collect())
     }
@@ -581,6 +753,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(())
     }
 
+    pub async fn fetch_undelegation_requests(
+        &self,
+    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
+        let Some(fetch_cloner) = self.fetch_cloner() else {
+            return Ok(Vec::new());
+        };
+        fetch_cloner.fetch_undelegation_requests().await
+    }
+
     pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
         self.fetch_cloner.as_ref()
     }
@@ -593,6 +774,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         self.fetch_cloner()
             .map(|provider| provider.is_watching(pubkey))
             .unwrap_or(false)
+    }
+
+    pub fn subscribe_undelegation_requests(
+        &self,
+    ) -> broadcast::Receiver<ObservedUndelegationRequest> {
+        self.undelegation_request_sender.subscribe()
     }
 }
 

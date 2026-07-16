@@ -4,11 +4,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use magicblock_core::intent::CommittedAccount;
-use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType as IntentCommitType, MagicIntentBundle,
-    ScheduledIntentBundle, UndelegateType,
+use magicblock_core::intent::{
+    types::CommittedAccount, CommitAndUndelegate,
+    CommitType as IntentCommitType, MagicIntentBundle, UndelegateType,
 };
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_transaction::Transaction;
@@ -603,9 +603,9 @@ fn committed_account_from_row(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::CommittedAccount;
-    use magicblock_program::magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
+    use magicblock_core::intent::{
+        types::CommittedAccount, CommitAndUndelegate, CommitType,
+        MagicIntentBundle, UndelegateType,
     };
     use solana_account::Account;
     use solana_hash::Hash;

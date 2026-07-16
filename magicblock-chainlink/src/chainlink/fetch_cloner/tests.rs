@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use dlp_api::state::DelegationRecord;
+use dlp_api::{
+    pda::undelegation_request_pda_from_delegated_account,
+    state::{DelegationRecord, UndelegationRequest},
+};
 use magicblock_core::token_programs::{
     try_get_rent_pending_ata_info, RENT_PENDING_ATA_CLOSE_AUTHORITY,
 };
@@ -220,6 +223,29 @@ where
         fetch_cloner,
         subscription_tx,
         cloner,
+    }
+}
+
+fn undelegation_request_data(
+    delegated_account: Pubkey,
+    expires_at_slot: u64,
+) -> Vec<u8> {
+    let request = UndelegationRequest {
+        delegated_account,
+        expires_at_slot,
+    };
+    let mut data = vec![0; UndelegationRequest::size_with_discriminator()];
+    request.to_bytes_with_discriminator(&mut data).unwrap();
+    data
+}
+
+fn dlp_account(data: Vec<u8>) -> Account {
+    Account {
+        lamports: 1_000_000,
+        data,
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
     }
 }
 
@@ -578,6 +604,52 @@ fn pending_waiters_gauge_value() -> i64 {
     chainlink_pending_fetch_waiters_gauge_value(
         ChainlinkPendingFetchLayer::FetchCloner,
     )
+}
+
+#[tokio::test]
+async fn fetch_undelegation_requests_scans_filtered_dlp_accounts() {
+    let delegated_account = random_pubkey();
+    let request_pda =
+        undelegation_request_pda_from_delegated_account(&delegated_account);
+    let request_data = undelegation_request_data(delegated_account, 20);
+
+    let ctx = setup(
+        vec![
+            (request_pda, dlp_account(request_data.clone())),
+            (
+                random_pubkey(),
+                dlp_account(vec![
+                    0;
+                    UndelegationRequest::size_with_discriminator()
+                ]),
+            ),
+            (
+                random_pubkey(),
+                Account {
+                    owner: system_program::id(),
+                    data: request_data,
+                    ..Default::default()
+                },
+            ),
+        ],
+        42,
+        Keypair::new(),
+    )
+    .await;
+
+    let requests = ctx
+        .fetch_cloner
+        .fetch_undelegation_requests()
+        .await
+        .unwrap();
+
+    assert_eq!(ctx.rpc_client.program_account_fetches(), 1);
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(request.request_pda, request_pda);
+    assert_eq!(request.delegated_account, delegated_account);
+    assert_eq!(request.expires_at_slot, 20);
+    assert_eq!(request.observed_slot, 42);
 }
 
 // -----------------

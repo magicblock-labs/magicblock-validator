@@ -8,9 +8,9 @@ use agave_geyser_plugin_interface::geyser_plugin_interface::{
 use json::{JsonValueTrait, Value};
 use libloading::{Library, Symbol};
 use magicblock_core::link::{
-    accounts::AccountWithSlot, transactions::TransactionStatus,
+    accounts::AccountWithSlot, blocks::LatestBlockInner,
+    transactions::TransactionStatus,
 };
-use magicblock_ledger::LatestBlockInner;
 use solana_account::ReadableAccount;
 
 const ENTRYPOINT_SYMBOL: &[u8] = b"_create_plugin";
