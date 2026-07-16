@@ -1305,33 +1305,39 @@ where
         let clients = self.connected_clients_snapshot();
 
         // Only drop websocket legs once at least one gRPC client holds the
-        // subscription; otherwise leave existing coverage untouched.
-        // Callers hold the subscription locks, so every call is bounded to
-        // keep a stalled client from wedging subscription transitions.
-        let mut grpc_covered = false;
-        let mut last_err = None;
-        for client in clients
-            .iter()
-            .filter(|c| c.transport() == PubsubTransport::Grpc)
-        {
-            match tokio::time::timeout(
-                SUBSCRIBE_TIMEOUT,
-                client.subscribe(pubkey, None),
-            )
-            .await
-            {
-                Ok(Ok(())) => grpc_covered = true,
-                Ok(Err(err)) => last_err = Some(err),
-                Err(_) => {
-                    last_err = Some(
-                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                            format!(
-                                "Subscribe timed out after {SUBSCRIBE_TIMEOUT:?} for client {}",
-                                client.id()
+        // subscription; otherwise leave existing coverage untouched. Calls
+        // run concurrently and bounded so a stalled client cannot wedge
+        // subscription transitions.
+        let grpc_results = futures_util::future::join_all(
+            clients
+                .iter()
+                .filter(|c| c.transport() == PubsubTransport::Grpc)
+                .map(|client| async move {
+                    match tokio::time::timeout(
+                        SUBSCRIBE_TIMEOUT,
+                        client.subscribe(pubkey, None),
+                    )
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(_) => Err(
+                            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                format!(
+                                    "Subscribe timed out after {SUBSCRIBE_TIMEOUT:?} for client {}",
+                                    client.id()
+                                ),
                             ),
                         ),
-                    )
-                }
+                    }
+                }),
+        )
+        .await;
+        let mut grpc_covered = false;
+        let mut last_err = None;
+        for result in grpc_results {
+            match result {
+                Ok(()) => grpc_covered = true,
+                Err(err) => last_err = Some(err),
             }
         }
         if !grpc_covered {
@@ -1349,40 +1355,43 @@ where
             .unwrap_or_else(|poison| poison.into_inner())
             .insert(pubkey);
 
-        for client in clients
-            .iter()
-            .filter(|c| c.transport() == PubsubTransport::WebSocket)
-        {
-            match tokio::time::timeout(
-                UNSUBSCRIBE_TIMEOUT,
-                client.unsubscribe(pubkey),
-            )
-            .await
-            {
-                Ok(Ok(()))
-                | Ok(Err(
-                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                        _,
-                    ),
-                )) => {}
-                Ok(Err(err)) => {
-                    warn!(
-                        pubkey = %pubkey,
-                        client_id = %client.id(),
-                        error = ?err,
-                        "Failed to drop websocket leg for gRPC-only coverage"
-                    );
-                }
-                Err(_) => {
-                    warn!(
-                        pubkey = %pubkey,
-                        client_id = %client.id(),
-                        timeout_ms = UNSUBSCRIBE_TIMEOUT.as_millis() as u64,
-                        "Timed out dropping websocket leg for gRPC-only coverage"
-                    );
-                }
-            }
-        }
+        futures_util::future::join_all(
+            clients
+                .iter()
+                .filter(|c| c.transport() == PubsubTransport::WebSocket)
+                .map(|client| async move {
+                    match tokio::time::timeout(
+                        UNSUBSCRIBE_TIMEOUT,
+                        client.unsubscribe(pubkey),
+                    )
+                    .await
+                    {
+                        Ok(Ok(()))
+                        | Ok(Err(
+                            RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                                _,
+                            ),
+                        )) => {}
+                        Ok(Err(err)) => {
+                            warn!(
+                                pubkey = %pubkey,
+                                client_id = %client.id(),
+                                error = ?err,
+                                "Failed to drop websocket leg for gRPC-only coverage"
+                            );
+                        }
+                        Err(_) => {
+                            warn!(
+                                pubkey = %pubkey,
+                                client_id = %client.id(),
+                                timeout_ms = UNSUBSCRIBE_TIMEOUT.as_millis() as u64,
+                                "Timed out dropping websocket leg for gRPC-only coverage"
+                            );
+                        }
+                    }
+                }),
+        )
+        .await;
         Ok(())
     }
 

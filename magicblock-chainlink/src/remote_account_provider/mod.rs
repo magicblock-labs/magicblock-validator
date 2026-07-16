@@ -560,6 +560,30 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             return false;
         };
 
+        Self::record_classification_entry(ownership, slot, source)
+    }
+
+    /// Like [Self::record_classification] but creates the ownership entry,
+    /// which the pending fetch's in-flight acquisition adopts right after.
+    async fn record_classification_for_pending_fetch(
+        &self,
+        pubkey: Pubkey,
+        slot: u64,
+        source: SubscriptionClassificationSource,
+    ) -> bool {
+        let mut ownership = self.subscription_ownership.lock().await;
+        Self::record_classification_entry(
+            ownership.entry(pubkey).or_default(),
+            slot,
+            source,
+        )
+    }
+
+    fn record_classification_entry(
+        ownership: &mut SubscriptionOwnership,
+        slot: u64,
+        source: SubscriptionClassificationSource,
+    ) -> bool {
         if ownership.last_classification.is_some_and(|last| {
             Self::classification_is_stale(last, slot, source)
         }) {
@@ -569,6 +593,44 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         ownership.last_classification =
             Some(SubscriptionClassification { slot, source });
         true
+    }
+
+    /// Records the RPC result's classification and applies the resulting tier
+    /// movement when it is still current.
+    async fn apply_fetch_classification(
+        &self,
+        pubkey: &Pubkey,
+        response_slot: u64,
+        not_found: bool,
+    ) {
+        let apply_classification = self
+            .record_classification(
+                *pubkey,
+                response_slot,
+                SubscriptionClassificationSource::Fetch,
+            )
+            .await;
+        if !apply_classification {
+            return;
+        }
+
+        if not_found {
+            self.move_not_found_to_secondary_locked(*pubkey).await;
+        } else {
+            // A confirmed miss that exists after all is gRPC-only; restore
+            // full coverage on promotion.
+            let restore_full_coverage = self.is_confirmed_missing(pubkey);
+            self.set_confirmed_missing(*pubkey, false);
+            if let Err(err) = self
+                .try_promote_found_to_primary_locked(
+                    *pubkey,
+                    restore_full_coverage,
+                )
+                .await
+            {
+                warn!(pubkey = %pubkey, error = ?err, "Failed to promote found account to primary subscription tier");
+            }
+        }
     }
 
     async fn classification_is_current(
@@ -1757,15 +1819,29 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 (None, false, None)
                             };
 
+                            // The in-flight acquisition may not have created
+                            // the ownership entry yet; record so the later
+                            // RPC result loses arbitration.
+                            let resolved_pending_fetch = result.2.is_some();
                             let apply_classification = result.1
-                            && account_is_found
-                            && subscription_tiers
-                                .record_classification(
-                                    update.pubkey,
-                                    slot,
-                                    SubscriptionClassificationSource::Subscription,
-                                )
-                                .await;
+                                && account_is_found
+                                && if resolved_pending_fetch {
+                                    subscription_tiers
+                                        .record_classification_for_pending_fetch(
+                                            update.pubkey,
+                                            slot,
+                                            SubscriptionClassificationSource::Subscription,
+                                        )
+                                        .await
+                                } else {
+                                    subscription_tiers
+                                        .record_classification(
+                                            update.pubkey,
+                                            slot,
+                                            SubscriptionClassificationSource::Subscription,
+                                        )
+                                        .await
+                                };
                             if apply_classification
                                 && subscription_tiers
                                     .secondary
@@ -3268,37 +3344,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         );
                         let waiters = state.waiters;
 
-                        let apply_classification = subscription_tiers
-                            .record_classification(
-                                *pubkey,
+                        subscription_tiers
+                            .apply_fetch_classification(
+                                pubkey,
                                 response_slot,
-                                SubscriptionClassificationSource::Fetch,
+                                not_found_pubkeys.contains(pubkey),
                             )
                             .await;
-
-                        if apply_classification
-                            && not_found_pubkeys.contains(pubkey)
-                        {
-                            subscription_tiers
-                                .move_not_found_to_secondary_locked(*pubkey)
-                                .await;
-                        } else if apply_classification {
-                            // A confirmed miss that exists after all is
-                            // gRPC-only; restore full coverage on promotion.
-                            let restore_full_coverage =
-                                subscription_tiers.is_confirmed_missing(pubkey);
-                            subscription_tiers
-                                .set_confirmed_missing(*pubkey, false);
-                            if let Err(err) = subscription_tiers
-                                .try_promote_found_to_primary_locked(
-                                    *pubkey,
-                                    restore_full_coverage,
-                                )
-                                .await
-                            {
-                                warn!(pubkey = %pubkey, error = ?err, "Failed to promote found account to primary subscription tier");
-                            }
-                        }
                         waiters
                     } else {
                         inc_chainlink_pending_fetch_accounts(
@@ -3307,7 +3359,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
                             1,
                         );
-                        // Account was already resolved or replaced, skip.
+                        // The resolving update may have raced ownership
+                        // creation; reconcile the tier if still current.
+                        subscription_tiers
+                            .apply_fetch_classification(
+                                pubkey,
+                                response_slot,
+                                not_found_pubkeys.contains(pubkey),
+                            )
+                            .await;
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
                                 "Account {pubkey} generation {generation} was already resolved or replaced"
