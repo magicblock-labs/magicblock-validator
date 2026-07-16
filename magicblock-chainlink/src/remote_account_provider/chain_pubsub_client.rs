@@ -441,6 +441,7 @@ pub mod mock {
         pending_resubscribe_failures: Arc<Mutex<usize>>,
         pending_unsubscribe_failures: Arc<Mutex<usize>>,
         pending_program_subscribe_failures: Arc<Mutex<usize>>,
+        pending_silent_subscribe_noops: Arc<Mutex<usize>>,
         reconnectable: Arc<Mutex<bool>>,
         subscribe_blocked: Arc<Mutex<bool>>,
         subscribe_pause_after_insert: Arc<Mutex<bool>>,
@@ -471,6 +472,7 @@ pub mod mock {
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
                 pending_unsubscribe_failures: Arc::new(Mutex::new(0)),
                 pending_program_subscribe_failures: Arc::new(Mutex::new(0)),
+                pending_silent_subscribe_noops: Arc::new(Mutex::new(0)),
                 reconnectable: Arc::new(Mutex::new(true)),
                 subscribe_blocked: Arc::new(Mutex::new(false)),
                 subscribe_pause_after_insert: Arc::new(Mutex::new(false)),
@@ -511,6 +513,12 @@ pub mod mock {
 
         pub fn fail_next_program_subscriptions(&self, n: usize) {
             *self.pending_program_subscribe_failures.lock() = n;
+        }
+
+        /// Next N subscribe() calls return Ok without registering the
+        /// subscription.
+        pub fn silently_noop_next_subscriptions(&self, n: usize) {
+            *self.pending_silent_subscribe_noops.lock() = n;
         }
 
         pub fn program_subscribe_attempts(&self) -> u64 {
@@ -687,6 +695,13 @@ pub mod mock {
                         "mock: subscribe while disconnected".to_string(),
                     ),
                 );
+            }
+            {
+                let mut to_noop = self.pending_silent_subscribe_noops.lock();
+                if *to_noop > 0 {
+                    *to_noop -= 1;
+                    return Ok(());
+                }
             }
             {
                 let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();

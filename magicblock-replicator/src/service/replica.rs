@@ -4,10 +4,14 @@ use std::time::{Duration, Instant};
 
 use async_nats::jetstream::Message as NatsMessage;
 use futures::StreamExt;
-use magicblock_core::link::{
-    replication::{Message, Transaction},
-    transactions::{ReplayPosition, WithEncoded},
+use magicblock_core::{
+    link::{
+        replication::{Message, Transaction},
+        transactions::{ReplayPosition, WithEncoded},
+    },
+    Slot, TransactionIndex,
 };
+use magicblock_metrics::metrics;
 use solana_transaction::versioned::VersionedTransaction;
 use tracing::{error, info, warn};
 
@@ -106,9 +110,7 @@ impl Replica {
         if current_slot > slot || obsolete {
             return;
         }
-        if slot.saturating_sub(self.ctx.slot) > 1 {
-            error!(slot, current_slot, "slot sequence has been skipped");
-        }
+        self.check_continuity(&message, msg, slot, index);
 
         let result = match message {
             Message::Transaction(txn) => self.replay_tx(txn).await,
@@ -133,6 +135,53 @@ impl Replica {
             return;
         }
         self.ctx.update_position(slot, index);
+    }
+
+    /// Reports any hole between the last applied position and this message.
+    fn check_continuity(
+        &self,
+        message: &Message,
+        msg: &NatsMessage,
+        slot: Slot,
+        index: TransactionIndex,
+    ) {
+        let current_slot = self.ctx.slot;
+        let stream_sequence = msg.info().ok().map(|i| i.stream_sequence);
+
+        if slot.saturating_sub(current_slot) > 1 {
+            metrics::inc_replica_stream_gap();
+            error!(
+                slot,
+                current_slot,
+                missing_slots = slot - current_slot - 1,
+                kind = message.kind(),
+                ?stream_sequence,
+                "slot sequence has been skipped"
+            );
+        }
+
+        // Only transactions carry real indices; the other kinds use sentinels.
+        if !matches!(message, Message::Transaction(_)) {
+            return;
+        }
+        // Within the same slot the previous position is a real index, so the
+        // next transaction must follow it. A new slot always restarts at 0.
+        let expected = if slot == current_slot {
+            self.ctx.index.saturating_add(1)
+        } else {
+            0
+        };
+        if index != expected {
+            metrics::inc_replica_stream_gap();
+            error!(
+                slot,
+                index,
+                expected,
+                current_slot,
+                ?stream_sequence,
+                "transaction index sequence has been skipped"
+            );
+        }
     }
 
     async fn replay_tx(&self, msg: Transaction) -> Result<()> {

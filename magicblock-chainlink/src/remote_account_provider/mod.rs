@@ -444,6 +444,9 @@ impl From<SubscriptionReason> for SubscriptionReasonLabel {
     }
 }
 
+pub(crate) type SubscriptionOwnershipMap =
+    Arc<AsyncMutex<HashMap<Pubkey, SubscriptionOwnership>>>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SubscriptionClassificationSource {
     Fetch,
@@ -457,7 +460,7 @@ struct SubscriptionClassification {
 }
 
 #[derive(Debug, Default, Clone)]
-struct SubscriptionOwnership {
+pub(crate) struct SubscriptionOwnership {
     reasons: HashMap<SubscriptionReason, usize>,
     last_classification: Option<SubscriptionClassification>,
 }
@@ -1180,6 +1183,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubsub_client: Arc<PubsubClient>,
         removed_account_tx: mpsc::Sender<Pubkey>,
         subscription_key_locks: SubscriptionKeyLocks,
+        subscription_ownership: SubscriptionOwnershipMap,
         emit_metrics: bool,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
@@ -1199,6 +1203,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         &never_evicted,
                         &removed_account_tx,
                         Some(&subscription_key_locks),
+                        Some(&subscription_ownership),
                     )
                     .await;
 
@@ -1253,6 +1258,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             Arc::new(AsyncMutex::new(HashMap::new()));
         let confirmed_missing_subscriptions =
             Arc::new(Mutex::new(HashSet::new()));
+        let subscription_ownership: SubscriptionOwnershipMap =
+            Arc::new(AsyncMutex::new(HashMap::new()));
 
         // The reconciler always runs: partial resubscriptions rely on it for
         // repair. The config flag only gates the metrics emission.
@@ -1264,13 +1271,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 Arc::new(pubsub_client.clone()),
                 removed_account_tx.clone(),
                 subscription_key_locks.clone(),
+                subscription_ownership.clone(),
                 config.enable_subscription_metrics(),
             ));
 
         let me = Self {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
             next_fetching_account_generation: AtomicU64::default(),
-            subscription_ownership: Arc::new(AsyncMutex::new(HashMap::new())),
+            subscription_ownership,
             subscription_transition_lock: Arc::new(AsyncMutex::new(())),
             subscription_key_locks,
             rpc_client,

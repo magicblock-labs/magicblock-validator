@@ -2581,6 +2581,7 @@ mod tests {
             &[],
             &removed_tx,
             None,
+            None,
         )
         .await;
 
