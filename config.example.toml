@@ -263,6 +263,12 @@ remove-confined-accounts = false
 # Env: MBV_CHAINLINK__RESUBSCRIPTION_DELAY
 # resubscription-delay = "50ms"
 
+# Period for polling DLP-owned UndelegationRequest accounts as a backfill for
+# missed subscription updates. Set to "0s" to disable polling.
+# Default: "5m"
+# Env: MBV_CHAINLINK__UNDELEGATION_REQUEST_POLL_INTERVAL
+# undelegation-request-poll-interval = "5m"
+
 # ------------------------------------------------------------------------------
 # Optional: Range Risk API validation for post-delegation actions signers
 # ------------------------------------------------------------------------------

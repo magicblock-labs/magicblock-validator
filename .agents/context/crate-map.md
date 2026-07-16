@@ -36,16 +36,16 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `magicblock-chainlink` | Base-chain account/delegation coordination. | accounts-db, AML, config, core, magic-program API, metrics | account-cloner, accounts, aperture, API, magic program | Checks/clones remote accounts, tracks delegation state, coordinates base-layer reads. See `.agents/context/crates/magicblock-chainlink.md` before changing this crate. |
-| `magicblock-account-cloner` | Fetches and injects base-layer accounts/programs into local validator state. | accounts-db, chainlink, committor-service, config, core, ledger, magic-program API, magic program, rpc-client | accounts, aperture, API | Distinguishes fee payer, delegated, and undelegated accounts; handles large/program clone paths. See `.agents/context/crates/magicblock-account-cloner.md` before changing this crate. |
-| `magicblock-accounts` | Account manager and scheduled commit processing glue. | account-cloner, accounts-db, chainlink, committor-service, core, metrics, magic program | `magicblock-api` | Current active role is scheduled commit processing and pending intent recovery; see `.agents/context/crates/magicblock-accounts.md` before changing this crate. |
+| `magicblock-chainlink` | Base-chain account/delegation coordination. | accounts-db, AML, config, core, magic-program API, metrics | account-cloner, aperture, API, magic program, services | Checks/clones remote accounts, tracks delegation state, coordinates base-layer reads and observed undelegation requests. See `.agents/context/crates/magicblock-chainlink.md` before changing this crate. |
+| `magicblock-account-cloner` | Fetches and injects base-layer accounts/programs into local validator state. | accounts-db, chainlink, committor-service, config, core, ledger, magic-program API, magic program, rpc-client | aperture, API, services | Distinguishes fee payer, delegated, and undelegated accounts; handles large/program clone paths. See `.agents/context/crates/magicblock-account-cloner.md` before changing this crate. |
+| `magicblock-accounts` | Legacy account config/error/trait compatibility crate. | committor-service | no active runtime consumer | Do not add new services here; current account lifecycle and scheduled-intent behavior live in chainlink/cloner, services, and committor-service. See `.agents/context/crates/magicblock-accounts.md` before changing this crate. |
 | `magicblock-aml` | External/cached risk-scoring integration. | `magicblock-config` (dev: `magicblock-core`) | `magicblock-chainlink` | Optional Range risk checks for post-delegation action signers; see `.agents/context/crates/magicblock-aml.md` before changing this crate. |
 
 ## Commit and base-layer settlement crates
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `magicblock-committor-service` | Executes scheduled base-layer intents: commit, undelegate, finalize, action. | committor program, core, metrics, magic program, rpc-client, table-mania | account-cloner, accounts, API | Durable commit pipeline; handles scheduling, transaction prep, buffers, ALTs, confirmations. See `.agents/context/crates/magicblock-committor-service.md` before changing this crate. |
+| `magicblock-committor-service` | Executes scheduled base-layer intents: commit, undelegate, finalize, action. | committor program, core, metrics, magic program, rpc-client, table-mania | account-cloner, API | Durable commit pipeline; accepts scheduled intents, handles recovery, transaction prep, buffers, ALTs, confirmations. See `.agents/context/crates/magicblock-committor-service.md` before changing this crate. |
 | `magicblock-committor-program` | On-chain committor program. | none | `magicblock-committor-service` | Base-layer program side for changeset buffers/commit application; see `.agents/context/crates/magicblock-committor-program.md` before changing this crate. |
 | `magicblock-table-mania` | Address lookup table management. | metrics, rpc-client | `magicblock-committor-service` | Creates/extends/deactivates/closes ALTs needed by commit transactions. See `.agents/context/crates/magicblock-table-mania.md` before changing this crate. |
 
@@ -63,7 +63,7 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 |---|---|---|---|---|
 | `magicblock-task-scheduler` | Program-scheduled task/crank service. | config, core, ledger, magic program | `magicblock-api` | SQLite-backed delay queue, retries/backoff, scheduled transaction submission. See `.agents/context/crates/magicblock-task-scheduler.md` before changing this crate. |
 | `magicblock-replicator` | Primary/replica event replication over NATS JetStream. | accounts-db, config, core, ledger | `magicblock-api` | Preserves HA/replica replay behavior; primary and replica modes differ intentionally. |
-| `magicblock-services` | Shared service utilities/adapters. | core, magic-program API | `magicblock-api` | Common service abstractions; keep generic. See `.agents/context/crates/magicblock-services.md` before changing this crate. |
+| `magicblock-services` | Shared validator services/adapters. | account-cloner, chainlink, core, magic-program API, metrics, magic program | `magicblock-api` | Callback adapter and owner-program undelegation request observer. See `.agents/context/crates/magicblock-services.md` before changing this crate. |
 | `magicblock-metrics` | Metrics helpers and instrumentation. | none | RPC, ledger, processor, chainlink, committor, table-mania, API | Prefer adding observability here rather than ad-hoc metrics code. See `.agents/context/crates/magicblock-metrics.md` before changing this crate. |
 
 ## Tools and test support
@@ -78,8 +78,8 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 ## How to use this map
 
 - For transaction correctness, start with `magicblock-processor`, then inspect `magicblock-accounts-db`, `magicblock-ledger`, and `magicblock-program` interactions.
-- For delegation or account cloning bugs, start with `magicblock-chainlink`, `magicblock-account-cloner`, and `magicblock-accounts`.
-- For commit or undelegation bugs, start with `magicblock-program`, `magicblock-accounts`, and `magicblock-committor-service`.
+- For delegation or account cloning bugs, start with `magicblock-chainlink` and `magicblock-account-cloner`; include `magicblock-services` when observed undelegation requests are involved.
+- For commit or undelegation bugs, start with `magicblock-program`, `magicblock-committor-service`, and `magicblock-services` for request-triggered scheduling.
 - For RPC behavior, start with `magicblock-aperture`; check `magicblock-chainlink` if reads trigger cloning.
 - For validator lifecycle/startup/shutdown, start with `magicblock-api` and `magicblock-validator`.
 - When adding, removing, renaming, or repurposing a crate, update this file and `AGENTS.md` in the same change.

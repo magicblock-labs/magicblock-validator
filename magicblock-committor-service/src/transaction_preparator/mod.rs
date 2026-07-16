@@ -8,7 +8,7 @@ use solana_message::VersionedMessage;
 use crate::{
     persist::IntentPersister,
     tasks::{
-        commit_task::CommitBufferStage, task_strategist::TransactionStrategy,
+        commit_stage_task::CleanupTask, task_strategist::TransactionStrategy,
         utils::TransactionUtils, BaseTaskImpl,
     },
     transaction_preparator::{
@@ -125,15 +125,11 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .optimized_tasks
             .iter()
             .filter_map(|task| match task {
-                BaseTaskImpl::Commit(commit_task) => commit_task.stage(),
-                BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                    commit_finalize_task.stage()
+                BaseTaskImpl::Commit(commit_task) => {
+                    CleanupTask::from_commit(commit_task)
                 }
-                _ => None,
-            })
-            .filter_map(|stage| match stage {
-                CommitBufferStage::Cleanup(cleanup_task) => {
-                    Some(cleanup_task.clone())
+                BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
+                    CleanupTask::from_commit_finalize(commit_finalize_task)
                 }
                 _ => None,
             })
