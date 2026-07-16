@@ -31,8 +31,9 @@ on:
       - '.github/actions/setup-solana/**'
   pull_request_review:
     types: [submitted]
-  pull_request_review_thread:
-    types: [resolved]
+
+permissions:
+  contents: read
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
@@ -46,6 +47,9 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     name: Review Gate
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
@@ -79,12 +83,13 @@ jobs:
             exit 0
           fi
 
-          unresolved=$(gh api graphql \
-            -f query='query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved}}}}}' \
+          unresolved=$(gh api graphql --paginate \
+            -f query='query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}' \
             -f owner="${REPO%%/*}" -f name="${REPO##*/}" -F pr="$PR" \
-            --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length')
+            --jq '.data.repository.pullRequest.reviewThreads.nodes[].isResolved' \
+            | grep -c false || true)
           if [ "$unresolved" -gt 0 ]; then
-            allow false "$unresolved unresolved review thread(s) — the suite starts once they are resolved"
+            allow false "$unresolved unresolved review thread(s) — resolve them, then re-run this workflow or push an update"
             exit 0
           fi
           allow true "CodeRabbit reviewed and all review threads resolved"
@@ -150,6 +155,10 @@ jobs:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     name: RedSuite lite
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
     env:
       REDSUITE_ROOT: ${{ github.workspace }}/runroot
       MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/release/magicblock-validator
