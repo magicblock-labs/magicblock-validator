@@ -428,6 +428,16 @@ pub enum OutboxIntentInstruction {
     /// - 3. []              Ephemeral System Program (CPI target)
     CreateOutboxIntent { data: Vec<u8> },
 
+    /// Records the attempt to realize a scheduled commit on chain.
+    /// Closes the associated outbox intent PDA account.
+    ///
+    /// # Account references
+    /// - 0. [WRITE, SIGNER] Validator Authority (receives rent refund from close)
+    /// - 1. []              Ephemeral System Program (CPI target)
+    /// - 2. [WRITE]         Ephemeral Vault
+    /// - 3. [WRITE]         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    ScheduledCommitSent(u64),
+
     /// Sets or advances the execution stage of an outbox intent.
     /// Must be called before sending the L1 transaction.
     ///
@@ -438,16 +448,6 @@ pub enum OutboxIntentInstruction {
         intent_id: u64,
         stage: ExecutionStage,
     },
-
-    /// Records the attempt to realize a scheduled commit on chain.
-    /// Closes the associated outbox intent PDA account.
-    ///
-    /// # Account references
-    /// - 0. [WRITE, SIGNER] Validator Authority (receives rent refund from close)
-    /// - 1. []              Ephemeral System Program (CPI target)
-    /// - 2. [WRITE]         Ephemeral Vault
-    /// - 3. [WRITE]         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
-    ScheduledCommitSent(u64),
 }
 
 impl OutboxIntentInstruction {
