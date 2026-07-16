@@ -65,7 +65,7 @@ pub struct RentPendingAtaInfo {
     pub token_account_data_len: u64,
 }
 
-struct ParsedTokenAccount {
+struct TokenAccountCommon {
     mint: Pubkey,
     owner: Pubkey,
     amount: u64,
@@ -445,14 +445,10 @@ pub fn try_get_rent_pending_ata_info(
         return None;
     }
 
-    let token_program = account.owner();
-    if !is_supported_token_program(token_program) {
-        return None;
-    }
     try_get_rent_pending_ata_info_for_token_program(
         pubkey,
         account,
-        token_program,
+        account.owner(),
     )
 }
 
@@ -482,7 +478,7 @@ pub fn try_get_undelegating_rent_pending_ata_info(
         })
 }
 
-fn is_supported_token_program(token_program: &Pubkey) -> bool {
+pub fn is_supported_token_program(token_program: &Pubkey) -> bool {
     *token_program == TOKEN_PROGRAM_ID
         || *token_program == TOKEN_2022_PROGRAM_ID
 }
@@ -536,10 +532,10 @@ fn try_get_rent_pending_ata_info_for_token_program(
 fn parse_token_account_for_rent_pending(
     token_program: &Pubkey,
     data: &[u8],
-) -> Option<ParsedTokenAccount> {
+) -> Option<TokenAccountCommon> {
     if *token_program == TOKEN_PROGRAM_ID {
         let account = SplAccount::unpack(data).ok()?;
-        Some(ParsedTokenAccount {
+        Some(TokenAccountCommon {
             mint: account.mint,
             owner: account.owner,
             amount: account.amount,
@@ -550,7 +546,7 @@ fn parse_token_account_for_rent_pending(
         let account = StateWithExtensions::<Token2022Account>::unpack(data)
             .ok()?
             .base;
-        Some(ParsedTokenAccount {
+        Some(TokenAccountCommon {
             mint: account.mint,
             owner: account.owner,
             amount: account.amount,

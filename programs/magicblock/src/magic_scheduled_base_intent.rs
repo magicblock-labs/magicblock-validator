@@ -110,7 +110,7 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
                 );
                 return Err(InstructionError::IllegalOwner);
             };
-            ExecutionTlsStash::register_recorded_rent_pending_ata_materialization(
+            ExecutionTlsStash::register_scheduled_rent_pending_ata_materialization(
                 info.ata_pubkey,
             );
             materializations.push(RentPendingAtaMaterialization {

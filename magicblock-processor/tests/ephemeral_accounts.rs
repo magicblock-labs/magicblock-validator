@@ -140,11 +140,7 @@ fn create_rent_pending_ata_ix(
     let ata = derive_ata(&wallet_owner, &mint);
     Instruction::new_with_bincode(
         MAGIC_PROGRAM_ID,
-        &MagicBlockInstruction::CreateRentPendingAta {
-            wallet_owner,
-            mint,
-            token_program: TOKEN_PROGRAM_ID,
-        },
+        &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
         vec![
             AccountMeta::new(payer, true),
             AccountMeta::new(ata, false),

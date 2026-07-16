@@ -86,17 +86,13 @@ declare_process_instruction!(
                     request_undelegation: true,
                 },
             ),
-            CreateRentPendingAta {
-                wallet_owner,
-                mint,
-                token_program,
-            } => process_create_rent_pending_ata(
-                invoke_context,
-                transaction_context,
-                wallet_owner,
-                mint,
-                token_program,
-            ),
+            CreateRentPendingAta { wallet_owner } => {
+                process_create_rent_pending_ata(
+                    invoke_context,
+                    transaction_context,
+                    wallet_owner,
+                )
+            }
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }

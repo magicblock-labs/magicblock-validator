@@ -468,7 +468,7 @@ impl super::TransactionExecutor {
         }
 
         while let Some(pubkey) =
-            ExecutionTlsStash::next_created_rent_pending_ata()
+            ExecutionTlsStash::pop_newly_created_rent_pending_ata()
         {
             let Some((_, acc)) =
                 txn.accounts.iter().find(|(key, _)| key == &pubkey)
@@ -480,7 +480,8 @@ impl super::TransactionExecutor {
                 ));
                 break;
             };
-            let Some(info) = created_rent_pending_ata_info(&pubkey, acc) else {
+            let Some(info) = newly_created_rent_pending_ata_info(&pubkey, acc)
+            else {
                 executed.execution_details.status =
                     Err(TransactionError::UnbalancedTransaction);
                 logs.push(format!(
@@ -540,12 +541,12 @@ fn transaction_balances(
     )
 }
 
-fn created_rent_pending_ata_info(
+fn newly_created_rent_pending_ata_info(
     pubkey: &Pubkey,
     acc: &AccountSharedData,
 ) -> Option<RentPendingAtaInfo> {
     try_get_rent_pending_ata_info(pubkey, acc).or_else(|| {
-        if !ExecutionTlsStash::has_recorded_rent_pending_ata_materialization(
+        if !ExecutionTlsStash::has_scheduled_rent_pending_ata_materialization(
             pubkey,
         ) {
             return None;
@@ -605,28 +606,35 @@ mod tests {
     }
 
     #[test]
-    fn created_rent_pending_ata_accepts_recorded_undelegating_materialization()
-    {
+    fn newly_created_rent_pending_ata_accepts_scheduled_undelegating_materialization(
+    ) {
         ExecutionTlsStash::clear();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
         let active_account = rent_pending_ata_account(wallet_owner, mint, 9);
 
-        assert!(created_rent_pending_ata_info(&ata, &active_account).is_some());
+        assert!(newly_created_rent_pending_ata_info(&ata, &active_account)
+            .is_some());
 
         let mut undelegating_account = active_account.clone();
         undelegating_account.set_owner(Pubkey::new_unique());
         undelegating_account.set_delegated(false);
         undelegating_account.set_undelegating(true);
-        assert!(created_rent_pending_ata_info(&ata, &undelegating_account)
-            .is_none());
+        assert!(newly_created_rent_pending_ata_info(
+            &ata,
+            &undelegating_account
+        )
+        .is_none());
 
-        ExecutionTlsStash::register_recorded_rent_pending_ata_materialization(
+        ExecutionTlsStash::register_scheduled_rent_pending_ata_materialization(
             ata,
         );
-        let info = created_rent_pending_ata_info(&ata, &undelegating_account)
-            .expect("recorded undelegating rent-pending ATA should validate");
+        let info =
+            newly_created_rent_pending_ata_info(&ata, &undelegating_account)
+                .expect(
+                    "scheduled undelegating rent-pending ATA should validate",
+                );
         assert_eq!(info.ata_pubkey, ata);
         assert_eq!(info.wallet_owner, wallet_owner);
         assert_eq!(info.mint, mint);

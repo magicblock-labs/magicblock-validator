@@ -183,12 +183,13 @@ magicblock-account-cloner
 3. `programs/magicblock/src/ephemeral_accounts` applies rent math using `EPHEMERAL_RENT_PER_BYTE` and account static-size overhead.
 4. Processor tests assert sponsor/vault lamport movement, signer requirements, PDA sponsor rules, and close/resize behavior.
 
-`CreateRentPendingAta { wallet_owner, mint, token_program }` lives next to the
+`CreateRentPendingAta { wallet_owner }` lives next to the
 ephemeral-account instructions but creates a local canonical token ATA, not a
 generic ephemeral account. Its account metas are payer signer, writable ATA,
-mint, and token program. It reuses the former `Unused` bincode slot, so do not
-insert another variant in that position or assume an unused discriminant remains
-there.
+mint, and token program; mint and token-program identity are derived from those
+accounts rather than duplicated in the payload. It reuses the former `Unused`
+bincode slot, so do not insert another variant in that position or assume an
+unused discriminant remains there.
 For Token-2022, rent-pending creation supports default account state plus
 marker-only account extensions such as `ImmutableOwner`,
 `NonTransferableAccount`, and `PausableAccount`; reject required stateful account

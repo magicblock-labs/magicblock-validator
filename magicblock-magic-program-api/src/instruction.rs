@@ -187,15 +187,11 @@ pub enum MagicBlockInstruction {
     /// Creates or verifies a local rent-pending projected ATA.
     ///
     /// # Account references
-    /// - **0.** `[SIGNER]` Payer/sponsor
+    /// - **0.** `[SIGNER, WRITE]` Payer/sponsor
     /// - **1.** `[WRITE]`  Canonical ATA PDA
     /// - **2.** `[]`       Mint
     /// - **3.** `[]`       Token program
-    CreateRentPendingAta {
-        wallet_owner: Pubkey,
-        mint: Pubkey,
-        token_program: Pubkey,
-    },
+    CreateRentPendingAta { wallet_owner: Pubkey },
 
     /// Clone a single account that fits in one transaction (<63KB data).
     ///

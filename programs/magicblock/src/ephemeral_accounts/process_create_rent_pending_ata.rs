@@ -1,9 +1,10 @@
 use magicblock_core::{
     tls::ExecutionTlsStash,
     token_programs::{
-        derive_ata_with_token_program, try_get_rent_pending_ata_info,
-        try_remap_ata_to_eata, RENT_PENDING_ATA_CLOSE_AUTHORITY,
-        TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+        derive_ata_with_token_program, is_supported_token_program,
+        try_get_rent_pending_ata_info, try_remap_ata_to_eata,
+        RENT_PENDING_ATA_CLOSE_AUTHORITY, TOKEN_2022_PROGRAM_ID,
+        TOKEN_PROGRAM_ID,
     },
 };
 use solana_account::{ReadableAccount, WritableAccount};
@@ -48,8 +49,6 @@ pub(crate) fn process_create_rent_pending_ata(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
     wallet_owner: Pubkey,
-    mint: Pubkey,
-    token_program: Pubkey,
 ) -> Result<(), InstructionError> {
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     if !ix_ctx.is_instruction_account_signer(PAYER_IDX)? {
@@ -58,23 +57,17 @@ pub(crate) fn process_create_rent_pending_ata(
 
     let ata_pubkey =
         *get_instruction_pubkey_with_idx(transaction_context, ATA_IDX)?;
-    let mint_pubkey =
-        *get_instruction_pubkey_with_idx(transaction_context, MINT_IDX)?;
-    let token_program_pubkey = *get_instruction_pubkey_with_idx(
+    let mint = *get_instruction_pubkey_with_idx(transaction_context, MINT_IDX)?;
+    let token_program = *get_instruction_pubkey_with_idx(
         transaction_context,
         TOKEN_PROGRAM_IDX,
     )?;
 
-    if mint_pubkey != mint || token_program_pubkey != token_program {
-        return Err(InstructionError::InvalidArgument);
-    }
     // Default owner is reserved as the MagicContext legacy-decode sentinel.
     if wallet_owner == Pubkey::default() {
         return Err(InstructionError::InvalidArgument);
     }
-    if token_program != TOKEN_PROGRAM_ID
-        && token_program != TOKEN_2022_PROGRAM_ID
-    {
+    if !is_supported_token_program(&token_program) {
         return Err(InstructionError::UnsupportedProgramId);
     }
     if is_native_mint(&mint, &token_program) {
@@ -134,7 +127,7 @@ pub(crate) fn process_create_rent_pending_ata(
     acc.set_ephemeral(false);
     acc.set_confined(false);
     acc.set_undelegating(false);
-    ExecutionTlsStash::register_created_rent_pending_ata(ata_pubkey);
+    ExecutionTlsStash::register_newly_created_rent_pending_ata(ata_pubkey);
 
     ic_msg!(
         invoke_context,
@@ -387,11 +380,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta {
-                wallet_owner,
-                mint,
-                token_program: TOKEN_PROGRAM_ID,
-            },
+            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),
@@ -453,11 +442,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta {
-                wallet_owner,
-                mint,
-                token_program: TOKEN_2022_PROGRAM_ID,
-            },
+            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),
@@ -521,11 +506,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta {
-                wallet_owner,
-                mint,
-                token_program: TOKEN_2022_PROGRAM_ID,
-            },
+            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),
@@ -592,11 +573,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta {
-                wallet_owner,
-                mint,
-                token_program: TOKEN_2022_PROGRAM_ID,
-            },
+            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),
@@ -642,11 +619,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta {
-                wallet_owner,
-                mint,
-                token_program: TOKEN_2022_PROGRAM_ID,
-            },
+            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),

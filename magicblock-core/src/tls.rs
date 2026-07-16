@@ -6,8 +6,8 @@ use solana_pubkey::Pubkey;
 #[derive(Default, Debug)]
 pub struct ExecutionTlsStash {
     tasks: VecDeque<TaskRequest>,
-    created_rent_pending_atas: VecDeque<Pubkey>,
-    recorded_rent_pending_ata_materializations: VecDeque<Pubkey>,
+    newly_created_rent_pending_atas: VecDeque<Pubkey>,
+    scheduled_rent_pending_ata_materializations: VecDeque<Pubkey>,
     // TODO(bmuddha/taco-paco): intents should go in here
     intents: VecDeque<()>,
 }
@@ -26,32 +26,32 @@ impl ExecutionTlsStash {
         EXECUTION_TLS_STASH.with_borrow_mut(|stash| stash.tasks.pop_front())
     }
 
-    pub fn register_created_rent_pending_ata(pubkey: Pubkey) {
+    pub fn register_newly_created_rent_pending_ata(pubkey: Pubkey) {
         EXECUTION_TLS_STASH.with_borrow_mut(|stash| {
-            stash.created_rent_pending_atas.push_back(pubkey)
+            stash.newly_created_rent_pending_atas.push_back(pubkey)
         });
     }
 
-    pub fn next_created_rent_pending_ata() -> Option<Pubkey> {
+    pub fn pop_newly_created_rent_pending_ata() -> Option<Pubkey> {
         EXECUTION_TLS_STASH.with_borrow_mut(|stash| {
-            stash.created_rent_pending_atas.pop_front()
+            stash.newly_created_rent_pending_atas.pop_front()
         })
     }
 
-    pub fn register_recorded_rent_pending_ata_materialization(pubkey: Pubkey) {
+    pub fn register_scheduled_rent_pending_ata_materialization(pubkey: Pubkey) {
         EXECUTION_TLS_STASH.with_borrow_mut(|stash| {
             stash
-                .recorded_rent_pending_ata_materializations
+                .scheduled_rent_pending_ata_materializations
                 .push_back(pubkey)
         });
     }
 
-    pub fn has_recorded_rent_pending_ata_materialization(
+    pub fn has_scheduled_rent_pending_ata_materialization(
         pubkey: &Pubkey,
     ) -> bool {
         EXECUTION_TLS_STASH.with_borrow(|stash| {
             stash
-                .recorded_rent_pending_ata_materializations
+                .scheduled_rent_pending_ata_materializations
                 .contains(pubkey)
         })
     }
@@ -59,8 +59,8 @@ impl ExecutionTlsStash {
     pub fn clear() {
         EXECUTION_TLS_STASH.with_borrow_mut(|stash| {
             stash.tasks.clear();
-            stash.created_rent_pending_atas.clear();
-            stash.recorded_rent_pending_ata_materializations.clear();
+            stash.newly_created_rent_pending_atas.clear();
+            stash.scheduled_rent_pending_ata_materializations.clear();
             stash.intents.clear();
         })
     }

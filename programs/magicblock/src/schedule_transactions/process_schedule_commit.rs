@@ -249,7 +249,7 @@ pub(crate) fn process_schedule_commit(
             }
 
             if let Some(info) = rent_pending_info {
-                ExecutionTlsStash::register_recorded_rent_pending_ata_materialization(
+                ExecutionTlsStash::register_scheduled_rent_pending_ata_materialization(
                     info.ata_pubkey,
                 );
                 rent_pending_ata_materializations.push(

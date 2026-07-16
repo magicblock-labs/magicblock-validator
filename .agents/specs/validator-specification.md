@@ -367,12 +367,13 @@ Magic Program instructions:
 Rent-pending ATAs are local canonical token accounts that let the ER accept
 tokens before the corresponding base-layer eATA exists. They are not generic
 ephemeral accounts. The Magic Program creates them locally through
-`CreateRentPendingAta { wallet_owner, mint, token_program }` and recognizes
-them only when the local token account is canonical, owned by SPL Token or
-Token-2022, non-native, delegated, not confined, not undelegating, not
-ephemeral, and has close authority set to the rent sysvar sentinel. Ordinary
-projected ATAs still use `Pubkey::default()` as the uncloseable close authority;
-that marker is not rent-pending.
+`CreateRentPendingAta { wallet_owner }`; the mint and token program are derived
+from the instruction accounts. It recognizes them only when the local token
+account is canonical, owned by SPL Token or Token-2022, non-native, delegated,
+not confined, not undelegating, not ephemeral, and has close authority set to
+the rent sysvar sentinel. Ordinary projected ATAs still use
+`Pubkey::default()` as the uncloseable close authority; that marker is not
+rent-pending.
 
 New local rent-pending ATA creation is free, but the same transaction must leave
 the newly created account with a positive token amount. The processor rejects
