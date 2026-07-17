@@ -59,10 +59,22 @@ pub(crate) async fn ensure_faucet_delegated_on_chain(
             ApiError::FailedToDelegateFaucet(faucet_pubkey, err.to_string())
         })?;
 
-    if matches!(
-        accounts[0].as_ref(),
-        Some(account) if account.owner == dlp_api::id()
-    ) {
+    // The faucet must be funded out-of-band before it can be delegated
+    // (operators and integration tests airdrop to it; the validator never funds
+    // it). If the account does not exist on the base chain it was never set up,
+    // so there is nothing to delegate — skip instead of failing startup.
+    // Validators that do not use hydra cranks rely on this: the default faucet
+    // keypair is always present in the config but is left unfunded.
+    let Some(faucet_account) = accounts[0].as_ref() else {
+        warn!(
+            %faucet_pubkey,
+            "Crank faucet account not found on the base chain; skipping delegation. \
+             Fund the faucet to enable hydra cranks."
+        );
+        return Ok(());
+    };
+
+    if faucet_account.owner == dlp_api::id() {
         let Some(delegation_record) = accounts[1].as_ref() else {
             return Err(ApiError::FailedToDelegateFaucet(
                 faucet_pubkey,
