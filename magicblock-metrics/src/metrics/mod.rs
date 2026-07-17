@@ -10,6 +10,7 @@ pub use types::{
     AccountFetchReason, BankPrecheckOutcome, BankPrecheckReason,
     ChainlinkCloneIntent, ChainlinkCloneMaterializationOutcome,
     ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
+    ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
     ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
     ChainlinkPendingFetchOutcome, LabelValue, Outcome,
     SubscriptionCleanupOutcome, SubscriptionCleanupSource,
@@ -285,6 +286,32 @@ lazy_static::lazy_static! {
                 SECONDS_1_9.iter()).cloned().collect()
             ),
             &["entrypoint", "fetch_reason", "layer", "outcome"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_COMPANION_FETCH_ATTEMPTS: HistogramVec =
+        HistogramVec::new(
+            HistogramOpts::new(
+                "chainlink_companion_fetch_attempts",
+                "Number of fetch attempts needed to resolve slot-consistent companion-account fetches by entrypoint, fetch reason, companion kind, and outcome",
+            )
+            .buckets(vec![1.0, 2.0, 3.0, 4.0, 5.0, 8.0, 10.0, 15.0, 20.0]),
+            &["entrypoint", "fetch_reason", "companion_kind", "outcome"],
+        )
+        .unwrap();
+
+    static ref CHAINLINK_COMPANION_FETCH_DURATION_SECONDS: HistogramVec =
+        HistogramVec::new(
+            HistogramOpts::new(
+                "chainlink_companion_fetch_duration_seconds",
+                "Time spent resolving slot-consistent companion-account fetches by entrypoint, fetch reason, companion kind, and outcome",
+            )
+            .buckets(
+                MILLIS_10_90.iter().chain(
+                MILLIS_100_900.iter()).chain(
+                SECONDS_1_9.iter()).cloned().collect()
+            ),
+            &["entrypoint", "fetch_reason", "companion_kind", "outcome"],
         )
         .unwrap();
 
@@ -745,6 +772,8 @@ pub(crate) fn register() {
         register!(CHAINLINK_PENDING_FETCH_WAITERS_TOTAL);
         register!(CHAINLINK_PENDING_FETCH_WAITERS_GAUGE);
         register!(CHAINLINK_PENDING_FETCH_OWNER_DURATION_SECONDS);
+        register!(CHAINLINK_COMPANION_FETCH_ATTEMPTS);
+        register!(CHAINLINK_COMPANION_FETCH_DURATION_SECONDS);
         register!(COMMITTOR_INTENTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
@@ -1227,6 +1256,110 @@ pub fn observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
             outcome.value(),
         ])
         .observe(seconds);
+}
+
+pub fn observe_chainlink_companion_fetch_attempts(
+    context: AccountFetchContext,
+    kind: ChainlinkCompanionFetchKind,
+    outcome: ChainlinkCompanionFetchOutcome,
+    attempts: f64,
+) {
+    CHAINLINK_COMPANION_FETCH_ATTEMPTS
+        .with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            kind.value(),
+            outcome.value(),
+        ])
+        .observe(attempts);
+}
+
+pub fn observe_chainlink_companion_fetch_duration_seconds(
+    context: AccountFetchContext,
+    kind: ChainlinkCompanionFetchKind,
+    outcome: ChainlinkCompanionFetchOutcome,
+    seconds: f64,
+) {
+    CHAINLINK_COMPANION_FETCH_DURATION_SECONDS
+        .with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            kind.value(),
+            outcome.value(),
+        ])
+        .observe(seconds);
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_companion_fetch_attempts_sample_count(
+    context: impl Into<AccountFetchContext>,
+    kind: ChainlinkCompanionFetchKind,
+    outcome: ChainlinkCompanionFetchOutcome,
+) -> u64 {
+    let context = context.into();
+    CHAINLINK_COMPANION_FETCH_ATTEMPTS
+        .get_metric_with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            kind.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get_sample_count())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_companion_fetch_attempts_sample_sum(
+    context: impl Into<AccountFetchContext>,
+    kind: ChainlinkCompanionFetchKind,
+    outcome: ChainlinkCompanionFetchOutcome,
+) -> f64 {
+    let context = context.into();
+    CHAINLINK_COMPANION_FETCH_ATTEMPTS
+        .get_metric_with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            kind.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get_sample_sum())
+        .unwrap_or(0.0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_companion_fetch_duration_sample_count(
+    context: impl Into<AccountFetchContext>,
+    kind: ChainlinkCompanionFetchKind,
+    outcome: ChainlinkCompanionFetchOutcome,
+) -> u64 {
+    let context = context.into();
+    CHAINLINK_COMPANION_FETCH_DURATION_SECONDS
+        .get_metric_with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            kind.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get_sample_count())
+        .unwrap_or(0)
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn chainlink_companion_fetch_duration_sample_sum(
+    context: impl Into<AccountFetchContext>,
+    kind: ChainlinkCompanionFetchKind,
+    outcome: ChainlinkCompanionFetchOutcome,
+) -> f64 {
+    let context = context.into();
+    CHAINLINK_COMPANION_FETCH_DURATION_SECONDS
+        .get_metric_with_label_values(&[
+            context.entrypoint().value(),
+            context.reason().value(),
+            kind.value(),
+            outcome.value(),
+        ])
+        .map(|m| m.get_sample_sum())
+        .unwrap_or(0.0)
 }
 
 #[cfg(any(test, feature = "dev-context"))]

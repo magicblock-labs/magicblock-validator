@@ -304,6 +304,68 @@ impl LabelValue for ChainlinkPendingFetchOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkCompanionFetchKind {
+    ProgramData,
+    DelegationRecord,
+    AtaProjection,
+    GenericSlotMatch,
+}
+
+impl ChainlinkCompanionFetchKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::ProgramData => "program_data",
+            Self::DelegationRecord => "delegation_record",
+            Self::AtaProjection => "ata_projection",
+            Self::GenericSlotMatch => "generic_slot_match",
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkCompanionFetchKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkCompanionFetchKind {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkCompanionFetchOutcome {
+    Succeeded,
+    FailedRpc,
+    FailedSlotMismatch,
+    FailedMinContextSlot,
+}
+
+impl ChainlinkCompanionFetchOutcome {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::FailedRpc => "failed_rpc",
+            Self::FailedSlotMismatch => "failed_slot_mismatch",
+            Self::FailedMinContextSlot => "failed_min_context_slot",
+        }
+    }
+}
+
+impl fmt::Display for ChainlinkCompanionFetchOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl LabelValue for ChainlinkCompanionFetchOutcome {
+    fn value(&self) -> &str {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BankPrecheckOutcome {
     BankHitNoFetch,
     BankHitUndelegatingRefreshRequired,
