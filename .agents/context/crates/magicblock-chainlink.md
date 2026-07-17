@@ -166,6 +166,8 @@ The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_to
 
 This pending-fetch instrumentation does not change fetch/clone behavior, dedup ownership, subscription ordering, or remote-fetch retry behavior; it only records counters, gauges, and histograms on existing control-flow edges.
 
+Companion-account slot-match fetches are instrumented by `chainlink_companion_fetch_attempts` and `chainlink_companion_fetch_duration_seconds` with labels `entrypoint`, `fetch_reason`, `companion_kind`, and `outcome`. `companion_kind` is a bounded label (`program_data`, `delegation_record`, `ata_projection`, `generic_slot_match`) that describes the slot-consistent relationship being resolved and is distinct from `fetch_reason`. These metrics are emitted from `RemoteAccountProvider::try_get_multi_until_slots_match` and must not change retry behavior, `min_context_slot`, slot matching, or subscription cleanup behavior. Labels must never include pubkeys, signatures, raw errors, endpoints, owners, or program IDs.
+
 RPC fetches use Base64Zstd encoding, commitment from the RPC client, `min_context_slot`, timeout/retry handling, and metrics for success/found/not-found/failure.
 
 ### Classification
