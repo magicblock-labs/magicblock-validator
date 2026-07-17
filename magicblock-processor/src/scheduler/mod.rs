@@ -25,7 +25,8 @@
 //! ## Primary Mode
 //!
 //! - Acts as the clock source, driving slot transitions via `slot_ticker`
-//! - Computes blockhash and broadcasts it via replication channel
+//! - Computes blockhash and broadcasts it via replication channel, unless the
+//!   validator runs standalone, in which case no replication sink is attached
 //! - Writes completed blocks to the ledger
 //!
 //! ## Replica Mode
@@ -38,7 +39,7 @@
 //! # Slot Transition Lifecycle
 //!
 //! 1. **Finalize current block** - compute blockhash, persist to ledger
-//! 2. **Broadcast block** - send to replication channel (primary only)
+//! 2. **Broadcast block** - send to replication channel (replicating primary only)
 //! 3. **Reset hasher** - seed with previous blockhash for next slot
 //! 4. **Advance slot** - increment slot number, reset transaction index
 //! 5. **Update program cache** - prune stale programs, re-root to new slot
@@ -116,8 +117,9 @@ pub struct TransactionScheduler {
     shutdown: CancellationToken,
     /// Receives mode transition commands (Primary or Replica) at runtime.
     mode_rx: Receiver<SchedulerMode>,
-    /// A sink for the events (transactions, blocks etc) that need to be replicated
-    replication_tx: Sender<Message>,
+    /// A sink for the events (transactions, blocks etc) that need to be replicated.
+    /// `None` when replication is disabled, i.e. the validator runs standalone.
+    replication_tx: Option<Sender<Message>>,
     /// Semaphore for coordinating exclusive DB access with external callers.
     /// Scheduler acquires permit when scheduling, releases when idle.
     pause_permit: Arc<Semaphore>,
@@ -323,10 +325,21 @@ impl TransactionScheduler {
         info!("Scheduler terminated");
     }
 
+    /// Whether this node is the source of a replication stream: primary mode with
+    /// a live sink. A standalone node runs as primary but has no sink attached.
+    fn is_replicating(&self) -> bool {
+        self.replication_tx.is_some() && self.coordinator.is_primary()
+    }
+
     /// Sends a replication message, logging any errors.
+    ///
+    /// A standalone validator has no sink, so the message is dropped.
     async fn send_replication(&self, msg: Message) {
+        let Some(tx) = &self.replication_tx else {
+            return;
+        };
         let kind = msg.kind();
-        if let Err(error) = self.replication_tx.send(msg).await {
+        if let Err(error) = tx.send(msg).await {
             error!(
                 %error,
                 kind,
@@ -352,7 +365,7 @@ impl TransactionScheduler {
             error!("failed to create accountsdb snapshot");
             return;
         };
-        if self.coordinator.is_primary() {
+        if self.is_replicating() {
             let msg = Message::SuperBlock(SuperBlock { slot, checksum });
             self.send_replication(msg).await;
         }
@@ -527,8 +540,8 @@ impl TransactionScheduler {
         let msg = txn
             .encoded
             .as_ref()
+            .filter(|_| is_execution && self.is_replicating())
             .cloned()
-            .filter(|_| is_execution && self.coordinator.is_primary())
             .map(|payload| {
                 Message::Transaction(replication::Transaction {
                     index,
@@ -566,24 +579,27 @@ impl TransactionScheduler {
     async fn prepare_block_as_primary(&mut self) -> LatestBlockInner {
         let blockhash = (*self.hasher.finalize().as_bytes()).into();
         // NOTE:
-        // As we have a single node network, we have no
-        // option but to use the time from host machine
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        // Sampled at millisecond accuracy: this is the value persisted in the
-        // ledger and exposed via the HighPrecisionClock sysvar, so live
+        // As we have a single node network, we have no option but to
+        // use the time from host machine sampled at millisecond accuracy:
+        // this is the value persisted in the ledger and exposed via the HighPrecisionClock sysvar,
         // execution and a restart/replay observe exactly the same timestamp.
-        let timestamp_millis = now.as_millis() as i64;
+        let timestamp_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
         let block = LatestBlockInner::new_with_millis(
             self.slot,
             blockhash,
             timestamp_millis,
         );
-        let msg = Message::Block(replication::Block {
-            slot: block.slot,
-            hash: block.blockhash,
-            timestamp_millis: block.timestamp_millis,
-        });
-        self.send_replication(msg).await;
+        if self.is_replicating() {
+            let msg = Message::Block(replication::Block {
+                slot: block.slot,
+                hash: block.blockhash,
+                timestamp_millis: block.timestamp_millis,
+            });
+            self.send_replication(msg).await;
+        }
         block
     }
 
