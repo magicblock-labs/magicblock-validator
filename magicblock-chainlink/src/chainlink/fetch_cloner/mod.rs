@@ -229,6 +229,31 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct CompanionFetchLogContext {
+    origin: AccountFetchContext,
+    primary_pubkey: Pubkey,
+    context_slot: Option<u64>,
+}
+
+fn log_companion_fetch_failure<E: std::fmt::Display + ?Sized>(
+    ctx: &CompanionFetchLogContext,
+    companion_pubkey: Pubkey,
+    companion_kind: ChainlinkCompanionFetchKind,
+    error: &E,
+) {
+    error!(
+        primary_pubkey = %ctx.primary_pubkey,
+        companion_pubkey = %companion_pubkey,
+        companion_kind = %companion_kind,
+        origin_entrypoint = %ctx.origin.entrypoint(),
+        origin_reason = %ctx.origin.reason(),
+        context_slot = ?ctx.context_slot,
+        error = %error,
+        "Failed to fetch companion account"
+    );
+}
+
 impl<T, U, V, C> FetchCloner<T, U, V, C>
 where
     T: ChainRpcClient,
@@ -1533,9 +1558,18 @@ where
             return;
         }
 
+        let companion_fetch_log_context = CompanionFetchLogContext {
+            origin: AccountFetchContext::subscription_update(
+                AccountFetchReason::SubscriptionUpdateClone,
+            ),
+            primary_pubkey: pubkey,
+            context_slot: Some(update_slot),
+        };
+
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
+                &companion_fetch_log_context,
             )
             .await;
         let Some(account) = resolved_account else {
@@ -2176,6 +2210,7 @@ where
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
         &self,
         update: ForwardedSubscriptionUpdate,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> (
         Option<AccountSharedData>,
         Option<DelegationRecord>,
@@ -2383,10 +2418,11 @@ where
                     }
                     // In case of errors fetching the delegation record we cannot clone the account
                     Ok(Err(err)) => {
-                        warn!(
-                            pubkey = %pubkey,
-                            error = ?err,
-                            "Failed to fetch delegation record"
+                        log_companion_fetch_failure(
+                            companion_fetch_log_context,
+                            delegation_record_pubkey,
+                            ChainlinkCompanionFetchKind::DelegationRecord,
+                            &err,
                         );
                         if acquired_delegation_record_reason {
                             release_subs(
@@ -2402,10 +2438,11 @@ where
                         (None, None, DelegationActions::default())
                     }
                     Err(err) => {
-                        warn!(
-                            pubkey = %pubkey,
-                            error = ?err,
-                            "Failed to fetch delegation record"
+                        log_companion_fetch_failure(
+                            companion_fetch_log_context,
+                            delegation_record_pubkey,
+                            ChainlinkCompanionFetchKind::DelegationRecord,
+                            &err,
                         );
                         if acquired_delegation_record_reason {
                             release_subs(

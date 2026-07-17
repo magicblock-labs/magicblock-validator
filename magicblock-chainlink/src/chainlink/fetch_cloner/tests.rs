@@ -857,17 +857,27 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
         .await
         .unwrap();
 
+    let update = ForwardedSubscriptionUpdate {
+        pubkey: account_pubkey,
+        account: RemoteAccount::from_fresh_account(
+            account.clone(),
+            CURRENT_SLOT,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Account,
+    };
+    let companion_fetch_log_context = CompanionFetchLogContext {
+        origin: AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        ),
+        primary_pubkey: account_pubkey,
+        context_slot: Some(update.account.slot()),
+    };
+
     let (resolved_account, delegation_record, _actions) = fetch_cloner
         .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-            ForwardedSubscriptionUpdate {
-                pubkey: account_pubkey,
-                account: RemoteAccount::from_fresh_account(
-                    account.clone(),
-                    CURRENT_SLOT,
-                    RemoteAccountUpdateSource::Subscription,
-                ),
-                source: SubscriptionSource::Account,
-            },
+            update,
+            &companion_fetch_log_context,
         )
         .await;
 
@@ -4469,17 +4479,27 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
     dlp_owned_account_shared.set_delegated(true);
     dlp_owned_account_shared.set_confined(true);
 
+    let update = ForwardedSubscriptionUpdate {
+        pubkey: account_pubkey,
+        account: RemoteAccount::from_fresh_account_shared_data(
+            dlp_owned_account_shared,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Account,
+    };
+    let companion_fetch_log_context = CompanionFetchLogContext {
+        origin: AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        ),
+        primary_pubkey: account_pubkey,
+        context_slot: Some(update.account.slot()),
+    };
+
     let (resolved_account, delegation_record, delegation_actions) =
         fetch_cloner
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-                ForwardedSubscriptionUpdate {
-                    pubkey: account_pubkey,
-                    account: RemoteAccount::from_fresh_account_shared_data(
-                        dlp_owned_account_shared,
-                        RemoteAccountUpdateSource::Subscription,
-                    ),
-                    source: SubscriptionSource::Account,
-                },
+                update,
+                &companion_fetch_log_context,
             )
             .await;
 
