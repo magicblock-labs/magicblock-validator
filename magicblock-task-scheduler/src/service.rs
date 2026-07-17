@@ -112,9 +112,9 @@ impl TaskSchedulerService {
             error!("Task migration failed: {}", e);
         }
 
-        // Ensure the faucet is funded before serving runtime requests so the
-        // first scheduled task is not dropped for lack of a payer.
-        self.wait_for_faucet_ready().await?;
+        // NOTE: the faucet wallet may not be funded yet, but we don't check.
+        // Crank requests will fail, but the task scheduler will continue to run.
+        // The faucet can be funded later if needed.
 
         loop {
             select! {
@@ -165,6 +165,7 @@ impl TaskSchedulerService {
         // (delegated and cloned into the ephemeral rollup) to pay with.
         self.wait_for_block_ready().await;
         info!("Migration: block ready");
+        // Teh faucet wallet is needed for the migration.
         self.wait_for_faucet_ready().await?;
         info!("Migration: faucet ready");
 
