@@ -1142,10 +1142,6 @@ impl MagicValidator {
         // However there is no proper solution for this right now.
         // An issue to create a shutdown system is open here:
         // https://github.com/magicblock-labs/magicblock-validator/issues/524
-        let task_scheduler = self
-            .task_scheduler
-            .take()
-            .expect("task_scheduler should be initialized");
         let is_primary_mode = {
             let mut mode = CoordinationMode::current();
             while mode == CoordinationMode::StartingUp {
@@ -1158,6 +1154,9 @@ impl MagicValidator {
             mode == CoordinationMode::Primary
         };
         if is_primary_mode {
+            let Some(task_scheduler) = self.task_scheduler.take() else {
+                return Ok(());
+            };
             tokio::spawn(async move {
                 let step_start = Instant::now();
                 let join_handle = match task_scheduler.start().await {
