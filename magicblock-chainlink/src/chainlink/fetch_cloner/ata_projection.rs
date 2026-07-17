@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use dlp_api::state::DelegationRecord;
-use futures_util::future::join_all;
+use futures_util::future::{join_all, FutureExt};
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
     is_ata, try_derive_eata_address_and_bump, try_derive_supported_ata_pubkeys,
@@ -14,10 +14,10 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
-    delegation,
+    delegation, log_companion_fetch_failure,
     subscription::{acquire_subs, release_subs, SubscriptionRelease},
     types::AccountWithCompanion,
-    FetchCloner,
+    CompanionFetchLogContext, FetchCloner,
 };
 use crate::{
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
@@ -105,6 +105,7 @@ pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_up
     eata_account: &AccountSharedData,
     deleg_record: Option<&DelegationRecord>,
     delegation_actions: &DelegationActions,
+    companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> Option<AccountCloneRequest>
 where
     T: ChainRpcClient,
@@ -119,6 +120,7 @@ where
             eata_account,
             deleg_record,
             delegation_actions,
+            companion_fetch_log_context,
         )
         .await;
     }
@@ -135,6 +137,7 @@ where
             eata_pubkey,
             eata_account.remote_slot(),
             metrics::AccountFetchContext::project_ata(),
+            companion_fetch_log_context,
         )
         .await?;
     let delegation_actions = delegation_actions.unwrap_or_default();
@@ -145,6 +148,7 @@ where
         eata_account,
         &deleg_record,
         &delegation_actions,
+        companion_fetch_log_context,
     )
     .await
 }
@@ -155,6 +159,7 @@ async fn maybe_build_projected_ata_clone_request_from_eata<T, U, V, C>(
     eata_account: &AccountSharedData,
     deleg_record: &DelegationRecord,
     delegation_actions: &DelegationActions,
+    companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> Option<AccountCloneRequest>
 where
     T: ChainRpcClient,
@@ -198,6 +203,7 @@ where
                 this,
                 &ata_pubkeys,
                 eata_account.remote_slot(),
+                companion_fetch_log_context,
             )
             .await?
         }
@@ -227,6 +233,7 @@ async fn fetch_remote_base_ata<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     ata_pubkeys: &[Pubkey],
     min_context_slot: u64,
+    companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> Option<(Pubkey, AccountSharedData)>
 where
     T: ChainRpcClient,
@@ -251,11 +258,14 @@ where
     {
         Ok(accounts) => accounts,
         Err(err) => {
-            debug!(
-                error = ?err,
-                pubkeys = ?ata_pubkeys,
-                "Failed to fetch base ATA for eATA projection"
-            );
+            for ata_pubkey in ata_pubkeys.iter().copied() {
+                log_companion_fetch_failure(
+                    companion_fetch_log_context,
+                    ata_pubkey,
+                    ChainlinkCompanionFetchKind::AtaProjection,
+                    &err,
+                );
+            }
             return None;
         }
     };
@@ -273,6 +283,7 @@ pub(crate) async fn maybe_project_ata_from_subscription_update<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     ata_pubkey: Pubkey,
     ata_account: AccountSharedData,
+    companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> (
     AccountSharedData,
     Option<(DelegationRecord, Option<DelegationActions>)>,
@@ -340,10 +351,11 @@ where
             (fresh, nf)
         }
         Err(err) => {
-            debug!(
-                pubkey = %eata_pubkey,
-                error = ?err,
-                "Failed to fetch eATA for projection"
+            log_companion_fetch_failure(
+                companion_fetch_log_context,
+                eata_pubkey,
+                ChainlinkCompanionFetchKind::AtaProjection,
+                &err,
             );
             (None, false)
         }
@@ -362,6 +374,7 @@ where
         eata_pubkey,
         ata_account.remote_slot().max(eata_account.remote_slot()),
         metrics::AccountFetchContext::project_ata(),
+        companion_fetch_log_context,
     )
     .await;
 
@@ -472,27 +485,38 @@ where
             // Collect eATA pubkey for subscription
             pubkeys_to_subscribe.push(eata);
 
-            ata_join_set.spawn(FetchCloner::task_to_fetch_with_companion(
-                this,
-                *ata_pubkey,
-                eata,
-                effective_slot,
-                ata_projection_context,
-                ChainlinkCompanionFetchKind::AtaProjection,
-            ));
+            let ata_pubkey = *ata_pubkey;
+            ata_join_set.spawn(
+                FetchCloner::task_to_fetch_with_companion(
+                    this,
+                    ata_pubkey,
+                    eata,
+                    effective_slot,
+                    ata_projection_context,
+                    ChainlinkCompanionFetchKind::AtaProjection,
+                )
+                .map(move |res| (ata_pubkey, eata, effective_slot, res)),
+            );
         } else {
             // eATA derivation failed, but still queue the ATA for cloning
             // without a companion by using a dummy companion pubkey
             // The resolve_account_with_companion logic handles the case
             // where the companion is not found
-            ata_join_set.spawn(FetchCloner::task_to_fetch_with_companion(
-                this,
-                *ata_pubkey,
-                Pubkey::default(), // Dummy companion - will be marked as NotFound
-                effective_slot,
-                ata_projection_context,
-                ChainlinkCompanionFetchKind::AtaProjection,
-            ));
+            let ata_pubkey = *ata_pubkey;
+            let companion_pubkey = Pubkey::default();
+            ata_join_set.spawn(
+                FetchCloner::task_to_fetch_with_companion(
+                    this,
+                    ata_pubkey,
+                    companion_pubkey,
+                    effective_slot,
+                    ata_projection_context,
+                    ChainlinkCompanionFetchKind::AtaProjection,
+                )
+                .map(move |res| {
+                    (ata_pubkey, companion_pubkey, effective_slot, res)
+                }),
+            );
         }
     }
 
@@ -528,42 +552,69 @@ where
     let mut ata_inputs: Vec<AtaResolutionInput> = Vec::new();
 
     for result in ata_results {
-        let AccountWithCompanion {
-            pubkey: ata_pubkey,
-            account: ata_account,
-            companion_pubkey: eata_pubkey,
-            companion_account: maybe_eata_account,
-        } = match result {
-            Ok(Ok(v)) => v,
-            Ok(Err(err)) => {
-                warn!(error = %err, "Failed to resolve ATA/eATA companion");
-                continue;
+        match result {
+            (_, _, _effective_slot, Ok(Ok(v))) => {
+                let AccountWithCompanion {
+                    pubkey: ata_pubkey,
+                    account: ata_account,
+                    companion_pubkey: eata_pubkey,
+                    companion_account: maybe_eata_account,
+                } = v;
+                let eata_shared =
+                    maybe_eata_account.map(|e| e.account_shared_data_cloned());
+                ata_inputs.push(AtaResolutionInput {
+                    ata_pubkey,
+                    ata_account,
+                    eata_pubkey,
+                    eata_shared,
+                });
             }
-            Err(join_err) => {
-                warn!(error = %join_err, "Failed to join ATA/eATA fetch task");
-                continue;
+            (ata_pubkey, eata_pubkey, effective_slot, Ok(Err(err))) => {
+                let companion_fetch_log_context = CompanionFetchLogContext {
+                    origin: ata_projection_context,
+                    primary_pubkey: ata_pubkey,
+                    context_slot: Some(effective_slot),
+                };
+                log_companion_fetch_failure(
+                    &companion_fetch_log_context,
+                    eata_pubkey,
+                    ChainlinkCompanionFetchKind::AtaProjection,
+                    &err,
+                );
             }
-        };
-
-        let eata_shared =
-            maybe_eata_account.map(|e| e.account_shared_data_cloned());
-        ata_inputs.push(AtaResolutionInput {
-            ata_pubkey,
-            ata_account,
-            eata_pubkey,
-            eata_shared,
-        });
+            (ata_pubkey, eata_pubkey, effective_slot, Err(join_err)) => {
+                let companion_fetch_log_context = CompanionFetchLogContext {
+                    origin: ata_projection_context,
+                    primary_pubkey: ata_pubkey,
+                    context_slot: Some(effective_slot),
+                };
+                log_companion_fetch_failure(
+                    &companion_fetch_log_context,
+                    eata_pubkey,
+                    ChainlinkCompanionFetchKind::AtaProjection,
+                    &join_err,
+                );
+            }
+        }
     }
 
     // Phase 2: Fetch delegation records in parallel for all eATAs
     let deleg_futures = ata_inputs.iter().filter_map(|input| {
-        input.eata_shared.as_ref().map(|_| {
+        input.eata_shared.as_ref().map(|_| async move {
+            let context_slot = this.remote_account_provider.chain_slot();
+            let companion_fetch_log_context = CompanionFetchLogContext {
+                origin: delegation_record_context,
+                primary_pubkey: input.eata_pubkey,
+                context_slot: Some(context_slot),
+            };
             delegation::fetch_and_parse_delegation_record(
                 this,
                 input.eata_pubkey,
-                this.remote_account_provider.chain_slot(),
+                context_slot,
                 delegation_record_context,
+                &companion_fetch_log_context,
             )
+            .await
         })
     });
     let deleg_results: Vec<

@@ -1585,6 +1585,7 @@ where
                 &account,
                 deleg_record.as_ref(),
                 &delegation_actions,
+                &companion_fetch_log_context,
             )
             .await;
 
@@ -1976,6 +1977,11 @@ where
                 pubkey,
                 account.remote_slot(),
                 record_context,
+                CompanionFetchLogContext {
+                    origin: record_context,
+                    primary_pubkey: pubkey,
+                    context_slot: Some(account.remote_slot()),
+                },
             )
             .await
         else {
@@ -2070,6 +2076,11 @@ where
                         &account,
                         Some(&deleg_record),
                         &delegation_actions,
+                        &CompanionFetchLogContext {
+                            origin: discovery_context,
+                            primary_pubkey: pubkey,
+                            context_slot: Some(account.remote_slot()),
+                        },
                     )
                     .await
                 {
@@ -2471,7 +2482,11 @@ where
                 }
             } else {
                 let (account, deleg_record) = self
-                    .maybe_project_ata_from_subscription_update(pubkey, account)
+                    .maybe_project_ata_from_subscription_update(
+                        pubkey,
+                        account,
+                        companion_fetch_log_context,
+                    )
                     .await;
                 if let Some((deleg_record, actions)) = deleg_record {
                     (
@@ -2497,6 +2512,7 @@ where
         eata_account: &AccountSharedData,
         deleg_record: Option<&DelegationRecord>,
         delegation_actions: &DelegationActions,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> Option<AccountCloneRequest> {
         ata_projection::maybe_build_projected_ata_clone_request_from_subscription_update(
             self,
@@ -2504,6 +2520,7 @@ where
             eata_account,
             deleg_record,
             delegation_actions,
+            companion_fetch_log_context,
         )
         .await
     }
@@ -2517,6 +2534,7 @@ where
         &self,
         ata_pubkey: Pubkey,
         ata_account: AccountSharedData,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> (
         AccountSharedData,
         Option<(DelegationRecord, Option<DelegationActions>)>,
@@ -2525,6 +2543,7 @@ where
             self,
             ata_pubkey,
             ata_account,
+            companion_fetch_log_context,
         )
         .await
     }
@@ -2578,12 +2597,14 @@ where
         account_pubkey: Pubkey,
         min_context_slot: u64,
         fetch_context: metrics::AccountFetchContext,
+        companion_fetch_log_context: CompanionFetchLogContext,
     ) -> Option<(DelegationRecord, Option<DelegationActions>)> {
         delegation::fetch_and_parse_delegation_record(
             self,
             account_pubkey,
             min_context_slot,
             fetch_context,
+            &companion_fetch_log_context,
         )
         .await
     }
@@ -3061,13 +3082,20 @@ where
                     pubkey, in_bank,
                 )
             {
+                let undelegating_refresh_context = fetch_context
+                    .with_reason(AccountFetchReason::UndelegatingRefresh);
                 let projected_deleg_record = self
                     .fetch_and_parse_delegation_record(
                         eata_pubkey,
                         self.remote_account_provider.chain_slot(),
-                        fetch_context.with_reason(
-                            AccountFetchReason::UndelegatingRefresh,
-                        ),
+                        undelegating_refresh_context,
+                        CompanionFetchLogContext {
+                            origin: undelegating_refresh_context,
+                            primary_pubkey: eata_pubkey,
+                            context_slot: Some(
+                                self.remote_account_provider.chain_slot(),
+                            ),
+                        },
                     )
                     .await;
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
@@ -3083,12 +3111,20 @@ where
                 }
             }
 
+            let undelegating_refresh_context = fetch_context
+                .with_reason(AccountFetchReason::UndelegatingRefresh);
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,
                     self.remote_account_provider.chain_slot(),
-                    fetch_context
-                        .with_reason(AccountFetchReason::UndelegatingRefresh),
+                    undelegating_refresh_context,
+                    CompanionFetchLogContext {
+                        origin: undelegating_refresh_context,
+                        primary_pubkey: *pubkey,
+                        context_slot: Some(
+                            self.remote_account_provider.chain_slot(),
+                        ),
+                    },
                 )
                 .await;
 

@@ -15,8 +15,9 @@ use solana_signer::Signer;
 use tracing::*;
 
 use super::{
+    log_companion_fetch_failure,
     subscription::{release_subs, SubscriptionRelease},
-    FetchCloner,
+    CompanionFetchLogContext, FetchCloner,
 };
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
@@ -172,6 +173,7 @@ pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
     account_pubkey: Pubkey,
     min_context_slot: u64,
     fetch_context: metrics::AccountFetchContext,
+    companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> Option<(DelegationRecord, Option<DelegationActions>)>
 where
     T: ChainRpcClient,
@@ -229,7 +231,15 @@ where
                 None
             }
         }
-        Err(_) => None,
+        Err(err) => {
+            log_companion_fetch_failure(
+                companion_fetch_log_context,
+                delegation_record_pubkey,
+                ChainlinkCompanionFetchKind::DelegationRecord,
+                &err,
+            );
+            None
+        }
     };
 
     let mut releases = Vec::new();

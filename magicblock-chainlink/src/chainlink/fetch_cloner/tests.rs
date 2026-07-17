@@ -6697,6 +6697,11 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
             eata_pubkey,
             CURRENT_SLOT,
             AccountFetchContext::rpc_get_account(),
+            CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: Some(CURRENT_SLOT),
+            },
         )
         .await
         .expect("delegation record with actions should resolve");
@@ -6712,6 +6717,11 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
             delegation_actions.as_ref().expect(
                 "delegation actions should be parsed for our validator",
             ),
+            &CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: Some(CURRENT_SLOT),
+            },
         )
         .await
         .expect(
@@ -6761,6 +6771,11 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
             eata_pubkey,
             CURRENT_SLOT,
             AccountFetchContext::rpc_get_account(),
+            CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: Some(CURRENT_SLOT),
+            },
         )
         .await
         .expect("delegation record should resolve");
@@ -6774,6 +6789,11 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
             &eata_shared,
             Some(&deleg_record),
             &DelegationActions::default(),
+            &CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: Some(CURRENT_SLOT),
+            },
         )
         .await;
 
@@ -6828,6 +6848,11 @@ async fn test_fetch_and_parse_delegation_record_releases_direct_ref_when_already
             eata_pubkey,
             CURRENT_SLOT,
             AccountFetchContext::rpc_get_account(),
+            CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: Some(CURRENT_SLOT),
+            },
         )
         .await
         .expect("delegation record should resolve");
