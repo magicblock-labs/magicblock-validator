@@ -36,3 +36,7 @@ path = "../programs/hydra/hydra.so"
 
 [metrics]
 address = "0.0.0.0:9000"
+
+[[programs]]
+id = "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+path = "../schedulecommit/elfs/noop.so"

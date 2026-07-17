@@ -55,7 +55,7 @@ Main consumers include:
 - `magicblock-processor`, which consumes `ValidatorChannelEndpoints`, executes `SchedulerCommand`s, drains `ExecutionTlsStash`, and emits account/status/replication messages;
 - `magicblock-replicator`, which consumes and publishes `link::replication::Message` and uses `wait_for_idle()` during checksum/reset operations;
 - `magicblock-ledger`, which replays persisted transactions through `TransactionSchedulerHandle::replay`;
-- `magicblock-accounts`, `magicblock-account-cloner`, and `magicblock-task-scheduler`, which submit validator-internal transactions or consume scheduled tasks;
+- `magicblock-committor-service`, `magicblock-services`, `magicblock-account-cloner`, and `magicblock-task-scheduler`, which submit validator-internal transactions, consume scheduled intents, or consume scheduled tasks;
 - `programs/magicblock`, which uses `MagicSys`, `CommittedAccount`, `BaseActionCallback`, coordination mode, and `ExecutionTlsStash`;
 - `magicblock-committor-service`, which consumes committed-account/action types and callback scheduling traits;
 - `magicblock-chainlink`, which uses token/eATA helpers and consolidated logging helpers.
@@ -69,7 +69,9 @@ Main consumers include:
 
 ### Channel endpoints
 
-`link::link()` returns the two sides of the validator channel fabric:
+`link::link(replication_enabled)` returns the two sides of the validator channel fabric. The
+replication channel is built only when `replication_enabled` is set, so both halves exist or neither
+does; a standalone validator has no replication service to drain the stream:
 
 ```text
 DispatchEndpoints (RPC/API side)
@@ -84,7 +86,7 @@ ValidatorChannelEndpoints (processor/internal side)
   -> transaction_status: flume Sender<TransactionStatus>
   -> account_update: flume Sender<AccountWithSlot>
   -> tasks_service: UnboundedSender<TaskRequest>
-  -> replication_messages: mpsc Sender<Message>
+  -> replication_messages: Option<mpsc Sender<Message>>
   -> pause_permit: Arc<Semaphore>
 ```
 
@@ -154,8 +156,8 @@ Use `CoordinationMode::current()`, `needs_validator_signer()`, `should_schedule_
 
 ### Validator channel construction
 
-1. `magicblock-api` calls `magicblock_core::link::link()` during validator startup.
-2. `link()` creates bounded MPSC queues for transaction commands and replication messages, bounded `flume` queues for account/status events, an unbounded task queue, and a shared `Semaphore(1)` pause permit.
+1. `magicblock-api` calls `magicblock_core::link::link(!is_standalone)` during validator startup.
+2. `link()` creates a bounded MPSC queue for transaction commands, bounded `flume` queues for account/status events, an unbounded task queue, and a shared `Semaphore(1)` pause permit. The bounded MPSC replication queue is created only when replication is enabled; in standalone mode both endpoints get `None` and the scheduler emits nothing.
 3. The API/RPC side receives `DispatchEndpoints`; the processor side receives `ValidatorChannelEndpoints`.
 4. `TransactionSchedulerHandle` clones can be passed to RPC, cloner, accounts, ledger replay, task scheduler, and replication services.
 
@@ -252,7 +254,7 @@ Native-token projection is intentionally limited to local ATA/eATA projection se
 
 ## Important invariants
 
-1. `link::link()` must return paired endpoints connected to the same channels and pause semaphore; dispatch and validator sides must not be mismatched.
+1. `link::link()` must return paired endpoints connected to the same channels and pause semaphore; dispatch and validator sides must not be mismatched. The replication sender and receiver are created together or not at all: a standalone node holds neither, so no component can hold a sender whose receiver nobody drains.
 2. Scheduler command ordering must keep replay transactions and replicated block boundaries in the same FIFO stream.
 3. `TransactionSchedulerHandle::wait_for_idle()` must continue to pause scheduling while the returned permit is held; maintenance that relies on exclusive `AccountsDb` access depends on this.
 4. Bounded channels on hot paths must preserve intentional backpressure and avoid unbounded memory growth.
@@ -346,7 +348,8 @@ Start with:
 - `magicblock-core/src/traits.rs`
 - `programs/magicblock/src/magic_sys.rs`
 - `programs/magicblock/src/magic_scheduled_base_intent.rs`
-- `magicblock-accounts/src/scheduled_commits_processor.rs`
+- `magicblock-committor-service/src/service/intent_client.rs`
+- `magicblock-services/src/undelegation_request_service.rs`
 - `magicblock-committor-service/src/`
 
 Check serialization, persistence, commit nonce behavior, callback error mapping, and base-layer settlement compatibility.
@@ -389,6 +392,7 @@ Avoid adding high-cardinality or noisy logs to hot loops. Keep test logging idem
 - `.agents/context/crates/magicblock-api.md` — service wiring consumer of core endpoints.
 - `.agents/context/crates/magicblock-aperture.md` — RPC/account/status event consumer.
 - `.agents/context/crates/magicblock-account-cloner.md` — internal transaction submission consumer.
-- `.agents/context/crates/magicblock-accounts.md` — scheduled commit consumer of core payloads.
+- `.agents/context/crates/magicblock-committor-service.md` — scheduled intent consumer of core payloads.
+- `.agents/context/crates/magicblock-services.md` — service adapters that submit validator-internal transactions.
 - `.agents/context/crates/magicblock-chainlink.md` — token/eATA helper and logging consumer.
 - `.agents/context/crates/magicblock-config.md` — config types that drive startup mode and service wiring.

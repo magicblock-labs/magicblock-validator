@@ -1,13 +1,17 @@
 use std::{collections::HashSet, sync::atomic::AtomicU16};
 
 use magicblock_core::logger::log_trace_warn;
+use magicblock_metrics::metrics::{
+    inc_chainlink_subscription_cleanup_accounts, SubscriptionCleanupOutcome,
+    SubscriptionCleanupSource,
+};
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 use tracing::*;
 
 use super::{
     subscription_key_owned_guard_from_map, AccountsLruCache, ChainPubsubClient,
-    SubscriptionKeyLocks,
+    SubscriptionKeyLocks, SubscriptionOwnershipMap, SubscriptionReason,
 };
 use crate::remote_account_provider::RemoteAccountProviderError;
 
@@ -24,11 +28,21 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
     pubkey: Pubkey,
     pubsub_client: &T,
     removed_account_tx: &mpsc::Sender<Pubkey>,
+    cleanup_source: SubscriptionCleanupSource,
 ) -> bool {
     match pubsub_client.unsubscribe(pubkey).await {
         Ok(()) => {
             if let Err(err) = removed_account_tx.send(pubkey).await {
                 warn!(error = ?err, "Failed to send removal update");
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                );
+            } else {
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::Unsubscribed,
+                );
             }
             true
         }
@@ -38,8 +52,16 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
                 RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
             ) {
                 debug!(error = ?err, "Failed to unsubscribe");
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::AlreadyAbsent,
+                );
             } else {
                 warn!(error = ?err, "Failed to unsubscribe");
+                inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    SubscriptionCleanupOutcome::UnsubscribeFailed,
+                );
             }
             false
         }
@@ -80,6 +102,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     never_evicted: &[Pubkey],
     removed_account_tx: &mpsc::Sender<Pubkey>,
     subscription_key_locks: Option<&SubscriptionKeyLocks>,
+    subscription_ownership: Option<&SubscriptionOwnershipMap>,
 ) -> usize {
     let lru_pubkeys = subscribed_accounts.pubkeys();
     let lru_count = lru_pubkeys.len();
@@ -94,6 +117,15 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         );
         return lru_count + never_evicted.len();
     };
+
+    // Never-evicted keys (e.g. the clock sysvar) are not tracked in the LRU,
+    // so the LRU diff below cannot repair them - collect the ones missing
+    // from any client to resubscribe them directly.
+    let missing_never_evicted: Vec<Pubkey> = never_evicted
+        .iter()
+        .filter(|pk| !pubsub_snapshot.intersection.contains(pk))
+        .copied()
+        .collect();
 
     let ensured_subs_without_never_evict: HashSet<_> = pubsub_snapshot
         .intersection
@@ -123,6 +155,27 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         extra_in_pubsub_count = extra_in_pubsub.len(),
         "Reconciling subscriptions between LRU and pubsub client"
     );
+
+    // Resubscribe never-evicted keys missing from any client. Clients that
+    // already hold the subscription dedup the call.
+    if !missing_never_evicted.is_empty() {
+        warn!(
+            pubkeys = ?missing_never_evicted,
+            "Resubscribing missing never-evicted accounts"
+        );
+        for pubkey in missing_never_evicted {
+            let _subscription_guard =
+                acquire_subscription_key_guard(subscription_key_locks, pubkey)
+                    .await;
+            if let Err(e) = pubsub_client.subscribe(pubkey, None).await {
+                warn!(
+                    pubkey = %pubkey,
+                    error = ?e,
+                    "Failed to resubscribe never-evicted account"
+                );
+            }
+        }
+    }
 
     // For any sub that is in the LRU but not ensured by all clients we resubscribe.
     // This may call subscribe on some clients that already have the subscription and
@@ -176,8 +229,52 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 continue;
             }
 
-            if let Err(e) = pubsub_client.subscribe(pubkey, None).await {
-                warn!(pubkey = %pubkey, error = ?e, "Failed to resubscribe account");
+            let resub_err = pubsub_client.subscribe(pubkey, None).await.err();
+            if let Some(err) = &resub_err {
+                warn!(pubkey = %pubkey, error = ?err, "Failed to resubscribe account");
+            }
+
+            // A subscription on any client keeps the account fresh; later
+            // cycles repair the remaining clients.
+            let delivered_somewhere = pubsub_client
+                .subscription_reconciliation_snapshot()
+                .is_some_and(|s| s.union.contains(&pubkey));
+            if delivered_somewhere {
+                continue;
+            }
+
+            // Undelegation tracking must stay watched until undelegation
+            // completes; keep the entry and retry next cycle.
+            if let Some(ownership) = subscription_ownership {
+                if ownership.lock().await.get(&pubkey).is_some_and(|own| {
+                    own.contains(SubscriptionReason::UndelegationTracking)
+                }) {
+                    continue;
+                }
+            }
+
+            // No client holds the subscription: evict so the account is
+            // re-cloned fresh on next use instead of going stale.
+            warn!(
+                pubkey = %pubkey,
+                error = ?resub_err,
+                "Resubscribe did not take effect on any client; evicting account to prevent stale state"
+            );
+            subscribed_accounts.remove(&pubkey);
+            if let Some(ownership) = subscription_ownership {
+                ownership.lock().await.remove(&pubkey);
+            }
+            if let Err(err) = removed_account_tx.send(pubkey).await {
+                warn!(pubkey = %pubkey, error = ?err, "Failed to send removal update for dead subscription");
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::Reconciler,
+                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                );
+            } else {
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::Reconciler,
+                    SubscriptionCleanupOutcome::Unsubscribed,
+                );
             }
         }
     }
@@ -228,6 +325,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 pubkey,
                 pubsub_client,
                 removed_account_tx,
+                SubscriptionCleanupSource::Reconciler,
             )
             .await;
         }
@@ -424,6 +522,89 @@ mod tests {
         assert!(subs.contains(&pk1));
         assert!(subs.contains(&pk2));
         assert!(subs.contains(&pk3));
+    }
+
+    /// A successfully re-established subscription must not trigger eviction.
+    #[tokio::test]
+    async fn test_repaired_subscription_is_not_evicted() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk = create_test_pubkey(1);
+        lru.add(pk);
+
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+        reconcile_subscriptions_local(&lru, &mock_client, &[], &removed_tx)
+            .await;
+
+        assert!(mock_client.subscriptions_union().contains(&pk));
+        assert!(lru.contains(&pk));
+        assert!(removed_rx.try_recv().is_err());
+    }
+
+    /// When no client holds the subscription after the resubscribe, the
+    /// account must be evicted instead of being left stale in the bank.
+    #[tokio::test]
+    async fn test_silently_dead_subscription_evicted_when_repair_fails() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk = create_test_pubkey(1);
+        lru.add(pk);
+
+        mock_client.silently_noop_next_subscriptions(1);
+
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+        reconcile_subscriptions_local(&lru, &mock_client, &[], &removed_tx)
+            .await;
+
+        assert!(!mock_client.subscriptions_union().contains(&pk));
+        assert!(!lru.contains(&pk));
+        assert_eq!(removed_rx.try_recv(), Ok(pk));
+    }
+
+    /// Accounts owned for undelegation tracking must never be evicted; they
+    /// are kept and retried on the next cycle.
+    #[tokio::test]
+    async fn test_undelegation_tracked_subscription_is_not_evicted() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk = create_test_pubkey(1);
+        lru.add(pk);
+
+        let ownership: SubscriptionOwnershipMap = Default::default();
+        ownership
+            .lock()
+            .await
+            .entry(pk)
+            .or_default()
+            .acquire(SubscriptionReason::UndelegationTracking);
+
+        mock_client.silently_noop_next_subscriptions(1);
+
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+        reconcile_subscriptions(
+            &lru,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            Some(&ownership),
+        )
+        .await;
+
+        assert!(lru.contains(&pk));
+        assert!(removed_rx.try_recv().is_err());
     }
 
     /// Test case: Empty LRU should cause resubscribe of all LRU accounts if missing
@@ -694,6 +875,7 @@ mod tests {
             pubsub_client,
             never_evicted,
             removed_account_tx,
+            None,
             None,
         )
         .await

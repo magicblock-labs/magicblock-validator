@@ -64,6 +64,10 @@ pub const DEFAULT_LEDGER_SIZE: u64 = 100 * 1024 * 1024 * 1024;
 /// Default superblock size (72K ~ 1 hour with 50ms block time)
 pub const DEFAULT_SUPERBLOCK_SIZE: u64 = 3600 * 20;
 
+/// Default ledger block cache size (512 MB, suits local dev;
+/// production nodes should configure 16 GB or more)
+pub const DEFAULT_LEDGER_BLOCK_CACHE_SIZE: u64 = 512 * 1024 * 1024;
+
 /// Metrics Defaults
 /// Default address for the metrics endpoint (Prometheus format)
 pub const DEFAULT_METRICS_ADDR: &str = "0.0.0.0:9000";
@@ -74,6 +78,9 @@ pub const DEFAULT_METRICS_COLLECT_FREQUENCY_SEC: u64 = 30;
 // ChainLink Defaults
 /// Default delay in milliseconds between resubscribing to accounts after a pubsub reconnection
 pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
+
+/// Default period in seconds for scanning DLP undelegation request accounts.
+pub const DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS: u64 = 5 * 60;
 
 /// Default capacity for the LRU cache of subscribed accounts
 pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;

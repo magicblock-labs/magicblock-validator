@@ -13,9 +13,6 @@ pub enum ApiError {
     #[error("Aperture service error: {0}")]
     Aperture(#[from] magicblock_aperture::error::ApertureError),
 
-    #[error("Accounts error: {0}")]
-    AccountsError(Box<magicblock_accounts::errors::AccountsError>),
-
     #[error("Ledger error: {0}")]
     LedgerError(Box<magicblock_ledger::errors::LedgerError>),
 
@@ -105,12 +102,6 @@ pub enum ApiError {
 
     #[error("Replication service failed: {0}")]
     Replication(#[from] magicblock_replicator::Error),
-}
-
-impl From<magicblock_accounts::errors::AccountsError> for ApiError {
-    fn from(e: magicblock_accounts::errors::AccountsError) -> Self {
-        Self::AccountsError(Box::new(e))
-    }
 }
 
 impl From<magicblock_ledger::errors::LedgerError> for ApiError {

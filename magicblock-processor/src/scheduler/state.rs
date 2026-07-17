@@ -55,7 +55,8 @@ pub struct TransactionSchedulerState {
     pub account_update_tx: AccountUpdateTx,
     pub transaction_status_tx: TransactionStatusTx,
     pub tasks_tx: ScheduledTasksTx,
-    pub replication_tx: Sender<Message>,
+    /// `None` when replication is disabled, i.e. the validator runs standalone.
+    pub replication_tx: Option<Sender<Message>>,
     /// Semaphore for pausing scheduling during exclusive DB access.
     pub pause_permit: Arc<Semaphore>,
 

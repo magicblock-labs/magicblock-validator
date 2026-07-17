@@ -4,11 +4,14 @@ use std::{
     sync::{atomic::AtomicU64, Arc},
 };
 
-use rocksdb::{ColumnFamilyDescriptor, DBCompressionType, Options, DB};
+use rocksdb::{
+    BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompressionType,
+    Options, DB,
+};
 use tracing::*;
 
 use super::{
-    columns::{should_enable_compression, Column, ColumnName},
+    columns::{Column, ColumnName},
     consts,
     options::{LedgerColumnOptions, LedgerOptions},
     rocksdb_options::should_disable_auto_compactions,
@@ -33,15 +36,28 @@ pub fn cf_descriptors(
 ) -> Vec<ColumnFamilyDescriptor> {
     use columns::*;
 
+    let block_cache = Cache::new_lru_cache(options.block_cache_size);
     let mut cf_descriptors = vec![
-        new_cf_descriptor::<TransactionStatus>(options, oldest_slot),
-        new_cf_descriptor::<AddressSignatures>(options, oldest_slot),
-        new_cf_descriptor::<SlotSignatures>(options, oldest_slot),
-        new_cf_descriptor::<Blocktime>(options, oldest_slot),
-        new_cf_descriptor::<Blockhash>(options, oldest_slot),
-        new_cf_descriptor::<Transaction>(options, oldest_slot),
-        new_cf_descriptor::<TransactionMemos>(options, oldest_slot),
-        new_cf_descriptor::<PerfSamples>(options, oldest_slot),
+        new_cf_descriptor::<TransactionStatus>(
+            options,
+            oldest_slot,
+            &block_cache,
+        ),
+        new_cf_descriptor::<AddressSignatures>(
+            options,
+            oldest_slot,
+            &block_cache,
+        ),
+        new_cf_descriptor::<SlotSignatures>(options, oldest_slot, &block_cache),
+        new_cf_descriptor::<Blocktime>(options, oldest_slot, &block_cache),
+        new_cf_descriptor::<Blockhash>(options, oldest_slot, &block_cache),
+        new_cf_descriptor::<Transaction>(options, oldest_slot, &block_cache),
+        new_cf_descriptor::<TransactionMemos>(
+            options,
+            oldest_slot,
+            &block_cache,
+        ),
+        new_cf_descriptor::<PerfSamples>(options, oldest_slot, &block_cache),
     ];
 
     // If the access type is Secondary, we don't need to open all of the
@@ -94,10 +110,11 @@ pub fn cf_descriptors(
 fn new_cf_descriptor<C: 'static + Column + ColumnName>(
     options: &LedgerOptions,
     oldest_slot: &Arc<AtomicU64>,
+    block_cache: &Cache,
 ) -> ColumnFamilyDescriptor {
     ColumnFamilyDescriptor::new(
         C::NAME,
-        get_cf_options::<C>(options, oldest_slot),
+        get_cf_options::<C>(options, oldest_slot, block_cache),
     )
 }
 
@@ -105,8 +122,19 @@ fn new_cf_descriptor<C: 'static + Column + ColumnName>(
 fn get_cf_options<C: 'static + Column + ColumnName>(
     options: &LedgerOptions,
     oldest_slot: &Arc<AtomicU64>,
+    block_cache: &Cache,
 ) -> Options {
     let mut cf_options = Options::default();
+
+    // With direct reads enabled the block cache is the only read caching
+    // layer, so use a large shared cache instead of the 32MiB per-CF default.
+    // Bloom filters spare disk reads for point lookups of absent keys.
+    let mut table_options = BlockBasedOptions::default();
+    table_options.set_block_cache(block_cache);
+    table_options.set_bloom_filter(10.0, false);
+    table_options.set_cache_index_and_filter_blocks(true);
+    table_options.set_pin_l0_filter_and_index_blocks_in_cache(true);
+    cf_options.set_block_based_table_factory(&table_options);
     // 256 * 8 = 2GB. 6 of these columns should take at most 12GB of RAM
     cf_options.set_max_write_buffer_number(8);
     cf_options.set_write_buffer_size(consts::MAX_WRITE_BUFFER_SIZE as usize);
@@ -152,17 +180,12 @@ fn get_cf_options<C: 'static + Column + ColumnName>(
 
 fn process_cf_options_advanced<C: 'static + Column + ColumnName>(
     cf_options: &mut Options,
-    column_options: &LedgerColumnOptions,
+    _column_options: &LedgerColumnOptions,
 ) {
-    // Explicitly disable compression on all columns by default
-    // See https://docs.rs/rocksdb/0.21.0/rocksdb/struct.Options.html#method.set_compression_type
-    cf_options.set_compression_type(DBCompressionType::None);
-
-    if should_enable_compression::<C>() {
-        cf_options.set_compression_type(
-            column_options
-                .compression_type
-                .to_rocksdb_compression_type(),
-        );
-    }
+    // Cheap LZ4 for fresh data on upper levels; higher-ratio Zstd for the
+    // bottommost level, where the bulk of the cold data lives. Compression is
+    // applied per block as SSTs are (re)written, so existing uncompressed
+    // ledgers remain readable and converge without migration.
+    cf_options.set_compression_type(DBCompressionType::Lz4);
+    cf_options.set_bottommost_compression_type(DBCompressionType::Zstd);
 }

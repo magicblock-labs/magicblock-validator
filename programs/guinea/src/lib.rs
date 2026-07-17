@@ -2,8 +2,9 @@
 use core::slice;
 
 use magicblock_magic_program_api::{
-    args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
-    EPHEMERAL_VAULT_PUBKEY,
+    args::ScheduleTaskArgs,
+    instruction::{EphemeralSystemInstruction, MagicBlockInstruction},
+    EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY,
 };
 use serde::{Deserialize, Serialize};
 use solana_program::{
@@ -150,11 +151,11 @@ fn schedule_task(
     mut accounts: slice::Iter<AccountInfo>,
     args: ScheduleTaskArgs,
 ) -> ProgramResult {
-    let magic_program_info = next_account_info(&mut accounts)?;
+    let program_info = next_account_info(&mut accounts)?;
     let payer_info = next_account_info(&mut accounts)?;
     let counter_pda_info = next_account_info(&mut accounts)?;
 
-    if magic_program_info.key != &magicblock_magic_program_api::ID {
+    if program_info.key != &magicblock_magic_program_api::ID {
         return Err(ProgramError::InvalidAccountData);
     }
 
@@ -203,10 +204,12 @@ fn cancel_task(
 }
 
 fn validate_ephemeral_accounts(
-    magic_program_info: &AccountInfo,
+    program_info: &AccountInfo,
     vault_info: &AccountInfo,
 ) -> ProgramResult {
-    if magic_program_info.key != &magicblock_magic_program_api::ID {
+    if program_info.key != &magicblock_magic_program_api::ID
+        && program_info.key != &EPHEMERAL_SYSTEM_PROGRAM_ID
+    {
         return Err(ProgramError::InvalidAccountData);
     }
     if *vault_info.key != EPHEMERAL_VAULT_PUBKEY {
@@ -219,12 +222,12 @@ fn create_ephemeral_account(
     mut accounts: slice::Iter<AccountInfo>,
     data_len: u32,
 ) -> ProgramResult {
-    let magic_program_info = next_account_info(&mut accounts)?;
+    let program_info = next_account_info(&mut accounts)?;
     let sponsor_info = next_account_info(&mut accounts)?;
     let ephemeral_info = next_account_info(&mut accounts)?;
     let vault_info = next_account_info(&mut accounts)?;
 
-    validate_ephemeral_accounts(magic_program_info, vault_info)?;
+    validate_ephemeral_accounts(program_info, vault_info)?;
 
     let account_infos = &[
         sponsor_info.clone(),
@@ -237,15 +240,24 @@ fn create_ephemeral_account(
         return Err(ProgramError::MissingRequiredSignature);
     }
 
-    let ix = Instruction::new_with_bincode(
-        magicblock_magic_program_api::ID,
-        &MagicBlockInstruction::CreateEphemeralAccount { data_len },
-        vec![
-            AccountMeta::new(*sponsor_info.key, sponsor_info.is_signer),
-            AccountMeta::new(*ephemeral_info.key, true),
-            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
-        ],
-    );
+    let account_metas = vec![
+        AccountMeta::new(*sponsor_info.key, sponsor_info.is_signer),
+        AccountMeta::new(*ephemeral_info.key, true),
+        AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+    ];
+    let ix = if *program_info.key == EPHEMERAL_SYSTEM_PROGRAM_ID {
+        Instruction::new_with_bincode(
+            EPHEMERAL_SYSTEM_PROGRAM_ID,
+            &EphemeralSystemInstruction::CreateEphemeralAccount { data_len },
+            account_metas,
+        )
+    } else {
+        Instruction::new_with_bincode(
+            magicblock_magic_program_api::ID,
+            &MagicBlockInstruction::CreateEphemeralAccount { data_len },
+            account_metas,
+        )
+    };
 
     invoke_with_sponsor(ix, account_infos, sponsor_info)?;
 
@@ -256,12 +268,12 @@ fn resize_ephemeral_account(
     mut accounts: slice::Iter<AccountInfo>,
     new_data_len: u32,
 ) -> ProgramResult {
-    let magic_program_info = next_account_info(&mut accounts)?;
+    let program_info = next_account_info(&mut accounts)?;
     let sponsor_info = next_account_info(&mut accounts)?;
     let ephemeral_info = next_account_info(&mut accounts)?;
     let vault_info = next_account_info(&mut accounts)?;
 
-    validate_ephemeral_accounts(magic_program_info, vault_info)?;
+    validate_ephemeral_accounts(program_info, vault_info)?;
 
     let account_infos = &[
         sponsor_info.clone(),
@@ -270,15 +282,26 @@ fn resize_ephemeral_account(
     ];
 
     // Create instruction (signer flag will be patched by helper if needed)
-    let ix = Instruction::new_with_bincode(
-        magicblock_magic_program_api::ID,
-        &MagicBlockInstruction::ResizeEphemeralAccount { new_data_len },
-        vec![
-            AccountMeta::new(*sponsor_info.key, true),
-            AccountMeta::new(*ephemeral_info.key, false),
-            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
-        ],
-    );
+    let account_metas = vec![
+        AccountMeta::new(*sponsor_info.key, true),
+        AccountMeta::new(*ephemeral_info.key, false),
+        AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+    ];
+    let ix = if *program_info.key == EPHEMERAL_SYSTEM_PROGRAM_ID {
+        Instruction::new_with_bincode(
+            EPHEMERAL_SYSTEM_PROGRAM_ID,
+            &EphemeralSystemInstruction::ResizeEphemeralAccount {
+                new_data_len,
+            },
+            account_metas,
+        )
+    } else {
+        Instruction::new_with_bincode(
+            magicblock_magic_program_api::ID,
+            &MagicBlockInstruction::ResizeEphemeralAccount { new_data_len },
+            account_metas,
+        )
+    };
 
     invoke_with_sponsor(ix, account_infos, sponsor_info)?;
 
@@ -288,12 +311,12 @@ fn resize_ephemeral_account(
 fn close_ephemeral_account(
     mut accounts: slice::Iter<AccountInfo>,
 ) -> ProgramResult {
-    let magic_program_info = next_account_info(&mut accounts)?;
+    let program_info = next_account_info(&mut accounts)?;
     let sponsor_info = next_account_info(&mut accounts)?;
     let ephemeral_info = next_account_info(&mut accounts)?;
     let vault_info = next_account_info(&mut accounts)?;
 
-    validate_ephemeral_accounts(magic_program_info, vault_info)?;
+    validate_ephemeral_accounts(program_info, vault_info)?;
 
     let account_infos = &[
         sponsor_info.clone(),
@@ -302,15 +325,24 @@ fn close_ephemeral_account(
     ];
 
     // Create instruction (signer flag will be patched by helper if needed)
-    let ix = Instruction::new_with_bincode(
-        magicblock_magic_program_api::ID,
-        &MagicBlockInstruction::CloseEphemeralAccount,
-        vec![
-            AccountMeta::new(*sponsor_info.key, true),
-            AccountMeta::new(*ephemeral_info.key, false),
-            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
-        ],
-    );
+    let account_metas = vec![
+        AccountMeta::new(*sponsor_info.key, true),
+        AccountMeta::new(*ephemeral_info.key, false),
+        AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+    ];
+    let ix = if *program_info.key == EPHEMERAL_SYSTEM_PROGRAM_ID {
+        Instruction::new_with_bincode(
+            EPHEMERAL_SYSTEM_PROGRAM_ID,
+            &EphemeralSystemInstruction::CloseEphemeralAccount,
+            account_metas,
+        )
+    } else {
+        Instruction::new_with_bincode(
+            magicblock_magic_program_api::ID,
+            &MagicBlockInstruction::CloseEphemeralAccount,
+            account_metas,
+        )
+    };
 
     invoke_with_sponsor(ix, account_infos, sponsor_info)?;
 

@@ -36,15 +36,15 @@ use magicblock_committor_service::{
     DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
-    intent::{BaseActionCallback, CommittedAccount},
+    intent::{
+        types::CommittedAccount, BaseAction, BaseActionCallback,
+        CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
+        ProgramArgs, UndelegateType,
+    },
     traits::ActionError,
 };
 use magicblock_program::{
-    args::ShortAccountMeta,
-    magic_scheduled_base_intent::{
-        BaseAction, CommitAndUndelegate, CommitType, MagicBaseIntent,
-        MagicIntentBundle, ProgramArgs, ScheduledIntentBundle, UndelegateType,
-    },
+    args::ShortAccountMeta, magic_scheduled_base_intent::ScheduledIntentBundle,
     validator::validator_authority_id,
 };
 use magicblock_rpc_client::MagicBlockSendTransactionConfig;
@@ -832,8 +832,7 @@ async fn test_cpi_limits_error_recovery() {
     let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
         transaction_preparator.cleanup_for_strategy(
             &fixture.authority,
-            &to_cleanup.optimized_tasks,
-            &to_cleanup.lookup_tables_keys,
+            to_cleanup,
             true,
         )
     });
@@ -980,8 +979,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
         transaction_preparator.cleanup_for_strategy(
             &fixture.authority,
-            &to_cleanup.optimized_tasks,
-            &to_cleanup.lookup_tables_keys,
+            to_cleanup,
             true,
         )
     });
@@ -1439,12 +1437,14 @@ async fn create_two_stage_executor<'a>(
         commit_tasks,
         authority,
         &None::<IntentPersisterImpl>,
+        None,
     )
     .unwrap();
     let finalize_strategy = TaskStrategist::build_strategy(
         finalize_tasks,
         authority,
         &None::<IntentPersisterImpl>,
+        None,
     )
     .unwrap();
     TwoStageExecutor::new(
@@ -1454,6 +1454,7 @@ async fn create_two_stage_executor<'a>(
         IntentExecutionClient::new(fixture.rpc_client.clone()),
         callback_executor.clone(),
         execution_report,
+        intent.id,
     )
 }
 
@@ -1480,6 +1481,7 @@ fn succeeding_commit_action(
         },
     ];
     BaseAction {
+        id: 0,
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
@@ -1523,6 +1525,7 @@ fn succeeding_undelegate_action(
     ];
 
     UndelegateType::WithBaseActions(vec![BaseAction {
+        id: 0,
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
@@ -1566,6 +1569,7 @@ fn failing_undelegate_action(
     ];
 
     UndelegateType::WithBaseActions(vec![BaseAction {
+        id: 0,
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
@@ -1710,6 +1714,7 @@ async fn single_flow_transaction_strategy(
         tasks,
         authority,
         &None::<IntentPersisterImpl>,
+        None,
     )
     .unwrap()
 }

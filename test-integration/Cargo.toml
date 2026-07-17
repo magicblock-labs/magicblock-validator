@@ -64,7 +64,7 @@ magicblock-committor-program = { path = "../magicblock-committor-program", featu
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
-magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "25386a7c1d406d06b8d07a4d5b0fd37d5e74213b", default-features = false }
+magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", tag = "v3.1.0", default-features = false }
 magicblock-magic-program-api = { path = "../magicblock-magic-program-api" }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
@@ -81,8 +81,7 @@ schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
 shlex = "1.3.0"
-# TODO: Update to latest version is merged
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
 solana-address-lookup-table-interface = "3.0"
 solana-commitment-config = "3.1.1"
 solana-compute-budget-interface = "3.0"
@@ -123,13 +122,9 @@ url = "2.5.0"
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
-# TODO: Update to latest version is merged
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
-# TODO: Update to latest version is merged
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
-# TODO: Update to latest version is merged
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
-# TODO: Update to latest version is merged
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "24cea3e311ae97c976ae8f3390185d7e9cacb27a" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
 # Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }

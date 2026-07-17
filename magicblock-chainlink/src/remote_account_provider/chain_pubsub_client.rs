@@ -113,6 +113,9 @@ pub struct ChainPubsubClientImpl {
     updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
     client_id: String,
     current_resub_delay_ms: Arc<AtomicU64>,
+    /// The configured delay [Self::current_resub_delay_ms] is reset to
+    /// after a resubscription pass completes without failures.
+    initial_resub_delay_ms: u64,
 }
 
 impl ChainPubsubClientImpl {
@@ -130,13 +133,15 @@ impl ChainPubsubClientImpl {
             commitment,
         )
         .await?;
+        let initial_resub_delay_ms = resubscription_delay.as_millis() as u64;
         let current_resub_delay_ms =
-            Arc::new(AtomicU64::new(resubscription_delay.as_millis() as u64));
+            Arc::new(AtomicU64::new(initial_resub_delay_ms));
         Ok(Self {
             actor: Arc::new(actor),
             updates_rcvr: Arc::new(Mutex::new(Some(updates))),
             client_id,
             current_resub_delay_ms,
+            initial_resub_delay_ms,
         })
     }
 }
@@ -256,19 +261,51 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
         const RESUB_MULTIPLE_RETRY_PER_PUBKEY: usize = 5;
-        let delay_ms = self.current_resub_delay_ms.load(Ordering::SeqCst);
-        let delay = Duration::from_millis(delay_ms);
-        let pubkeys_vec: Vec<Pubkey> = pubkeys.into_iter().collect();
-        for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
-            if let Err(err) = self
-                .subscribe(*pubkey, Some(RESUB_MULTIPLE_RETRY_PER_PUBKEY))
-                .await
-            {
-                // Report the number of subscriptions we managed before failing
-                metrics::set_pubsub_client_resubscribed_count(
-                    &self.client_id,
-                    idx + 1,
-                );
+        // Failed keys are retried over just the remainder: erroring out
+        // instead triggers a full reconnect that drains every subscription.
+        const MAX_PASSES: usize = 3;
+        // Only resubscribe what is still missing
+        let subscribed = self.subscriptions_union();
+        let had_active_subs = !subscribed.is_empty();
+        let mut remaining: Vec<Pubkey> = pubkeys
+            .into_iter()
+            .filter(|pk| !subscribed.contains(pk))
+            .collect();
+        let total_subs = remaining.len();
+        let mut fatal_err = None;
+
+        for _ in 0..MAX_PASSES {
+            if remaining.is_empty() {
+                break;
+            }
+            let delay_ms = self.current_resub_delay_ms.load(Ordering::SeqCst);
+            let delay = Duration::from_millis(delay_ms);
+            let mut failed = Vec::new();
+            let mut last_err = None;
+            for (idx, pubkey) in remaining.iter().enumerate() {
+                match self
+                    .subscribe(*pubkey, Some(RESUB_MULTIPLE_RETRY_PER_PUBKEY))
+                    .await
+                {
+                    Ok(()) => {
+                        // Pace successful subscribes only; failures
+                        // already backed off internally
+                        if idx + 1 < remaining.len() {
+                            tokio::time::sleep(delay).await;
+                        }
+                    }
+                    Err(err) => {
+                        debug!(
+                            error = ?err,
+                            pubkey = %pubkey,
+                            "Re-subscription failed for pubkey",
+                        );
+                        failed.push(*pubkey);
+                        last_err = Some(err);
+                    }
+                }
+            }
+            if !failed.is_empty() {
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
                 // in order to avoid overwhelming the RPC with requests
@@ -276,25 +313,41 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                     delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
                 self.current_resub_delay_ms
                     .store(new_delay, Ordering::SeqCst);
-                debug!(
-                    error = ?err,
-                    total_subs = pubkeys_vec.len(),
-                    processed_subs = idx + 1,
-                    pubkey = %pubkey,
-                    "Re-subscription for multiple pubkeys failed to complete",
-                );
-                return Err(err);
             }
-            // Only sleep between subscriptions, not after the final one
-            if idx < pubkeys_vec.len() - 1 {
-                tokio::time::sleep(delay).await;
+            let no_progress = failed.len() == remaining.len();
+            remaining = failed;
+            if no_progress {
+                // Further passes won't do better. Error out (triggering a
+                // full reconnect) only when there is nothing to lose:
+                // nothing restored here and no pre-existing subscriptions.
+                if remaining.len() == total_subs && !had_active_subs {
+                    fatal_err = last_err;
+                }
+                break;
             }
         }
-        // Report successful resubscription of all pubkeys
+
         metrics::set_pubsub_client_resubscribed_count(
             &self.client_id,
-            pubkeys_vec.len(),
+            total_subs - remaining.len(),
         );
+        if let Some(err) = fatal_err {
+            warn!(total_subs, "Re-subscription made no progress");
+            return Err(err);
+        }
+        if remaining.is_empty() {
+            // Clean pass: restore the configured pacing
+            self.current_resub_delay_ms
+                .store(self.initial_resub_delay_ms, Ordering::SeqCst);
+        } else {
+            // Leftovers are repaired by the subscription reconciler
+            warn!(
+                total_subs,
+                failed = remaining.len(),
+                "Re-subscription completed with failures, \
+                 leaving repair to the reconciler",
+            );
+        }
         Ok(())
     }
 
@@ -341,6 +394,7 @@ pub mod mock {
         pending_resubscribe_failures: Arc<Mutex<usize>>,
         pending_unsubscribe_failures: Arc<Mutex<usize>>,
         pending_program_subscribe_failures: Arc<Mutex<usize>>,
+        pending_silent_subscribe_noops: Arc<Mutex<usize>>,
         reconnectable: Arc<Mutex<bool>>,
         subscribe_blocked: Arc<Mutex<bool>>,
         subscribe_pause_after_insert: Arc<Mutex<bool>>,
@@ -370,6 +424,7 @@ pub mod mock {
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
                 pending_unsubscribe_failures: Arc::new(Mutex::new(0)),
                 pending_program_subscribe_failures: Arc::new(Mutex::new(0)),
+                pending_silent_subscribe_noops: Arc::new(Mutex::new(0)),
                 reconnectable: Arc::new(Mutex::new(true)),
                 subscribe_blocked: Arc::new(Mutex::new(false)),
                 subscribe_pause_after_insert: Arc::new(Mutex::new(false)),
@@ -405,6 +460,12 @@ pub mod mock {
 
         pub fn fail_next_program_subscriptions(&self, n: usize) {
             *self.pending_program_subscribe_failures.lock() = n;
+        }
+
+        /// Next N subscribe() calls return Ok without registering the
+        /// subscription.
+        pub fn silently_noop_next_subscriptions(&self, n: usize) {
+            *self.pending_silent_subscribe_noops.lock() = n;
         }
 
         pub fn program_subscribe_attempts(&self) -> u64 {
@@ -534,6 +595,12 @@ pub mod mock {
         pub fn insert_subscription(&self, pubkey: Pubkey) {
             self.subscribed_pubkeys.lock().insert(pubkey);
         }
+
+        /// Directly remove a subscription without going through unsubscribe().
+        /// Useful for testing already-missing cleanup scenarios.
+        pub fn remove_subscription(&self, pubkey: &Pubkey) {
+            self.subscribed_pubkeys.lock().remove(pubkey);
+        }
     }
 
     #[async_trait]
@@ -575,6 +642,13 @@ pub mod mock {
                         "mock: subscribe while disconnected".to_string(),
                     ),
                 );
+            }
+            {
+                let mut to_noop = self.pending_silent_subscribe_noops.lock();
+                if *to_noop > 0 {
+                    *to_noop -= 1;
+                    return Ok(());
+                }
             }
             {
                 let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
@@ -647,8 +721,15 @@ pub mod mock {
             }
 
             let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
-            subscribed_pubkeys.remove(&pubkey);
-            Ok(())
+            if subscribed_pubkeys.remove(&pubkey) {
+                Ok(())
+            } else {
+                Err(
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                        pubkey.to_string(),
+                    ),
+                )
+            }
         }
 
         async fn shutdown(&self) -> RemoteAccountProviderResult<()> {

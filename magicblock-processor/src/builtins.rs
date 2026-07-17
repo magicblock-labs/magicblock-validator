@@ -61,6 +61,11 @@ pub static BUILTINS: &[Builtin] = &[
         entrypoint: magicblock_processor::PostDelegationActionEntrypoint::vm,
     },
     Builtin {
+        program_id: magicblock_program::EPHEMERAL_SYSTEM_PROGRAM_ID,
+        name: "magicblock_ephemeral_system_program",
+        entrypoint: magicblock_processor::EphemeralSystemEntrypoint::vm,
+    },
+    Builtin {
         program_id: compute_budget::ID,
         name: "compute_budget_program",
         entrypoint: solana_compute_budget_program::Entrypoint::vm,

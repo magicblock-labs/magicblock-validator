@@ -6,9 +6,9 @@
 
 High-level responsibilities:
 
-- expose `CommittorService` / `BaseIntentCommittor` as the async service boundary used by `magicblock-api`, `magicblock-accounts`, and account cloning;
+- expose `CommittorService` / `BaseIntentCommittor` as the async service boundary used by `magicblock-api` and account cloning;
 - schedule intent bundles without executing mutually conflicting committed accounts in parallel;
-- fetch Delegation Program metadata, commit nonces, rent reimbursements, and base accounts needed for task construction;
+- fetch Delegation Program metadata, including commit nonces and rent payer data, plus base accounts needed for task construction;
 - choose commit delivery strategies: state args, diff args, state buffers, diff buffers, and optional ALTs;
 - prepare and clean up committor-program buffer accounts and TableMania lookup-table reservations;
 - execute single-stage or two-stage base-layer transaction flows and schedule action callbacks;
@@ -55,7 +55,7 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `src/persist/` | SQLite persistence for commit rows, bundle signatures, status/strategy enums, and conversion utilities. |
 | `src/stubs/` | Feature-gated dev/test stub committor behind `dev-context-only-utils`. |
 | `magicblock-api/src/magic_validator.rs` | Starts the service at validator initialization with `committor_service.sqlite`, validator keypair, RPC URL, websocket URL, compute-unit price, and action callback scheduler. |
-| `magicblock-accounts/src/scheduled_commits_processor.rs` | Main runtime producer/consumer: takes scheduled intent bundles from the transaction scheduler, schedules them with the committor, consumes result broadcasts, and performs pending-intent recovery after ledger replay. |
+| `src/service.rs` and `src/service/intent_client.rs` | Runtime producer/consumer: accepts scheduled intent bundles from `MagicContext`, schedules them with the committor, consumes result broadcasts, submits `ScheduledCommitSent`, and performs pending-intent recovery after ledger replay. |
 | `magicblock-account-cloner/src/account_cloner.rs` | Uses `BaseIntentCommittor` for lookup-table reservation around account cloning and diagnostic mapping of committor errors. |
 | `magicblock-api/src/magic_sys_adapter.rs` | Fetches current commit nonces through the committor service for Magic syscalls. |
 | `test-integration/test-committor-service/` | Integration coverage for delivery preparators, transaction preparators, intent executor flows, and local commit execution. |
@@ -136,14 +136,15 @@ magicblock-api::MagicValidator::init_committor_service
   -> actor run loop spawned on Tokio
 ```
 
-The service is initialized before the account manager starts pending-intent recovery. Pending recovery must run after ledger replay so local accounts reflect delegated state before recovered intents are checked.
+The intent execution service is started after ledger replay/reset so pending recovery sees local accounts that reflect current delegated state before recovered intents are checked.
 
 ### Fresh scheduled intent flow
 
 ```text
 Magic Program schedules intent in ER
-  -> transaction scheduler exposes ScheduledIntentBundle(s)
-  -> magicblock-accounts::ScheduledCommitsProcessor::process
+  -> MagicContext stores ScheduledIntentBundle(s)
+  -> InternalIntentRpcClient executes AcceptScheduleCommits locally
+  -> TransactionScheduler exposes accepted ScheduledIntentBundle(s)
   -> CommittorService::schedule_intent_bundles
   -> CommittorProcessor::schedule_intent_bundle
      -> IntentPersisterImpl::start_base_intents
@@ -152,19 +153,19 @@ Magic Program schedules intent in ER
      -> IntentScheduler blocks conflicts by committed pubkeys
      -> IntentExecutorImpl executes selected intent
      -> broadcast result
-  -> ScheduledCommitsProcessor consumes result and updates local/metadata state
+  -> IntentExecutionService consumes result and submits ScheduledCommitSent locally
 ```
 
 `CommittorProcessor::schedule_intent_bundle` logs persistence failures but still tries to execute. This is intentionally loud because losing persistence weakens restart recovery; do not hide or downgrade that error path.
 
 ### Recovery flow for pending intents
 
-1. `magicblock-accounts` calls `get_pending_intent_bundles()` after replay.
+1. `IntentExecutionService` calls `pending_intent_bundles()` after replay/reset when it starts.
 2. `CommittorProcessor::pending_intent_bundles` loads SQLite rows with `CommitStatus::Pending` and `created_at` inside the 14-day recovery window.
 3. It fetches the current base-layer slot and reconstructs `ScheduledIntentBundle`s grouped by `message_id`.
 4. Rows for a message must agree on ER slot and ER blockhash; otherwise that message is skipped.
 5. Data-account rows without stored data are skipped because they cannot reconstruct a `CommittedAccount` safely.
-6. `magicblock-accounts` filters recovered bundles against current delegated state, then calls `schedule_recovered_intent_bundles` so rows are not inserted again.
+6. `IntentExecutionService` filters recovered bundles against current delegated state, then calls `schedule_recovered_intent_bundles` so rows are not inserted again.
 
 Preserve the no-repersist path for recovered intents. Re-inserting rows can violate primary keys or duplicate status history.
 
@@ -189,9 +190,10 @@ The scheduler blocks on the union of `ScheduledIntentBundle::get_all_committed_p
 IntentExecutorImpl::execute
   -> mark persisted rows Pending
   -> TaskBuilderImpl::commit_tasks + finalize_tasks
-     -> fetch next commit nonces and diffable base accounts using max(remote_slot)
+     -> fetch next commit nonces, delegation metadata, and diffable base accounts using max(remote_slot)
      -> persist commit_id for each committed account
      -> create commit, commit-finalize, undelegate, finalize, and action tasks
+  -> tag intents whose commit uses nonce <= 1 with a per-intent uniqueness noop
   -> TaskStrategist::build_execution_strategy
      -> try single transaction when total task count <= 22 and it fits
      -> optimize large tasks to buffers when needed
@@ -200,8 +202,12 @@ IntentExecutorImpl::execute
   -> TransactionPreparator prepares buffers/ALTs and assembles VersionedMessage
   -> SingleStageExecutor or TwoStageExecutor sends base-layer transactions
   -> persist final status/signatures and schedule callbacks
-  -> reset nonce cache on errors or undelegation
+  -> reset nonce cache for all committed pubkeys on errors, or only undelegated pubkeys on successful undelegation
 ```
+
+Current DLP finalize instructions do not undelegate and require only the validator plus delegated account, so `FinalizeTask` and `CommitFinalizeTask` no longer fetch or carry owner/rent metadata. Finalize-stage `UndelegateTask`s complete ownership return through standalone DLP `Undelegate`. For owner-program requests, task building detects `DelegationMetadata.undelegation_requester = OwnerProgram` and includes the derived request PDA; DLP validates that request account and uses `DelegationMetadata.rent_payer` to close both delegation and request accounts. For validator-requested undelegation, or metadata still showing `None` because commit and finalize task lists are built before the commit-stage transaction records the validator requester on base, no request account is included.
+
+Transaction fit is not only packet size. `TaskStrategist` currently checks whether a single-stage transaction or each two-stage transaction fits the wire size, optionally after switching commits to buffers and adding ALTs, but it does not split a transaction stage by compute units. Each commit, finalize, commit-finalize, and undelegate task currently advertises `120_000` CU, while Agave caps a transaction at `1_400_000` CU. Keep task bundles below that transaction-level cap unless the strategist and executor/output/persistence model are extended to split, record, and confirm multiple transactions for the affected stage.
 
 For committed accounts with `data.len() > COMMIT_STATE_SIZE_THRESHOLD` (`256`), the task builder fetches the base account and may use diff-in-args delivery. If the base-account fetch fails, it falls back to full state args and logs a warning. This can increase transaction size and trigger buffer/ALT strategy later.
 
@@ -221,13 +227,15 @@ Cleanup closes prepared buffers and releases TableMania pubkeys. `IntentExecutio
 
 ### Commit nonce cache
 
-`CacheTaskInfoFetcher` caches commit nonces in a 1,000-entry LRU. It uses per-pubkey async mutexes acquired in sorted order to avoid A→B / B→A deadlocks, and a `retiring` map to keep evicted locks alive while in-flight requests still hold them. `fetch_next_commit_nonces` increments cached values and reserves the next nonce; `fetch_current_commit_nonces` reads/stores the current value without incrementing. After a failed commit or undelegation, `IntentExecutorImpl` resets the cache for affected pubkeys.
+`CacheTaskInfoFetcher` caches commit nonces in a 10,000-entry LRU. It uses per-pubkey async mutexes acquired in sorted order to avoid A->B / B->A deadlocks, and a `retiring` map to keep evicted locks alive while in-flight requests still hold them. `fetch_next_commit_nonces` increments cached values and reserves the next nonce; `fetch_current_commit_nonces` reads/stores the current value without incrementing.
+
+`IntentExecutorImpl` resets cached nonces according to execution certainty. On any execution error, it resets all committed pubkeys because it cannot know what landed on chain. On successful undelegation paths, it resets only the pubkeys returned by `get_undelegate_intent_pubkeys()` and `get_commit_finalize_and_undelegate_intent_pubkeys()`. Other successfully committed pubkeys keep their incremented cached nonce, which avoids a chain re-fetch racing the just-landed finalize and reusing a stale nonce/buffer PDA.
 
 Do not remove sorted lock acquisition or the retiring map without replacing the deadlock/race prevention. Commit nonce races can cause base-layer commit failures and stuck undelegations.
 
 ### `min_context_slot` and freshness
 
-Task-info RPC reads use the maximum `remote_slot` across committed accounts as `min_context_slot` when fetching delegation metadata and diffable base accounts. This helps avoid building commits against base-layer state older than the ER account snapshot. The fetcher retries `Minimum context slot not reached` up to five times with short sleeps. Preserve this freshness check unless the broader account-sync/settlement contract changes.
+Task-info RPC reads use the maximum `remote_slot` across committed accounts as `min_context_slot` when fetching delegation metadata and diffable base accounts. This helps avoid building commits or standalone undelegate tasks against base-layer state older than the ER account snapshot, including stale rent-payer or owner-program requester metadata. The fetcher retries `Minimum context slot not reached` up to five times with short sleeps. Preserve this freshness check unless the broader account-sync/settlement contract changes.
 
 ### Persistence is both status API and recovery state
 
@@ -236,6 +244,12 @@ SQLite rows are used by operator/status APIs and by restart recovery. Updating s
 ### Buffers, ALTs, and transaction fit
 
 `TaskStrategist` first tries args, then buffer optimization, then ALTs. It chooses two-stage execution in cases where a single-stage ALT transaction would be slower than two no-ALT transactions. Altering thresholds such as `MAX_UNITED_TASKS_LEN = 22`, `COMMIT_STATE_SIZE_THRESHOLD = 256`, transaction-size constants, or buffer chunking changes latency, RPC transaction counts, and fit behavior.
+
+### Per-intent uniqueness noop
+
+Intent transactions are otherwise built from fully deterministic inputs. After an undelegate/re-delegate cycle the delegation metadata nonce restarts, so a first commit (nonce 1) can be byte-identical to a prior instance's landed transaction: identical bytes yield the identical signature, the skip-preflight send is deduped by the network, and the status-based confirmer matches the old transaction — the intent reports success without executing. `IntentExecutorImpl::execute_inner` therefore passes `Some(intent_id)` as `uniqueness_nonce` to `TaskStrategist` for intents whose commit uses nonce <= 1 (and always for standalone actions). The strategist renders it as a constant-size spl-noop instruction carrying the intent id on every produced stage — the finalize stage needs the same protection, since without the noop its bytes contain nothing per-instance — and includes it in all fit checks. Retries of the same intent keep the same id, preserving intentional dedup. Commit-id recovery (`handle_commit_id_error`) re-tags the strategy when a stale-cache retry lands back on nonce 1. The noop program must exist on the base layer (deployed on mainnet/devnet; loaded from `test-integration/schedulecommit/elfs/noop.so` in integration configs).
+
+The same uniqueness nonce is appended to every independently signed buffer init, realloc, write, and cleanup transaction sent by `DeliveryPreparator`. Buffer PDAs are keyed by authority, account pubkey, and commit id; because the commit id restarts at 1 after re-delegation, those transactions could otherwise alias a prior delegation instance under the same cached base-layer blockhash. Reusing the intent id keeps retries of one intent idempotent while ensuring a later delegation instance produces distinct signatures. Keep the noop in every buffer lifecycle stage: protecting only initialization still allows an old resize, chunk write, or close status to be mistaken for the current operation.
 
 ### Actions and callbacks
 
@@ -251,13 +265,14 @@ The public service API uses nonblocking `try_send`. If the service channel is fu
 2. Preserve FIFO blocking semantics across indirectly blocked intents; later intents must not bypass an earlier blocked intent sharing any key.
 3. Do not schedule duplicate intent ids in the same scheduler/execution-extension context.
 4. Commit nonces must be fetched with base-layer freshness (`min_context_slot`) and incremented atomically per account.
-5. A failed or undelegating intent must reset cached nonces for affected accounts.
+5. Execution errors must reset cached nonces for all committed pubkeys; successful undelegation must reset only the undelegated pubkeys and preserve other committed-account cache entries.
 6. Fresh intent scheduling must persist rows before execution when possible; recovered scheduling must not reinsert rows.
 7. Pending-intent recovery must reconstruct only rows inside the recovery window and skip inconsistent or incomplete persisted groups.
 8. Buffer accounts and ALTs must be prepared before transaction assembly uses them, and released/closed only when safe.
 9. Failed intent cleanup must not race with retries using the same buffer PDAs; current cleanup is success-only for that reason.
 10. Transaction-size and compute-budget choices must keep produced transactions under Solana wire limits.
 11. Base-layer sends must preserve explicit processed/committed confirmation semantics from `magicblock-rpc-client`.
+12. Intents whose commit uses nonce <= 1 must carry the per-intent uniqueness noop on every stage; otherwise their transactions can alias a prior delegation instance's landed signature and report success without executing.
 12. Signer/authority requirements for validator-signed commits, committor-program buffers, ALTs, callbacks, and base-layer instructions must not be relaxed.
 13. Persistence status/signature updates must continue to expose enough information for diagnostics, retries, and recovery.
 14. Avoid adding blocking I/O or unbounded work to service actor, scheduler, executor, task-preparation, or RPC hot paths.
@@ -266,7 +281,7 @@ The public service API uses nonblocking `try_send`. If the service channel is fu
 
 ### Changing service API, startup, or shutdown
 
-Start with `src/service.rs`, `src/committor_processor.rs`, and `magicblock-api/src/magic_validator.rs`. Then inspect `magicblock-accounts/src/scheduled_commits_processor.rs`, `magicblock-account-cloner/src/account_cloner.rs`, and `magicblock-api/src/magic_sys_adapter.rs`. Check oneshot behavior, channel capacity/backpressure, cancellation, and whether consumers need errors instead of logged-only failures.
+Start with `src/service.rs`, `src/service/intent_client.rs`, `src/committor_processor.rs`, and `magicblock-api/src/magic_validator.rs`. Then inspect `magicblock-account-cloner/src/account_cloner.rs` and `magicblock-api/src/magic_sys_adapter.rs`. Check oneshot behavior, channel capacity/backpressure, cancellation, and whether consumers need errors instead of logged-only failures.
 
 ### Changing scheduling or concurrency
 
@@ -286,7 +301,7 @@ Start with `src/transaction_preparator/mod.rs` and `delivery_preparator.rs`, the
 
 ### Changing persistence or recovery
 
-Start with `src/persist/db.rs`, `src/persist/commit_persister.rs`, `src/persist/types/`, and `src/committor_processor.rs` recovery helpers. Then inspect `magicblock-accounts/src/scheduled_commits_processor.rs`. Preserve schema compatibility, enum string values, `u64`/`i64` conversions, row grouping by `message_id`, 14-day recovery window, and no-repersist recovery scheduling.
+Start with `src/persist/db.rs`, `src/persist/commit_persister.rs`, `src/persist/types/`, `src/committor_processor.rs` recovery helpers, and `src/service.rs` recovery filtering. Preserve schema compatibility, enum string values, `u64`/`i64` conversions, row grouping by `message_id`, 14-day recovery window, and no-repersist recovery scheduling.
 
 ### Changing metrics or observability
 
@@ -306,6 +321,6 @@ Start with metric calls in `intent_execution_engine.rs`, `delivery_preparator.rs
 - `.agents/context/crates/magicblock-committor-program.md` — buffer/chunks on-chain helper contracts.
 - `.agents/context/crates/magicblock-rpc-client.md` — base-layer send/confirm and RPC helper behavior.
 - `.agents/context/crates/magicblock-table-mania.md` — ALT lifecycle and finalized-read semantics.
-- `.agents/context/crates/magicblock-accounts.md` — scheduled commit processing and pending-intent recovery call sites.
+- `.agents/context/crates/magicblock-services.md` — request-driven local scheduling that can create commit-and-undelegate intents.
 - `magicblock-committor-service/README.md` — high-level implementation notes.
 - `test-integration/test-committor-service/` — integration coverage of delivery and intent execution.
