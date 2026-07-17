@@ -116,7 +116,7 @@ MagicValidator::start
   -> if Replica: do not start task scheduler
 ```
 
-On `start()`, `migrate_persisted_tasks` reads all legacy rows from `tasks`, removes invalid rows (`execution_interval_millis <= 0`, `>= u32::MAX`, or `executions_left <= 0`), waits for a usable blockhash and delegated/funded faucet, creates each valid Hydra crank, and removes each row whether migration succeeds or fails so the legacy database empties. If a legacy row has `last_execution_millis > 0`, migration preserves its cadence by converting the remaining wall-clock delay until `last_execution_millis + execution_interval_millis` into slots and adding those slots to the current block snapshot slot for Hydra `start_slot`; overdue or never-run tasks start at the current slot.
+On `start()`, `migrate_persisted_tasks` reads all legacy rows from `tasks`, removes invalid rows (`execution_interval_millis <= 0`, `>= u32::MAX`, or `executions_left <= 0`), waits for a usable blockhash and delegated/funded faucet, creates each valid Hydra crank, and removes each row only if its crank was created successfully; rows whose crank creation fails remain in the legacy database to be retried on the next startup. If a legacy row has `last_execution_millis > 0`, migration preserves its cadence by converting the remaining wall-clock delay until `last_execution_millis + execution_interval_millis` into slots and adding those slots to the current block snapshot slot for Hydra `start_slot`; overdue or never-run tasks start at the current slot.
 
 ### Schedule request flow
 

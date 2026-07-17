@@ -131,10 +131,11 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    /// Migrates every task persisted by the legacy scheduler onto hydra, then
-    /// empties the database. Invalid tasks are dropped without rescheduling.
-    /// Migration is best-effort: a task is removed from the database whether or
-    /// not its hydra crank could be created, so the database always empties.
+    /// Migrates every task persisted by the legacy scheduler onto hydra.
+    /// Invalid tasks are dropped without rescheduling. Migration is
+    /// best-effort: a valid task is removed from the database only if its
+    /// hydra crank was created successfully; otherwise it remains in SQLite
+    /// to be retried on the next startup.
     async fn migrate_persisted_tasks(&self) -> TaskSchedulerResult<()> {
         let tasks = self.db.get_tasks().await?;
         if tasks.is_empty() {
