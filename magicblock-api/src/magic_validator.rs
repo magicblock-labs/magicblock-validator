@@ -127,7 +127,8 @@ pub struct MagicValidator {
     replication_handle:
         Option<thread::JoinHandle<magicblock_replicator::Result<()>>>,
     mode_tx: Sender<SchedulerMode>,
-    replication_tx: Sender<Message>,
+    /// `None` when replication is disabled, i.e. the validator runs standalone.
+    replication_tx: Option<Sender<Message>>,
     unregister_handle: Option<thread::JoinHandle<()>>,
     is_standalone: bool,
 }
@@ -224,7 +225,7 @@ impl MagicValidator {
             None
         };
         let accountsdb = Arc::new(accountsdb);
-        let (mut dispatch, validator_channels) = link();
+        let (mut dispatch, validator_channels) = link(!is_standalone);
         let shared_chain_slot =
             (!Self::replication_mode_uses_disabled_chainlink(
                 &config.validator.replication_mode,
@@ -1022,7 +1023,14 @@ impl MagicValidator {
                 self.config.validator.replication_mode,
                 ReplicationMode::Primary(_)
             ) {
-                self.replication_tx
+                let replication_tx =
+                    self.replication_tx.as_ref().ok_or_else(|| {
+                        ApiError::FailedToSendModeSwitch(
+                            "replication sink missing in primary mode"
+                                .to_owned(),
+                        )
+                    })?;
+                replication_tx
                     .send(Message::Reset(self.accountsdb.slot()))
                     .await
                     .map_err(|e| {
