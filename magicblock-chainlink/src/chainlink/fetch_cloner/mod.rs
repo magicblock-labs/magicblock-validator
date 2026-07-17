@@ -1742,7 +1742,12 @@ where
         }
 
         if account.executable() {
-            self.handle_executable_sub_update(pubkey, account).await;
+            self.handle_executable_sub_update(
+                pubkey,
+                account,
+                &companion_fetch_log_context,
+            )
+            .await;
         } else {
             let commit_frequency_ms = deleg_record.as_ref().and_then(|dr| {
                 dr.authority
@@ -2144,10 +2149,16 @@ where
         &self,
         pubkey: Pubkey,
         account: AccountSharedData,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) {
         // moved to program_loader module
-        program_loader::handle_executable_sub_update(self, pubkey, account)
-            .await;
+        program_loader::handle_executable_sub_update_with_context(
+            self,
+            pubkey,
+            account,
+            companion_fetch_log_context,
+        )
+        .await;
     }
 
     async fn cleanup_direct_subscription_for_delegated_account(
