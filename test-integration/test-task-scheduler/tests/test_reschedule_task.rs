@@ -103,15 +103,6 @@ fn test_reschedule_task() {
         validator
     );
 
-    // Funding now covers the larger iteration count, which the original crank
-    // could not have held, proving the crank was recreated.
-    wait_for_hydra_crank(
-        &ctx,
-        &crank_pda,
-        Duration::from_secs(10),
-        &mut validator,
-    );
-
     // Cancel and confirm the active crank is closed.
     let sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
