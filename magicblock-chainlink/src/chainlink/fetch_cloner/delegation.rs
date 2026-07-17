@@ -6,7 +6,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
     try_derive_eata_address_and_bump, EphemeralAta, EATA_PROGRAM_ID,
 };
-use magicblock_metrics::metrics;
+use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
 use solana_account::ReadableAccount;
 use solana_keypair::Keypair;
 use solana_program::program_error::ProgramError;
@@ -204,10 +204,13 @@ where
             &[delegation_record_pubkey],
             Some(MatchSlotsConfig {
                 min_context_slot: Some(min_context_slot),
-                companion_fetch_kind: None,
+                companion_fetch_kind: Some(
+                    ChainlinkCompanionFetchKind::DelegationRecord,
+                ),
                 ..Default::default()
             }),
-            fetch_context,
+            fetch_context
+                .with_reason(metrics::AccountFetchReason::DelegationRecord),
         )
         .await
     {

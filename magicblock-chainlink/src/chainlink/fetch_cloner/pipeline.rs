@@ -6,6 +6,7 @@ use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, ChainlinkCloneIntent,
     ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
+    ChainlinkCompanionFetchKind,
 };
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -499,7 +500,9 @@ where
                 &pubkeys_to_fetch,
                 Some(MatchSlotsConfig {
                     min_context_slot: batch_min_context_slot,
-                    companion_fetch_kind: None,
+                    companion_fetch_kind: Some(
+                        ChainlinkCompanionFetchKind::ProgramData,
+                    ),
                     ..Default::default()
                 }),
                 fetch_context.with_reason(AccountFetchReason::ProgramData),

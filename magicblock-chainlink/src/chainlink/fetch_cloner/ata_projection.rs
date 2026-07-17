@@ -7,7 +7,7 @@ use magicblock_core::token_programs::{
     is_ata, try_derive_eata_address_and_bump, try_derive_supported_ata_pubkeys,
     AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
 };
-use magicblock_metrics::metrics;
+use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
@@ -240,7 +240,9 @@ where
             ata_pubkeys,
             Some(MatchSlotsConfig {
                 min_context_slot: Some(min_context_slot),
-                companion_fetch_kind: None,
+                companion_fetch_kind: Some(
+                    ChainlinkCompanionFetchKind::AtaProjection,
+                ),
                 ..Default::default()
             }),
             metrics::AccountFetchContext::project_ata(),
@@ -321,7 +323,9 @@ where
             &[eata_pubkey],
             Some(MatchSlotsConfig {
                 min_context_slot: Some(ata_account.remote_slot()),
-                companion_fetch_kind: None,
+                companion_fetch_kind: Some(
+                    ChainlinkCompanionFetchKind::AtaProjection,
+                ),
                 ..Default::default()
             }),
             metrics::AccountFetchContext::project_ata(),
@@ -474,6 +478,7 @@ where
                 eata,
                 effective_slot,
                 ata_projection_context,
+                ChainlinkCompanionFetchKind::AtaProjection,
             ));
         } else {
             // eATA derivation failed, but still queue the ATA for cloning
@@ -486,6 +491,7 @@ where
                 Pubkey::default(), // Dummy companion - will be marked as NotFound
                 effective_slot,
                 ata_projection_context,
+                ChainlinkCompanionFetchKind::AtaProjection,
             ));
         }
     }

@@ -27,8 +27,9 @@ use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
     BankPrecheckReason, ChainlinkCloneIntent,
     ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
-    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage,
-    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome, Outcome,
+    ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
+    ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome, Outcome,
 };
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
@@ -2219,6 +2220,7 @@ where
                         AccountFetchContext::subscription_update(
                             AccountFetchReason::DelegationRecord,
                         ),
+                        ChainlinkCompanionFetchKind::DelegationRecord,
                     )
                     .await
                 {
@@ -3369,6 +3371,7 @@ where
             delegation_record_pubkey,
             slot,
             fetch_context.with_reason(AccountFetchReason::DelegationRecord),
+            ChainlinkCompanionFetchKind::DelegationRecord,
         )
     }
 
@@ -3384,7 +3387,8 @@ where
             pubkey,
             program_data_pubkey,
             slot,
-            fetch_context,
+            fetch_context.with_reason(AccountFetchReason::ProgramData),
+            ChainlinkCompanionFetchKind::ProgramData,
         )
     }
 
@@ -3394,6 +3398,7 @@ where
         companion_pubkey: Pubkey,
         slot: u64,
         fetch_context: AccountFetchContext,
+        companion_fetch_kind: ChainlinkCompanionFetchKind,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let provider = self.remote_account_provider.clone();
         let bank = self.accounts_bank.clone();
@@ -3414,7 +3419,7 @@ where
                     &[pubkey, companion_pubkey],
                     Some(MatchSlotsConfig {
                         min_context_slot: Some(slot),
-                        companion_fetch_kind: None,
+                        companion_fetch_kind: Some(companion_fetch_kind),
                         ..Default::default()
                     }),
                     fetch_context,
