@@ -230,17 +230,13 @@ pub fn wait_for_hydra_crank_closed(
 ) {
     let now = Instant::now();
     while now.elapsed() < max_timeout {
-        let closed = match ctx
-            .try_ephem_client()
-            .ok()
-            .and_then(|client| client.get_account(crank_pda).ok())
-        {
-            // Account fully removed.
-            None => true,
-            // Closed ephemeral accounts are drained to zero lamports.
-            Some(account) => account.lamports == 0,
-        };
-        if closed {
+        let client = expect!(ctx.try_ephem_client(), validator);
+        let account = expect!(
+            client.get_account_with_commitment(crank_pda, ctx.commitment),
+            validator
+        )
+        .value;
+        if account.is_none_or(|account| account.lamports == 0) {
             return;
         }
         expect!(ctx.wait_for_next_slot_ephem(), validator);
