@@ -5,13 +5,18 @@ use std::{
 };
 
 use magicblock_metrics::metrics::{
+    chainlink_companion_fetch_attempts_sample_count,
+    chainlink_companion_fetch_attempts_sample_sum,
+    chainlink_companion_fetch_duration_sample_count,
+    chainlink_companion_fetch_duration_sample_sum,
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
     chainlink_pending_fetch_waiters_value,
     chainlink_subscription_cleanup_accounts_value,
     chainlink_subscription_registration_accounts_value,
-    chainlink_subscription_release_accounts_value, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome,
+    chainlink_subscription_release_accounts_value, AccountFetchReason,
+    ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
 };
 use solana_account::Account;
 use solana_system_interface::program as system_program;
@@ -301,6 +306,210 @@ async fn setup_matching_slots(
         .unwrap(),
         forward_rx,
     )
+}
+
+#[tokio::test]
+async fn test_companion_fetch_metrics_record_fast_path_success() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+    let context = AccountFetchContext::subscription_update(
+        AccountFetchReason::ProgramData,
+    );
+    let kind = ChainlinkCompanionFetchKind::ProgramData;
+    let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
+    let attempts_count_before =
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
+    let attempts_sum_before =
+        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome);
+    let duration_count_before =
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
+    let duration_sum_before =
+        chainlink_companion_fetch_duration_sample_sum(context, kind, outcome);
+
+    let res = remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            Some(MatchSlotsConfig {
+                max_retries: 10,
+                retry_interval_ms: 50,
+                min_context_slot: Some(CURRENT_SLOT),
+                companion_fetch_kind: Some(kind),
+            }),
+            context,
+        )
+        .await;
+
+    assert!(res.is_ok());
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        attempts_count_before + 1
+    );
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome),
+        attempts_sum_before + 1.0
+    );
+    assert_eq!(
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
+        duration_count_before + 1
+    );
+    assert!(
+        chainlink_companion_fetch_duration_sample_sum(context, kind, outcome)
+            >= duration_sum_before
+    );
+}
+
+#[tokio::test]
+async fn test_companion_fetch_metrics_record_retry_success() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+    let rpc_to_advance = remote_account_provider.rpc_client.clone();
+    let advance_handle = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        rpc_to_advance.set_slot(CURRENT_SLOT + 1);
+    });
+    let context = AccountFetchContext::subscription_update(
+        AccountFetchReason::ProgramData,
+    );
+    let kind = ChainlinkCompanionFetchKind::ProgramData;
+    let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
+    let attempts_count_before =
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
+    let attempts_sum_before =
+        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome);
+
+    let res = remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            Some(MatchSlotsConfig {
+                max_retries: 20,
+                retry_interval_ms: 10,
+                min_context_slot: Some(CURRENT_SLOT + 1),
+                companion_fetch_kind: Some(kind),
+            }),
+            context,
+        )
+        .await;
+    advance_handle.await.unwrap();
+
+    assert!(res.is_ok());
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        attempts_count_before + 1
+    );
+    assert!(
+        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome)
+            > attempts_sum_before + 1.0
+    );
+}
+
+#[tokio::test]
+async fn test_companion_fetch_metrics_record_slot_mismatch_failure() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    let context = AccountFetchContext::rpc_get_account()
+        .with_reason(AccountFetchReason::DelegationRecord);
+    let kind = ChainlinkCompanionFetchKind::DelegationRecord;
+    let outcome = ChainlinkCompanionFetchOutcome::FailedSlotMismatch;
+    let attempts_count_before =
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
+    let duration_count_before =
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
+
+    // RPC-only retries in the provider test mock use one batch context slot,
+    // which normalizes slots before the terminal mismatch branch. Exercise the
+    // private observation helper directly so this test covers the metric path
+    // without changing production retry behavior.
+    observe_companion_fetch_if_configured(
+        context,
+        Some(kind),
+        outcome,
+        1,
+        std::time::Instant::now(),
+    );
+
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        attempts_count_before + 1
+    );
+    assert_eq!(
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
+        duration_count_before + 1
+    );
+}
+
+#[tokio::test]
+async fn test_companion_fetch_metrics_not_recorded_without_kind() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+    let context = AccountFetchContext::project_ata();
+    let kind = ChainlinkCompanionFetchKind::AtaProjection;
+    let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
+    let attempts_count_before =
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
+    let duration_count_before =
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
+
+    let res = remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            Some(MatchSlotsConfig {
+                max_retries: 10,
+                retry_interval_ms: 50,
+                min_context_slot: Some(CURRENT_SLOT),
+                companion_fetch_kind: None,
+            }),
+            context,
+        )
+        .await;
+
+    assert!(res.is_ok());
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        attempts_count_before
+    );
+    assert_eq!(
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
+        duration_count_before
+    );
 }
 
 #[tokio::test]
@@ -1461,6 +1670,7 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot() {
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: None,
+                companion_fetch_kind: None,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1531,6 +1741,7 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
                         max_retries: 3,
                         retry_interval_ms: 10,
                         min_context_slot: None,
+                        companion_fetch_kind: None,
                     }),
                     AccountFetchContext::rpc_get_account(),
                 )
@@ -1608,6 +1819,7 @@ async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: None,
+                companion_fetch_kind: None,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1652,6 +1864,7 @@ async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT + 1),
+                companion_fetch_kind: None,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1691,6 +1904,7 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_accou
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT),
+                companion_fetch_kind: None,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1712,6 +1926,7 @@ fn test_match_slots_retry_delay_honors_configured_interval() {
         max_retries: 10,
         retry_interval_ms: 50,
         min_context_slot: None,
+        companion_fetch_kind: None,
     };
 
     assert_eq!(match_slots_retry_delay(&config), Duration::from_millis(50));

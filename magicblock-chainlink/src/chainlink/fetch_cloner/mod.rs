@@ -3414,6 +3414,7 @@ where
                     &[pubkey, companion_pubkey],
                     Some(MatchSlotsConfig {
                         min_context_slot: Some(slot),
+                        companion_fetch_kind: None,
                         ..Default::default()
                     }),
                     fetch_context,

@@ -240,6 +240,7 @@ where
             ata_pubkeys,
             Some(MatchSlotsConfig {
                 min_context_slot: Some(min_context_slot),
+                companion_fetch_kind: None,
                 ..Default::default()
             }),
             metrics::AccountFetchContext::project_ata(),
@@ -320,6 +321,7 @@ where
             &[eata_pubkey],
             Some(MatchSlotsConfig {
                 min_context_slot: Some(ata_account.remote_slot()),
+                companion_fetch_kind: None,
                 ..Default::default()
             }),
             metrics::AccountFetchContext::project_ata(),

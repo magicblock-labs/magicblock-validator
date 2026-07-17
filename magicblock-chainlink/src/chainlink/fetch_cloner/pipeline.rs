@@ -499,6 +499,7 @@ where
                 &pubkeys_to_fetch,
                 Some(MatchSlotsConfig {
                     min_context_slot: batch_min_context_slot,
+                    companion_fetch_kind: None,
                     ..Default::default()
                 }),
                 fetch_context.with_reason(AccountFetchReason::ProgramData),
