@@ -165,6 +165,16 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
             )
             .unwrap();
 
+        // Fund the task scheduler's faucet so it can be delegated and pay for
+        // hydra cranks; otherwise scheduled tasks never execute.
+        if let Some(faucet_keypair) =
+            config.task_scheduler.faucet_keypair.as_ref()
+        {
+            chain_only_ctx
+                .airdrop_chain(&faucet_keypair.pubkey(), 20 * LAMPORTS_PER_SOL)
+                .unwrap();
+        }
+
         // Init fees vault for validator
         init_validator_fees_vault(
             &chain_only_ctx,
