@@ -28,6 +28,7 @@ use crate::tasks::{
 // 4 u64 fields. These integers are expected to be on the hot path
 // and updated continuously.
 pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
+pub(crate) const PREFIX_INSTRUCTION_COUNT: usize = 2;
 
 /// Builds a [`BaseTaskImpl`] for each `action`, used by both
 /// [`crate::tasks::task_builder::TaskBuilderImpl`] (real task construction)
@@ -188,6 +189,7 @@ impl TransactionUtils {
             Self::tasks_accounts_size_budget(tasks),
         );
         let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
+        // Note: if order changes IntentTransactionErrorMapper would have to be modified
         if let Some(nonce) = uniqueness_nonce {
             ixs.push(Self::uniqueness_noop_instruction(nonce));
         }
@@ -288,7 +290,7 @@ impl TransactionUtils {
         compute_units: u32,
         compute_unit_price: u64,
         _accounts_size_budget: u32,
-    ) -> [Instruction; 2] {
+    ) -> [Instruction; PREFIX_INSTRUCTION_COUNT] {
         [
             ComputeBudgetInstruction::set_compute_unit_limit(compute_units),
             ComputeBudgetInstruction::set_compute_unit_price(

@@ -88,7 +88,6 @@ impl std::error::Error for CallbackScheduleError {
 pub enum ActionError {
     TimeoutError,
     ActionsError(TransactionError, Option<Signature>),
-    IntentFailedError(String),
 }
 
 impl fmt::Display for ActionError {
@@ -100,9 +99,6 @@ impl fmt::Display for ActionError {
                     f,
                     "User supplied actions are ill-formed: {err}. {sig:?}"
                 )
-            }
-            Self::IntentFailedError(msg) => {
-                write!(f, "Intent execution failed: {msg}")
             }
         }
     }

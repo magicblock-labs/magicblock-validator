@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use futures_util::future::join;
-use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
@@ -99,9 +99,12 @@ where
             err
         }
         res => {
-            let signature = res.as_ref().ok().copied();
-            single_stage_executor
-                .execute_callbacks(signature, res.as_ref().map(|_| ()));
+            if let Ok(signature) = res {
+                single_stage_executor.execute_callbacks(
+                    Some(signature),
+                    Ok::<_, ActionError>(()),
+                );
+            }
             let transaction_strategy = single_stage_executor.consume_strategy();
             #[cfg(feature = "dev-context-only-utils")]
             execution_report.add_succeeded_transaction_strategy(

@@ -1,4 +1,3 @@
-use magicblock_core::traits::ActionError;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     utils::TransactionErrorMapper, MagicBlockRpcClientError,
@@ -8,7 +7,10 @@ use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use tracing::error;
 
-use crate::{intent_executor::error::InternalError, tasks::BaseTaskImpl};
+use crate::{
+    intent_executor::error::InternalError,
+    tasks::{utils::PREFIX_INSTRUCTION_COUNT, BaseTaskImpl},
+};
 
 /// Those are the errors that may occur during Commit/Finalize stages on Base layer
 #[derive(thiserror::Error, Debug)]
@@ -43,7 +45,7 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
 impl TransactionStrategyExecutionError {
     /// Number of compute budget instructions prepended to every transaction.
     /// Used to map instruction indices back to task indices.
-    const TASK_OFFSET: u8 = 2;
+    const TASK_OFFSET: u8 = PREFIX_INSTRUCTION_COUNT as u8;
 
     pub fn is_cpi_limit_error(&self) -> bool {
         matches!(
@@ -235,17 +237,5 @@ impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
         TransactionStrategyExecutionError::try_from_transaction_error(
             error, signature, self.tasks,
         )
-    }
-}
-
-impl From<&TransactionStrategyExecutionError> for ActionError {
-    fn from(value: &TransactionStrategyExecutionError) -> Self {
-        if let TransactionStrategyExecutionError::ActionsError(err, signature) =
-            value
-        {
-            Self::ActionsError(err.clone(), *signature)
-        } else {
-            Self::IntentFailedError(value.to_string())
-        }
     }
 }

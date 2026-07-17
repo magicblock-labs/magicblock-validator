@@ -1,4 +1,3 @@
-use magicblock_core::traits::ActionError;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_signature::Signature;
@@ -140,18 +139,6 @@ impl metrics::LabelValue for IntentExecutorError {
                 finalize_signature: _,
             } => err.value(),
             _ => "failed",
-        }
-    }
-}
-
-impl From<&IntentExecutorError> for ActionError {
-    fn from(value: &IntentExecutorError) -> Self {
-        match value {
-            IntentExecutorError::FailedToCommitError { err, .. }
-            | IntentExecutorError::FailedToFinalizeError { err, .. } => {
-                err.into()
-            }
-            err => ActionError::IntentFailedError(err.to_string()),
         }
     }
 }

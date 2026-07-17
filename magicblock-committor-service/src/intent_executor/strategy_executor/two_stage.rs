@@ -183,10 +183,11 @@ where
         // the same uniqueness noop.
         self.state.finalize_strategy.uniqueness_nonce =
             self.state.commit_strategy.uniqueness_nonce;
-        self.execute_callbacks(
-            commit_result.as_ref().ok().copied(),
-            commit_result.as_ref().map(|_| ()),
-        );
+        // We execute callbacks only on success
+        // ActionError would be reported via CommitStagePatcher
+        if let Ok(signature) = commit_result {
+            self.execute_callbacks(Some(signature), Ok::<_, ActionError>(()));
+        }
         self.execution_report
             .dispose(self.state.commit_strategy.clone());
         if commit_result.is_err() {
@@ -223,7 +224,8 @@ where
         );
         self.execution_report.dispose(junk_strategy);
 
-        if result.is_err() {
+        // In other cases Finalize stage will report for itself
+        if matches!(result, Err(ActionError::TimeoutError)) {
             let junk_strategy = handle_actions_result(
                 &self.authority.pubkey(),
                 &self.callback_scheduler,
@@ -331,11 +333,13 @@ where
             execution_state,
         )
         .await?;
+
+        // Callback are executed on success, timeout, action errors
+        // Other errors shall not trigger a callback it will timeout naturally
+        if let Ok(signature) = finalize_result {
+            self.execute_callbacks(Some(signature), Ok::<_, ActionError>(()));
+        }
         // Even if failed - dump finalize into junk
-        self.execute_callbacks(
-            finalize_result.as_ref().ok().copied(),
-            finalize_result.as_ref().map(|_| ()),
-        );
         self.execution_report
             .dispose(self.state.finalize_strategy.clone());
         finalize_result.map_err(|err| {
