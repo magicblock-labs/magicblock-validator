@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
-use solana_keypair::Keypair;
 
-use crate::{consts, types::SerdeKeypair};
+use crate::types::SerdeKeypair;
 
 /// Configuration for the internal task scheduler.
 ///
@@ -20,9 +19,7 @@ pub struct TaskSchedulerConfig {
 impl Default for TaskSchedulerConfig {
     fn default() -> Self {
         Self {
-            faucet_keypair: Some(SerdeKeypair(Keypair::from_base58_string(
-                consts::DEFAULT_TASK_SCHEDULER_FAUCET_KEYPAIR,
-            ))),
+            faucet_keypair: None,
         }
     }
 }
