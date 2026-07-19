@@ -632,7 +632,9 @@ impl BufferExecutionError {
 
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::AccountAlreadyInitializedError(_, _) => false,
+            // Leftover buffer from a prior attempt: the cleanup-and-retry in
+            // `prepare_task_handling_errors` failed, a fresh attempt can heal
+            Self::AccountAlreadyInitializedError(_, _) => true,
             Self::TransactionSendError(err) => err.is_transient(),
         }
     }

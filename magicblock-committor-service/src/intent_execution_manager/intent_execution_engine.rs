@@ -341,9 +341,12 @@ where
             }
 
             // Release the executor slot during backoff so unrelated intents
-            // keep executing while this one waits out the outage
+            // keep executing while this one waits out the outage.
+            // Per-intent jitter decorrelates synchronized retry bursts when
+            // many intents fail together during an outage
+            let jitter = Duration::from_millis((intent.id % 8) * 125);
             drop(execution_permit.take());
-            sleep(INTENT_RETRY_BACKOFF * attempt).await;
+            sleep(INTENT_RETRY_BACKOFF * attempt + jitter).await;
             execution_permit =
                 match executors_semaphore.clone().acquire_owned().await {
                     Ok(permit) => Some(permit),
