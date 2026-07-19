@@ -293,6 +293,11 @@ where
         let instant = Instant::now();
         let mut execution_permit = Some(execution_permit);
 
+        // Commit tasks give on-chain dedup (commit nonce) to re-executed
+        // sends; action-only intents can double-execute if their transaction
+        // landed unobserved, so they only retry pre-send failures
+        let has_dedup_guard = !intent.get_all_committed_pubkeys().is_empty();
+
         // Execute an Intent
         let mut attempt = 0;
         let result = loop {
@@ -309,9 +314,15 @@ where
 
             // Retry only plausibly transient failures, and never once action
             // callbacks fired: a retry would double-report the intent outcome
+            let send_stage_failure = matches!(
+                &result.inner,
+                Err(IntentExecutorError::FailedToCommitError { .. })
+                    | Err(IntentExecutorError::FailedToFinalizeError { .. })
+            );
             let retriable = attempt < MAX_INTENT_ATTEMPTS
                 && result.callbacks_report.is_empty()
-                && matches!(&result.inner, Err(err) if err.is_transient());
+                && matches!(&result.inner, Err(err) if err.is_transient())
+                && (has_dedup_guard || !send_stage_failure);
             if !retriable {
                 break result;
             }

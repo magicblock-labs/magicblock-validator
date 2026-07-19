@@ -400,6 +400,7 @@ impl DeliveryPreparator {
             }
 
             fn decide_flow(
+                &self,
                 err: &Self::ExecutionError,
             ) -> ControlFlow<(), Duration> {
                 match err {

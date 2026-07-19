@@ -15,6 +15,7 @@ pub trait SendErrorMapper<E> {
     type ExecutionError;
     fn map(&self, error: E) -> Self::ExecutionError;
     fn decide_flow(
+        &self,
         mapped_error: &Self::ExecutionError,
     ) -> ControlFlow<(), Duration>;
 }
@@ -60,7 +61,8 @@ where
             Err(err) => err,
         };
         let mapped_error = send_result_mapper.map(err);
-        let sleep_duration = match Map::decide_flow(&mapped_error) {
+        let sleep_duration = match send_result_mapper.decide_flow(&mapped_error)
+        {
             ControlFlow::Continue(value) => value,
             ControlFlow::Break(()) => return Err(mapped_error),
         };
