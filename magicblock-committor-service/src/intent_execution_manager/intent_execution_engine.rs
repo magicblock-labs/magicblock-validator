@@ -33,7 +33,8 @@ use crate::{
         intent_executor_factory::IntentExecutorFactory,
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
-    persist::IntentPersister,
+    persist::{CommitStatus, IntentPersister},
+    utils::persist_status_update_by_message_set,
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
@@ -310,6 +311,15 @@ where
             if !retriable {
                 break result;
             }
+
+            // The failed attempt persisted a failure status; restore Pending
+            // so a crash before the next attempt stays restart-recoverable
+            persist_status_update_by_message_set(
+                &persister,
+                intent.id,
+                &intent.get_all_committed_pubkeys(),
+                CommitStatus::Pending,
+            );
 
             if let Err(err) = &result.inner {
                 warn!(intent_id = intent.id, attempt, error = ?err, "Transient intent failure, retrying");
@@ -993,13 +1003,12 @@ mod tests {
                         )
                         .is_ok();
                     if should_fail {
-                        let callbacks_report = if self
-                            .report_callbacks_on_failure
-                        {
-                            vec![Ok(Signature::default())]
-                        } else {
-                            vec![]
-                        };
+                        let callbacks_report =
+                            if self.report_callbacks_on_failure {
+                                vec![Ok(Signature::default())]
+                            } else {
+                                vec![]
+                            };
                         IntentExecutionResult {
                             inner: Err(ExecutorError::FailedToCommitError {
                                 err: TransactionStrategyExecutionError::InternalError(

@@ -44,18 +44,11 @@ impl InternalError {
     }
 
     /// True when the failure is plausibly transient (transport, RPC
-    /// availability) and a re-send may succeed. Unmapped on-chain instruction
-    /// errors are deterministic and excluded.
+    /// availability) and a re-send may succeed.
     pub fn is_transient(&self) -> bool {
         match self {
             Self::SignerError(_) => false,
-            Self::MagicBlockRpcClientError(err) => match err.as_ref() {
-                MagicBlockRpcClientError::LookupTableDeserialize(_) => false,
-                MagicBlockRpcClientError::SentTransactionError(tx_err, _) => {
-                    !matches!(tx_err, TransactionError::InstructionError(..))
-                }
-                _ => true,
-            },
+            Self::MagicBlockRpcClientError(err) => err.is_transient(),
         }
     }
 
@@ -139,16 +132,23 @@ impl IntentExecutorError {
 
     /// True when re-executing the whole intent from scratch may succeed:
     /// the failure was transport/RPC-side rather than deterministic.
+    /// Once a commit landed (two-stage finalize failures) re-execution would
+    /// commit the same state again, so those are never transient.
     pub fn is_transient(&self) -> bool {
         match self {
             Self::EmptyIntentError
             | Self::FailedToFitError
             | Self::SignerError(_) => false,
             Self::TaskBuilderError(err) => err.is_transient(),
-            Self::FailedToCommitError { err, .. }
-            | Self::FailedToFinalizeError { err, .. } => err.is_transient(),
-            Self::FailedCommitPreparationError(err)
-            | Self::FailedFinalizePreparationError(err) => err.is_transient(),
+            Self::FailedToCommitError { err, .. } => err.is_transient(),
+            Self::FailedToFinalizeError {
+                err,
+                commit_signature: None,
+                ..
+            } => err.is_transient(),
+            Self::FailedToFinalizeError { .. }
+            | Self::FailedFinalizePreparationError(_) => false,
+            Self::FailedCommitPreparationError(err) => err.is_transient(),
         }
     }
 
@@ -550,14 +550,39 @@ mod tests {
         assert!(!err.is_transient());
 
         let err = TransactionStrategyExecutionError::InternalError(
-            InternalError::SignerError(
-                solana_signer::SignerError::Custom("oops".to_string()),
-            ),
+            InternalError::SignerError(solana_signer::SignerError::Custom(
+                "oops".to_string(),
+            )),
         );
         assert!(!err.is_transient());
 
         assert!(!super::IntentExecutorError::EmptyIntentError.is_transient());
         assert!(!super::IntentExecutorError::FailedToFitError.is_transient());
+    }
+
+    #[test]
+    fn finalize_failure_after_landed_commit_is_not_transient() {
+        let transient_err = || {
+            TransactionStrategyExecutionError::InternalError(
+                make_send_transaction_error("connection reset"),
+            )
+        };
+
+        // Single-stage: nothing landed, safe to re-execute
+        let err = super::IntentExecutorError::FailedToFinalizeError {
+            err: transient_err(),
+            commit_signature: None,
+            finalize_signature: None,
+        };
+        assert!(err.is_transient());
+
+        // Two-stage: commit landed, re-execution would commit again
+        let err = super::IntentExecutorError::FailedToFinalizeError {
+            err: transient_err(),
+            commit_signature: Some(solana_signature::Signature::default()),
+            finalize_signature: None,
+        };
+        assert!(!err.is_transient());
     }
 
     #[test]
