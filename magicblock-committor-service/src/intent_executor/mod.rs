@@ -571,6 +571,11 @@ where
         let result = self
             .execute_inner(base_intent, &mut execution_report, &persister)
             .await;
+        if result.is_err() {
+            // A stale cached blockhash may be the failure cause; drop it so
+            // an engine-level retry fetches a fresh one
+            self.intent_client.invalidate_cached_blockhash().await;
+        }
         if !pubkeys.is_empty() {
             // Reset TaskInfoFetcher, as cache could become invalid
             if result.is_err() {
