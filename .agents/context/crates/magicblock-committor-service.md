@@ -47,7 +47,7 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `src/config.rs` and `src/compute_budget.rs` | Chain/RPC configuration, default action timeout, and per-task compute-budget helpers. |
 | `src/committor_processor.rs` | Constructs `MagicblockRpcClient`, `TableMania`, `IntentPersisterImpl`, `IntentExecutionManager`, and `CacheTaskInfoFetcher`; exposes persistence queries and recovery helpers. |
 | `src/intent_execution_manager.rs` | Backpressure boundary between service and execution engine; enqueues bundles and falls back to an internal DB when the channel is full. |
-| `src/intent_execution_manager/intent_execution_engine.rs` | Main scheduler loop, executor semaphore (`MAX_EXECUTORS = 50`), result broadcasting, metrics, and successful-cleanup spawning. |
+| `src/intent_execution_manager/intent_execution_engine.rs` | Main scheduler loop, executor semaphore (`MAX_EXECUTORS = 50`), transient-failure intent retries (`MAX_INTENT_ATTEMPTS = 3` with jittered linear backoff, bounded by a `MAX_SLEEPING_RETRIES = 50` semaphore), result broadcasting, metrics, and per-attempt cleanup spawning. |
 | `src/intent_execution_manager/intent_scheduler.rs` | Pubkey conflict scheduler for committed accounts. Maintains FIFO blocking queues and prevents duplicate/concurrent conflicting intents. |
 | `src/intent_executor/` | Intent execution state machine, transaction client, factory, single-stage/two-stage executors, timeout helpers, and commit nonce fetcher/cache. |
 | `src/tasks/` | Atomic base-layer task types and task builders/strategist for commit, commit-finalize, undelegate, actions, buffers, ALTs, and compute budgets. |
@@ -180,9 +180,20 @@ Preserve the no-repersist path for recovered intents. Re-inserting rows can viol
 3. asks `IntentScheduler` whether it can run now;
 4. waits for one of `MAX_EXECUTORS = 50` semaphore permits;
 5. creates an executor and spawns intent execution;
-6. broadcasts the result, completes the scheduler entry, and cleans buffers/ALTs only after successful execution.
+6. broadcasts the result, completes the scheduler entry, and spawns per-attempt cleanup (full buffer/ALT cleanup only after success; failed attempts release only ALT reservations).
 
 The scheduler blocks on the union of `ScheduledIntentBundle::get_all_committed_pubkeys()`, including commit and commit-and-undelegate accounts in the same bundle. Standalone base actions with no committed pubkeys do not block on account keys.
+
+### Intent retry policy
+
+A failed execution is retried by the engine with a fresh executor, up to `MAX_INTENT_ATTEMPTS = 3` total attempts with jittered linear backoff, only when all of the following hold:
+
+- the error is classified transient by `IntentExecutorError::is_transient()` (transport/RPC-side, delegated down through `TransactionStrategyExecutionError`, `TaskBuilderError`, `TransactionPreparatorError`, and ultimately `MagicBlockRpcClientError::is_transient`); deterministic failures — signer errors, oversized strategies, on-chain instruction errors, finalize failures after a landed commit (`FailedToFinalizeError` with a commit signature, `FailedFinalizePreparationError`) — are terminal on the first attempt;
+- no action callbacks were scheduled during the failed attempt (a retry would double-report the intent outcome to user programs);
+- the intent contains at least one commit/finalize/undelegate task, whose on-chain commit nonce makes a duplicate landing fail the retried transaction atomically; action-only intents may only retry pre-send failures (the same guard restricts their in-loop send retries to blockhash-fetch errors);
+- a retry slot is free: retries release their executor permit while sleeping, and a `MAX_SLEEPING_RETRIES = 50` semaphore bounds the sleeping population — without a free slot the failure is terminal.
+
+Before each backoff, persisted commit rows are restored to `Pending` so a crash inside the retry window remains recoverable by `reschedule_pending_bundles` on restart. Each attempt surrenders its strategies to the execution report (including on preparation and patch failures), so per-attempt cleanup can release partially prepared ALT reservations and buffers.
 
 ### Intent execution and task strategy flow
 
