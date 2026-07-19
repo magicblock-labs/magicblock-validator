@@ -678,6 +678,13 @@ impl DeliveryPreparatorError {
             | Self::FailedToPrepareBufferAccounts(err) => err.signature(),
         }
     }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::FailedToCreateALTError(err)
+            | Self::FailedToPrepareBufferAccounts(err) => err.is_transient(),
+        }
+    }
 }
 
 pub type DeliveryPreparatorResult<T, E = DeliveryPreparatorError> =

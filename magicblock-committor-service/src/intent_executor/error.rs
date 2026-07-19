@@ -43,6 +43,22 @@ impl InternalError {
         }
     }
 
+    /// True when the failure is plausibly transient (transport, RPC
+    /// availability) and a re-send may succeed. Unmapped on-chain instruction
+    /// errors are deterministic and excluded.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::SignerError(_) => false,
+            Self::MagicBlockRpcClientError(err) => match err.as_ref() {
+                MagicBlockRpcClientError::LookupTableDeserialize(_) => false,
+                MagicBlockRpcClientError::SentTransactionError(tx_err, _) => {
+                    !matches!(tx_err, TransactionError::InstructionError(..))
+                }
+                _ => true,
+            },
+        }
+    }
+
     pub fn is_transaction_too_large(&self) -> bool {
         fn is_send_transaction_too_large(err: &RpcClientError) -> bool {
             matches!(err.request, Some(RpcRequest::SendTransaction))
@@ -121,6 +137,21 @@ impl IntentExecutorError {
         }
     }
 
+    /// True when re-executing the whole intent from scratch may succeed:
+    /// the failure was transport/RPC-side rather than deterministic.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::EmptyIntentError
+            | Self::FailedToFitError
+            | Self::SignerError(_) => false,
+            Self::TaskBuilderError(err) => err.is_transient(),
+            Self::FailedToCommitError { err, .. }
+            | Self::FailedToFinalizeError { err, .. } => err.is_transient(),
+            Self::FailedCommitPreparationError(err)
+            | Self::FailedFinalizePreparationError(err) => err.is_transient(),
+        }
+    }
+
     pub fn signatures(&self) -> Option<(Signature, Option<Signature>)> {
         match self {
             IntentExecutorError::FailedToCommitError { signature, err: _ } => {
@@ -195,6 +226,15 @@ impl TransactionStrategyExecutionError {
     /// Number of compute budget instructions prepended to every transaction.
     /// Used to map instruction indices back to task indices.
     const TASK_OFFSET: u8 = 2;
+
+    /// On-chain domain errors are deterministic (and already have dedicated
+    /// recovery paths); only internal transport failures are transient.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::InternalError(err) => err.is_transient(),
+            _ => false,
+        }
+    }
 
     pub fn is_cpi_limit_error(&self) -> bool {
         matches!(
@@ -473,6 +513,51 @@ mod tests {
         let err =
             TransactionStrategyExecutionError::TransactionTooLargeError(inner);
         assert!(err.is_recoverable_by_two_stage());
+    }
+
+    #[test]
+    fn transport_errors_are_transient() {
+        let err = TransactionStrategyExecutionError::InternalError(
+            make_send_transaction_error("connection reset"),
+        );
+        assert!(err.is_transient());
+
+        let err = TransactionStrategyExecutionError::InternalError(
+            InternalError::MagicBlockRpcClientError(Box::new(
+                MagicBlockRpcClientError::SentTransactionError(
+                    solana_transaction_error::TransactionError::BlockhashNotFound,
+                    solana_signature::Signature::default(),
+                ),
+            )),
+        );
+        assert!(err.is_transient());
+    }
+
+    #[test]
+    fn deterministic_errors_are_not_transient() {
+        // Landed on-chain with an instruction error - deterministic
+        let err = TransactionStrategyExecutionError::InternalError(
+            InternalError::MagicBlockRpcClientError(Box::new(
+                MagicBlockRpcClientError::SentTransactionError(
+                    solana_transaction_error::TransactionError::InstructionError(
+                        2,
+                        solana_instruction::error::InstructionError::Custom(1),
+                    ),
+                    solana_signature::Signature::default(),
+                ),
+            )),
+        );
+        assert!(!err.is_transient());
+
+        let err = TransactionStrategyExecutionError::InternalError(
+            InternalError::SignerError(
+                solana_signer::SignerError::Custom("oops".to_string()),
+            ),
+        );
+        assert!(!err.is_transient());
+
+        assert!(!super::IntentExecutorError::EmptyIntentError.is_transient());
+        assert!(!super::IntentExecutorError::FailedToFitError.is_transient());
     }
 
     #[test]

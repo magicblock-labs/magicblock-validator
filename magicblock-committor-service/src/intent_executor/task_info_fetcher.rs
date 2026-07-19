@@ -655,6 +655,16 @@ pub enum TaskInfoFetcherError {
 }
 
 impl TaskInfoFetcherError {
+    /// RPC-side fetch failures are transient; malformed or absent
+    /// delegation accounts are deterministic.
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            Self::MinContextSlotNotReachedError(_, _)
+                | Self::MagicBlockRpcClientError(_)
+        )
+    }
+
     pub fn map_client_error(
         min_context_slot: u64,
         e: MagicBlockRpcClientError,

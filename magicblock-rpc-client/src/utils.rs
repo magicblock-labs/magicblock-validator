@@ -1,6 +1,9 @@
 use std::{future::Future, ops::ControlFlow, time::Duration};
 
-use solana_rpc_client_api::client_error::ErrorKind;
+use solana_rpc_client_api::{
+    client_error::ErrorKind,
+    custom_error::JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY, request::RpcError,
+};
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use tokio::time::{sleep, Instant};
@@ -211,17 +214,79 @@ pub fn decide_rpc_native_flow(
     match &*err.kind {
         // Retry IO errors
         ErrorKind::Io(_) => ControlFlow::Continue(Duration::from_millis(500)),
-        // Retry 5xx server errors
-        ErrorKind::Reqwest(err) => match err.status() {
-            Some(status) if status.is_server_error() => {
-                trace!(error = ?err, "Server error during sending transaction");
-                ControlFlow::Continue(Duration::from_millis(100))
-            }
-            _ => ControlFlow::Break(()),
-        },
+        ErrorKind::Reqwest(err) => {
+            trace!(error = ?err, "HTTP error during sending transaction");
+            decide_reqwest_flow(err.status().map(|status| status.as_u16()))
+        }
+        // Node behind on slots reports itself unhealthy - transient
+        ErrorKind::RpcError(RpcError::RpcResponseError {
+            code: JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY,
+            ..
+        }) => ControlFlow::Continue(Duration::from_millis(500)),
         _ => {
             // Can't handle - propagate
             ControlFlow::Break(())
         }
+    }
+}
+
+/// A reqwest error with no status is a transport failure (connect, timeout,
+/// reset); 5xx and 429 are transient server conditions. All are retriable.
+fn decide_reqwest_flow(status: Option<u16>) -> ControlFlow<(), Duration> {
+    match status {
+        None => ControlFlow::Continue(Duration::from_millis(500)),
+        Some(status) if (500..600).contains(&status) => {
+            ControlFlow::Continue(Duration::from_millis(100))
+        }
+        Some(429) => ControlFlow::Continue(Duration::from_millis(500)),
+        Some(_) => ControlFlow::Break(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reqwest_transport_and_transient_statuses_retried() {
+        assert!(decide_reqwest_flow(None).is_continue());
+        assert!(decide_reqwest_flow(Some(500)).is_continue());
+        assert!(decide_reqwest_flow(Some(503)).is_continue());
+        assert!(decide_reqwest_flow(Some(429)).is_continue());
+    }
+
+    #[test]
+    fn test_reqwest_client_errors_not_retried() {
+        assert!(decide_reqwest_flow(Some(400)).is_break());
+        assert!(decide_reqwest_flow(Some(403)).is_break());
+        assert!(decide_reqwest_flow(Some(404)).is_break());
+    }
+
+    #[test]
+    fn test_node_unhealthy_rpc_error_retried() {
+        let err = solana_rpc_client_api::client_error::Error {
+            request: None,
+            kind: Box::new(ErrorKind::RpcError(RpcError::RpcResponseError {
+                code: JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY,
+                message: "Node is behind".to_string(),
+                data:
+                    solana_rpc_client_api::request::RpcResponseErrorData::Empty,
+            })),
+        };
+        assert!(decide_rpc_native_flow(&err).is_continue());
+    }
+
+    #[test]
+    fn test_other_rpc_errors_not_retried() {
+        let err = solana_rpc_client_api::client_error::Error {
+            request: None,
+            kind: Box::new(ErrorKind::RpcError(RpcError::RpcResponseError {
+                code: -32602,
+                message: "invalid params".to_string(),
+                data:
+                    solana_rpc_client_api::request::RpcResponseErrorData::Empty,
+            })),
+        };
+        assert!(decide_rpc_native_flow(&err).is_break());
     }
 }
