@@ -561,6 +561,77 @@ mod tests {
     }
 
     #[test]
+    fn builder_and_preparation_error_transience() {
+        use crate::{
+            intent_executor::task_info_fetcher::TaskInfoFetcherError,
+            tasks::task_builder::TaskBuilderError,
+            transaction_preparator::{
+                delivery_preparator::{
+                    DeliveryPreparatorError,
+                    InternalError as DeliveryInternalError,
+                },
+                error::TransactionPreparatorError,
+            },
+        };
+
+        fn transient_rpc_client_error() -> MagicBlockRpcClientError {
+            MagicBlockRpcClientError::SendTransaction(Box::new(
+                RpcClientError {
+                    request: Some(RpcRequest::SendTransaction),
+                    kind: Box::new(RpcClientErrorKind::Custom(
+                        "io".to_string(),
+                    )),
+                },
+            ))
+        }
+        fn transient_delivery_error() -> TransactionPreparatorError {
+            TransactionPreparatorError::from(
+                DeliveryPreparatorError::FailedToCreateALTError(
+                    DeliveryInternalError::MagicBlockRpcClientError(Box::new(
+                        transient_rpc_client_error(),
+                    )),
+                ),
+            )
+        }
+
+        // RPC-side commit-id fetch failures are transient
+        let err = super::IntentExecutorError::TaskBuilderError(
+            TaskBuilderError::CommitTasksBuildError(
+                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(
+                    transient_rpc_client_error(),
+                )),
+            ),
+        );
+        assert!(err.is_transient());
+
+        // Missing delegation metadata is deterministic
+        let err = super::IntentExecutorError::TaskBuilderError(
+            TaskBuilderError::MissingDelegationMetadata(
+                solana_pubkey::Pubkey::new_unique(),
+            ),
+        );
+        assert!(!err.is_transient());
+
+        // Commit-stage delivery preparation RPC failures are transient
+        let err = super::IntentExecutorError::FailedCommitPreparationError(
+            transient_delivery_error(),
+        );
+        assert!(err.is_transient());
+
+        // Oversized strategies are deterministic
+        let err = super::IntentExecutorError::FailedCommitPreparationError(
+            TransactionPreparatorError::FailedToFitError,
+        );
+        assert!(!err.is_transient());
+
+        // Finalize preparation runs after a landed commit - always terminal
+        let err = super::IntentExecutorError::FailedFinalizePreparationError(
+            transient_delivery_error(),
+        );
+        assert!(!err.is_transient());
+    }
+
+    #[test]
     fn finalize_failure_after_landed_commit_is_not_transient() {
         let transient_err = || {
             TransactionStrategyExecutionError::InternalError(

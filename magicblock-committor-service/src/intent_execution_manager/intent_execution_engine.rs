@@ -180,12 +180,14 @@ where
             let executor_factory = self.executor_factory.clone();
             let persister = self.intents_persister.clone();
             let inner = self.inner.clone();
+            let executors_semaphore = self.executors_semaphore.clone();
 
             let handle = tokio::spawn(Self::execute(
                 executor_factory,
                 persister,
                 intent,
                 inner,
+                executors_semaphore,
                 permit,
                 result_sender.clone(),
             ));
@@ -278,16 +280,18 @@ where
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit.
     /// Transient failures are retried with a fresh executor while the scheduler
     /// keeps conflicting intents blocked, preserving per-account commit order.
-    #[instrument(skip(executor_factory, persister, intent, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor_factory, persister, intent, inner_scheduler, executors_semaphore, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
         executor_factory: Arc<F>,
         persister: Option<P>,
         intent: ScheduledIntentBundle,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,
+        executors_semaphore: Arc<Semaphore>,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
         let instant = Instant::now();
+        let mut execution_permit = Some(execution_permit);
 
         // Execute an Intent
         let mut attempt = 0;
@@ -324,7 +328,19 @@ where
             if let Err(err) = &result.inner {
                 warn!(intent_id = intent.id, attempt, error = ?err, "Transient intent failure, retrying");
             }
+
+            // Release the executor slot during backoff so unrelated intents
+            // keep executing while this one waits out the outage
+            drop(execution_permit.take());
             sleep(INTENT_RETRY_BACKOFF * attempt).await;
+            execution_permit =
+                match executors_semaphore.clone().acquire_owned().await {
+                    Ok(permit) => Some(permit),
+                    Err(_) => {
+                        error!(SEMAPHORE_CLOSED_MSG);
+                        break result;
+                    }
+                };
         };
         let _ = result.inner.as_ref().inspect_err(|err| {
             error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
@@ -657,7 +673,7 @@ mod tests {
     }
 
     /// Transient failures are retried with a fresh executor until success
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_transient_failure_retried_until_success() {
         let factory = MockIntentExecutorFactory::new_transient(2);
         let created_instances = factory.created_instances.clone();
@@ -678,7 +694,7 @@ mod tests {
     }
 
     /// Transient failures stop being retried once attempts are exhausted
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_transient_failure_exhausts_attempts() {
         let factory = MockIntentExecutorFactory::new_transient(usize::MAX);
         let created_instances = factory.created_instances.clone();
