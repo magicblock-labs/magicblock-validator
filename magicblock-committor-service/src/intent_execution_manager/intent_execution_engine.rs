@@ -44,6 +44,16 @@ const MAX_EXECUTORS: u8 = 50;
 const MAX_INTENT_ATTEMPTS: u32 = 3;
 /// Backoff between intent attempts, scaled linearly by attempt number
 const INTENT_RETRY_BACKOFF: Duration = Duration::from_secs(1);
+/// Max intents concurrently sleeping in retry backoff. Retries release their
+/// executor slot while sleeping; this cap keeps the total task population
+/// bounded when many intents fail together
+const MAX_SLEEPING_RETRIES: u8 = 50;
+
+/// Concurrency limits shared between the engine and its executor tasks
+struct ExecutionLimits {
+    executors: Arc<Semaphore>,
+    retries: Arc<Semaphore>,
+}
 
 pub type PatchedErrors = Vec<TransactionStrategyExecutionError>;
 
@@ -103,6 +113,7 @@ pub(crate) struct IntentExecutionEngine<D, P, F> {
     inner: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
+    retries_semaphore: Arc<Semaphore>,
 }
 
 impl<D, P, F, E> IntentExecutionEngine<D, P, F>
@@ -126,6 +137,9 @@ where
             running_executors: FuturesUnordered::new(),
             executors_semaphore: Arc::new(Semaphore::new(
                 MAX_EXECUTORS as usize,
+            )),
+            retries_semaphore: Arc::new(Semaphore::new(
+                MAX_SLEEPING_RETRIES as usize,
             )),
             inner: Arc::new(Mutex::new(IntentScheduler::new())),
         }
@@ -180,14 +194,17 @@ where
             let executor_factory = self.executor_factory.clone();
             let persister = self.intents_persister.clone();
             let inner = self.inner.clone();
-            let executors_semaphore = self.executors_semaphore.clone();
+            let limits = ExecutionLimits {
+                executors: self.executors_semaphore.clone(),
+                retries: self.retries_semaphore.clone(),
+            };
 
             let handle = tokio::spawn(Self::execute(
                 executor_factory,
                 persister,
                 intent,
                 inner,
-                executors_semaphore,
+                limits,
                 permit,
                 result_sender.clone(),
             ));
@@ -280,13 +297,13 @@ where
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit.
     /// Transient failures are retried with a fresh executor while the scheduler
     /// keeps conflicting intents blocked, preserving per-account commit order.
-    #[instrument(skip(executor_factory, persister, intent, inner_scheduler, executors_semaphore, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor_factory, persister, intent, inner_scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
         executor_factory: Arc<F>,
         persister: Option<P>,
         intent: ScheduledIntentBundle,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,
-        executors_semaphore: Arc<Semaphore>,
+        limits: ExecutionLimits,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
@@ -327,6 +344,14 @@ where
                 break result;
             }
 
+            // Sleeping retries release their executor slot but must stay
+            // bounded; without a free retry slot the failure is terminal
+            let Ok(retry_permit) = limits.retries.clone().try_acquire_owned()
+            else {
+                warn!(intent_id = intent.id, "Retry capacity exhausted");
+                break result;
+            };
+
             // The failed attempt persisted a failure status; restore Pending
             // so a crash before the next attempt stays restart-recoverable
             persist_status_update_by_message_set(
@@ -348,13 +373,14 @@ where
             drop(execution_permit.take());
             sleep(INTENT_RETRY_BACKOFF * attempt + jitter).await;
             execution_permit =
-                match executors_semaphore.clone().acquire_owned().await {
+                match limits.executors.clone().acquire_owned().await {
                     Ok(permit) => Some(permit),
                     Err(_) => {
                         error!(SEMAPHORE_CLOSED_MSG);
                         break result;
                     }
                 };
+            drop(retry_permit);
         };
         let _ = result.inner.as_ref().inspect_err(|err| {
             error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
