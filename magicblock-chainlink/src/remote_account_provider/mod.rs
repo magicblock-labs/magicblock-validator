@@ -1337,7 +1337,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<Self> {
         let secondary_subscriptions = Arc::new(AccountsLruCache::new(
             // SAFETY: config guarantees a non-zero capacity
-            NonZeroUsize::new(config.subscribed_accounts_lru_capacity())
+            NonZeroUsize::new(config.secondary_subscriptions_lru_capacity())
                 .expect("lru capacity must be non-zero"),
         ));
         Self::new_with_secondary_subscriptions(
@@ -1585,7 +1585,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             NonZeroUsize::new(cap).expect("non-zero capacity")
         }));
         let secondary_subscriptions = Arc::new(AccountsLruCache::new({
-            let cap = config.subscribed_accounts_lru_capacity();
+            let cap = config.secondary_subscriptions_lru_capacity();
             NonZeroUsize::new(cap).expect("non-zero capacity")
         }));
         let subscribed_accounts_tracker =
