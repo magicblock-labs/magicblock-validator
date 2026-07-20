@@ -171,7 +171,7 @@ pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     account_pubkey: Pubkey,
     min_context_slot: u64,
-    fetch_origin: metrics::AccountFetchOrigin,
+    fetch_context: metrics::AccountFetchContext,
 ) -> Option<(DelegationRecord, Option<DelegationActions>)>
 where
     T: ChainRpcClient,
@@ -206,7 +206,7 @@ where
                 min_context_slot: Some(min_context_slot),
                 ..Default::default()
             }),
-            fetch_origin,
+            fetch_context,
         )
         .await
     {

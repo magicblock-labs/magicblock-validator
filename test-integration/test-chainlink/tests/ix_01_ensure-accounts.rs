@@ -3,7 +3,7 @@ use magicblock_chainlink::{
     assert_not_cloned, assert_not_found, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
     testing::{init_logger, utils::random_pubkey},
-    AccountFetchOrigin,
+    AccountFetchContext,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::ixtest_context::IxtestContext;
@@ -19,7 +19,7 @@ async fn ixtest_write_non_existing_account() {
     let pubkeys = [pubkey];
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     debug!("res: {res:?}");
@@ -44,7 +44,7 @@ async fn ixtest_write_existing_account_undelegated() {
     let pubkeys = [counter_auth.pubkey()];
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     debug!("res: {res:?}");
@@ -74,7 +74,7 @@ async fn ixtest_write_existing_account_valid_delegation_record() {
 
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     debug!("res: {res:?}");

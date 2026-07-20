@@ -6,7 +6,7 @@
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_not_subscribed,
     testing::{init_logger, utils::sleep_ms},
-    AccountFetchOrigin,
+    AccountFetchContext,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::ixtest_context::IxtestContext;
@@ -34,7 +34,11 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot() {
         info!("1. Account delegated to us");
 
         ctx.chainlink
-            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .ensure_accounts(
+                &pubkeys,
+                None,
+                AccountFetchContext::rpc_get_account(),
+            )
             .await
             .unwrap();
         sleep_ms(1_500).await;

@@ -580,7 +580,7 @@ async fn wait_for_rpc_fetch_activity(
 }
 
 fn pending_accounts_value(
-    origin: AccountFetchOrigin,
+    origin: impl Into<AccountFetchContext>,
     outcome: ChainlinkPendingFetchOutcome,
 ) -> u64 {
     chainlink_pending_fetch_accounts_value(
@@ -590,7 +590,7 @@ fn pending_accounts_value(
     )
 }
 
-fn pending_waiters_value(origin: AccountFetchOrigin) -> u64 {
+fn pending_waiters_value(origin: impl Into<AccountFetchContext>) -> u64 {
     chainlink_pending_fetch_waiters_value(
         origin,
         ChainlinkPendingFetchLayer::FetchCloner,
@@ -683,7 +683,7 @@ async fn test_fetch_and_clone_single_non_delegated_account() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -721,7 +721,7 @@ async fn test_fetch_and_clone_single_non_existing_account() {
             &[non_existing_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -781,7 +781,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -937,7 +937,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_different_authority(
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1017,7 +1017,7 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
             &[deleg_record_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(result.is_ok());
@@ -1031,7 +1031,7 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1137,7 +1137,7 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
             ],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1238,7 +1238,7 @@ async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_d
             &[delegated_pubkey, invalid_delegated_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1309,7 +1309,7 @@ async fn test_deleg_record_stale() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1330,7 +1330,7 @@ async fn test_deleg_record_stale() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     debug!(result = ?result, "Test result after updating delegation record");
@@ -1385,7 +1385,7 @@ async fn test_account_stale() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1405,7 +1405,7 @@ async fn test_account_stale() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     debug!(result = ?result, "Test result after updating account");
@@ -1467,7 +1467,7 @@ async fn test_delegation_record_unsub_race_condition_prevention() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -1536,7 +1536,7 @@ async fn test_fetch_and_clone_with_dedup_concurrent_requests() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -1613,7 +1613,7 @@ async fn test_undelegation_requested_subscription_behavior() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(result.is_ok());
@@ -1687,7 +1687,7 @@ async fn test_delegated_discovered_after_direct_subscribe_releases_direct_withou
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("delegated account fetch should succeed");
@@ -2152,7 +2152,7 @@ async fn test_delegated_subscription_update_keeps_externally_acquired_undelegati
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("delegated account fetch should succeed");
@@ -2336,7 +2336,7 @@ async fn test_parallel_fetch_prevention_multiple_accounts() {
                     &accounts,
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -2425,7 +2425,7 @@ async fn test_cold_accounts_fetch_is_batched_into_single_rpc_call() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2495,7 +2495,7 @@ async fn test_requerying_same_accounts_adds_no_rpc_calls() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2515,7 +2515,7 @@ async fn test_requerying_same_accounts_adds_no_rpc_calls() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2577,7 +2577,7 @@ async fn test_cold_accounts_fetch_chunks_batches_at_rpc_limit() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2679,7 +2679,7 @@ async fn test_mixed_class_batch_uses_one_main_rpc_call_plus_companions() {
             ],
             Some(&[missing_pubkey]),
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2790,7 +2790,7 @@ async fn test_cancel_single_key_keeps_other_keys_in_same_ensure_alive() {
                     &pubkeys,
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -2935,7 +2935,7 @@ async fn test_batched_wire_failure_fails_keys_without_per_key_retry() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(
@@ -2964,7 +2964,7 @@ async fn test_batched_wire_failure_fails_keys_without_per_key_retry() {
             &pubkeys[0..1],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("a single-key retry must succeed");
@@ -3041,7 +3041,7 @@ async fn test_batched_wire_failure_after_deadline_reports_timeout() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(
@@ -3107,7 +3107,7 @@ async fn test_overlapping_concurrent_ensures_share_inflight_keys_at_rpc_level()
                     &[key_a, key_b],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3125,7 +3125,7 @@ async fn test_overlapping_concurrent_ensures_share_inflight_keys_at_rpc_level()
                     &[key_b, key_c],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3267,7 +3267,7 @@ async fn test_fetch_with_some_acounts_marked_as_empty_if_not_found() {
             ],
             Some(&[marked_non_existing_account_pubkey]),
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("Fetch and clone failed");
@@ -3369,7 +3369,7 @@ async fn test_confined_delegation_behavior() {
             &[account1_pubkey, account2_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("Failed to fetch and clone accounts");
@@ -3441,7 +3441,7 @@ async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -3659,7 +3659,7 @@ async fn test_allowed_programs_filters_programs() {
             &[program_id_allowed, program_id_blocked],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -3731,7 +3731,7 @@ async fn test_allowed_programs_none_allows_all() {
             &[program_id1, program_id2],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -3802,7 +3802,7 @@ async fn test_allowed_programs_empty_allows_all() {
             &[program_id1, program_id2],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -3848,7 +3848,7 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
             fetch_cloner
                 .clone_program_with_ownership(
                     program,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3861,7 +3861,7 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
             fetch_cloner
                 .clone_program_with_ownership(
                     program,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3921,7 +3921,7 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
             fetch_cloner
                 .clone_program_with_ownership(
                     old_program,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3934,7 +3934,7 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
             fetch_cloner
                 .clone_program_with_ownership(
                     new_program,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -4015,7 +4015,7 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_fetch() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -4083,7 +4083,7 @@ async fn test_no_program_subscription_for_undelegated_account() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -4334,7 +4334,7 @@ async fn test_fetch_and_clone_non_raw_eata_owned_account_as_delegated() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("Failed to fetch and clone delegated EATA-owned account");
@@ -5881,7 +5881,7 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect_err("actions on non-delegated target must be rejected");
@@ -5934,7 +5934,7 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("DLP-owned normal clone should be normalized, not rejected");
@@ -5987,7 +5987,7 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("DLP-owned magic fee vault should remain delegated");
@@ -6036,7 +6036,7 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("native token clone should be normalized");
@@ -6099,7 +6099,7 @@ async fn test_delegated_malformed_ata_clone_is_rejected() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect_err("malformed delegated ATA clone should be rejected");
@@ -6156,7 +6156,7 @@ async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("non-ATA native token clone should be preserved");
@@ -6208,7 +6208,7 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("plain native token clone should be preserved");
@@ -6301,7 +6301,7 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect(
@@ -6378,7 +6378,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                     delegated_to_other: None,
                     needs_undelegation: false,
                 },
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
             .expect("action-bearing clone should not fail");
@@ -6446,7 +6446,7 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect(
@@ -6508,7 +6508,7 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("active delegated targets should be skipped without failing");
@@ -6555,7 +6555,7 @@ async fn test_failed_plain_clone_accepts_concurrent_active_delegation() {
         fetch_cloner
             .clone_account_with_ownership(
                 request,
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
     });
@@ -6613,7 +6613,10 @@ async fn test_other_validator_delegation_does_not_accept_active_local_account()
     cloner.set_fail_next_clone(true);
 
     fetch_cloner
-        .clone_account_with_ownership(request, AccountFetchOrigin::GetAccount)
+        .clone_account_with_ownership(
+            request,
+            AccountFetchContext::rpc_get_account(),
+        )
         .await
         .expect_err(
             "another validator's delegation must not accept local state",
@@ -6673,7 +6676,7 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
         .fetch_and_parse_delegation_record(
             eata_pubkey,
             CURRENT_SLOT,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("delegation record with actions should resolve");
@@ -6737,7 +6740,7 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
         .fetch_and_parse_delegation_record(
             eata_pubkey,
             CURRENT_SLOT,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("delegation record should resolve");
@@ -6804,7 +6807,7 @@ async fn test_fetch_and_parse_delegation_record_releases_direct_ref_when_already
         .fetch_and_parse_delegation_record(
             eata_pubkey,
             CURRENT_SLOT,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("delegation record should resolve");
@@ -7331,7 +7334,7 @@ async fn test_fetch_subscription_race_duplicate_clone() {
                 &[account_pubkey],
                 None,
                 None,
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
         })
@@ -7463,7 +7466,7 @@ async fn test_newer_account_clone_waits_then_replaces_older_slot() {
                     &[account_pubkey],
                     None,
                     Some(NEW_SLOT),
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -7590,7 +7593,7 @@ async fn test_delegated_account_fetch_subscription_race() {
                 &[account_pubkey],
                 None,
                 Some(CURRENT_SLOT),
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
         })
@@ -7698,7 +7701,7 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
                 &[account_pubkey],
                 None,
                 None,
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
         })
@@ -7732,7 +7735,7 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(
@@ -7788,7 +7791,7 @@ async fn test_ata_projection_releases_ata_direct_ref_after_fetch() {
             &[ata_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("ATA projection fetch should not fail");
@@ -7861,7 +7864,7 @@ async fn test_token_2022_native_ata_projection_normalizes_and_preserves_layout()
             &[ata_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("Token-2022 ATA projection fetch should not fail");
@@ -7947,7 +7950,7 @@ async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
             &[ata_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("fetch should succeed");
@@ -8213,7 +8216,7 @@ async fn test_owned_operation_concurrent_calls_spawn_one_owner_fetch() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8279,7 +8282,7 @@ async fn test_owned_operation_waiters_share_not_found_metadata() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8349,7 +8352,7 @@ async fn test_owned_operation_waiters_share_missing_delegation_record_metadata()
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8387,7 +8390,7 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         1,
         1,
         owner_budget,
-        AccountFetchOrigin::GetAccount,
+        AccountFetchContext::rpc_get_account(),
         ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Created(handles) => handles,
@@ -8402,7 +8405,7 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         2,
         2,
         joiner_budget,
-        AccountFetchOrigin::GetAccount,
+        AccountFetchContext::rpc_get_account(),
         ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Joined(handles) => handles,
@@ -8477,16 +8480,16 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
     )
     .await;
 
-    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
+    let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
     let owned_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::Owned,
     );
     let joined_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::JoinedExisting,
     );
-    let waiters_baseline = pending_waiters_value(fetch_origin);
+    let waiters_baseline = pending_waiters_value(fetch_context);
 
     rpc_client.block_fetches();
 
@@ -8498,7 +8501,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
                     &[account_pubkey],
                     None,
                     None,
-                    fetch_origin,
+                    fetch_context,
                 )
                 .await
         })
@@ -8515,7 +8518,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
                     &[account_pubkey],
                     None,
                     None,
-                    fetch_origin,
+                    fetch_context,
                 )
                 .await
         })
@@ -8541,7 +8544,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         .expect("waiter fetch should succeed");
 
     let owned_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::Owned,
     )
     .saturating_sub(owned_baseline);
@@ -8550,7 +8553,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         "fetch_cloner owned metric should increase by at least 1; got {owned_delta}"
     );
     let joined_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::JoinedExisting,
     )
     .saturating_sub(joined_baseline);
@@ -8559,7 +8562,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         "fetch_cloner joined-existing metric should increase by at least 1; got {joined_delta}"
     );
     let waiters_delta =
-        pending_waiters_value(fetch_origin).saturating_sub(waiters_baseline);
+        pending_waiters_value(fetch_context).saturating_sub(waiters_baseline);
     assert!(
         waiters_delta >= 1,
         "fetch_cloner waiter metric should increase by at least 1; got {waiters_delta}"
@@ -8605,7 +8608,7 @@ async fn test_owned_operation_waiter_cancellation_is_local() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8622,7 +8625,7 @@ async fn test_owned_operation_waiter_cancellation_is_local() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8701,7 +8704,7 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8716,7 +8719,7 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8805,7 +8808,7 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8820,7 +8823,7 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8833,7 +8836,7 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8929,7 +8932,7 @@ async fn test_cancel_all_pending_on_shutdown() {
                         &[pubkey],
                         None,
                         None,
-                        AccountFetchOrigin::GetAccount,
+                        AccountFetchContext::rpc_get_account(),
                     )
                     .await
             }),
@@ -8950,7 +8953,7 @@ async fn test_cancel_all_pending_on_shutdown() {
                         &[pubkey],
                         None,
                         None,
-                        AccountFetchOrigin::GetAccount,
+                        AccountFetchContext::rpc_get_account(),
                     )
                     .await
             }),
@@ -9032,7 +9035,7 @@ async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -9049,7 +9052,7 @@ async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -9225,7 +9228,7 @@ async fn test_delegated_account_owned_by_token_program_does_not_subscribe_progra
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(result.is_ok());

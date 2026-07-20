@@ -1,5 +1,5 @@
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_metrics::metrics::AccountFetchOrigin;
+use magicblock_metrics::metrics::{AccountFetchContext, AccountFetchReason};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tracing::*;
@@ -59,6 +59,12 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
     } else {
         false
     };
+    let program_load_context = AccountFetchContext::subscription_update(
+        AccountFetchReason::ProgramLoad,
+    );
+    let program_data_context =
+        program_load_context.with_reason(AccountFetchReason::ProgramData);
+
     let (program_account, program_data_account) = if account
         .owner()
         .eq(&LOADER_V3)
@@ -67,7 +73,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
             this,
             pubkey,
             account.remote_slot(),
-            AccountFetchOrigin::GetAccount,
+            program_data_context,
         )
         .await
         {
@@ -127,10 +133,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
         }
     };
     if let Err(err) = this
-        .clone_program_with_ownership(
-            loaded_program,
-            AccountFetchOrigin::GetAccount,
-        )
+        .clone_program_with_ownership(loaded_program, program_load_context)
         .await
     {
         warn!(pubkey = %pubkey, error = %err, "Failed to clone program into bank");

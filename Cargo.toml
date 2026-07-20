@@ -47,7 +47,7 @@ edition = "2021"
 homepage = "https://www.magicblock.xyz"
 license = "Business Source License 1.1"
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
-version = "0.13.8"
+version = "0.13.9"
 
 [workspace.dependencies]
 agave-geyser-plugin-interface = { version = "4.0" }
@@ -180,7 +180,8 @@ prost = "0.14"
 protobuf-src = "1.1"
 rand = "0.9"
 reqwest = "0.12"
-rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
+rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2", features = ["raw-ptr"] }
+librocksdb-sys = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2" }
 rusqlite = { version = "0.37.0", features = ["bundled"] } # bundled sqlite 3.44
 rustc-hash = "2.1"
 rustc_version = "0.4"
@@ -287,8 +288,8 @@ solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-
 solana-storage-proto = { path = "storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
 solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
-# Fork is used to enable `disable_manual_compaction` usage
-# Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
-# without patching update isn't possible due to conflict with solana deps
+# Fork mirrors upstream rust-rocksdb; APIs missing from the safe wrapper
+# (disable_manual_compaction, mode-aware rate limiter) are reached through
+# the `raw-ptr` feature + librocksdb-sys directly.
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
-rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
+rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2" }
