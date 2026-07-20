@@ -69,7 +69,9 @@ Main consumers include:
 
 ### Channel endpoints
 
-`link::link()` returns the two sides of the validator channel fabric:
+`link::link(replication_enabled)` returns the two sides of the validator channel fabric. The
+replication channel is built only when `replication_enabled` is set, so both halves exist or neither
+does; a standalone validator has no replication service to drain the stream:
 
 ```text
 DispatchEndpoints (RPC/API side)
@@ -84,7 +86,7 @@ ValidatorChannelEndpoints (processor/internal side)
   -> transaction_status: flume Sender<TransactionStatus>
   -> account_update: flume Sender<AccountWithSlot>
   -> tasks_service: UnboundedSender<TaskRequest>
-  -> replication_messages: mpsc Sender<Message>
+  -> replication_messages: Option<mpsc Sender<Message>>
   -> pause_permit: Arc<Semaphore>
 ```
 
@@ -154,8 +156,8 @@ Use `CoordinationMode::current()`, `needs_validator_signer()`, `should_schedule_
 
 ### Validator channel construction
 
-1. `magicblock-api` calls `magicblock_core::link::link()` during validator startup.
-2. `link()` creates bounded MPSC queues for transaction commands and replication messages, bounded `flume` queues for account/status events, an unbounded task queue, and a shared `Semaphore(1)` pause permit.
+1. `magicblock-api` calls `magicblock_core::link::link(!is_standalone)` during validator startup.
+2. `link()` creates a bounded MPSC queue for transaction commands, bounded `flume` queues for account/status events, an unbounded task queue, and a shared `Semaphore(1)` pause permit. The bounded MPSC replication queue is created only when replication is enabled; in standalone mode both endpoints get `None` and the scheduler emits nothing.
 3. The API/RPC side receives `DispatchEndpoints`; the processor side receives `ValidatorChannelEndpoints`.
 4. `TransactionSchedulerHandle` clones can be passed to RPC, cloner, accounts, ledger replay, task scheduler, and replication services.
 
@@ -252,7 +254,7 @@ Native-token projection is intentionally limited to local ATA/eATA projection se
 
 ## Important invariants
 
-1. `link::link()` must return paired endpoints connected to the same channels and pause semaphore; dispatch and validator sides must not be mismatched.
+1. `link::link()` must return paired endpoints connected to the same channels and pause semaphore; dispatch and validator sides must not be mismatched. The replication sender and receiver are created together or not at all: a standalone node holds neither, so no component can hold a sender whose receiver nobody drains.
 2. Scheduler command ordering must keep replay transactions and replicated block boundaries in the same FIFO stream.
 3. `TransactionSchedulerHandle::wait_for_idle()` must continue to pause scheduling while the returned permit is held; maintenance that relies on exclusive `AccountsDb` access depends on this.
 4. Bounded channels on hot paths must preserve intentional backpressure and avoid unbounded memory growth.
