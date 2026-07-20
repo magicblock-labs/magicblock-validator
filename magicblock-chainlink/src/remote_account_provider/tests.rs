@@ -346,7 +346,7 @@ async fn test_companion_fetch_metrics_record_fast_path_success() {
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT),
-                companion_fetch_kind: Some(kind),
+                companion_fetch_kind: kind,
             }),
             context,
         )
@@ -410,7 +410,7 @@ async fn test_companion_fetch_metrics_record_retry_success() {
                 max_retries: 20,
                 retry_interval_ms: 10,
                 min_context_slot: Some(CURRENT_SLOT + 1),
-                companion_fetch_kind: Some(kind),
+                companion_fetch_kind: kind,
             }),
             context,
         )
@@ -489,16 +489,7 @@ async fn test_companion_fetch_metrics_not_recorded_without_kind() {
         chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
 
     let res = remote_account_provider
-        .try_get_multi_until_slots_match(
-            &[pubkey1, pubkey2],
-            Some(MatchSlotsConfig {
-                max_retries: 10,
-                retry_interval_ms: 50,
-                min_context_slot: Some(CURRENT_SLOT),
-                companion_fetch_kind: None,
-            }),
-            context,
-        )
+        .try_get_multi_until_slots_match(&[pubkey1, pubkey2], None, context)
         .await;
 
     assert!(res.is_ok());
@@ -1670,7 +1661,8 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot() {
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: None,
-                companion_fetch_kind: None,
+                companion_fetch_kind:
+                    ChainlinkCompanionFetchKind::GenericSlotMatch,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1741,7 +1733,8 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
                         max_retries: 3,
                         retry_interval_ms: 10,
                         min_context_slot: None,
-                        companion_fetch_kind: None,
+                        companion_fetch_kind:
+                            ChainlinkCompanionFetchKind::GenericSlotMatch,
                     }),
                     AccountFetchContext::rpc_get_account(),
                 )
@@ -1819,7 +1812,8 @@ async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: None,
-                companion_fetch_kind: None,
+                companion_fetch_kind:
+                    ChainlinkCompanionFetchKind::GenericSlotMatch,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1864,7 +1858,8 @@ async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT + 1),
-                companion_fetch_kind: None,
+                companion_fetch_kind:
+                    ChainlinkCompanionFetchKind::GenericSlotMatch,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1904,7 +1899,8 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_accou
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT),
-                companion_fetch_kind: None,
+                companion_fetch_kind:
+                    ChainlinkCompanionFetchKind::GenericSlotMatch,
             }),
             AccountFetchContext::rpc_get_account(),
         )
@@ -1926,7 +1922,7 @@ fn test_match_slots_retry_delay_honors_configured_interval() {
         max_retries: 10,
         retry_interval_ms: 50,
         min_context_slot: None,
-        companion_fetch_kind: None,
+        companion_fetch_kind: ChainlinkCompanionFetchKind::GenericSlotMatch,
     };
 
     assert_eq!(match_slots_retry_delay(&config), Duration::from_millis(50));

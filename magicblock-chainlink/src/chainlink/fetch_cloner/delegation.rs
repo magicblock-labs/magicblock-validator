@@ -206,9 +206,8 @@ where
             &[delegation_record_pubkey],
             Some(MatchSlotsConfig {
                 min_context_slot: Some(min_context_slot),
-                companion_fetch_kind: Some(
+                companion_fetch_kind:
                     ChainlinkCompanionFetchKind::DelegationRecord,
-                ),
                 ..Default::default()
             }),
             fetch_context

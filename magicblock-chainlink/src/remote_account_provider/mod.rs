@@ -631,7 +631,7 @@ pub struct MatchSlotsConfig {
     pub max_retries: u64,
     pub retry_interval_ms: u64,
     pub min_context_slot: Option<u64>,
-    pub companion_fetch_kind: Option<ChainlinkCompanionFetchKind>,
+    pub companion_fetch_kind: ChainlinkCompanionFetchKind,
 }
 
 impl Default for MatchSlotsConfig {
@@ -640,7 +640,7 @@ impl Default for MatchSlotsConfig {
             max_retries: 10,
             retry_interval_ms: 50,
             min_context_slot: None,
-            companion_fetch_kind: None,
+            companion_fetch_kind: ChainlinkCompanionFetchKind::GenericSlotMatch,
         }
     }
 }
@@ -1298,8 +1298,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         use SlotsMatchResult::*;
         let fetch_context = fetch_context.into();
+        let companion_fetch_kind =
+            config.as_ref().map(|config| config.companion_fetch_kind);
         let config = config.unwrap_or_default();
-        let companion_fetch_kind = config.companion_fetch_kind;
         let companion_fetch_started_at = std::time::Instant::now();
         let mut companion_fetch_attempts = 1u64;
         // 1. Fetch the _normal_ way and hope the slots match and if required

@@ -3501,7 +3501,7 @@ where
                     &[pubkey, companion_pubkey],
                     Some(MatchSlotsConfig {
                         min_context_slot: Some(slot),
-                        companion_fetch_kind: Some(companion_fetch_kind),
+                        companion_fetch_kind,
                         ..Default::default()
                     }),
                     fetch_context,
