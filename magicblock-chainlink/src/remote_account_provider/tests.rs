@@ -502,6 +502,56 @@ async fn test_secondary_eviction_failure_restores_previous_account() {
     assert!(!ctx.provider.is_watching(&second_missing));
 }
 
+#[tokio::test]
+async fn test_found_fetch_fails_when_primary_capacity_is_protected() {
+    init_logger();
+
+    let protected = random_pubkey();
+    let found = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        protected,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.rpc_client.add_account(
+        found,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    );
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    let err = ctx
+        .provider
+        .try_get(found, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountResolutionsFailed(message)
+            if message.contains("NoEvictableSubscriptionCapacity")
+                && message.contains(&found.to_string())
+    ));
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&protected));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&found));
+    assert!(!ctx.provider.is_watching(&found));
+    assert!(!ctx.pubsub_client.subscriptions_union().contains(&found));
+}
+
 struct TestSlotConfig {
     current_slot: u64,
     account1_slot: u64,

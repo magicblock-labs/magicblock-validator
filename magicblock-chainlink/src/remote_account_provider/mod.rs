@@ -655,7 +655,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         pubkey: &Pubkey,
         response_slot: u64,
         not_found: bool,
-    ) {
+    ) -> RemoteAccountProviderResult<()> {
         let apply_classification = self
             .record_classification(
                 *pubkey,
@@ -664,25 +664,35 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             )
             .await;
         if !apply_classification {
-            return;
+            return Ok(());
         }
 
         if not_found {
             self.move_not_found_to_secondary_locked(*pubkey).await;
+            Ok(())
         } else {
             // A confirmed miss that exists after all is gRPC-only; restore
             // full coverage on promotion.
             let restore_full_coverage = self.is_confirmed_missing(pubkey);
+            let was_secondary = self.secondary.contains(pubkey);
             self.set_confirmed_missing(*pubkey, false);
-            if let Err(err) = self
+            let promotion_result = self
                 .try_promote_found_to_primary_locked(
                     *pubkey,
                     restore_full_coverage,
                 )
-                .await
-            {
-                warn!(pubkey = %pubkey, error = ?err, "Failed to promote found account to primary subscription tier");
+                .await;
+            if was_secondary && matches!(promotion_result, Ok(false)) {
+                self.cleanup_rejected_subscription(*pubkey).await?;
+                self.secondary.remove(pubkey);
+                self.subscription_ownership.lock().await.remove(pubkey);
+                return Err(
+                    RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                        pubkey: *pubkey,
+                    },
+                );
             }
+            promotion_result.map(|_| ())
         }
     }
 
@@ -3379,7 +3389,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             for (pubkey, remote_account) in
                 pubkeys.iter().zip(remote_accounts.iter())
             {
-                let waiters = {
+                let (waiters, classification_result) = {
                     let _transition_guard = subscription_tiers
                         .subscription_transition_lock
                         .lock()
@@ -3406,22 +3416,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         )
                     };
                     if let Some(state) = state {
-                        observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
-                            state.fetch_context,
-                            ChainlinkPendingFetchLayer::RemoteAccountProvider,
-                            ChainlinkPendingFetchOutcome::OwnerSucceeded,
-                            state.owner_started_at.elapsed().as_secs_f64(),
-                        );
                         let waiters = state.waiters;
 
-                        subscription_tiers
+                        let classification_result = subscription_tiers
                             .apply_fetch_classification(
                                 pubkey,
                                 response_slot,
                                 not_found_pubkeys.contains(pubkey),
                             )
                             .await;
-                        waiters
+                        observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+                            state.fetch_context,
+                            ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                            if classification_result.is_ok() {
+                                ChainlinkPendingFetchOutcome::OwnerSucceeded
+                            } else {
+                                ChainlinkPendingFetchOutcome::OwnerFailed
+                            },
+                            state.owner_started_at.elapsed().as_secs_f64(),
+                        );
+                        (waiters, classification_result)
                     } else {
                         inc_chainlink_pending_fetch_accounts_with_context(
                             fetch_context,
@@ -3440,7 +3454,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                 // Send the fetch result to all waiting requests
                 for request in waiters {
-                    let _ = request.send(Ok(remote_account.clone()));
+                    let result = match &classification_result {
+                        Ok(()) => Ok(remote_account.clone()),
+                        Err(RemoteAccountProviderError::NoEvictableSubscriptionCapacity { pubkey }) => {
+                            Err(RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                                pubkey: *pubkey,
+                            })
+                        }
+                        Err(err) => Err(
+                            RemoteAccountProviderError::AccountResolutionsFailed(
+                                err.to_string(),
+                            ),
+                        ),
+                    };
+                    let _ = request.send(result);
                 }
             }
         });

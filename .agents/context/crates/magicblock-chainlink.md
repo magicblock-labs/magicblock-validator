@@ -166,7 +166,9 @@ Fetch-owned unknown accounts enter a bounded secondary subscription LRU rather
 than the primary working-set LRU. They retain full websocket and gRPC coverage
 while the fetch is pending. A winning not-found result switches to gRPC-only
 coverage when gRPC is available; a winning found result moves the account to
-the primary LRU. Results discarded by fetch/subscription generation arbitration
+the primary LRU. If protected primary entries leave no promotion capacity, the
+found fetch fails and its secondary subscription is rolled back. Results
+discarded by fetch/subscription generation arbitration
 must not change tiers. Per-account classification retains the winning slot and
 source while the subscription is owned: older updates are ignored for tier
 movement, and subscription data wins an equal-slot tie over RPC data.
