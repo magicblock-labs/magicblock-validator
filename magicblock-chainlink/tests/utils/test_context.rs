@@ -22,7 +22,7 @@ use magicblock_chainlink::{
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
         utils::{create_test_lru_cache, create_test_lru_cache_with_config},
     },
-    AccountFetchOrigin, InnerChainlink,
+    AccountFetchContext, InnerChainlink,
 };
 use magicblock_config::config::LifecycleMode;
 use solana_account::{Account, AccountSharedData};
@@ -215,7 +215,7 @@ impl TestContext {
             .ensure_accounts(
                 &[*pubkey],
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
     }

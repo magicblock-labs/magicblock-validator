@@ -2,7 +2,7 @@ use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
     assert_subscribed_without_delegation_record, testing::init_logger,
-    AccountFetchOrigin,
+    AccountFetchContext,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::ixtest_context::IxtestContext;
@@ -23,7 +23,11 @@ async fn ixtest_deleg_after_subscribe_case2() {
         info!("1. Initially the account does not exist");
         let res = ctx
             .chainlink
-            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .ensure_accounts(
+                &pubkeys,
+                None,
+                AccountFetchContext::rpc_get_account(),
+            )
             .await
             .unwrap();
 
@@ -38,7 +42,11 @@ async fn ixtest_deleg_after_subscribe_case2() {
         ctx.init_counter(&counter_auth).await;
 
         ctx.chainlink
-            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .ensure_accounts(
+                &pubkeys,
+                None,
+                AccountFetchContext::rpc_get_account(),
+            )
             .await
             .unwrap();
 
@@ -62,7 +70,11 @@ async fn ixtest_deleg_after_subscribe_case2() {
         let deleg_record_pubkey = ctx.delegation_record_pubkey(&counter_pda);
 
         ctx.chainlink
-            .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+            .ensure_accounts(
+                &pubkeys,
+                None,
+                AccountFetchContext::rpc_get_account(),
+            )
             .await
             .unwrap();
 
