@@ -1,10 +1,15 @@
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_metrics::metrics::{AccountFetchContext, AccountFetchReason};
+use magicblock_metrics::metrics::{
+    AccountFetchContext, AccountFetchReason, ChainlinkCompanionFetchKind,
+};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tracing::*;
 
-use super::{subscription::release_program_data_subs, FetchCloner};
+use super::{
+    log_companion_fetch_failure, subscription::release_program_data_subs,
+    CompanionFetchLogContext, FetchCloner,
+};
 use crate::{
     cloner::Cloner,
     remote_account_provider::{
@@ -16,10 +21,11 @@ use crate::{
     },
 };
 
-pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
+pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     pubkey: Pubkey,
     account: AccountSharedData,
+    companion_fetch_log_context: &CompanionFetchLogContext,
 ) where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -65,52 +71,60 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
     let program_data_context =
         program_load_context.with_reason(AccountFetchReason::ProgramData);
 
-    let (program_account, program_data_account) = if account
-        .owner()
-        .eq(&LOADER_V3)
-    {
-        match FetchCloner::task_to_fetch_with_program_data(
-            this,
-            pubkey,
-            account.remote_slot(),
-            program_data_context,
-        )
-        .await
-        {
-            Ok(Ok(account_with_companion)) => (
-                account_with_companion.account.into_account_shared_data(),
-                account_with_companion
-                    .companion_account
-                    .map(|x| x.into_account_shared_data()),
-            ),
-            Ok(Err(err)) => {
-                error!(pubkey = %pubkey, error = %err, "Failed to fetch program data account");
-                if acquired_program_data_reason {
-                    // Both refs exist for LoaderV3 program-data cleanup.
-                    release_program_data_subs(
-                        &this.remote_account_provider,
+    let (program_account, program_data_account) =
+        if account.owner().eq(&LOADER_V3) {
+            match FetchCloner::task_to_fetch_with_program_data(
+                this,
+                pubkey,
+                account.remote_slot(),
+                program_data_context,
+            )
+            .await
+            {
+                Ok(Ok(account_with_companion)) => (
+                    account_with_companion.account.into_account_shared_data(),
+                    account_with_companion
+                        .companion_account
+                        .map(|x| x.into_account_shared_data()),
+                ),
+                Ok(Err(err)) => {
+                    log_companion_fetch_failure(
+                        companion_fetch_log_context,
                         program_data_pubkey,
-                    )
-                    .await;
+                        ChainlinkCompanionFetchKind::ProgramData,
+                        &err,
+                    );
+                    if acquired_program_data_reason {
+                        // Both refs exist for LoaderV3 program-data cleanup.
+                        release_program_data_subs(
+                            &this.remote_account_provider,
+                            program_data_pubkey,
+                        )
+                        .await;
+                    }
+                    return;
                 }
-                return;
-            }
-            Err(err) => {
-                error!(pubkey = %pubkey, error = %err, "Failed to fetch program data account");
-                if acquired_program_data_reason {
-                    // Both refs exist for LoaderV3 program-data cleanup.
-                    release_program_data_subs(
-                        &this.remote_account_provider,
+                Err(err) => {
+                    log_companion_fetch_failure(
+                        companion_fetch_log_context,
                         program_data_pubkey,
-                    )
-                    .await;
+                        ChainlinkCompanionFetchKind::ProgramData,
+                        &err,
+                    );
+                    if acquired_program_data_reason {
+                        // Both refs exist for LoaderV3 program-data cleanup.
+                        release_program_data_subs(
+                            &this.remote_account_provider,
+                            program_data_pubkey,
+                        )
+                        .await;
+                    }
+                    return;
                 }
-                return;
             }
-        }
-    } else {
-        (account, None::<AccountSharedData>)
-    };
+        } else {
+            (account, None::<AccountSharedData>)
+        };
 
     let loaded_program = match ProgramAccountResolver::try_new(
         pubkey,
