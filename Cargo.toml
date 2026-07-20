@@ -180,7 +180,9 @@ prost = "0.14"
 protobuf-src = "1.1"
 rand = "0.9"
 reqwest = "0.12"
-rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2", features = ["raw-ptr"] }
+rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2", features = [
+    "raw-ptr",
+] }
 librocksdb-sys = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2" }
 rusqlite = { version = "0.37.0", features = ["bundled"] } # bundled sqlite 3.44
 rustc-hash = "2.1"
@@ -292,8 +294,10 @@ solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git"
 # TODO: Update to the merged version when ready
 solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 solana-storage-proto = { path = "storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
+# TODO: Update to the merged version when ready
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
+# TODO: Update to the merged version when ready
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ab02436a458bf83aade6a8b9276f6384077c78fc" }
 # Fork mirrors upstream rust-rocksdb; APIs missing from the safe wrapper
 # (disable_manual_compaction, mode-aware rate limiter) are reached through
 # the `raw-ptr` feature + librocksdb-sys directly.
