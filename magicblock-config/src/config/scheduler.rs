@@ -8,18 +8,10 @@ use crate::types::SerdeKeypair;
 /// validator only needs the keypair used to pay for (sponsor, fund, and cancel)
 /// hydra cranks. This faucet keypair is delegated on startup; it must be funded
 /// separately (the validator does not fund it).
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Default, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct TaskSchedulerConfig {
     /// Keypair the task scheduler uses to pay for hydra cranks, encoded in
     /// Base58.
     pub faucet_keypair: Option<SerdeKeypair>,
-}
-
-impl Default for TaskSchedulerConfig {
-    fn default() -> Self {
-        Self {
-            faucet_keypair: None,
-        }
-    }
 }
