@@ -90,7 +90,7 @@ async fn setup_provider_with_lru_capacity(
 }
 
 fn pending_accounts_value(
-    origin: AccountFetchOrigin,
+    origin: impl Into<AccountFetchContext>,
     outcome: ChainlinkPendingFetchOutcome,
 ) -> u64 {
     chainlink_pending_fetch_accounts_value(
@@ -100,7 +100,7 @@ fn pending_accounts_value(
     )
 }
 
-fn pending_waiters_value(origin: AccountFetchOrigin) -> u64 {
+fn pending_waiters_value(origin: impl Into<AccountFetchContext>) -> u64 {
     chainlink_pending_fetch_waiters_value(
         origin,
         ChainlinkPendingFetchLayer::RemoteAccountProvider,
@@ -156,7 +156,7 @@ async fn wait_for_direct_subscription(
 }
 
 async fn wait_for_pending_account_delta_at_least(
-    origin: AccountFetchOrigin,
+    origin: impl Into<AccountFetchContext> + Copy,
     outcome: ChainlinkPendingFetchOutcome,
     baseline: u64,
     minimum_delta: u64,
@@ -210,7 +210,7 @@ async fn test_not_found_account_stays_secondary_and_promotes_on_creation() {
 
     let res = ctx
         .provider
-        .try_get(missing, AccountFetchOrigin::GetAccount)
+        .try_get(missing, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     assert!(!res.is_found());
@@ -302,7 +302,7 @@ async fn test_repeated_not_found_fetch_preserves_primary_working_set() {
 
     assert!(ctx
         .provider
-        .try_get(existing, AccountFetchOrigin::GetAccount)
+        .try_get(existing, AccountFetchContext::rpc_get_account())
         .await
         .unwrap()
         .is_found());
@@ -314,7 +314,7 @@ async fn test_repeated_not_found_fetch_preserves_primary_working_set() {
     for _ in 0..2 {
         assert!(!ctx
             .provider
-            .try_get(missing, AccountFetchOrigin::GetAccount)
+            .try_get(missing, AccountFetchContext::rpc_get_account())
             .await
             .unwrap()
             .is_found());
@@ -341,7 +341,7 @@ async fn test_manual_unsubscribe_removes_secondary_account() {
 
     assert!(!ctx
         .provider
-        .try_get(missing, AccountFetchOrigin::GetAccount)
+        .try_get(missing, AccountFetchContext::rpc_get_account())
         .await
         .unwrap()
         .is_found());
@@ -423,7 +423,7 @@ async fn test_secondary_capacity_preserves_protected_account() {
         .unwrap();
     assert!(!ctx
         .provider
-        .try_get(protected_missing, AccountFetchOrigin::GetAccount)
+        .try_get(protected_missing, AccountFetchContext::rpc_get_account(),)
         .await
         .unwrap()
         .is_found());
@@ -439,7 +439,7 @@ async fn test_secondary_capacity_preserves_protected_account() {
     ctx.pubsub_client.fail_next_unsubscriptions(1);
     let err = ctx
         .provider
-        .try_get(rejected_missing, AccountFetchOrigin::GetAccount)
+        .try_get(rejected_missing, AccountFetchContext::rpc_get_account())
         .await
         .unwrap_err();
     assert!(matches!(
@@ -479,7 +479,7 @@ async fn test_secondary_eviction_failure_restores_previous_account() {
 
     assert!(!ctx
         .provider
-        .try_get(first_missing, AccountFetchOrigin::GetAccount)
+        .try_get(first_missing, AccountFetchContext::rpc_get_account())
         .await
         .unwrap()
         .is_found());
@@ -487,7 +487,7 @@ async fn test_secondary_eviction_failure_restores_previous_account() {
 
     assert!(ctx
         .provider
-        .try_get(second_missing, AccountFetchOrigin::GetAccount)
+        .try_get(second_missing, AccountFetchContext::rpc_get_account())
         .await
         .is_err());
     assert!(ctx
@@ -563,7 +563,7 @@ async fn test_try_get_multi_short_multi_account_response_returns_error() {
         provider.try_get_multi(
             &[pubkey1, pubkey2],
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
             None,
         ),
     )
@@ -671,7 +671,7 @@ async fn test_cancelled_subscription_setup_cleans_classification_placeholder() {
         FetchingAccountState {
             generation,
             fetch_start_slot: 0,
-            fetch_origin: AccountFetchOrigin::GetAccount,
+            fetch_context: AccountFetchContext::rpc_get_account(),
             owner_started_at: std::time::Instant::now(),
             waiters: vec![sender],
         },
@@ -744,7 +744,7 @@ async fn test_failed_placeholder_adoption_preserves_generation_for_cleanup() {
             &pubkey,
             SubscriptionReason::DirectAccount,
             SubscriptionRegistrationOrigin::Fetch(
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             ),
         )
         .await
@@ -804,7 +804,7 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
                 .try_get_multi(
                     &[pubkey],
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                     None,
                 )
                 .await
@@ -831,7 +831,12 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
 
     pubsub_client.try_reconnect().await.unwrap();
     let retry = provider
-        .try_get_multi(&[pubkey], None, AccountFetchOrigin::GetAccount, None)
+        .try_get_multi(
+            &[pubkey],
+            None,
+            AccountFetchContext::rpc_get_account(),
+            None,
+        )
         .await
         .expect("retry after cleanup should succeed");
     assert_eq!(retry.len(), 1);
@@ -866,7 +871,7 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
                 .try_get_multi(
                     &[pubkey],
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                     None,
                 )
                 .await
@@ -883,7 +888,7 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
                 .try_get_multi(
                     &[pubkey],
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                     None,
                 )
                 .await
@@ -1577,7 +1582,7 @@ async fn test_try_get_multi_owner_success_cleans_up_pending_entry() {
                 .try_get_multi(
                     &[pubkey],
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                     None,
                 )
                 .await
@@ -1628,16 +1633,16 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         ..
     } = setup_provider(pubkey, account).await;
 
-    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
+    let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
     let owned_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::Owned,
     );
     let joined_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::JoinedExisting,
     );
-    let waiters_baseline = pending_waiters_value(fetch_origin);
+    let waiters_baseline = pending_waiters_value(fetch_context);
 
     rpc_client.block_fetches();
 
@@ -1645,7 +1650,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         let provider = provider.clone();
         async move {
             provider
-                .try_get_multi(&[pubkey], None, fetch_origin, None)
+                .try_get_multi(&[pubkey], None, fetch_context, None)
                 .await
         }
     });
@@ -1656,7 +1661,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         let provider = provider.clone();
         async move {
             provider
-                .try_get_multi(&[pubkey], None, fetch_origin, None)
+                .try_get_multi(&[pubkey], None, fetch_context, None)
                 .await
         }
     });
@@ -1681,7 +1686,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         .expect("waiter fetch should succeed");
 
     let owned_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::Owned,
     )
     .saturating_sub(owned_baseline);
@@ -1690,7 +1695,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         "remote provider owned metric should increase by at least 1; got {owned_delta}"
     );
     let joined_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::JoinedExisting,
     )
     .saturating_sub(joined_baseline);
@@ -1699,7 +1704,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         "remote provider joined-existing metric should increase by at least 1; got {joined_delta}"
     );
     let waiters_delta =
-        pending_waiters_value(fetch_origin).saturating_sub(waiters_baseline);
+        pending_waiters_value(fetch_context).saturating_sub(waiters_baseline);
     assert!(
         waiters_delta >= 1,
         "remote provider waiter metric should increase by at least 1; got {waiters_delta}"
@@ -1747,13 +1752,13 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         .unwrap(),
     );
 
-    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
+    let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
     let resolved_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
     );
     let late_rpc_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
     );
 
@@ -1763,7 +1768,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         let provider = provider.clone();
         async move {
             provider
-                .try_get_multi(&[pubkey], None, fetch_origin, None)
+                .try_get_multi(&[pubkey], None, fetch_context, None)
                 .await
         }
     });
@@ -1793,7 +1798,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         Some(RemoteAccountUpdateSource::Subscription)
     );
     let resolved_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
     )
     .saturating_sub(resolved_baseline);
@@ -1807,7 +1812,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
     rpc_client.set_current_slot(fetch_start_slot + 1);
     rpc_client.allow_fetches();
     wait_for_pending_account_delta_at_least(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
         late_rpc_baseline,
         1,
@@ -1849,7 +1854,7 @@ async fn test_get_non_existing_account() {
 
     let pubkey = random_pubkey();
     let remote_account = remote_account_provider
-        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     assert!(!remote_account.is_found());
@@ -1902,7 +1907,7 @@ async fn test_get_existing_account_for_valid_slot() {
     };
 
     let remote_account = remote_account_provider
-        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     let AccountAtSlot { account, slot } =
@@ -1943,7 +1948,7 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot() {
                 retry_interval_ms: 50,
                 min_context_slot: None,
             }),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2013,7 +2018,7 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
                         retry_interval_ms: 10,
                         min_context_slot: None,
                     }),
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         }
@@ -2090,7 +2095,7 @@ async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
                 retry_interval_ms: 50,
                 min_context_slot: None,
             }),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -2134,7 +2139,7 @@ async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT + 1),
             }),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2173,7 +2178,7 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_accou
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT),
             }),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -2303,7 +2308,7 @@ async fn test_add_accounts_up_to_limit_no_eviction() {
     // Add three accounts (up to limit)
     for pk in pubkeys {
         provider
-            .try_get(*pk, AccountFetchOrigin::GetAccount)
+            .try_get(*pk, AccountFetchContext::rpc_get_account())
             .await
             .unwrap();
     }
@@ -2332,28 +2337,28 @@ async fn test_eviction_order() {
 
     // Fill cache: [1, 2, 3] (1 is least recently used)
     provider
-        .try_get(pubkey1, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey1, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     provider
-        .try_get(pubkey2, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey2, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     provider
-        .try_get(pubkey3, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey3, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
 
     // Access pubkey1 to make it more recently used: [2, 3, 1]
     // This should just promote, making order [2, 3, 1]
     provider
-        .try_get(pubkey1, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey1, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
 
     // Add pubkey4, should evict pubkey2 (now least recently used)
     provider
-        .try_get(pubkey4, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey4, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
 
@@ -2364,7 +2369,7 @@ async fn test_eviction_order() {
 
     // Add pubkey5, should evict pubkey3 (now least recently used)
     provider
-        .try_get(pubkey5, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey5, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
 
@@ -2388,7 +2393,7 @@ async fn test_multiple_evictions_in_sequence() {
     // Fill cache to capacity (no evictions)
     for pk in pubkeys.iter().take(4) {
         provider
-            .try_get(*pk, AccountFetchOrigin::GetAccount)
+            .try_get(*pk, AccountFetchContext::rpc_get_account())
             .await
             .unwrap();
     }
@@ -2396,7 +2401,7 @@ async fn test_multiple_evictions_in_sequence() {
     // Add more accounts and verify evictions happen in LRU order
     for i in 4..7 {
         provider
-            .try_get(pubkeys[i], AccountFetchOrigin::GetAccount)
+            .try_get(pubkeys[i], AccountFetchContext::rpc_get_account())
             .await
             .unwrap();
         let expected_evicted = pubkeys[i - 4]; // Should evict the account added 4 steps ago
@@ -2741,7 +2746,7 @@ async fn test_registration_metric_already_present_on_duplicate_acquire() {
 }
 
 #[tokio::test]
-async fn test_registration_metric_preserves_fetch_origin() {
+async fn test_registration_metric_preserves_fetch_context() {
     init_logger();
     let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
@@ -2757,16 +2762,20 @@ async fn test_registration_metric_preserves_fetch_origin() {
         setup_provider(pubkey, account).await;
 
     let before = registration_metric_value(
-        SubscriptionRegistrationOrigin::Fetch(AccountFetchOrigin::GetAccount),
+        SubscriptionRegistrationOrigin::Fetch(
+            AccountFetchContext::rpc_get_account(),
+        ),
         SubscriptionReasonLabel::DirectAccount,
         SubscriptionRegistrationOutcome::AddedBelowCapacity,
     );
     provider
-        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     let after = registration_metric_value(
-        SubscriptionRegistrationOrigin::Fetch(AccountFetchOrigin::GetAccount),
+        SubscriptionRegistrationOrigin::Fetch(
+            AccountFetchContext::rpc_get_account(),
+        ),
         SubscriptionReasonLabel::DirectAccount,
         SubscriptionRegistrationOutcome::AddedBelowCapacity,
     );

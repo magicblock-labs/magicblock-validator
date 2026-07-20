@@ -12,7 +12,7 @@ use magicblock_chainlink::{
         get_remote_account_update_sources, init_logger, random_pubkey,
         sleep_ms, PUBSUB_URL, RPC_URL,
     },
-    AccountFetchOrigin,
+    AccountFetchContext,
 };
 use magicblock_config::config::LifecycleMode;
 use solana_commitment_config::CommitmentConfig;
@@ -63,7 +63,7 @@ async fn ixtest_get_non_existing_account() {
 
     let pubkey = random_pubkey();
     let remote_account = remote_account_provider
-        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     assert!(!remote_account.is_found());
@@ -116,7 +116,7 @@ async fn ixtest_get_existing_account_for_valid_slot() {
     {
         // Fetching immediately does not return the account yet
         let remote_account = remote_account_provider
-            .try_get(pubkey, AccountFetchOrigin::GetAccount)
+            .try_get(pubkey, AccountFetchContext::rpc_get_account())
             .await
             .unwrap();
         assert!(!remote_account.is_found());
@@ -135,7 +135,7 @@ async fn ixtest_get_existing_account_for_valid_slot() {
         // After waiting for a bit the subscription update came in
         let cs = current_slot(rpc_client).await;
         let remote_account = remote_account_provider
-            .try_get(pubkey, AccountFetchOrigin::GetAccount)
+            .try_get(pubkey, AccountFetchContext::rpc_get_account())
             .await
             .unwrap();
         assert!(remote_account.is_found());
@@ -165,7 +165,7 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
             .try_get_multi(
                 &all_pubkeys,
                 None,
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
                 None,
             )
             .await
@@ -197,7 +197,7 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
             .try_get_multi(
                 &all_pubkeys,
                 None,
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
                 None,
             )
             .await
@@ -231,7 +231,7 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
             .try_get_multi(
                 &all_pubkeys,
                 None,
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
                 None,
             )
             .await

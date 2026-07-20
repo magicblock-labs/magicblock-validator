@@ -3,7 +3,7 @@ use magicblock_chainlink::{
     assert_not_cloned, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
     testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchOrigin,
+    AccountFetchContext,
 };
 use solana_account::Account;
 use solana_program::clock::Slot;
@@ -58,7 +58,7 @@ async fn test_deleg_after_subscribe_case2() {
             .ensure_accounts(
                 &[pubkey],
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
             .unwrap();
@@ -87,7 +87,7 @@ async fn test_deleg_after_subscribe_case2() {
             .ensure_accounts(
                 &[pubkey],
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
             .unwrap();

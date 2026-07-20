@@ -14,7 +14,9 @@ use intent_client::{
 };
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
-use magicblock_metrics::metrics::{self, AccountFetchOrigin};
+use magicblock_metrics::metrics::{
+    self, AccountFetchContext, AccountFetchReason,
+};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle, Pubkey,
 };
@@ -382,7 +384,9 @@ where
                         .chainlink
                         .accounts_delegated_on_base_and_er(
                             &pubkeys,
-                            AccountFetchOrigin::GetAccount,
+                            AccountFetchContext::internal(
+                                AccountFetchReason::RequestedAccount,
+                            ),
                         )
                         .await;
                     result

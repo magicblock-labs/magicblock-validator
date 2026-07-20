@@ -514,7 +514,7 @@ mod tests {
             CapacityEvictionProtection, FetchingAccountState,
         },
         testing::init_logger,
-        AccountFetchOrigin,
+        AccountFetchContext,
     };
 
     fn create_test_pubkey(seed: u8) -> Pubkey {
@@ -620,7 +620,7 @@ mod tests {
             FetchingAccountState {
                 generation: 1,
                 fetch_start_slot: 0,
-                fetch_origin: AccountFetchOrigin::GetAccount,
+                fetch_context: AccountFetchContext::rpc_get_account(),
                 owner_started_at: std::time::Instant::now(),
                 waiters: Vec::new(),
             },

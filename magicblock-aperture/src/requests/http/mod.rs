@@ -13,7 +13,7 @@ use magicblock_core::{
     coordination_mode::CoordinationMode,
     link::transactions::{SanitizeableTransaction, WithEncoded},
 };
-use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
+use magicblock_metrics::metrics::{AccountFetchContext, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -158,7 +158,7 @@ impl HttpDispatcher {
             .ensure_accounts(
                 &[*pubkey],
                 Some(&mark_empty_if_not_found),
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
             .inspect_err(|e| {
@@ -192,7 +192,7 @@ impl HttpDispatcher {
             .ensure_accounts(
                 pubkeys,
                 Some(pubkeys),
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
             .inspect_err(|e| {
