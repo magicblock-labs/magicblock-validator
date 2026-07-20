@@ -21,33 +21,6 @@ use crate::{
     },
 };
 
-#[cfg(test)]
-pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
-    pubkey: Pubkey,
-    account: AccountSharedData,
-) where
-    T: ChainRpcClient,
-    U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
-{
-    let companion_fetch_log_context = CompanionFetchLogContext {
-        origin: AccountFetchContext::subscription_update(
-            AccountFetchReason::SubscriptionUpdateClone,
-        ),
-        primary_pubkey: pubkey,
-        context_slot: Some(account.remote_slot()),
-    };
-    handle_executable_sub_update_with_context(
-        this,
-        pubkey,
-        account,
-        &companion_fetch_log_context,
-    )
-    .await;
-}
-
 pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     pubkey: Pubkey,

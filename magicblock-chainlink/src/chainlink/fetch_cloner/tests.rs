@@ -7,7 +7,8 @@ use dlp_api::{
 use magicblock_metrics::metrics::{
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
-    chainlink_pending_fetch_waiters_value, ChainlinkPendingFetchLayer,
+    chainlink_pending_fetch_waiters_value, AccountFetchContext,
+    AccountFetchReason, ChainlinkPendingFetchLayer,
     ChainlinkPendingFetchOutcome,
 };
 use solana_account::{
@@ -77,6 +78,32 @@ type TestFetchClonerResult = (
     mpsc::Sender<ForwardedSubscriptionUpdate>,
     Arc<ClonerStub>,
 );
+
+async fn handle_executable_sub_update(
+    this: &FetchCloner<
+        ChainRpcClientMock,
+        ChainPubsubClientMock,
+        AccountsBankStub,
+        ClonerStub,
+    >,
+    pubkey: Pubkey,
+    account: AccountSharedData,
+) {
+    let companion_fetch_log_context = CompanionFetchLogContext {
+        origin: AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        ),
+        primary_pubkey: pubkey,
+        context_slot: Some(account.remote_slot()),
+    };
+    program_loader::handle_executable_sub_update_with_context(
+        this,
+        pubkey,
+        account,
+        &companion_fetch_log_context,
+    )
+    .await;
+}
 
 type TestFetchCloner = FetchCloner<
     ChainRpcClientMock,
@@ -3589,7 +3616,7 @@ async fn test_program_loader_resolver_error_releases_program_data_refs() {
     let mut program_account_shared = AccountSharedData::from(program_account);
     program_account_shared.set_remote_slot(CURRENT_SLOT);
 
-    program_loader::handle_executable_sub_update(
+    handle_executable_sub_update(
         &fetch_cloner,
         program_pubkey,
         program_account_shared,
