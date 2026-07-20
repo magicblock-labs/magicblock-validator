@@ -627,6 +627,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
 // -----------------
 // Configs
 // -----------------
+const DEFAULT_MATCH_SLOTS_MAX_RETRIES: u64 = 10;
+const DEFAULT_MATCH_SLOTS_RETRY_INTERVAL_MS: u64 = 50;
+
 pub struct MatchSlotsConfig {
     pub max_retries: u64,
     pub retry_interval_ms: u64,
@@ -634,13 +637,39 @@ pub struct MatchSlotsConfig {
     pub companion_fetch_kind: ChainlinkCompanionFetchKind,
 }
 
-impl Default for MatchSlotsConfig {
+impl MatchSlotsConfig {
+    pub fn new(companion_fetch_kind: ChainlinkCompanionFetchKind) -> Self {
+        Self {
+            max_retries: DEFAULT_MATCH_SLOTS_MAX_RETRIES,
+            retry_interval_ms: DEFAULT_MATCH_SLOTS_RETRY_INTERVAL_MS,
+            min_context_slot: None,
+            companion_fetch_kind,
+        }
+    }
+}
+
+struct MatchSlotsRetryConfig {
+    max_retries: u64,
+    retry_interval_ms: u64,
+    min_context_slot: Option<u64>,
+}
+
+impl Default for MatchSlotsRetryConfig {
     fn default() -> Self {
         Self {
-            max_retries: 10,
-            retry_interval_ms: 50,
+            max_retries: DEFAULT_MATCH_SLOTS_MAX_RETRIES,
+            retry_interval_ms: DEFAULT_MATCH_SLOTS_RETRY_INTERVAL_MS,
             min_context_slot: None,
-            companion_fetch_kind: ChainlinkCompanionFetchKind::GenericSlotMatch,
+        }
+    }
+}
+
+impl From<&MatchSlotsConfig> for MatchSlotsRetryConfig {
+    fn from(config: &MatchSlotsConfig) -> Self {
+        Self {
+            max_retries: config.max_retries,
+            retry_interval_ms: config.retry_interval_ms,
+            min_context_slot: config.min_context_slot,
         }
     }
 }
@@ -648,7 +677,7 @@ impl Default for MatchSlotsConfig {
 fn next_match_slots_retry(
     retries: &mut u64,
     start: std::time::Instant,
-    config: &MatchSlotsConfig,
+    config: &MatchSlotsRetryConfig,
 ) -> Result<Duration, String> {
     *retries += 1;
     if *retries == config.max_retries {
@@ -666,13 +695,13 @@ fn next_match_slots_retry(
 fn next_match_slots_rpc_error_retry(
     retries: &mut u64,
     start: std::time::Instant,
-    config: &MatchSlotsConfig,
+    config: &MatchSlotsRetryConfig,
 ) -> Result<Duration, String> {
     next_match_slots_retry(retries, start, config)
         .map(|delay| delay.max(RPC_FETCH_RETRY_DELAY))
 }
 
-fn match_slots_retry_delay(config: &MatchSlotsConfig) -> Duration {
+fn match_slots_retry_delay(config: &MatchSlotsRetryConfig) -> Duration {
     Duration::from_millis(config.retry_interval_ms)
 }
 
@@ -1300,7 +1329,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let fetch_context = fetch_context.into();
         let companion_fetch_kind =
             config.as_ref().map(|config| config.companion_fetch_kind);
-        let config = config.unwrap_or_default();
+        let config = config
+            .as_ref()
+            .map(MatchSlotsRetryConfig::from)
+            .unwrap_or_default();
         let companion_fetch_started_at = std::time::Instant::now();
         let mut companion_fetch_attempts = 1u64;
         // 1. Fetch the _normal_ way and hope the slots match and if required

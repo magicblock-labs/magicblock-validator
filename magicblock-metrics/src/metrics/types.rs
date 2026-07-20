@@ -308,7 +308,6 @@ pub enum ChainlinkCompanionFetchKind {
     ProgramData,
     DelegationRecord,
     AtaProjection,
-    GenericSlotMatch,
 }
 
 impl ChainlinkCompanionFetchKind {
@@ -317,7 +316,6 @@ impl ChainlinkCompanionFetchKind {
             Self::ProgramData => "program_data",
             Self::DelegationRecord => "delegation_record",
             Self::AtaProjection => "ata_projection",
-            Self::GenericSlotMatch => "generic_slot_match",
         }
     }
 }
