@@ -400,6 +400,66 @@ async fn test_repeated_not_found_fetch_preserves_primary_working_set() {
 }
 
 #[tokio::test]
+async fn test_refetching_confirmed_miss_restores_full_coverage_while_pending() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(existing, Account::default()).await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+    let subscribe_attempts = ctx.pubsub_client.subscribe_attempts();
+
+    ctx.rpc_client.block_fetches();
+    let task_handle = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            provider
+                .try_get(missing, AccountFetchContext::rpc_get_account())
+                .await
+        }
+    });
+    let provider = ctx.provider.clone();
+    wait_until("confirmed miss refetch to restore full coverage", || {
+        provider.is_pending(&missing)
+            && !provider
+                .confirmed_missing_subscriptions
+                .lock()
+                .unwrap()
+                .contains(&missing)
+    })
+    .await;
+    assert!(ctx.pubsub_client.subscribe_attempts() > subscribe_attempts);
+
+    ctx.rpc_client.allow_fetches();
+    let remote_account =
+        tokio::time::timeout(Duration::from_secs(2), task_handle)
+            .await
+            .expect("refetch should complete")
+            .expect("refetch should not panic")
+            .expect("refetch should succeed");
+    assert!(!remote_account.is_found());
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+}
+
+#[tokio::test]
 async fn test_manual_unsubscribe_removes_secondary_account() {
     init_logger();
 

@@ -2925,6 +2925,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         .await
                         .map(|_| ())
                 } else {
+                    let confirmed_missing = self
+                        .confirmed_missing_subscriptions
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner())
+                        .contains(pubkey);
+                    if confirmed_missing {
+                        self.pubsub_client.subscribe(*pubkey, None).await?;
+                        self.confirmed_missing_subscriptions
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner())
+                            .remove(pubkey);
+                    }
                     Ok(())
                 }
             } else {
