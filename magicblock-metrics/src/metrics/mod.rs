@@ -53,6 +53,27 @@ lazy_static::lazy_static! {
         "chain_slot_gauge", "Chain Slot Gauge",
     ).unwrap();
 
+    // The replica's view of a slot differed from the leader's: it missed a
+    // message, or applied one the leader did not. Reseeding from the leader's
+    // hash each slot makes this self-heal, leaving one log line as its trace.
+    static ref REPLICA_BLOCKHASH_DIVERGENCE_COUNTER: IntCounter = IntCounter::new(
+        "replica_blockhash_divergence_count",
+        "Replica blocks whose local blockhash diverged from the leader's",
+    ).unwrap();
+
+    static ref REPLICA_STREAM_GAP_COUNTER: IntCounter = IntCounter::new(
+        "replica_stream_gap_count",
+        "Holes detected in the replicated message sequence",
+    ).unwrap();
+
+    // Legitimate only for a transaction that had not reached the ledger as a
+    // mode switch rebuilt the accumulator. More than rare means the rebuild is
+    // wrong, and that the allowance is masking real divergence.
+    static ref REPLICA_INITIAL_BLOCKHASH_MISMATCH_COUNTER: IntCounter = IntCounter::new(
+        "replica_initial_blockhash_mismatch_count",
+        "First-block-after-mode-switch blockhash mismatches on a replica",
+    ).unwrap();
+
     // -----------------
     // Ledger
     // -----------------
@@ -286,7 +307,7 @@ lazy_static::lazy_static! {
                 SECONDS_1_9.iter()).cloned().collect()
             ),
             &["entrypoint", "fetch_reason", "layer", "outcome"],
-        )
+)
         .unwrap();
 
     static ref CHAINLINK_COMPANION_FETCH_ATTEMPTS: HistogramVec =
@@ -739,6 +760,9 @@ pub(crate) fn register() {
         }
         register!(SLOT_GAUGE);
         register!(CHAIN_SLOT_GAUGE);
+        register!(REPLICA_BLOCKHASH_DIVERGENCE_COUNTER);
+        register!(REPLICA_STREAM_GAP_COUNTER);
+        register!(REPLICA_INITIAL_BLOCKHASH_MISMATCH_COUNTER);
         register!(LEDGER_SIZE_GAUGE);
         register!(LEDGER_BLOCK_TIMES_GAUGE);
         register!(LEDGER_BLOCKHASHES_GAUGE);
@@ -836,6 +860,18 @@ pub fn set_slot(slot: u64) {
 
 pub fn set_chain_slot(value: u64) {
     CHAIN_SLOT_GAUGE.set(value as i64);
+}
+
+pub fn inc_replica_blockhash_divergence() {
+    REPLICA_BLOCKHASH_DIVERGENCE_COUNTER.inc();
+}
+
+pub fn inc_replica_stream_gap() {
+    REPLICA_STREAM_GAP_COUNTER.inc();
+}
+
+pub fn inc_replica_initial_blockhash_mismatch() {
+    REPLICA_INITIAL_BLOCKHASH_MISMATCH_COUNTER.inc();
 }
 
 pub fn set_ledger_size(size: u64) {

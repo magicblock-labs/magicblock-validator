@@ -25,19 +25,21 @@
 //! ## Primary Mode
 //!
 //! - Acts as the clock source, driving slot transitions via `slot_ticker`
-//! - Computes blockhash and broadcasts it via replication channel
+//! - Computes blockhash and broadcasts it via replication channel, unless the
+//!   validator runs standalone, in which case no replication sink is attached
 //! - Writes completed blocks to the ledger
 //!
 //! ## Replica Mode
 //!
-//! - Waits for block production notifications from replication service
+//! - Applies blocks from the replication service, which is what advances its slot
 //! - Verifies computed blockhash matches the received blockhash
 //! - Logs divergence errors (does not halt execution)
+//! - On entering the mode, rebuilds the accumulator from persisted state
 //!
 //! # Slot Transition Lifecycle
 //!
 //! 1. **Finalize current block** - compute blockhash, persist to ledger
-//! 2. **Broadcast block** - send to replication channel (primary only)
+//! 2. **Broadcast block** - send to replication channel (replicating primary only)
 //! 3. **Reset hasher** - seed with previous blockhash for next slot
 //! 4. **Advance slot** - increment slot number, reset transaction index
 //! 5. **Update program cache** - prune stale programs, re-root to new slot
@@ -112,8 +114,9 @@ pub struct TransactionScheduler {
     shutdown: CancellationToken,
     /// Receives mode transition commands (Primary or Replica) at runtime.
     mode_rx: Receiver<SchedulerMode>,
-    /// A sink for the events (transactions, blocks etc) that need to be replicated
-    replication_tx: Sender<Message>,
+    /// A sink for the events (transactions, blocks etc) that need to be replicated.
+    /// `None` when replication is disabled, i.e. the validator runs standalone.
+    replication_tx: Option<Sender<Message>>,
     /// Semaphore for coordinating exclusive DB access with external callers.
     /// Scheduler acquires permit when scheduling, releases when idle.
     pause_permit: Arc<Semaphore>,
@@ -277,7 +280,7 @@ impl TransactionScheduler {
                 biased;
                 _ = self.slot_ticker.tick() => {
                     if self.coordinator.is_primary() {
-                        let slot = self.transition_to_new_slot(None).await;
+                        let slot = self.transition_to_new_slot().await;
                         self.handle_superblock(slot).await;
                     }
                 }
@@ -295,11 +298,9 @@ impl TransactionScheduler {
                         }
                         SchedulerMode::Replica => {
                             self.coordinator.switch_to_replica_mode_globally();
-                            // A node that starts directly in replica mode may
-                            // have rebooted mid-slot: rebuild the in-memory
-                            // streaming-blockhash accumulator from the ledger so
-                            // the first reconstructed block verifies correctly.
+                            self.resync_from_ledger();
                             self.reconstruct_inprogress_hasher();
+                            self.is_initial_replica_block = true;
                         }
                     }
                 }
@@ -311,7 +312,7 @@ impl TransactionScheduler {
             }
         }
         if self.coordinator.is_primary() {
-            let slot = self.transition_to_new_slot(None).await;
+            let slot = self.transition_to_new_slot().await;
             self.handle_superblock(slot).await;
         }
         // Shutdown: drop executor channels to signal workers to stop,
@@ -321,13 +322,21 @@ impl TransactionScheduler {
         info!("Scheduler terminated");
     }
 
+    /// Whether this node is the source of a replication stream: primary mode with
+    /// a live sink. A standalone node runs as primary but has no sink attached.
+    fn is_replicating(&self) -> bool {
+        self.replication_tx.is_some() && self.coordinator.is_primary()
+    }
+
     /// Sends a replication message, logging any errors.
+    ///
+    /// A standalone validator has no sink, so the message is dropped.
     async fn send_replication(&self, msg: Message) {
-        if self.replication_tx.is_closed() {
+        let Some(tx) = &self.replication_tx else {
             return;
-        }
+        };
         let kind = msg.kind();
-        if let Err(error) = self.replication_tx.send(msg).await {
+        if let Err(error) = tx.send(msg).await {
             error!(
                 %error,
                 kind,
@@ -353,7 +362,7 @@ impl TransactionScheduler {
             error!("failed to create accountsdb snapshot");
             return;
         };
-        if self.coordinator.is_primary() {
+        if self.is_replicating() {
             let msg = Message::SuperBlock(SuperBlock { slot, checksum });
             self.send_replication(msg).await;
         }
@@ -402,19 +411,17 @@ impl TransactionScheduler {
 
         let block =
             LatestBlockInner::new(block.slot, block.hash, block.timestamp);
-        self.verify_block_as_replica(&block);
         self.ledger
             .write_block(block.clone())
             .map_err(|error| error.to_string())?;
+        self.verify_block_as_replica(&block);
         self.accountsdb.set_slot(block.slot);
         self.update_sysvars(&block);
         let slot = block.slot;
         let result = self.notify_executors_of_block(block).await;
         drop(permit);
-        // apply_replayed_block advances self.slot before the queued
-        // latest_block notification can be received. The block_produced path
-        // then skips transition_to_new_slot for this already-applied slot, so
-        // handle_superblock must run here for replayed superblock snapshots.
+        // This is the only path that advances the slot in replica mode, so a
+        // replayed superblock's snapshot has to be taken here.
         if result.is_ok() {
             self.handle_superblock(slot).await;
         }
@@ -527,8 +534,8 @@ impl TransactionScheduler {
         let msg = txn
             .encoded
             .as_ref()
+            .filter(|_| is_execution && self.is_replicating())
             .cloned()
-            .filter(|_| is_execution && self.coordinator.is_primary())
             .map(|payload| {
                 Message::Transaction(replication::Transaction {
                     index,
@@ -552,33 +559,14 @@ impl TransactionScheduler {
 
     /// Transitions to the next slot, finalizing the current block.
     ///
-    /// In primary mode, this drives the slot transition clock and broadcasts
-    /// the new block. In replica mode, this responds to block notifications.
-    async fn transition_to_new_slot(
-        &mut self,
-        block: Option<LatestBlockInner>,
-    ) -> u64 {
-        let block = self.prepare_block(block).await;
+    /// Primary only: it drives the slot transition clock and broadcasts the new
+    /// block. A replica advances its slot through `apply_replayed_block` instead.
+    async fn transition_to_new_slot(&mut self) -> u64 {
+        let block = self.prepare_block_as_primary().await;
         self.finalize_block(block.clone()).await;
         self.update_sysvars(&block);
         metrics::set_slot(block.slot);
         block.slot
-    }
-
-    /// Prepares the block for the current slot.
-    ///
-    /// In primary mode: computes blockhash, creates block from local state.
-    /// In replica mode: uses the block from the replication stream, verifying hash.
-    async fn prepare_block(
-        &mut self,
-        block: Option<LatestBlockInner>,
-    ) -> LatestBlockInner {
-        if let Some(block) = block {
-            self.verify_block_as_replica(&block);
-            block
-        } else {
-            self.prepare_block_as_primary().await
-        }
     }
 
     /// Prepares block as primary: computes blockhash and broadcasts to replicas.
@@ -594,26 +582,65 @@ impl TransactionScheduler {
             // of blocks might have identical timestamps
             .as_secs() as i64;
         let block = LatestBlockInner::new(self.slot, blockhash, timestamp);
-        let msg = Message::Block(replication::Block {
-            slot: block.slot,
-            hash: block.blockhash,
-            timestamp: block.clock.unix_timestamp,
-        });
-        self.send_replication(msg).await;
+        if self.is_replicating() {
+            let msg = Message::Block(replication::Block {
+                slot: block.slot,
+                hash: block.blockhash,
+                timestamp: block.clock.unix_timestamp,
+            });
+            self.send_replication(msg).await;
+        }
         block
     }
 
     /// Checks that the blockhash received from replication stream matches the local
+    ///
+    /// The first block after entering replica mode is allowed to mismatch: the
+    /// rebuild reads the ledger, and a transaction executed but not yet flushed
+    /// leaves it short. That allowance is reported rather than dropped, since it
+    /// is otherwise indistinguishable from the divergence it would hide.
     fn verify_block_as_replica(&mut self, block: &LatestBlockInner) {
         let is_initial = std::mem::take(&mut self.is_initial_replica_block);
-        if !is_initial
-            && block.blockhash.as_ref() != self.hasher.finalize().as_bytes()
-        {
+        if block.blockhash.as_ref() == self.hasher.finalize().as_bytes() {
+            return;
+        }
+        if is_initial {
+            metrics::inc_replica_initial_blockhash_mismatch();
+            warn!(
+                slot = block.slot,
+                "initial replica blockhash mismatch, rebuilt from persisted state"
+            )
+        } else {
+            metrics::inc_replica_blockhash_divergence();
             error!(
                 slot = block.slot,
                 "replication blockhash has diverged from local"
             )
         }
+    }
+
+    /// Reseeds the accumulator and slot from persisted state on entering replica
+    /// mode. Both can be wrong by then, and neither self-corrects:
+    ///
+    /// - Both are captured in `new()`, before ledger replay, which advances
+    ///   `latest_block` without touching `accountsdb.slot()`.
+    /// - The accumulator holds signatures that must not carry over: replay folds
+    ///   in every replayed one (nothing resets it in `StartingUp`), and a primary
+    ///   stepping down has already hashed the in-progress slot, which
+    ///   `reconstruct_inprogress_hasher` is about to re-add.
+    fn resync_from_ledger(&mut self) {
+        // Reuses the snapshot-hash fallback, for a replica whose accountsdb came
+        // from a snapshot but whose ledger is empty.
+        let seed = Self::initial_blockhash(
+            &self.accountsdb,
+            self.ledger.latest_block(),
+        );
+        let latest_slot = self.ledger.latest_block().load().slot;
+
+        self.hasher.reset();
+        self.hasher.update(seed.as_ref());
+        self.slot = self.accountsdb.slot().max(latest_slot) + 1;
+        self.index = 0;
     }
 
     /// Rebuilds the streaming-blockhash accumulator for the in-progress slot

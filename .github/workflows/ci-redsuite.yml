@@ -1,0 +1,336 @@
+name: Run CI - RedSuite
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+on:
+  push:
+    branches: [master, dev]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/ci-redsuite.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/ci-redsuite.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+
+env:
+  REDSUITE_REPO: magicblock-labs/redsuite
+  REDSUITE_REV: 91abdd5e44db88d922cba8a5d22ed2cfa0e63951
+  SOLANA_VERSION: v4.0.3
+  RUST_TOOLCHAIN: "1.94.1"
+  BENCHER_PROJECT: magicblock-validator-redsuite
+
+jobs:
+  review_gate:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    name: Review Gate
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - name: Check review state
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          allow() { echo "run=$1" >> "$GITHUB_OUTPUT"; echo "$2" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            allow true "push run — no review gate"
+            exit 0
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            # review-triggered: GitHub applied no paths filter here
+            if ! gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' \
+              | grep -qE '\.(rs|proto)$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^\.github/workflows/ci-redsuite\.yml$|^\.github/actions/(setup-build-env|setup-solana)/'; then
+              allow false "PR touches no redsuite-relevant paths"
+              exit 0
+            fi
+          fi
+
+          reviews=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+            --jq '[.[] | select(.user.login | startswith("coderabbit"))] | length')
+          if [ "$reviews" -eq 0 ]; then
+            allow false "CodeRabbit has not reviewed yet — the suite starts once it has"
+            exit 0
+          fi
+
+          unresolved=$(gh api graphql --paginate \
+            -f query='query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}' \
+            -f owner="${REPO%%/*}" -f name="${REPO##*/}" -F pr="$PR" \
+            --jq '.data.repository.pullRequest.reviewThreads.nodes[].isResolved' \
+            | grep -c false || true)
+          if [ "$unresolved" -gt 0 ]; then
+            allow false "$unresolved unresolved review thread(s) — resolve them, then re-run this workflow or push an update"
+            exit 0
+          fi
+          allow true "CodeRabbit reviewed and all review threads resolved"
+        shell: bash
+
+  build_er:
+    needs: review_gate
+    if: needs.review_gate.outputs.run == 'true'
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    name: Build ER Release Artifact
+    timeout-minutes: 90
+    env:
+      HOST_CARGO_JOBS: "8"
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-redsuite-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          rust_toolchain_release: ${{ env.RUST_TOOLCHAIN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install lld linker
+        run: sudo apt-get update && sudo apt-get install -y lld
+        shell: bash
+
+      - name: Build validator release binary
+        run: |
+          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+            cargo build --release --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
+        shell: bash
+        working-directory: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          solana_version: ${{ env.SOLANA_VERSION }}
+
+      - name: Build committor program
+        run: |
+          cargo build-sbf --manifest-path magicblock-committor-program/Cargo.toml \
+            --sbf-out-dir target/deploy/ --quiet
+          test -f target/deploy/magicblock_committor_program.so
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Upload ER + committor artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: redsuite-er-bin
+          path: |
+            magicblock-validator/target/release/magicblock-validator
+            magicblock-validator/target/deploy/magicblock_committor_program.so
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+  run_redsuite:
+    needs: build_er
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    name: RedSuite lite
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    env:
+      REDSUITE_ROOT: ${{ github.workspace }}/runroot
+      MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/release/magicblock-validator
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          solana_version: ${{ env.SOLANA_VERSION }}
+
+      - name: Restore redsuite build
+        id: redsuite-cache
+        uses: actions/cache@v4
+        with:
+          path: redsuite-dist
+          key: redsuite-bin-${{ env.REDSUITE_REV }}-rust${{ env.RUST_TOOLCHAIN }}-solana${{ env.SOLANA_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Checkout redsuite
+        if: steps.redsuite-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.REDSUITE_REPO }}
+          ref: ${{ env.REDSUITE_REV }}
+          path: redsuite
+          persist-credentials: false
+
+      - name: Build redsuite
+        if: steps.redsuite-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          cargo build --release --locked -p redsuite
+          cargo xtask programs
+          mkdir -p ../redsuite-dist/deploy
+          cp target/release/redsuite ../redsuite-dist/
+          cp target/deploy/*.so ../redsuite-dist/deploy/
+        shell: bash
+        working-directory: redsuite
+
+      - name: Download ER + committor artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: redsuite-er-bin
+          path: magicblock-validator/target
+
+      - name: Prepare run root
+        run: |
+          set -euxo pipefail
+          mkdir -p runroot/target/deploy runroot/target/redsuite-stack
+          cp redsuite-dist/deploy/*.so runroot/target/deploy/
+          chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN"
+        shell: bash
+
+      - name: Run redsuite lite suite
+        run: |
+          set -euo pipefail
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          [ -n "${REDSUITE_CLONE_URL:-}" ] || unset REDSUITE_CLONE_URL
+          ./redsuite-dist/redsuite run all --profile lite
+        shell: bash
+        env:
+          REDSUITE_CLONE_URL: ${{ secrets.REDSUITE_CLONE_URL }}
+
+      - name: Upload stack logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redsuite-stack-logs
+          path: runroot/target/redsuite-stack/*.log*
+          retention-days: 3
+          if-no-files-found: ignore
+
+      # Push-run artifacts double as the comparison baseline for PRs, so they
+      # keep the maximum retention; a quiet base branch must not lose it.
+      - name: Upload scenario reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redsuite-reports
+          path: runroot/target/redsuite-reports/
+          retention-days: ${{ github.event_name == 'push' && 90 || 14 }}
+          if-no-files-found: ignore
+
+      - name: Stack down
+        if: always()
+        run: ./redsuite-dist/redsuite stack down
+        shell: bash
+
+      - name: Fetch baseline reports from base branch
+        id: baseline
+        if: github.event_name != 'push'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          run_id=$(gh api \
+            "repos/$REPO/actions/workflows/ci-redsuite.yml/runs?branch=$BASE_REF&status=success&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')
+          if [ -z "$run_id" ]; then
+            echo "no successful baseline run on $BASE_REF yet"
+            exit 1
+          fi
+          gh run download "$run_id" --repo "$REPO" \
+            --name redsuite-reports --dir baseline-reports
+          cp baseline-reports/*.json runroot/target/redsuite-reports/
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+
+      - name: Compare against base branch
+        if: github.event_name != 'push' && steps.baseline.outcome == 'success'
+        run: |
+          set -euo pipefail
+          {
+            echo "## redsuite: PR vs $BASE_REF"
+            echo '```'
+            ./redsuite-dist/redsuite report compare
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+
+      - name: Export Bencher Metric Format
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: ./redsuite-dist/redsuite report bmf --out redsuite-bmf.json
+        shell: bash
+
+      - uses: bencherdev/bencher@v0.6.8
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+
+      - name: Track results with Bencher
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          set -euo pipefail
+          if [ -z "${BENCHER_API_TOKEN:-}" ]; then
+            echo "BENCHER_API_TOKEN not set — skipping Bencher tracking"
+            exit 0
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            bencher run \
+              --project "$BENCHER_PROJECT" \
+              --token "$BENCHER_API_TOKEN" \
+              --branch "$GITHUB_REF_NAME" \
+              --testbed blacksmith-8vcpu-ubuntu-2404 \
+              --adapter json \
+              --file redsuite-bmf.json
+          else
+            bencher run \
+              --project "$BENCHER_PROJECT" \
+              --token "$BENCHER_API_TOKEN" \
+              --branch "$HEAD_REF" \
+              --start-point "$BASE_REF" \
+              --start-point-hash "$BASE_SHA" \
+              --start-point-clone-thresholds \
+              --start-point-reset \
+              --testbed blacksmith-8vcpu-ubuntu-2404 \
+              --adapter json \
+              --github-actions "$GH_TOKEN" \
+              --file redsuite-bmf.json
+          fi
+        shell: bash
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

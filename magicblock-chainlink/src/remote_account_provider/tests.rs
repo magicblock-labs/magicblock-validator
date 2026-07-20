@@ -2748,6 +2748,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             &never_evicted,
             &self.removed_account_tx,
             Some(&self.subscription_key_locks),
+            Some(&self.subscription_ownership),
         )
         .await
     }

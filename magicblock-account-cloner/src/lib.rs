@@ -747,7 +747,7 @@ mod tests {
 
     fn cloner() -> ChainlinkCloner {
         magicblock_program::validator::generate_validator_authority_if_needed();
-        let (dispatch, _) = link();
+        let (dispatch, _) = link(false);
         ChainlinkCloner::new(
             dispatch.transaction_scheduler,
             LatestBlock::default(),
