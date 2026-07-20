@@ -770,26 +770,6 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.69.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "271383c67ccabffb7381723dea0672a673f292304fcb45c01cc648c7a8d58088"
-dependencies = [
- "bitflags 2.13.0",
- "cexpr",
- "clang-sys",
- "itertools 0.12.1",
- "lazy_static",
- "lazycell",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 1.1.0",
- "shlex 1.3.0",
- "syn 2.0.118",
-]
-
-[[package]]
-name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
@@ -797,11 +777,11 @@ dependencies = [
  "bitflags 2.13.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash 2.1.2",
+ "rustc-hash",
  "shlex 1.3.0",
  "syn 2.0.118",
 ]
@@ -2434,7 +2414,7 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "bincode",
  "magicblock-magic-program-api",
@@ -3169,12 +3149,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
-name = "lazycell"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
-
-[[package]]
 name = "ledger-stats"
 version = "0.0.0"
 dependencies = [
@@ -3234,16 +3208,16 @@ dependencies = [
 
 [[package]]
 name = "librocksdb-sys"
-version = "0.17.1+9.9.3"
-source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=6d975197#6d975197a647996a6f616dccdfd129ae06a7959c"
+version = "0.18.0+10.7.5"
+source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=50c94dc2#50c94dc2c29cc27d8e1214eb56b6bc2d1cd73857"
 dependencies = [
- "bindgen 0.69.5",
+ "bindgen",
  "bzip2-sys",
  "cc",
- "glob",
  "libc",
  "libz-sys",
  "lz4-sys",
+ "rustflags",
  "zstd-sys",
 ]
 
@@ -3475,7 +3449,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3502,7 +3476,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "async-trait",
  "magicblock-committor-service",
@@ -3515,7 +3489,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "flate2",
  "lmdb-rkv",
@@ -3537,7 +3511,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3555,7 +3529,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "agave-feature-set",
  "agave-geyser-plugin-interface",
@@ -3606,7 +3580,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "agave-feature-set",
  "anyhow",
@@ -3668,7 +3642,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -3726,7 +3700,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "borsh 1.6.1",
  "paste",
@@ -3741,7 +3715,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3788,7 +3762,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "clap",
  "derive_more",
@@ -3808,7 +3782,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "bincode",
  "bytes",
@@ -3870,13 +3844,14 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "arc-swap",
  "bincode",
  "byteorder",
  "fs_extra",
  "libc",
+ "librocksdb-sys",
  "log",
  "magicblock-core",
  "magicblock-metrics",
@@ -3912,7 +3887,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "bincode",
  "const-crypto",
@@ -3925,7 +3900,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -3940,7 +3915,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -3955,7 +3930,7 @@ dependencies = [
  "magicblock-metrics",
  "magicblock-program",
  "parking_lot",
- "rustc-hash 2.1.2",
+ "rustc-hash",
  "serde",
  "solana-account 3.4.0",
  "solana-bpf-loader-program",
@@ -3993,7 +3968,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -4034,7 +4009,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "async-nats",
  "bincode",
@@ -4061,7 +4036,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4088,7 +4063,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "bincode",
  "futures-util",
@@ -4117,7 +4092,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -4144,7 +4119,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "bincode",
  "chrono",
@@ -4171,7 +4146,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-tui-client"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "chrono",
  "clap",
@@ -4193,7 +4168,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "console-subscriber",
  "magicblock-api",
@@ -4209,7 +4184,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "magicblock-delegation-program-api",
  "magicblock-program",
@@ -4226,7 +4201,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "agave-feature-set",
  "git-version",
@@ -5034,7 +5009,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
  "heck",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "petgraph",
@@ -5055,7 +5030,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -5240,7 +5215,7 @@ dependencies = [
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
- "rustc-hash 2.1.2",
+ "rustc-hash",
  "rustls",
  "socket2",
  "thiserror 2.0.18",
@@ -5260,7 +5235,7 @@ dependencies = [
  "lru-slab",
  "rand 0.9.4",
  "ring",
- "rustc-hash 2.1.2",
+ "rustc-hash",
  "rustls",
  "rustls-pki-types",
  "slab",
@@ -5686,8 +5661,8 @@ checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
 
 [[package]]
 name = "rocksdb"
-version = "0.22.0"
-source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=6d975197#6d975197a647996a6f616dccdfd129ae06a7959c"
+version = "0.24.0"
+source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=50c94dc2#50c94dc2c29cc27d8e1214eb56b6bc2d1cd73857"
 dependencies = [
  "libc",
  "librocksdb-sys",
@@ -5715,12 +5690,6 @@ checksum = "b50b8869d9fc858ce7266cce0194bd74df58b9d0e3f6df3a9fc8eb470d95c09d"
 
 [[package]]
 name = "rustc-hash"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
-
-[[package]]
-name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
@@ -5733,6 +5702,12 @@ checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
 ]
+
+[[package]]
+name = "rustflags"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a39e0e9135d7a7208ee80aa4e3e4b88f0f5ad7be92153ed70686c38a03db2e63"
 
 [[package]]
 name = "rustix"
@@ -8585,7 +8560,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "bincode",
  "bs58",
@@ -9665,7 +9640,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.13.7"
+version = "0.13.9"
 dependencies = [
  "guinea",
  "magicblock-accounts-db",
@@ -11201,7 +11176,6 @@ version = "2.0.16+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
 dependencies = [
- "bindgen 0.72.1",
  "cc",
  "pkg-config",
 ]

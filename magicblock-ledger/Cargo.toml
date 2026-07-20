@@ -40,6 +40,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 rocksdb = { workspace = true }
+librocksdb-sys = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
