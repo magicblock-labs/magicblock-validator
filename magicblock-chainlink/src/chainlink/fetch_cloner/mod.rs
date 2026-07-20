@@ -27,8 +27,9 @@ use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
     BankPrecheckReason, ChainlinkCloneIntent,
     ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
-    ChainlinkCloneRemoteResult, ChainlinkEmptyPlaceholderStage,
-    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome, Outcome,
+    ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
+    ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome, Outcome,
 };
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
@@ -226,6 +227,31 @@ where
                 .clone(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CompanionFetchLogContext {
+    origin: AccountFetchContext,
+    primary_pubkey: Pubkey,
+    context_slot: u64,
+}
+
+fn log_companion_fetch_failure<E: std::fmt::Display + ?Sized>(
+    ctx: &CompanionFetchLogContext,
+    companion_pubkey: Pubkey,
+    companion_kind: ChainlinkCompanionFetchKind,
+    error: &E,
+) {
+    error!(
+        primary_pubkey = %ctx.primary_pubkey,
+        companion_pubkey = %companion_pubkey,
+        companion_kind = %companion_kind,
+        origin_entrypoint = %ctx.origin.entrypoint(),
+        origin_reason = %ctx.origin.reason(),
+        context_slot = ctx.context_slot,
+        error = %error,
+        "Failed to fetch companion account"
+    );
 }
 
 impl<T, U, V, C> FetchCloner<T, U, V, C>
@@ -1532,9 +1558,18 @@ where
             return;
         }
 
+        let companion_fetch_log_context = CompanionFetchLogContext {
+            origin: AccountFetchContext::subscription_update(
+                AccountFetchReason::SubscriptionUpdateClone,
+            ),
+            primary_pubkey: pubkey,
+            context_slot: update_slot,
+        };
+
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
+                &companion_fetch_log_context,
             )
             .await;
         let Some(account) = resolved_account else {
@@ -1550,6 +1585,7 @@ where
                 &account,
                 deleg_record.as_ref(),
                 &delegation_actions,
+                &companion_fetch_log_context,
             )
             .await;
 
@@ -1707,7 +1743,12 @@ where
         }
 
         if account.executable() {
-            self.handle_executable_sub_update(pubkey, account).await;
+            self.handle_executable_sub_update(
+                pubkey,
+                account,
+                &companion_fetch_log_context,
+            )
+            .await;
         } else {
             let commit_frequency_ms = deleg_record.as_ref().and_then(|dr| {
                 dr.authority
@@ -1936,6 +1977,11 @@ where
                 pubkey,
                 account.remote_slot(),
                 record_context,
+                CompanionFetchLogContext {
+                    origin: record_context,
+                    primary_pubkey: pubkey,
+                    context_slot: account.remote_slot(),
+                },
             )
             .await
         else {
@@ -2030,6 +2076,11 @@ where
                         &account,
                         Some(&deleg_record),
                         &delegation_actions,
+                        &CompanionFetchLogContext {
+                            origin: discovery_context,
+                            primary_pubkey: pubkey,
+                            context_slot: account.remote_slot(),
+                        },
                     )
                     .await
                 {
@@ -2109,10 +2160,16 @@ where
         &self,
         pubkey: Pubkey,
         account: AccountSharedData,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) {
         // moved to program_loader module
-        program_loader::handle_executable_sub_update(self, pubkey, account)
-            .await;
+        program_loader::handle_executable_sub_update_with_context(
+            self,
+            pubkey,
+            account,
+            companion_fetch_log_context,
+        )
+        .await;
     }
 
     async fn cleanup_direct_subscription_for_delegated_account(
@@ -2175,6 +2232,7 @@ where
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
         &self,
         update: ForwardedSubscriptionUpdate,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> (
         Option<AccountSharedData>,
         Option<DelegationRecord>,
@@ -2219,6 +2277,7 @@ where
                         AccountFetchContext::subscription_update(
                             AccountFetchReason::DelegationRecord,
                         ),
+                        ChainlinkCompanionFetchKind::DelegationRecord,
                     )
                     .await
                 {
@@ -2381,10 +2440,11 @@ where
                     }
                     // In case of errors fetching the delegation record we cannot clone the account
                     Ok(Err(err)) => {
-                        warn!(
-                            pubkey = %pubkey,
-                            error = ?err,
-                            "Failed to fetch delegation record"
+                        log_companion_fetch_failure(
+                            companion_fetch_log_context,
+                            delegation_record_pubkey,
+                            ChainlinkCompanionFetchKind::DelegationRecord,
+                            &err,
                         );
                         if acquired_delegation_record_reason {
                             release_subs(
@@ -2400,10 +2460,11 @@ where
                         (None, None, DelegationActions::default())
                     }
                     Err(err) => {
-                        warn!(
-                            pubkey = %pubkey,
-                            error = ?err,
-                            "Failed to fetch delegation record"
+                        log_companion_fetch_failure(
+                            companion_fetch_log_context,
+                            delegation_record_pubkey,
+                            ChainlinkCompanionFetchKind::DelegationRecord,
+                            &err,
                         );
                         if acquired_delegation_record_reason {
                             release_subs(
@@ -2421,7 +2482,11 @@ where
                 }
             } else {
                 let (account, deleg_record) = self
-                    .maybe_project_ata_from_subscription_update(pubkey, account)
+                    .maybe_project_ata_from_subscription_update(
+                        pubkey,
+                        account,
+                        companion_fetch_log_context,
+                    )
                     .await;
                 if let Some((deleg_record, actions)) = deleg_record {
                     (
@@ -2447,6 +2512,7 @@ where
         eata_account: &AccountSharedData,
         deleg_record: Option<&DelegationRecord>,
         delegation_actions: &DelegationActions,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> Option<AccountCloneRequest> {
         ata_projection::maybe_build_projected_ata_clone_request_from_subscription_update(
             self,
@@ -2454,6 +2520,7 @@ where
             eata_account,
             deleg_record,
             delegation_actions,
+            companion_fetch_log_context,
         )
         .await
     }
@@ -2467,6 +2534,7 @@ where
         &self,
         ata_pubkey: Pubkey,
         ata_account: AccountSharedData,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> (
         AccountSharedData,
         Option<(DelegationRecord, Option<DelegationActions>)>,
@@ -2475,6 +2543,7 @@ where
             self,
             ata_pubkey,
             ata_account,
+            companion_fetch_log_context,
         )
         .await
     }
@@ -2528,12 +2597,14 @@ where
         account_pubkey: Pubkey,
         min_context_slot: u64,
         fetch_context: metrics::AccountFetchContext,
+        companion_fetch_log_context: CompanionFetchLogContext,
     ) -> Option<(DelegationRecord, Option<DelegationActions>)> {
         delegation::fetch_and_parse_delegation_record(
             self,
             account_pubkey,
             min_context_slot,
             fetch_context,
+            &companion_fetch_log_context,
         )
         .await
     }
@@ -3011,13 +3082,20 @@ where
                     pubkey, in_bank,
                 )
             {
+                let undelegating_refresh_context = fetch_context
+                    .with_reason(AccountFetchReason::UndelegatingRefresh);
                 let projected_deleg_record = self
                     .fetch_and_parse_delegation_record(
                         eata_pubkey,
                         self.remote_account_provider.chain_slot(),
-                        fetch_context.with_reason(
-                            AccountFetchReason::UndelegatingRefresh,
-                        ),
+                        undelegating_refresh_context,
+                        CompanionFetchLogContext {
+                            origin: undelegating_refresh_context,
+                            primary_pubkey: eata_pubkey,
+                            context_slot: self
+                                .remote_account_provider
+                                .chain_slot(),
+                        },
                     )
                     .await;
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
@@ -3033,12 +3111,18 @@ where
                 }
             }
 
+            let undelegating_refresh_context = fetch_context
+                .with_reason(AccountFetchReason::UndelegatingRefresh);
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,
                     self.remote_account_provider.chain_slot(),
-                    fetch_context
-                        .with_reason(AccountFetchReason::UndelegatingRefresh),
+                    undelegating_refresh_context,
+                    CompanionFetchLogContext {
+                        origin: undelegating_refresh_context,
+                        primary_pubkey: *pubkey,
+                        context_slot: self.remote_account_provider.chain_slot(),
+                    },
                 )
                 .await;
 
@@ -3369,6 +3453,7 @@ where
             delegation_record_pubkey,
             slot,
             fetch_context.with_reason(AccountFetchReason::DelegationRecord),
+            ChainlinkCompanionFetchKind::DelegationRecord,
         )
     }
 
@@ -3384,7 +3469,8 @@ where
             pubkey,
             program_data_pubkey,
             slot,
-            fetch_context,
+            fetch_context.with_reason(AccountFetchReason::ProgramData),
+            ChainlinkCompanionFetchKind::ProgramData,
         )
     }
 
@@ -3394,6 +3480,7 @@ where
         companion_pubkey: Pubkey,
         slot: u64,
         fetch_context: AccountFetchContext,
+        companion_fetch_kind: ChainlinkCompanionFetchKind,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let provider = self.remote_account_provider.clone();
         let bank = self.accounts_bank.clone();
@@ -3414,7 +3501,7 @@ where
                     &[pubkey, companion_pubkey],
                     Some(MatchSlotsConfig {
                         min_context_slot: Some(slot),
-                        ..Default::default()
+                        ..MatchSlotsConfig::new(companion_fetch_kind)
                     }),
                     fetch_context,
                 )

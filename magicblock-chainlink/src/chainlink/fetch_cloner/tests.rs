@@ -7,7 +7,8 @@ use dlp_api::{
 use magicblock_metrics::metrics::{
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
-    chainlink_pending_fetch_waiters_value, ChainlinkPendingFetchLayer,
+    chainlink_pending_fetch_waiters_value, AccountFetchContext,
+    AccountFetchReason, ChainlinkPendingFetchLayer,
     ChainlinkPendingFetchOutcome,
 };
 use solana_account::{
@@ -77,6 +78,32 @@ type TestFetchClonerResult = (
     mpsc::Sender<ForwardedSubscriptionUpdate>,
     Arc<ClonerStub>,
 );
+
+async fn handle_executable_sub_update(
+    this: &FetchCloner<
+        ChainRpcClientMock,
+        ChainPubsubClientMock,
+        AccountsBankStub,
+        ClonerStub,
+    >,
+    pubkey: Pubkey,
+    account: AccountSharedData,
+) {
+    let companion_fetch_log_context = CompanionFetchLogContext {
+        origin: AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        ),
+        primary_pubkey: pubkey,
+        context_slot: account.remote_slot(),
+    };
+    program_loader::handle_executable_sub_update_with_context(
+        this,
+        pubkey,
+        account,
+        &companion_fetch_log_context,
+    )
+    .await;
+}
 
 type TestFetchCloner = FetchCloner<
     ChainRpcClientMock,
@@ -857,17 +884,27 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
         .await
         .unwrap();
 
+    let update = ForwardedSubscriptionUpdate {
+        pubkey: account_pubkey,
+        account: RemoteAccount::from_fresh_account(
+            account.clone(),
+            CURRENT_SLOT,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Account,
+    };
+    let companion_fetch_log_context = CompanionFetchLogContext {
+        origin: AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        ),
+        primary_pubkey: account_pubkey,
+        context_slot: update.account.slot(),
+    };
+
     let (resolved_account, delegation_record, _actions) = fetch_cloner
         .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-            ForwardedSubscriptionUpdate {
-                pubkey: account_pubkey,
-                account: RemoteAccount::from_fresh_account(
-                    account.clone(),
-                    CURRENT_SLOT,
-                    RemoteAccountUpdateSource::Subscription,
-                ),
-                source: SubscriptionSource::Account,
-            },
+            update,
+            &companion_fetch_log_context,
         )
         .await;
 
@@ -3579,7 +3616,7 @@ async fn test_program_loader_resolver_error_releases_program_data_refs() {
     let mut program_account_shared = AccountSharedData::from(program_account);
     program_account_shared.set_remote_slot(CURRENT_SLOT);
 
-    program_loader::handle_executable_sub_update(
+    handle_executable_sub_update(
         &fetch_cloner,
         program_pubkey,
         program_account_shared,
@@ -4469,17 +4506,27 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
     dlp_owned_account_shared.set_delegated(true);
     dlp_owned_account_shared.set_confined(true);
 
+    let update = ForwardedSubscriptionUpdate {
+        pubkey: account_pubkey,
+        account: RemoteAccount::from_fresh_account_shared_data(
+            dlp_owned_account_shared,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Account,
+    };
+    let companion_fetch_log_context = CompanionFetchLogContext {
+        origin: AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        ),
+        primary_pubkey: account_pubkey,
+        context_slot: update.account.slot(),
+    };
+
     let (resolved_account, delegation_record, delegation_actions) =
         fetch_cloner
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-                ForwardedSubscriptionUpdate {
-                    pubkey: account_pubkey,
-                    account: RemoteAccount::from_fresh_account_shared_data(
-                        dlp_owned_account_shared,
-                        RemoteAccountUpdateSource::Subscription,
-                    ),
-                    source: SubscriptionSource::Account,
-                },
+                update,
+                &companion_fetch_log_context,
             )
             .await;
 
@@ -6677,6 +6724,11 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
             eata_pubkey,
             CURRENT_SLOT,
             AccountFetchContext::rpc_get_account(),
+            CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await
         .expect("delegation record with actions should resolve");
@@ -6692,6 +6744,11 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
             delegation_actions.as_ref().expect(
                 "delegation actions should be parsed for our validator",
             ),
+            &CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await
         .expect(
@@ -6741,6 +6798,11 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
             eata_pubkey,
             CURRENT_SLOT,
             AccountFetchContext::rpc_get_account(),
+            CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await
         .expect("delegation record should resolve");
@@ -6754,6 +6816,11 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
             &eata_shared,
             Some(&deleg_record),
             &DelegationActions::default(),
+            &CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await;
 
@@ -6808,6 +6875,11 @@ async fn test_fetch_and_parse_delegation_record_releases_direct_ref_when_already
             eata_pubkey,
             CURRENT_SLOT,
             AccountFetchContext::rpc_get_account(),
+            CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await
         .expect("delegation record should resolve");

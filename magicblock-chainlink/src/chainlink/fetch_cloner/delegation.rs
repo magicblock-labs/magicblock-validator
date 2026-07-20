@@ -6,7 +6,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
     try_derive_eata_address_and_bump, EphemeralAta, EATA_PROGRAM_ID,
 };
-use magicblock_metrics::metrics;
+use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
 use solana_account::ReadableAccount;
 use solana_keypair::Keypair;
 use solana_program::program_error::ProgramError;
@@ -15,8 +15,9 @@ use solana_signer::Signer;
 use tracing::*;
 
 use super::{
+    log_companion_fetch_failure,
     subscription::{release_subs, SubscriptionRelease},
-    FetchCloner,
+    CompanionFetchLogContext, FetchCloner,
 };
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
@@ -172,6 +173,7 @@ pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
     account_pubkey: Pubkey,
     min_context_slot: u64,
     fetch_context: metrics::AccountFetchContext,
+    companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> Option<(DelegationRecord, Option<DelegationActions>)>
 where
     T: ChainRpcClient,
@@ -204,9 +206,12 @@ where
             &[delegation_record_pubkey],
             Some(MatchSlotsConfig {
                 min_context_slot: Some(min_context_slot),
-                ..Default::default()
+                ..MatchSlotsConfig::new(
+                    ChainlinkCompanionFetchKind::DelegationRecord,
+                )
             }),
-            fetch_context,
+            fetch_context
+                .with_reason(metrics::AccountFetchReason::DelegationRecord),
         )
         .await
     {
@@ -225,7 +230,15 @@ where
                 None
             }
         }
-        Err(_) => None,
+        Err(err) => {
+            log_companion_fetch_failure(
+                companion_fetch_log_context,
+                delegation_record_pubkey,
+                ChainlinkCompanionFetchKind::DelegationRecord,
+                &err,
+            );
+            None
+        }
     };
 
     let mut releases = Vec::new();
