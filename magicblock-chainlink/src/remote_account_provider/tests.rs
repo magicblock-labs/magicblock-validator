@@ -284,6 +284,71 @@ async fn test_not_found_account_stays_secondary_and_promotes_on_creation() {
 }
 
 #[tokio::test]
+async fn test_subscription_creation_fails_when_primary_capacity_is_protected() {
+    init_logger();
+
+    let protected = random_pubkey();
+    let missing = random_pubkey();
+    let mut ctx = setup_provider_with_lru_capacity(
+        protected,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    ctx.provider
+        .try_get(protected, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap();
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    let fetch_slot = ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .slot();
+
+    let updates_before = ctx.provider.received_updates_count();
+    ctx.pubsub_client
+        .send_account_update(
+            missing,
+            fetch_slot + 1,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+    let provider = ctx.provider.clone();
+    wait_until("subscription update to be rejected", || {
+        provider.received_updates_count() > updates_before
+    })
+    .await;
+    let transition_guard =
+        ctx.provider.subscription_transition_lock.lock().await;
+    drop(transition_guard);
+
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&protected));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(!ctx.provider.is_watching(&missing));
+    assert!(!ctx.pubsub_client.subscriptions_union().contains(&missing));
+    assert!(ctx._forward_rx.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn test_repeated_not_found_fetch_preserves_primary_working_set() {
     init_logger();
 

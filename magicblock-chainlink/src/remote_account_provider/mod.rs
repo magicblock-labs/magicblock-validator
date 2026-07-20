@@ -1780,6 +1780,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                     // Serialize fetch arbitration and tier movement so a late
                     // RPC result cannot overwrite this subscription update.
+                    let mut classification_error = None;
                     let (forward_update, _accepted_update, resolved_fetch) =
                         if !needs_tier_handling {
                             // Record so a lagging RPC result cannot later win
@@ -1909,14 +1910,46 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     .secondary
                                     .contains(&update.pubkey)
                             {
-                                if let Err(err) = subscription_tiers
+                                match subscription_tiers
                                     .try_promote_found_to_primary_locked(
                                         update.pubkey,
                                         true,
                                     )
                                     .await
                                 {
-                                    warn!(pubkey = %update.pubkey, error = ?err, "Failed to promote found account to primary subscription tier");
+                                    Ok(true) => {}
+                                    Ok(false) => {
+                                        let err = RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                                            pubkey: update.pubkey,
+                                        };
+                                        match subscription_tiers
+                                            .cleanup_rejected_subscription(
+                                                update.pubkey,
+                                            )
+                                            .await
+                                        {
+                                            Ok(()) => {
+                                                subscription_tiers
+                                                    .secondary
+                                                    .remove(&update.pubkey);
+                                                subscription_tiers
+                                                    .subscription_ownership
+                                                    .lock()
+                                                    .await
+                                                    .remove(&update.pubkey);
+                                            }
+                                            Err(cleanup_err) => {
+                                                warn!(pubkey = %update.pubkey, error = ?cleanup_err, "Failed to clean up rejected found subscription");
+                                            }
+                                        }
+                                        classification_error =
+                                            Some(err.to_string());
+                                    }
+                                    Err(err) => {
+                                        warn!(pubkey = %update.pubkey, error = ?err, "Failed to promote found account to primary subscription tier");
+                                        classification_error =
+                                            Some(err.to_string());
+                                    }
                                 }
                             }
                             result
@@ -1924,11 +1957,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                     if let Some((_, waiters)) = resolved_fetch {
                         for sender in waiters {
-                            let _ = sender.send(Ok(remote_account.clone()));
+                            let response = match classification_error.as_ref() {
+                                Some(err) => Err(RemoteAccountProviderError::AccountResolutionsFailed(err.clone())),
+                                None => Ok(remote_account.clone()),
+                            };
+                            let _ = sender.send(response);
                         }
                     }
 
-                    if let Some(forward_update) = forward_update {
+                    if let Some(forward_update) = forward_update
+                        .filter(|_| classification_error.is_none())
+                    {
                         if let Err(err) =
                             subscription_forwarder.send(forward_update).await
                         {

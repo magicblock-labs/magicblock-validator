@@ -365,6 +365,10 @@ Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_to
 - accounts with `UndelegationTracking` ownership are protected,
 - if no candidate can be evicted, the new subscription is unsubscribed and `NoEvictableSubscriptionCapacity` is returned.
 
+A found RPC result or subscription update for an account in the secondary tier
+is rejected when it cannot be promoted into the primary tier; it must not be
+returned to fetch waiters or forwarded as a successful update.
+
 Primary and secondary LRU membership is exclusive and both tiers use the same
 delegated, undelegating, in-flight-fetch, never-evict, and
 `UndelegationTracking` protections. Tier changes use the global subscription
