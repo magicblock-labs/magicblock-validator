@@ -233,7 +233,7 @@ where
 struct CompanionFetchLogContext {
     origin: AccountFetchContext,
     primary_pubkey: Pubkey,
-    context_slot: Option<u64>,
+    context_slot: u64,
 }
 
 fn log_companion_fetch_failure<E: std::fmt::Display + ?Sized>(
@@ -248,7 +248,7 @@ fn log_companion_fetch_failure<E: std::fmt::Display + ?Sized>(
         companion_kind = %companion_kind,
         origin_entrypoint = %ctx.origin.entrypoint(),
         origin_reason = %ctx.origin.reason(),
-        context_slot = ?ctx.context_slot,
+        context_slot = ctx.context_slot,
         error = %error,
         "Failed to fetch companion account"
     );
@@ -1563,7 +1563,7 @@ where
                 AccountFetchReason::SubscriptionUpdateClone,
             ),
             primary_pubkey: pubkey,
-            context_slot: Some(update_slot),
+            context_slot: update_slot,
         };
 
         let (resolved_account, deleg_record, delegation_actions) = self
@@ -1980,7 +1980,7 @@ where
                 CompanionFetchLogContext {
                     origin: record_context,
                     primary_pubkey: pubkey,
-                    context_slot: Some(account.remote_slot()),
+                    context_slot: account.remote_slot(),
                 },
             )
             .await
@@ -2079,7 +2079,7 @@ where
                         &CompanionFetchLogContext {
                             origin: discovery_context,
                             primary_pubkey: pubkey,
-                            context_slot: Some(account.remote_slot()),
+                            context_slot: account.remote_slot(),
                         },
                     )
                     .await
@@ -3092,9 +3092,9 @@ where
                         CompanionFetchLogContext {
                             origin: undelegating_refresh_context,
                             primary_pubkey: eata_pubkey,
-                            context_slot: Some(
-                                self.remote_account_provider.chain_slot(),
-                            ),
+                            context_slot: self
+                                .remote_account_provider
+                                .chain_slot(),
                         },
                     )
                     .await;
@@ -3121,9 +3121,7 @@ where
                     CompanionFetchLogContext {
                         origin: undelegating_refresh_context,
                         primary_pubkey: *pubkey,
-                        context_slot: Some(
-                            self.remote_account_provider.chain_slot(),
-                        ),
+                        context_slot: self.remote_account_provider.chain_slot(),
                     },
                 )
                 .await;

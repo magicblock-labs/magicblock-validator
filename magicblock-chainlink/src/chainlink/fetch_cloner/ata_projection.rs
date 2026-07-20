@@ -573,7 +573,7 @@ where
                 let companion_fetch_log_context = CompanionFetchLogContext {
                     origin: ata_projection_context,
                     primary_pubkey: ata_pubkey,
-                    context_slot: Some(effective_slot),
+                    context_slot: effective_slot,
                 };
                 log_companion_fetch_failure(
                     &companion_fetch_log_context,
@@ -586,7 +586,7 @@ where
                 let companion_fetch_log_context = CompanionFetchLogContext {
                     origin: ata_projection_context,
                     primary_pubkey: ata_pubkey,
-                    context_slot: Some(effective_slot),
+                    context_slot: effective_slot,
                 };
                 log_companion_fetch_failure(
                     &companion_fetch_log_context,
@@ -605,7 +605,7 @@ where
             let companion_fetch_log_context = CompanionFetchLogContext {
                 origin: delegation_record_context,
                 primary_pubkey: input.eata_pubkey,
-                context_slot: Some(context_slot),
+                context_slot,
             };
             delegation::fetch_and_parse_delegation_record(
                 this,

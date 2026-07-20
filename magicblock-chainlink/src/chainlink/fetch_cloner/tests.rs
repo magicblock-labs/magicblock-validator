@@ -94,7 +94,7 @@ async fn handle_executable_sub_update(
             AccountFetchReason::SubscriptionUpdateClone,
         ),
         primary_pubkey: pubkey,
-        context_slot: Some(account.remote_slot()),
+        context_slot: account.remote_slot(),
     };
     program_loader::handle_executable_sub_update_with_context(
         this,
@@ -898,7 +898,7 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
             AccountFetchReason::SubscriptionUpdateClone,
         ),
         primary_pubkey: account_pubkey,
-        context_slot: Some(update.account.slot()),
+        context_slot: update.account.slot(),
     };
 
     let (resolved_account, delegation_record, _actions) = fetch_cloner
@@ -4519,7 +4519,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
             AccountFetchReason::SubscriptionUpdateClone,
         ),
         primary_pubkey: account_pubkey,
-        context_slot: Some(update.account.slot()),
+        context_slot: update.account.slot(),
     };
 
     let (resolved_account, delegation_record, delegation_actions) =
@@ -6727,7 +6727,7 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
             CompanionFetchLogContext {
                 origin: AccountFetchContext::rpc_get_account(),
                 primary_pubkey: eata_pubkey,
-                context_slot: Some(CURRENT_SLOT),
+                context_slot: CURRENT_SLOT,
             },
         )
         .await
@@ -6747,7 +6747,7 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
             &CompanionFetchLogContext {
                 origin: AccountFetchContext::rpc_get_account(),
                 primary_pubkey: eata_pubkey,
-                context_slot: Some(CURRENT_SLOT),
+                context_slot: CURRENT_SLOT,
             },
         )
         .await
@@ -6801,7 +6801,7 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
             CompanionFetchLogContext {
                 origin: AccountFetchContext::rpc_get_account(),
                 primary_pubkey: eata_pubkey,
-                context_slot: Some(CURRENT_SLOT),
+                context_slot: CURRENT_SLOT,
             },
         )
         .await
@@ -6819,7 +6819,7 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
             &CompanionFetchLogContext {
                 origin: AccountFetchContext::rpc_get_account(),
                 primary_pubkey: eata_pubkey,
-                context_slot: Some(CURRENT_SLOT),
+                context_slot: CURRENT_SLOT,
             },
         )
         .await;
@@ -6878,7 +6878,7 @@ async fn test_fetch_and_parse_delegation_record_releases_direct_ref_when_already
             CompanionFetchLogContext {
                 origin: AccountFetchContext::rpc_get_account(),
                 primary_pubkey: eata_pubkey,
-                context_slot: Some(CURRENT_SLOT),
+                context_slot: CURRENT_SLOT,
             },
         )
         .await
