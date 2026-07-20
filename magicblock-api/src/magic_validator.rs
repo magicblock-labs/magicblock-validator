@@ -120,7 +120,6 @@ pub struct MagicValidator {
     undelegation_request_service: Option<Arc<UndelegationRequestService>>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
-    faucet_keypair: Option<Keypair>,
     transaction_scheduler: TransactionSchedulerHandle,
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
@@ -449,22 +448,22 @@ impl MagicValidator {
             ));
         debug!(path = %task_scheduler_db_path.display(), "Initializing task scheduler");
         let step_start = Instant::now();
-        let task_scheduler = TaskSchedulerService::new(
-            &task_scheduler_db_path,
-            config.aperture.listen.http(),
-            faucet_keypair.clone().map(|k| k.insecure_clone()),
-            dispatch
-                .tasks_service
-                .take()
-                .expect("tasks_service should be initialized"),
-            ledger.latest_block().clone(),
-            Duration::from_millis(config.ledger.block_time_ms()),
-            token.clone(),
-        )
-        .inspect_err(
-            |e| error!(error = ?e, "Failed to initialize task scheduler"),
-        )
-        .ok();
+        let task_scheduler = faucet_keypair
+            .map(|k| {
+                TaskSchedulerService::new(
+                    &task_scheduler_db_path,
+                    config.aperture.listen.http(),
+                    k.insecure_clone(),
+                    dispatch
+                        .tasks_service
+                        .take()
+                        .expect("tasks_service should be initialized"),
+                    ledger.latest_block().clone(),
+                    Duration::from_millis(config.ledger.block_time_ms()),
+                    token.clone(),
+                )
+            })
+            .transpose()?;
         log_timing("startup", "task_scheduler_init", step_start);
 
         Ok(Self {
@@ -481,7 +480,6 @@ impl MagicValidator {
             claim_fees_task: ClaimFeesTask::new(),
             rpc_handle,
             identity: validator_pubkey,
-            faucet_keypair: faucet_keypair.map(|k| k.insecure_clone()),
             transaction_scheduler: dispatch.transaction_scheduler,
             task_scheduler,
             transaction_execution,
@@ -926,8 +924,12 @@ impl MagicValidator {
         let chain_operation_config = self.config.chain_operation.clone();
         let block_time_ms = self.config.ledger.block_time_ms();
         let base_fee = self.config.validator.basefee;
-        let faucet_keypair =
-            self.faucet_keypair.as_ref().map(|k| k.insecure_clone());
+        let faucet_keypair = self
+            .config
+            .task_scheduler
+            .faucet_keypair
+            .as_ref()
+            .map(|k| k.insecure_clone());
 
         // Ephemeral mode does a non-blocking startup balance check.
         // Intentionally fire-and-forget: the task itself exits the process on failure.
