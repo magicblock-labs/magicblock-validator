@@ -11,7 +11,7 @@ At a high level it:
 - registers all collectors exactly once before the metrics server starts,
 - exposes a `/metrics` HTTP endpoint in Prometheus text format,
 - provides typed wrapper functions so other crates do not need to construct collectors directly,
-- provides reusable label traits/types such as `LabelValue`, `Outcome`, and `AccountFetchOrigin`,
+- provides reusable label traits/types such as `LabelValue`, `Outcome`, `AccountFetchEntrypoint`, `AccountFetchReason`, and `AccountFetchContext`,
 - acts as the observability boundary for RPC, transaction execution, account sync, ledger, committor, RPC client, pubsub/gRPC, table-mania, and system-storage metrics.
 
 This crate is intentionally dependency-light and has no dependency on other workspace crates. Many performance-sensitive crates depend on it, so changes here can affect build topology, hot-path overhead, metric cardinality, and operator visibility across the validator.
@@ -43,7 +43,7 @@ Primary source files:
 |---|---|
 | `magicblock-metrics/src/lib.rs` | Crate exports. Re-exports `metrics`, `try_start_metrics_service`, and `MetricsService`. |
 | `magicblock-metrics/src/metrics/mod.rs` | Collector declarations, bucket constants, registry setup, and public mutation/timer wrappers. |
-| `magicblock-metrics/src/metrics/types.rs` | Shared metric label helpers (`LabelValue`, `Outcome`, `AccountFetchOrigin`) plus currently-unused account clone/commit shape enums. |
+| `magicblock-metrics/src/metrics/types.rs` | Shared metric label helpers (`LabelValue`, `Outcome`, `AccountFetchEntrypoint`, `AccountFetchReason`, `AccountFetchContext`) plus currently-unused account clone/commit shape enums. |
 | `magicblock-metrics/src/service.rs` | Hyper/Tokio HTTP server exposing `GET /metrics`, handling cancellation, and encoding registry contents. |
 | `magicblock-metrics/README.md` | Prometheus/Grafana setup notes for local scraping and visualization. |
 | `magicblock-config/src/config/metrics.rs` | Validator configuration shape for metrics address and system collection frequency. |
@@ -205,48 +205,49 @@ System/storage gauge updates are driven from `magicblock-api/src/tickers.rs` at 
 | `set_accounts_count(value)` | Number of accounts in `AccountsDb`. |
 | `set_monitored_accounts_count(count)` | Absolute count of monitored accounts; callers must pass total count, not delta. |
 | `inc_evicted_accounts_count()` | Cumulative count of monitored accounts forcefully removed from monitor list/database. |
-| `inc_chainlink_bank_precheck_accounts(origin, outcome, reason, count)` / `chainlink_bank_precheck_accounts_total{origin,outcome,reason}` (exported as `mbv_chainlink_bank_precheck_accounts_total`) | Classifies `FetchCloner` account entries before remote provider fetch; call sites should aggregate per label bucket where practical and must not add pubkey labels. |
-| `inc_chainlink_subscription_registration_accounts(origin, subscription_reason, outcome)` | `chainlink_subscription_registration_accounts_total` (`mbv_chainlink_subscription_registration_accounts_total`) classifies Chainlink account subscription registration attempts by `{origin,subscription_reason,outcome}`. Origin is `AccountFetchOrigin` label values plus `internal`; subscription reasons are `direct_account`, `delegation_record`, `program_data`, `undelegation_tracking`, `ata_projection`; outcomes are `already_present`, `added_below_capacity`, `evicted_candidate`, `subscribe_error`, `unsubscribe_evicted_error`, `rejected_and_unsubscribed`, `unsubscribe_rejected_error`. |
+| `inc_chainlink_bank_precheck_accounts_with_context(context, outcome, bank_reason, count)` / `chainlink_bank_precheck_accounts_total{entrypoint,fetch_reason,outcome,bank_reason}` (exported as `mbv_chainlink_bank_precheck_accounts_total`) | Classifies `FetchCloner` account entries before remote provider fetch; call sites should aggregate per label bucket where practical and must not add pubkey labels. |
+| `inc_chainlink_subscription_registration_accounts(origin, subscription_reason, outcome)` | `chainlink_subscription_registration_accounts_total` (`mbv_chainlink_subscription_registration_accounts_total`) classifies Chainlink account subscription registration attempts by `{entrypoint,fetch_reason,subscription_reason,outcome}`. `SubscriptionRegistrationOrigin::Fetch` carries `AccountFetchContext`; `Internal` emits `entrypoint="internal", fetch_reason="requested_account"`. Subscription reasons are `direct_account`, `delegation_record`, `program_data`, `undelegation_tracking`, `ata_projection`; outcomes are `already_present`, `added_below_capacity`, `evicted_candidate`, `subscribe_error`, `unsubscribe_evicted_error`, `rejected_and_unsubscribed`, `unsubscribe_rejected_error`. |
 | `inc_chainlink_subscription_release_accounts(reason, outcome)` | `chainlink_subscription_release_accounts_total` (`mbv_chainlink_subscription_release_accounts_total`) classifies Chainlink account subscription release attempts by `{reason,outcome}` with the same five reason values and outcomes `unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`. |
 | `inc_chainlink_subscription_cleanup_accounts(cleanup_source, outcome)` | `chainlink_subscription_cleanup_accounts_total` (`mbv_chainlink_subscription_cleanup_accounts_total`) classifies Chainlink account subscription cleanup actions by `{cleanup_source,outcome}`; cleanup sources are `normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`; outcomes are `unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`. |
 | `inc_account_fetches_success(count)` | Successful network account fetch count. |
 | `inc_account_fetches_failed(count)` | Failed network account fetch count. |
-| `inc_account_fetches_found(origin, count)` | Network fetches that found accounts, labelled by `AccountFetchOrigin`. |
-| `inc_account_fetches_not_found(origin, count)` | Network fetches that did not find accounts, labelled by `AccountFetchOrigin`. |
-| `inc_chainlink_clone_accounts_total(origin, remote_result, clone_intent, outcome)` | Chainlink clone lifecycle attempts and outcomes, labelled by bounded enum-like origin, remote-result, clone-intent, and outcome values. |
-| `inc_chainlink_clone_materialization_accounts_total(origin, remote_result, outcome)` | Post-clone bank materialization checks, labelled by bounded enum-like origin, remote-result, and materialization-outcome values. |
-| `inc_chainlink_empty_placeholder_accounts_total(origin, stage, outcome)` | Empty-placeholder lifecycle events, labelled by bounded enum-like origin, placeholder-stage, and binary outcome values. |
+| `inc_account_fetches_found_with_context(context, count)` | Network fetches that found accounts, labelled by `entrypoint` and `fetch_reason`. |
+| `inc_account_fetches_not_found_with_context(context, count)` | Network fetches that did not find accounts, labelled by `entrypoint` and `fetch_reason`. |
+| `inc_chainlink_clone_accounts_total_with_context(context, remote_result, clone_intent, outcome)` | Chainlink clone lifecycle attempts and outcomes, labelled by bounded entrypoint/fetch-reason, remote-result, clone-intent, and outcome values. |
+| `inc_chainlink_clone_materialization_accounts_total_with_context(context, remote_result, outcome)` | Post-clone bank materialization checks, labelled by bounded entrypoint/fetch-reason, remote-result, and materialization-outcome values. |
+| `inc_chainlink_empty_placeholder_accounts_total_with_context(context, stage, outcome)` | Empty-placeholder lifecycle events, labelled by bounded entrypoint/fetch-reason, placeholder-stage, and binary outcome values. |
 | `inc_undelegation_requested()` | Chainlink observed an undelegation request. |
 | `inc_undelegation_completed()` | Chainlink detected undelegation completion. |
 | `inc_unstuck_undelegation_count()` | Undelegating account was already undelegated on chain. |
-| `inc_chainlink_pending_fetch_accounts(origin, layer, outcome, count)` / `mbv_chainlink_pending_fetch_accounts_total{origin,layer,outcome}` | Account fetch/clone requests by origin, pending-dedup layer, and owner/waiter outcome. |
-| `inc_chainlink_pending_fetch_waiters(origin, layer, count)` / `mbv_chainlink_pending_fetch_waiters_total{origin,layer}` | Account fetch/clone requests that joined existing pending work by origin and pending-dedup layer. |
+| `inc_chainlink_pending_fetch_accounts_with_context(context, layer, outcome, count)` / `mbv_chainlink_pending_fetch_accounts_total{entrypoint,fetch_reason,layer,outcome}` | Account fetch/clone requests by fetch context, pending-dedup layer, and owner/waiter outcome. |
+| `inc_chainlink_pending_fetch_waiters_with_context(context, layer, count)` / `mbv_chainlink_pending_fetch_waiters_total{entrypoint,fetch_reason,layer}` | Account fetch/clone requests that joined existing pending work by fetch context and pending-dedup layer. |
 | `inc_chainlink_pending_fetch_waiters_gauge(layer)` / `dec_chainlink_pending_fetch_waiters_gauge(layer)` / `mbv_chainlink_pending_fetch_waiters_gauge{layer}` | Currently active account fetch/clone waiters by pending-dedup layer. |
-| `observe_chainlink_pending_fetch_owner_duration_seconds(origin, layer, outcome, seconds)` / `mbv_chainlink_pending_fetch_owner_duration_seconds{origin,layer,outcome}` | Time spent by pending fetch/clone owners by origin, pending-dedup layer, and terminal owner outcome. |
+| `observe_chainlink_pending_fetch_owner_duration_seconds_with_context(context, layer, outcome, seconds)` / `mbv_chainlink_pending_fetch_owner_duration_seconds{entrypoint,fetch_reason,layer,outcome}` | Time spent by pending fetch/clone owners by fetch context, pending-dedup layer, and terminal owner outcome. |
+| `observe_chainlink_companion_fetch_attempts(context, kind, outcome, attempts)` / `mbv_chainlink_companion_fetch_attempts{entrypoint,fetch_reason,companion_kind,outcome}` and `observe_chainlink_companion_fetch_duration_seconds(context, kind, outcome, seconds)` / `mbv_chainlink_companion_fetch_duration_seconds{entrypoint,fetch_reason,companion_kind,outcome}` | Histograms for slot-consistent companion-account fetch attempts and duration. `companion_kind` is bounded (`program_data`, `delegation_record`, `ata_projection`) and all labels are enum/static values. No separate companion-fetch total counter is needed because the histogram `_count` series provides outcome counts. |
 
 Important caveats:
 
 - `MONITORED_ACCOUNTS_GAUGE` is set to an absolute count. Do not call it with a delta.
-- Account fetch found/not-found counters include an `origin` label. Keep origin cardinality low and stable.
+- Account fetch found/not-found counters include bounded `entrypoint` and `fetch_reason` labels. Keep both label sets low-cardinality and stable.
 - Clone lifecycle counters use only bounded enum-like labels. Do not include pubkeys, signatures, raw errors, endpoints, request parameters, or other unbounded/user-controlled values in these labels.
 - `remote_result=failed` is reserved for fetch failures before a clone request is built. Emit it only with `clone_intent=unknown` and `outcome=skipped` unless a later implementation has a concrete clone request to classify.
 - The clone lifecycle counters replace the stale clone-cache and pending-clone gauges removed by the eviction-vs-get metrics cleanup; use the counters for clone observability rather than reintroducing those gauges.
 - Empty-placeholder stages are bounded enum labels: `converted_to_empty` when Chainlink converts a remote `None` into the zero-lamport/default-owner/empty-data placeholder, `clone_submitted` after a placeholder clone is submitted, `clone_submit_failed` if that clone submission fails, `observed_in_bank_after_ensure` when the post-clone materialization check sees the placeholder in bank, and `still_missing_after_ensure` when the cloner returned success but the placeholder is still not visible. `later_refetched` is reserved for a future sampled/sketch implementation and is not emitted by the current code because retaining per-pubkey state would create unbounded memory/cardinality risk.
 - Subscription lifecycle counters are for Chainlink registration, release, and cleanup outcome classification. Call sites must use the provided enum/static labels only; do not add pubkey, signature, raw error, endpoint URL, or other free-form labels.
-- `AccountFetchOrigin::SendTransaction(Signature)` intentionally labels as only `send_transaction`; the signature is available through `signature()` for logging/correlation but must not become a Prometheus label.
+- Fetch attribution metrics use bounded `entrypoint` + `fetch_reason` labels. Entrypoint identifies the top-level flow; fetch_reason identifies the immediate cause. Signatures remain tracing-only and must never be metric labels.
 - `chainlink_pending_fetch_waiters_gauge` is incremented only for waiter joins, not for owner calls awaiting their own operation. It must be decremented on success, failure, cancellation, timeout, and waiter-drop paths.
-- Pending-fetch labels are low-cardinality enum/static labels only: `origin` uses `AccountFetchOrigin`, `layer` uses `fetch_cloner` or `remote_account_provider`, and `outcome` uses exactly `owned`, `joined_existing`, `owner_succeeded`, `owner_failed`, `owner_cancelled`, `resolved_by_subscription_update`, or `rpc_fetch_completed_after_update`.
+- Pending-fetch labels are low-cardinality enum/static labels only: `entrypoint` and `fetch_reason` use `AccountFetchContext`, `layer` uses `fetch_cloner` or `remote_account_provider`, and `outcome` uses exactly `owned`, `joined_existing`, `owner_succeeded`, `owner_failed`, `owner_cancelled`, `resolved_by_subscription_update`, or `rpc_fetch_completed_after_update`.
 
 Useful PromQL examples for the pending-fetch contract use scraped `mbv_` names:
 
 ```promql
-sum by (origin, layer) (rate(mbv_chainlink_pending_fetch_waiters_total[5m]))
+sum by (entrypoint, fetch_reason, layer) (rate(mbv_chainlink_pending_fetch_waiters_total[5m]))
 /
-sum by (origin, layer) (rate(mbv_chainlink_pending_fetch_accounts_total{outcome="owned"}[5m]))
+sum by (entrypoint, fetch_reason, layer) (rate(mbv_chainlink_pending_fetch_accounts_total{outcome="owned"}[5m]))
 ```
 
 ```promql
-sum by (origin, layer, outcome) (rate(mbv_chainlink_pending_fetch_accounts_total[5m]))
+sum by (entrypoint, fetch_reason, layer, outcome) (rate(mbv_chainlink_pending_fetch_accounts_total[5m]))
 ```
 
 ### RPC and aperture
@@ -356,7 +357,7 @@ It is implemented for:
 - `&str`,
 - `String`,
 - `Result<T, E>` where both sides implement `LabelValue`,
-- `AccountFetchOrigin`,
+- `AccountFetchEntrypoint`, `AccountFetchReason`, and `AccountFetchContext`,
 - Chainlink clone lifecycle label enums (`ChainlinkCloneRemoteResult`, `ChainlinkCloneIntent`, `ChainlinkCloneOutcome`, `ChainlinkCloneMaterializationOutcome`, `ChainlinkEmptyPlaceholderStage`),
 - subscription lifecycle label enums (`SubscriptionRegistrationOrigin`, `SubscriptionReasonLabel`, `SubscriptionRegistrationOutcome`, `SubscriptionReleaseOutcome`, `SubscriptionCleanupSource`, `SubscriptionCleanupOutcome`),
 - downstream consumer types such as committor execution outputs and errors.
@@ -372,16 +373,14 @@ Use `LabelValue` when a metric needs a label derived from an enum-like type. New
 
 Use `Outcome::from_success(bool)` for binary success/error label values. Do not create separate labels for individual errors unless operators need that distinction and cardinality is controlled.
 
-### `AccountFetchOrigin`
+### Fetch attribution types
 
-`AccountFetchOrigin` identifies why Chainlink fetched account data:
+Fetch attribution uses `AccountFetchContext`, split into:
 
-- `GetMultipleAccounts` -> `get_multiple_accounts`,
-- `GetAccount` -> `get_account`,
-- `SendTransaction(Signature)` -> `send_transaction`,
-- `ProjectAta` -> `project_ata`.
+- `AccountFetchEntrypoint`: the top-level flow (`rpc_get_account`, `rpc_get_multiple_accounts`, `send_transaction`, `subscription_update`, `project_ata`, `internal`).
+- `AccountFetchReason`: the immediate cause (`requested_account`, `delegation_record`, `program_data`, `action_dependency_missing`, `action_dependency_forced_refresh`, `undelegating_refresh`, `subscription_update_clone`, `subscription_update_greedy_discovery`, `ata_projection`, `program_load`, `clock`).
 
-The `SendTransaction` signature is intentionally not part of the label. Use `signature()` for tracing/log correlation only.
+Signatures attached to `send_transaction` are intentionally not part of metric labels. Use `signature()` for tracing/log correlation only.
 
 ### `AccountCommit`
 

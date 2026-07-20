@@ -14,7 +14,7 @@ use magicblock_metrics::metrics::{
     start_ledger_disable_compactions_timer, start_ledger_shutdown_timer,
     HistogramTimer,
 };
-use rocksdb::{Direction as IteratorDirection, FlushOptions};
+use rocksdb::{AsRawPtr, Direction as IteratorDirection, FlushOptions};
 use solana_clock::{Slot, UnixTimestamp};
 use solana_hash::{Hash, HASH_BYTES};
 use solana_measure::measure::Measure;
@@ -1409,7 +1409,12 @@ impl Ledger {
             measure: Measure::start("Compaction cancellation"),
             _timer: start_ledger_disable_compactions_timer(),
         };
-        self.db.backend.db.disable_manual_compaction();
+        // Not exposed by the safe wrapper, reach through the C API
+        unsafe {
+            librocksdb_sys::rocksdb_disable_manual_compaction(
+                self.db.backend.db.as_raw_ptr(),
+            );
+        }
     }
 
     /// Cached latest block data

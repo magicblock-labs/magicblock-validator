@@ -7,7 +7,7 @@ use magicblock_chainlink::{
         },
         init_logger,
     },
-    AccountFetchOrigin,
+    AccountFetchContext,
 };
 use solana_account::ReadableAccount;
 use solana_pubkey::{pubkey, Pubkey};
@@ -57,7 +57,7 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     let pubkeys = [ata_pubkey];
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchContext::rpc_get_account())
         .await
         .expect("ensure_accounts ok");
     debug!("res: {:?}", res);
@@ -101,7 +101,7 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated() {
     let pubkeys = [ata_pubkey];
     let _res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchContext::rpc_get_account())
         .await
         .expect("ensure_accounts ok");
 
@@ -151,7 +151,7 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated_to_us() {
     let pubkeys = [ata_pubkey];
     let res = ctx
         .chainlink
-        .ensure_accounts(&pubkeys, None, AccountFetchOrigin::GetAccount)
+        .ensure_accounts(&pubkeys, None, AccountFetchContext::rpc_get_account())
         .await
         .expect("ensure_accounts ok");
     debug!("res: {:?}", res);

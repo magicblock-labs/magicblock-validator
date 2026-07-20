@@ -169,7 +169,7 @@ impl ExecutionTestEnv {
         let ledger =
             Arc::new(Ledger::open(dir.path()).expect("opening test ledger"));
 
-        let (dispatch, validator_channels) = link();
+        let (dispatch, validator_channels) = link(true);
         let blockhash = ledger.latest_block().load().blockhash;
         let svm_env = build_svm_env(&accountsdb, blockhash, fee);
         let payers = (0..executors).map(|_| Keypair::new()).collect();

@@ -127,7 +127,8 @@ pub struct MagicValidator {
     replication_handle:
         Option<thread::JoinHandle<magicblock_replicator::Result<()>>>,
     mode_tx: Sender<SchedulerMode>,
-    replication_tx: Sender<Message>,
+    /// `None` when replication is disabled, i.e. the validator runs standalone.
+    replication_tx: Option<Sender<Message>>,
     unregister_handle: Option<thread::JoinHandle<()>>,
     is_standalone: bool,
 }
@@ -224,7 +225,7 @@ impl MagicValidator {
             None
         };
         let accountsdb = Arc::new(accountsdb);
-        let (mut dispatch, validator_channels) = link();
+        let (mut dispatch, validator_channels) = link(!is_standalone);
         let shared_chain_slot =
             (!Self::replication_mode_uses_disabled_chainlink(
                 &config.validator.replication_mode,
@@ -1021,7 +1022,16 @@ impl MagicValidator {
                 self.config.validator.replication_mode,
                 ReplicationMode::Primary(_)
             ) {
-                self.replication_tx
+                // Take the sender: this is its only use, and the shutdown
+                // drain only completes once every sender clone is dropped.
+                let replication_tx =
+                    self.replication_tx.take().ok_or_else(|| {
+                        ApiError::FailedToSendModeSwitch(
+                            "replication sink missing in primary mode"
+                                .to_owned(),
+                        )
+                    })?;
+                replication_tx
                     .send(Message::Reset(self.accountsdb.slot()))
                     .await
                     .map_err(|e| {
@@ -1148,6 +1158,11 @@ impl MagicValidator {
         let stop_start = Instant::now();
         self.start_unregister_validator_on_chain().await;
         self.exit.store(true, Ordering::Relaxed);
+
+        // Drop any remaining replication sender before cancelling: the
+        // replication drain treats a closed channel as "producer finished"
+        // and otherwise waits out its full timeout.
+        self.replication_tx = None;
 
         // Stop request ingress before stopping intent execution so shutdown
         // does not admit new local undelegation scheduling work.
