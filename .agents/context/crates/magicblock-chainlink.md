@@ -40,7 +40,7 @@ Primary source files:
 
 | Path | Role |
 |---|---|
-| `magicblock-chainlink/src/lib.rs` | Crate exports. Re-exports Chainlink types and `AccountFetchOrigin`. |
+| `magicblock-chainlink/src/lib.rs` | Crate exports. Re-exports Chainlink types and `AccountFetchContext`. |
 | `magicblock-chainlink/src/chainlink/mod.rs` | Public Chainlink facade, replication-mode wrapper, transaction/account ensure entrypoints, removed-account eviction listener. |
 | `magicblock-chainlink/src/chainlink/fetch_cloner/` | Main fetch/clone pipeline, delegation handling, subscription-update processing, ATA/eATA projection, pending operation deduplication. |
 | `magicblock-chainlink/src/remote_account_provider/` | RPC/pubsub provider, subscription ownership, LRU capacity, websocket/gRPC clients, program-account resolution. |
@@ -72,10 +72,10 @@ Important methods:
 
 - `try_new_from_endpoints(...)`: builds `RemoteAccountProvider`, `FetchCloner`, risk service, and subscription update channel from configured base-layer endpoints.
 - `ensure_transaction_accounts(tx)`: ensures all transaction account keys, plus a possible fee-payer ephemeral balance PDA, are present locally. No-op system transfers are skipped.
-- `ensure_accounts(pubkeys, mark_empty_if_not_found, fetch_origin)`: fetches/clones accounts but returns only fetch/clone status.
-- `fetch_accounts(pubkeys, fetch_origin)`: ensures accounts and then reads them from the local bank.
-- `accounts_delegated_on_base_and_er(pubkeys, fetch_origin)`: checks that each account is DLP-owned on base and represented as delegated/DLP-owned locally.
-- `account_delegation_statuses(pubkeys, fetch_origin)`: returns base-layer delegation plus explicit account-on-ER status (`missing`, `delegated`, or `not_delegated`) for owner-program undelegation request logs.
+- `ensure_accounts(pubkeys, mark_empty_if_not_found, fetch_context)`: fetches/clones accounts but returns only fetch/clone status.
+- `fetch_accounts(pubkeys, fetch_context)`: ensures accounts and then reads them from the local bank.
+- `accounts_delegated_on_base_and_er(pubkeys, fetch_context)`: checks that each account is DLP-owned on base and represented as delegated/DLP-owned locally.
+- `account_delegation_statuses(pubkeys, fetch_context)`: returns base-layer delegation plus explicit account-on-ER status (`missing`, `delegated`, or `not_delegated`) for owner-program undelegation request logs.
 - `undelegation_requested(pubkey)`: called by committor/account flows before an account is undelegated so Chainlink keeps watching for base-layer completion.
 - `fetch_undelegation_requests()`: scans base-layer Delegation Program accounts for active `UndelegationRequest` PDAs using filtered `getProgramAccounts` and returns decoded `ObservedUndelegationRequest`s for `magicblock-accounts`.
 - `fetch_count()` / `is_watching()`: mainly observability/testing helpers.
@@ -108,7 +108,7 @@ Chainlink should build accurate clone requests; the cloner owns how those reques
 2. Collect all account keys from the sanitized transaction.
 3. Derive `ephemeral_balance_pda_from_payer(fee_payer, 0)` and add it if absent locally.
 4. Mark all collected pubkeys as `mark_empty_if_not_found`; missing transaction accounts are cloned as empty placeholders when appropriate.
-5. Call `ensure_accounts` with `AccountFetchOrigin::SendTransaction(signature)`.
+5. Call `ensure_accounts` with `AccountFetchContext::send_transaction(signature)`.
 6. `ensure_accounts` promotes accounts in the subscription LRU and calls `FetchCloner::fetch_and_clone_accounts_with_dedup`.
 
 Pitfalls:
@@ -120,6 +120,11 @@ Pitfalls:
 ## Runtime flow: fetch and clone pipeline
 
 The central implementation is `FetchCloner::fetch_and_clone_accounts_with_dedup` and its inner `fetch_and_clone_accounts`.
+
+
+### Fetch attribution
+
+Chainlink must preserve parent entrypoint while replacing `fetch_reason` for internal follow-up work such as delegation records, program data, post-delegation action dependencies, undelegating refreshes, subscription-update clones, and ATA projection.
 
 ### Deduplication and bank fast path
 
@@ -157,7 +162,7 @@ Empty placeholders are created in `RemoteAccountProvider::try_get_multi` when RP
 4. Waits for either RPC results or a subscription update that is at least as new as the fetch start slot.
 5. Returns results in input order.
 
-The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="remote_account_provider"`. Claimed pubkeys record `owned`; calls that join existing `fetching_accounts` work record `joined_existing`, waiter total, and active waiter gauge. Subscription-update wins record `resolved_by_subscription_update`, while late RPC completions after such a win or replacement record `rpc_fetch_completed_after_update`. `FetchingAccountState` stores bounded metric metadata (`AccountFetchOrigin` and owner start time) so subscription-update completion uses the original origin without adding pubkey/signature labels.
+The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="remote_account_provider"`. Claimed pubkeys record `owned`; calls that join existing `fetching_accounts` work record `joined_existing`, waiter total, and active waiter gauge. Subscription-update wins record `resolved_by_subscription_update`, while late RPC completions after such a win or replacement record `rpc_fetch_completed_after_update`. `FetchingAccountState` stores bounded metric metadata (`AccountFetchContext` and owner start time) so subscription-update completion preserves the original entrypoint/fetch reason without adding pubkey/signature labels.
 
 This pending-fetch instrumentation does not change fetch/clone behavior, dedup ownership, subscription ordering, or remote-fetch retry behavior; it only records counters, gauges, and histograms on existing control-flow edges.
 
@@ -330,7 +335,7 @@ Ownership is reference-counted per reason. Releasing one reason does not unsubsc
 
 `ensure_subscription` differs from `acquire_subscription`: it does not increment an already-held reason. This is used by eATA projection to keep an LRU entry warm without unbounded refcount growth.
 
-Registration outcome metrics (`chainlink_subscription_registration_accounts_total`, exported as `mbv_chainlink_subscription_registration_accounts_total`) are emitted once per claimed subscription attempt by origin, subscription reason, and terminal registration outcome. Waiter-only fetch callers do not independently set up subscriptions and are not counted separately; direct `try_get_multi` owners preserve their `AccountFetchOrigin`, while callers without a fetch origin use `internal`.
+Registration outcome metrics (`chainlink_subscription_registration_accounts_total`, exported as `mbv_chainlink_subscription_registration_accounts_total`) are emitted once per claimed subscription attempt by entrypoint, fetch reason, subscription reason, and terminal registration outcome. Waiter-only fetch callers do not independently set up subscriptions and are not counted separately; direct `try_get_multi` owners preserve their `AccountFetchContext`, while callers without a fetch context use `entrypoint="internal", fetch_reason="requested_account"`.
 
 Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_total{reason,outcome}` and `chainlink_subscription_cleanup_accounts_total{cleanup_source,outcome}`, exported with the `mbv_` prefix) are emitted only on cold subscription release/cleanup transition paths, never on per-update hot loops. Release metrics classify each explicit `release_subscription_with_mode` / silent delegated-account release result (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`). Cleanup metrics classify the actual unsubscribe/removal action by `cleanup_source` (`normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`) and `outcome` (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`). All labels are static/enum values only; no pubkey, signature, raw error, or endpoint labels are used.
 

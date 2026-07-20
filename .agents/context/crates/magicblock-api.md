@@ -133,7 +133,7 @@ Caveats:
 2. Ledger replay uses `process_ledger` with a blockhash age derived from configured block time.
 3. After replay, Magic Program scheduled actions are cleared so replayed accept-commit transactions do not re-commit.
 4. Optional AccountsDb defragmentation runs before normal work starts; this is explicitly marked safe only before cleanup, scheduler mode changes, replication, slot ticks, or task recovery.
-5. Standalone/primary nodes reset the bank and, for primaries, send a replication `Message::Reset`.
+5. Standalone/primary nodes reset the bank and, for primaries, send a replication `Message::Reset`. The retained replication sender is dropped after this one-shot send: the shutdown drain treats channel closure as "producer finished", so only the scheduler may keep a sender clone.
 6. The intent execution service starts only after replay/reset and handles pending commit intent recovery before its normal accept loop.
 7. Standalone nodes switch the scheduler to `SchedulerMode::Primary`; primary/replica modes spawn the replication service instead.
 8. Non-replica validators start `UndelegationRequestService`; it consumes Chainlink observed requests and the configured polling backfill. Replicas keep Chainlink disabled and do not scan DLP requests.
@@ -167,7 +167,7 @@ This service is started only for non-replica validators.
 ### Shutdown flow: `MagicValidator::stop`
 
 1. Send unregister transaction in the background when standalone ephemeral on-chain coordination is enabled.
-2. Set the local `exit` flag and cancel the shared cancellation token.
+2. Set the local `exit` flag, drop any remaining replication sender, and cancel the shared cancellation token. The sender must be gone before the primary replication drain runs, otherwise the drain cannot observe channel closure and waits out its full timeout.
 3. Stop the undelegation request service, then the intent execution service.
 4. Stop claim-fees task.
 5. Join RPC thread, slot ticker, ledger truncator, replication thread, and transaction execution thread.

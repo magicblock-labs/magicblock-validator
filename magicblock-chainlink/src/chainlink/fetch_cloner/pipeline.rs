@@ -4,8 +4,8 @@ use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::{
-    self, AccountFetchOrigin, ChainlinkCloneIntent, ChainlinkCloneOutcome,
-    ChainlinkCloneRemoteResult,
+    self, AccountFetchContext, AccountFetchReason, ChainlinkCloneIntent,
+    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
 };
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -200,7 +200,7 @@ pub(crate) async fn resolve_delegated_accounts<T, U, V, C>(
     owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
     plain: Vec<AccountCloneRequest>,
     min_context_slot: Option<u64>,
-    fetch_origin: AccountFetchOrigin,
+    fetch_context: AccountFetchContext,
 ) -> ChainlinkResult<ResolvedDelegatedAccounts>
 where
     T: ChainRpcClient,
@@ -233,7 +233,7 @@ where
             this.task_to_fetch_with_delegation_record(
                 *pubkey,
                 effective_slot,
-                fetch_origin,
+                fetch_context,
             ),
         );
     }
@@ -447,7 +447,7 @@ pub(crate) async fn resolve_programs_with_program_data<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     programs: Vec<(Pubkey, AccountSharedData, u64)>,
     min_context_slot: Option<u64>,
-    fetch_origin: AccountFetchOrigin,
+    fetch_context: AccountFetchContext,
 ) -> ChainlinkResult<ResolvedPrograms>
 where
     T: ChainRpcClient,
@@ -501,7 +501,7 @@ where
                     min_context_slot: batch_min_context_slot,
                     ..Default::default()
                 }),
-                fetch_origin,
+                fetch_context.with_reason(AccountFetchReason::ProgramData),
             )
             .await
     } else {
@@ -694,7 +694,7 @@ pub(crate) async fn clone_accounts_and_programs<T, U, V, C>(
     loaded_programs: Vec<
         crate::remote_account_provider::program_account::LoadedProgram,
     >,
-    fetch_origin: AccountFetchOrigin,
+    fetch_context: AccountFetchContext,
 ) -> ChainlinkResult<()>
 where
     T: ChainRpcClient,
@@ -707,8 +707,8 @@ where
     let mut program_join_set = JoinSet::new();
     for acc in loaded_programs {
         if !this.is_program_allowed(&acc.program_id) {
-            metrics::inc_chainlink_clone_accounts_total(
-                fetch_origin,
+            metrics::inc_chainlink_clone_accounts_total_with_context(
+                fetch_context,
                 ChainlinkCloneRemoteResult::Found,
                 ChainlinkCloneIntent::ProgramData,
                 ChainlinkCloneOutcome::Skipped,
@@ -719,7 +719,7 @@ where
         let this_clone = this.clone();
         program_join_set.spawn(async move {
             this_clone
-                .clone_program_with_ownership(acc, fetch_origin)
+                .clone_program_with_ownership(acc, fetch_context)
                 .await
         });
     }
@@ -752,7 +752,7 @@ where
             this_clone
                 .clone_account_with_post_delegation_action_invariants(
                     request,
-                    fetch_origin,
+                    fetch_context,
                 )
                 .await
         });
@@ -780,7 +780,7 @@ where
             this_clone
                 .clone_account_with_post_delegation_action_invariants(
                     request,
-                    fetch_origin,
+                    fetch_context,
                 )
                 .await
         });
