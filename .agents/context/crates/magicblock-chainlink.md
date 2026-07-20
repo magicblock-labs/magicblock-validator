@@ -166,6 +166,10 @@ The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_to
 
 This pending-fetch instrumentation does not change fetch/clone behavior, dedup ownership, subscription ordering, or remote-fetch retry behavior; it only records counters, gauges, and histograms on existing control-flow edges.
 
+Companion-account slot-match fetches are instrumented by `chainlink_companion_fetch_attempts` and `chainlink_companion_fetch_duration_seconds` with labels `entrypoint`, `fetch_reason`, `companion_kind`, and `outcome`. `companion_kind` is a bounded label (`program_data`, `delegation_record`, `ata_projection`) that describes the slot-consistent relationship being resolved and is distinct from `fetch_reason`. These metrics are emitted from `RemoteAccountProvider::try_get_multi_until_slots_match` and must not change retry behavior, `min_context_slot`, slot matching, or subscription cleanup behavior. Labels must never include pubkeys, signatures, raw errors, endpoints, owners, or program IDs.
+
+Companion-account fetch failures emit a standardized `error!` log with the message `Failed to fetch companion account`. The structured log includes the primary account pubkey, companion account pubkey, companion kind, origin entrypoint and reason from `AccountFetchContext`, context slot, and error. This applies to both subscription-update and non-subscription companion fetch origins. Expected optional companion absence, such as an eATA fetch that succeeds as `NotFound`, must not be logged as an error. This logging must not change retry behavior, slot matching, `min_context_slot`, clone/drop decisions, or subscription cleanup behavior.
+
 RPC fetches use Base64Zstd encoding, commitment from the RPC client, `min_context_slot`, timeout/retry handling, and metrics for success/found/not-found/failure.
 
 ### Classification
