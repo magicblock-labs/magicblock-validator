@@ -63,6 +63,9 @@ async fn setup_provider_with_lru_capacity(
 
     let (forward_tx, forward_rx) = mpsc::channel(1_000);
     let (subscribed_accounts, config) = create_test_lru_cache(lru_capacity);
+    let config = config
+        .with_secondary_subscriptions_lru_capacity(lru_capacity)
+        .unwrap();
     let chain_slot = Arc::<AtomicU64>::default();
 
     let provider = Arc::new(
