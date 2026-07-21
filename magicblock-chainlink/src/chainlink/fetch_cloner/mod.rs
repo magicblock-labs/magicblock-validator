@@ -1803,6 +1803,7 @@ where
             context_slot: update_slot,
         };
 
+        let update_source = update.source;
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
@@ -1817,9 +1818,10 @@ where
                 AccountFetchReason::SubscriptionUpdateClone,
             );
         let projected_ata_clone_request = self
-            .maybe_build_projected_ata_clone_request_from_subscription_update(
+            .maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
                 pubkey,
                 &account,
+                update_source,
                 deleg_record.as_ref(),
                 &delegation_actions,
                 &companion_fetch_log_context,
@@ -2751,10 +2753,31 @@ where
         delegation_actions: &DelegationActions,
         companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> Option<AccountCloneRequest> {
+        self.maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
+            eata_pubkey,
+            eata_account,
+            SubscriptionSource::Account,
+            deleg_record,
+            delegation_actions,
+            companion_fetch_log_context,
+        )
+        .await
+    }
+
+    async fn maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
+        &self,
+        eata_pubkey: Pubkey,
+        eata_account: &AccountSharedData,
+        update_source: SubscriptionSource,
+        deleg_record: Option<&DelegationRecord>,
+        delegation_actions: &DelegationActions,
+        companion_fetch_log_context: &CompanionFetchLogContext,
+    ) -> Option<AccountCloneRequest> {
         ata_projection::maybe_build_projected_ata_clone_request_from_subscription_update(
             self,
             eata_pubkey,
             eata_account,
+            update_source,
             deleg_record,
             delegation_actions,
             companion_fetch_log_context,

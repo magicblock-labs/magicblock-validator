@@ -22,8 +22,9 @@ use super::{
 use crate::{
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
-        ResolvedAccountSharedData, SubscriptionReason,
+        pubsub_common::SubscriptionSource, ChainPubsubClient, ChainRpcClient,
+        MatchSlotsConfig, RemoteAccount, ResolvedAccountSharedData,
+        SubscriptionReason,
     },
 };
 
@@ -121,6 +122,7 @@ pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_up
     this: &FetchCloner<T, U, V, C>,
     eata_pubkey: Pubkey,
     eata_account: &AccountSharedData,
+    update_source: SubscriptionSource,
     deleg_record: Option<&DelegationRecord>,
     delegation_actions: &DelegationActions,
     companion_fetch_log_context: &CompanionFetchLogContext,
@@ -143,11 +145,28 @@ where
         .await;
     }
 
-    delegation::parse_raw_eata_pda(
-        &eata_pubkey,
-        eata_account.data(),
-        EATA_PROGRAM_ID,
-    )?;
+    let ata_pubkeys =
+        derive_supported_ata_pubkeys_from_raw_eata(&eata_pubkey, eata_account)?;
+    if ata_pubkeys.is_empty() {
+        return None;
+    }
+
+    let has_local_base_ata = ata_pubkeys
+        .iter()
+        .any(|ata_pubkey| this.accounts_bank.get_account(ata_pubkey).is_some());
+    let has_raw_eata_projection_interest = this
+        .remote_account_provider
+        .has_subscription_reason(
+            &eata_pubkey,
+            SubscriptionReason::AtaProjection,
+        )
+        .await;
+    if matches!(update_source, SubscriptionSource::Program)
+        && !has_local_base_ata
+        && !has_raw_eata_projection_interest
+    {
+        return None;
+    }
 
     let (deleg_record, delegation_actions) =
         delegation::fetch_and_parse_delegation_record(
