@@ -2,10 +2,7 @@ use std::{collections::HashSet, time::Duration};
 
 use magicblock_config::{
     config::{GrpcConfig, LifecycleMode},
-    consts::{
-        DEFAULT_MAX_MONITORED_ACCOUNTS, DEFAULT_RESUBSCRIPTION_DELAY_MS,
-        DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS,
-    },
+    consts::{DEFAULT_MAX_MONITORED_ACCOUNTS, DEFAULT_RESUBSCRIPTION_DELAY_MS},
 };
 use solana_pubkey::Pubkey;
 
@@ -15,8 +12,6 @@ use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
 pub struct RemoteAccountProviderConfig {
     /// How many accounts to monitor for changes
     subscribed_accounts_lru_capacity: usize,
-    /// How many accounts to retain in the secondary subscription cache
-    secondary_subscriptions_lru_capacity: usize,
     /// Lifecycle mode of the validator
     lifecycle_mode: LifecycleMode,
     /// Whether to enable metrics for account subscriptions
@@ -91,27 +86,12 @@ impl RemoteAccountProviderConfig {
         Ok(self)
     }
 
-    pub fn with_secondary_subscriptions_lru_capacity(
-        mut self,
-        capacity: usize,
-    ) -> RemoteAccountProviderResult<Self> {
-        if capacity == 0 {
-            return Err(RemoteAccountProviderError::InvalidLruCapacity);
-        }
-        self.secondary_subscriptions_lru_capacity = capacity;
-        Ok(self)
-    }
-
     pub fn lifecycle_mode(&self) -> &LifecycleMode {
         &self.lifecycle_mode
     }
 
     pub fn subscribed_accounts_lru_capacity(&self) -> usize {
         self.subscribed_accounts_lru_capacity
-    }
-
-    pub fn secondary_subscriptions_lru_capacity(&self) -> usize {
-        self.secondary_subscriptions_lru_capacity
     }
 
     pub fn enable_subscription_metrics(&self) -> bool {
@@ -140,8 +120,6 @@ impl Default for RemoteAccountProviderConfig {
     fn default() -> Self {
         Self {
             subscribed_accounts_lru_capacity: DEFAULT_MAX_MONITORED_ACCOUNTS,
-            secondary_subscriptions_lru_capacity:
-                DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS,
             lifecycle_mode: LifecycleMode::default(),
             enable_subscription_metrics: true,
             program_subs: vec![dlp_api::id()].into_iter().collect(),

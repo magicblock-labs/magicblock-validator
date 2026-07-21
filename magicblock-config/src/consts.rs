@@ -85,9 +85,6 @@ pub const DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS: u64 = 5 * 60;
 /// Default capacity for the LRU cache of subscribed accounts
 pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;
 
-/// Default capacity for the secondary LRU cache of subscribed accounts
-pub const DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS: usize = 20_000;
-
 /// Default base URL for Range risk service
 pub const DEFAULT_RISK_BASE_URL: &str = "https://api.range.org/v1";
 

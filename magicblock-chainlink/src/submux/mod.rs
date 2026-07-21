@@ -19,10 +19,10 @@ use tracing::*;
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{
-        ChainPubsubClient, PubsubTransport, ReconnectableClient,
+        ChainPubsubClient, ReconnectableClient,
         SubscriptionReconciliationSnapshot,
     },
-    errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
+    errors::RemoteAccountProviderResult,
     pubsub_common::SubscriptionUpdate,
 };
 
@@ -35,7 +35,6 @@ pub use self::debounce_state::DebounceState;
 
 mod subscription_task;
 pub use self::subscription_task::AccountSubscriptionTask;
-use self::subscription_task::{SUBSCRIBE_TIMEOUT, UNSUBSCRIBE_TIMEOUT};
 
 mod subscribed_accounts_tracker;
 pub use self::subscribed_accounts_tracker::SubscribedAccountsTracker;
@@ -147,9 +146,6 @@ where
     never_debounce: HashSet<Pubkey>,
     /// Map of program account subscriptions we are holding inside the pubsub clients
     program_subs: Arc<Mutex<HashSet<Pubkey>>>,
-    /// Accounts whose desired coverage excludes websocket clients while at
-    /// least one gRPC client is available.
-    grpc_only_subscriptions: Arc<Mutex<HashSet<Pubkey>>>,
     /// Client handles currently considered connected by the mux.
     connected_client_ids: Arc<Mutex<HashSet<usize>>>,
     /// Number of currently connected pubsub clients.
@@ -229,8 +225,6 @@ where
             vec![clock::ID].into_iter().collect();
 
         let program_subs: Arc<Mutex<HashSet<Pubkey>>> = Default::default();
-        let grpc_only_subscriptions: Arc<Mutex<HashSet<Pubkey>>> =
-            Default::default();
         let connected_client_ids: Arc<Mutex<HashSet<usize>>> =
             Arc::new(Mutex::new(
                 clients
@@ -265,19 +259,15 @@ where
             }
         }
 
-        let clients_only = Arc::new(Mutex::new(
-            clients
-                .iter()
-                .map(|(client, _)| client.clone())
-                .collect::<Vec<_>>(),
-        ));
+        let clients_only = clients
+            .iter()
+            .map(|(client, _)| client.clone())
+            .collect::<Vec<_>>();
 
         Self::spawn_reconnectors(
             clients,
-            clients_only.clone(),
             subscribed_accounts_tracker,
             program_subs.clone(),
-            grpc_only_subscriptions.clone(),
             connected_client_ids.clone(),
             connected_clients.clone(),
             connected_clients_subscribing_immediately.clone(),
@@ -285,7 +275,7 @@ where
 
         let shutdown_token = CancellationToken::new();
         let me = Self {
-            clients: clients_only,
+            clients: Arc::new(Mutex::new(clients_only)),
             out_tx,
             out_rx: Arc::new(Mutex::new(Some(out_rx))),
             dedup_cache: dedup_cache.clone(),
@@ -295,7 +285,6 @@ where
             debounce_states: debounce_states.clone(),
             never_debounce,
             program_subs,
-            grpc_only_subscriptions,
             connected_client_ids,
             connected_clients,
             connected_clients_subscribing_immediately,
@@ -319,23 +308,18 @@ where
     // -----------------
     // Reconnection
     // -----------------
-    #[allow(clippy::too_many_arguments)]
     fn spawn_reconnectors<U: SubscribedAccountsTracker>(
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
-        all_clients: Arc<Mutex<Vec<Arc<T>>>>,
         subscribed_accounts_tracker: Arc<U>,
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
-        grpc_only_subscriptions: Arc<Mutex<HashSet<Pubkey>>>,
         connected_client_ids: Arc<Mutex<HashSet<usize>>>,
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) {
         for (client, mut abort_rx) in clients.into_iter() {
-            let all_clients = all_clients.clone();
             let subscribed_accounts_tracker =
                 subscribed_accounts_tracker.clone();
             let program_subs = program_subs.clone();
-            let grpc_only_subscriptions = grpc_only_subscriptions.clone();
             let connected_client_ids = connected_client_ids.clone();
             let connected_clients = connected_clients.clone();
             let connected_clients_subscribing_immediately =
@@ -379,10 +363,8 @@ where
 
                     Self::reconnect_client_with_backoff(
                         client.clone(),
-                        all_clients.clone(),
                         subscribed_accounts_tracker.clone(),
                         program_subs.clone(),
-                        grpc_only_subscriptions.clone(),
                         connected_client_ids.clone(),
                         connected_clients.clone(),
                         connected_clients_subscribing_immediately.clone(),
@@ -422,81 +404,6 @@ where
             .collect()
     }
 
-    fn reconciliation_snapshot_from_clients(
-        clients: Vec<Arc<T>>,
-    ) -> Option<SubscriptionReconciliationSnapshot> {
-        if clients.is_empty() {
-            return None;
-        }
-
-        let mut union = HashSet::new();
-        let mut intersection_sets = Vec::with_capacity(clients.len());
-        for client in clients {
-            let Some(snapshot) = client.subscription_reconciliation_snapshot()
-            else {
-                continue;
-            };
-            union.extend(snapshot.union);
-            intersection_sets.push(snapshot.intersection);
-        }
-
-        let smallest = intersection_sets.iter().min_by_key(|set| set.len())?;
-        let intersection = smallest
-            .iter()
-            .filter(|pubkey| {
-                intersection_sets
-                    .iter()
-                    .filter(|set| !std::ptr::eq(*set, smallest))
-                    .all(|set| set.contains(pubkey))
-            })
-            .copied()
-            .collect();
-
-        Some(SubscriptionReconciliationSnapshot {
-            union,
-            intersection,
-        })
-    }
-
-    fn account_subscriptions_for_client<U: SubscribedAccountsTracker>(
-        tracker: &U,
-        grpc_only_subscriptions: &Arc<Mutex<HashSet<Pubkey>>>,
-        clients: &Mutex<Vec<Arc<T>>>,
-        connected_client_ids: &Arc<Mutex<HashSet<usize>>>,
-        client: &T,
-    ) -> HashSet<Pubkey> {
-        // The tracker is authoritative. The policy set only removes
-        // confirmed misses from websocket reconnects while a connected
-        // gRPC client can cover them; otherwise websocket clients restore
-        // full coverage.
-        let mut subscriptions = tracker.subscribed_accounts();
-        if client.transport() == PubsubTransport::WebSocket
-            && Self::has_connected_grpc_client(clients, connected_client_ids)
-        {
-            let grpc_only = grpc_only_subscriptions
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
-            subscriptions.retain(|pubkey| !grpc_only.contains(pubkey));
-        }
-        subscriptions
-    }
-
-    fn has_connected_grpc_client(
-        clients: &Mutex<Vec<Arc<T>>>,
-        connected_client_ids: &Arc<Mutex<HashSet<usize>>>,
-    ) -> bool {
-        let clients = clients
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clone();
-        let connected_ids =
-            Self::connected_client_ids_lock(connected_client_ids);
-        clients.iter().any(|client| {
-            client.transport() == PubsubTransport::Grpc
-                && connected_ids.contains(&Self::client_key(client))
-        })
-    }
-
     fn remove_client(&self, target: &Arc<T>) {
         {
             let mut clients = self.clients_lock();
@@ -530,13 +437,8 @@ where
             }
         }
 
-        let mut account_subs = Self::account_subscriptions_for_client(
-            subscribed_accounts_tracker.as_ref(),
-            &self.grpc_only_subscriptions,
-            &self.clients,
-            &self.connected_client_ids,
-            client.as_ref(),
-        );
+        let mut account_subs =
+            subscribed_accounts_tracker.subscribed_accounts();
         account_subs.extend(self.never_debounce.iter().copied());
         if let Err(err) = client.resub_multiple(account_subs).await {
             self.remove_client(&client);
@@ -577,10 +479,8 @@ where
 
         Self::spawn_reconnectors(
             vec![(client.clone(), abort_rx)],
-            self.clients.clone(),
             subscribed_accounts_tracker.clone(),
             self.program_subs.clone(),
-            self.grpc_only_subscriptions.clone(),
             self.connected_client_ids.clone(),
             self.connected_clients.clone(),
             self.connected_clients_subscribing_immediately.clone(),
@@ -607,13 +507,8 @@ where
                 );
             }
         }
-        let mut account_subs = Self::account_subscriptions_for_client(
-            subscribed_accounts_tracker.as_ref(),
-            &self.grpc_only_subscriptions,
-            &self.clients,
-            &self.connected_client_ids,
-            client.as_ref(),
-        );
+        let mut account_subs =
+            subscribed_accounts_tracker.subscribed_accounts();
         account_subs.extend(self.never_debounce.iter().copied());
         if let Err(err) = client.resub_multiple(account_subs).await {
             warn!(
@@ -643,23 +538,18 @@ where
     #[instrument(
         skip(
             client,
-            all_clients,
             accounts_tracker,
             program_subs,
-            grpc_only_subscriptions,
             connected_client_ids,
             connected_clients,
             connected_clients_subscribing_immediately
         ),
         fields(client_id = %client.id())
     )]
-    #[allow(clippy::too_many_arguments)]
     async fn reconnect_client_with_backoff<U: SubscribedAccountsTracker>(
         client: Arc<T>,
-        all_clients: Arc<Mutex<Vec<Arc<T>>>>,
         accounts_tracker: Arc<U>,
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
-        grpc_only_subscriptions: Arc<Mutex<HashSet<Pubkey>>>,
         connected_client_ids: Arc<Mutex<HashSet<usize>>>,
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
@@ -686,10 +576,8 @@ where
             }
             match Self::reconnect_client(
                 client.clone(),
-                &all_clients,
                 &accounts_tracker,
                 &program_subs,
-                &grpc_only_subscriptions,
                 connected_client_ids.clone(),
                 connected_clients.clone(),
                 connected_clients_subscribing_immediately.clone(),
@@ -752,16 +640,13 @@ where
     }
 
     #[instrument(
-        skip(client, all_clients, accounts_tracker, program_subs, grpc_only_subscriptions, connected_client_ids, connected_clients, connected_clients_subscribing_immediately),
+        skip(client, accounts_tracker, program_subs, connected_client_ids, connected_clients, connected_clients_subscribing_immediately),
         fields(client_id = %client.id())
     )]
-    #[allow(clippy::too_many_arguments)]
     async fn reconnect_client<U: SubscribedAccountsTracker>(
         client: Arc<T>,
-        all_clients: &Arc<Mutex<Vec<Arc<T>>>>,
         accounts_tracker: &Arc<U>,
         program_subs: &Arc<Mutex<HashSet<Pubkey>>>,
-        grpc_only_subscriptions: &Arc<Mutex<HashSet<Pubkey>>>,
         connected_client_ids: Arc<Mutex<HashSet<usize>>>,
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
@@ -793,13 +678,7 @@ where
         // Resubscribe all accounts from the authoritative tracker.
         // This ensures subscriptions are restored even if all clients lost their state
         // during disconnect/abort.
-        let account_subs = Self::account_subscriptions_for_client(
-            accounts_tracker.as_ref(),
-            grpc_only_subscriptions,
-            all_clients,
-            &connected_client_ids,
-            client.as_ref(),
-        );
+        let account_subs = accounts_tracker.subscribed_accounts();
 
         if let Err(err) = client.resub_multiple(account_subs).await {
             debug!(
@@ -830,14 +709,10 @@ where
                 }
             }
 
-            let account_subs = Self::account_subscriptions_for_client(
-                accounts_tracker.as_ref(),
-                grpc_only_subscriptions,
-                all_clients,
-                &connected_client_ids,
-                client.as_ref(),
-            );
-            if let Err(err) = client.resub_multiple(account_subs).await {
+            if let Err(err) = client
+                .resub_multiple(accounts_tracker.subscribed_accounts())
+                .await
+            {
                 Self::connected_client_ids_lock(&connected_client_ids)
                     .remove(&client_key);
                 return Err(err);
@@ -1176,7 +1051,6 @@ where
             debounce_states: self.debounce_states.clone(),
             never_debounce: self.never_debounce.clone(),
             program_subs: self.program_subs.clone(),
-            grpc_only_subscriptions: self.grpc_only_subscriptions.clone(),
             connected_client_ids: self.connected_client_ids.clone(),
             connected_clients: self.connected_clients.clone(),
             connected_clients_subscribing_immediately: self
@@ -1210,25 +1084,13 @@ where
         pubkey: Pubkey,
         retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
-        let was_grpc_only = self
-            .grpc_only_subscriptions
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .remove(&pubkey);
-        let result = AccountSubscriptionTask::Subscribe(
+        AccountSubscriptionTask::Subscribe(
             pubkey,
             retries,
             self.required_account_subscription_confirmations(),
         )
         .process(self.connected_clients_snapshot())
-        .await;
-        if result.is_err() && was_grpc_only {
-            self.grpc_only_subscriptions
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .insert(pubkey);
-        }
-        result
+        .await
     }
 
     async fn subscribe_program(
@@ -1281,126 +1143,9 @@ where
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        let was_grpc_only = self
-            .grpc_only_subscriptions
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .remove(&pubkey);
-        let result = AccountSubscriptionTask::Unsubscribe(pubkey)
+        AccountSubscriptionTask::Unsubscribe(pubkey)
             .process(self.connected_clients_snapshot())
-            .await;
-        if result.is_err() && was_grpc_only {
-            self.grpc_only_subscriptions
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .insert(pubkey);
-        }
-        result
-    }
-
-    async fn prefer_grpc_subscription(
-        &self,
-        pubkey: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
-        let clients = self.connected_clients_snapshot();
-
-        // Only drop websocket legs once at least one gRPC client holds the
-        // subscription; otherwise leave existing coverage untouched. Calls
-        // run concurrently and bounded so a stalled client cannot wedge
-        // subscription transitions.
-        let grpc_results = futures_util::future::join_all(
-            clients
-                .iter()
-                .filter(|c| c.transport() == PubsubTransport::Grpc)
-                .map(|client| async move {
-                    match tokio::time::timeout(
-                        SUBSCRIBE_TIMEOUT,
-                        client.subscribe(pubkey, None),
-                    )
-                    .await
-                    {
-                        Ok(result) => result,
-                        Err(_) => Err(
-                            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                                format!(
-                                    "Subscribe timed out after {SUBSCRIBE_TIMEOUT:?} for client {}",
-                                    client.id()
-                                ),
-                            ),
-                        ),
-                    }
-                }),
-        )
-        .await;
-        let mut grpc_covered = false;
-        let mut last_err = None;
-        for result in grpc_results {
-            match result {
-                Ok(()) => grpc_covered = true,
-                Err(err) => last_err = Some(err),
-            }
-        }
-        // A no-op subscribe can mask lost coverage; trust only the snapshot.
-        if grpc_covered {
-            grpc_covered = self
-                .subscription_reconciliation_snapshot_for_transport(
-                    PubsubTransport::Grpc,
-                )
-                .is_some_and(|snapshot| snapshot.union.contains(&pubkey));
-        }
-        if !grpc_covered {
-            return Err(last_err.unwrap_or_else(|| {
-                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                    format!(
-                        "No connected gRPC client to hold subscription for {pubkey}"
-                    ),
-                )
-            }));
-        }
-
-        self.grpc_only_subscriptions
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .insert(pubkey);
-
-        futures_util::future::join_all(
-            clients
-                .iter()
-                .filter(|c| c.transport() == PubsubTransport::WebSocket)
-                .map(|client| async move {
-                    match tokio::time::timeout(
-                        UNSUBSCRIBE_TIMEOUT,
-                        client.unsubscribe(pubkey),
-                    )
-                    .await
-                    {
-                        Ok(Ok(()))
-                        | Ok(Err(
-                            RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                                _,
-                            ),
-                        )) => {}
-                        Ok(Err(err)) => {
-                            warn!(
-                                pubkey = %pubkey,
-                                client_id = %client.id(),
-                                error = ?err,
-                                "Failed to drop websocket leg for gRPC-only coverage"
-                            );
-                        }
-                        Err(_) => {
-                            warn!(
-                                pubkey = %pubkey,
-                                client_id = %client.id(),
-                                timeout_ms = UNSUBSCRIBE_TIMEOUT.as_millis() as u64,
-                                "Timed out dropping websocket leg for gRPC-only coverage"
-                            );
-                        }
-                    }
-                }),
-        )
-        .await;
-        Ok(())
+            .await
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
@@ -1459,21 +1204,46 @@ where
     fn subscription_reconciliation_snapshot(
         &self,
     ) -> Option<SubscriptionReconciliationSnapshot> {
-        Self::reconciliation_snapshot_from_clients(
-            self.connected_clients_snapshot(),
-        )
-    }
+        let connected_clients = self.connected_clients_snapshot();
+        if connected_clients.is_empty() {
+            return None;
+        }
 
-    fn subscription_reconciliation_snapshot_for_transport(
-        &self,
-        transport: PubsubTransport,
-    ) -> Option<SubscriptionReconciliationSnapshot> {
-        let clients = self
-            .connected_clients_snapshot()
-            .into_iter()
-            .filter(|client| client.transport() == transport)
+        let mut union = HashSet::new();
+        let mut intersection_sets = Vec::with_capacity(connected_clients.len());
+        for client in connected_clients {
+            let snapshot = match client.subscription_reconciliation_snapshot() {
+                Some(snapshot) => snapshot,
+                None => continue,
+            };
+            union.extend(snapshot.union);
+            intersection_sets.push(snapshot.intersection);
+        }
+
+        if intersection_sets.is_empty() {
+            return None;
+        }
+
+        // Find the smallest set to iterate over, then check membership
+        // in all others — no intermediate cloning/collecting.
+        // SAFETY: we return above if the set is empty, so unwrap is safe here.
+        let smallest =
+            intersection_sets.iter().min_by_key(|s| s.len()).unwrap();
+        let intersection = smallest
+            .iter()
+            .filter(|pk| {
+                intersection_sets
+                    .iter()
+                    .filter(|s| !std::ptr::eq(*s, smallest))
+                    .all(|s| s.contains(pk))
+            })
+            .copied()
             .collect();
-        Self::reconciliation_snapshot_from_clients(clients)
+
+        Some(SubscriptionReconciliationSnapshot {
+            union,
+            intersection,
+        })
     }
 
     /// Returns true if any inner client subscribes immediately
@@ -2465,173 +2235,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_prefer_grpc_subscription_drops_ws_legs() {
-        init_logger();
-
-        let (tx1, rx1) = mpsc::channel(10_000);
-        let (tx2, rx2) = mpsc::channel(10_000);
-        let ws_client = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
-        let grpc_client = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
-        grpc_client.set_transport(PubsubTransport::Grpc);
-
-        let pk = Pubkey::new_unique();
-        let (mux, _aborts) = new_submux_with_abort(
-            vec![ws_client.clone(), grpc_client.clone()],
-            vec![pk],
-            Some(100),
-        );
-
-        mux.subscribe(pk, None).await.unwrap();
-        assert!(ws_client.subscriptions_union().contains(&pk));
-        assert!(grpc_client.subscriptions_union().contains(&pk));
-
-        mux.prefer_grpc_subscription(pk).await.unwrap();
-        assert!(!ws_client.subscriptions_union().contains(&pk));
-        assert!(grpc_client.subscriptions_union().contains(&pk));
-
-        mux.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_grpc_only_subscription_is_restored_on_grpc_reconnect() {
-        init_logger();
-
-        let (tx1, rx1) = mpsc::channel(10_000);
-        let (tx2, rx2) = mpsc::channel(10_000);
-        let ws_client = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
-        let grpc_client = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
-        grpc_client.set_transport(PubsubTransport::Grpc);
-
-        let pubkey = Pubkey::new_unique();
-        let (mux, aborts) = new_submux_with_abort(
-            vec![ws_client.clone(), grpc_client.clone()],
-            vec![pubkey],
-            Some(100),
-        );
-
-        mux.subscribe(pubkey, None).await.unwrap();
-        mux.prefer_grpc_subscription(pubkey).await.unwrap();
-        grpc_client.simulate_disconnect();
-        aborts[1].send(()).await.unwrap();
-
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while !grpc_client.subscriptions_union().contains(&pubkey) {
-            assert!(
-                Instant::now() < deadline,
-                "gRPC subscription did not recover"
-            );
-            sleep_ms(10).await;
-        }
-
-        assert!(!ws_client.subscriptions_union().contains(&pubkey));
-        mux.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_reconcile_replaces_lingering_ws_with_grpc_coverage() {
-        init_logger();
-
-        let (tx1, rx1) = mpsc::channel(10_000);
-        let (tx2, rx2) = mpsc::channel(10_000);
-        let ws_client = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
-        let grpc_client = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
-        grpc_client.set_transport(PubsubTransport::Grpc);
-
-        let pubkey = Pubkey::new_unique();
-        let (mux, _aborts) = new_submux_with_abort(
-            vec![ws_client.clone(), grpc_client.clone()],
-            vec![pubkey],
-            Some(100),
-        );
-        ws_client.insert_subscription(pubkey);
-
-        let primary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
-        let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
-        secondary.add(pubkey);
-        let (removed_tx, mut removed_rx) = mpsc::channel(10);
-
-        reconcile_subscriptions(
-            &primary,
-            &secondary,
-            &Mutex::new(HashSet::from([pubkey])),
-            &mux,
-            &[],
-            &removed_tx,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await;
-
-        assert!(!ws_client.subscriptions_union().contains(&pubkey));
-        assert!(grpc_client.subscriptions_union().contains(&pubkey));
-        assert!(removed_rx.try_recv().is_err());
-        mux.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_reconcile_keeps_pending_secondary_fully_covered() {
-        init_logger();
-
-        let (tx1, rx1) = mpsc::channel(10_000);
-        let (tx2, rx2) = mpsc::channel(10_000);
-        let ws_client = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
-        let grpc_client = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
-        grpc_client.set_transport(PubsubTransport::Grpc);
-
-        let pubkey = Pubkey::new_unique();
-        let (mux, _aborts) = new_submux_with_abort(
-            vec![ws_client.clone(), grpc_client.clone()],
-            vec![pubkey],
-            Some(100),
-        );
-        ws_client.insert_subscription(pubkey);
-
-        let primary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
-        let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
-        secondary.add(pubkey);
-        let (removed_tx, mut removed_rx) = mpsc::channel(10);
-
-        reconcile_subscriptions(
-            &primary,
-            &secondary,
-            &Mutex::new(HashSet::new()),
-            &mux,
-            &[],
-            &removed_tx,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await;
-
-        assert!(ws_client.subscriptions_union().contains(&pubkey));
-        assert!(grpc_client.subscriptions_union().contains(&pubkey));
-        assert!(removed_rx.try_recv().is_err());
-        mux.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_prefer_grpc_subscription_without_grpc_keeps_ws_legs() {
-        init_logger();
-
-        let (tx1, rx1) = mpsc::channel(10_000);
-        let ws_client = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
-
-        let pk = Pubkey::new_unique();
-        let (mux, _aborts) =
-            new_submux_with_abort(vec![ws_client.clone()], vec![pk], Some(100));
-
-        mux.subscribe(pk, None).await.unwrap();
-        assert!(mux.prefer_grpc_subscription(pk).await.is_err());
-        assert!(ws_client.subscriptions_union().contains(&pk));
-
-        mux.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
     async fn test_reconcile_skips_repair_when_no_submux_clients_connected() {
         init_logger();
 
@@ -2665,22 +2268,11 @@ mod tests {
 
         let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
         lru.add(pk);
-        let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
         let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
 
-        let count = reconcile_subscriptions(
-            &lru,
-            &secondary,
-            &Mutex::new(HashSet::new()),
-            &mux,
-            &[],
-            &removed_tx,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await;
+        let count =
+            reconcile_subscriptions(&lru, &mux, &[], &removed_tx, None, None)
+                .await;
 
         assert_eq!(count, 1);
         assert_eq!(client1.subscribe_attempts(), before_client1_attempts);
