@@ -61,6 +61,12 @@ cargo nextest run -p <crate-name> <test_name> --no-capture
 
 `cargo test` and `cargo nextest` both run tests; use one of them rather than both for the same scope. Prefer `cargo nextest` when available. Use `cargo test` when `nextest` is unavailable, when you need libtest flags such as `--exact` or `--test-threads=1`, or when matching the integration runner's behavior exactly.
 
+## Manual release preparation
+
+Run `.github/workflows/prepare-release.yml` manually from GitHub Actions on the default branch. Its optional `version` input accepts `X.Y.Z` or `vX.Y.Z`; when omitted, the workflow increments the patch component of the current root `[workspace.package]` version. It checks out the default branch, updates the root workspace version, runs `.github/version-align.sh`, builds the root and `test-integration` workspaces without `--locked` to refresh both lockfiles, then verifies that both lockfiles are current.
+
+The workflow commits the generated changes as `release: vX.Y.Z`, pushes `release/vX.Y.Z`, and opens an empty-body pull request titled `release vX.Y.Z`. It fails rather than overwriting an existing release branch or tag, and uses the repository's `GH_PERSONAL_ACCESS_TOKEN` secret so the pushed branch and pull request trigger the normal workflows.
+
 ## Integration test structure
 
 Integration tests live under `test-integration/`. The integration workspace has its own `Cargo.toml`, test crates, test programs, and Makefile.
