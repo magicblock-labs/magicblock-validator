@@ -207,6 +207,15 @@ const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
         }
     };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DlpProgramUpdateInterest {
+    DropIrrelevant,
+    DropLocalDelegatedAuthoritative,
+    ProcessUndelegating,
+    ProcessAtaProjection,
+    ProcessDirectlyWatched,
+}
+
 /// Tracks delegation-record sightings from the DLP program subscription and
 /// internal-looking account updates parked until their record is sighted.
 /// A single lock keeps check-then-park atomic against sight-then-release, so
@@ -421,6 +430,7 @@ where
                     })
             },
         );
+        me.keep_dlp_program_update_interest_primitives_reachable();
 
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
@@ -431,6 +441,88 @@ where
     /// Get the current fetch count
     pub fn fetch_count(&self) -> u64 {
         self.fetch_count.load(Ordering::Relaxed)
+    }
+
+    fn keep_dlp_program_update_interest_primitives_reachable(&self) {
+        let _ = DlpProgramUpdateInterest::DropIrrelevant;
+        let _ = Self::classify_dlp_program_update_interest;
+        let _ = Self::has_local_ata_projection_interest;
+        let _ = ata_projection::derive_supported_ata_pubkeys_from_raw_eata;
+        let _ = RemoteAccountProvider::<T, U>::has_subscription_reason;
+    }
+
+    async fn classify_dlp_program_update_interest(
+        &self,
+        pubkey: Pubkey,
+        account: &AccountSharedData,
+    ) -> DlpProgramUpdateInterest {
+        if let Some(local_account) = self.accounts_bank.get_account(&pubkey) {
+            if local_account.undelegating() {
+                return DlpProgramUpdateInterest::ProcessUndelegating;
+            }
+            if local_account.delegated() {
+                return DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative;
+            }
+        }
+
+        if self.remote_account_provider.is_watching(&pubkey) {
+            return DlpProgramUpdateInterest::ProcessDirectlyWatched;
+        }
+
+        if self
+            .has_local_ata_projection_interest(pubkey, account)
+            .await
+        {
+            return DlpProgramUpdateInterest::ProcessAtaProjection;
+        }
+
+        DlpProgramUpdateInterest::DropIrrelevant
+    }
+
+    async fn has_local_ata_projection_interest(
+        &self,
+        pubkey: Pubkey,
+        account: &AccountSharedData,
+    ) -> bool {
+        if let Some(eata_pubkey) =
+            ata_projection::derive_eata_pubkey_from_ata_account(
+                &pubkey, account,
+            )
+        {
+            if self
+                .remote_account_provider
+                .has_subscription_reason(
+                    &pubkey,
+                    SubscriptionReason::AtaProjection,
+                )
+                .await
+                || self
+                    .remote_account_provider
+                    .has_subscription_reason(
+                        &eata_pubkey,
+                        SubscriptionReason::AtaProjection,
+                    )
+                    .await
+            {
+                return true;
+            }
+        }
+
+        if let Some(ata_pubkeys) =
+            ata_projection::derive_supported_ata_pubkeys_from_raw_eata(
+                &pubkey, account,
+            )
+        {
+            if ata_pubkeys.iter().any(|ata_pubkey| {
+                self.accounts_bank.get_account(ata_pubkey).is_some()
+            }) {
+                return true;
+            }
+        }
+
+        self.remote_account_provider
+            .has_subscription_reason(&pubkey, SubscriptionReason::AtaProjection)
+            .await
     }
 
     #[instrument(skip(self, pubkeys))]

@@ -41,6 +41,24 @@ pub(crate) fn derive_eata_pubkey_from_ata_layout(
     derive_eata_pubkey(ata_info_from_layout(ata_pubkey, ata_account)?)
 }
 
+pub(crate) fn derive_supported_ata_pubkeys_from_raw_eata(
+    eata_pubkey: &Pubkey,
+    eata_account: &AccountSharedData,
+) -> Option<Vec<Pubkey>> {
+    let (wallet_owner, mint) = delegation::parse_raw_eata_pda(
+        eata_pubkey,
+        eata_account.data(),
+        EATA_PROGRAM_ID,
+    )?;
+    Some(
+        try_derive_supported_ata_pubkeys(&wallet_owner, &mint)
+            .token_2022_first()
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+    )
+}
+
 fn derive_eata_pubkey(ata_info: AtaInfo) -> Option<Pubkey> {
     let (eata_pubkey, _) =
         try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)?;

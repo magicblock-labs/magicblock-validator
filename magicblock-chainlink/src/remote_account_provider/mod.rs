@@ -2902,14 +2902,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 }
 
-#[cfg(test)]
 impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
-    /// Check if an account is currently pending (being fetched).
-    pub(crate) fn is_pending(&self, pubkey: &Pubkey) -> bool {
-        let fetching = self.fetching_accounts.lock().unwrap();
-        fetching.contains_key(pubkey)
-    }
-
     pub(crate) async fn has_subscription_reason(
         &self,
         pubkey: &Pubkey,
@@ -2920,6 +2913,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .await
             .get(pubkey)
             .is_some_and(|ownership| ownership.contains(reason))
+    }
+}
+
+#[cfg(test)]
+impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+    /// Check if an account is currently pending (being fetched).
+    pub(crate) fn is_pending(&self, pubkey: &Pubkey) -> bool {
+        let fetching = self.fetching_accounts.lock().unwrap();
+        fetching.contains_key(pubkey)
     }
 }
 

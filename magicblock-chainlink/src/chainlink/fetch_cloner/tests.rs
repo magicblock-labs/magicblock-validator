@@ -509,6 +509,190 @@ async fn acquire_direct_subscription_for_update(
         .expect("failed to acquire direct subscription for update test");
 }
 
+#[tokio::test]
+async fn test_dlp_program_update_classifier_prefers_undelegating_local_state() {
+    let validator_keypair = Keypair::new();
+    let local_owner = random_pubkey();
+    let pubkey = random_pubkey();
+    let mut remote_update =
+        AccountSharedData::new(1_000_000, 0, &dlp_api::id());
+    remote_update.set_remote_slot(101);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        accounts_bank,
+        remote_account_provider,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        100,
+        validator_keypair,
+    )
+    .await;
+
+    let mut local_account = AccountSharedData::new(1_000_000, 0, &local_owner);
+    local_account.set_delegated(true);
+    local_account.set_undelegating(true);
+    local_account.set_remote_slot(100);
+    accounts_bank.insert(pubkey, local_account);
+    acquire_direct_subscription_for_update(&remote_account_provider, &pubkey)
+        .await;
+
+    assert_eq!(
+        fetch_cloner
+            .classify_dlp_program_update_interest(pubkey, &remote_update)
+            .await,
+        DlpProgramUpdateInterest::ProcessUndelegating
+    );
+}
+
+#[tokio::test]
+async fn test_dlp_program_update_classifier_prefers_delegated_local_authority_before_watch(
+) {
+    let validator_keypair = Keypair::new();
+    let local_owner = random_pubkey();
+    let pubkey = random_pubkey();
+    let mut remote_update =
+        AccountSharedData::new(1_000_000, 0, &dlp_api::id());
+    remote_update.set_remote_slot(101);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        accounts_bank,
+        remote_account_provider,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        100,
+        validator_keypair,
+    )
+    .await;
+
+    let mut local_account = AccountSharedData::new(1_000_000, 0, &local_owner);
+    local_account.set_delegated(true);
+    local_account.set_remote_slot(100);
+    accounts_bank.insert(pubkey, local_account);
+    acquire_direct_subscription_for_update(&remote_account_provider, &pubkey)
+        .await;
+
+    assert_eq!(
+        fetch_cloner
+            .classify_dlp_program_update_interest(pubkey, &remote_update)
+            .await,
+        DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative
+    );
+}
+
+#[tokio::test]
+async fn test_dlp_program_update_classifier_returns_directly_watched_before_projection(
+) {
+    let validator_keypair = Keypair::new();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let mut eata_account = AccountSharedData::from(create_eata_account(
+        &wallet_owner,
+        &mint,
+        777,
+        true,
+    ));
+    eata_account.set_remote_slot(101);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        accounts_bank,
+        remote_account_provider,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        100,
+        validator_keypair,
+    )
+    .await;
+    insert_plain_ata_in_bank(
+        &accounts_bank,
+        derive_ata(&wallet_owner, &mint),
+        &wallet_owner,
+        &mint,
+        100,
+    );
+    acquire_direct_subscription_for_update(
+        &remote_account_provider,
+        &eata_pubkey,
+    )
+    .await;
+
+    assert_eq!(
+        fetch_cloner
+            .classify_dlp_program_update_interest(eata_pubkey, &eata_account)
+            .await,
+        DlpProgramUpdateInterest::ProcessDirectlyWatched
+    );
+}
+
+#[tokio::test]
+async fn test_dlp_program_update_classifier_detects_ata_projection_interest() {
+    let validator_keypair = Keypair::new();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let mut eata_account = AccountSharedData::from(create_eata_account(
+        &wallet_owner,
+        &mint,
+        777,
+        true,
+    ));
+    eata_account.set_remote_slot(101);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        accounts_bank,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        100,
+        validator_keypair,
+    )
+    .await;
+    insert_plain_ata_in_bank(
+        &accounts_bank,
+        derive_ata(&wallet_owner, &mint),
+        &wallet_owner,
+        &mint,
+        100,
+    );
+
+    assert_eq!(
+        fetch_cloner
+            .classify_dlp_program_update_interest(eata_pubkey, &eata_account)
+            .await,
+        DlpProgramUpdateInterest::ProcessAtaProjection
+    );
+}
+
+#[tokio::test]
+async fn test_dlp_program_update_classifier_drops_irrelevant_update() {
+    let validator_keypair = Keypair::new();
+    let pubkey = random_pubkey();
+    let mut remote_update =
+        AccountSharedData::new(1_000_000, 0, &dlp_api::id());
+    remote_update.set_remote_slot(101);
+
+    let FetcherTestCtx { fetch_cloner, .. } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        100,
+        validator_keypair,
+    )
+    .await;
+
+    assert_eq!(
+        fetch_cloner
+            .classify_dlp_program_update_interest(pubkey, &remote_update)
+            .await,
+        DlpProgramUpdateInterest::DropIrrelevant
+    );
+}
+
 async fn wait_for_pending_request(
     fetch_cloner: &Arc<
         FetchCloner<
