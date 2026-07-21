@@ -4626,10 +4626,18 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_droppe
 
 // A freshly delegated account whose app data collides with an internal DLP
 // discriminator is still greedily cloned: the delegation-record update from
-// the same delegation routes it to discovery.
+// the same delegation routes it to discovery, in either delivery order.
 #[tokio::test]
-async fn test_discovered_colliding_delegated_account_with_record_sighting_is_cloned(
-) {
+async fn test_discovered_colliding_delegated_account_record_first_is_cloned() {
+    colliding_delegated_account_is_cloned(false).await;
+}
+
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_record_late_is_cloned() {
+    colliding_delegated_account_is_cloned(true).await;
+}
+
+async fn colliding_delegated_account_is_cloned(record_late: bool) {
     init_logger();
     let validator_keypair = Keypair::new();
     let validator_pubkey = validator_keypair.pubkey();
@@ -4690,10 +4698,17 @@ async fn test_discovered_colliding_delegated_account_with_record_sighting_is_clo
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
-    for (pubkey, account) in [
+    // With the record late, the account update parks awaiting its record and
+    // the record update arriving later (e.g. debounced) must release it into
+    // discovery.
+    let mut updates = vec![
         (delegation_record_pubkey, delegation_record_account),
         (account_pubkey, delegated_account),
-    ] {
+    ];
+    if record_late {
+        updates.reverse();
+    }
+    for (pubkey, account) in updates {
         subscription_tx
             .send(ForwardedSubscriptionUpdate {
                 pubkey,
@@ -4706,6 +4721,7 @@ async fn test_discovered_colliding_delegated_account_with_record_sighting_is_clo
             })
             .await
             .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     tokio::time::timeout(Duration::from_secs(2), async {
