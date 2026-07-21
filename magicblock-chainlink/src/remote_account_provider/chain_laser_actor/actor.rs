@@ -562,13 +562,28 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     /// Common error handling for stream errors. Detects "fallen
     /// behind" errors and spawns diagnostics to compare our last
     /// known slot with the actual chain slot via RPC.
+    ///
+    /// Transient errors are only logged: the SDK reconnects the affected
+    /// stream itself with slot replay, while signaling a connection issue
+    /// here would tear down every healthy stream and resubscribe all
+    /// accounts on each routine provider reset.
     async fn handle_stream_error(
         &mut self,
         err: &LaserstreamError,
         source: &str,
     ) {
         if is_fallen_behind_error(err) {
+            // Replay from our tracked slot is no longer possible; a full
+            // resubscribe with a fresh slot is required.
             self.spawn_fallen_behind_diagnostics(source);
+        } else if is_sdk_reconnectable_status(err) {
+            debug!(
+                error = ?err,
+                slots = ?self.slots,
+                "SDK-reconnectable status in {} stream, awaiting reconnect",
+                source,
+            );
+            return;
         }
 
         warn!(
@@ -837,5 +852,41 @@ fn is_fallen_behind_error(err: &LaserstreamError) -> bool {
                     .contains("fallen behind")
         }
         _ => false,
+    }
+}
+
+/// Mid-stream status errors are informational: the SDK yields them and then
+/// reconnects the stream itself with slot replay. Fallen-behind errors and
+/// terminal errors (e.g. [LaserstreamError::MaxReconnectAttempts],
+/// [LaserstreamError::StreamEnded]) require a full resubscribe.
+fn is_sdk_reconnectable_status(err: &LaserstreamError) -> bool {
+    matches!(err, LaserstreamError::Status(_)) && !is_fallen_behind_error(err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stream_error_classification() {
+        let transient = LaserstreamError::Status(tonic::Status::unavailable(
+            "connection closed due to a deployment restart",
+        ));
+        assert!(is_sdk_reconnectable_status(&transient));
+        assert!(!is_fallen_behind_error(&transient));
+
+        let fallen_behind = LaserstreamError::Status(tonic::Status::new(
+            Code::DataLoss,
+            "client has fallen behind",
+        ));
+        assert!(is_fallen_behind_error(&fallen_behind));
+        assert!(!is_sdk_reconnectable_status(&fallen_behind));
+
+        let terminal = LaserstreamError::MaxReconnectAttempts(
+            tonic::Status::cancelled("Connection failed after 10 attempts"),
+        );
+        assert!(!is_sdk_reconnectable_status(&terminal));
+
+        assert!(!is_sdk_reconnectable_status(&LaserstreamError::StreamEnded));
     }
 }

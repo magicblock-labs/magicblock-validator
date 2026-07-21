@@ -16,7 +16,7 @@ use tracing::*;
 
 use super::{
     chain_pubsub_actor::ChainPubsubActor,
-    errors::RemoteAccountProviderResult,
+    errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
 };
 
@@ -26,6 +26,15 @@ const MAX_RESUB_DELAY_MS: u64 = 800;
 pub struct SubscriptionReconciliationSnapshot {
     pub union: HashSet<Pubkey>,
     pub intersection: HashSet<Pubkey>,
+}
+
+/// Transport kind of a pubsub client. Websocket subscriptions are
+/// per-account server-side resources, gRPC subscriptions are entries in a
+/// shared stream filter and scale much further.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PubsubTransport {
+    WebSocket,
+    Grpc,
 }
 
 // -----------------
@@ -82,9 +91,47 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         })
     }
 
+    /// Returns a reconciliation snapshot only when this client represents the
+    /// requested transport. Multiplexers override this to aggregate their
+    /// matching connected clients.
+    fn subscription_reconciliation_snapshot_for_transport(
+        &self,
+        transport: PubsubTransport,
+    ) -> Option<SubscriptionReconciliationSnapshot> {
+        (self.transport() == transport)
+            .then(|| self.subscription_reconciliation_snapshot())
+            .flatten()
+    }
+
     fn subs_immediately(&self) -> bool;
 
     fn id(&self) -> &str;
+
+    fn transport(&self) -> PubsubTransport {
+        PubsubTransport::WebSocket
+    }
+
+    /// Prefers gRPC-only coverage for `pubkey`.
+    /// Multiplexing implementors drop websocket legs only after gRPC
+    /// coverage is confirmed and err otherwise, leaving coverage untouched.
+    async fn prefer_grpc_subscription(
+        &self,
+        pubkey: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        match self.transport() {
+            PubsubTransport::Grpc => self.subscribe(pubkey, None).await,
+            // Dropping a ws subscription is only safe behind a multiplexer
+            // that confirmed gRPC coverage.
+            PubsubTransport::WebSocket => {
+                Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    format!(
+                        "cannot prefer gRPC-only coverage for {pubkey} on a \
+                         websocket-only client"
+                    ),
+                ))
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -405,6 +452,7 @@ pub mod mock {
         program_subscribe_attempts: Arc<AtomicU64>,
         subscribe_notify: Arc<Notify>,
         client_id: String,
+        transport: Arc<Mutex<PubsubTransport>>,
     }
 
     impl ChainPubsubClientMock {
@@ -438,7 +486,12 @@ pub mod mock {
                     "mock:{}",
                     CLIENT_ID.fetch_add(1, AtomicOrdering::SeqCst)
                 ),
+                transport: Arc::new(Mutex::new(PubsubTransport::WebSocket)),
             }
+        }
+
+        pub fn set_transport(&self, transport: PubsubTransport) {
+            *self.transport.lock() = transport;
         }
 
         /// Simulate a disconnect: clear all subscriptions and mark client as disconnected.
@@ -747,6 +800,10 @@ pub mod mock {
 
         fn id(&self) -> &str {
             &self.client_id
+        }
+
+        fn transport(&self) -> PubsubTransport {
+            *self.transport.lock()
         }
     }
 
