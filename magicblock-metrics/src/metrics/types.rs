@@ -663,7 +663,6 @@ pub enum SubscriptionRegistrationOutcome {
     EvictedCandidate,
     SubscribeError,
     UnsubscribeEvictedError,
-    RejectedNoCapacity,
     RejectedAndUnsubscribed,
     UnsubscribeRejectedError,
 }
@@ -676,7 +675,6 @@ impl SubscriptionRegistrationOutcome {
             Self::EvictedCandidate => "evicted_candidate",
             Self::SubscribeError => "subscribe_error",
             Self::UnsubscribeEvictedError => "unsubscribe_evicted_error",
-            Self::RejectedNoCapacity => "rejected_no_capacity",
             Self::RejectedAndUnsubscribed => "rejected_and_unsubscribed",
             Self::UnsubscribeRejectedError => "unsubscribe_rejected_error",
         }

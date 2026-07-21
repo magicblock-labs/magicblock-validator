@@ -162,21 +162,6 @@ Empty placeholders are created in `RemoteAccountProvider::try_get_multi` when RP
 4. Waits for either RPC results or a subscription update that is at least as new as the fetch start slot.
 5. Returns results in input order.
 
-Fetch-owned unknown accounts enter a bounded secondary subscription LRU rather
-than the primary working-set LRU. They retain full websocket and gRPC coverage
-while the fetch is pending. A winning not-found result switches to gRPC-only
-coverage when gRPC is available; a winning found result moves the account to
-the primary LRU. If protected primary entries leave no promotion capacity, the
-found fetch fails and its secondary subscription is rolled back. Refetching a
-confirmed miss restores full coverage for the duration of the new pending
-fetch. Results discarded by fetch/subscription generation arbitration
-must not change tiers. Per-account classification retains the winning slot and
-source while the subscription is owned: older updates are ignored for tier
-movement, and subscription data wins an equal-slot tie over RPC data.
-Classification-only ownership created before subscription acquisition is tagged
-with the fetch generation and removed on setup failure or cancellation, so stale
-cleanup cannot delete a newer generation's state.
-
 The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="remote_account_provider"`. Claimed pubkeys record `owned`; calls that join existing `fetching_accounts` work record `joined_existing`, waiter total, and active waiter gauge. Subscription-update wins record `resolved_by_subscription_update`, while late RPC completions after such a win or replacement record `rpc_fetch_completed_after_update`. `FetchingAccountState` stores bounded metric metadata (`AccountFetchContext` and owner start time) so subscription-update completion preserves the original entrypoint/fetch reason without adding pubkey/signature labels.
 
 This pending-fetch instrumentation does not change fetch/clone behavior, dedup ownership, subscription ordering, or remote-fetch retry behavior; it only records counters, gauges, and histograms on existing control-flow edges.
@@ -294,7 +279,7 @@ Key behavior:
 
 - Clock sysvar updates update `chain_slot` and are not forwarded to the fetch cloner.
 - Non-clock updates become `ForwardedSubscriptionUpdate` with a `SubscriptionSource` (`Account` or program source).
-- If a subscription update arrives while an RPC fetch is pending, it resolves the pending fetch waiters only when its slot is at least the fetch start slot and does not regress the retained per-account classification.
+- If a subscription update arrives while an RPC fetch is pending and its slot is at least the fetch start slot, it resolves the pending fetch waiters instead of being forwarded as a separate update.
 - Account-subscription updates for pubkeys no longer watched are dropped and can enqueue a removal update if stale local state exists.
 - Program-subscription updates are allowed even if the pubkey is not in the direct-account LRU; delegated accounts may be tracked only by owner-program subscriptions.
 - Non-advancing updates are ignored unless they represent a same-slot delegated refresh needed for undelegate/redelegate recovery.
@@ -356,9 +341,6 @@ Ownership is reference-counted per reason. Releasing one reason does not unsubsc
 
 Registration outcome metrics (`chainlink_subscription_registration_accounts_total`, exported as `mbv_chainlink_subscription_registration_accounts_total`) are emitted once per claimed subscription attempt by entrypoint, fetch reason, subscription reason, and terminal registration outcome. Waiter-only fetch callers do not independently set up subscriptions and are not counted separately; direct `try_get_multi` owners preserve their `AccountFetchContext`, while callers without a fetch context use `entrypoint="internal", fetch_reason="requested_account"`.
 
-Capacity that is known to be exhausted before an upstream subscribe is reported
-as `rejected_no_capacity`; no compensating unsubscribe is issued in that case.
-
 Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_total{reason,outcome}` and `chainlink_subscription_cleanup_accounts_total{cleanup_source,outcome}`, exported with the `mbv_` prefix) are emitted only on cold subscription release/cleanup transition paths, never on per-update hot loops. Release metrics classify each explicit `release_subscription_with_mode` / silent delegated-account release result (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`). Cleanup metrics classify the actual unsubscribe/removal action by `cleanup_source` (`normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`) and `outcome` (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`). All labels are static/enum values only; no pubkey, signature, raw error, or endpoint labels are used.
 
 ### LRU and defensive eviction
@@ -370,22 +352,6 @@ Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_to
 - accounts with `UndelegationTracking` ownership are protected,
 - if no candidate can be evicted, the new subscription is unsubscribed and `NoEvictableSubscriptionCapacity` is returned.
 
-A found RPC result or subscription update for an account in the secondary tier
-is rejected when it cannot be promoted into the primary tier; it must not be
-returned to fetch waiters or forwarded as a successful update.
-RPC-only slot-match retries apply the same tier classification before returning
-their results.
-
-Primary and secondary LRU membership is exclusive and both tiers use the same
-delegated, undelegating, in-flight-fetch, never-evict, and
-`UndelegationTracking` protections. Tier changes use the global subscription
-transition lock followed by the per-pubkey lock. Secondary capacity is bounded
-independently at the configured primary LRU capacity, so the total direct-watch
-bound is twice that setting. Pending fetches briefly retain websocket coverage;
-confirmed misses do not use websocket subscriptions while gRPC is healthy.
-The confirmed-missing set is a bounded subset of the secondary tier; pending or
-failed fetches remain secondary but retain full transport coverage.
-
 When an account is evicted from subscription capacity, the provider sends a removal update. `InnerChainlink::subscribe_account_removals` listens for these and may submit `Cloner::evict_account` to remove stale local state, but only if the bank account is neither delegated nor undelegating.
 
 Removal handling is serialized with same-pubkey subscription transitions via `evict_unwatched_with_subscription_lock`, preventing an evict transaction from being submitted after a fresh subscription re-watches the same pubkey.
@@ -395,23 +361,6 @@ Removal handling is serialized with same-pubkey subscription transitions via `ev
 If subscription metrics are enabled, a background task periodically runs `subscription_reconciler::reconcile_subscriptions` to compare the LRU with actual pubsub-client subscriptions, update metrics, and notify removal for subscriptions that vanished.
 
 When the pubsub client is `SubMuxClient`, reconciliation snapshots are intentionally based only on currently connected inner clients. Disconnected/reconnecting clients are ignored by `subscriptions_union()` and `subscriptions_intersection()` until the reconnect path has reconnected them, resubscribed programs/accounts from the authoritative trackers, performed its catch-up pass, and marked them connected again. Reconciler-triggered SubMux subscribe/unsubscribe repair operations also fan out only to connected clients; reconnecting clients catch up through the reconnect path instead. If no inner pubsub client is connected, reconciliation skips repair/noisy LRU-vs-pubsub mismatch reporting for that tick because there is no live client to inspect or repair.
-
-SubMux persists the desired gRPC-only policy for confirmed misses. Reconnects
-restore those keys on gRPC clients and exclude them from websocket
-clients; reconciliation compares transports separately so a lingering
-websocket leg cannot mask missing gRPC coverage. If every gRPC client is down,
-reconciliation restores full fallback coverage until gRPC returns.
-Repair is verified against a fresh subscription snapshot; a secondary entry
-without protected ownership, live delegated/undelegating state, or an in-flight
-fetch is evicted if neither preferred nor fallback subscription establishes
-coverage.
-
-Laserstream `Status` items are left to the pinned SDK's replaying reconnect
-path. The SDK retains write-updated account/program filters and its internal
-slot tracker across reconnects, and resets its retry budget only after stream
-progress. Exhausted retries, terminal stream errors, and fallen-behind errors
-still trigger a full actor rebuild. This avoids bulk resubscription churn on
-routine provider resets without silently losing dynamic subscriptions.
 
 ## SubMuxClient internals
 
