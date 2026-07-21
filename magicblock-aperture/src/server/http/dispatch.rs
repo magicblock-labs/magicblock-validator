@@ -1,36 +1,28 @@
 use core::str;
 use std::{convert::Infallible, sync::Arc};
 
-use futures::{stream::FuturesOrdered, StreamExt};
+use engine::Engine;
+use futures::{StreamExt, stream::FuturesOrdered};
 use hyper::{
+    Method, Request, Response, StatusCode,
     body::Incoming,
     header::{
-        HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS,
-        ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
-        ACCESS_CONTROL_MAX_AGE,
+        ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+        ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_MAX_AGE, HeaderValue,
     },
-    Method, Request, Response, StatusCode,
 };
-use magicblock_accounts_db::AccountsDb;
-use magicblock_core::{
-    coordination_mode::CoordinationMode,
-    link::{transactions::TransactionSchedulerHandle, DispatchEndpoints},
-};
-use magicblock_ledger::Ledger;
+use magicblock_ledger_deprecated::Ledger;
 use magicblock_metrics::metrics::{
-    RPC_REQUESTS_COUNT, RPC_REQUEST_HANDLING_TIME,
+    RPC_REQUEST_HANDLING_TIME, RPC_REQUESTS_COUNT,
 };
 
 use crate::{
     requests::{
-        http::{extract_bytes, parse_body, HandlerResult},
-        payload::ResponseErrorPayload,
         JsonHttpRequest, RpcRequest,
+        http::{HandlerResult, extract_bytes, parse_body},
+        payload::ResponseErrorPayload,
     },
-    state::{
-        blocks::BlocksCache, transactions::TransactionsCache, ChainlinkImpl,
-        NodeContext, SharedState,
-    },
+    state::{ChainlinkImpl, NodeContext, SharedState},
     utils::JsonBody,
 };
 
@@ -41,42 +33,29 @@ use crate::{
 /// to process any supported JSON-RPC request. It acts as the `self` context
 /// for all RPC method implementations.
 pub(crate) struct HttpDispatcher {
-    /// The public key of the validator node.
+    /// The public key of the validator node and fee/feature context.
     pub(crate) context: NodeContext,
-    /// A handle to the accounts database.
-    pub(crate) accountsdb: Arc<AccountsDb>,
-    /// A handle to the blockchain ledger.
+    /// The engine: account/block/transaction reads and transaction submission.
+    pub(crate) engine: Engine,
+    /// Read-only deprecated ledger, used as a fallback for historical reads.
     pub(crate) ledger: Arc<Ledger>,
     /// Chainlink provides synchronization of on-chain accounts and
     /// fetches accounts used in a specific transaction as well as those
     /// required when getting account info, etc.
     pub(crate) chainlink: Arc<ChainlinkImpl>,
-    /// A handle to the transaction signatures cache.
-    pub(crate) transactions: TransactionsCache,
-    /// A handle to the recent blocks cache.
-    pub(crate) blocks: Arc<BlocksCache>,
-    /// A handle to the transaction scheduler for processing
-    /// `sendTransaction` and `simulateTransaction`.
-    pub(crate) transactions_scheduler: TransactionSchedulerHandle,
 }
 
 impl HttpDispatcher {
     /// Creates a new, thread-safe `HttpDispatcher` instance.
     ///
-    /// This constructor clones the necessary handles from the global `SharedState` and
-    /// `DispatchEndpoints`, making it cheap to create multiple `Arc<Self>` pointers.
-    pub(super) fn new(
-        state: SharedState,
-        channels: &DispatchEndpoints,
-    ) -> Arc<Self> {
+    /// This constructor clones the necessary handles from the global
+    /// `SharedState`, making it cheap to create multiple `Arc<Self>` pointers.
+    pub(super) fn new(state: SharedState) -> Arc<Self> {
         Arc::new(Self {
             context: state.context,
-            accountsdb: state.accountsdb.clone(),
-            ledger: state.ledger.clone(),
+            engine: state.engine,
+            ledger: state.ledger,
             chainlink: state.chainlink,
-            transactions: state.transactions.clone(),
-            blocks: state.blocks.clone(),
-            transactions_scheduler: channels.transaction_scheduler.clone(),
         })
     }
 
@@ -96,7 +75,7 @@ impl HttpDispatcher {
         self: Arc<Self>,
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
-        if let Some(response) = Self::handle_special_request(&request) {
+        if let Some(response) = self.handle_special_request(&request) {
             return Ok(response);
         }
         // A local macro to simplify error handling. If a Result is an Err,
@@ -177,10 +156,10 @@ impl HttpDispatcher {
         match request.method {
             GetAccountInfo => self.get_account_info(request).await,
             GetBalance => self.get_balance(request).await,
-            GetBlock => self.get_block(request),
+            GetBlock => self.get_block(request).await,
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_block_height(request),
-            GetBlockTime => self.get_block_time(request),
+            GetBlockTime => self.get_block_time(request).await,
             GetBlocks => self.get_blocks(request),
             GetBlocksWithLimit => self.get_blocks_with_limit(request),
             GetClusterNodes => self.get_cluster_nodes(request),
@@ -199,8 +178,10 @@ impl HttpDispatcher {
             GetRecentPerformanceSamples => {
                 self.get_recent_performance_samples(request)
             }
-            GetSignatureStatuses => self.get_signature_statuses(request),
-            GetSignaturesForAddress => self.get_signatures_for_address(request),
+            GetSignatureStatuses => self.get_signature_statuses(request).await,
+            GetSignaturesForAddress => {
+                self.get_signatures_for_address(request).await
+            }
             GetSlot => self.get_slot(request),
             GetSlotLeader => self.get_slot_leader(request),
             GetSlotLeaders => self.get_slot_leaders(request),
@@ -216,7 +197,7 @@ impl HttpDispatcher {
             }
             GetTokenLargestAccounts => self.get_token_largest_accounts(request),
             GetTokenSupply => self.get_token_supply(request),
-            GetTransaction => self.get_transaction(request),
+            GetTransaction => self.get_transaction(request).await,
             GetTransactionCount => self.get_transaction_count(request),
             GetVersion => self.get_version(request),
             GetVoteAccounts => self.get_vote_accounts(request),
@@ -233,18 +214,17 @@ impl HttpDispatcher {
     }
 
     fn handle_special_request(
+        &self,
         request: &Request<Incoming>,
     ) -> Option<Response<JsonBody>> {
-        if request.method() == Method::OPTIONS {
+        if request.method() == Method::OPTIONS
+            || request.uri() == "/health/primary"
+        {
             let mut response = Response::new(JsonBody::from(""));
-            Self::set_access_control_headers(&mut response);
-            return Some(response);
-        } else if request.uri() == "/health/primary" {
-            let mut response = Response::new(JsonBody::from(""));
-            Self::set_access_control_headers(&mut response);
-            if CoordinationMode::current() != CoordinationMode::Primary {
-                *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE
+            if request.uri() == "/health/primary" && !self.context.is_primary {
+                *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
             }
+            Self::set_access_control_headers(&mut response);
             return Some(response);
         }
         None

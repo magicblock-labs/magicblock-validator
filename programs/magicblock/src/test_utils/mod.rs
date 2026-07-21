@@ -2,19 +2,22 @@ use core::fmt;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
 use magicblock_core::{
-    intent::{types::CommittedAccount, MagicIntentBundle},
+    intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
 };
-use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};
-use solana_account::AccountSharedData;
-use solana_instruction::{error::InstructionError, AccountMeta};
-use solana_program_runtime::invoke_context::mock_process_instruction;
+use magicblock_magic_program_api::{EPHEMERAL_VAULT_PUBKEY, id};
+use solana_account::{AccountMode, AccountSharedData};
+use solana_instruction::{AccountMeta, error::InstructionError};
+use solana_program_runtime::{
+    invoke_context::mock_process_instruction,
+    solana_sbpf::program::BuiltinFunctionDefinition,
+};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 
@@ -30,8 +33,8 @@ pub fn ensure_started_validator(
     map: &mut HashMap<Pubkey, AccountSharedData>,
     nonces: Option<StubNonces>,
 ) {
-    validator::generate_validator_authority_if_needed();
-    let validator_authority_id = validator::validator_authority_id();
+    let validator_authority_id =
+        validator::generate_validator_authority_if_needed();
     map.entry(validator_authority_id).or_insert_with(|| {
         AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
     });
@@ -39,7 +42,7 @@ pub fn ensure_started_validator(
     // Ensure ephemeral vault account exists
     map.entry(EPHEMERAL_VAULT_PUBKEY).or_insert_with(|| {
         let mut vault = AccountSharedData::new(0, 0, &id());
-        vault.set_ephemeral(true);
+        vault.set_mode(AccountMode::Ephemeral);
         vault
     });
 
@@ -51,9 +54,6 @@ pub fn ensure_started_validator(
         },
     });
     init_magic_sys(stub);
-
-    // Ensure validator is in Primary mode (ledger replay complete)
-    magicblock_core::coordination_mode::switch_to_primary_mode();
 }
 
 pub fn process_instruction(
@@ -85,7 +85,7 @@ pub fn process_instruction_with_logs(
         transaction_accounts,
         instruction_accounts,
         expected_result,
-        Entrypoint::vm,
+        (Entrypoint::vm, Entrypoint::codegen),
         |_invoke_context| {},
         |invoke_context| {
             logs = invoke_context

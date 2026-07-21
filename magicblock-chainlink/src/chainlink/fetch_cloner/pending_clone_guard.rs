@@ -70,3 +70,34 @@ impl Drop for PendingCloneGuard {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn drop_fails_waiters_and_releases_claim() {
+        let key = Pubkey::new_unique();
+        let (tx, rx) = oneshot::channel();
+        let pending =
+            Arc::new(Mutex::new(hash_map::HashMap::from([(key, vec![tx])])));
+
+        drop(PendingCloneGuard::new(pending.clone(), key));
+
+        assert_eq!(rx.await.unwrap(), CloneCompletion::Failed);
+        assert!(!pending.lock().unwrap().contains_key(&key));
+    }
+
+    #[test]
+    fn dismissed_guard_leaves_completion_to_owner() {
+        let key = Pubkey::new_unique();
+        let pending =
+            Arc::new(Mutex::new(hash_map::HashMap::from([(key, Vec::new())])));
+        let mut guard = PendingCloneGuard::new(pending.clone(), key);
+
+        guard.dismiss();
+        drop(guard);
+
+        assert!(pending.lock().unwrap().contains_key(&key));
+    }
+}

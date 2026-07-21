@@ -20,6 +20,20 @@ pub enum ClonerError {
     #[error("CommittorServiceError {0}")]
     CommittorServiceError(String),
 
+    #[error("engine error: {0}")]
+    Engine(String),
+
+    /// The engine has no equivalent yet of the magic program's
+    /// `ScheduleUndelegation`, which the cloner used to emit alongside the
+    /// clone. Cloning without it would leave an account that must be
+    /// undelegated (e.g. flagged for AML risk) delegated instead, so this
+    /// refuses rather than silently skipping the undelegation. Scheduled to be
+    /// wired back up in phase 4.
+    #[error(
+        "account {0} must be undelegated after cloning, which is not supported until the engine can schedule undelegations"
+    )]
+    UndelegationSchedulingUnavailable(Pubkey),
+
     #[error(
         "Clone transaction for account {pubkey} is too large: {size} bytes (max {max_size} bytes)"
     )]

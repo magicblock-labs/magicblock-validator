@@ -237,14 +237,12 @@ impl AccountFetchContext {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChainlinkPendingFetchLayer {
-    FetchCloner,
     RemoteAccountProvider,
 }
 
 impl ChainlinkPendingFetchLayer {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::FetchCloner => "fetch_cloner",
             Self::RemoteAccountProvider => "remote_account_provider",
         }
     }
@@ -659,24 +657,16 @@ impl LabelValue for SubscriptionReasonLabel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscriptionRegistrationOutcome {
     AlreadyPresent,
-    AddedBelowCapacity,
-    EvictedCandidate,
+    Added,
     SubscribeError,
-    UnsubscribeEvictedError,
-    RejectedAndUnsubscribed,
-    UnsubscribeRejectedError,
 }
 
 impl SubscriptionRegistrationOutcome {
     pub fn as_str(&self) -> &str {
         match self {
             Self::AlreadyPresent => "already_present",
-            Self::AddedBelowCapacity => "added_below_capacity",
-            Self::EvictedCandidate => "evicted_candidate",
+            Self::Added => "added",
             Self::SubscribeError => "subscribe_error",
-            Self::UnsubscribeEvictedError => "unsubscribe_evicted_error",
-            Self::RejectedAndUnsubscribed => "rejected_and_unsubscribed",
-            Self::UnsubscribeRejectedError => "unsubscribe_rejected_error",
         }
     }
 }
@@ -730,8 +720,6 @@ impl LabelValue for SubscriptionReleaseOutcome {
 pub enum SubscriptionCleanupSource {
     NormalRelease,
     ManualUnsubscribe,
-    CapacityEviction,
-    RejectedNewSubscription,
     DelegatedAccountSilent,
     Reconciler,
 }
@@ -741,8 +729,6 @@ impl SubscriptionCleanupSource {
         match self {
             Self::NormalRelease => "normal_release",
             Self::ManualUnsubscribe => "manual_unsubscribe",
-            Self::CapacityEviction => "capacity_eviction",
-            Self::RejectedNewSubscription => "rejected_new_subscription",
             Self::DelegatedAccountSilent => "delegated_account_silent",
             Self::Reconciler => "reconciler",
         }

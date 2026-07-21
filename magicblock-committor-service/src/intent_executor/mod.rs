@@ -17,10 +17,7 @@ use magicblock_core::traits::{
     ActionsCallbackScheduler, CallbackScheduleError,
 };
 use magicblock_metrics::metrics;
-use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-    validator::validator_authority,
-};
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -39,21 +36,21 @@ use crate::{
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         two_stage_executor::TwoStageExecutor,
         utils::{
-            execute_with_timeout, handle_cpi_limit_error, CommitStage,
-            FinalizeStage, SingleStage,
+            CommitStage, FinalizeStage, SingleStage, execute_with_timeout,
+            handle_cpi_limit_error,
         },
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
+        BaseTaskImpl,
         task_builder::{TaskBuilderImpl, TasksBuilder},
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
-        BaseTaskImpl,
     },
     transaction_preparator::{
-        delivery_preparator::BufferExecutionError,
-        error::TransactionPreparatorError, TransactionPreparator,
+        TransactionPreparator, delivery_preparator::BufferExecutionError,
+        error::TransactionPreparatorError,
     },
     utils::persist_status_update_by_message_set,
 };
@@ -172,13 +169,13 @@ where
     A: ActionsCallbackScheduler,
 {
     pub fn new(
+        authority: Keypair,
         rpc_client: MagicblockRpcClient,
         transaction_preparator: T,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
         actions_callback_executor: A,
         actions_timeout: Duration,
     ) -> Self {
-        let authority = validator_authority();
         let intent_client = IntentExecutionClient::new(rpc_client);
         Self {
             authority,
@@ -639,7 +636,7 @@ mod tests {
     use solana_account::Account;
 
     use super::*;
-    use crate::tasks::{utils::create_commit_task, FinalizeTask};
+    use crate::tasks::{FinalizeTask, utils::create_commit_task};
 
     fn commit_task(commit_id: u64) -> BaseTaskImpl {
         create_commit_task(

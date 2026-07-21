@@ -5,13 +5,13 @@ use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
 };
 use solana_account_info::{AccountInfo, IntoAccountInfo};
-use solana_instruction::{error::InstructionError, AccountMeta};
+use solana_instruction::{AccountMeta, error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::{
+    transaction::TransactionContext,
     transaction_accounts::{AccountRef, AccountRefMut},
-    TransactionContext,
 };
 
 pub(crate) struct InstructionAccount<'a, 'ix_data> {
@@ -24,7 +24,8 @@ impl<'a, 'ix_data> InstructionAccount<'a, 'ix_data> {
     pub(crate) fn to_account_shared_data(
         &self,
     ) -> Result<AccountSharedData, InstructionError> {
-        Ok(self.borrow()?.to_account_shared_data())
+        // `AccountRef` derefs through `TransactionAccountView` to the account.
+        Ok((**self.borrow()?).clone())
     }
 
     pub(crate) fn borrow(&self) -> Result<AccountRef<'_>, InstructionError> {
@@ -98,7 +99,7 @@ pub(crate) fn get_instruction_pubkey_and_account_with_idx(
     let account_ref =
         get_instruction_account_with_idx(transaction_context, idx)?;
     let account = account_ref.borrow()?;
-    let account = Account::from(account.to_account_shared_data());
+    let account = Account::from((**account).clone());
     let pubkey =
         transaction_context.get_key_of_account_at_index(account_ref.tx_idx)?;
     Ok((*pubkey, account))

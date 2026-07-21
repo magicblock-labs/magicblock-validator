@@ -1,7 +1,7 @@
 use std::{
     marker::PhantomData,
     path::Path,
-    sync::{atomic::AtomicI64, Arc},
+    sync::{Arc, atomic::AtomicI64},
 };
 
 use bincode::deserialize;
@@ -9,7 +9,7 @@ use rocksdb::{ColumnFamily, DBRawIterator, LiveFile};
 use solana_clock::Slot;
 
 use super::{
-    columns::{columns, Column, ColumnName, TypedColumn},
+    columns::{Column, ColumnName, TypedColumn, columns},
     iterator::IteratorMode,
     ledger_column::LedgerColumn,
     options::{LedgerColumnOptions, LedgerOptions},

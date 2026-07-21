@@ -1,0 +1,4 @@
+interface:
+  display_name: "MBV Engine Integration"
+  short_description: "Track MBV-engine integration plans and progress"
+  default_prompt: "Use $mbv-engine-integration to resume the MBV engine integration from the local progress file."

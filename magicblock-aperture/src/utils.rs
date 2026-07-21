@@ -6,10 +6,11 @@ use std::{
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
 use json::Serialize;
-use magicblock_core::link::accounts::LockedAccount;
+use solana_account::AccountSharedData;
 use solana_account_decoder::{
-    encode_ui_account, UiAccount, UiAccountEncoding, UiDataSliceConfig,
+    UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account,
 };
+use solana_pubkey::Pubkey;
 use solana_rpc_client_api::filter::RpcFilterType;
 
 use crate::requests::params::Serde32Bytes;
@@ -128,14 +129,16 @@ impl AccountWithPubkey {
     /// Constructs a new `AccountWithPubkey`, performing a
     /// race-free read and encoding of the account data.
     pub(crate) fn new(
-        account: &LockedAccount,
+        pubkey: Pubkey,
+        account: &AccountSharedData,
         encoding: UiAccountEncoding,
         slice: Option<UiDataSliceConfig>,
     ) -> Self {
-        let pubkey = account.pubkey.into();
-        let account = account.read_locked(|pk, acc| {
-            encode_ui_account(pk, acc, encoding, None, slice)
-        });
-        Self { pubkey, account }
+        let account =
+            encode_ui_account(&pubkey, account, encoding, None, slice);
+        Self {
+            pubkey: pubkey.into(),
+            account,
+        }
     }
 }

@@ -61,7 +61,7 @@ The router/API can expose delegation status for a single account via `getDelegat
 When a delegated account is cloned into the ER:
 
 - The validator fetches account data and delegation metadata from the base layer.
-- The account is installed into local AccountsDb.
+- The account is installed into the engine accountsdb through the account accessor.
 - The account is presented to the local SVM with its original owner so application programs can use it normally.
 - Delegation-related flags/metadata must remain available for access validation and lifecycle handling.
 
@@ -79,7 +79,7 @@ Triggers include:
 
 ### Account flavors
 
-The account cloner distinguishes these important flavors:
+Chainlink distinguishes these important account flavors before materialization:
 
 | Flavor | Meaning | ER behavior |
 |---|---|---|
@@ -89,16 +89,18 @@ The account cloner distinguishes these important flavors:
 
 ### Cloning freshness
 
-The cloner tracks remote updates and clone outputs. If a remote account has changed since the last clone, the next clone request should fetch a newer base-layer version. Fetching uses base-layer RPC and delegation record lookups; websocket subscriptions track future changes.
+Chainlink tracks remote updates and materialized account state. If a remote account has changed since the last materialization, the next request should fetch a newer base-layer version. Fetching uses base-layer RPC and delegation record lookups; websocket subscriptions track future changes.
 
-### Large accounts and programs
+### Account and program materialization
 
-The Magic Program API includes validator-only clone instructions:
+Chainlink uses `Engine::account(pubkey).create(...)` for account state. The
+engine composes ordered MagicRoot patches and finalization, followed by
+`PostFinalize` when a delegation record carries actions. Program accounts use
+the engine's loader-specific materialization path and are never delegated.
 
-- `CloneAccount` for accounts that fit in one transaction.
-- `CloneAccountInit` / `CloneAccountContinue` / `CleanupPartialClone` for large accounts.
-
-Program accounts are cloned/redeployed locally via loader-specific paths. Program accounts are not delegated.
+The legacy Magic Program `CloneAccount*`, cleanup, and program-finalization
+variants remain decodable for wire compatibility but fail closed with
+`AccountCompositionRemoved`; they are not a second materialization path.
 
 ## Transaction routing and execution specification
 
@@ -143,20 +145,23 @@ Account locks are bitmask-based:
 
 The forked SVM includes MagicBlock-specific access validation after execution:
 
-> Writable accounts must be delegated, ephemeral, or confined, except for explicitly allowed cases such as fee payers, Magic Program instruction allowlists, and special post-delegation action executor patterns.
+> Writable accounts must use a mutable engine account mode. Only transactions
+> composed entirely from MagicRoot instructions use the engine's privileged
+> account-mutation path.
 
 Any change touching account flags, account loading, SVM commit/rollback, or transaction sanitization must preserve this invariant. This is a security boundary: weakening it would let ordinary (untrusted) ER transactions mutate state they must not touch, which can lose funds. Do not relax it for performance or convenience.
 
-#### Privileged accounts
+#### Privileged account mutation
 
-Accounts carry a `privileged` flag (defined in the forked `solana-account`, accessed via `privileged()` / `set_privileged()`). The validator marks exactly one account privileged: the **validator identity (authority) account**, set in `init_validator_identity` (`magicblock-api/src/fund_account.rs`), called once during startup in `magic_validator.rs`. No other account is ever flagged privileged in this repo.
+Privilege is transaction-scoped, not stored as a validator-selected account
+flag. The engine recognizes a transaction as privileged only when every
+top-level instruction targets MagicRoot. MagicRoot is registered internally by
+the engine and composes validator-controlled account patches; ordinary user or
+mixed-program transactions still undergo normal mutability validation.
 
-In the executor's commit-to-local-state path (`magicblock-processor/src/executor/processing.rs`) the flag grants two bypasses:
-
-- **Persistence bypass** — privileged accounts are always written back to AccountsDb, even when not dirty (normal accounts persist only if dirty).
-- **Integrity-check bypass** — when the fee payer is privileged, `verify_account_states` returns early, skipping the confined-account integrity checks that otherwise apply.
-
-This is why the validator identity must remain privileged: validator-internal/system transactions (e.g. funding, identity operations) bypass the access-validation checks that constrain untrusted ER transactions. Do not flag additional accounts privileged, and do not remove the validator identity's privilege. (Distinct from the "privileged instruction" concept in `programs/magicblock/src/schedule_task/mod.rs`, which is about instructions disallowed inside cranks, not the account flag.)
+Post-finalize actions do not require a separate privileged executor. MagicRoot
+checks that every writable action account is mutable before native CPI, clears
+outer signer bits, and vouches only for the signers declared by each action.
 
 ### Sysvars
 

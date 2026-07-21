@@ -2,12 +2,12 @@ use std::{ops::ControlFlow, time::Duration};
 
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
-    utils::{
-        decide_rpc_error_flow, map_magicblock_client_error,
-        send_transaction_with_retries, SendErrorMapper, TransactionErrorMapper,
-    },
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
+    utils::{
+        SendErrorMapper, TransactionErrorMapper, decide_rpc_error_flow,
+        map_magicblock_client_error, send_transaction_with_retries,
+    },
 };
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
@@ -18,11 +18,11 @@ use tracing::warn;
 
 use crate::{
     intent_executor::{
+        ExecutionOutput,
         error::{
             IntentExecutorResult, IntentTransactionErrorMapper, InternalError,
             TransactionStrategyExecutionError,
         },
-        ExecutionOutput,
     },
     tasks::BaseTaskImpl,
 };
@@ -121,6 +121,11 @@ impl IntentExecutionClient {
             VersionedMessage::Legacy(value) => {
                 warn!("Legacy message not expected");
                 value.recent_blockhash = latest_blockhash;
+            }
+            VersionedMessage::V1(value) => {
+                warn!("V1 message not expected");
+                // V1 renames the blockhash to the lifetime specifier.
+                value.lifetime_specifier = latest_blockhash;
             }
         };
 

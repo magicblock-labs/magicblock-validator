@@ -8,16 +8,14 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-bincode = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
-magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
-magicblock-ledger = { workspace = true }
+magicblock-engine = { workspace = true }
 magicblock-program = { workspace = true }
 rusqlite = { workspace = true }
-solana-instruction = { workspace = true }
+solana-instruction = { workspace = true, features = ["wincode"] }
 solana-message = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
@@ -28,6 +26,8 @@ solana-transaction-error = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, features = ["time"] }
+wincode = { workspace = true }
 
 [dev-dependencies]
-serial_test = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-engine = { workspace = true, features = ["testkit"] }

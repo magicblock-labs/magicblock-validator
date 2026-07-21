@@ -2,19 +2,16 @@ use std::fmt::Debug;
 
 use hyper::body::Bytes;
 use json::Serialize;
-use magicblock_core::{
-    link::{accounts::LockedAccount, transactions::TransactionStatus},
-    Slot,
-};
-use solana_account::ReadableAccount;
+use magicblock_core::Slot;
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_account_decoder::{
-    encode_ui_account, UiAccountEncoding, UiDataSliceConfig,
+    UiAccountEncoding, UiDataSliceConfig, encode_ui_account,
 };
 use solana_pubkey::Pubkey;
 use solana_transaction_error::{TransactionError, TransactionResult};
 
 use crate::{
-    requests::{params::SerdeSignature, payload::NotificationPayload},
+    requests::payload::NotificationPayload,
     state::subscriptions::SubscriptionID,
     utils::{AccountWithPubkey, ProgramFilters},
 };
@@ -64,7 +61,7 @@ pub struct ProgramAccountEncoder {
 }
 
 impl Encoder for AccountEncoder {
-    type Data = LockedAccount;
+    type Data = (Pubkey, AccountSharedData);
 
     fn encode(
         &self,
@@ -72,16 +69,21 @@ impl Encoder for AccountEncoder {
         data: &Self::Data,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let encoded = data.read_locked(|pk, acc| {
-            encode_ui_account(pk, acc, self.encoding, None, self.data_slice)
-        });
+        let (pubkey, account) = data;
+        let encoded = encode_ui_account(
+            pubkey,
+            account,
+            self.encoding,
+            None,
+            self.data_slice,
+        );
         let method = "accountNotification";
         NotificationPayload::encode(encoded, slot, method, id)
     }
 }
 
 impl Encoder for ProgramAccountEncoder {
-    type Data = LockedAccount;
+    type Data = (Pubkey, AccountSharedData);
 
     fn encode(
         &self,
@@ -89,11 +91,11 @@ impl Encoder for ProgramAccountEncoder {
         data: &Self::Data,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        data.read_locked(|_, acc| {
-            self.filters.matches(acc.data()).then_some(())
-        })?;
+        let (pubkey, account) = data;
+        self.filters.matches(account.data()).then_some(())?;
         let value = AccountWithPubkey::new(
-            data,
+            *pubkey,
+            account,
             self.encoder.encoding,
             self.encoder.data_slice,
         );
@@ -122,48 +124,6 @@ impl Encoder for TransactionResultEncoder {
         let method = "signatureNotification";
         let err = data.as_ref().err().cloned();
         let result = SignatureResult { err };
-        NotificationPayload::encode(result, slot, method, id)
-    }
-}
-
-/// A `logsSubscribe` payload encoder
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
-pub(crate) enum TransactionLogsEncoder {
-    All,
-    Mentions(Pubkey),
-}
-
-impl Encoder for TransactionLogsEncoder {
-    type Data = TransactionStatus;
-
-    fn encode(
-        &self,
-        slot: Slot,
-        data: &Self::Data,
-        id: SubscriptionID,
-    ) -> Option<Bytes> {
-        let logs = data.meta.log_messages.as_ref()?;
-        if let Self::Mentions(pubkey) = self {
-            data.txn
-                .message()
-                .account_keys()
-                .iter()
-                .any(|p| p == pubkey)
-                .then_some(())?;
-        }
-
-        #[derive(Serialize)]
-        struct TransactionLogs<'a> {
-            signature: SerdeSignature,
-            err: Option<TransactionError>,
-            logs: &'a [String],
-        }
-        let method = "logsNotification";
-        let result = TransactionLogs {
-            signature: SerdeSignature(*data.txn.signature()),
-            err: data.meta.status.as_ref().err().cloned(),
-            logs,
-        };
         NotificationPayload::encode(result, slot, method, id)
     }
 }

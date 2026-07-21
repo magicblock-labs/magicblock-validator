@@ -8,7 +8,6 @@
 //! full supply details). They ensure API compatibility with standard tools by
 //! returning default or empty responses, rather than 'method not found' errors.
 
-use magicblock_core::link::blocks::BlockHash;
 use magicblock_metrics::metrics::TRANSACTION_COUNT;
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_rpc_client_api::response::{
@@ -75,7 +74,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode(
             &request.id,
             Vec::<()>::new(),
-            self.blocks.block_height(),
+            self.engine.blocks().latest().slot,
         ))
     }
 
@@ -88,7 +87,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode(
             &request.id,
             Vec::<()>::new(),
-            self.blocks.block_height(),
+            self.engine.blocks().latest().slot,
         ))
     }
 
@@ -107,7 +106,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode(
             &request.id,
             supply,
-            self.blocks.block_height(),
+            self.engine.blocks().latest().slot,
         ))
     }
 
@@ -124,7 +123,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode(
             &request.id,
             supply,
-            self.blocks.block_height(),
+            self.engine.blocks().latest().slot,
         ))
     }
 
@@ -155,7 +154,7 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
-            Serde32Bytes::from(BlockHash::default()),
+            Serde32Bytes::from(solana_hash::Hash::default()),
         ))
     }
 
@@ -165,8 +164,8 @@ impl HttpDispatcher {
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
-        let slot = self.blocks.block_height();
-        let transaction_count = self.ledger.count_transactions()?;
+        let slot = self.engine.blocks().latest().slot;
+        let transaction_count = TRANSACTION_COUNT.get();
         let info = json::json! {{
             "epoch": slot / SLOTS_IN_EPOCH,
             "slotIndex": slot % SLOTS_IN_EPOCH,

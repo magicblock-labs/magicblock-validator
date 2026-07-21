@@ -11,10 +11,9 @@ use crate::{
 impl WsDispatcher {
     /// Handles the `programSubscribe` WebSocket RPC request.
     ///
-    /// Registers the current WebSocket connection to receive notifications for all
-    /// accounts owned by the specified program. The stream of notifications can be
-    /// refined using server-side data filters and a custom data encoding, provided
-    /// in an optional configuration object.
+    /// Spawns a task that forwards engine account updates for accounts owned by
+    /// `pubkey` to this connection, applying the request's server-side filters and
+    /// encoding. Returns the subscription ID.
     pub(crate) async fn program_subscribe(
         &mut self,
         request: &mut JsonRequest,
@@ -38,19 +37,25 @@ impl WsDispatcher {
             encoding,
             data_slice: config.account_config.data_slice,
         };
-
-        // Bundle the encoding and filtering options for the subscription.
         let encoder = ProgramAccountEncoder { encoder, filters };
 
-        let handle = self
-            .subscriptions
-            .subscribe_to_program(pubkey, encoder, self.chan.clone())
-            .await;
+        let id = next_subid();
+        let mut rx = self.engine.accounts().subscribe_program(pubkey).await;
+        let tx = self.chan.tx.clone();
+        let handle = tokio::spawn(async move {
+            while let Ok((pubkey, account)) = rx.recv().await {
+                let slot = account.slot();
+                let Some(bytes) = encoder.encode(slot, &(pubkey, account), id)
+                else {
+                    continue;
+                };
+                if tx.send(bytes).await.is_err() {
+                    break;
+                }
+            }
+        });
+        self.register(id, handle);
 
-        let result = SubResult::SubId(handle.id);
-        // Store the cleanup handle to manage the subscription's lifecycle.
-        self.register_unsub(handle);
-
-        Ok(result)
+        Ok(SubResult::SubId(id))
     }
 }

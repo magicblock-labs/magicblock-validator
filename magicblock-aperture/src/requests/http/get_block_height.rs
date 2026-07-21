@@ -9,7 +9,7 @@ impl HttpDispatcher {
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
-        let height = self.blocks.block_height();
+        let height = self.engine.blocks().latest().slot;
         Ok(ResponsePayload::encode_no_context(&request.id, height))
     }
 }

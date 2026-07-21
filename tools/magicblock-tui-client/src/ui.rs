@@ -1,15 +1,15 @@
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs, Wrap},
-    Frame,
 };
 use tracing::Level;
 
 use crate::state::{
-    Tab, TransactionAccount, TransactionDetail, TransactionSource, TuiState,
-    ViewMode, MAX_DETAIL_ACCOUNTS,
+    MAX_DETAIL_ACCOUNTS, Tab, TransactionAccount, TransactionDetail,
+    TransactionSource, TuiState, ViewMode,
 };
 
 const CYAN: Color = Color::Cyan;
@@ -187,7 +187,7 @@ fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
                 Level::TRACE => Color::Magenta,
             };
 
-            let line = Line::from(vec![
+            Line::from(vec![
                 Span::styled(
                     format!("{} ", timestamp),
                     Style::default().fg(DARK_GRAY),
@@ -199,9 +199,7 @@ fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
                     Style::default().fg(DARK_GRAY),
                 ),
                 Span::raw(&log.message),
-            ]);
-
-            line
+            ])
         })
         .collect();
 
@@ -815,8 +813,7 @@ mod tests {
             compact_explorer_url(
                 "https://explorer.solana.com/tx/z1szQZcd1234567890ABCDEFGH?cluster=custom&customUrl=http://127.0.0.1:7799"
             ),
-            "https://explorer.solana.com/tx/z1szQZcd.....ABCDEFGH"
-                .to_string()
+            "https://explorer.solana.com/tx/z1szQZcd.....ABCDEFGH".to_string()
         );
     }
 

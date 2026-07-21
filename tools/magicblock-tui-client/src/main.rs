@@ -1,5 +1,5 @@
 use clap::Parser;
-use magicblock_tui_client::{enrich_config_from_rpc, run_tui, TuiConfig};
+use magicblock_tui_client::{TuiConfig, enrich_config_from_rpc, run_tui};
 
 #[derive(Debug, Parser)]
 #[command(name = "magicblock-tui-client")]

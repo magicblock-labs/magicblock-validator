@@ -1,4 +1,6 @@
-use solana_account::{Account, AccountSharedData, WritableAccount};
+use solana_account::{
+    Account, AccountFieldPatch, AccountMode, AccountSharedData, WritableAccount,
+};
 use solana_pubkey::Pubkey;
 
 pub fn account_shared_with_owner(
@@ -9,12 +11,22 @@ pub fn account_shared_with_owner(
     AccountSharedData::from(acc)
 }
 
+pub fn account_shared_with_owner_and_slot(
+    acc: &Account,
+    owner: Pubkey,
+    slot: u64,
+) -> AccountSharedData {
+    let mut acc = account_shared_with_owner(acc, owner);
+    AccountFieldPatch::Slot(slot).apply(&mut acc);
+    acc
+}
+
 pub fn delegated_account_shared_with_owner(
     acc: &Account,
     owner: Pubkey,
 ) -> AccountSharedData {
     let mut acc = account_shared_with_owner(acc, owner);
-    acc.set_delegated(true);
+    acc.set_mode(AccountMode::Delegated);
     acc
 }
 
@@ -30,7 +42,7 @@ pub fn delegated_account_shared_with_owner_and_slot(
     remote_slot: u64,
 ) -> AccountSharedData {
     let mut acc = account_shared_with_owner(acc, owner);
-    acc.set_delegated(true);
-    acc.set_remote_slot(remote_slot);
+    acc.set_mode(AccountMode::Delegated);
+    AccountFieldPatch::Slot(remote_slot).apply(&mut acc);
     acc
 }

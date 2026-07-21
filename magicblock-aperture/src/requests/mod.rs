@@ -1,6 +1,6 @@
 use json::{Array, Deserialize, Value};
 
-use crate::{error::RpcError, RpcResult};
+use crate::{RpcResult, error::RpcError};
 
 pub(crate) type JsonHttpRequest = JsonRequest<JsonRpcHttpMethod>;
 pub(crate) type JsonWsRequest = JsonRequest<JsonRpcWsMethod>;

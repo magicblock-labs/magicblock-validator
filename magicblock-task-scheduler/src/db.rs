@@ -6,7 +6,7 @@ use std::{
 
 use chrono::Utc;
 use magicblock_program::args::ScheduleTaskRequest;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 use tokio::sync::Mutex;
@@ -219,7 +219,7 @@ impl SchedulerDatabase {
     }
 
     pub async fn insert_task(&self, task: &DbTask) -> TaskSchedulerResult<i64> {
-        let instructions_bin = bincode::serialize(&task.instructions)?;
+        let instructions_bin = wincode::serialize(&task.instructions)?;
         let authority_str = task.authority.to_string();
         let conn = self.conn.lock().await;
         let previous_updated_at: Option<i64> = conn
@@ -332,7 +332,7 @@ impl SchedulerDatabase {
         let mut rows = stmt.query_map([task_id], |row| {
             let instructions_bin: Vec<u8> = row.get(1)?;
             let instructions: Vec<Instruction> =
-                bincode::deserialize(&instructions_bin).map_err(|e| {
+                wincode::deserialize(&instructions_bin).map_err(|e| {
                     rusqlite::Error::InvalidParameterName(format!(
                         "instructions: {}",
                         e
@@ -372,7 +372,7 @@ impl SchedulerDatabase {
         let rows = stmt.query_map([], |row| {
             let instructions_bin: Vec<u8> = row.get(1)?;
             let instructions: Vec<Instruction> =
-                bincode::deserialize(&instructions_bin).map_err(|e| {
+                wincode::deserialize(&instructions_bin).map_err(|e| {
                     rusqlite::Error::InvalidParameterName(format!(
                         "instructions: {}",
                         e

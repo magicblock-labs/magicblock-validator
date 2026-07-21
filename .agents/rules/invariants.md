@@ -41,7 +41,7 @@ Remote base-chain updates must not overwrite local delegated state.
 
 An undelegating account must also remain protected from remote overwrite until undelegation is confirmed on chain.
 
-Remote updates must be monotonic by slot. Stale or out-of-order updates must not regress local state. Same-slot updates may only add delegation information and must not overwrite local delegated data.
+Remote updates must be monotonic by slot. Stale or out-of-order updates must not regress local state. A same-slot replacement is permitted only for a genuine, validator-authorized account-mode transition; a duplicate replacement with the same mode must fail. This execution allowance does not authorize the transition itself: validator delegation and undelegation resolution must still prevent remote state from overwriting protected local execution before confirmed undelegation.
 
 **Invariant:** Delegated and undelegating account state may only move forward according to local execution, except after confirmed undelegation.
 

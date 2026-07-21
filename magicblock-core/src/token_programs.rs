@@ -1,8 +1,8 @@
 use solana_account::{
-    Account, AccountSharedData, ReadableAccount, WritableAccount,
+    Account, AccountMode, AccountSharedData, ReadableAccount, WritableAccount,
 };
 use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
-use solana_pubkey::{pubkey, Pubkey};
+use solana_pubkey::{Pubkey, pubkey};
 use spl_token::state::Account as SplAccount;
 use spl_token_2022::{
     extension::StateWithExtensionsMut, state::Account as Token2022Account,
@@ -102,11 +102,11 @@ fn normalize_legacy_projected_token_account(
     let Ok(mut token_account) = SplAccount::unpack(account.data()) else {
         return false;
     };
-    if token_account.mint == spl_token::native_mint::id() {
-        if let COption::Some(rent_exempt_reserve) = token_account.is_native {
-            token_account.is_native = COption::None;
-            account.set_lamports(rent_exempt_reserve);
-        }
+    if token_account.mint == spl_token::native_mint::id()
+        && let COption::Some(rent_exempt_reserve) = token_account.is_native
+    {
+        token_account.is_native = COption::None;
+        account.set_lamports(rent_exempt_reserve);
     }
     token_account.close_authority = COption::Some(Pubkey::default());
     SplAccount::pack(token_account, account.data_as_mut_slice()).is_ok()
@@ -360,7 +360,7 @@ pub fn try_remap_ata_to_eata(
     let token_program_owner = account.owner();
     let is_spl_token = *token_program_owner == TOKEN_PROGRAM_ID;
     let is_token_2022 = *token_program_owner == TOKEN_2022_PROGRAM_ID;
-    if !(is_spl_token || is_token_2022) || !account.delegated() {
+    if !(is_spl_token || is_token_2022) || !account.is(AccountMode::Delegated) {
         return None;
     }
 

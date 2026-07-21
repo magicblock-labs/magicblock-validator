@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use helius_laserstream::{
-    grpc::SubscribeRequest, LaserstreamError,
-    StreamHandle as HeliusStreamHandle,
+    LaserstreamError, StreamHandle as HeliusStreamHandle,
+    grpc::SubscribeRequest,
 };
 
 use super::LaserStream;

@@ -2,17 +2,17 @@ use std::{
     ffi::{CStr, CString},
     marker::PhantomData,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
 use rocksdb::{
+    CompactionDecision,
     compaction_filter::CompactionFilter,
     compaction_filter_factory::{
         CompactionFilterContext, CompactionFilterFactory,
     },
-    CompactionDecision,
 };
 use solana_clock::Slot;
 

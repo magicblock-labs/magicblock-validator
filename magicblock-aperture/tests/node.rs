@@ -34,7 +34,7 @@ async fn test_get_identity() {
 
     assert_eq!(
         identity,
-        env.execution.get_payer().pubkey,
+        env.engine.authority(),
         "identity should match the validator's public key"
     );
 }

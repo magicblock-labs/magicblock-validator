@@ -13,7 +13,6 @@ on:
       - '**/Cargo.lock'
       - '**/rustfmt*.toml'
       - 'Makefile'
-      - 'test-integration/Makefile'
       - '.github/workflows/ci-fmt.yml'
       - '.github/actions/setup-build-env/**'
   pull_request:
@@ -24,7 +23,6 @@ on:
       - '**/Cargo.lock'
       - '**/rustfmt*.toml'
       - 'Makefile'
-      - 'test-integration/Makefile'
       - '.github/workflows/ci-fmt.yml'
       - '.github/actions/setup-build-env/**'
 
@@ -44,12 +42,5 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - run: make ci-fmt
-        shell: bash
-        working-directory: magicblock-validator
-
-      - name: Run ci-fmt in test-integration
-        run: |
-          cd test-integration
-          make ci-fmt
         shell: bash
         working-directory: magicblock-validator

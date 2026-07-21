@@ -27,7 +27,7 @@ Update this guide in the same change whenever behavior or contracts in `magicblo
 - how callback signatures, errors, receipts, discriminators, payloads, or account metas are propagated;
 - asynchronous send behavior, logging, retry/confirmation semantics, or Tokio runtime assumptions;
 - call-site wiring in `magicblock-api`, committor expectations around `ActionsCallbackScheduler`, or Chainlink observer contracts consumed by the undelegation request service;
-- validation commands or integration suites relevant to action callbacks or owner-program undelegation requests.
+- validation commands relevant to action callbacks or owner-program undelegation requests.
 
 Because callbacks are a cross-crate contract between Magic Program scheduling, committor execution, and user callback programs, also update this file when another crate changes `BaseActionCallback`, `MagicResponse`, `CallbackInstruction`, or `ActionsCallbackScheduler` semantics.
 
@@ -56,7 +56,7 @@ Main consumers:
 - Chainlink, which publishes observed undelegation request updates consumed by this crate;
 - callback-capable Magic Action flows scheduled through `programs/magicblock`.
 
-There are no crate-local tests or README files for `magicblock-services` at the time of writing. Use the committor integration tests when callback behavior changes.
+There are no crate-local tests or README files for `magicblock-services` at the time of writing. Use focused consumer package checks when callback behavior changes.
 
 ## Public API shape / Main public types and APIs
 
@@ -176,7 +176,7 @@ The current implementation uses `Ordering::Relaxed` for uniqueness only; no orde
 `build_inner_instruction` creates the user-program instruction that the callback program will invoke:
 
 1. It wraps the outcome in `MagicResponse::V1(MagicResponseV1 { ok, data, error, receipt })`.
-2. `data` starts with `callback.discriminator` and appends `bincode::serialize(&response)`.
+2. `data` starts with `callback.discriminator` and appends `wincode::serialize(&response)`.
 3. `receipt` is present only when the committor supplied a base-action transaction signature.
 4. Account metas are copied from `callback.account_metas_per_program`.
 5. Only `CALLBACK_SIGNER` is marked as signer in the inner instruction; all other metas preserve writability but are not made signers here.
@@ -206,7 +206,7 @@ Callback sends are not confirmed and are not retried. This keeps the committor c
 
 ### Wire compatibility
 
-The callback instruction data combines a program-specific discriminator with a bincode-encoded `MagicResponse`. This is a user-program-facing wire contract. Changes to response versioning, serialization, or account meta treatment must be coordinated with `magicblock-magic-program-api`, Magic Program validation, and downstream callback program expectations.
+The callback instruction data combines a program-specific discriminator with a wincode-encoded `MagicResponse`. This remains byte-compatible with the previous bincode representation and is a user-program-facing wire contract. Changes to response versioning, serialization, or account meta treatment must be coordinated with `magicblock-magic-program-api`, Magic Program validation, and downstream callback program expectations.
 
 ### Error reporting boundary
 
@@ -227,7 +227,7 @@ When the delegated-account readiness check fails, the service logs `delegated_on
 ## Important invariants
 
 1. `schedule` must return exactly one `Result<Signature, CallbackScheduleError>` for each input callback, preserving input order.
-2. Callback response data must preserve the `discriminator || bincode(MagicResponse::V1)` layout unless a coordinated wire-format migration is implemented.
+2. Callback response data must preserve the established `discriminator || MagicResponse::V1` byte layout unless a coordinated wire-format migration is implemented.
 3. The validator authority must remain the outer transaction payer and signer unless startup/wallet semantics are intentionally changed.
 4. `CALLBACK_SIGNER` may be a signer only inside the inner instruction; it must be non-signer in the outer transaction account metas.
 5. Inner account meta writability must be propagated from `BaseActionCallback`; this crate should not reinterpret callback account authorization.
@@ -297,7 +297,6 @@ Start with `magicblock-services/src/lib.rs` and ask whether the new adapter belo
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-services`.
 - Consumer validation intent: because this crate has limited crate-local coverage, include relevant `magicblock-committor-service` checks for callback behavior changes and request-driven undelegation integration checks for undelegation request changes.
-- Relevant integration suites: committor suites that exercise action callbacks/timeouts, plus schedule-commit or undelegation request suites when `UndelegationRequestService` changes; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance-risk validation intent: report any added synchronous RPC work, retries, confirmation, persistence, extra serialization, or unbounded spawning/logging and its effect on committor throughput and callback latency.
 
 

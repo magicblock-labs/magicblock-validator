@@ -23,31 +23,26 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let filters = ProgramFilters::from(config.filters);
 
-        // Fetch all accounts owned by the program, applying
-        // filters at the database level for efficiency.
-        let accounts =
-            self.accountsdb.get_program_accounts(&program, move |a| {
-                filters.matches(a.data())
-            })?;
-
         let encoding = config
             .account_config
             .encoding
             .unwrap_or(UiAccountEncoding::Base58);
         let slice = config.account_config.data_slice;
 
-        // Encode the filtered accounts for the RPC response.
+        // Scan all accounts owned by the program through the engine, applying
+        // the server-side filters and encoding for the RPC response.
+        let accounts = self.engine.accounts();
         let accounts = accounts
+            .program(&program)
+            .map_err(RpcError::internal)?
+            .filter(|(_, account)| filters.matches(account.data()))
             .map(|(pubkey, account)| {
-                // lock account to prevent data races with concurrently modifying
-                // transaction executor threads (unlikely, but not impossible)
-                let locked = LockedAccount::new(pubkey, account);
-                AccountWithPubkey::new(&locked, encoding, slice)
+                AccountWithPubkey::new(pubkey, &account, encoding, slice)
             })
             .collect::<Vec<_>>();
 
         if config.with_context.unwrap_or_default() {
-            let slot = self.blocks.block_height();
+            let slot = self.engine.blocks().latest().slot;
             Ok(ResponsePayload::encode(&request.id, accounts, slot))
         } else {
             Ok(ResponsePayload::encode_no_context(&request.id, accounts))

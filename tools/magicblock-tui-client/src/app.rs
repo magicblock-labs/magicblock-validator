@@ -6,13 +6,12 @@ use std::{
 
 use chrono::Local;
 use crossterm::{
-    cursor,
+    ExecutableCommand, cursor,
     event::Event,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
-    ExecutableCommand,
 };
 use futures_util::StreamExt;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use serde::Deserialize;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::{
@@ -31,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Level;
 
 use crate::{
-    events::{handle_event, poll_event, EventAction},
+    events::{EventAction, handle_event, poll_event},
     state::{
         LogEntry, TransactionAccount, TransactionDetail, TransactionEntry,
         TransactionSource, TuiConfig, TuiState,
@@ -64,10 +63,10 @@ pub async fn run_tui(
     let mut state = TuiState::new(config.clone());
     let local_ws_url = config.ws_url.replace("0.0.0.0", "localhost");
     let client = reqwest::Client::new();
-    if let Ok(epoch_info) = get_epoch_info(&client, &config.rpc_url).await {
-        if epoch_info.slots_in_epoch > 0 {
-            state.slots_per_epoch = epoch_info.slots_in_epoch;
-        }
+    if let Ok(epoch_info) = get_epoch_info(&client, &config.rpc_url).await
+        && epoch_info.slots_in_epoch > 0
+    {
+        state.slots_per_epoch = epoch_info.slots_in_epoch;
     }
 
     let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -149,10 +148,10 @@ pub async fn run_tui(
 pub async fn enrich_config_from_rpc(config: &mut TuiConfig) {
     let client = reqwest::Client::new();
 
-    if config.validator_identity.is_empty() {
-        if let Ok(identity) = get_identity(&client, &config.rpc_url).await {
-            config.validator_identity = identity;
-        }
+    if config.validator_identity.is_empty()
+        && let Ok(identity) = get_identity(&client, &config.rpc_url).await
+    {
+        config.validator_identity = identity;
     }
 
     if let Ok(server_version) =
@@ -1316,11 +1315,11 @@ mod tests {
     };
 
     use super::{
+        BlockTransactionMessage, CompiledInstruction, LoadedAddresses,
+        TransactionMessage, TransactionMessageHeader, VOTE_PROGRAM_ID,
         backfill_start_slot, build_transaction_accounts,
         build_transaction_detail_request, is_retryable_block_error,
         is_skippable_block_error, is_vote_transaction, live_feed_target_slot,
-        BlockTransactionMessage, CompiledInstruction, LoadedAddresses,
-        TransactionMessage, TransactionMessageHeader, VOTE_PROGRAM_ID,
     };
 
     #[test]

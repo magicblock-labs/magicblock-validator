@@ -1,6 +1,6 @@
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::transaction::TransactionContext;
 
 pub(crate) trait InstructionFrame {
     /// How deeply in the stack this frame is.

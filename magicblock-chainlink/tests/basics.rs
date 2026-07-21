@@ -1,20 +1,13 @@
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_cloned_as_undelegated,
-    testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchContext,
+    AccountFetchContext, assert_cloned_as_delegated,
+    assert_cloned_as_undelegated,
+    testing::{
+        accounts::account_shared_with_owner_and_slot, context::TestContext,
+        deleg::add_delegation_record_for,
+    },
 };
 use solana_account::Account;
-use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
-use utils::{
-    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
-};
-mod utils;
-
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
 
 #[tokio::test]
 async fn test_remote_slot_of_accounts_read_from_bank() {
@@ -24,10 +17,10 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
     // when ensuring reads
     let slot: u64 = 11;
 
-    let ctx = setup(slot).await;
+    let ctx = TestContext::init(slot).await;
     let TestContext {
         chainlink,
-        cloner,
+        bank,
         rpc_client,
         ..
     } = ctx.clone();
@@ -36,7 +29,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
     let pubkey = Pubkey::new_unique();
     let owner = Pubkey::new_unique();
     let acc = Account {
-        lamports: 1_000,
+        lamports: 1_000_000,
         ..Default::default()
     };
     let acc = account_shared_with_owner_and_slot(&acc, owner, slot);
@@ -53,7 +46,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
         )
         .await
         .unwrap();
-    assert_cloned_as_undelegated!(cloner, &[pubkey], slot, owner);
+    assert_cloned_as_undelegated!(bank, &[pubkey], slot, owner);
     assert_eq!(chainlink.fetch_count().unwrap(), 1);
 
     // 2. Read account again which gets it from bank (without fetching again)
@@ -65,7 +58,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
         )
         .await
         .unwrap();
-    assert_cloned_as_undelegated!(cloner, &[pubkey], slot, owner);
+    assert_cloned_as_undelegated!(bank, &[pubkey], slot, owner);
     assert_eq!(chainlink.fetch_count().unwrap(), 1);
 }
 
@@ -77,10 +70,10 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
     // when ensuring writes
     let slot: u64 = 11;
 
-    let ctx = setup(slot).await;
+    let ctx = TestContext::init(slot).await;
     let TestContext {
         chainlink,
-        cloner,
+        bank,
         rpc_client,
         ..
     } = ctx.clone();
@@ -89,7 +82,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
     let pubkey = Pubkey::new_unique();
     let owner = Pubkey::new_unique();
     let acc = Account {
-        lamports: 1_000,
+        lamports: 1_000_000,
         ..Default::default()
     };
     let delegated_acc =
@@ -108,7 +101,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
         )
         .await
         .unwrap();
-    assert_cloned_as_delegated!(cloner, &[pubkey], slot, owner);
+    assert_cloned_as_delegated!(bank, &[pubkey], slot, owner);
 
     // We fetch the account once then realize it is owned by the delegation record.
     // Then we fetch both again to ensure same slot
@@ -123,7 +116,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
         )
         .await
         .unwrap();
-    assert_cloned_as_delegated!(cloner, &[pubkey], slot, owner);
+    assert_cloned_as_delegated!(bank, &[pubkey], slot, owner);
     // Since the account is already in the bank, we don't fetch it again
     assert_eq!(chainlink.fetch_count().unwrap(), 3);
 }

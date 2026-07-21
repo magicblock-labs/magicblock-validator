@@ -11,8 +11,7 @@ pub const DEFAULT_STORAGE_DIRECTORY: &str = "magicblock-test-storage/";
 
 /// WARNING: This keypair is for development/testing only.
 /// Production deployments MUST provide their own keypair via config file, env var, or CLI argument.
-pub const DEFAULT_VALIDATOR_KEYPAIR: &str =
-     "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ";
+pub const DEFAULT_VALIDATOR_KEYPAIR: &str = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ";
 
 /// Default base fee in lamports for transactions
 pub const DEFAULT_BASE_FEE: u64 = 0;
@@ -81,9 +80,6 @@ pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
 
 /// Default period in seconds for scanning DLP undelegation request accounts.
 pub const DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS: u64 = 5 * 60;
-
-/// Default capacity for the LRU cache of subscribed accounts
-pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;
 
 /// Default base URL for Range risk service
 pub const DEFAULT_RISK_BASE_URL: &str = "https://api.range.org/v1";

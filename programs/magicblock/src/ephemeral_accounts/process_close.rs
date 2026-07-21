@@ -5,7 +5,7 @@ use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk_ids::system_program;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::transaction::TransactionContext;
 
 use super::{
     get_ephemeral_data_len, rent_for, transfer_rent,

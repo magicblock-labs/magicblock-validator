@@ -1,8 +1,10 @@
 mod prelude {
     pub(super) use crate::{
-        requests::{params::Serde32Bytes, JsonWsRequest as JsonRequest},
-        server::websocket::dispatch::{SubResult, WsDispatcher},
         RpcResult,
+        encoder::Encoder,
+        requests::{JsonWsRequest as JsonRequest, params::Serde32Bytes},
+        server::websocket::dispatch::{SubResult, WsDispatcher},
+        state::subscriptions::next_subid,
     };
 }
 

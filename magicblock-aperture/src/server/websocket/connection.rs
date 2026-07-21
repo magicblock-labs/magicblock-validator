@@ -17,8 +17,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument};
 
 use super::{
-    dispatch::{WsDispatchResult, WsDispatcher},
     ConnectionState,
+    dispatch::{WsDispatchResult, WsDispatcher},
 };
 use crate::{
     error::RpcError,
@@ -66,8 +66,7 @@ impl ConnectionHandler {
         let chan = WsConnectionChannel { id, tx };
 
         // The dispatcher is tied to this specific connection via its channel.
-        let dispatcher =
-            WsDispatcher::new(state.subscriptions, state.transactions, chan);
+        let dispatcher = WsDispatcher::new(state.engine, chan);
         Self {
             dispatcher,
             cancel: state.cancel,
@@ -154,15 +153,12 @@ impl ConnectionHandler {
                     next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
                 }
 
-                // 3. Handle a new subscription notification from the server backend.
+                // 3. Handle a new subscription notification from a forwarding task.
                 Some(update) = self.updates_rx.recv() => {
                     if self.send(update.as_ref()).await.is_err() {
                         break;
                     }
                 }
-
-                // 4. Run cleanup logic for this connection (e.g., an expiring sub).
-                _ = self.dispatcher.cleanup() => {}
 
                 else => {
                     break;
