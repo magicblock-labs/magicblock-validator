@@ -36,6 +36,12 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 
+/// Threshold the mock risk server uses to decide `isRisky`. The test owner
+/// risk scores (1 and 9) sit either side of it.
+const MOCK_RISK_THRESHOLD: u64 = 5;
+
+/// Mock of the risk server the validator queries. Serves the risk server's
+/// `GET /risk?pubkey=` endpoint, computing `isRisky` from seeded scores.
 pub struct MockRangeServer {
     base_url: String,
     request_count: Arc<AtomicUsize>,
@@ -67,11 +73,11 @@ impl MockRangeServer {
                         let read = stream.read(&mut buffer).unwrap_or(0);
                         let request = String::from_utf8_lossy(&buffer[..read]);
 
-                        let body = if request.starts_with("GET /risk/address?")
-                            && request.contains("address=")
+                        let body = if request.starts_with("GET /risk?")
+                            && request.contains("pubkey=")
                         {
-                            let address = request
-                                .split("address=")
+                            let pubkey = request
+                                .split("pubkey=")
                                 .nth(1)
                                 .unwrap()
                                 .split(['&', ' '])
@@ -80,24 +86,26 @@ impl MockRangeServer {
                             worker_requested_addresses
                                 .write()
                                 .unwrap()
-                                .push(address.to_string());
+                                .push(pubkey.to_string());
                             let risk_score = worker_risks
                                 .read()
                                 .unwrap()
-                                .get(address)
+                                .get(pubkey)
                                 .copied()
                                 .unwrap_or(0);
                             worker_request_count.fetch_add(1, Ordering::SeqCst);
-                            format!(r#"{{"riskScore":{risk_score}}}"#)
+                            let is_risky = risk_score > MOCK_RISK_THRESHOLD;
+                            format!(
+                                r#"{{"pubkey":"{pubkey}","riskScore":{risk_score},"riskThreshold":{MOCK_RISK_THRESHOLD},"isRisky":{is_risky}}}"#
+                            )
                         } else {
                             r#"{"error":"not found"}"#.to_string()
                         };
-                        let status =
-                            if request.starts_with("GET /risk/address?") {
-                                "200 OK"
-                            } else {
-                                "404 Not Found"
-                            };
+                        let status = if request.starts_with("GET /risk?") {
+                            "200 OK"
+                        } else {
+                            "404 Not Found"
+                        };
                         let response = format!(
                             "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                             body.len(),
@@ -162,7 +170,7 @@ pub fn setup_validator_with_local_remote(
     reset_ledger: bool,
     skip_keypair_match_check: bool,
     loaded_accounts: &LoadedAccounts,
-    risk_base_url: String,
+    risk_server_url: String,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let accountsdb_config = AccountsDbConfig {
         reset: reset_ledger,
@@ -187,8 +195,7 @@ pub fn setup_validator_with_local_remote(
         chainlink: ChainLinkConfig {
             risk: RiskConfig {
                 enabled: true,
-                base_url: risk_base_url,
-                api_key: Some("test-api-key".to_string()),
+                risk_server_url,
                 ..Default::default()
             },
             ..Default::default()

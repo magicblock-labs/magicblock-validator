@@ -70,8 +70,8 @@ pub enum ChainlinkError {
     #[error("pending request owner failed for {0}: {1}")]
     PendingRequestOwnerFailed(Pubkey, String),
 
-    #[error("Failed to perform Range risk check: {0}")]
-    RangeRisk(#[from] RiskError),
+    #[error("Failed to perform risk check: {0}")]
+    RiskCheckFailed(#[from] RiskError),
 
     #[error("Chainlink is disabled for non-primary mode")]
     DisabledForNonPrimaryMode,
