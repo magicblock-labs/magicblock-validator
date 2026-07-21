@@ -430,8 +430,6 @@ where
                     })
             },
         );
-        me.keep_dlp_program_update_interest_primitives_reachable();
-
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
 
@@ -441,14 +439,6 @@ where
     /// Get the current fetch count
     pub fn fetch_count(&self) -> u64 {
         self.fetch_count.load(Ordering::Relaxed)
-    }
-
-    fn keep_dlp_program_update_interest_primitives_reachable(&self) {
-        let _ = DlpProgramUpdateInterest::DropIrrelevant;
-        let _ = Self::classify_dlp_program_update_interest;
-        let _ = Self::has_local_ata_projection_interest;
-        let _ = ata_projection::derive_supported_ata_pubkeys_from_raw_eata;
-        let _ = RemoteAccountProvider::<T, U>::has_subscription_reason;
     }
 
     async fn classify_dlp_program_update_interest(
@@ -1666,6 +1656,50 @@ where
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
+        let dlp_program_interest =
+            if matches!(update.source, SubscriptionSource::Program)
+                && update.account.is_owned_by_delegation_program()
+            {
+                match update.account.fresh_account() {
+                    Some(account) => Some(
+                        self.classify_dlp_program_update_interest(
+                            pubkey, &account,
+                        )
+                        .await,
+                    ),
+                    None => None,
+                }
+            } else {
+                None
+            };
+
+        match dlp_program_interest {
+            Some(DlpProgramUpdateInterest::DropIrrelevant) => {
+                if !update.account.fresh_account().is_some_and(|account| {
+                    is_internal_dlp_account_data(account.data())
+                }) {
+                    trace!(
+                        pubkey = %pubkey,
+                        "Dropping irrelevant DLP program subscription update"
+                    );
+                    return;
+                }
+            }
+            Some(DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative) => {
+                self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                    .await;
+                trace!(
+                    pubkey = %pubkey,
+                    "Dropping DLP program update for locally authoritative delegated account"
+                );
+                return;
+            }
+            Some(DlpProgramUpdateInterest::ProcessUndelegating)
+            | Some(DlpProgramUpdateInterest::ProcessAtaProjection)
+            | Some(DlpProgramUpdateInterest::ProcessDirectlyWatched)
+            | None => {}
+        }
+
         // Internal DLP payloads (records/metadata/commit state) can never be
         // greedily cloned, so drop them before discovery issues remote
         // fetches. The exception is an account whose app data collides with
@@ -1673,7 +1707,11 @@ where
         // delegation record, whose sighting routes the account update to
         // discovery — immediately when the record arrived first, or by
         // releasing the parked update once the record arrives later.
-        if matches!(update.source, SubscriptionSource::Program)
+        if !matches!(
+            dlp_program_interest,
+            Some(DlpProgramUpdateInterest::ProcessUndelegating)
+                | Some(DlpProgramUpdateInterest::ProcessAtaProjection)
+        ) && matches!(update.source, SubscriptionSource::Program)
             && update.account.is_owned_by_delegation_program()
             && update.account.fresh_account().is_some_and(|account| {
                 is_internal_dlp_account_data(account.data())
