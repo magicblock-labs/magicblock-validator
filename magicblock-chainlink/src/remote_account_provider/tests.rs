@@ -195,6 +195,34 @@ async fn wait_until(what: &str, condition: impl Fn() -> bool) {
     }
 }
 
+/// Waits for the detached evicted-cleanup task to drop the key's ownership
+/// entry.
+async fn wait_until_ownership_removed<T, U>(
+    provider: &RemoteAccountProvider<T, U>,
+    pubkey: &Pubkey,
+) where
+    T: crate::remote_account_provider::ChainRpcClient,
+    U: ChainPubsubClient,
+{
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    loop {
+        if !provider
+            .subscription_ownership
+            .lock()
+            .await
+            .contains_key(pubkey)
+        {
+            break;
+        }
+        assert!(
+            start.elapsed() < timeout,
+            "timed out waiting for ownership removal of {pubkey}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 /// Accounts that do not exist on chain stay in the secondary LRU and move to
 /// the primary LRU once they are created.
 #[tokio::test]
@@ -640,7 +668,7 @@ async fn test_secondary_capacity_preserves_protected_account() {
 }
 
 #[tokio::test]
-async fn test_secondary_eviction_failure_restores_previous_account() {
+async fn test_secondary_eviction_unsubscribe_failure_keeps_admission() {
     init_logger();
 
     let existing = random_pubkey();
@@ -665,21 +693,34 @@ async fn test_secondary_eviction_failure_restores_previous_account() {
         .is_found());
     ctx.pubsub_client.fail_next_unsubscriptions(1);
 
-    assert!(ctx
+    // The admission stands even though the evicted key's unsubscribe fails;
+    // the stray subscription is removed by the reconciler on a later pass.
+    assert!(!ctx
         .provider
         .try_get(second_missing, AccountFetchContext::rpc_get_account())
         .await
-        .is_err());
+        .unwrap()
+        .is_found());
     assert!(ctx
         .provider
         .secondary_subscriptions
-        .contains(&first_missing));
-    assert!(ctx.provider.is_watching(&first_missing));
+        .contains(&second_missing));
+    assert!(ctx.provider.is_watching(&second_missing));
+    assert!(!ctx.provider.is_watching(&first_missing));
+    wait_until_ownership_removed(&ctx.provider, &first_missing).await;
+    // The failed unsubscribe leaves a stray pubsub subscription behind for
+    // the reconciler to collect.
     assert!(ctx
         .pubsub_client
         .subscriptions_union()
         .contains(&first_missing));
-    assert!(!ctx.provider.is_watching(&second_missing));
+
+    // A reconciler pass removes the stray subscription.
+    ctx.provider.reconcile_subscriptions_once_for_test().await;
+    assert!(!ctx
+        .pubsub_client
+        .subscriptions_union()
+        .contains(&first_missing));
 }
 
 #[tokio::test]
@@ -1909,13 +1950,14 @@ async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
 
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
-    assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
     assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
+    // The evicted key's unsubscribe and ownership cleanup run in a detached
+    // task.
+    wait_until("evicted account is unsubscribed", || {
+        !pubsub_client.subscriptions_union().contains(&pubkey1)
+    })
+    .await;
+    wait_until_ownership_removed(&provider, &pubkey1).await;
     assert!(provider
         .subscription_ownership
         .lock()
@@ -1965,13 +2007,14 @@ async fn test_lru_eviction_and_reason_release_are_serialized() {
 
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
-    assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
     assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
+    // The evicted key's unsubscribe and ownership cleanup run in a detached
+    // task.
+    wait_until("evicted account is unsubscribed", || {
+        !pubsub_client.subscriptions_union().contains(&pubkey1)
+    })
+    .await;
+    wait_until_ownership_removed(&provider, &pubkey1).await;
     assert!(provider
         .subscription_ownership
         .lock()
@@ -2757,6 +2800,15 @@ fn drain_removed_account_rx(rx: &mut mpsc::Receiver<Pubkey>) -> Vec<Pubkey> {
     removed_accounts
 }
 
+/// Awaits the next removal notification. Capacity-eviction cleanup runs as a
+/// detached task, so its effects are asynchronous to the admission call.
+async fn wait_for_removed_account(rx: &mut mpsc::Receiver<Pubkey>) -> Pubkey {
+    tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("timed out waiting for removed account")
+        .expect("removed account channel closed")
+}
+
 // Subscription lifecycle metric readers. Tests read the current counter value
 // for one exact label tuple before and after an operation and compare the delta
 // so they stay robust to global Prometheus counter state shared across runs.
@@ -2859,8 +2911,7 @@ async fn test_eviction_order() {
 
     // Check channel received the evicted account
 
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey2]);
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey2);
 
     // Add pubkey5, should evict pubkey3 (now least recently used)
     provider
@@ -2869,8 +2920,7 @@ async fn test_eviction_order() {
         .unwrap();
 
     // Check channel received the second evicted account
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey3]);
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey3);
 }
 
 #[tokio::test]
@@ -2902,8 +2952,10 @@ async fn test_multiple_evictions_in_sequence() {
         let expected_evicted = pubkeys[i - 4]; // Should evict the account added 4 steps ago
 
         // Verify the evicted account was sent over the channel
-        let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-        assert_eq!(removed_accounts, vec![expected_evicted]);
+        assert_eq!(
+            wait_for_removed_account(&mut removed_rx).await,
+            expected_evicted
+        );
     }
 }
 
@@ -2950,21 +3002,24 @@ async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
     assert!(provider.is_watching(&pubkey3));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
+    // The evicted key's unsubscribe runs in a detached cleanup task.
+    wait_until("evicted account is unsubscribed", || {
+        !provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey1)
+    })
+    .await;
     assert!(provider
         .pubsub_client()
         .subscriptions_union()
         .contains(&pubkey2));
 
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey1]);
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey1);
 }
 
 #[tokio::test]
-async fn test_capacity_eviction_unsubscribe_failure_restores_previous_owner() {
+async fn test_capacity_eviction_unsubscribe_failure_keeps_admission() {
     init_logger();
     let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
@@ -2980,44 +3035,119 @@ async fn test_capacity_eviction_unsubscribe_failure_restores_previous_owner() {
         .unwrap();
     provider.pubsub_client().fail_next_unsubscriptions(1);
 
-    let registration_before = registration_metric_value(
+    let evicted_before = registration_metric_value(
         SubscriptionRegistrationOrigin::Internal,
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
+        SubscriptionRegistrationOutcome::EvictedCandidate,
     );
     let cleanup_before = cleanup_metric_value(
         SubscriptionCleanupSource::CapacityEviction,
         SubscriptionCleanupOutcome::UnsubscribeFailed,
     );
 
-    let err = provider
+    // The admission stands even though the evicted key's unsubscribe fails;
+    // the stray subscription is removed by the reconciler on a later pass.
+    provider
         .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
         .await
-        .unwrap_err();
+        .unwrap();
 
-    let registration_after = registration_metric_value(
+    let evicted_after = registration_metric_value(
         SubscriptionRegistrationOrigin::Internal,
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
+        SubscriptionRegistrationOutcome::EvictedCandidate,
     );
-    let cleanup_after = cleanup_metric_value(
-        SubscriptionCleanupSource::CapacityEviction,
-        SubscriptionCleanupOutcome::UnsubscribeFailed,
-    );
-    assert_eq!(registration_after - registration_before, 1);
-    assert_eq!(cleanup_after - cleanup_before, 1);
+    assert_eq!(evicted_after - evicted_before, 1);
 
-    assert!(matches!(
-        err,
-        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
-    ));
-    assert!(provider.is_watching(&pubkey1));
-    assert!(!provider.is_watching(&pubkey2));
-    assert!(!provider
+    assert!(!provider.is_watching(&pubkey1));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(provider
         .pubsub_client()
         .subscriptions_union()
         .contains(&pubkey2));
 
+    // Cleanup runs in a detached task: the unsubscribe failure is recorded,
+    // ownership is dropped, and the removal notification still goes out.
+    wait_until("evicted-cleanup unsubscribe failure is recorded", || {
+        cleanup_metric_value(
+            SubscriptionCleanupSource::CapacityEviction,
+            SubscriptionCleanupOutcome::UnsubscribeFailed,
+        ) - cleanup_before
+            == 1
+    })
+    .await;
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey1);
+    assert!(!provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey1));
+}
+
+/// The detached evicted-cleanup task re-checks tier membership under the
+/// evicted key's guard and must skip a key that was re-admitted while the
+/// cleanup was waiting, leaving its subscription and ownership intact.
+#[tokio::test]
+async fn test_evicted_cleanup_skips_readmitted_account() {
+    init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let pubkeys = &[pubkey1, pubkey2];
+
+    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
+
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    // Hold pubkey1's per-key guard so the detached cleanup task spawned by
+    // the eviction below blocks before its membership re-check.
+    let guard = subscription_key_owned_guard_from_map(
+        &provider.subscription_key_locks,
+        pubkey1,
+    )
+    .await;
+
+    let retained_before = cleanup_metric_value(
+        SubscriptionCleanupSource::CapacityEviction,
+        SubscriptionCleanupOutcome::RetainedIntentionally,
+    );
+
+    provider
+        .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    assert!(!provider.is_watching(&pubkey1));
+
+    // Re-admit pubkey1 (as the secondary tier would after a fetch claims it)
+    // before letting the cleanup task proceed.
+    provider.secondary_subscriptions.add(pubkey1);
+    drop(guard);
+
+    wait_until("evicted cleanup skipped the re-admitted account", || {
+        cleanup_metric_value(
+            SubscriptionCleanupSource::CapacityEviction,
+            SubscriptionCleanupOutcome::RetainedIntentionally,
+        ) - retained_before
+            == 1
+    })
+    .await;
+
+    // The re-admitted key kept its subscription and ownership; no removal
+    // notification was emitted for it.
+    assert!(provider.is_watching(&pubkey1));
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey1));
+    assert!(provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey1));
     let removed_accounts = drain_removed_account_rx(&mut removed_rx);
     assert!(removed_accounts.is_empty());
 }
@@ -3070,32 +3200,36 @@ async fn test_capacity_eviction_missing_pubsub_subscription_completes_cleanup()
         SubscriptionReasonLabel::DirectAccount,
         SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
     );
-    let cleanup_after = cleanup_metric_value(
-        SubscriptionCleanupSource::CapacityEviction,
-        SubscriptionCleanupOutcome::AlreadyAbsent,
-    );
     assert_eq!(evicted_after - evicted_before, 1);
     assert_eq!(error_after - error_before, 0);
-    assert_eq!(cleanup_after - cleanup_before, 1);
 
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
     assert!(provider
         .pubsub_client()
         .subscriptions_union()
         .contains(&pubkey2));
+
+    // The evicted key's cleanup runs in a detached task.
+    wait_until("evicted-cleanup already-absent outcome is recorded", || {
+        cleanup_metric_value(
+            SubscriptionCleanupSource::CapacityEviction,
+            SubscriptionCleanupOutcome::AlreadyAbsent,
+        ) - cleanup_before
+            == 1
+    })
+    .await;
+    assert!(!provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey1));
     assert!(!provider
         .subscription_ownership
         .lock()
         .await
         .contains_key(&pubkey1));
 
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey1]);
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey1);
 }
 
 #[tokio::test]

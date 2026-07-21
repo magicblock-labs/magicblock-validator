@@ -552,6 +552,18 @@ impl SubscriptionOwnership {
 
 /// Shared state for serialized movement between the primary and secondary
 /// subscription tiers.
+///
+/// Locking rules:
+/// - The per-key subscription guard is acquired first and may be held across
+///   pubsub network calls for that key.
+/// - `subscription_transition_lock` protects the composite in-memory tier
+///   state (both LRUs, ownership map, confirmed-missing set). It is acquired
+///   after the per-key guard, kept to short in-memory critical sections, and
+///   MUST NOT be held across any pubsub subscribe/unsubscribe await.
+/// - Cleanup of a key evicted by another key's admission runs as a detached
+///   task ([Self::spawn_evicted_cleanup]) so no task ever holds two per-key
+///   guards at once.
+#[derive(Clone)]
 struct SubscriptionTierCtx<U: ChainPubsubClient> {
     primary: Arc<AccountsLruCache>,
     secondary: Arc<AccountsLruCache>,
@@ -671,7 +683,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         }
 
         if not_found {
-            self.move_not_found_to_secondary_locked(*pubkey).await;
+            self.move_not_found_to_secondary(*pubkey).await;
             Ok(())
         } else {
             // A confirmed miss that exists after all is gRPC-only; restore
@@ -680,15 +692,18 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             let was_secondary = self.secondary.contains(pubkey);
             self.set_confirmed_missing(*pubkey, false);
             let promotion_result = self
-                .try_promote_found_to_primary_locked(
-                    *pubkey,
-                    restore_full_coverage,
-                )
+                .try_promote_found_to_primary(*pubkey, restore_full_coverage)
                 .await;
-            if was_secondary && matches!(promotion_result, Ok(false)) {
+            if was_secondary
+                && matches!(promotion_result, Ok(PromotionOutcome::NoCapacity))
+            {
                 self.cleanup_rejected_subscription(*pubkey).await?;
-                self.secondary.remove(pubkey);
-                self.subscription_ownership.lock().await.remove(pubkey);
+                {
+                    let _transition_guard =
+                        self.subscription_transition_lock.lock().await;
+                    self.secondary.remove(pubkey);
+                    self.subscription_ownership.lock().await.remove(pubkey);
+                }
                 return Err(
                     RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
                         pubkey: *pubkey,
@@ -727,6 +742,8 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                     == SubscriptionClassificationSource::Subscription)
     }
 
+    /// Adds `pubkey` to `cache` honoring eviction protection.
+    /// Precondition: the caller holds `subscription_transition_lock`.
     async fn add_with_protection(
         &self,
         cache: &AccountsLruCache,
@@ -749,6 +766,8 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         })
     }
 
+    /// Whether `pubkey` could be admitted to `cache` (advisory pre-check).
+    /// Precondition: the caller holds `subscription_transition_lock`.
     async fn has_capacity_with_protection(
         &self,
         cache: &AccountsLruCache,
@@ -771,62 +790,89 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         })
     }
 
-    fn rollback_admission(
-        cache: &AccountsLruCache,
-        admitted: &Pubkey,
-        evicted: Pubkey,
-    ) {
-        cache.remove(admitted);
-        let restored = cache.add_with_evict_filter(evicted, |_| false);
-        debug_assert!(matches!(
-            restored,
-            AddAccountOutcome::Added | AddAccountOutcome::AlreadyPresent
-        ));
-    }
+    /// Cleans up an account that was just evicted from a tier: drops its
+    /// subscription and notifies upstream so it can be removed from the bank.
+    ///
+    /// Runs as a detached task on purpose:
+    /// - the caller already holds the admitted key's per-key guard; taking
+    ///   the evicted key's guard inline could ABBA-deadlock with a concurrent
+    ///   transition admitting the evicted key,
+    /// - the unsubscribe network call must not run under the transition lock.
+    ///
+    /// The task re-checks tier membership under the evicted key's guard and
+    /// skips keys that were re-admitted (or have a pending fetch) in the
+    /// meantime. If the unsubscribe fails the tier state stands and the
+    /// reconciler removes the stray subscription on its next pass.
+    fn spawn_evicted_cleanup(&self, evicted: Pubkey) {
+        let ctx = self.clone();
+        task::spawn(async move {
+            {
+                let _evicted_guard = subscription_key_owned_guard_from_map(
+                    &ctx.subscription_key_locks,
+                    evicted,
+                )
+                .await;
 
-    async fn cleanup_evicted(
-        &self,
-        cache: &AccountsLruCache,
-        admitted: &Pubkey,
-        evicted: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
-        let _evicted_guard = subscription_key_owned_guard_from_map(
-            &self.subscription_key_locks,
-            evicted,
-        )
-        .await;
-        let cleanup_outcome =
-            match self.pubsub_client.unsubscribe(evicted).await {
-                Ok(()) => SubscriptionCleanupOutcome::Unsubscribed,
-                Err(
-                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                        _,
-                    ),
-                ) => SubscriptionCleanupOutcome::AlreadyAbsent,
-                Err(err) => {
+                let still_evicted = {
+                    let _transition_guard =
+                        ctx.subscription_transition_lock.lock().await;
+                    let fetching = ctx
+                        .fetching_accounts
+                        .lock()
+                        .expect("fetching_accounts lock poisoned");
+                    !ctx.primary.contains(&evicted)
+                        && !ctx.secondary.contains(&evicted)
+                        && !fetching.contains_key(&evicted)
+                };
+                if !still_evicted {
                     inc_chainlink_subscription_cleanup_accounts(
                         SubscriptionCleanupSource::CapacityEviction,
-                        SubscriptionCleanupOutcome::UnsubscribeFailed,
+                        SubscriptionCleanupOutcome::RetainedIntentionally,
                     );
-                    Self::rollback_admission(cache, admitted, evicted);
-                    return Err(err);
+                    return;
                 }
-            };
 
-        inc_chainlink_subscription_cleanup_accounts(
-            SubscriptionCleanupSource::CapacityEviction,
-            cleanup_outcome,
-        );
-        self.subscription_ownership.lock().await.remove(&evicted);
-        self.set_confirmed_missing(evicted, false);
-        if let Err(err) = self.removed_account_tx.send(evicted).await {
-            warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
-            inc_chainlink_subscription_cleanup_accounts(
-                SubscriptionCleanupSource::CapacityEviction,
-                SubscriptionCleanupOutcome::RemovalUpdateFailed,
-            );
-        }
-        Ok(())
+                let cleanup_outcome = match ctx
+                    .pubsub_client
+                    .unsubscribe(evicted)
+                    .await
+                {
+                    Ok(()) => SubscriptionCleanupOutcome::Unsubscribed,
+                    Err(
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                            _,
+                        ),
+                    ) => SubscriptionCleanupOutcome::AlreadyAbsent,
+                    Err(err) => {
+                        warn!(
+                            evicted = %evicted,
+                            error = ?err,
+                            "Failed to unsubscribe evicted account; reconciler will remove the stray subscription"
+                        );
+                        SubscriptionCleanupOutcome::UnsubscribeFailed
+                    }
+                };
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::CapacityEviction,
+                    cleanup_outcome,
+                );
+
+                let _transition_guard =
+                    ctx.subscription_transition_lock.lock().await;
+                ctx.subscription_ownership.lock().await.remove(&evicted);
+                ctx.set_confirmed_missing(evicted, false);
+            }
+            // Send after dropping the per-key guard: the removal consumer
+            // takes per-key guards itself, so sending into the bounded
+            // channel while holding one could stall the removal pipeline.
+            if let Err(err) = ctx.removed_account_tx.send(evicted).await {
+                warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::CapacityEviction,
+                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                );
+            }
+        });
     }
 
     async fn cleanup_rejected_subscription(
@@ -860,16 +906,22 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         }
     }
 
-    async fn register_secondary_locked(
+    /// Registers `pubkey` in the secondary tier.
+    /// Precondition: the caller holds the key's subscription guard; the
+    /// transition lock is scoped internally and never spans the subscribe.
+    async fn register_secondary(
         &self,
         pubkey: &Pubkey,
         reason: SubscriptionReason,
         origin: SubscriptionRegistrationOrigin,
     ) -> RemoteAccountProviderResult<()> {
-        if !self
-            .has_capacity_with_protection(&self.secondary, pubkey)
-            .await
-        {
+        let has_capacity = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.has_capacity_with_protection(&self.secondary, pubkey)
+                .await
+        };
+        if !has_capacity {
             inc_chainlink_subscription_registration_accounts(
                 origin,
                 reason.into(),
@@ -884,9 +936,22 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
 
         // Keep full redundancy until the RPC result confirms the account is
         // missing. The reconciler switches confirmed misses to gRPC-only.
+        // Runs outside the transition lock; the per-key guard held by the
+        // caller serializes transitions of this key.
         self.pubsub_client.subscribe(*pubkey, None).await?;
 
-        match self.add_with_protection(&self.secondary, *pubkey).await {
+        let add_outcome = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            let add_outcome =
+                self.add_with_protection(&self.secondary, *pubkey).await;
+            if !matches!(add_outcome, AddAccountOutcome::NoEvictableCandidate) {
+                self.set_confirmed_missing(*pubkey, false);
+            }
+            add_outcome
+        };
+
+        match add_outcome {
             AddAccountOutcome::AlreadyPresent => {
                 inc_chainlink_subscription_registration_accounts(
                     origin,
@@ -902,22 +967,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                 );
             }
             AddAccountOutcome::Evicted(evicted) => {
-                if let Err(err) =
-                    self.cleanup_evicted(&self.secondary, pubkey, evicted).await
-                {
-                    if let Err(cleanup_err) =
-                        self.cleanup_rejected_subscription(*pubkey).await
-                    {
-                        warn!(pubkey = %pubkey, error = ?cleanup_err, "Failed to clean up rejected secondary subscription");
-                        return Err(cleanup_err);
-                    }
-                    inc_chainlink_subscription_registration_accounts(
-                        origin,
-                        reason.into(),
-                        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-                    );
-                    return Err(err);
-                }
+                self.spawn_evicted_cleanup(evicted);
                 inc_chainlink_subscription_registration_accounts(
                     origin,
                     reason.into(),
@@ -939,11 +989,14 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             }
         }
 
-        self.set_confirmed_missing(*pubkey, false);
         Ok(())
     }
 
-    async fn move_not_found_to_secondary_locked(&self, pubkey: Pubkey) {
+    /// Moves a confirmed-missing account from the primary to the secondary
+    /// tier. In-memory only; the whole move runs under one transition-lock
+    /// scope and eviction cleanup is deferred to a detached task.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn move_not_found_to_secondary(&self, pubkey: Pubkey) {
         if self
             .capacity_eviction_protection_for(&pubkey)
             .is_protected()
@@ -964,63 +1017,103 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             return;
         }
 
-        if self.secondary.contains(&pubkey) {
-            self.set_confirmed_missing(pubkey, true);
-            return;
-        }
-        if !self.primary.contains(&pubkey) {
-            return;
-        }
+        let evicted = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
 
-        match self.add_with_protection(&self.secondary, pubkey).await {
-            AddAccountOutcome::Added | AddAccountOutcome::AlreadyPresent => {}
-            AddAccountOutcome::Evicted(evicted) => {
-                if let Err(err) = self
-                    .cleanup_evicted(&self.secondary, &pubkey, evicted)
-                    .await
-                {
-                    debug!(pubkey = %pubkey, error = ?err, "Could not move not-found account to secondary tier");
-                    return;
-                }
+            if self.secondary.contains(&pubkey) {
+                self.set_confirmed_missing(pubkey, true);
+                return;
             }
-            AddAccountOutcome::NoEvictableCandidate => return,
-        }
+            if !self.primary.contains(&pubkey) {
+                return;
+            }
 
-        self.primary.remove(&pubkey);
-        // The reconciler applies the gRPC-only transport policy off the
-        // locked path.
-        self.set_confirmed_missing(pubkey, true);
+            let evicted =
+                match self.add_with_protection(&self.secondary, pubkey).await {
+                    AddAccountOutcome::Added
+                    | AddAccountOutcome::AlreadyPresent => None,
+                    AddAccountOutcome::Evicted(evicted) => Some(evicted),
+                    AddAccountOutcome::NoEvictableCandidate => return,
+                };
+
+            self.primary.remove(&pubkey);
+            // The reconciler applies the gRPC-only transport policy off the
+            // locked path.
+            self.set_confirmed_missing(pubkey, true);
+            evicted
+        };
+
+        if let Some(evicted) = evicted {
+            self.spawn_evicted_cleanup(evicted);
+        }
     }
 
-    async fn try_promote_found_to_primary_locked(
+    /// Promotes a secondary-tier account that turned out to exist into the
+    /// primary tier. The coverage-restoring subscribe runs before the state
+    /// commit and outside the transition lock, so a subscribe failure leaves
+    /// the tier state untouched.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn try_promote_found_to_primary(
         &self,
         pubkey: Pubkey,
         restore_full_coverage: bool,
-    ) -> RemoteAccountProviderResult<bool> {
+    ) -> RemoteAccountProviderResult<PromotionOutcome> {
         if !self.secondary.contains(&pubkey) {
-            return Ok(false);
+            return Ok(PromotionOutcome::NotInSecondary);
         }
 
         if restore_full_coverage {
             self.pubsub_client.subscribe(pubkey, None).await?;
             self.set_confirmed_missing(pubkey, false);
         }
-        match self.add_with_protection(&self.primary, pubkey).await {
-            AddAccountOutcome::Added | AddAccountOutcome::AlreadyPresent => {
-                self.secondary.remove(&pubkey);
-                self.set_confirmed_missing(pubkey, false);
-                Ok(true)
+
+        let (outcome, evicted) = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+
+            // Re-check under the lock: the key may have left the secondary
+            // tier (e.g. evicted by another key's admission) while the
+            // coverage subscribe was in flight. That is not a capacity
+            // rejection; whoever removed it owns the follow-up.
+            if !self.secondary.contains(&pubkey) {
+                (PromotionOutcome::NotInSecondary, None)
+            } else {
+                match self.add_with_protection(&self.primary, pubkey).await {
+                    AddAccountOutcome::Added
+                    | AddAccountOutcome::AlreadyPresent => {
+                        self.secondary.remove(&pubkey);
+                        self.set_confirmed_missing(pubkey, false);
+                        (PromotionOutcome::Promoted, None)
+                    }
+                    AddAccountOutcome::Evicted(evicted) => {
+                        self.secondary.remove(&pubkey);
+                        self.set_confirmed_missing(pubkey, false);
+                        (PromotionOutcome::Promoted, Some(evicted))
+                    }
+                    AddAccountOutcome::NoEvictableCandidate => {
+                        (PromotionOutcome::NoCapacity, None)
+                    }
+                }
             }
-            AddAccountOutcome::Evicted(evicted) => {
-                self.cleanup_evicted(&self.primary, &pubkey, evicted)
-                    .await?;
-                self.secondary.remove(&pubkey);
-                self.set_confirmed_missing(pubkey, false);
-                Ok(true)
-            }
-            AddAccountOutcome::NoEvictableCandidate => Ok(false),
+        };
+
+        if let Some(evicted) = evicted {
+            self.spawn_evicted_cleanup(evicted);
         }
+        Ok(outcome)
     }
+}
+
+/// Result of trying to promote a secondary-tier account into the primary
+/// tier. `NotInSecondary` (the key departed the secondary tier before or
+/// during the promotion) is a benign no-op for callers, unlike `NoCapacity`
+/// which is a genuine capacity rejection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromotionOutcome {
+    Promoted,
+    NoCapacity,
+    NotInSecondary,
 }
 
 pub(crate) enum SubscriptionReleaseMode {
@@ -1696,7 +1789,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
         self.lrucache_subscribed_accounts.promote_multi(pubkeys);
-        self.secondary_subscriptions.promote_multi(pubkeys);
+        // This runs on the per-transaction ensure path; the secondary tier
+        // only holds fetch-owned/missing accounts and is empty in the common
+        // case, so skip its lock entirely then. A promote missed due to a
+        // concurrent insert is harmless (LRU ordering is a heuristic).
+        if !self.secondary_subscriptions.is_vacant() {
+            self.secondary_subscriptions.promote_multi(pubkeys);
+        }
     }
 
     pub(crate) async fn get_slot(&self) -> RemoteAccountProviderResult<u64> {
@@ -1826,8 +1925,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     // Fast path: fetch arbitration and tier movement only
                     // apply while a fetch is pending or the account sits in
                     // the secondary tier. All other updates forward without
-                    // the transition lock, which acquire/promotion hold
-                    // across network calls.
+                    // taking the per-key guard or the transition lock.
                     let needs_tier_handling =
                         subscription_tiers.secondary.contains(&update.pubkey)
                             || fetching_accounts
@@ -1861,10 +1959,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 None,
                             )
                         } else {
-                            let _transition_guard = subscription_tiers
-                                .subscription_transition_lock
-                                .lock()
-                                .await;
+                            // The per-key guard serializes this update
+                            // against fetch resolutions and other transitions
+                            // of the same key; the tier helpers scope the
+                            // transition lock to their in-memory critical
+                            // sections.
                             let _subscription_guard =
                                 subscription_key_owned_guard_from_map(
                                     &subscription_tiers.subscription_key_locks,
@@ -1968,14 +2067,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     .contains(&update.pubkey)
                             {
                                 match subscription_tiers
-                                    .try_promote_found_to_primary_locked(
+                                    .try_promote_found_to_primary(
                                         update.pubkey,
                                         true,
                                     )
                                     .await
                                 {
-                                    Ok(true) => {}
-                                    Ok(false) => {
+                                    Ok(PromotionOutcome::Promoted) => {}
+                                    // The key left the secondary tier while
+                                    // the promotion was in flight; whoever
+                                    // removed it owns the follow-up.
+                                    Ok(PromotionOutcome::NotInSecondary) => {}
+                                    Ok(PromotionOutcome::NoCapacity) => {
                                         let err = RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
                                             pubkey: update.pubkey,
                                         };
@@ -1986,6 +2089,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                             .await
                                         {
                                             Ok(()) => {
+                                                let _transition_guard =
+                                                    subscription_tiers
+                                                        .subscription_transition_lock
+                                                        .lock()
+                                                        .await;
                                                 subscription_tiers
                                                     .secondary
                                                     .remove(&update.pubkey);
@@ -2170,8 +2278,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                 }
             };
-            let _transition_guard =
-                self.subscription_transition_lock.lock().await;
             for (pubkey, remote_account) in pubkeys.iter().zip(&remote_accounts)
             {
                 let _subscription_guard =
@@ -2188,7 +2294,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     )
                     .await?;
             }
-            drop(_transition_guard);
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
                 config.min_context_slot,
@@ -2662,18 +2767,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         {
             return self
                 .subscription_tier_ctx()
-                .register_secondary_locked(pubkey, reason, origin)
+                .register_secondary(pubkey, reason, origin)
                 .await;
         }
 
         let tier_ctx = self.subscription_tier_ctx();
-        if !tier_ctx
-            .has_capacity_with_protection(
-                &self.lrucache_subscribed_accounts,
-                pubkey,
-            )
-            .await
-        {
+        let has_capacity = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            tier_ctx
+                .has_capacity_with_protection(
+                    &self.lrucache_subscribed_accounts,
+                    pubkey,
+                )
+                .await
+        };
+        if !has_capacity {
             inc_chainlink_subscription_registration_accounts(
                 origin,
                 reason.into(),
@@ -2686,7 +2795,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             );
         }
 
-        // 1. First realize subscription
+        // 1. First realize subscription. Runs outside the transition lock;
+        // the per-key guard held by the caller serializes this key.
         if let Err(err) = self.pubsub_client.subscribe(*pubkey, None).await {
             inc_chainlink_subscription_registration_accounts(
                 origin,
@@ -2699,9 +2809,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // 2. Add to LRU cache
         // If an account is evicted then we need to unsubscribe from it
         // and then inform upstream that we are no longer tracking it
-        let add_outcome = tier_ctx
-            .add_with_protection(&self.lrucache_subscribed_accounts, *pubkey)
-            .await;
+        let add_outcome = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            let add_outcome = tier_ctx
+                .add_with_protection(
+                    &self.lrucache_subscribed_accounts,
+                    *pubkey,
+                )
+                .await;
+            if !matches!(add_outcome, AddAccountOutcome::NoEvictableCandidate) {
+                self.remove_from_secondary(pubkey);
+            }
+            add_outcome
+        };
 
         match add_outcome {
             AddAccountOutcome::AlreadyPresent => {
@@ -2720,27 +2841,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             }
             AddAccountOutcome::Evicted(evicted) => {
                 trace!(evicted = %evicted, "Evicting account");
-                if let Err(err) = tier_ctx
-                    .cleanup_evicted(
-                        &self.lrucache_subscribed_accounts,
-                        pubkey,
-                        evicted,
-                    )
-                    .await
-                {
-                    if let Err(cleanup_err) =
-                        tier_ctx.cleanup_rejected_subscription(*pubkey).await
-                    {
-                        warn!(pubkey = %pubkey, error = ?cleanup_err, "Failed to clean up rejected primary subscription");
-                        return Err(cleanup_err);
-                    }
-                    inc_chainlink_subscription_registration_accounts(
-                        origin,
-                        reason.into(),
-                        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-                    );
-                    return Err(err);
-                }
+                tier_ctx.spawn_evicted_cleanup(evicted);
                 inc_chainlink_subscription_registration_accounts(
                     origin,
                     reason.into(),
@@ -2766,7 +2867,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             }
         }
 
-        self.remove_from_secondary(pubkey);
         Ok(())
     }
 
@@ -2893,7 +2993,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         skip_existing_reason: bool,
         origin: SubscriptionRegistrationOrigin,
     ) -> RemoteAccountProviderResult<()> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
+        // The per-key guard serializes every transition of this key,
+        // including the network calls made below. The transition lock is
+        // acquired only inside the tier-state helpers.
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -2922,17 +3024,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 if !keep_secondary {
                     match self
                         .subscription_tier_ctx()
-                        .try_promote_found_to_primary_locked(*pubkey, true)
+                        .try_promote_found_to_primary(*pubkey, true)
                         .await
                     {
-                        Ok(true) => Ok(()),
-                        Ok(false)
+                        Ok(PromotionOutcome::Promoted) => Ok(()),
+                        // The key left the secondary tier while the
+                        // promotion was in flight (e.g. evicted by another
+                        // key's admission); register it from scratch.
+                        Ok(PromotionOutcome::NotInSecondary) => {
+                            self.register_subscription(pubkey, reason, origin)
+                                .await
+                        }
+                        Ok(PromotionOutcome::NoCapacity)
                             if reason
                                 == SubscriptionReason::UndelegationTracking =>
                         {
                             Ok(())
                         }
-                        Ok(false) => Err(
+                        Ok(PromotionOutcome::NoCapacity) => Err(
                             RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
                                 pubkey: *pubkey,
                             },
@@ -3006,7 +3115,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         reason: SubscriptionReason,
         mode: SubscriptionReleaseMode,
     ) -> RemoteAccountProviderResult<bool> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -3064,6 +3172,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 reason.into(),
                 SubscriptionReleaseOutcome::Unsubscribed,
             );
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
             self.subscription_ownership.lock().await.remove(pubkey);
             self.lrucache_subscribed_accounts.remove(pubkey);
             self.remove_from_secondary(pubkey);
@@ -3092,7 +3202,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<bool> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -3169,9 +3278,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     SubscriptionCleanupSource::DelegatedAccountSilent,
                     SubscriptionCleanupOutcome::Unsubscribed,
                 );
-                self.subscription_ownership.lock().await.remove(pubkey);
-                self.lrucache_subscribed_accounts.remove(pubkey);
-                self.remove_from_secondary(pubkey);
+                {
+                    let _transition_guard =
+                        self.subscription_transition_lock.lock().await;
+                    self.subscription_ownership.lock().await.remove(pubkey);
+                    self.lrucache_subscribed_accounts.remove(pubkey);
+                    self.remove_from_secondary(pubkey);
+                }
                 trace!(
                     pubkey = %pubkey,
                     ?reason,
@@ -3195,9 +3308,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         SubscriptionCleanupSource::DelegatedAccountSilent,
                         SubscriptionCleanupOutcome::AlreadyAbsent,
                     );
-                    self.subscription_ownership.lock().await.remove(pubkey);
-                    self.lrucache_subscribed_accounts.remove(pubkey);
-                    self.remove_from_secondary(pubkey);
+                    {
+                        let _transition_guard =
+                            self.subscription_transition_lock.lock().await;
+                        self.subscription_ownership.lock().await.remove(pubkey);
+                        self.lrucache_subscribed_accounts.remove(pubkey);
+                        self.remove_from_secondary(pubkey);
+                    }
                     trace!(
                         pubkey = %pubkey,
                         ?reason,
@@ -3246,7 +3363,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -3279,6 +3395,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         .await;
 
         if success {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
             self.lrucache_subscribed_accounts.remove(pubkey);
             self.remove_from_secondary(pubkey);
             self.subscription_ownership.lock().await.remove(pubkey);
@@ -3590,10 +3708,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 pubkeys.iter().zip(remote_accounts.iter())
             {
                 let (waiters, classification_result) = {
-                    let _transition_guard = subscription_tiers
-                        .subscription_transition_lock
-                        .lock()
-                        .await;
+                    // The per-key guard serializes this resolution against
+                    // subscription updates and other transitions of the same
+                    // key; the tier helpers scope the transition lock to
+                    // their in-memory critical sections.
                     let _subscription_guard =
                         subscription_key_owned_guard_from_map(
                             &subscription_tiers.subscription_key_locks,

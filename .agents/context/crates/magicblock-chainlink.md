@@ -378,8 +378,16 @@ their results.
 
 Primary and secondary LRU membership is exclusive and both tiers use the same
 delegated, undelegating, in-flight-fetch, never-evict, and
-`UndelegationTracking` protections. Tier changes use the global subscription
-transition lock followed by the per-pubkey lock. Secondary capacity is bounded
+`UndelegationTracking` protections. Tier changes acquire the per-pubkey lock
+first; the global subscription transition lock is taken after it, only for
+short in-memory critical sections over the composite tier state (both LRUs,
+ownership map, confirmed-missing set), and is never held across pubsub
+subscribe/unsubscribe network calls. Per-pubkey locks may be held across
+network calls for their own key. Cleanup of a key evicted by another key's
+admission (unsubscribe plus removal notification) runs as a detached task that
+takes the evicted key's lock itself and skips keys re-admitted in the
+meantime; if its unsubscribe fails, the reconciler removes the stray
+subscription on a later pass. Secondary capacity is bounded
 independently at the configured primary LRU capacity, so the total direct-watch
 bound is twice that setting. Pending fetches briefly retain websocket coverage;
 confirmed misses do not use websocket subscriptions while gRPC is healthy.
