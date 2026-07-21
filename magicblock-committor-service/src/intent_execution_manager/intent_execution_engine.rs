@@ -308,15 +308,59 @@ where
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
         let instant = Instant::now();
-        let mut execution_permit = Some(execution_permit);
 
+        let (result, execution_permit) = Self::execute_with_retries(
+            executor_factory,
+            persister,
+            &intent,
+            limits,
+            execution_permit,
+        )
+        .await;
+
+        // Report
+        let _ = result.inner.as_ref().inspect_err(|err| {
+            error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
+        });
+        Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
+        let broadcasted_result =
+            BroadcastedIntentExecutionResult::new(intent.id, result);
+        if let Err(err) = result_sender.send(broadcasted_result) {
+            warn!(error = ?err, "No result listeners");
+        }
+
+        // Unlock: remove executed task from Scheduler to unblock other intents
+        // SAFETY: Self::execute is called ONLY after IntentScheduler
+        // successfully is able to schedule execution of some Intent
+        // that means that the same Intent is SAFE to complete
+        inner_scheduler
+            .lock()
+            .expect(POISONED_INNER_MSG)
+            .complete(&intent)
+            .expect("Valid completion of previously scheduled message");
+
+        // Free worker
+        drop(execution_permit);
+    }
+
+    /// Executes an intent, retrying plausibly-transient failures with a
+    /// fresh executor. Returns the final result together with whichever
+    /// execution permit is still held (`None` only if the executors
+    /// semaphore closed mid-retry).
+    async fn execute_with_retries(
+        executor_factory: Arc<F>,
+        persister: Option<P>,
+        intent: &ScheduledIntentBundle,
+        limits: ExecutionLimits,
+        execution_permit: OwnedSemaphorePermit,
+    ) -> (IntentExecutionResult, Option<OwnedSemaphorePermit>) {
         // Commit tasks give on-chain dedup (commit nonce) to re-executed
         // sends; action-only intents can double-execute if their transaction
         // landed unobserved, so they only retry pre-send failures
         let has_dedup_guard = !intent.get_all_committed_pubkeys().is_empty();
 
-        // Execute an Intent
         let mut attempt = 0;
+        let mut execution_permit = Some(execution_permit);
         let result = loop {
             attempt += 1;
             let mut executor = executor_factory.create_instance();
@@ -382,32 +426,8 @@ where
                 };
             drop(retry_permit);
         };
-        let _ = result.inner.as_ref().inspect_err(|err| {
-            error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
-        });
 
-        // Record metrics after execution
-        Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
-
-        // Broadcast result to subscribers
-        let broadcasted_result =
-            BroadcastedIntentExecutionResult::new(intent.id, result);
-        if let Err(err) = result_sender.send(broadcasted_result) {
-            warn!(error = ?err, "No result listeners");
-        }
-
-        // Remove executed task from Scheduler to unblock other intents
-        // SAFETY: Self::execute is called ONLY after IntentScheduler
-        // successfully is able to schedule execution of some Intent
-        // that means that the same Intent is SAFE to complete
-        inner_scheduler
-            .lock()
-            .expect(POISONED_INNER_MSG)
-            .complete(&intent)
-            .expect("Valid completion of previously scheduled message");
-
-        // Free worker
-        drop(execution_permit);
+        (result, execution_permit)
     }
 
     /// Records metrics related to intent execution
