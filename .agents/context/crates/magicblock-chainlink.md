@@ -297,7 +297,8 @@ Key behavior:
 - If a subscription update arrives while an RPC fetch is pending, it resolves the pending fetch waiters only when its slot is at least the fetch start slot and does not regress the retained per-account classification.
 - Account-subscription updates for pubkeys no longer watched are dropped and can enqueue a removal update if stale local state exists.
 - Program-subscription updates are allowed even if the pubkey is not in the direct-account LRU; delegated accounts may be tracked only by owner-program subscriptions.
-- Non-advancing updates are ignored unless they represent a same-slot delegated refresh needed for undelegate/redelegate recovery.
+- Updates whose slot is strictly below the bank's remote slot are dropped in `process_subscription_update` before the resolve path issues any remote account/delegation-record fetch; their companion-fetch side effects (opportunistic refresh from a stale update's fetch) no longer run. Newer state still arrives via its own subscription update or on-demand fetch.
+- Same-slot non-advancing updates still flow through the resolve path and are ignored afterwards unless they represent a same-slot delegated refresh needed for undelegate/redelegate recovery.
 - Delegated updates cause direct subscription cleanup; undelegation-completion updates retain/directly ensure subscriptions as appropriate and release `UndelegationTracking` ownership.
 
 ### DLP undelegation request scanning
