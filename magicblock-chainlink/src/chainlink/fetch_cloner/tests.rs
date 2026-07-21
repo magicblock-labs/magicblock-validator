@@ -4,6 +4,7 @@ use dlp_api::{
     pda::undelegation_request_pda_from_delegated_account,
     state::{DelegationRecord, UndelegationRequest},
 };
+use magicblock_core::token_programs::TOKEN_PROGRAM_ID;
 use magicblock_metrics::metrics::{
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
@@ -18,6 +19,7 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_program::{program_option::COption, program_pack::Pack};
 use solana_rent::Rent;
+use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk_ids::system_program;
 use solana_signer::Signer;
 use spl_token::state::{Account as SplAccount, AccountState};
@@ -37,8 +39,10 @@ use crate::{
     assert_subscribed_without_delegation_record,
     remote_account_provider::{
         chain_pubsub_client::mock::ChainPubsubClientMock,
-        chain_slot::ChainSlot, pubsub_common::SubscriptionSource,
-        RemoteAccountProvider, RemoteAccountUpdateSource,
+        chain_slot::ChainSlot,
+        program_account::{get_loaderv3_get_program_data_address, LOADER_V3},
+        pubsub_common::SubscriptionSource,
+        RemoteAccount, RemoteAccountProvider, RemoteAccountUpdateSource,
         SubscriptionReleaseMode,
     },
     testing::{
@@ -1932,9 +1936,6 @@ async fn test_delegated_discovered_after_direct_subscribe_releases_direct_withou
 
     // Send a newer plain update; delegated authoritative-skip path should
     // silently release direct subscription ownership.
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
     let chain_update = Account {
         lamports: 900_000,
         data: vec![9, 9, 9, 9],
@@ -2404,7 +2405,6 @@ async fn test_delegated_subscription_update_keeps_externally_acquired_undelegati
 
     // Drive a delegated update through the subscription listener so the
     // delegated direct-subscription cleanup path is exercised end-to-end.
-    use crate::remote_account_provider::RemoteAccount;
     rpc_client.set_slot(CURRENT_SLOT + 1);
     let chain_update = Account {
         lamports: 900_000,
@@ -3397,8 +3397,6 @@ async fn test_overlapping_concurrent_ensures_share_inflight_keys_at_rpc_level()
 
 #[tokio::test]
 async fn test_mock_multi_account_fetch_increments_only_multi_counter() {
-    use solana_rpc_client_api::config::RpcAccountInfoConfig;
-
     init_logger();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
@@ -3757,10 +3755,6 @@ async fn test_auto_airdrop_uses_chain_slot_when_account_not_in_bank() {
 
 #[tokio::test]
 async fn test_program_loader_resolver_error_releases_program_data_refs() {
-    use crate::remote_account_provider::program_account::{
-        get_loaderv3_get_program_data_address, LOADER_V3,
-    };
-
     init_logger();
     let validator_keypair = Keypair::new();
     let program_pubkey = random_pubkey();
@@ -4340,10 +4334,6 @@ async fn send_subscription_update_and_get_subscribed_programs(
     slot: u64,
     expected_program_id: Option<Pubkey>,
 ) -> std::collections::HashSet<Pubkey> {
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     accounts_bank.insert(account_pubkey, AccountSharedData::from(bank_account));
     acquire_direct_subscription_for_update(
         remote_account_provider,
@@ -4607,10 +4597,6 @@ async fn test_non_raw_eata_owned_account_subscription_update_stays_delegated() {
         EATA_PROGRAM_ID,
     );
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     acquire_direct_subscription_for_update(
         &remote_account_provider,
         &account_pubkey,
@@ -4679,10 +4665,6 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
         validator_keypair.insecure_clone(),
     )
     .await;
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     let mut dlp_owned_account_shared =
         AccountSharedData::from(dlp_owned_account.clone());
@@ -4773,10 +4755,6 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_droppe
     let fetches_before = rpc_client.single_account_fetches()
         + rpc_client.multi_account_fetches();
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
@@ -4853,10 +4831,6 @@ async fn test_absent_unwatched_dlp_program_update_is_dropped_without_delegation_
 
     let fetches_before = rpc_client.single_account_fetches()
         + rpc_client.multi_account_fetches();
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -4947,10 +4921,6 @@ async fn test_active_local_delegated_dlp_program_update_cleans_up_without_fetch_
     let fetches_before = rpc_client.single_account_fetches()
         + rpc_client.multi_account_fetches();
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
@@ -5039,10 +5009,6 @@ async fn test_undelegating_internal_looking_dlp_program_update_reaches_completio
         .await
         .unwrap();
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: account_pubkey,
@@ -5097,10 +5063,6 @@ async fn test_raw_eata_program_update_without_projection_interest_is_dropped_wit
 
     let fetches_before = rpc_client.single_account_fetches()
         + rpc_client.multi_account_fetches();
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -5167,10 +5129,6 @@ async fn test_raw_eata_program_update_with_projection_interest_processes_project
         validator_pubkey,
         EATA_PROGRAM_ID,
     );
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -5253,10 +5211,6 @@ async fn test_absent_unwatched_dlp_update_delegated_elsewhere_is_ignored_without
 
     let fetches_before = rpc_client.single_account_fetches()
         + rpc_client.multi_account_fetches();
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -5479,10 +5433,6 @@ async fn colliding_delegated_account_is_cloned(record_late: bool) {
         rent_epoch: 0,
     };
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     // With the record late, the account update parks awaiting its record and
     // the record update arriving later (e.g. debounced) must release it into
     // discovery.
@@ -5571,10 +5521,6 @@ async fn test_internal_dlp_pda_program_update_is_filtered_after_discovery_miss()
     )
     .await;
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
             pubkey: delegation_record_pubkey,
@@ -5648,10 +5594,6 @@ async fn test_same_slot_delegated_subscription_update_overrides_plain_bank_accou
     let mut plain_in_bank = AccountSharedData::from(plain_account);
     plain_in_bank.set_remote_slot(CURRENT_SLOT);
     accounts_bank.insert(account_pubkey, plain_in_bank);
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     acquire_direct_subscription_for_update(
         &remote_account_provider,
@@ -5738,10 +5680,6 @@ async fn test_same_slot_delegated_subscription_update_overrides_undelegating_ban
     undelegating_in_bank.set_undelegating(true);
     accounts_bank.insert(account_pubkey, undelegating_in_bank);
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     acquire_direct_subscription_for_update(
         &remote_account_provider,
         &account_pubkey,
@@ -5817,10 +5755,6 @@ async fn test_discovered_dlp_owned_account_delegated_elsewhere_is_ignored() {
         other_validator,
         account_owner,
     );
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -5900,10 +5834,6 @@ async fn test_out_of_order_delegated_eata_subscription_update_still_projects_ata
         &mint,
         CURRENT_SLOT,
     );
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     acquire_direct_subscription_for_update(
         &remote_account_provider,
@@ -6001,10 +5931,6 @@ async fn test_out_of_order_delegated_eata_update_clones_action_dependencies() {
         &mint,
         CURRENT_SLOT,
     );
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     acquire_direct_subscription_for_update(
         &remote_account_provider,
@@ -6104,10 +6030,6 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
     let mut stale_in_bank = AccountSharedData::from(delegated_account.clone());
     stale_in_bank.set_remote_slot(CURRENT_SLOT - 1);
     accounts_bank.insert(account_pubkey, stale_in_bank);
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     acquire_direct_subscription_for_update(
         &remote_account_provider,
@@ -6210,10 +6132,6 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
         &mint,
         CURRENT_SLOT,
     );
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     acquire_direct_subscription_for_update(
         &remote_account_provider,
@@ -6330,10 +6248,6 @@ async fn test_raw_eata_subscription_update_without_actions_projects_remote_ata_o
         accounts_bank.get_account(&ata_pubkey).is_none(),
         "test must start without the ATA in bank"
     );
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     acquire_direct_subscription_for_update(
         &remote_account_provider,
@@ -6477,10 +6391,6 @@ async fn test_delegated_eata_subscription_update_projects_remote_ata() {
         "test must start without the ATA in bank"
     );
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     acquire_direct_subscription_for_update(
         &remote_account_provider,
         &eata_pubkey,
@@ -6576,10 +6486,6 @@ async fn test_ata_subscription_update_projects_eata_when_chain_slot_lags() {
         tokio::time::sleep(Duration::from_millis(800)).await;
         rpc_to_advance.set_slot(ATA_SLOT);
     });
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     acquire_direct_subscription_for_update(
         &remote_account_provider,
@@ -6697,10 +6603,6 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
         &mint,
         CURRENT_SLOT,
     );
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     acquire_direct_subscription_for_update(
         &remote_account_provider,
@@ -7853,10 +7755,6 @@ async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
     local_ata_shared.set_delegated(true);
     accounts_bank.insert(ata_pubkey, local_ata_shared);
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     // A newer chain update for delegated eATA must not override delegated ATA in bank.
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -7940,10 +7838,6 @@ async fn test_delegated_eata_update_projects_existing_plain_ata_in_bank() {
     let mut plain_ata_shared = AccountSharedData::from(plain_ata);
     plain_ata_shared.set_remote_slot(PLAIN_ATA_SLOT);
     accounts_bank.insert(ata_pubkey, plain_ata_shared);
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -8050,10 +7944,6 @@ async fn test_delegated_eata_update_projects_existing_token_2022_ata_in_bank() {
     let mut legacy_ata_shared = AccountSharedData::from(legacy_ata);
     legacy_ata_shared.set_remote_slot(PLAIN_ATA_SLOT + 1);
     accounts_bank.insert(legacy_ata_pubkey, legacy_ata_shared);
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -8165,10 +8055,6 @@ async fn test_greedy_delegated_eata_update_projects_remote_token_2022_ata() {
         validator_pubkey,
         EATA_PROGRAM_ID,
     );
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -9008,10 +8894,6 @@ async fn test_undelegating_projected_ata_subscription_update_stays_locked() {
     accounts_bank.insert(ata_pubkey, local_ata_shared);
     assert_not_subscribed!(remote_account_provider, &[&eata_pubkey]);
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     acquire_direct_subscription_for_update(
         &remote_account_provider,
         &ata_pubkey,
@@ -9111,10 +8993,6 @@ async fn test_delegated_eata_update_does_not_override_undelegating_ata_in_bank()
     local_ata_shared.set_remote_slot(LOCAL_SLOT);
     local_ata_shared.set_undelegating(true);
     accounts_bank.insert(ata_pubkey, local_ata_shared);
-
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
 
     subscription_tx
         .send(ForwardedSubscriptionUpdate {
@@ -10091,10 +9969,6 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
     .await;
     let eata_pubkey = derive_eata(&wallet_owner, &mint);
 
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
     acquire_direct_subscription_for_update(
         &remote_account_provider,
         &ata_pubkey,
@@ -10169,8 +10043,6 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
 #[tokio::test]
 async fn test_delegated_account_owned_by_token_program_does_not_subscribe_program(
 ) {
-    use magicblock_core::token_programs::TOKEN_PROGRAM_ID;
-
     init_logger();
     let validator_keypair = Keypair::new();
     let validator_pubkey = validator_keypair.pubkey();
