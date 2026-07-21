@@ -17,7 +17,7 @@ use crate::remote_account_provider::{
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
     chain_rpc_client::ChainRpcClientImpl, chain_slot::ChainSlot,
     pubsub_common::SubscriptionUpdate, ChainPubsubClient,
-    ChainPubsubClientImpl, Endpoint, PubsubTransport, ReconnectableClient,
+    ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
@@ -167,14 +167,6 @@ impl ChainPubsubClient for ChainUpdatesClient {
         match self {
             WebSocket(client) => client.id(),
             Laser(client) => client.id(),
-        }
-    }
-
-    fn transport(&self) -> PubsubTransport {
-        use ChainUpdatesClient::*;
-        match self {
-            WebSocket(client) => client.transport(),
-            Laser(client) => client.transport(),
         }
     }
 }

@@ -584,11 +584,6 @@ impl MagicValidator {
                     config.chainlink.max_monitored_accounts,
                 )
             })
-            .and_then(|conf| {
-                conf.with_secondary_subscriptions_lru_capacity(
-                    config.chainlink.secondary_max_monitored_accounts,
-                )
-            })
             .map(|conf| conf.with_grpc(config.grpc.clone()))
             .map_err(|err| {
                 ApiError::from(

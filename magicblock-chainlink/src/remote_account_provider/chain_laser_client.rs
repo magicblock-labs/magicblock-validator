@@ -16,8 +16,8 @@ use crate::remote_account_provider::{
     chain_laser_actor::{ChainLaserActor, SharedSubscriptions, Slots},
     chain_rpc_client::ChainRpcClientImpl,
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
-    ChainPubsubClient, PubsubTransport, ReconnectableClient,
-    RemoteAccountProviderError, RemoteAccountProviderResult,
+    ChainPubsubClient, ReconnectableClient, RemoteAccountProviderError,
+    RemoteAccountProviderResult,
 };
 
 /// Reserved pubkey used to track implicit slot subscriptions for GRPC clients.
@@ -266,10 +266,6 @@ impl ChainPubsubClient for ChainLaserClientImpl {
 
     fn id(&self) -> &str {
         &self.client_id
-    }
-
-    fn transport(&self) -> PubsubTransport {
-        PubsubTransport::Grpc
     }
 }
 
