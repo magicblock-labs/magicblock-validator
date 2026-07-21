@@ -527,6 +527,56 @@ async fn test_failed_membership_repair_rolls_back_new_reason() {
 }
 
 #[tokio::test]
+async fn test_secondary_critical_acquire_fails_without_primary_capacity() {
+    init_logger();
+
+    let protected = random_pubkey();
+    let missing = random_pubkey();
+    let ctx =
+        setup_provider_with_lru_capacity(protected, Account::default(), 1)
+            .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+
+    let err = ctx
+        .provider
+        .acquire_subscription(&missing, SubscriptionReason::DelegationRecord)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::NoEvictableSubscriptionCapacity { pubkey }
+            if pubkey == missing
+    ));
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&protected));
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(
+        !ctx.provider
+            .has_subscription_reason(
+                &missing,
+                SubscriptionReason::DelegationRecord,
+            )
+            .await
+    );
+}
+
+#[tokio::test]
 async fn test_secondary_capacity_preserves_protected_account() {
     init_logger();
 

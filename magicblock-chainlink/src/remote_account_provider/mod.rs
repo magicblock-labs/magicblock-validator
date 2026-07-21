@@ -2920,10 +2920,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     matches!(origin, SubscriptionRegistrationOrigin::Fetch(_))
                         && reason == SubscriptionReason::DirectAccount;
                 if !keep_secondary {
-                    self.subscription_tier_ctx()
+                    match self
+                        .subscription_tier_ctx()
                         .try_promote_found_to_primary_locked(*pubkey, true)
                         .await
-                        .map(|_| ())
+                    {
+                        Ok(true) => Ok(()),
+                        Ok(false)
+                            if reason
+                                == SubscriptionReason::UndelegationTracking =>
+                        {
+                            Ok(())
+                        }
+                        Ok(false) => Err(
+                            RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                                pubkey: *pubkey,
+                            },
+                        ),
+                        Err(err) => Err(err),
+                    }
                 } else {
                     let confirmed_missing = self
                         .confirmed_missing_subscriptions
