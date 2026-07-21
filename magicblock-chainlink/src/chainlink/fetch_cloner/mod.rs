@@ -1497,13 +1497,8 @@ where
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
-        if self
-            .maybe_greedily_clone_discovered_delegated_account(pubkey, &update)
-            .await
-        {
-            return;
-        }
-
+        // Internal DLP payloads (records/metadata/commit state) can never be
+        // greedily cloned, so drop them before discovery issues remote fetches.
         if matches!(update.source, SubscriptionSource::Program)
             && update.account.is_owned_by_delegation_program()
             && update.account.fresh_account().is_some_and(|account| {
@@ -1512,8 +1507,15 @@ where
         {
             trace!(
                 pubkey = %pubkey,
-                "Dropping internal DLP program subscription update after discovery miss"
+                "Dropping internal DLP program subscription update"
             );
+            return;
+        }
+
+        if self
+            .maybe_greedily_clone_discovered_delegated_account(pubkey, &update)
+            .await
+        {
             return;
         }
 

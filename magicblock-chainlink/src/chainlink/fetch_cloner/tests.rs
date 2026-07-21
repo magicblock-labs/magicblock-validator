@@ -4536,8 +4536,11 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
     assert!(accounts_bank.get_account(&account_pubkey).is_none());
 }
 
+// Accounts whose app data collides with an internal DLP discriminator are
+// dropped before discovery (no remote fetch); they are cloned lazily on
+// first use instead of greedily from the program update.
 #[tokio::test]
-async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned(
+async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_dropped_without_fetch(
 ) {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -4566,6 +4569,8 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned
         accounts_bank,
         rpc_client,
         subscription_tx,
+        fetch_cloner,
+        cloner,
         ..
     } = setup(
         [(account_pubkey, delegated_account.clone())],
@@ -4580,6 +4585,9 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned
         validator_pubkey,
         account_owner,
     );
+
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
 
     use crate::remote_account_provider::{
         RemoteAccount, RemoteAccountUpdateSource,
@@ -4597,27 +4605,23 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned
         })
         .await
         .unwrap();
+    drop(subscription_tx);
 
-    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
-    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
-    tokio::time::timeout(TIMEOUT, async {
-        while !accounts_bank.get_account(&account_pubkey).is_some_and(
-            |account| {
-                account.delegated()
-                    && account.owner() == &account_owner
-                    && account.remote_slot() == CURRENT_SLOT
-            },
-        ) {
-            tokio::time::sleep(POLL_INTERVAL).await;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while Arc::strong_count(&fetch_cloner) > 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("timed out waiting for masquerading delegated account clone");
+    .expect("timed out waiting for internal DLP update to be dropped");
 
-    let cloned_account = accounts_bank
-        .get_account(&account_pubkey)
-        .expect("account should be greedily cloned from program update");
-    assert_eq!(cloned_account.data(), app_data.as_slice());
+    assert!(accounts_bank.get_account(&account_pubkey).is_none());
+    assert_eq!(cloner.clone_request_count(), 0);
+    assert_eq!(
+        rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches(),
+        fetches_before
+    );
 }
 
 #[tokio::test]
