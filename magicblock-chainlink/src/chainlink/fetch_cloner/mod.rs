@@ -1558,6 +1558,22 @@ where
             return;
         }
 
+        // A strictly older update can never advance the bank; drop it before
+        // the resolve path issues remote fetches. Same-slot updates fall
+        // through to the full non-advancing check, which needs resolved state.
+        if self
+            .accounts_bank
+            .get_account(&pubkey)
+            .is_some_and(|in_bank| in_bank.remote_slot() > update_slot)
+        {
+            trace!(
+                pubkey = %pubkey,
+                update_slot,
+                "Ignoring out-of-order subscription update"
+            );
+            return;
+        }
+
         let companion_fetch_log_context = CompanionFetchLogContext {
             origin: AccountFetchContext::subscription_update(
                 AccountFetchReason::SubscriptionUpdateClone,
