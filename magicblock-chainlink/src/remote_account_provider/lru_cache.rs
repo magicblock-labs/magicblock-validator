@@ -208,7 +208,9 @@ impl AccountsLruCache {
         let subs = self.subscribed_accounts.lock();
         subs.contains(pubkey)
             || subs.len() < subs.cap().get()
-            || subs.iter().any(|(candidate, _)| is_evictable(candidate))
+            // Scan LRU-first to match the eviction order used by
+            // add_with_evict_filter, so the common case stays O(1).
+            || subs.iter().rev().any(|(candidate, _)| is_evictable(candidate))
     }
 
     pub fn contains(&self, pubkey: &Pubkey) -> bool {

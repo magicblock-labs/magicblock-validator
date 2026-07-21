@@ -753,7 +753,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         let fetching = self
             .fetching_accounts
             .lock()
-            .expect("fetching_accounts lock poisoned");
+            .unwrap_or_else(|poison| poison.into_inner());
         cache.add_with_evict_filter(pubkey, |candidate| {
             cache.can_evict(candidate)
                 && !fetching.contains_key(candidate)
@@ -777,7 +777,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         let fetching = self
             .fetching_accounts
             .lock()
-            .expect("fetching_accounts lock poisoned");
+            .unwrap_or_else(|poison| poison.into_inner());
         cache.can_add_with_evict_filter(pubkey, |candidate| {
             cache.can_evict(candidate)
                 && !fetching.contains_key(candidate)
@@ -819,7 +819,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                     let fetching = ctx
                         .fetching_accounts
                         .lock()
-                        .expect("fetching_accounts lock poisoned");
+                        .unwrap_or_else(|poison| poison.into_inner());
                     !ctx.primary.contains(&evicted)
                         && !ctx.secondary.contains(&evicted)
                         && !fetching.contains_key(&evicted)
@@ -1930,7 +1930,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         subscription_tiers.secondary.contains(&update.pubkey)
                             || fetching_accounts
                                 .lock()
-                                .expect("fetching_accounts lock poisoned")
+                                .unwrap_or_else(|poison| poison.into_inner())
                                 .contains_key(&update.pubkey);
 
                     // Serialize fetch arbitration and tier movement so a late
@@ -1978,9 +1978,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 )
                                 .await;
                             let result = if classification_is_current {
-                                let mut fetching = fetching_accounts
-                                    .lock()
-                                    .expect("fetching_accounts lock poisoned");
+                                let mut fetching =
+                                    fetching_accounts.lock().unwrap_or_else(
+                                        |poison| poison.into_inner(),
+                                    );
                                 if let Some(generation) = fetching
                                     .get(&update.pubkey)
                                     .map(|state| state.generation)
@@ -2416,7 +2417,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         > = HashMap::new();
 
         {
-            let mut fetching = self.fetching_accounts.lock().unwrap();
+            let mut fetching = self
+                .fetching_accounts
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
             for &pubkey in pubkeys {
                 let (sender, receiver) = oneshot::channel();
                 let mut claimed = false;
@@ -3432,7 +3436,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let fetch_started_at = std::time::Instant::now();
             // Helper to notify all pending requests of fetch failure
             let notify_error = |error_msg: &str| {
-                let mut fetching = fetching_accounts.lock().unwrap();
+                let mut fetching = fetching_accounts
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
                 warn!(
                     pubkey_count = pubkeys.len(),
                     pubkeys = %pubkeys_str(&pubkeys),
@@ -3726,7 +3732,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         continue;
                     };
                     let state = {
-                        let mut fetching = fetching_accounts.lock().unwrap();
+                        let mut fetching = fetching_accounts
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner());
                         remove_fetching_account_if_generation_matches(
                             &mut fetching,
                             pubkey,
@@ -3865,7 +3873,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Check if an account is currently pending (being fetched).
     pub(crate) fn is_pending(&self, pubkey: &Pubkey) -> bool {
-        let fetching = self.fetching_accounts.lock().unwrap();
+        let fetching = self
+            .fetching_accounts
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         fetching.contains_key(pubkey)
     }
 
