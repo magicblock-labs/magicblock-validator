@@ -371,18 +371,10 @@ where
                 }
             });
 
-            // Retry only plausibly transient failures, and never once action
-            // callbacks fired: a retry would double-report the intent outcome
-            let send_stage_failure = matches!(
-                &result.inner,
-                Err(IntentExecutorError::FailedToCommitError { .. })
-                    | Err(IntentExecutorError::FailedToFinalizeError { .. })
-            );
-            let retriable = attempt < MAX_INTENT_ATTEMPTS
-                && result.callbacks_report.is_empty()
-                && matches!(&result.inner, Err(err) if err.is_transient())
-                && (has_dedup_guard || !send_stage_failure);
-            if !retriable {
+            // break early if we can't retry anymore
+            if attempt >= MAX_INTENT_ATTEMPTS
+                || !result.is_retriable(has_dedup_guard)
+            {
                 break result;
             }
 
