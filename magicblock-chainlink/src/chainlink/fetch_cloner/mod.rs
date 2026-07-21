@@ -96,7 +96,10 @@ use crate::{
         program_account::{
             get_loaderv3_get_program_data_address, LoadedProgram,
         },
-        pubsub_common::{is_internal_dlp_account_data, SubscriptionSource},
+        pubsub_common::{
+            is_delegation_record_data, is_internal_dlp_account_data,
+            SubscriptionSource,
+        },
         CapacityEvictionProtection, ChainPubsubClient, ChainRpcClient,
         ForwardedSubscriptionUpdate, MatchSlotsConfig, RemoteAccount,
         RemoteAccountProvider, ResolvedAccountSharedData, SubscriptionReason,
@@ -141,6 +144,11 @@ where
     /// Negative cache for derived eATAs confirmed missing on chain.
     known_empty_eatas: Arc<PlMutex<LruCache<Pubkey, ()>>>,
 
+    /// Slots at which delegation-record-shaped program updates were last
+    /// seen, used to recognize freshly delegated accounts whose app data
+    /// collides with an internal DLP discriminator.
+    seen_delegation_record_slots: Arc<PlMutex<LruCache<Pubkey, u64>>>,
+
     /// Tracks in-flight clone operations.
     /// The first caller to claim a key becomes the owner and performs
     /// the actual clone. Subsequent callers become waiters and receive
@@ -181,6 +189,19 @@ const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
         None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
     };
 
+/// Capacity for recently sighted delegation-record update slots.
+const SEEN_DELEGATION_RECORD_SLOTS_CAPACITY: NonZeroUsize =
+    match NonZeroUsize::new(16_384) {
+        Some(n) => n,
+        None => {
+            panic!("SEEN_DELEGATION_RECORD_SLOTS_CAPACITY must be non-zero")
+        }
+    };
+
+/// Grace period for an account update to be matched with its same-slot
+/// delegation-record update when the record is delivered slightly later.
+const DELEGATION_RECORD_SIGHTING_GRACE: Duration = Duration::from_millis(250);
+
 /// A pending fetch+clone operation claimed by one dedup call, resolved by
 /// the batch worker spawned for that call.
 struct ClaimedOperation {
@@ -216,6 +237,9 @@ where
             allowed_programs: self.allowed_programs.clone(),
             programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
+            seen_delegation_record_slots: self
+                .seen_delegation_record_slots
+                .clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
             pending_operation_timeout_ms: self
@@ -320,6 +344,9 @@ where
             known_empty_eatas: Arc::new(PlMutex::new(LruCache::new(
                 KNOWN_EMPTY_EATAS_CAPACITY,
             ))),
+            seen_delegation_record_slots: Arc::new(PlMutex::new(
+                LruCache::new(SEEN_DELEGATION_RECORD_SLOTS_CAPACITY),
+            )),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
             pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
@@ -1492,18 +1519,58 @@ where
         });
     }
 
+    /// Records sightings of delegation-record-shaped program updates, then
+    /// reports whether this pubkey's own delegation record was sighted at or
+    /// after the update slot: a fresh delegation writes the account and its
+    /// record in one slot, so a sighting marks a delegated account whose app
+    /// data collides with an internal DLP discriminator. A short grace period
+    /// covers the record being delivered after the account update.
+    async fn is_freshly_delegated_collision(
+        &self,
+        update: &ForwardedSubscriptionUpdate,
+    ) -> bool {
+        let slot = update.account.slot();
+        if update
+            .account
+            .fresh_account()
+            .is_some_and(|account| is_delegation_record_data(account.data()))
+        {
+            self.seen_delegation_record_slots
+                .lock()
+                .put(update.pubkey, slot);
+        }
+
+        let record_pubkey =
+            delegation_record_pda_from_delegated_account(&update.pubkey);
+        let record_sighted = || {
+            self.seen_delegation_record_slots
+                .lock()
+                .get(&record_pubkey)
+                .is_some_and(|&record_slot| record_slot >= slot)
+        };
+        if record_sighted() {
+            return true;
+        }
+        tokio::time::sleep(DELEGATION_RECORD_SIGHTING_GRACE).await;
+        record_sighted()
+    }
+
     async fn process_subscription_update(
         &self,
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
         // Internal DLP payloads (records/metadata/commit state) can never be
-        // greedily cloned, so drop them before discovery issues remote fetches.
+        // greedily cloned, so drop them before discovery issues remote
+        // fetches. The exception is an account whose app data collides with
+        // an internal discriminator: its delegation also emits the
+        // delegation-record update, whose sighting routes it to discovery.
         if matches!(update.source, SubscriptionSource::Program)
             && update.account.is_owned_by_delegation_program()
             && update.account.fresh_account().is_some_and(|account| {
                 is_internal_dlp_account_data(account.data())
             })
+            && !self.is_freshly_delegated_collision(&update).await
         {
             trace!(
                 pubkey = %pubkey,

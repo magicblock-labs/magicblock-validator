@@ -4624,6 +4624,110 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_droppe
     );
 }
 
+// A freshly delegated account whose app data collides with an internal DLP
+// discriminator is still greedily cloned: the delegation-record update from
+// the same delegation routes it to discovery.
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_with_record_sighting_is_cloned(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let mut app_data = vec![0; DelegationRecord::size_with_discriminator()];
+    app_data[..8].copy_from_slice(&100u64.to_le_bytes());
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: app_data.clone(),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    let delegation_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    let delegation_record = DelegationRecord {
+        authority: validator_pubkey,
+        owner: account_owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    let delegation_record_account = Account {
+        lamports: 1_000_000,
+        data: delegation_record_to_vec(&delegation_record),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    for (pubkey, account) in [
+        (delegation_record_pubkey, delegation_record_account),
+        (account_pubkey, delegated_account),
+    ] {
+        subscription_tx
+            .send(ForwardedSubscriptionUpdate {
+                pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    account,
+                    CURRENT_SLOT,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+                source: SubscriptionSource::Program,
+            })
+            .await
+            .unwrap();
+    }
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !accounts_bank.get_account(&account_pubkey).is_some_and(
+            |account| {
+                account.delegated()
+                    && account.owner() == &account_owner
+                    && account.remote_slot() == CURRENT_SLOT
+            },
+        ) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for colliding delegated account clone");
+
+    let cloned_account = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be greedily cloned from program update");
+    assert_eq!(cloned_account.data(), app_data.as_slice());
+}
+
 #[tokio::test]
 async fn test_internal_dlp_pda_program_update_is_filtered_after_discovery_miss()
 {
