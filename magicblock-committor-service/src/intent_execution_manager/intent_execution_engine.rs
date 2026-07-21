@@ -40,14 +40,14 @@ use crate::{
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 /// Max number of executors that can send messages in parallel to Base layer
 const MAX_EXECUTORS: u8 = 50;
+/// Max intents concurrently sleeping in retry backoff. Retries release their
+/// executor slot while sleeping; this cap keeps the total task population
+/// bounded when many intents fail together
+const MAX_SLEEPING_RETRIERS: usize = 5_000;
 /// Max executions of an intent whose failures were transient
 const MAX_INTENT_ATTEMPTS: u32 = 3;
 /// Backoff between intent attempts, scaled linearly by attempt number
 const INTENT_RETRY_BACKOFF: Duration = Duration::from_secs(1);
-/// Max intents concurrently sleeping in retry backoff. Retries release their
-/// executor slot while sleeping; this cap keeps the total task population
-/// bounded when many intents fail together
-const MAX_SLEEPING_RETRIES: u8 = 50;
 
 /// Concurrency limits shared between the engine and its executor tasks
 struct ExecutionLimits {
@@ -138,9 +138,7 @@ where
             executors_semaphore: Arc::new(Semaphore::new(
                 MAX_EXECUTORS as usize,
             )),
-            retries_semaphore: Arc::new(Semaphore::new(
-                MAX_SLEEPING_RETRIES as usize,
-            )),
+            retries_semaphore: Arc::new(Semaphore::new(MAX_SLEEPING_RETRIERS)),
             inner: Arc::new(Mutex::new(IntentScheduler::new())),
         }
     }
