@@ -338,6 +338,8 @@ struct ClaimedSubscriptionSetupGuard {
     fetching_accounts: Arc<FetchingAccounts>,
     subscription_ownership: SubscriptionOwnershipMap,
     subscription_transition_lock: Arc<AsyncMutex<()>>,
+    primary: Arc<AccountsLruCache>,
+    secondary: Arc<AccountsLruCache>,
     claimed_pubkeys: Vec<Pubkey>,
     claimed_generations: HashMap<Pubkey, FetchingAccountGeneration>,
     cancellation_error_text: Option<String>,
@@ -348,6 +350,8 @@ impl ClaimedSubscriptionSetupGuard {
         fetching_accounts: Arc<FetchingAccounts>,
         subscription_ownership: SubscriptionOwnershipMap,
         subscription_transition_lock: Arc<AsyncMutex<()>>,
+        primary: Arc<AccountsLruCache>,
+        secondary: Arc<AccountsLruCache>,
         claimed_pubkeys: Vec<Pubkey>,
         claimed_generations: HashMap<Pubkey, FetchingAccountGeneration>,
     ) -> Self {
@@ -355,6 +359,8 @@ impl ClaimedSubscriptionSetupGuard {
             fetching_accounts,
             subscription_ownership,
             subscription_transition_lock,
+            primary,
+            secondary,
             claimed_pubkeys,
             claimed_generations,
             cancellation_error_text: Some(
@@ -405,6 +411,8 @@ impl ClaimedSubscriptionSetupGuard {
         cleanup_classification_placeholders(
             &self.subscription_ownership,
             &self.subscription_transition_lock,
+            &self.primary,
+            &self.secondary,
             &self.claimed_generations,
         )
         .await;
@@ -429,11 +437,15 @@ impl Drop for ClaimedSubscriptionSetupGuard {
         let subscription_ownership = self.subscription_ownership.clone();
         let subscription_transition_lock =
             self.subscription_transition_lock.clone();
+        let primary = self.primary.clone();
+        let secondary = self.secondary.clone();
         let claimed_generations = std::mem::take(&mut self.claimed_generations);
         task::spawn(async move {
             cleanup_classification_placeholders(
                 &subscription_ownership,
                 &subscription_transition_lock,
+                &primary,
+                &secondary,
                 &claimed_generations,
             )
             .await;
@@ -444,11 +456,20 @@ impl Drop for ClaimedSubscriptionSetupGuard {
 async fn cleanup_classification_placeholders(
     subscription_ownership: &SubscriptionOwnershipMap,
     subscription_transition_lock: &Arc<AsyncMutex<()>>,
+    primary: &AccountsLruCache,
+    secondary: &AccountsLruCache,
     claimed_generations: &HashMap<Pubkey, FetchingAccountGeneration>,
 ) {
     let _transition_guard = subscription_transition_lock.lock().await;
     let mut ownership = subscription_ownership.lock().await;
     for (pubkey, generation) in claimed_generations {
+        // Keep the placeholder when the key already holds tier state: the
+        // update pump admitted it into the primary tier after winning fetch
+        // arbitration, and dropping the ownership here would orphan that
+        // membership. A later acquire (or capacity eviction) adopts it.
+        if primary.contains(pubkey) || secondary.contains(pubkey) {
+            continue;
+        }
         if ownership.get(pubkey).is_some_and(|entry| {
             entry.is_empty()
                 && entry.classification_placeholder_generation
@@ -2615,6 +2636,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     self.fetching_accounts.clone(),
                     self.subscription_ownership.clone(),
                     self.subscription_transition_lock.clone(),
+                    self.lrucache_subscribed_accounts.clone(),
+                    self.secondary_subscriptions.clone(),
                     claimed_pubkeys.clone(),
                     claimed_generations.clone(),
                 );

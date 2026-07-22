@@ -538,6 +538,82 @@ async fn test_subscription_resolving_pending_fetch_without_tier_state_rejects_wi
 }
 
 #[tokio::test]
+async fn test_setup_cancellation_preserves_pump_admitted_primary_membership() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let pending = random_pubkey();
+    let ctx = setup_provider(existing, Account::default()).await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    let waiter_rx = insert_pending_fetch(&ctx.provider, pending, 100);
+    let generation = {
+        let fetching = ctx.provider.fetching_accounts.lock().unwrap();
+        fetching.get(&pending).unwrap().generation
+    };
+    ctx.pubsub_client.insert_subscription(pending);
+    ctx.pubsub_client
+        .send_account_update(
+            pending,
+            101,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+    tokio::time::timeout(Duration::from_secs(2), waiter_rx)
+        .await
+        .expect("timed out waiting for fetch resolution")
+        .expect("waiter channel closed")
+        .expect("subscription-resolved fetch should succeed");
+    assert!(ctx.provider.lrucache_subscribed_accounts.contains(&pending));
+
+    // The claiming try_get_multi future is cancelled before setup adopted
+    // the placeholder; the cleanup must keep the ownership entry because
+    // the update pump already admitted the key into the primary tier.
+    cleanup_classification_placeholders(
+        &ctx.provider.subscription_ownership,
+        &ctx.provider.subscription_transition_lock,
+        &ctx.provider.lrucache_subscribed_accounts,
+        &ctx.provider.secondary_subscriptions,
+        &[(pending, generation)].into_iter().collect(),
+    )
+    .await;
+    assert!(ctx
+        .provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pending));
+    assert!(ctx.provider.lrucache_subscribed_accounts.contains(&pending));
+
+    // A later fetch adopts the membership instead of registering the key
+    // as fetch-owned secondary alongside its primary entry.
+    ctx.rpc_client.add_account(
+        pending,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    );
+    ctx.provider
+        .try_get(pending, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap();
+    assert!(ctx.provider.lrucache_subscribed_accounts.contains(&pending));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&pending));
+    assert!(
+        ctx.provider
+            .has_subscription_reason(
+                &pending,
+                SubscriptionReason::DirectAccount
+            )
+            .await
+    );
+}
+
+#[tokio::test]
 async fn test_repeated_not_found_fetch_preserves_primary_working_set() {
     init_logger();
 
@@ -1075,9 +1151,13 @@ async fn test_classification_placeholder_cleanup_is_generation_scoped() {
         .await
         .insert(pubkey, placeholder);
 
+    let (primary, _) = create_test_lru_cache(10);
+    let (secondary, _) = create_test_lru_cache(10);
     cleanup_classification_placeholders(
         &subscription_ownership,
         &subscription_transition_lock,
+        &primary,
+        &secondary,
         &HashMap::from([(pubkey, 1)]),
     )
     .await;
@@ -1086,6 +1166,8 @@ async fn test_classification_placeholder_cleanup_is_generation_scoped() {
     cleanup_classification_placeholders(
         &subscription_ownership,
         &subscription_transition_lock,
+        &primary,
+        &secondary,
         &HashMap::from([(pubkey, 2)]),
     )
     .await;
@@ -1123,6 +1205,8 @@ async fn test_cancelled_subscription_setup_cleans_classification_placeholder() {
         fetching_accounts.clone(),
         subscription_ownership.clone(),
         subscription_transition_lock.clone(),
+        create_test_lru_cache(10).0,
+        create_test_lru_cache(10).0,
         vec![pubkey],
         HashMap::from([(pubkey, generation)]),
     );
@@ -1195,6 +1279,8 @@ async fn test_failed_placeholder_adoption_preserves_generation_for_cleanup() {
     cleanup_classification_placeholders(
         &provider.subscription_ownership,
         &provider.subscription_transition_lock,
+        &provider.lrucache_subscribed_accounts,
+        &provider.secondary_subscriptions,
         &HashMap::from([(pubkey, generation)]),
     )
     .await;

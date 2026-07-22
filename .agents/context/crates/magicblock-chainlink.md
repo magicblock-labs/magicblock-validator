@@ -382,7 +382,10 @@ resolving the waiters; without capacity the waiters fail with the same
 rejection, the classification recorded for the winning update is dropped (so
 a later fetch re-runs the full tier classification instead of losing
 arbitration to it), and the pending setup registers the key as a fresh
-fetch-owned secondary entry.
+fetch-owned secondary entry. If the claiming fetch is cancelled before setup
+adopts the placeholder, the placeholder cleanup keeps the ownership entry for
+keys that already hold tier state, so the pump-admitted primary membership is
+adopted by a later acquire instead of being orphaned.
 RPC-only slot-match retries apply the same tier classification before returning
 their results.
 
