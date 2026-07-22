@@ -471,6 +471,14 @@ impl TaskBuilderError {
             Self::MissingDelegationMetadata(_) => None,
         }
     }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::CommitTasksBuildError(err)
+            | Self::FinalizedTasksBuildError(err) => err.is_transient(),
+            Self::MissingDelegationMetadata(_) => false,
+        }
+    }
 }
 
 pub type TaskBuilderResult<T, E = TaskBuilderError> = Result<T, E>;
