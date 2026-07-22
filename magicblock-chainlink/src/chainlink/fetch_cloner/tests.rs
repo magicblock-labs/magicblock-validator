@@ -4991,10 +4991,11 @@ async fn colliding_delegated_account_is_cloned(
     assert_eq!(cloned_account.data(), app_data.as_slice());
 }
 
-// Unrelated internal updates parking after a candidate must not evict it
-// before its record sighting releases it.
+// Unrelated record-shaped internal updates parking after a candidate must not
+// evict it before its record sighting releases it.
 #[test]
-fn test_dlp_collision_tracker_parked_candidate_survives_firehose_churn() {
+fn test_dlp_collision_tracker_parked_candidate_survives_record_shaped_firehose_churn(
+) {
     use crate::remote_account_provider::{
         RemoteAccount, RemoteAccountUpdateSource,
     };
@@ -5007,13 +5008,20 @@ fn test_dlp_collision_tracker_parked_candidate_survives_firehose_churn() {
             &candidate_pubkey,
         );
 
-    let park = |tracker: &mut DlpCollisionTracker, pubkey: Pubkey| {
-        let update = ForwardedSubscriptionUpdate {
+    let record_shaped_update = |pubkey: Pubkey| {
+        let delegation_record = DelegationRecord {
+            authority: random_pubkey(),
+            owner: random_pubkey(),
+            delegation_slot: 1,
+            lamports: 1_000,
+            commit_frequency_ms: 2_000,
+        };
+        ForwardedSubscriptionUpdate {
             pubkey,
             account: RemoteAccount::from_fresh_account(
                 Account {
                     lamports: 1_000,
-                    data: vec![],
+                    data: delegation_record_to_vec(&delegation_record),
                     owner: dlp_api::id(),
                     executable: false,
                     rent_epoch: 0,
@@ -5022,18 +5030,22 @@ fn test_dlp_collision_tracker_parked_candidate_survives_firehose_churn() {
                 RemoteAccountUpdateSource::Subscription,
             ),
             source: SubscriptionSource::Program,
-        };
-        assert!(!tracker.check_or_park(&update));
+        }
     };
 
-    park(&mut tracker, candidate_pubkey);
-    for _ in 0..8_192 {
-        park(&mut tracker, random_pubkey());
+    assert!(!tracker.check_or_park(&record_shaped_update(candidate_pubkey,)));
+    for _ in 0..PARKED_COLLISION_UPDATES_CAPACITY.get() {
+        let unrelated_record_account = random_pubkey();
+        assert!(tracker
+            .sight_record(unrelated_record_account, SLOT)
+            .is_none());
+        assert!(!tracker
+            .check_or_park(&record_shaped_update(unrelated_record_account,)));
     }
 
-    let released = tracker
-        .sight_record(record_pubkey, SLOT)
-        .expect("candidate must survive firehose churn until sighting");
+    let released = tracker.sight_record(record_pubkey, SLOT).expect(
+        "candidate must survive record-shaped firehose churn until sighting",
+    );
     assert_eq!(released.pubkey, candidate_pubkey);
     assert_eq!(released.slot, SLOT);
 }
