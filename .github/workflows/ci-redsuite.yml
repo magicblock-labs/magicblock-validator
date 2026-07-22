@@ -35,7 +35,7 @@ permissions:
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: 14654d6966703fbba7f9c5dde75e156189f0e00a
+  REDSUITE_REV: c78c56c1f5b339409ace9e9007a9dd9a3253f04e
   SOLANA_VERSION: v4.0.3
   RUST_TOOLCHAIN: "1.94.1"
   BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
@@ -231,6 +231,28 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
         shell: bash
         env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+
+      - name: Comment PR with brief compare
+        if: github.event_name != 'push' && steps.baseline.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          marker='<!-- redsuite-compare -->'
+          compare_output="$(./redsuite-dist/redsuite report compare --brief)"
+          body="$(printf '%s\n## redsuite: PR vs %s\n```\n%s\n```\n' "$marker" "$BASE_REF" "$compare_output")"
+          comment_id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- redsuite-compare -->")) | .id' | head -n1)
+          if [ -n "$comment_id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$comment_id" -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
+          fi
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
 
       - name: Export Bencher Metric Format
