@@ -607,6 +607,153 @@ async fn test_subscription_creation_rejection_survives_unsubscribe_failure() {
     assert!(!ctx.pubsub_client.subscriptions_union().contains(&missing));
 }
 
+async fn direct_account_refcount(
+    provider: &RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    pubkey: &Pubkey,
+) -> usize {
+    provider
+        .subscription_ownership
+        .lock()
+        .await
+        .get(pubkey)
+        .and_then(|ownership| {
+            ownership
+                .reasons
+                .get(&SubscriptionReason::DirectAccount)
+                .copied()
+        })
+        .unwrap_or(0)
+}
+
+#[tokio::test]
+async fn test_promotion_evicted_mid_flight_is_not_treated_as_admitted() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(
+        existing,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    // A key promoted by another transition holds primary membership and
+    // reports the benign departure outcome.
+    assert!(ctx
+        .provider
+        .try_get(existing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&existing));
+    assert_eq!(
+        ctx.provider
+            .subscription_tier_ctx()
+            .try_promote_found_to_primary(existing, false)
+            .await
+            .unwrap(),
+        PromotionOutcome::NotInSecondary
+    );
+
+    // Establish a confirmed-missing secondary entry.
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+
+    // Evict the key from the secondary tier while the promotion awaits the
+    // coverage-restoring subscribe; the promotion must not count the found
+    // result as admitted.
+    ctx.pubsub_client.pause_after_subscribe_insert();
+    let insertions_before = ctx.pubsub_client.subscribe_insertions();
+    let tier_ctx = ctx.provider.subscription_tier_ctx();
+    let promotion = tokio::spawn(async move {
+        tier_ctx.try_promote_found_to_primary(missing, true).await
+    });
+    ctx.pubsub_client
+        .wait_for_subscribe_insertions(insertions_before + 1)
+        .await;
+    ctx.provider.secondary_subscriptions.remove(&missing);
+    ctx.pubsub_client.resume_after_subscribe_insert();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(2), promotion)
+        .await
+        .expect("timed out waiting for promotion")
+        .expect("promotion task should not panic")
+        .expect("promotion should not error");
+    assert_eq!(outcome, PromotionOutcome::Evicted);
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+}
+
+#[tokio::test]
+async fn test_failed_coverage_restore_rolls_back_acquired_reason() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(
+        existing,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+    let refcount_before =
+        direct_account_refcount(&ctx.provider, &missing).await;
+
+    // The coverage-restoring subscribe of a confirmed-missing refetch fails
+    // transiently; the just-acquired reason must be rolled back.
+    ctx.pubsub_client.simulate_disconnect();
+    assert!(ctx
+        .provider
+        .acquire_subscription_with_origin(
+            &missing,
+            SubscriptionReason::DirectAccount,
+            SubscriptionRegistrationOrigin::Fetch(
+                AccountFetchContext::rpc_get_account(),
+            ),
+        )
+        .await
+        .is_err());
+
+    assert_eq!(
+        direct_account_refcount(&ctx.provider, &missing).await,
+        refcount_before
+    );
+    // The key stays confirmed missing until coverage is actually restored.
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+}
+
 #[tokio::test]
 async fn test_confirmed_miss_switches_to_grpc_only_promptly() {
     init_logger();

@@ -710,22 +710,30 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             // A confirmed miss that exists after all is gRPC-only; restore
             // full coverage on promotion.
             let restore_full_coverage = self.is_confirmed_missing(pubkey);
-            let was_secondary = self.secondary.contains(pubkey);
             self.set_confirmed_missing(*pubkey, false);
-            let promotion_result = self
+            match self
                 .try_promote_found_to_primary(*pubkey, restore_full_coverage)
-                .await;
-            if was_secondary
-                && matches!(promotion_result, Ok(PromotionOutcome::NoCapacity))
+                .await
             {
-                self.finalize_rejected_promotion(pubkey).await;
-                return Err(
+                Ok(PromotionOutcome::NoCapacity) => {
+                    self.finalize_rejected_promotion(pubkey).await;
+                    Err(
+                        RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                            pubkey: *pubkey,
+                        },
+                    )
+                }
+                // Evicted mid-promotion by another key's admission: the
+                // detached eviction cleanup owns the state removal and bank
+                // eviction; the found result must not be returned without
+                // primary membership.
+                Ok(PromotionOutcome::Evicted) => Err(
                     RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
                         pubkey: *pubkey,
                     },
-                );
+                ),
+                other => other.map(|_| ()),
             }
-            promotion_result.map(|_| ())
         }
     }
 
@@ -1139,6 +1147,10 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         pubkey: Pubkey,
         restore_full_coverage: bool,
     ) -> RemoteAccountProviderResult<PromotionOutcome> {
+        // Not-in-secondary at entry is benign: the caller's key may hold
+        // primary membership or never have been tiered (e.g. never-evict
+        // keys). Only a mid-flight departure (re-check below) distinguishes
+        // eviction.
         if !self.secondary.contains(&pubkey) {
             return Ok(PromotionOutcome::NotInSecondary);
         }
@@ -1153,11 +1165,11 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                 self.subscription_transition_lock.lock().await;
 
             // Re-check under the lock: the key may have left the secondary
-            // tier (e.g. evicted by another key's admission) while the
-            // coverage subscribe was in flight. That is not a capacity
-            // rejection; whoever removed it owns the follow-up.
+            // tier while the coverage subscribe was in flight — promoted by
+            // another transition (benign) or evicted by another key's
+            // admission (the found result must not count as admitted).
             if !self.secondary.contains(&pubkey) {
-                (PromotionOutcome::NotInSecondary, None)
+                (self.departed_promotion_outcome(&pubkey), None)
             } else {
                 match self.add_with_protection(&self.primary, pubkey).await {
                     AddAccountOutcome::Added
@@ -1182,6 +1194,17 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             self.spawn_evicted_cleanup(evicted);
         }
         Ok(outcome)
+    }
+
+    /// Outcome for a key that departed the secondary tier mid-promotion:
+    /// primary membership means another transition promoted it; no
+    /// membership means another key's admission evicted it.
+    fn departed_promotion_outcome(&self, pubkey: &Pubkey) -> PromotionOutcome {
+        if self.primary.contains(pubkey) {
+            PromotionOutcome::NotInSecondary
+        } else {
+            PromotionOutcome::Evicted
+        }
     }
 
     /// Admits a key whose pending fetch was just resolved as found by a
@@ -1257,14 +1280,18 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
 }
 
 /// Result of trying to promote a secondary-tier account into the primary
-/// tier. `NotInSecondary` (the key departed the secondary tier before or
-/// during the promotion) is a benign no-op for callers, unlike `NoCapacity`
-/// which is a genuine capacity rejection.
+/// tier. `NotInSecondary` (the key departed the secondary tier but holds
+/// primary membership — another transition promoted it) is a benign no-op.
+/// `Evicted` (the key departed with no membership — another key's admission
+/// evicted it) means the found result must not count as admitted; the
+/// detached eviction cleanup owns the state removal and bank eviction.
+/// `NoCapacity` is a genuine capacity rejection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromotionOutcome {
     Promoted,
     NoCapacity,
     NotInSecondary,
+    Evicted,
 }
 
 pub(crate) enum SubscriptionReleaseMode {
@@ -2255,10 +2282,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     .await
                                 {
                                     Ok(PromotionOutcome::Promoted) => {}
-                                    // The key left the secondary tier while
-                                    // the promotion was in flight; whoever
-                                    // removed it owns the follow-up.
+                                    // The key was promoted by another
+                                    // transition while this one was in
+                                    // flight; it holds primary membership.
                                     Ok(PromotionOutcome::NotInSecondary) => {}
+                                    // Evicted mid-promotion: the detached
+                                    // eviction cleanup owns the follow-up;
+                                    // the found update must not be forwarded
+                                    // without primary membership.
+                                    Ok(PromotionOutcome::Evicted) => {
+                                        classification_error = Some(
+                                            RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                                                pubkey: update.pubkey,
+                                            }
+                                            .to_string(),
+                                        );
+                                    }
                                     Ok(PromotionOutcome::NoCapacity) => {
                                         let err = RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
                                             pubkey: update.pubkey,
@@ -3194,10 +3233,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         .await
                     {
                         Ok(PromotionOutcome::Promoted) => Ok(()),
-                        // The key left the secondary tier while the
-                        // promotion was in flight (e.g. evicted by another
-                        // key's admission); register it from scratch.
-                        Ok(PromotionOutcome::NotInSecondary) => {
+                        // Promoted by another transition mid-flight; the key
+                        // holds primary membership and the reason stands.
+                        Ok(PromotionOutcome::NotInSecondary) => Ok(()),
+                        // Evicted by another key's admission mid-flight;
+                        // register it from scratch.
+                        Ok(PromotionOutcome::Evicted) => {
                             self.register_subscription(pubkey, reason, origin)
                                 .await
                         }
@@ -3221,13 +3262,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         .unwrap_or_else(|poison| poison.into_inner())
                         .contains(pubkey);
                     if confirmed_missing {
-                        self.pubsub_client.subscribe(*pubkey, None).await?;
-                        self.confirmed_missing_subscriptions
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                            .remove(pubkey);
+                        // Flow the error into repair_result (no early return)
+                        // so the acquired-reason rollback below executes.
+                        match self.pubsub_client.subscribe(*pubkey, None).await
+                        {
+                            Ok(()) => {
+                                self.confirmed_missing_subscriptions
+                                    .lock()
+                                    .unwrap_or_else(|poison| {
+                                        poison.into_inner()
+                                    })
+                                    .remove(pubkey);
+                                Ok(())
+                            }
+                            Err(err) => Err(err),
+                        }
+                    } else {
+                        Ok(())
                     }
-                    Ok(())
                 }
             } else {
                 self.register_subscription(pubkey, reason, origin).await
