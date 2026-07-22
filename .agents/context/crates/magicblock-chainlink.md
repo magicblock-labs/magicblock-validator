@@ -300,6 +300,17 @@ If a subscription update discovers a DLP-owned account absent from the bank, Cha
 
 Updates delegated to other validators are ignored after discovery so this validator does not clone state it cannot execute against.
 
+### Internal DLP update filtering and collision sighting
+
+Program-subscription updates whose payload parses as an internal DLP account (delegation record, delegation metadata, commit record, program config) are dropped in `FetchCloner::process_subscription_update` **before** greedy discovery, with zero remote fetches — their derived "record of a record" PDA never exists, and these updates dominate the DLP program-subscription firehose.
+
+The exception is a delegated account whose app data byte-collides with an internal DLP discriminator (LE u64 100–103). Such accounts must still reach greedy discovery so their post-delegation actions execute. `DlpCollisionTracker` (single lock, so check-then-park is atomic against sight-then-release) resolves this without a fetch:
+
+- Every delegation-record-shaped update records a monotonic sighting (`record pubkey -> max slot`), from either subscription source. Only program-subscription updates are dropped/parked; account-subscription updates always continue into normal processing.
+- An internal-looking account update whose derived delegation-record PDA was sighted at or after its own slot proceeds to greedy discovery (a fresh delegation writes both accounts in one slot).
+- Otherwise the update is parked (pubkey + slot, keyed by its derived record PDA); a later record sighting releases it into an authority-gated, deduped fetch+clone that retries until the bank reflects the sighted delegation.
+- Genuine internal PDAs always miss the sighting cache and are dropped. A missed sighting degrades to lazy on-demand cloning via the normal getAccount/send-transaction paths — never to incorrect state.
+
 ## RemoteAccountProvider internals
 
 `RemoteAccountProvider` owns direct remote access and subscription state.
