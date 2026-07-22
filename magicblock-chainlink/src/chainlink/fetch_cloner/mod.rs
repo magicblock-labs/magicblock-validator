@@ -188,9 +188,13 @@ const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
         None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
     };
 
-/// Capacity for recently sighted delegation-record update slots.
+/// Capacity for recently sighted delegation-record update slots. A sighting
+/// must outlive the SubMux debounce that can delay the colliding account's
+/// own update, so the capacity is sized for >32k record-shaped updates/s
+/// across that window; entries are a few dozen bytes. Eviction degrades to
+/// lazy on-demand cloning and self-heals at the account's next record touch.
 const SEEN_DELEGATION_RECORD_SLOTS_CAPACITY: NonZeroUsize =
-    match NonZeroUsize::new(16_384) {
+    match NonZeroUsize::new(65_536) {
         Some(n) => n,
         None => {
             panic!("SEEN_DELEGATION_RECORD_SLOTS_CAPACITY must be non-zero")
