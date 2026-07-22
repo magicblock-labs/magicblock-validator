@@ -199,8 +199,10 @@ const SEEN_DELEGATION_RECORD_SLOTS_CAPACITY: NonZeroUsize =
     };
 
 /// Capacity for internal-looking account updates parked until their
-/// delegation record is sighted; every internal firehose update parks, so
-/// this must outlast churn across the SubMux debounce window.
+/// delegation record is sighted. Once full, new unsighted candidates are
+/// dropped instead of evicting already parked candidates; this preserves
+/// account-first collision candidates across record-heavy firehose bursts
+/// while keeping memory bounded.
 const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
     match NonZeroUsize::new(16_384) {
         Some(n) => n,
@@ -267,6 +269,12 @@ impl DlpCollisionTracker {
             .get(&record_pubkey)
             .is_some_and(|&record_slot| record_slot >= update.account.slot());
         if !sighted {
+            if !self.parked.contains(&record_pubkey)
+                && self.parked.len() >= PARKED_COLLISION_UPDATES_CAPACITY.get()
+            {
+                return false;
+            }
+
             // Monotonic like sightings: a replayed older update must not
             // downgrade the parked slot.
             let parked = self.parked.get_or_insert_mut(record_pubkey, || {
