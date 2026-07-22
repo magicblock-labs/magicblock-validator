@@ -2088,18 +2088,30 @@ where
         &self,
         candidate: ParkedCollisionCandidate,
     ) {
-        if self.accounts_bank.get_account(&candidate.pubkey).is_some() {
+        // A bank entry only settles the candidate if it already reflects the
+        // delegation the sighting announced. A pre-delegation clone (whose
+        // program update was dropped as internal-looking) must be
+        // force-refreshed, or it would linger undelegated and its
+        // post-delegation actions would never proactively execute.
+        let fresh_delegated_in_bank = self
+            .accounts_bank
+            .get_account(&candidate.pubkey)
+            .is_some_and(|in_bank| {
+                in_bank.delegated() && in_bank.remote_slot() >= candidate.slot
+            });
+        if fresh_delegated_in_bank {
             return;
         }
         let fetch_context = AccountFetchContext::subscription_update(
             AccountFetchReason::SubscriptionUpdateGreedyDiscovery,
         );
         if let Err(err) = self
-            .fetch_and_clone_accounts_with_dedup(
+            .fetch_and_clone_accounts_with_dedup_forced_refresh(
                 &[candidate.pubkey],
                 None,
                 Some(candidate.slot),
                 fetch_context,
+                &HashSet::from([candidate.pubkey]),
             )
             .await
         {

@@ -4629,15 +4629,26 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_droppe
 // the same delegation routes it to discovery, in either delivery order.
 #[tokio::test]
 async fn test_discovered_colliding_delegated_account_record_first_is_cloned() {
-    colliding_delegated_account_is_cloned(false).await;
+    colliding_delegated_account_is_cloned(false, false).await;
 }
 
 #[tokio::test]
 async fn test_discovered_colliding_delegated_account_record_late_is_cloned() {
-    colliding_delegated_account_is_cloned(true).await;
+    colliding_delegated_account_is_cloned(true, false).await;
 }
 
-async fn colliding_delegated_account_is_cloned(record_late: bool) {
+// A stale pre-delegation clone in the bank must not settle a released
+// candidate: the release force-refreshes it into the delegated state.
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_record_late_refreshes_stale_bank_copy(
+) {
+    colliding_delegated_account_is_cloned(true, true).await;
+}
+
+async fn colliding_delegated_account_is_cloned(
+    record_late: bool,
+    stale_in_bank: bool,
+) {
     init_logger();
     let validator_keypair = Keypair::new();
     let validator_pubkey = validator_keypair.pubkey();
@@ -4674,6 +4685,18 @@ async fn colliding_delegated_account_is_cloned(record_late: bool) {
         validator_pubkey,
         account_owner,
     );
+
+    if stale_in_bank {
+        let mut stale_copy = AccountSharedData::from(Account {
+            lamports: 1_000_000,
+            data: app_data.clone(),
+            owner: account_owner,
+            executable: false,
+            rent_epoch: 0,
+        });
+        stale_copy.set_remote_slot(CURRENT_SLOT - 10);
+        accounts_bank.insert(account_pubkey, stale_copy);
+    }
 
     let delegation_record_pubkey =
         dlp_api::pda::delegation_record_pda_from_delegated_account(
