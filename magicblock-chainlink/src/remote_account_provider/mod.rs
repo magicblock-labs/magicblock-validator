@@ -508,6 +508,7 @@ type CapacityEvictionProtectionPredicate =
 type SharedCapacityEvictionProtectionPredicate =
     Arc<RwLock<Option<Arc<CapacityEvictionProtectionPredicate>>>>;
 
+#[derive(Clone)]
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
     pub account: RemoteAccount,
