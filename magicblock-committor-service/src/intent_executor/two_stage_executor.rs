@@ -116,7 +116,7 @@ where
             self.state.current_attempt += 1;
 
             // Prepare & execute message
-            let execution_result = match prepare_and_execute_strategy(
+            let execution_result = prepare_and_execute_strategy(
                 &self.intent_client,
                 &self.authority,
                 transaction_preparator,
@@ -124,23 +124,19 @@ where
                 persister,
             )
             .await
-            {
-                Ok(value) => value,
-                Err(err) => {
-                    // Preparation may have reserved ALTs or initialized
-                    // buffers already - surrender strategies for cleanup
-                    self.dispose_strategies();
-                    return Err(
-                        IntentExecutorError::FailedCommitPreparationError(err),
-                    );
-                }
-            };
+            .map_err(IntentExecutorError::FailedCommitPreparationError)
+            .inspect_err(|_| {
+                // Preparation may have reserved ALTs or initialized
+                // buffers already - surrender strategies for cleanup
+                self.dispose_strategies();
+            })?;
+
             let execution_err = match execution_result {
                 Ok(value) => break Ok(value),
                 Err(err) => err,
             };
 
-            let flow = match self
+            let flow = self
                 .patch_commit_strategy(
                     &execution_err,
                     task_info_fetcher,
@@ -148,13 +144,9 @@ where
                     committed_pubkeys,
                 )
                 .await
-            {
-                Ok(value) => value,
-                Err(err) => {
+                .inspect_err(|_| {
                     self.dispose_strategies();
-                    return Err(err);
-                }
-            };
+                })?;
             let cleanup = match flow {
                 ControlFlow::Continue(value) => value,
                 ControlFlow::Break(()) => {
@@ -426,7 +418,7 @@ where
             self.state.current_attempt += 1;
 
             // Prepare & execute message
-            let execution_result = match prepare_and_execute_strategy(
+            let execution_result = prepare_and_execute_strategy(
                 &self.intent_client,
                 &self.authority,
                 transaction_preparator,
@@ -434,33 +426,23 @@ where
                 persister,
             )
             .await
-            {
-                Ok(value) => value,
-                Err(err) => {
-                    // Preparation may have reserved ALTs or initialized
-                    // buffers already - surrender strategy for cleanup
-                    self.dispose_strategy();
-                    return Err(
-                        IntentExecutorError::FailedFinalizePreparationError(
-                            err,
-                        ),
-                    );
-                }
-            };
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)
+            .inspect_err(|_| {
+                // Preparation may have reserved ALTs or initialized
+                // buffers already - surrender strategy for cleanup
+                self.dispose_strategy();
+            })?;
             let execution_err = match execution_result {
                 Ok(value) => break Ok(value),
                 Err(err) => err,
             };
 
-            let flow = match self.patch_finalize_strategy(&execution_err).await
-            {
-                Ok(value) => value,
-                Err(err) => {
+            let flow = self
+                .patch_finalize_strategy(&execution_err)
+                .await
+                .inspect_err(|_| {
                     self.dispose_strategy();
-                    return Err(err);
-                }
-            };
-
+                })?;
             let cleanup = match flow {
                 ControlFlow::Continue(cleanup) => cleanup,
                 ControlFlow::Break(()) => {

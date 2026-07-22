@@ -84,8 +84,6 @@ where
             self.current_attempt += 1;
 
             // Prepare & execute message
-            // Preparation failures here happen before anything landed, so
-            // they are commit-stage errors (safe to re-execute the intent)
             let execution_result = prepare_and_execute_strategy(
                 &self.intent_client,
                 &self.authority,
@@ -94,7 +92,7 @@ where
                 persister,
             )
             .await
-            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
 
             // Process error: Ok - return, Err - handle further
             let execution_err = match execution_result {
@@ -295,7 +293,7 @@ where
             &None::<IntentPersisterImpl>,
         )
         .await
-        .map_err(IntentExecutorError::FailedCommitPreparationError)?
+        .map_err(IntentExecutorError::FailedFinalizePreparationError)?
         .map_err(|err| IntentExecutorError::FailedToFinalizeError {
             err,
             commit_signature: None,
