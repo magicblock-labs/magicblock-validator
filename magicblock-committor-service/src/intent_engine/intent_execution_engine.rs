@@ -1044,6 +1044,8 @@ mod tests {
                 }),
                 patched_errors: vec![],
                 callbacks_report: vec![],
+                #[cfg(feature = "dev-context-only-utils")]
+                successful_transaction_strategies: vec![],
             };
             let result = match &self.failure_mode {
                 MockFailureMode::None => success,
