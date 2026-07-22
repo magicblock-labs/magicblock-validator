@@ -156,34 +156,10 @@ where
         return None;
     }
 
-    let has_local_base_ata = ata_pubkeys
-        .iter()
-        .any(|ata_pubkey| this.accounts_bank.get_account(ata_pubkey).is_some());
-    let mut has_base_ata_projection_interest = false;
-    for ata_pubkey in ata_pubkeys.iter() {
-        if this
-            .remote_account_provider
-            .has_subscription_reason(
-                ata_pubkey,
-                SubscriptionReason::AtaProjection,
-            )
-            .await
-        {
-            has_base_ata_projection_interest = true;
-            break;
-        }
-    }
-    let has_raw_eata_projection_interest = this
-        .remote_account_provider
-        .has_subscription_reason(
-            &eata_pubkey,
-            SubscriptionReason::AtaProjection,
-        )
-        .await;
     if matches!(update_source, SubscriptionSource::Program)
-        && !has_local_base_ata
-        && !has_base_ata_projection_interest
-        && !has_raw_eata_projection_interest
+        && !this
+            .raw_eata_has_local_projection_interest(eata_pubkey, eata_account)
+            .await?
     {
         return None;
     }
