@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -9,7 +9,8 @@ use std::{
 };
 
 pub(crate) use chain_pubsub_client::{
-    ChainPubsubClient, ChainPubsubClientImpl, ReconnectableClient,
+    ChainPubsubClient, ChainPubsubClientImpl, PubsubTransport,
+    ReconnectableClient,
 };
 pub(crate) use chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl};
 use config::RemoteAccountProviderConfig;
@@ -17,6 +18,7 @@ pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 use futures_util::future::{join_all, try_join_all};
+use lru_cache::TieredSubscribedAccountsTracker;
 pub use lru_cache::{AccountsLruCache, AddAccountOutcome};
 use magicblock_config::config::GrpcConfig;
 pub(crate) use remote_account::RemoteAccount;
@@ -188,7 +190,7 @@ fn spawn_deferred_pubsub_clients(
     resubscription_delay: Duration,
     grpc_cfg: GrpcConfig,
     submux: SubMuxClient<ChainUpdatesClient>,
-    subscribed_accounts: Arc<AccountsLruCache>,
+    subscribed_accounts: Arc<TieredSubscribedAccountsTracker>,
 ) {
     // Deferred clients are the fallback update sources; retry connect/attach
     // with capped backoff instead of dropping them permanently on failure.
@@ -288,7 +290,7 @@ fn spawn_deferred_pubsub_clients(
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
 type FetchingAccountGeneration = u64;
 
-struct FetchingAccountState {
+pub(crate) struct FetchingAccountState {
     generation: FetchingAccountGeneration,
     fetch_start_slot: u64,
     fetch_context: AccountFetchContext,
@@ -296,7 +298,7 @@ struct FetchingAccountState {
     waiters: Vec<oneshot::Sender<FetchResult>>,
 }
 
-type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
+pub(crate) type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
 
 struct PendingFetchWaiterGaugeGuard {
     layer: ChainlinkPendingFetchLayer,
@@ -334,6 +336,10 @@ impl Drop for PendingFetchWaiterGaugeGuard {
 
 struct ClaimedSubscriptionSetupGuard {
     fetching_accounts: Arc<FetchingAccounts>,
+    subscription_ownership: SubscriptionOwnershipMap,
+    subscription_transition_lock: Arc<AsyncMutex<()>>,
+    primary: Arc<AccountsLruCache>,
+    secondary: Arc<AccountsLruCache>,
     claimed_pubkeys: Vec<Pubkey>,
     claimed_generations: HashMap<Pubkey, FetchingAccountGeneration>,
     cancellation_error_text: Option<String>,
@@ -342,11 +348,19 @@ struct ClaimedSubscriptionSetupGuard {
 impl ClaimedSubscriptionSetupGuard {
     fn new(
         fetching_accounts: Arc<FetchingAccounts>,
+        subscription_ownership: SubscriptionOwnershipMap,
+        subscription_transition_lock: Arc<AsyncMutex<()>>,
+        primary: Arc<AccountsLruCache>,
+        secondary: Arc<AccountsLruCache>,
         claimed_pubkeys: Vec<Pubkey>,
         claimed_generations: HashMap<Pubkey, FetchingAccountGeneration>,
     ) -> Self {
         Self {
             fetching_accounts,
+            subscription_ownership,
+            subscription_transition_lock,
+            primary,
+            secondary,
             claimed_pubkeys,
             claimed_generations,
             cancellation_error_text: Some(
@@ -355,7 +369,7 @@ impl ClaimedSubscriptionSetupGuard {
         }
     }
 
-    fn cleanup_with_error(&mut self, waiter_error_text: String) {
+    fn cleanup_fetching_with_error(&self, waiter_error_text: &str) {
         {
             let mut fetching = self
                 .fetching_accounts
@@ -383,13 +397,25 @@ impl ClaimedSubscriptionSetupGuard {
                     for sender in state.waiters {
                         let _ = sender.send(Err(
                             RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                                waiter_error_text.clone(),
+                                waiter_error_text.to_string(),
                             ),
                         ));
                     }
                 }
             }
         }
+    }
+
+    async fn cleanup_with_error(&mut self, waiter_error_text: String) {
+        self.cleanup_fetching_with_error(&waiter_error_text);
+        cleanup_classification_placeholders(
+            &self.subscription_ownership,
+            &self.subscription_transition_lock,
+            &self.primary,
+            &self.secondary,
+            &self.claimed_generations,
+        )
+        .await;
         self.disarm();
     }
 
@@ -406,7 +432,51 @@ impl Drop for ClaimedSubscriptionSetupGuard {
         else {
             return;
         };
-        self.cleanup_with_error(waiter_error_text);
+        self.cleanup_fetching_with_error(&waiter_error_text);
+
+        let subscription_ownership = self.subscription_ownership.clone();
+        let subscription_transition_lock =
+            self.subscription_transition_lock.clone();
+        let primary = self.primary.clone();
+        let secondary = self.secondary.clone();
+        let claimed_generations = std::mem::take(&mut self.claimed_generations);
+        task::spawn(async move {
+            cleanup_classification_placeholders(
+                &subscription_ownership,
+                &subscription_transition_lock,
+                &primary,
+                &secondary,
+                &claimed_generations,
+            )
+            .await;
+        });
+    }
+}
+
+async fn cleanup_classification_placeholders(
+    subscription_ownership: &SubscriptionOwnershipMap,
+    subscription_transition_lock: &Arc<AsyncMutex<()>>,
+    primary: &AccountsLruCache,
+    secondary: &AccountsLruCache,
+    claimed_generations: &HashMap<Pubkey, FetchingAccountGeneration>,
+) {
+    let _transition_guard = subscription_transition_lock.lock().await;
+    let mut ownership = subscription_ownership.lock().await;
+    for (pubkey, generation) in claimed_generations {
+        // Keep the placeholder when the key already holds tier state: the
+        // update pump admitted it into the primary tier after winning fetch
+        // arbitration, and dropping the ownership here would orphan that
+        // membership. A later acquire (or capacity eviction) adopts it.
+        if primary.contains(pubkey) || secondary.contains(pubkey) {
+            continue;
+        }
+        if ownership.get(pubkey).is_some_and(|entry| {
+            entry.is_empty()
+                && entry.classification_placeholder_generation
+                    == Some(*generation)
+        }) {
+            ownership.remove(pubkey);
+        }
     }
 }
 
@@ -449,13 +519,28 @@ impl From<SubscriptionReason> for SubscriptionReasonLabel {
 pub(crate) type SubscriptionOwnershipMap =
     Arc<AsyncMutex<HashMap<Pubkey, SubscriptionOwnership>>>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubscriptionClassificationSource {
+    Fetch,
+    Subscription,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SubscriptionClassification {
+    slot: u64,
+    source: SubscriptionClassificationSource,
+}
+
 #[derive(Debug, Default, Clone)]
 pub(crate) struct SubscriptionOwnership {
     reasons: HashMap<SubscriptionReason, usize>,
+    last_classification: Option<SubscriptionClassification>,
+    classification_placeholder_generation: Option<FetchingAccountGeneration>,
 }
 
 impl SubscriptionOwnership {
     fn acquire(&mut self, reason: SubscriptionReason) {
+        self.classification_placeholder_generation = None;
         *self.reasons.entry(reason).or_default() += 1;
     }
 
@@ -486,6 +571,729 @@ impl SubscriptionOwnership {
     }
 }
 
+/// Shared state for serialized movement between the primary and secondary
+/// subscription tiers.
+///
+/// Locking rules:
+/// - The per-key subscription guard is acquired first and may be held across
+///   pubsub network calls for that key.
+/// - `subscription_transition_lock` protects the composite in-memory tier
+///   state (both LRUs, ownership map, confirmed-missing set). It is acquired
+///   after the per-key guard, kept to short in-memory critical sections, and
+///   MUST NOT be held across any pubsub subscribe/unsubscribe await.
+/// - Cleanup of a key evicted by another key's admission runs as a detached
+///   task ([Self::spawn_evicted_cleanup]) so no task ever holds two per-key
+///   guards at once.
+#[derive(Clone)]
+struct SubscriptionTierCtx<U: ChainPubsubClient> {
+    primary: Arc<AccountsLruCache>,
+    secondary: Arc<AccountsLruCache>,
+    pubsub_client: U,
+    subscription_ownership:
+        Arc<AsyncMutex<HashMap<Pubkey, SubscriptionOwnership>>>,
+    subscription_transition_lock: Arc<AsyncMutex<()>>,
+    subscription_key_locks: SubscriptionKeyLocks,
+    fetching_accounts: Arc<FetchingAccounts>,
+    capacity_eviction_protection: SharedCapacityEvictionProtectionPredicate,
+    confirmed_missing_subscriptions: Arc<Mutex<HashSet<Pubkey>>>,
+    removed_account_tx: mpsc::Sender<Pubkey>,
+}
+
+impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
+    fn capacity_eviction_protection_for(
+        &self,
+        pubkey: &Pubkey,
+    ) -> CapacityEvictionProtection {
+        let guard = self
+            .capacity_eviction_protection
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.as_ref().map(|predicate| predicate(pubkey)).unwrap_or(
+            CapacityEvictionProtection {
+                delegated: false,
+                undelegating: false,
+            },
+        )
+    }
+
+    fn is_confirmed_missing(&self, pubkey: &Pubkey) -> bool {
+        self.confirmed_missing_subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .contains(pubkey)
+    }
+
+    fn set_confirmed_missing(&self, pubkey: Pubkey, confirmed: bool) {
+        let mut subscriptions = self
+            .confirmed_missing_subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if confirmed {
+            subscriptions.insert(pubkey);
+        } else {
+            subscriptions.remove(&pubkey);
+        }
+    }
+
+    async fn record_classification(
+        &self,
+        pubkey: Pubkey,
+        slot: u64,
+        source: SubscriptionClassificationSource,
+    ) -> bool {
+        let mut ownership = self.subscription_ownership.lock().await;
+        let Some(ownership) = ownership.get_mut(&pubkey) else {
+            return false;
+        };
+
+        Self::record_classification_entry(ownership, slot, source)
+    }
+
+    /// Like [Self::record_classification] but creates the ownership entry,
+    /// which the pending fetch's in-flight acquisition adopts right after.
+    async fn record_classification_for_pending_fetch(
+        &self,
+        pubkey: Pubkey,
+        slot: u64,
+        source: SubscriptionClassificationSource,
+        generation: FetchingAccountGeneration,
+    ) -> bool {
+        let mut ownership = self.subscription_ownership.lock().await;
+        let ownership = ownership.entry(pubkey).or_default();
+        let apply_classification =
+            Self::record_classification_entry(ownership, slot, source);
+        if ownership.is_empty() {
+            ownership.classification_placeholder_generation = Some(generation);
+        }
+        apply_classification
+    }
+
+    fn record_classification_entry(
+        ownership: &mut SubscriptionOwnership,
+        slot: u64,
+        source: SubscriptionClassificationSource,
+    ) -> bool {
+        if ownership.last_classification.is_some_and(|last| {
+            Self::classification_is_stale(last, slot, source)
+        }) {
+            return false;
+        }
+
+        ownership.last_classification =
+            Some(SubscriptionClassification { slot, source });
+        true
+    }
+
+    /// Records the RPC result's classification and applies the resulting tier
+    /// movement when it is still current.
+    async fn apply_fetch_classification(
+        &self,
+        pubkey: &Pubkey,
+        response_slot: u64,
+        not_found: bool,
+    ) -> RemoteAccountProviderResult<()> {
+        let apply_classification = self
+            .record_classification(
+                *pubkey,
+                response_slot,
+                SubscriptionClassificationSource::Fetch,
+            )
+            .await;
+        if !apply_classification {
+            return Ok(());
+        }
+
+        if not_found {
+            self.move_not_found_to_secondary(*pubkey).await;
+            Ok(())
+        } else {
+            // A confirmed miss that exists after all is gRPC-only; restore
+            // full coverage on promotion.
+            let restore_full_coverage = self.is_confirmed_missing(pubkey);
+            self.set_confirmed_missing(*pubkey, false);
+            match self
+                .try_promote_found_to_primary(*pubkey, restore_full_coverage)
+                .await
+            {
+                Ok(PromotionOutcome::NoCapacity) => {
+                    self.finalize_rejected_promotion(pubkey).await;
+                    Err(
+                        RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                            pubkey: *pubkey,
+                        },
+                    )
+                }
+                // Evicted mid-promotion by another key's admission: the
+                // detached eviction cleanup owns the state removal and bank
+                // eviction; the found result must not be returned without
+                // primary membership.
+                Ok(PromotionOutcome::Evicted) => Err(
+                    RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                        pubkey: *pubkey,
+                    },
+                ),
+                other => other.map(|_| ()),
+            }
+        }
+    }
+
+    /// Finalizes a rejected secondary-tier promotion. The rejection decision
+    /// is final, so the tier state, ownership, and bank entry are dropped
+    /// even when the unsubscribe fails — the reconciler collects the stray
+    /// subscription on a later pass. Keeping the state on unsubscribe
+    /// failure would let the recorded found classification win arbitration
+    /// against a later fetch and leak the account without primary admission.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn finalize_rejected_promotion(&self, pubkey: &Pubkey) {
+        if let Err(err) = self.cleanup_rejected_subscription(*pubkey).await {
+            warn!(
+                pubkey = %pubkey,
+                error = ?err,
+                "Failed to unsubscribe rejected promotion; reconciler will remove the stray subscription"
+            );
+        }
+        {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.secondary.remove(pubkey);
+            self.set_confirmed_missing(*pubkey, false);
+            self.subscription_ownership.lock().await.remove(pubkey);
+        }
+        // The bank may hold a stale entry (e.g. an empty placeholder from
+        // the confirmed-missing phase); evict it so a later ensure
+        // refetches the account.
+        self.spawn_removal_notification(*pubkey);
+    }
+
+    async fn classification_is_current(
+        &self,
+        pubkey: Pubkey,
+        slot: u64,
+        source: SubscriptionClassificationSource,
+    ) -> bool {
+        self.subscription_ownership
+            .lock()
+            .await
+            .get(&pubkey)
+            .and_then(|ownership| ownership.last_classification)
+            .is_none_or(|last| {
+                !Self::classification_is_stale(last, slot, source)
+            })
+    }
+
+    fn classification_is_stale(
+        last: SubscriptionClassification,
+        slot: u64,
+        source: SubscriptionClassificationSource,
+    ) -> bool {
+        slot < last.slot
+            || (slot == last.slot
+                && source == SubscriptionClassificationSource::Fetch
+                && last.source
+                    == SubscriptionClassificationSource::Subscription)
+    }
+
+    /// Adds `pubkey` to `cache` honoring eviction protection.
+    /// Precondition: the caller holds `subscription_transition_lock`.
+    async fn add_with_protection(
+        &self,
+        cache: &AccountsLruCache,
+        pubkey: Pubkey,
+    ) -> AddAccountOutcome {
+        let ownership = self.subscription_ownership.lock().await;
+        let fetching = self
+            .fetching_accounts
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cache.add_with_evict_filter(pubkey, |candidate| {
+            cache.can_evict(candidate)
+                && !fetching.contains_key(candidate)
+                && !self
+                    .capacity_eviction_protection_for(candidate)
+                    .is_protected()
+                && !ownership.get(candidate).is_some_and(|ownership| {
+                    ownership.contains(SubscriptionReason::UndelegationTracking)
+                })
+        })
+    }
+
+    /// Whether `pubkey` could be admitted to `cache` (advisory pre-check).
+    /// Precondition: the caller holds `subscription_transition_lock`.
+    async fn has_capacity_with_protection(
+        &self,
+        cache: &AccountsLruCache,
+        pubkey: &Pubkey,
+    ) -> bool {
+        let ownership = self.subscription_ownership.lock().await;
+        let fetching = self
+            .fetching_accounts
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cache.can_add_with_evict_filter(pubkey, |candidate| {
+            cache.can_evict(candidate)
+                && !fetching.contains_key(candidate)
+                && !self
+                    .capacity_eviction_protection_for(candidate)
+                    .is_protected()
+                && !ownership.get(candidate).is_some_and(|ownership| {
+                    ownership.contains(SubscriptionReason::UndelegationTracking)
+                })
+        })
+    }
+
+    /// Cleans up an account that was just evicted from a tier: drops its
+    /// subscription and notifies upstream so it can be removed from the bank.
+    ///
+    /// Runs as a detached task on purpose:
+    /// - the caller already holds the admitted key's per-key guard; taking
+    ///   the evicted key's guard inline could ABBA-deadlock with a concurrent
+    ///   transition admitting the evicted key,
+    /// - the unsubscribe network call must not run under the transition lock.
+    ///
+    /// The task re-checks tier membership under the evicted key's guard and
+    /// skips keys that were re-admitted (or have a pending fetch) in the
+    /// meantime. If the unsubscribe fails the tier state stands and the
+    /// reconciler removes the stray subscription on its next pass.
+    fn spawn_evicted_cleanup(&self, evicted: Pubkey) {
+        let ctx = self.clone();
+        task::spawn(async move {
+            {
+                let _evicted_guard = subscription_key_owned_guard_from_map(
+                    &ctx.subscription_key_locks,
+                    evicted,
+                )
+                .await;
+
+                let still_evicted = {
+                    let _transition_guard =
+                        ctx.subscription_transition_lock.lock().await;
+                    let fetching = ctx
+                        .fetching_accounts
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner());
+                    !ctx.primary.contains(&evicted)
+                        && !ctx.secondary.contains(&evicted)
+                        && !fetching.contains_key(&evicted)
+                };
+                if !still_evicted {
+                    inc_chainlink_subscription_cleanup_accounts(
+                        SubscriptionCleanupSource::CapacityEviction,
+                        SubscriptionCleanupOutcome::RetainedIntentionally,
+                    );
+                    return;
+                }
+
+                let cleanup_outcome = match ctx
+                    .pubsub_client
+                    .unsubscribe(evicted)
+                    .await
+                {
+                    Ok(()) => SubscriptionCleanupOutcome::Unsubscribed,
+                    Err(
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                            _,
+                        ),
+                    ) => SubscriptionCleanupOutcome::AlreadyAbsent,
+                    Err(err) => {
+                        warn!(
+                            evicted = %evicted,
+                            error = ?err,
+                            "Failed to unsubscribe evicted account; reconciler will remove the stray subscription"
+                        );
+                        SubscriptionCleanupOutcome::UnsubscribeFailed
+                    }
+                };
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::CapacityEviction,
+                    cleanup_outcome,
+                );
+
+                let _transition_guard =
+                    ctx.subscription_transition_lock.lock().await;
+                ctx.subscription_ownership.lock().await.remove(&evicted);
+                ctx.set_confirmed_missing(evicted, false);
+            }
+            // Send after dropping the per-key guard: the removal consumer
+            // takes per-key guards itself, so sending into the bounded
+            // channel while holding one could stall the removal pipeline.
+            if let Err(err) = ctx.removed_account_tx.send(evicted).await {
+                warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::CapacityEviction,
+                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                );
+            }
+        });
+    }
+
+    /// Notifies the removal pipeline that `pubkey` lost its last watch, so a
+    /// stale bank entry (e.g. an empty placeholder cloned while the account
+    /// was confirmed missing) is evicted and a later ensure refetches it.
+    /// Detached because the removal consumer takes per-key guards; sending
+    /// inline while holding this key's guard could stall the pipeline.
+    fn spawn_removal_notification(&self, pubkey: Pubkey) {
+        let removed_account_tx = self.removed_account_tx.clone();
+        task::spawn(async move {
+            if let Err(err) = removed_account_tx.send(pubkey).await {
+                warn!(pubkey = %pubkey, error = ?err, "Failed to send removal update for rejected promotion");
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::RejectedNewSubscription,
+                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                );
+            }
+        });
+    }
+
+    async fn cleanup_rejected_subscription(
+        &self,
+        pubkey: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        match self.pubsub_client.unsubscribe(pubkey).await {
+            Ok(()) => {
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::RejectedNewSubscription,
+                    SubscriptionCleanupOutcome::Unsubscribed,
+                );
+                Ok(())
+            }
+            Err(
+                RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_),
+            ) => {
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::RejectedNewSubscription,
+                    SubscriptionCleanupOutcome::AlreadyAbsent,
+                );
+                Ok(())
+            }
+            Err(err) => {
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::RejectedNewSubscription,
+                    SubscriptionCleanupOutcome::UnsubscribeFailed,
+                );
+                Err(err)
+            }
+        }
+    }
+
+    /// Registers `pubkey` in the secondary tier.
+    /// Precondition: the caller holds the key's subscription guard; the
+    /// transition lock is scoped internally and never spans the subscribe.
+    async fn register_secondary(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+        origin: SubscriptionRegistrationOrigin,
+    ) -> RemoteAccountProviderResult<()> {
+        let has_capacity = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.has_capacity_with_protection(&self.secondary, pubkey)
+                .await
+        };
+        if !has_capacity {
+            inc_chainlink_subscription_registration_accounts(
+                origin,
+                reason.into(),
+                SubscriptionRegistrationOutcome::RejectedNoCapacity,
+            );
+            return Err(
+                RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                    pubkey: *pubkey,
+                },
+            );
+        }
+
+        // Keep full redundancy until the RPC result confirms the account is
+        // missing; the confirming classification switches to gRPC-only
+        // promptly and the reconciler repairs the policy on later passes.
+        // Runs outside the transition lock; the per-key guard held by the
+        // caller serializes transitions of this key.
+        self.pubsub_client.subscribe(*pubkey, None).await?;
+
+        let add_outcome = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            let add_outcome =
+                self.add_with_protection(&self.secondary, *pubkey).await;
+            if !matches!(add_outcome, AddAccountOutcome::NoEvictableCandidate) {
+                self.set_confirmed_missing(*pubkey, false);
+            }
+            add_outcome
+        };
+
+        match add_outcome {
+            AddAccountOutcome::AlreadyPresent => {
+                inc_chainlink_subscription_registration_accounts(
+                    origin,
+                    reason.into(),
+                    SubscriptionRegistrationOutcome::AlreadyPresent,
+                );
+            }
+            AddAccountOutcome::Added => {
+                inc_chainlink_subscription_registration_accounts(
+                    origin,
+                    reason.into(),
+                    SubscriptionRegistrationOutcome::AddedBelowCapacity,
+                );
+            }
+            AddAccountOutcome::Evicted(evicted) => {
+                self.spawn_evicted_cleanup(evicted);
+                inc_chainlink_subscription_registration_accounts(
+                    origin,
+                    reason.into(),
+                    SubscriptionRegistrationOutcome::EvictedCandidate,
+                );
+            }
+            AddAccountOutcome::NoEvictableCandidate => {
+                self.cleanup_rejected_subscription(*pubkey).await?;
+                inc_chainlink_subscription_registration_accounts(
+                    origin,
+                    reason.into(),
+                    SubscriptionRegistrationOutcome::RejectedAndUnsubscribed,
+                );
+                return Err(
+                    RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                        pubkey: *pubkey,
+                    },
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Moves a confirmed-missing account from the primary to the secondary
+    /// tier. The tier move runs under one transition-lock scope; eviction
+    /// cleanup is deferred to a detached task and the gRPC-only transport
+    /// switch runs after the lock scope.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn move_not_found_to_secondary(&self, pubkey: Pubkey) {
+        if self
+            .capacity_eviction_protection_for(&pubkey)
+            .is_protected()
+        {
+            return;
+        }
+
+        let direct_only = self
+            .subscription_ownership
+            .lock()
+            .await
+            .get(&pubkey)
+            .is_some_and(|ownership| {
+                ownership.reasons.len() == 1
+                    && ownership.contains(SubscriptionReason::DirectAccount)
+            });
+        if !direct_only {
+            return;
+        }
+
+        let (confirmed_missing, evicted) = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+
+            if self.secondary.contains(&pubkey) {
+                self.set_confirmed_missing(pubkey, true);
+                (true, None)
+            } else if !self.primary.contains(&pubkey) {
+                (false, None)
+            } else {
+                match self.add_with_protection(&self.secondary, pubkey).await {
+                    outcome @ (AddAccountOutcome::Added
+                    | AddAccountOutcome::AlreadyPresent
+                    | AddAccountOutcome::Evicted(_)) => {
+                        self.primary.remove(&pubkey);
+                        self.set_confirmed_missing(pubkey, true);
+                        let evicted = match outcome {
+                            AddAccountOutcome::Evicted(evicted) => {
+                                Some(evicted)
+                            }
+                            _ => None,
+                        };
+                        (true, evicted)
+                    }
+                    AddAccountOutcome::NoEvictableCandidate => (false, None),
+                }
+            }
+        };
+
+        if let Some(evicted) = evicted {
+            self.spawn_evicted_cleanup(evicted);
+        }
+        if confirmed_missing {
+            // Drop the websocket leg promptly; the multiplexer only does so
+            // after confirming gRPC coverage and errs otherwise, in which
+            // case full coverage stays and the reconciler applies the
+            // gRPC-only policy on a later pass.
+            if let Err(err) =
+                self.pubsub_client.prefer_grpc_subscription(pubkey).await
+            {
+                debug!(
+                    pubkey = %pubkey,
+                    error = ?err,
+                    "Keeping full coverage for confirmed miss; reconciler applies gRPC-only policy later"
+                );
+            }
+        }
+    }
+
+    /// Promotes a secondary-tier account that turned out to exist into the
+    /// primary tier. The coverage-restoring subscribe runs before the state
+    /// commit and outside the transition lock, so a subscribe failure leaves
+    /// the tier state untouched.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn try_promote_found_to_primary(
+        &self,
+        pubkey: Pubkey,
+        restore_full_coverage: bool,
+    ) -> RemoteAccountProviderResult<PromotionOutcome> {
+        // Not-in-secondary at entry is benign: the caller's key may hold
+        // primary membership or never have been tiered (e.g. never-evict
+        // keys). Only a mid-flight departure (re-check below) distinguishes
+        // eviction.
+        if !self.secondary.contains(&pubkey) {
+            return Ok(PromotionOutcome::NotInSecondary);
+        }
+
+        if restore_full_coverage {
+            self.pubsub_client.subscribe(pubkey, None).await?;
+            self.set_confirmed_missing(pubkey, false);
+        }
+
+        let (outcome, evicted) = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+
+            // Re-check under the lock: the key may have left the secondary
+            // tier while the coverage subscribe was in flight — promoted by
+            // another transition (benign) or evicted by another key's
+            // admission (the found result must not count as admitted).
+            if !self.secondary.contains(&pubkey) {
+                (self.departed_promotion_outcome(&pubkey), None)
+            } else {
+                match self.add_with_protection(&self.primary, pubkey).await {
+                    AddAccountOutcome::Added
+                    | AddAccountOutcome::AlreadyPresent => {
+                        self.secondary.remove(&pubkey);
+                        self.set_confirmed_missing(pubkey, false);
+                        (PromotionOutcome::Promoted, None)
+                    }
+                    AddAccountOutcome::Evicted(evicted) => {
+                        self.secondary.remove(&pubkey);
+                        self.set_confirmed_missing(pubkey, false);
+                        (PromotionOutcome::Promoted, Some(evicted))
+                    }
+                    AddAccountOutcome::NoEvictableCandidate => {
+                        (PromotionOutcome::NoCapacity, None)
+                    }
+                }
+            }
+        };
+
+        if let Some(evicted) = evicted {
+            self.spawn_evicted_cleanup(evicted);
+        }
+        Ok(outcome)
+    }
+
+    /// Outcome for a key that departed the secondary tier mid-promotion:
+    /// primary membership means another transition promoted it; no
+    /// membership means another key's admission evicted it.
+    fn departed_promotion_outcome(&self, pubkey: &Pubkey) -> PromotionOutcome {
+        if self.primary.contains(pubkey) {
+            PromotionOutcome::NotInSecondary
+        } else {
+            PromotionOutcome::Evicted
+        }
+    }
+
+    /// Admits a key whose pending fetch was just resolved as found by a
+    /// subscription update before the fetch's subscription setup created any
+    /// tier state: subscribes and registers it directly in the primary tier,
+    /// so a found result is never handed to fetch waiters without primary
+    /// admission. The in-flight setup adopts the membership (and skips its
+    /// own subscribe). On rejection the caller fails the waiters; the
+    /// placeholder ownership stays for the pending setup to adopt, which
+    /// then registers the key as a fresh fetch-owned secondary entry.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn admit_resolved_fetch_to_primary(
+        &self,
+        pubkey: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        let has_capacity = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.has_capacity_with_protection(&self.primary, &pubkey)
+                .await
+        };
+        if !has_capacity {
+            return Err(
+                RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                    pubkey,
+                },
+            );
+        }
+
+        self.pubsub_client.subscribe(pubkey, None).await?;
+
+        let add_outcome = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.add_with_protection(&self.primary, pubkey).await
+        };
+        match add_outcome {
+            AddAccountOutcome::Added | AddAccountOutcome::AlreadyPresent => {
+                Ok(())
+            }
+            AddAccountOutcome::Evicted(evicted) => {
+                self.spawn_evicted_cleanup(evicted);
+                Ok(())
+            }
+            AddAccountOutcome::NoEvictableCandidate => {
+                self.cleanup_rejected_subscription(pubkey).await?;
+                Err(
+                    RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                        pubkey,
+                    },
+                )
+            }
+        }
+    }
+
+    /// Drops the classification recorded for a pending-fetch winner whose
+    /// primary admission failed: the rejection consumed the found evidence,
+    /// and a later fetch must re-run the full tier classification instead of
+    /// losing arbitration to it and returning the account from the secondary
+    /// tier without primary admission.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn clear_rejected_fetch_classification(&self, pubkey: &Pubkey) {
+        let _transition_guard = self.subscription_transition_lock.lock().await;
+        let mut ownership = self.subscription_ownership.lock().await;
+        if let Some(entry) = ownership.get_mut(pubkey) {
+            if entry.is_empty() {
+                ownership.remove(pubkey);
+            } else {
+                entry.last_classification = None;
+            }
+        }
+    }
+}
+
+/// Result of trying to promote a secondary-tier account into the primary
+/// tier. `NotInSecondary` (the key departed the secondary tier but holds
+/// primary membership — another transition promoted it) is a benign no-op.
+/// `Evicted` (the key departed with no membership — another key's admission
+/// evicted it) means the found result must not count as admitted; the
+/// detached eviction cleanup owns the state removal and bank eviction.
+/// `NoCapacity` is a genuine capacity rejection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PromotionOutcome {
+    Promoted,
+    NoCapacity,
+    NotInSecondary,
+    Evicted,
+}
+
 pub(crate) enum SubscriptionReleaseMode {
     Single,
     All,
@@ -503,11 +1311,12 @@ impl CapacityEvictionProtection {
     }
 }
 
-type CapacityEvictionProtectionPredicate =
+pub(crate) type CapacityEvictionProtectionPredicate =
     dyn Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync;
-type SharedCapacityEvictionProtectionPredicate =
+pub(crate) type SharedCapacityEvictionProtectionPredicate =
     Arc<RwLock<Option<Arc<CapacityEvictionProtectionPredicate>>>>;
 
+#[derive(Clone)]
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
     pub account: RemoteAccount,
@@ -595,6 +1404,15 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
 
     /// Tracks which accounts are currently subscribed to
     lrucache_subscribed_accounts: Arc<AccountsLruCache>,
+
+    /// Tracks fetch-owned accounts outside the primary working-set LRU.
+    /// Pending fetches retain full coverage; confirmed misses prefer gRPC-only
+    /// coverage until an account update promotes them to the primary tier.
+    secondary_subscriptions: Arc<AccountsLruCache>,
+    /// Bounded subset of the secondary tier proven missing by a winning RPC
+    /// result. Reconciliation uses this to distinguish them from pending or
+    /// failed fetches that must retain full transport coverage.
+    confirmed_missing_subscriptions: Arc<Mutex<HashSet<Pubkey>>>,
 
     capacity_eviction_protection: SharedCapacityEvictionProtectionPredicate,
 
@@ -802,12 +1620,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Creates a background task that periodically reconciles subscriptions
     /// with the LRU (repairing missing ones, e.g. after a partial
     /// resubscription) and optionally updates the active subscriptions gauge
+    #[allow(clippy::too_many_arguments)]
     fn start_active_subscriptions_updater<PubsubClient: ChainPubsubClient>(
         subscribed_accounts: Arc<AccountsLruCache>,
+        secondary_subscriptions: Arc<AccountsLruCache>,
+        confirmed_missing_subscriptions: Arc<Mutex<HashSet<Pubkey>>>,
         pubsub_client: Arc<PubsubClient>,
         removed_account_tx: mpsc::Sender<Pubkey>,
         subscription_key_locks: SubscriptionKeyLocks,
         subscription_ownership: SubscriptionOwnershipMap,
+        fetching_accounts: Arc<FetchingAccounts>,
+        capacity_eviction_protection: SharedCapacityEvictionProtectionPredicate,
         emit_metrics: bool,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
@@ -821,11 +1644,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 let pubsub_total =
                     subscription_reconciler::reconcile_subscriptions(
                         &subscribed_accounts,
+                        &secondary_subscriptions,
+                        &confirmed_missing_subscriptions,
                         pubsub_client.as_ref(),
                         &never_evicted,
                         &removed_account_tx,
                         Some(&subscription_key_locks),
                         Some(&subscription_ownership),
+                        Some(fetching_accounts.as_ref()),
+                        Some(&capacity_eviction_protection),
                     )
                     .await;
 
@@ -848,27 +1675,63 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
         chain_slot: ChainSlot,
     ) -> RemoteAccountProviderResult<Self> {
+        let secondary_subscriptions = Arc::new(AccountsLruCache::new(
+            // SAFETY: config guarantees a non-zero capacity
+            NonZeroUsize::new(config.secondary_subscriptions_lru_capacity())
+                .expect("lru capacity must be non-zero"),
+        ));
+        Self::new_with_secondary_subscriptions(
+            rpc_client,
+            pubsub_client,
+            subscription_forwarder,
+            config,
+            lrucache_subscribed_accounts,
+            secondary_subscriptions,
+            chain_slot,
+        )
+        .await
+    }
+
+    async fn new_with_secondary_subscriptions(
+        rpc_client: T,
+        pubsub_client: U,
+        subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
+        config: &RemoteAccountProviderConfig,
+        lrucache_subscribed_accounts: Arc<AccountsLruCache>,
+        secondary_subscriptions: Arc<AccountsLruCache>,
+        chain_slot: ChainSlot,
+    ) -> RemoteAccountProviderResult<Self> {
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
         let subscription_key_locks: SubscriptionKeyLocks =
             Arc::new(AsyncMutex::new(HashMap::new()));
+        let confirmed_missing_subscriptions =
+            Arc::new(Mutex::new(HashSet::new()));
         let subscription_ownership: SubscriptionOwnershipMap =
             Arc::new(AsyncMutex::new(HashMap::new()));
+        let fetching_accounts = Arc::<FetchingAccounts>::default();
+        let capacity_eviction_protection:
+            SharedCapacityEvictionProtectionPredicate =
+            Arc::new(RwLock::new(None));
 
         // The reconciler always runs: partial resubscriptions rely on it for
         // repair. The config flag only gates the metrics emission.
         let active_subscriptions_updater =
             Some(Self::start_active_subscriptions_updater(
                 lrucache_subscribed_accounts.clone(),
+                secondary_subscriptions.clone(),
+                confirmed_missing_subscriptions.clone(),
                 Arc::new(pubsub_client.clone()),
                 removed_account_tx.clone(),
                 subscription_key_locks.clone(),
                 subscription_ownership.clone(),
+                fetching_accounts.clone(),
+                capacity_eviction_protection.clone(),
                 config.enable_subscription_metrics(),
             ));
 
         let me = Self {
-            fetching_accounts: Arc::<FetchingAccounts>::default(),
+            fetching_accounts,
             next_fetching_account_generation: AtomicU64::default(),
             subscription_ownership,
             subscription_transition_lock: Arc::new(AsyncMutex::new(())),
@@ -879,7 +1742,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
             lrucache_subscribed_accounts,
-            capacity_eviction_protection: Arc::new(RwLock::new(None)),
+            secondary_subscriptions,
+            confirmed_missing_subscriptions,
+            capacity_eviction_protection,
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
@@ -972,7 +1837,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         config.resubscription_delay(),
                         config.grpc().clone(),
                         provider.pubsub_client.clone(),
-                        provider.lrucache_subscribed_accounts.clone(),
+                        Arc::new(TieredSubscribedAccountsTracker::new(
+                            provider.lrucache_subscribed_accounts.clone(),
+                            provider.secondary_subscriptions.clone(),
+                        )),
                     );
                 }
                 Ok(provider)
@@ -1059,9 +1927,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let cap = config.subscribed_accounts_lru_capacity();
             NonZeroUsize::new(cap).expect("non-zero capacity")
         }));
+        let secondary_subscriptions = Arc::new(AccountsLruCache::new({
+            let cap = config.secondary_subscriptions_lru_capacity();
+            NonZeroUsize::new(cap).expect("non-zero capacity")
+        }));
+        let subscribed_accounts_tracker =
+            Arc::new(TieredSubscribedAccountsTracker::new(
+                subscribed_accounts.clone(),
+                secondary_subscriptions.clone(),
+            ));
 
         let submux =
-            SubMuxClient::new(pubsubs, subscribed_accounts.clone(), None);
+            SubMuxClient::new(pubsubs, subscribed_accounts_tracker, None);
 
         if !config.program_subs().is_empty() {
             let count = config.program_subs().len();
@@ -1076,12 +1953,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let provider = RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
-        >::new(
+        >::new_with_secondary_subscriptions(
             rpc_client,
             submux,
             subscription_forwarder,
             config,
             subscribed_accounts,
+            secondary_subscriptions,
             ChainSlot::new(chain_slot),
         )
         .await?;
@@ -1090,6 +1968,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
         self.lrucache_subscribed_accounts.promote_multi(pubkeys);
+        // This runs on the per-transaction ensure path; the secondary tier
+        // only holds fetch-owned/missing accounts and is empty in the common
+        // case, so skip its lock entirely then. A promote missed due to a
+        // concurrent insert is harmless (LRU ordering is a heuristic).
+        if !self.secondary_subscriptions.is_vacant() {
+            self.secondary_subscriptions.promote_multi(pubkeys);
+        }
     }
 
     pub(crate) async fn get_slot(&self) -> RemoteAccountProviderResult<u64> {
@@ -1145,22 +2030,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         *guard = Some(Arc::new(predicate));
     }
 
-    fn capacity_eviction_protection_for(
-        &self,
-        pubkey: &Pubkey,
-    ) -> CapacityEvictionProtection {
-        let guard = self
-            .capacity_eviction_protection
-            .read()
-            .unwrap_or_else(|poison| poison.into_inner());
-        guard.as_ref().map(|predicate| predicate(pubkey)).unwrap_or(
-            CapacityEvictionProtection {
-                delegated: false,
-                undelegating: false,
-            },
-        )
-    }
-
     pub fn try_get_removed_account_rx(
         &self,
     ) -> RemoteAccountProviderResult<mpsc::Receiver<Pubkey>> {
@@ -1194,6 +2063,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let received_updates_count = self.received_updates_count.clone();
         let last_update_slot = self.last_update_slot.clone();
         let subscription_forwarder = self.subscription_forwarder.clone();
+        let subscription_tiers = Arc::new(self.subscription_tier_ctx());
         task::spawn(async move {
             while let Some(update) = updates.recv().await {
                 let slot = update.slot;
@@ -1229,64 +2099,241 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         }
                     };
 
-                    // Check if we're currently fetching this account
-                    let forward_update = {
-                        let mut fetching = fetching_accounts
-                            .lock()
-                            .expect("fetching_accounts lock poisoned");
-                        if let Some(generation) = fetching
-                            .get(&update.pubkey)
-                            .map(|state| state.generation)
-                        {
-                            if let Some(state) =
-                                remove_fetching_account_if_generation_matches(
-                                    &mut fetching,
-                                    &update.pubkey,
-                                    generation,
-                                )
-                            {
-                                // If subscription update is newer than when we started fetching,
-                                // resolve with the subscription data instead
-                                if slot >= state.fetch_start_slot {
-                                    trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Using subscription update instead of fetch");
-                                    metrics::observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
-                                        state.fetch_context,
-                                        ChainlinkPendingFetchLayer::RemoteAccountProvider,
-                                        ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
-                                        state.owner_started_at.elapsed().as_secs_f64(),
-                                    );
-                                    metrics::inc_chainlink_pending_fetch_accounts_with_context(
-                                        state.fetch_context,
-                                        ChainlinkPendingFetchLayer::RemoteAccountProvider,
-                                        ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
-                                        1,
-                                    );
+                    let account_is_found = remote_account.is_found();
 
-                                    // Resolve all pending requests with subscription data
-                                    for sender in state.waiters {
-                                        let _ = sender
-                                            .send(Ok(remote_account.clone()));
+                    // Fast path: fetch arbitration and tier movement only
+                    // apply while a fetch is pending or the account sits in
+                    // the secondary tier. All other updates forward without
+                    // taking the per-key guard or the transition lock.
+                    let needs_tier_handling =
+                        subscription_tiers.secondary.contains(&update.pubkey)
+                            || fetching_accounts
+                                .lock()
+                                .unwrap_or_else(|poison| poison.into_inner())
+                                .contains_key(&update.pubkey);
+
+                    // Serialize fetch arbitration and tier movement so a late
+                    // RPC result cannot overwrite this subscription update.
+                    let mut classification_error = None;
+                    let (forward_update, _accepted_update, resolved_fetch) =
+                        if !needs_tier_handling {
+                            // Record so a lagging RPC result cannot later win
+                            // classification against this newer update.
+                            if account_is_found {
+                                subscription_tiers
+                                    .record_classification(
+                                        update.pubkey,
+                                        slot,
+                                        SubscriptionClassificationSource::Subscription,
+                                    )
+                                    .await;
+                            }
+                            (
+                                Some(ForwardedSubscriptionUpdate {
+                                    pubkey: update.pubkey,
+                                    account: remote_account.clone(),
+                                    source: update.source,
+                                }),
+                                true,
+                                None,
+                            )
+                        } else {
+                            // The per-key guard serializes this update
+                            // against fetch resolutions and other transitions
+                            // of the same key; the tier helpers scope the
+                            // transition lock to their in-memory critical
+                            // sections.
+                            let _subscription_guard =
+                                subscription_key_owned_guard_from_map(
+                                    &subscription_tiers.subscription_key_locks,
+                                    update.pubkey,
+                                )
+                                .await;
+                            let classification_is_current = subscription_tiers
+                                .classification_is_current(
+                                    update.pubkey,
+                                    slot,
+                                    SubscriptionClassificationSource::Subscription,
+                                )
+                                .await;
+                            let result = if classification_is_current {
+                                let mut fetching =
+                                    fetching_accounts.lock().unwrap_or_else(
+                                        |poison| poison.into_inner(),
+                                    );
+                                if let Some(generation) = fetching
+                                    .get(&update.pubkey)
+                                    .map(|state| state.generation)
+                                {
+                                    if let Some(state) =
+                                    remove_fetching_account_if_generation_matches(
+                                        &mut fetching,
+                                        &update.pubkey,
+                                        generation,
+                                    )
+                                {
+                                    // If subscription update is newer than when we started fetching,
+                                    // resolve with the subscription data instead
+                                    if slot >= state.fetch_start_slot {
+                                        trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Using subscription update instead of fetch");
+                                        metrics::observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+                                            state.fetch_context,
+                                            ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                                            ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
+                                            state.owner_started_at.elapsed().as_secs_f64(),
+                                        );
+                                        metrics::inc_chainlink_pending_fetch_accounts_with_context(
+                                            state.fetch_context,
+                                            ChainlinkPendingFetchLayer::RemoteAccountProvider,
+                                            ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
+                                            1,
+                                        );
+
+                                        (None, true, Some((generation, state.waiters)))
+                                    } else {
+                                        // Subscription is stale, put the fetch tracking back
+                                        debug!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Received stale subscription update");
+                                        fetching.insert(update.pubkey, state);
+                                        (None, false, None)
                                     }
-                                    None
                                 } else {
-                                    // Subscription is stale, put the fetch tracking back
-                                    debug!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Received stale subscription update");
-                                    fetching.insert(update.pubkey, state);
-                                    None
+                                    (None, false, None)
+                                }
+                                } else {
+                                    (
+                                        Some(ForwardedSubscriptionUpdate {
+                                            pubkey: update.pubkey,
+                                            account: remote_account.clone(),
+                                            source: update.source,
+                                        }),
+                                        true,
+                                        None,
+                                    )
                                 }
                             } else {
-                                None
-                            }
-                        } else {
-                            Some(ForwardedSubscriptionUpdate {
-                                pubkey: update.pubkey,
-                                account: remote_account,
-                                source: update.source,
-                            })
-                        }
-                    };
+                                debug!(pubkey = %update.pubkey, slot, "Ignoring stale subscription classification");
+                                (None, false, None)
+                            };
 
-                    if let Some(forward_update) = forward_update {
+                            // The in-flight acquisition may not have created
+                            // the ownership entry yet; record so the later
+                            // RPC result loses arbitration.
+                            let apply_classification = result.1
+                                && account_is_found
+                                && match result.2.as_ref() {
+                                    Some((generation, _)) => {
+                                        subscription_tiers
+                                            .record_classification_for_pending_fetch(
+                                                update.pubkey,
+                                                slot,
+                                                SubscriptionClassificationSource::Subscription,
+                                                *generation,
+                                            )
+                                            .await
+                                    }
+                                    None => {
+                                        subscription_tiers
+                                            .record_classification(
+                                                update.pubkey,
+                                                slot,
+                                                SubscriptionClassificationSource::Subscription,
+                                            )
+                                            .await
+                                    }
+                                };
+                            if apply_classification
+                                && !subscription_tiers
+                                    .secondary
+                                    .contains(&update.pubkey)
+                                && result.2.is_some()
+                                && !subscription_tiers
+                                    .primary
+                                    .contains(&update.pubkey)
+                            {
+                                // The pending fetch resolved before its
+                                // subscription setup created any tier state;
+                                // admit the found account into the primary
+                                // tier now so it is never handed to waiters
+                                // without primary admission.
+                                if let Err(err) = subscription_tiers
+                                    .admit_resolved_fetch_to_primary(
+                                        update.pubkey,
+                                    )
+                                    .await
+                                {
+                                    warn!(pubkey = %update.pubkey, error = ?err, "Failed to admit resolved-fetch account to primary subscription tier");
+                                    subscription_tiers
+                                        .clear_rejected_fetch_classification(
+                                            &update.pubkey,
+                                        )
+                                        .await;
+                                    classification_error =
+                                        Some(err.to_string());
+                                }
+                            } else if apply_classification
+                                && subscription_tiers
+                                    .secondary
+                                    .contains(&update.pubkey)
+                            {
+                                match subscription_tiers
+                                    .try_promote_found_to_primary(
+                                        update.pubkey,
+                                        true,
+                                    )
+                                    .await
+                                {
+                                    Ok(PromotionOutcome::Promoted) => {}
+                                    // The key was promoted by another
+                                    // transition while this one was in
+                                    // flight; it holds primary membership.
+                                    Ok(PromotionOutcome::NotInSecondary) => {}
+                                    // Evicted mid-promotion: the detached
+                                    // eviction cleanup owns the follow-up;
+                                    // the found update must not be forwarded
+                                    // without primary membership.
+                                    Ok(PromotionOutcome::Evicted) => {
+                                        classification_error = Some(
+                                            RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                                                pubkey: update.pubkey,
+                                            }
+                                            .to_string(),
+                                        );
+                                    }
+                                    Ok(PromotionOutcome::NoCapacity) => {
+                                        let err = RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                                            pubkey: update.pubkey,
+                                        };
+                                        subscription_tiers
+                                            .finalize_rejected_promotion(
+                                                &update.pubkey,
+                                            )
+                                            .await;
+                                        classification_error =
+                                            Some(err.to_string());
+                                    }
+                                    Err(err) => {
+                                        warn!(pubkey = %update.pubkey, error = ?err, "Failed to promote found account to primary subscription tier");
+                                        classification_error =
+                                            Some(err.to_string());
+                                    }
+                                }
+                            }
+                            result
+                        };
+
+                    if let Some((_, waiters)) = resolved_fetch {
+                        for sender in waiters {
+                            let response = match classification_error.as_ref() {
+                                Some(err) => Err(RemoteAccountProviderError::AccountResolutionsFailed(err.clone())),
+                                None => Ok(remote_account.clone()),
+                            };
+                            let _ = sender.send(response);
+                        }
+                    }
+
+                    if let Some(forward_update) = forward_update
+                        .filter(|_| classification_error.is_none())
+                    {
                         if let Err(err) =
                             subscription_forwarder.send(forward_update).await
                         {
@@ -1432,6 +2479,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                 }
             };
+            for (pubkey, remote_account) in pubkeys.iter().zip(&remote_accounts)
+            {
+                let _subscription_guard =
+                    subscription_key_owned_guard_from_map(
+                        &self.subscription_key_locks,
+                        *pubkey,
+                    )
+                    .await;
+                self.subscription_tier_ctx()
+                    .apply_fetch_classification(
+                        pubkey,
+                        remote_account.slot(),
+                        !remote_account.is_found(),
+                    )
+                    .await?;
+            }
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
                 config.min_context_slot,
@@ -1554,7 +2617,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         > = HashMap::new();
 
         {
-            let mut fetching = self.fetching_accounts.lock().unwrap();
+            let mut fetching = self
+                .fetching_accounts
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
             for &pubkey in pubkeys {
                 let (sender, receiver) = oneshot::channel();
                 let mut claimed = false;
@@ -1615,6 +2681,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let mut subscription_setup_guard =
                 ClaimedSubscriptionSetupGuard::new(
                     self.fetching_accounts.clone(),
+                    self.subscription_ownership.clone(),
+                    self.subscription_transition_lock.clone(),
+                    self.lrucache_subscribed_accounts.clone(),
+                    self.secondary_subscriptions.clone(),
                     claimed_pubkeys.clone(),
                     claimed_generations.clone(),
                 );
@@ -1622,7 +2692,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .setup_subscriptions(&claimed_pubkeys, fetch_context)
                 .await
             {
-                subscription_setup_guard.cleanup_with_error(err.to_string());
+                subscription_setup_guard
+                    .cleanup_with_error(err.to_string())
+                    .await;
                 return Err(err);
             }
             subscription_setup_guard.disarm();
@@ -1822,7 +2894,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let mut errors = Vec::new();
         let mut acquired = Vec::new();
-        for (result, pubkey) in subscription_results.iter().zip(pubkeys.iter())
+        for (result, pubkey) in
+            subscription_results.into_iter().zip(pubkeys.iter())
         {
             match result {
                 Err(err) => {
@@ -1830,7 +2903,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         pubkey = %pubkey, err = ?err,
                         "Failed to subscribe to account"
                     );
-                    errors.push(format!("{}: {}", pubkey, err));
+                    errors.push((*pubkey, err));
                 }
                 Ok(()) => acquired.push(*pubkey),
             }
@@ -1863,12 +2936,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                 }
             }
+            // A single failure keeps its type so callers can react to
+            // specific variants (e.g. capacity exhaustion).
+            if errors.len() == 1 {
+                // SAFETY: len checked above
+                return Err(errors.pop().unwrap().1);
+            }
             return Err(
                 RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                     format!(
                         "{} subscription(s) failed: [{}]",
                         errors.len(),
-                        errors.join(", ")
+                        errors
+                            .iter()
+                            .map(|(pubkey, err)| format!("{pubkey}: {err}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     ),
                 ),
             );
@@ -1884,7 +2967,42 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         reason: SubscriptionReason,
         origin: SubscriptionRegistrationOrigin,
     ) -> RemoteAccountProviderResult<()> {
-        // 1. First realize subscription
+        if matches!(origin, SubscriptionRegistrationOrigin::Fetch(_))
+            && reason == SubscriptionReason::DirectAccount
+            && self.lrucache_subscribed_accounts.can_evict(pubkey)
+        {
+            return self
+                .subscription_tier_ctx()
+                .register_secondary(pubkey, reason, origin)
+                .await;
+        }
+
+        let tier_ctx = self.subscription_tier_ctx();
+        let has_capacity = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            tier_ctx
+                .has_capacity_with_protection(
+                    &self.lrucache_subscribed_accounts,
+                    pubkey,
+                )
+                .await
+        };
+        if !has_capacity {
+            inc_chainlink_subscription_registration_accounts(
+                origin,
+                reason.into(),
+                SubscriptionRegistrationOutcome::RejectedNoCapacity,
+            );
+            return Err(
+                RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                    pubkey: *pubkey,
+                },
+            );
+        }
+
+        // 1. First realize subscription. Runs outside the transition lock;
+        // the per-key guard held by the caller serializes this key.
         if let Err(err) = self.pubsub_client.subscribe(*pubkey, None).await {
             inc_chainlink_subscription_registration_accounts(
                 origin,
@@ -1898,46 +3016,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // If an account is evicted then we need to unsubscribe from it
         // and then inform upstream that we are no longer tracking it
         let add_outcome = {
-            let ownership = self.subscription_ownership.lock().await;
-            self.lrucache_subscribed_accounts.add_with_evict_filter(
-                *pubkey,
-                |candidate| {
-                    if !self.lrucache_subscribed_accounts.can_evict(candidate) {
-                        trace!(
-                            candidate = %candidate,
-                            "Skipping capacity eviction candidate from never-evict set"
-                        );
-                        return false;
-                    }
-
-                    let protection =
-                        self.capacity_eviction_protection_for(candidate);
-                    if protection.is_protected() {
-                        trace!(
-                            candidate = %candidate,
-                            delegated = protection.delegated,
-                            undelegating = protection.undelegating,
-                            "Skipping capacity eviction candidate protected by bank state"
-                        );
-                        return false;
-                    }
-
-                    let protected_by_ownership =
-                        ownership.get(candidate).is_some_and(|ownership| {
-                            ownership.contains(
-                                SubscriptionReason::UndelegationTracking,
-                            )
-                        });
-                    if protected_by_ownership {
-                        trace!(
-                            candidate = %candidate,
-                            reason = ?SubscriptionReason::UndelegationTracking,
-                            "Skipping capacity eviction candidate protected by subscription ownership"
-                        );
-                    }
-                    !protected_by_ownership
-                },
-            )
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            let add_outcome = tier_ctx
+                .add_with_protection(
+                    &self.lrucache_subscribed_accounts,
+                    *pubkey,
+                )
+                .await;
+            if !matches!(add_outcome, AddAccountOutcome::NoEvictableCandidate) {
+                self.remove_from_secondary(pubkey);
+            }
+            add_outcome
         };
 
         match add_outcome {
@@ -1957,105 +3047,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             }
             AddAccountOutcome::Evicted(evicted) => {
                 trace!(evicted = %evicted, "Evicting account");
-
-                // LRU eviction is a forced full removal, but keep local
-                // ownership intact until pubsub confirms the subscription is
-                // gone so a failed unsubscribe cannot leave ownership state
-                // inconsistent with the active subscription.
-                let cleanup_outcome =
-                    match self.pubsub_client.unsubscribe(evicted).await {
-                        Ok(()) => SubscriptionCleanupOutcome::Unsubscribed,
-                        Err(err)
-                            if matches!(
-                                err,
-                                RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                                    _
-                                )
-                            ) =>
-                        {
-                            debug!(evicted = %evicted, error = ?err, "Evicted pubsub subscription was already absent");
-                            SubscriptionCleanupOutcome::AlreadyAbsent
-                        }
-                        Err(err) => {
-                            // Should we retry here?
-                            warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
-                            inc_chainlink_subscription_cleanup_accounts(
-                                SubscriptionCleanupSource::CapacityEviction,
-                                SubscriptionCleanupOutcome::UnsubscribeFailed,
-                            );
-                            self.subscription_ownership
-                                .lock()
-                                .await
-                                .entry(*pubkey)
-                                .or_default()
-                                .acquire(reason);
-                            inc_chainlink_subscription_registration_accounts(
-                                origin,
-                                reason.into(),
-                                SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-                            );
-                            return Err(err);
-                        }
-                    };
-
-                inc_chainlink_subscription_cleanup_accounts(
-                    SubscriptionCleanupSource::CapacityEviction,
-                    cleanup_outcome,
-                );
+                tier_ctx.spawn_evicted_cleanup(evicted);
                 inc_chainlink_subscription_registration_accounts(
                     origin,
                     reason.into(),
                     SubscriptionRegistrationOutcome::EvictedCandidate,
                 );
-                self.subscription_ownership.lock().await.remove(&evicted);
-
-                // Inform upstream so it can remove it from the store. Failure
-                // to notify is non-fatal here because the LRU, pubsub, and
-                // ownership state have already been updated consistently.
-                if let Err(err) = self.send_removal_update(evicted).await {
-                    warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
-                }
             }
             AddAccountOutcome::NoEvictableCandidate => {
-                if let Err(err) = self.pubsub_client.unsubscribe(*pubkey).await
-                {
-                    if matches!(
-                        err,
-                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                            _
-                        )
-                    ) {
-                        // Nothing to roll back on pubsub; continue with the
-                        // local cleanup/removal for the rejected pubkey.
-                        inc_chainlink_subscription_cleanup_accounts(
-                            SubscriptionCleanupSource::RejectedNewSubscription,
-                            SubscriptionCleanupOutcome::AlreadyAbsent,
-                        );
-                    } else {
-                        debug!(
-                            pubkey = %pubkey,
-                            error = ?err,
-                            "Failed to unsubscribe new subscription after all LRU candidates were protected"
-                        );
-                        inc_chainlink_subscription_cleanup_accounts(
-                            SubscriptionCleanupSource::RejectedNewSubscription,
-                            SubscriptionCleanupOutcome::UnsubscribeFailed,
-                        );
-                        inc_chainlink_subscription_registration_accounts(
-                            origin,
-                            reason.into(),
-                            SubscriptionRegistrationOutcome::UnsubscribeRejectedError,
-                        );
-                        return Err(err);
-                    }
-                } else {
-                    inc_chainlink_subscription_cleanup_accounts(
-                        SubscriptionCleanupSource::RejectedNewSubscription,
-                        SubscriptionCleanupOutcome::Unsubscribed,
-                    );
-                }
-                self.subscription_ownership.lock().await.remove(pubkey);
-                self.lrucache_subscribed_accounts.remove(pubkey);
+                tier_ctx.cleanup_rejected_subscription(*pubkey).await?;
                 debug!(
                     pubkey = %pubkey,
                     "No evictable subscription capacity available; all LRU candidates are protected"
@@ -2091,6 +3091,39 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// part of the provider's internal logic.
     pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
         self.lrucache_subscribed_accounts.contains(pubkey)
+            || self.secondary_subscriptions.contains(pubkey)
+    }
+
+    /// Removes a pubkey from the secondary LRU; safe for never-evict keys.
+    fn remove_from_secondary(&self, pubkey: &Pubkey) {
+        if self.secondary_subscriptions.contains(pubkey) {
+            self.secondary_subscriptions.remove(pubkey);
+        }
+        self.confirmed_missing_subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(pubkey);
+    }
+
+    fn subscription_tier_ctx(&self) -> SubscriptionTierCtx<U> {
+        SubscriptionTierCtx {
+            primary: self.lrucache_subscribed_accounts.clone(),
+            secondary: self.secondary_subscriptions.clone(),
+            pubsub_client: self.pubsub_client.clone(),
+            subscription_ownership: self.subscription_ownership.clone(),
+            subscription_transition_lock: self
+                .subscription_transition_lock
+                .clone(),
+            subscription_key_locks: self.subscription_key_locks.clone(),
+            fetching_accounts: self.fetching_accounts.clone(),
+            capacity_eviction_protection: self
+                .capacity_eviction_protection
+                .clone(),
+            confirmed_missing_subscriptions: self
+                .confirmed_missing_subscriptions
+                .clone(),
+            removed_account_tx: self.removed_account_tx.clone(),
+        }
     }
 
     pub(crate) async fn evict_unwatched_with_subscription_lock<F, Fut>(
@@ -2166,16 +3199,106 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         skip_existing_reason: bool,
         origin: SubscriptionRegistrationOrigin,
     ) -> RemoteAccountProviderResult<()> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
+        // The per-key guard serializes every transition of this key,
+        // including the network calls made below. The transition lock is
+        // acquired only inside the tier-state helpers.
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
         let mut ownership = self.subscription_ownership.lock().await;
         if let Some(existing) = ownership.get_mut(pubkey) {
-            if !skip_existing_reason || !existing.contains(reason) {
+            let classification_placeholder_generation =
+                existing.classification_placeholder_generation;
+            let acquired_reason =
+                !skip_existing_reason || !existing.contains(reason);
+            if acquired_reason {
                 existing.acquire(reason);
             }
-            self.lrucache_subscribed_accounts.add(*pubkey);
+            drop(ownership);
+
+            let repair_result = if self
+                .lrucache_subscribed_accounts
+                .contains(pubkey)
+            {
+                self.lrucache_subscribed_accounts.promote_multi(&[pubkey]);
+                Ok(())
+            } else if self.secondary_subscriptions.contains(pubkey) {
+                self.secondary_subscriptions.promote_multi(&[pubkey]);
+                let keep_secondary =
+                    matches!(origin, SubscriptionRegistrationOrigin::Fetch(_))
+                        && reason == SubscriptionReason::DirectAccount;
+                if !keep_secondary {
+                    match self
+                        .subscription_tier_ctx()
+                        .try_promote_found_to_primary(*pubkey, true)
+                        .await
+                    {
+                        Ok(PromotionOutcome::Promoted) => Ok(()),
+                        // Promoted by another transition mid-flight; the key
+                        // holds primary membership and the reason stands.
+                        Ok(PromotionOutcome::NotInSecondary) => Ok(()),
+                        // Evicted by another key's admission mid-flight;
+                        // register it from scratch.
+                        Ok(PromotionOutcome::Evicted) => {
+                            self.register_subscription(pubkey, reason, origin)
+                                .await
+                        }
+                        Ok(PromotionOutcome::NoCapacity)
+                            if reason
+                                == SubscriptionReason::UndelegationTracking =>
+                        {
+                            Ok(())
+                        }
+                        Ok(PromotionOutcome::NoCapacity) => Err(
+                            RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                                pubkey: *pubkey,
+                            },
+                        ),
+                        Err(err) => Err(err),
+                    }
+                } else {
+                    let confirmed_missing = self
+                        .confirmed_missing_subscriptions
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner())
+                        .contains(pubkey);
+                    if confirmed_missing {
+                        // Flow the error into repair_result (no early return)
+                        // so the acquired-reason rollback below executes.
+                        match self.pubsub_client.subscribe(*pubkey, None).await
+                        {
+                            Ok(()) => {
+                                self.confirmed_missing_subscriptions
+                                    .lock()
+                                    .unwrap_or_else(|poison| {
+                                        poison.into_inner()
+                                    })
+                                    .remove(pubkey);
+                                Ok(())
+                            }
+                            Err(err) => Err(err),
+                        }
+                    } else {
+                        Ok(())
+                    }
+                }
+            } else {
+                self.register_subscription(pubkey, reason, origin).await
+            };
+
+            if let Err(err) = repair_result {
+                if acquired_reason {
+                    if let Some(existing) =
+                        self.subscription_ownership.lock().await.get_mut(pubkey)
+                    {
+                        if existing.release(reason) {
+                            existing.classification_placeholder_generation =
+                                classification_placeholder_generation;
+                        }
+                    }
+                }
+                return Err(err);
+            }
             inc_chainlink_subscription_registration_accounts(
                 origin,
                 reason.into(),
@@ -2211,7 +3334,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         reason: SubscriptionReason,
         mode: SubscriptionReleaseMode,
     ) -> RemoteAccountProviderResult<bool> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -2253,7 +3375,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 );
                 return Ok(false);
             }
-            ownership.remove(pubkey);
             released_count
         };
 
@@ -2270,7 +3391,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 reason.into(),
                 SubscriptionReleaseOutcome::Unsubscribed,
             );
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.subscription_ownership.lock().await.remove(pubkey);
             self.lrucache_subscribed_accounts.remove(pubkey);
+            self.remove_from_secondary(pubkey);
         } else {
             inc_chainlink_subscription_release_accounts(
                 reason.into(),
@@ -2296,7 +3421,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<bool> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -2360,7 +3484,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Ok(false);
             }
 
-            ownership.remove(pubkey);
             released_count
         };
 
@@ -2374,7 +3497,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     SubscriptionCleanupSource::DelegatedAccountSilent,
                     SubscriptionCleanupOutcome::Unsubscribed,
                 );
-                self.lrucache_subscribed_accounts.remove(pubkey);
+                {
+                    let _transition_guard =
+                        self.subscription_transition_lock.lock().await;
+                    self.subscription_ownership.lock().await.remove(pubkey);
+                    self.lrucache_subscribed_accounts.remove(pubkey);
+                    self.remove_from_secondary(pubkey);
+                }
                 trace!(
                     pubkey = %pubkey,
                     ?reason,
@@ -2398,7 +3527,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         SubscriptionCleanupSource::DelegatedAccountSilent,
                         SubscriptionCleanupOutcome::AlreadyAbsent,
                     );
-                    self.lrucache_subscribed_accounts.remove(pubkey);
+                    {
+                        let _transition_guard =
+                            self.subscription_transition_lock.lock().await;
+                        self.subscription_ownership.lock().await.remove(pubkey);
+                        self.lrucache_subscribed_accounts.remove(pubkey);
+                        self.remove_from_secondary(pubkey);
+                    }
                     trace!(
                         pubkey = %pubkey,
                         ?reason,
@@ -2447,7 +3582,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
-        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -2460,7 +3594,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(());
         }
 
-        if !self.lrucache_subscribed_accounts.contains(pubkey) {
+        if !self.lrucache_subscribed_accounts.contains(pubkey)
+            && !self.secondary_subscriptions.contains(pubkey)
+        {
             trace!(pubkey = %pubkey, "Already unsubscribed from LRU");
             inc_chainlink_subscription_cleanup_accounts(
                 SubscriptionCleanupSource::ManualUnsubscribe,
@@ -2478,7 +3614,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         .await;
 
         if success {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
             self.lrucache_subscribed_accounts.remove(pubkey);
+            self.remove_from_secondary(pubkey);
             self.subscription_ownership.lock().await.remove(pubkey);
         }
 
@@ -2505,13 +3644,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let commitment = self.rpc_client.commitment();
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
+        let subscription_tiers = self.subscription_tier_ctx();
         tokio::spawn(async move {
             use RemoteAccount::*;
 
             let fetch_started_at = std::time::Instant::now();
             // Helper to notify all pending requests of fetch failure
             let notify_error = |error_msg: &str| {
-                let mut fetching = fetching_accounts.lock().unwrap();
+                let mut fetching = fetching_accounts
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
                 warn!(
                     pubkey_count = pubkeys.len(),
                     pubkeys = %pubkeys_str(&pubkeys),
@@ -2721,6 +3863,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             let mut found_count = 0u64;
             let mut not_found_count = 0u64;
+            let mut not_found_pubkeys = HashSet::new();
 
             let remote_accounts: Vec<RemoteAccount> = pubkeys
                 .iter()
@@ -2736,6 +3879,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                     None if mark_empty_if_not_found.contains(pubkey) => {
                         not_found_count += 1;
+                        not_found_pubkeys.insert(*pubkey);
                         inc_chainlink_empty_placeholder_accounts_total_with_context(
                             fetch_context,
                             ChainlinkEmptyPlaceholderStage::ConvertedToEmpty,
@@ -2755,6 +3899,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                     None => {
                         not_found_count += 1;
+                        not_found_pubkeys.insert(*pubkey);
                         NotFound(response_slot)
                     }
                 })
@@ -2783,8 +3928,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             for (pubkey, remote_account) in
                 pubkeys.iter().zip(remote_accounts.iter())
             {
-                let waiters = {
-                    let mut fetching = fetching_accounts.lock().unwrap();
+                let (waiters, classification_result) = {
+                    // The per-key guard serializes this resolution against
+                    // subscription updates and other transitions of the same
+                    // key; the tier helpers scope the transition lock to
+                    // their in-memory critical sections.
+                    let _subscription_guard =
+                        subscription_key_owned_guard_from_map(
+                            &subscription_tiers.subscription_key_locks,
+                            *pubkey,
+                        )
+                        .await;
                     // Remove from fetching and get pending requests
                     // Note: the account might have been resolved by a
                     // subscription update already or replaced by a newer owner.
@@ -2792,20 +3946,37 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     else {
                         continue;
                     };
-                    if let Some(state) =
+                    let state = {
+                        let mut fetching = fetching_accounts
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner());
                         remove_fetching_account_if_generation_matches(
                             &mut fetching,
                             pubkey,
                             generation,
                         )
-                    {
+                    };
+                    if let Some(state) = state {
+                        let waiters = state.waiters;
+
+                        let classification_result = subscription_tiers
+                            .apply_fetch_classification(
+                                pubkey,
+                                response_slot,
+                                not_found_pubkeys.contains(pubkey),
+                            )
+                            .await;
                         observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
                             state.fetch_context,
                             ChainlinkPendingFetchLayer::RemoteAccountProvider,
-                            ChainlinkPendingFetchOutcome::OwnerSucceeded,
+                            if classification_result.is_ok() {
+                                ChainlinkPendingFetchOutcome::OwnerSucceeded
+                            } else {
+                                ChainlinkPendingFetchOutcome::OwnerFailed
+                            },
                             state.owner_started_at.elapsed().as_secs_f64(),
                         );
-                        state.waiters
+                        (waiters, classification_result)
                     } else {
                         inc_chainlink_pending_fetch_accounts_with_context(
                             fetch_context,
@@ -2813,7 +3984,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
                             1,
                         );
-                        // Account was already resolved or replaced, skip.
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
                                 "Account {pubkey} generation {generation} was already resolved or replaced"
@@ -2825,7 +3995,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                 // Send the fetch result to all waiting requests
                 for request in waiters {
-                    let _ = request.send(Ok(remote_account.clone()));
+                    let result = match &classification_result {
+                        Ok(()) => Ok(remote_account.clone()),
+                        Err(RemoteAccountProviderError::NoEvictableSubscriptionCapacity { pubkey }) => {
+                            Err(RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                                pubkey: *pubkey,
+                            })
+                        }
+                        Err(err) => Err(
+                            RemoteAccountProviderError::AccountResolutionsFailed(
+                                err.to_string(),
+                            ),
+                        ),
+                    };
+                    let _ = request.send(result);
                 }
             }
         });
@@ -2905,7 +4088,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Check if an account is currently pending (being fetched).
     pub(crate) fn is_pending(&self, pubkey: &Pubkey) -> bool {
-        let fetching = self.fetching_accounts.lock().unwrap();
+        let fetching = self
+            .fetching_accounts
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         fetching.contains_key(pubkey)
     }
 

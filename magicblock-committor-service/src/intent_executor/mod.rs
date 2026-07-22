@@ -128,6 +128,27 @@ pub struct IntentExecutionResult {
     pub successful_transaction_strategies: Vec<TransactionStrategy>,
 }
 
+impl IntentExecutionResult {
+    /// Whether a failed execution is safe to retry with a fresh executor.
+    ///
+    /// Never retries once action callbacks have reported (a retry would
+    /// double-report the outcome), and only retries plausibly transient
+    /// errors. Commit tasks give on-chain dedup (commit nonce) to re-executed
+    /// sends; action-only intents (`has_dedup_guard == false`) have no such
+    /// guard and can double-execute if their transaction landed unobserved,
+    /// so they only retry pre-send failures.
+    pub fn is_retriable(&self, has_dedup_guard: bool) -> bool {
+        let send_stage_failure = matches!(
+            &self.inner,
+            Err(IntentExecutorError::FailedToCommitError { .. })
+                | Err(IntentExecutorError::FailedToFinalizeError { .. })
+        );
+        self.callbacks_report.is_empty()
+            && matches!(&self.inner, Err(err) if err.is_transient())
+            && (has_dedup_guard || !send_stage_failure)
+    }
+}
+
 #[derive(Default)]
 pub struct IntentExecutionReport {
     /// Junk that needs to be cleaned up

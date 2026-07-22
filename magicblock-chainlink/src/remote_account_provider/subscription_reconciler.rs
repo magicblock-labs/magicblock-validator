@@ -1,4 +1,7 @@
-use std::{collections::HashSet, sync::atomic::AtomicU16};
+use std::{
+    collections::HashSet,
+    sync::{atomic::AtomicU16, Mutex},
+};
 
 use magicblock_core::logger::log_trace_warn;
 use magicblock_metrics::metrics::{
@@ -11,7 +14,9 @@ use tracing::*;
 
 use super::{
     subscription_key_owned_guard_from_map, AccountsLruCache, ChainPubsubClient,
-    SubscriptionKeyLocks, SubscriptionOwnershipMap, SubscriptionReason,
+    FetchingAccounts, PubsubTransport,
+    SharedCapacityEvictionProtectionPredicate, SubscriptionKeyLocks,
+    SubscriptionOwnershipMap, SubscriptionReason,
 };
 use crate::remote_account_provider::RemoteAccountProviderError;
 
@@ -96,16 +101,26 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
 ///
 /// Returns the expected total number of monitored accounts: LRU-tracked accounts
 /// plus never-evicted accounts.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &AccountsLruCache,
+    secondary_subscriptions: &AccountsLruCache,
+    confirmed_missing_subscriptions: &Mutex<HashSet<Pubkey>>,
     pubsub_client: &PubsubClient,
     never_evicted: &[Pubkey],
     removed_account_tx: &mpsc::Sender<Pubkey>,
     subscription_key_locks: Option<&SubscriptionKeyLocks>,
     subscription_ownership: Option<&SubscriptionOwnershipMap>,
+    fetching_accounts: Option<&FetchingAccounts>,
+    capacity_eviction_protection: Option<
+        &SharedCapacityEvictionProtectionPredicate,
+    >,
 ) -> usize {
     let lru_pubkeys = subscribed_accounts.pubkeys();
     let lru_count = lru_pubkeys.len();
+    let secondary_pubkeys = secondary_subscriptions.pubkeys();
+    let expected_total =
+        lru_count + never_evicted.len() + secondary_pubkeys.len();
 
     let Some(pubsub_snapshot) =
         pubsub_client.subscription_reconciliation_snapshot()
@@ -115,7 +130,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             never_evicted_count = never_evicted.len(),
             "Skipping subscription reconciliation because no connected pubsub client is available"
         );
-        return lru_count + never_evicted.len();
+        return expected_total;
     };
 
     // Never-evicted keys (e.g. the clock sysvar) are not tracked in the LRU,
@@ -129,12 +144,14 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
 
     let ensured_subs_without_never_evict: HashSet<_> = pubsub_snapshot
         .intersection
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|pk| !never_evicted.contains(pk))
         .collect();
     let partial_subs_without_never_evict: HashSet<_> = pubsub_snapshot
         .union
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|pk| !never_evicted.contains(pk))
         .collect();
 
@@ -142,10 +159,46 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     let extra_in_lru: HashSet<_> = lru_pubkeys
         .difference(&ensured_subs_without_never_evict)
         .collect();
-    // B) Subs not in LRU that some clients are subscribed to
+    // B) Subs not in either tier that some clients hold
     let extra_in_pubsub: HashSet<_> = partial_subs_without_never_evict
         .difference(&lru_pubkeys)
+        .filter(|pk| !secondary_pubkeys.contains(pk))
         .collect();
+    // C) Confirmed misses prefer gRPC-only coverage. Pending/unclassified
+    // secondary accounts, and every secondary account while gRPC is
+    // unavailable, retain full coverage.
+    let grpc_snapshot = pubsub_client
+        .subscription_reconciliation_snapshot_for_transport(
+            PubsubTransport::Grpc,
+        );
+    let websocket_snapshot = pubsub_client
+        .subscription_reconciliation_snapshot_for_transport(
+            PubsubTransport::WebSocket,
+        );
+    let secondary_to_repair: Vec<Pubkey> = {
+        let confirmed_missing = confirmed_missing_subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        secondary_pubkeys
+            .iter()
+            .filter(|pubkey| {
+                if confirmed_missing.contains(pubkey) {
+                    match &grpc_snapshot {
+                        Some(grpc) => {
+                            !grpc.intersection.contains(pubkey)
+                                || websocket_snapshot
+                                    .as_ref()
+                                    .is_some_and(|ws| ws.union.contains(pubkey))
+                        }
+                        None => !pubsub_snapshot.intersection.contains(pubkey),
+                    }
+                } else {
+                    !pubsub_snapshot.intersection.contains(pubkey)
+                }
+            })
+            .copied()
+            .collect()
+    };
 
     trace!(
         lru_count = lru_count,
@@ -295,7 +348,9 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 acquire_subscription_key_guard(subscription_key_locks, pubkey)
                     .await;
 
-            if subscribed_accounts.contains(&pubkey) {
+            if subscribed_accounts.contains(&pubkey)
+                || secondary_subscriptions.contains(&pubkey)
+            {
                 trace!(
                     pubkey = %pubkey,
                     "Skipping stale unsubscribe because pubkey entered LRU after reconciliation snapshot"
@@ -330,10 +385,99 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             .await;
         }
     }
+    // Restore the desired transport coverage for secondary accounts.
+    for pubkey in secondary_to_repair {
+        let _subscription_guard =
+            acquire_subscription_key_guard(subscription_key_locks, pubkey)
+                .await;
+
+        if !secondary_subscriptions.contains(&pubkey) {
+            continue;
+        }
+
+        let grpc_preferred = confirmed_missing_subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .contains(&pubkey);
+        let has_grpc = grpc_snapshot.is_some();
+        let preferred_result = if grpc_preferred && has_grpc {
+            pubsub_client.prefer_grpc_subscription(pubkey).await
+        } else {
+            pubsub_client.subscribe(pubkey, None).await
+        };
+        if let Err(err) = &preferred_result {
+            debug!(pubkey = %pubkey, error = ?err, "Secondary repair failed; restoring full coverage");
+        }
+        let preferred_covered = pubsub_client
+            .subscription_reconciliation_snapshot()
+            .is_some_and(|snapshot| snapshot.union.contains(&pubkey));
+        if preferred_result.is_err() || !preferred_covered {
+            if let Err(err) = pubsub_client.subscribe(pubkey, None).await {
+                warn!(pubkey = %pubkey, error = ?err, "Failed to repair secondary account subscription");
+            }
+        }
+
+        let covered = pubsub_client
+            .subscription_reconciliation_snapshot()
+            .is_some_and(|snapshot| snapshot.union.contains(&pubkey));
+        if covered {
+            continue;
+        }
+
+        if fetching_accounts.is_some_and(|fetching_accounts| {
+            fetching_accounts
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .contains_key(&pubkey)
+        }) {
+            continue;
+        }
+
+        if capacity_eviction_protection.is_some_and(|protection| {
+            protection
+                .read()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .as_ref()
+                .is_some_and(|predicate| predicate(&pubkey).is_protected())
+        }) {
+            continue;
+        }
+
+        if let Some(ownership) = subscription_ownership {
+            if ownership.lock().await.get(&pubkey).is_some_and(|own| {
+                own.contains(SubscriptionReason::UndelegationTracking)
+            }) {
+                continue;
+            }
+        }
+
+        warn!(pubkey = %pubkey, "Secondary repair did not take effect on any client; evicting account to prevent stale state");
+        secondary_subscriptions.remove(&pubkey);
+        confirmed_missing_subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(&pubkey);
+        if let Some(ownership) = subscription_ownership {
+            ownership.lock().await.remove(&pubkey);
+        }
+        if let Err(err) = removed_account_tx.send(pubkey).await {
+            warn!(pubkey = %pubkey, error = ?err, "Failed to send removal update for dead secondary subscription");
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::Reconciler,
+                SubscriptionCleanupOutcome::RemovalUpdateFailed,
+            );
+        } else {
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::Reconciler,
+                SubscriptionCleanupOutcome::Unsubscribed,
+            );
+        }
+    }
+
     // We assume that reconciling worked and now our subscribed accounts are up to date
     // Pubsubs should be subscribed to all accounts in LRU accounts and accounts that
     // are never evicted (not tracked in LRU)
-    lru_count + never_evicted.len()
+    expected_total
 }
 
 async fn acquire_subscription_key_guard(
@@ -362,16 +506,196 @@ mod tests {
     use super::*;
     use crate::{
         remote_account_provider::{
-            chain_pubsub_client::mock::ChainPubsubClientMock,
-            lru_cache::AccountsLruCache, pubsub_common::SubscriptionUpdate,
+            chain_pubsub_client::{
+                mock::ChainPubsubClientMock, PubsubTransport,
+            },
+            lru_cache::AccountsLruCache,
+            pubsub_common::SubscriptionUpdate,
+            CapacityEvictionProtection, FetchingAccountState,
         },
         testing::init_logger,
+        AccountFetchContext,
     };
 
     fn create_test_pubkey(seed: u8) -> Pubkey {
         let mut bytes = [0u8; 32];
         bytes[0] = seed;
         Pubkey::from(bytes)
+    }
+
+    /// Secondary-tier accounts in pubsub but not in the main LRU must not be
+    /// unsubscribed as stale.
+    #[tokio::test]
+    async fn test_secondary_account_is_not_unsubscribed() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        mock_client.set_transport(PubsubTransport::Grpc);
+
+        let pk = create_test_pubkey(1);
+        mock_client.insert_subscription(pk);
+
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        secondary.add(pk);
+
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+        reconcile_subscriptions(
+            &lru,
+            &secondary,
+            &Mutex::new(HashSet::new()),
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert!(mock_client.subscriptions_union().contains(&pk));
+        assert!(removed_rx.try_recv().is_err());
+    }
+
+    /// Secondary-tier accounts no client holds get their gRPC coverage restored.
+    #[tokio::test]
+    async fn test_secondary_account_grpc_coverage_is_restored() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        mock_client.set_transport(PubsubTransport::Grpc);
+
+        let pk = create_test_pubkey(1);
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        secondary.add(pk);
+
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+        reconcile_subscriptions(
+            &lru,
+            &secondary,
+            &Mutex::new(HashSet::new()),
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        assert!(mock_client.subscriptions_union().contains(&pk));
+        assert!(removed_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_secondary_noop_repair_respects_protections_then_evicts() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        mock_client.set_transport(PubsubTransport::Grpc);
+
+        let pk = create_test_pubkey(1);
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        secondary.add(pk);
+        let confirmed_missing = Mutex::new(HashSet::from([pk]));
+        let ownership: SubscriptionOwnershipMap = Default::default();
+        ownership
+            .lock()
+            .await
+            .entry(pk)
+            .or_default()
+            .acquire(SubscriptionReason::DirectAccount);
+        let fetching_accounts = FetchingAccounts::default();
+        let capacity_eviction_protection:
+            SharedCapacityEvictionProtectionPredicate = Default::default();
+        fetching_accounts.lock().unwrap().insert(
+            pk,
+            FetchingAccountState {
+                generation: 1,
+                fetch_start_slot: 0,
+                fetch_context: AccountFetchContext::rpc_get_account(),
+                owner_started_at: std::time::Instant::now(),
+                waiters: Vec::new(),
+            },
+        );
+        mock_client.silently_noop_next_subscriptions(2);
+
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+        reconcile_subscriptions(
+            &lru,
+            &secondary,
+            &confirmed_missing,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&capacity_eviction_protection),
+        )
+        .await;
+
+        assert!(secondary.contains(&pk));
+        assert!(confirmed_missing.lock().unwrap().contains(&pk));
+        assert!(ownership.lock().await.contains_key(&pk));
+        assert!(removed_rx.try_recv().is_err());
+        assert_eq!(mock_client.subscribe_attempts(), 2);
+
+        fetching_accounts.lock().unwrap().remove(&pk);
+        *capacity_eviction_protection.write().unwrap() =
+            Some(Arc::new(|_| CapacityEvictionProtection {
+                delegated: true,
+                undelegating: false,
+            }));
+        mock_client.silently_noop_next_subscriptions(2);
+        reconcile_subscriptions(
+            &lru,
+            &secondary,
+            &confirmed_missing,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&capacity_eviction_protection),
+        )
+        .await;
+
+        assert!(secondary.contains(&pk));
+        assert!(confirmed_missing.lock().unwrap().contains(&pk));
+        assert!(ownership.lock().await.contains_key(&pk));
+        assert!(removed_rx.try_recv().is_err());
+        assert_eq!(mock_client.subscribe_attempts(), 4);
+
+        *capacity_eviction_protection.write().unwrap() = None;
+        mock_client.silently_noop_next_subscriptions(2);
+        reconcile_subscriptions(
+            &lru,
+            &secondary,
+            &confirmed_missing,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&capacity_eviction_protection),
+        )
+        .await;
+
+        assert!(!secondary.contains(&pk));
+        assert!(!confirmed_missing.lock().unwrap().contains(&pk));
+        assert!(!ownership.lock().await.contains_key(&pk));
+        assert_eq!(removed_rx.try_recv(), Ok(pk));
+        assert_eq!(mock_client.subscribe_attempts(), 6);
     }
 
     #[tokio::test]
@@ -595,11 +919,15 @@ mod tests {
         let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
         reconcile_subscriptions(
             &lru,
+            &AccountsLruCache::new(NonZeroUsize::new(10).unwrap()),
+            &Mutex::new(HashSet::new()),
             &mock_client,
             &[],
             &removed_tx,
             None,
             Some(&ownership),
+            None,
+            None,
         )
         .await;
 
@@ -870,11 +1198,16 @@ mod tests {
         never_evicted: &[Pubkey],
         removed_account_tx: &mpsc::Sender<Pubkey>,
     ) -> usize {
+        let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
         reconcile_subscriptions(
             subscribed_accounts,
+            &secondary,
+            &Mutex::new(HashSet::new()),
             pubsub_client,
             never_evicted,
             removed_account_tx,
+            None,
+            None,
             None,
             None,
         )

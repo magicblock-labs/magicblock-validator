@@ -57,6 +57,9 @@ impl IntentExecutionClient {
         // Send with retries
         let send_error_mapper = IntentErrorMapper {
             transaction_error_mapper: IntentTransactionErrorMapper { tasks },
+            has_dedup_guard: tasks
+                .iter()
+                .any(|task| !matches!(task, BaseTaskImpl::BaseAction(_))),
         };
         let attempt = || async {
             self.send_prepared_message(authority, prepared_message.clone())
@@ -83,6 +86,9 @@ impl IntentExecutionClient {
         // Send with retries
         let send_error_mapper = IntentErrorMapper {
             transaction_error_mapper: IntentTransactionErrorMapper { tasks },
+            // Resending the identical already-signed transaction can't
+            // double-apply actions - it either lands once or is rejected.
+            has_dedup_guard: true,
         };
         let attempt = || async {
             self.rpc_client
@@ -243,6 +249,9 @@ impl IntentExecutionClient {
 
 struct IntentErrorMapper<TxMap> {
     transaction_error_mapper: TxMap,
+    /// Commit/finalize/undelegate tasks make a duplicate landing fail
+    /// the whole retried transaction, so re-sends cannot double-apply
+    has_dedup_guard: bool,
 }
 
 impl<TxMap> SendErrorMapper<InternalError> for IntentErrorMapper<TxMap>
@@ -268,11 +277,26 @@ where
         }
     }
 
-    fn decide_flow(err: &Self::ExecutionError) -> ControlFlow<(), Duration> {
-        match err {
-            TransactionStrategyExecutionError::InternalError(
-                InternalError::MagicBlockRpcClientError(err),
-            ) => decide_rpc_error_flow(err),
+    fn decide_flow(
+        &self,
+        err: &Self::ExecutionError,
+    ) -> ControlFlow<(), Duration> {
+        let TransactionStrategyExecutionError::InternalError(
+            InternalError::MagicBlockRpcClientError(err),
+        ) = err
+        else {
+            return ControlFlow::Break(());
+        };
+        if self.has_dedup_guard {
+            return decide_rpc_error_flow(err);
+        }
+        // Action-only transactions have no on-chain dedup: a re-send
+        // with a fresh blockhash could execute the actions twice.
+        // Only failures from before signing & sending are retriable.
+        match err.as_ref() {
+            MagicBlockRpcClientError::GetLatestBlockhash(_) => {
+                decide_rpc_error_flow(err)
+            }
             _ => ControlFlow::Break(()),
         }
     }
@@ -296,7 +320,10 @@ where
         }
     }
 
-    fn decide_flow(err: &Self::ExecutionError) -> ControlFlow<(), Duration> {
+    fn decide_flow(
+        &self,
+        err: &Self::ExecutionError,
+    ) -> ControlFlow<(), Duration> {
         match err {
             TransactionStrategyExecutionError::InternalError(
                 InternalError::MagicBlockRpcClientError(err),
@@ -315,6 +342,7 @@ impl SendErrorMapper<MagicBlockRpcClientError> for DefaultGetErrorMapper {
     }
 
     fn decide_flow(
+        &self,
         mapped_error: &Self::ExecutionError,
     ) -> ControlFlow<(), Duration> {
         decide_rpc_error_flow(mapped_error)
