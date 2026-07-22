@@ -65,17 +65,21 @@ use magicblock_metrics::{
     metrics,
     metrics::{
         dec_chainlink_pending_fetch_waiters_gauge, inc_account_fetches_failed,
-        inc_account_fetches_found, inc_account_fetches_not_found,
+        inc_account_fetches_found_with_context,
+        inc_account_fetches_not_found_with_context,
         inc_account_fetches_success,
-        inc_chainlink_empty_placeholder_accounts_total,
-        inc_chainlink_pending_fetch_accounts,
-        inc_chainlink_pending_fetch_waiters,
+        inc_chainlink_empty_placeholder_accounts_total_with_context,
+        inc_chainlink_pending_fetch_accounts_with_context,
         inc_chainlink_pending_fetch_waiters_gauge,
+        inc_chainlink_pending_fetch_waiters_with_context,
         inc_chainlink_subscription_cleanup_accounts,
         inc_chainlink_subscription_registration_accounts,
         inc_chainlink_subscription_release_accounts,
-        observe_chainlink_pending_fetch_owner_duration_seconds,
-        set_monitored_accounts_count, AccountFetchOrigin,
+        observe_chainlink_companion_fetch_attempts,
+        observe_chainlink_companion_fetch_duration_seconds,
+        observe_chainlink_pending_fetch_owner_duration_seconds_with_context,
+        set_monitored_accounts_count, AccountFetchContext, AccountFetchReason,
+        ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
         ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
         ChainlinkPendingFetchOutcome, Outcome, SubscriptionCleanupOutcome,
         SubscriptionCleanupSource, SubscriptionReasonLabel,
@@ -287,7 +291,7 @@ type FetchingAccountGeneration = u64;
 struct FetchingAccountState {
     generation: FetchingAccountGeneration,
     fetch_start_slot: u64,
-    fetch_origin: AccountFetchOrigin,
+    fetch_context: AccountFetchContext,
     owner_started_at: std::time::Instant,
     waiters: Vec<oneshot::Sender<FetchResult>>,
 }
@@ -370,8 +374,8 @@ impl ClaimedSubscriptionSetupGuard {
                         generation,
                     )
                 {
-                    observe_chainlink_pending_fetch_owner_duration_seconds(
-                        state.fetch_origin,
+                    observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+                        state.fetch_context,
                         ChainlinkPendingFetchLayer::RemoteAccountProvider,
                         ChainlinkPendingFetchOutcome::OwnerFailed,
                         state.owner_started_at.elapsed().as_secs_f64(),
@@ -623,18 +627,49 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
 // -----------------
 // Configs
 // -----------------
+const DEFAULT_MATCH_SLOTS_MAX_RETRIES: u64 = 10;
+const DEFAULT_MATCH_SLOTS_RETRY_INTERVAL_MS: u64 = 50;
+
 pub struct MatchSlotsConfig {
     pub max_retries: u64,
     pub retry_interval_ms: u64,
     pub min_context_slot: Option<u64>,
+    pub companion_fetch_kind: ChainlinkCompanionFetchKind,
 }
 
-impl Default for MatchSlotsConfig {
+impl MatchSlotsConfig {
+    pub fn new(companion_fetch_kind: ChainlinkCompanionFetchKind) -> Self {
+        Self {
+            max_retries: DEFAULT_MATCH_SLOTS_MAX_RETRIES,
+            retry_interval_ms: DEFAULT_MATCH_SLOTS_RETRY_INTERVAL_MS,
+            min_context_slot: None,
+            companion_fetch_kind,
+        }
+    }
+}
+
+struct MatchSlotsRetryConfig {
+    max_retries: u64,
+    retry_interval_ms: u64,
+    min_context_slot: Option<u64>,
+}
+
+impl Default for MatchSlotsRetryConfig {
     fn default() -> Self {
         Self {
-            max_retries: 10,
-            retry_interval_ms: 50,
+            max_retries: DEFAULT_MATCH_SLOTS_MAX_RETRIES,
+            retry_interval_ms: DEFAULT_MATCH_SLOTS_RETRY_INTERVAL_MS,
             min_context_slot: None,
+        }
+    }
+}
+
+impl From<&MatchSlotsConfig> for MatchSlotsRetryConfig {
+    fn from(config: &MatchSlotsConfig) -> Self {
+        Self {
+            max_retries: config.max_retries,
+            retry_interval_ms: config.retry_interval_ms,
+            min_context_slot: config.min_context_slot,
         }
     }
 }
@@ -642,7 +677,7 @@ impl Default for MatchSlotsConfig {
 fn next_match_slots_retry(
     retries: &mut u64,
     start: std::time::Instant,
-    config: &MatchSlotsConfig,
+    config: &MatchSlotsRetryConfig,
 ) -> Result<Duration, String> {
     *retries += 1;
     if *retries == config.max_retries {
@@ -660,14 +695,37 @@ fn next_match_slots_retry(
 fn next_match_slots_rpc_error_retry(
     retries: &mut u64,
     start: std::time::Instant,
-    config: &MatchSlotsConfig,
+    config: &MatchSlotsRetryConfig,
 ) -> Result<Duration, String> {
     next_match_slots_retry(retries, start, config)
         .map(|delay| delay.max(RPC_FETCH_RETRY_DELAY))
 }
 
-fn match_slots_retry_delay(config: &MatchSlotsConfig) -> Duration {
+fn match_slots_retry_delay(config: &MatchSlotsRetryConfig) -> Duration {
     Duration::from_millis(config.retry_interval_ms)
+}
+
+fn observe_companion_fetch_if_configured(
+    context: AccountFetchContext,
+    kind: Option<ChainlinkCompanionFetchKind>,
+    outcome: ChainlinkCompanionFetchOutcome,
+    attempts: u64,
+    started_at: std::time::Instant,
+) {
+    if let Some(kind) = kind {
+        observe_chainlink_companion_fetch_attempts(
+            context,
+            kind,
+            outcome,
+            attempts as f64,
+        );
+        observe_chainlink_companion_fetch_duration_seconds(
+            context,
+            kind,
+            outcome,
+            started_at.elapsed().as_secs_f64(),
+        );
+    }
 }
 
 impl
@@ -831,7 +889,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let updates = me.pubsub_client.take_updates();
         me.listen_for_account_updates(updates)?;
         let clock_remote_account = me
-            .try_get(clock::ID, AccountFetchOrigin::GetAccount)
+            .try_get(
+                clock::ID,
+                AccountFetchContext::internal(AccountFetchReason::Clock),
+            )
             .await?;
         match clock_remote_account {
             RemoteAccount::NotFound(_) => {
@@ -1188,14 +1249,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 // resolve with the subscription data instead
                                 if slot >= state.fetch_start_slot {
                                     trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Using subscription update instead of fetch");
-                                    metrics::observe_chainlink_pending_fetch_owner_duration_seconds(
-                                        state.fetch_origin,
+                                    metrics::observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+                                        state.fetch_context,
                                         ChainlinkPendingFetchLayer::RemoteAccountProvider,
                                         ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
                                         state.owner_started_at.elapsed().as_secs_f64(),
                                     );
-                                    metrics::inc_chainlink_pending_fetch_accounts(
-                                        state.fetch_origin,
+                                    metrics::inc_chainlink_pending_fetch_accounts_with_context(
+                                        state.fetch_context,
                                         ChainlinkPendingFetchLayer::RemoteAccountProvider,
                                         ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
                                         1,
@@ -1244,41 +1305,68 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     /// Convenience wrapper around [`RemoteAccountProvider::try_get_multi`] to fetch
     /// a single account.
-    #[instrument(skip(self))]
+    #[instrument(skip(self, fetch_context))]
     pub async fn try_get(
         &self,
         pubkey: Pubkey,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], None, fetch_origin, None)
+        self.try_get_multi(&[pubkey], None, fetch_context, None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
             .map(|mut accs| accs.drain(..).next().unwrap())
     }
 
-    #[instrument(skip(self, pubkeys, config))]
+    #[instrument(skip(self, pubkeys, config, fetch_context))]
     pub async fn try_get_multi_until_slots_match(
         &self,
         pubkeys: &[Pubkey],
         config: Option<MatchSlotsConfig>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         use SlotsMatchResult::*;
-
+        let fetch_context = fetch_context.into();
+        let companion_fetch_kind =
+            config.as_ref().map(|config| config.companion_fetch_kind);
+        let config = config
+            .as_ref()
+            .map(MatchSlotsRetryConfig::from)
+            .unwrap_or_default();
+        let companion_fetch_started_at = std::time::Instant::now();
+        let mut companion_fetch_attempts = 1u64;
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
-        let mut remote_accounts = self
-            .try_get_multi(pubkeys, None, fetch_origin, None)
-            .await?;
+        let mut remote_accounts = match self
+            .try_get_multi(pubkeys, None, fetch_context, None)
+            .await
+        {
+            Ok(accounts) => accounts,
+            Err(err) => {
+                observe_companion_fetch_if_configured(
+                    fetch_context,
+                    companion_fetch_kind,
+                    ChainlinkCompanionFetchOutcome::FailedRpc,
+                    companion_fetch_attempts,
+                    companion_fetch_started_at,
+                );
+                return Err(err);
+            }
+        };
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
-            config.as_ref().and_then(|c| c.min_context_slot),
+            config.min_context_slot,
         ) {
+            observe_companion_fetch_if_configured(
+                fetch_context,
+                companion_fetch_kind,
+                ChainlinkCompanionFetchOutcome::Succeeded,
+                companion_fetch_attempts,
+                companion_fetch_started_at,
+            );
             return Ok(remote_accounts);
         }
 
-        let config = config.unwrap_or_default();
         // Capture the fetch start slot once and reuse it across retries. When a
         // caller provides a stricter min_context_slot, the forced refetch must
         // start from that slot rather than the provider's possibly lagging
@@ -1306,8 +1394,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     pubkey_slots
                 );
             }
+            companion_fetch_attempts += 1;
             remote_accounts = match self
-                .fetch_multi_rpc_only(pubkeys, fetch_start_slot, fetch_origin)
+                .fetch_multi_rpc_only(pubkeys, fetch_start_slot, fetch_context)
                 .await
             {
                 Ok(remote_accounts) => remote_accounts,
@@ -1330,7 +1419,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             tokio::time::sleep(retry_delay).await;
                             continue;
                         }
-                        Err(_) => return Err(err),
+                        Err(_) => {
+                            observe_companion_fetch_if_configured(
+                                fetch_context,
+                                companion_fetch_kind,
+                                ChainlinkCompanionFetchOutcome::FailedRpc,
+                                companion_fetch_attempts,
+                                companion_fetch_started_at,
+                            );
+                            return Err(err);
+                        }
                     }
                 }
             };
@@ -1339,6 +1437,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 config.min_context_slot,
             );
             if let Match = slots_match_result {
+                observe_companion_fetch_if_configured(
+                    fetch_context,
+                    companion_fetch_kind,
+                    ChainlinkCompanionFetchOutcome::Succeeded,
+                    companion_fetch_attempts,
+                    companion_fetch_started_at,
+                );
                 return Ok(remote_accounts);
             }
 
@@ -1368,6 +1473,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         // SAFETY: Match case is already handled and returns
                         Match => unreachable!("we would have returned above"),
                         Mismatch => {
+                            observe_companion_fetch_if_configured(
+                                fetch_context,
+                                companion_fetch_kind,
+                                ChainlinkCompanionFetchOutcome::FailedSlotMismatch,
+                                companion_fetch_attempts,
+                                companion_fetch_started_at,
+                            );
                             return Err(
                                 RemoteAccountProviderError::SlotsDidNotMatch(
                                     pubkeys_str(pubkeys),
@@ -1377,6 +1489,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             );
                         }
                         MatchButBelowMinContextSlot(slot) => {
+                            observe_companion_fetch_if_configured(
+                                fetch_context,
+                                companion_fetch_kind,
+                                ChainlinkCompanionFetchOutcome::FailedMinContextSlot,
+                                companion_fetch_attempts,
+                                companion_fetch_started_at,
+                            );
                             return Err(RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
                                 pubkeys_str(pubkeys),
                                 remote_account_slots,
@@ -1393,17 +1512,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Gets the accounts for the given pubkeys by fetching from RPC.
     /// Always fetches fresh data. FetchCloner handles request deduplication.
     /// Subscribes first to catch any updates that arrive during fetch.
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found))]
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, fetch_context))]
     pub async fn try_get_multi(
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: impl Into<AccountFetchContext>,
         fetch_start_slot: Option<u64>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
         }
+        let fetch_context = fetch_context.into();
 
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!("Fetching accounts");
@@ -1444,14 +1564,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 match fetching.entry(pubkey) {
                     Entry::Occupied(mut entry) => {
                         entry.get_mut().waiters.push(sender);
-                        inc_chainlink_pending_fetch_accounts(
-                            fetch_origin,
+                        inc_chainlink_pending_fetch_accounts_with_context(
+                            fetch_context,
                             layer,
                             ChainlinkPendingFetchOutcome::JoinedExisting,
                             1,
                         );
-                        inc_chainlink_pending_fetch_waiters(
-                            fetch_origin,
+                        inc_chainlink_pending_fetch_waiters_with_context(
+                            fetch_context,
                             layer,
                             1,
                         );
@@ -1465,12 +1585,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         entry.insert(FetchingAccountState {
                             generation,
                             fetch_start_slot,
-                            fetch_origin,
+                            fetch_context,
                             owner_started_at: std::time::Instant::now(),
                             waiters: vec![sender],
                         });
-                        inc_chainlink_pending_fetch_accounts(
-                            fetch_origin,
+                        inc_chainlink_pending_fetch_accounts_with_context(
+                            fetch_context,
                             layer,
                             ChainlinkPendingFetchOutcome::Owned,
                             1,
@@ -1499,7 +1619,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     claimed_generations.clone(),
                 );
             if let Err(err) = self
-                .setup_subscriptions(&claimed_pubkeys, fetch_origin)
+                .setup_subscriptions(&claimed_pubkeys, fetch_context)
                 .await
             {
                 subscription_setup_guard.cleanup_with_error(err.to_string());
@@ -1516,7 +1636,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     claimed_generations.clone(),
                     mark_empty_if_not_found,
                     min_context_slot,
-                    fetch_origin,
+                    fetch_context,
                 );
             }
         }
@@ -1582,7 +1702,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         // This must stay a single wire call so all results share one
         // response slot (the slot-match contract callers verify);
@@ -1664,8 +1784,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .collect();
 
         inc_account_fetches_success(pubkeys.len() as u64);
-        inc_account_fetches_found(fetch_origin, found_count);
-        inc_account_fetches_not_found(fetch_origin, not_found_count);
+        inc_account_fetches_found_with_context(fetch_context, found_count);
+        inc_account_fetches_not_found_with_context(
+            fetch_context,
+            not_found_count,
+        );
 
         Ok(remote_accounts)
     }
@@ -1673,7 +1796,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     async fn setup_subscriptions(
         &self,
         pubkeys: &[Pubkey],
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> RemoteAccountProviderResult<()> {
         if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys_str = pubkeys
@@ -1691,7 +1814,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 self.acquire_subscription_with_origin(
                     pubkey,
                     SubscriptionReason::DirectAccount,
-                    SubscriptionRegistrationOrigin::Fetch(fetch_origin),
+                    SubscriptionRegistrationOrigin::Fetch(fetch_context),
                 )
                 .await
             }))
@@ -2375,7 +2498,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         generations: HashMap<Pubkey, FetchingAccountGeneration>,
         mark_empty_if_not_found: Option<&[Pubkey]>,
         min_context_slot: u64,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) {
         let rpc_client = self.rpc_client.clone();
         let fetching_accounts = self.fetching_accounts.clone();
@@ -2394,7 +2517,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     pubkeys = %pubkeys_str(&pubkeys),
                     min_context_slot = min_context_slot,
                     commitment = ?commitment,
-                    fetch_origin = %fetch_origin,
+                    fetch_entrypoint = %fetch_context.entrypoint(),
+                    fetch_reason = %fetch_context.reason(),
                     elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
                     error = %error_msg,
                     "{error_msg}"
@@ -2412,8 +2536,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 generation,
                             )
                         {
-                            observe_chainlink_pending_fetch_owner_duration_seconds(
-                                state.fetch_origin,
+                            observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+                                state.fetch_context,
                                 ChainlinkPendingFetchLayer::RemoteAccountProvider,
                                 ChainlinkPendingFetchOutcome::OwnerFailed,
                                 state.owner_started_at.elapsed().as_secs_f64(),
@@ -2555,18 +2679,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         let attempt =
                             RPC_FETCH_MAX_RETRIES - remaining_retries + 1;
                         warn!(
-                            pubkey_count = pubkeys.len(),
-                            pubkeys = %pubkeys_str(&pubkeys),
-                            attempt = attempt,
-                            max_retries = RPC_FETCH_MAX_RETRIES,
-                            remaining_retries = remaining_retries.saturating_sub(1),
-                            timeout_ms = RPC_FETCH_TIMEOUT.as_millis() as u64,
-                            elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
-                            min_context_slot = min_context_slot,
-                            commitment = ?commitment,
-                            fetch_origin = %fetch_origin,
-                            "RPC call timeout. Retrying..."
-                        );
+                                pubkey_count = pubkeys.len(),
+                                pubkeys = %pubkeys_str(&pubkeys),
+                                attempt = attempt,
+                                max_retries = RPC_FETCH_MAX_RETRIES,
+                                remaining_retries = remaining_retries.saturating_sub(1),
+                                timeout_ms = RPC_FETCH_TIMEOUT.as_millis() as u64,
+                                elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
+                                min_context_slot = min_context_slot,
+                                commitment = ?commitment,
+                                fetch_entrypoint = %fetch_context.entrypoint(),
+                        fetch_reason = %fetch_context.reason(),
+                                "RPC call timeout. Retrying..."
+                            );
                         remaining_retries -= 1;
                         if remaining_retries == 0 {
                             let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
@@ -2611,8 +2736,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                     None if mark_empty_if_not_found.contains(pubkey) => {
                         not_found_count += 1;
-                        inc_chainlink_empty_placeholder_accounts_total(
-                            fetch_origin,
+                        inc_chainlink_empty_placeholder_accounts_total_with_context(
+                            fetch_context,
                             ChainlinkEmptyPlaceholderStage::ConvertedToEmpty,
                             Outcome::Success,
                         );
@@ -2637,8 +2762,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             // Update metrics for successful RPC fetch
             inc_account_fetches_success(pubkeys.len() as u64);
-            inc_account_fetches_found(fetch_origin, found_count);
-            inc_account_fetches_not_found(fetch_origin, not_found_count);
+            inc_account_fetches_found_with_context(fetch_context, found_count);
+            inc_account_fetches_not_found_with_context(
+                fetch_context,
+                not_found_count,
+            );
 
             if tracing::enabled!(tracing::Level::TRACE) {
                 let pubkeys = pubkeys
@@ -2671,16 +2799,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             generation,
                         )
                     {
-                        observe_chainlink_pending_fetch_owner_duration_seconds(
-                            state.fetch_origin,
+                        observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
+                            state.fetch_context,
                             ChainlinkPendingFetchLayer::RemoteAccountProvider,
                             ChainlinkPendingFetchOutcome::OwnerSucceeded,
                             state.owner_started_at.elapsed().as_secs_f64(),
                         );
                         state.waiters
                     } else {
-                        inc_chainlink_pending_fetch_accounts(
-                            fetch_origin,
+                        inc_chainlink_pending_fetch_accounts_with_context(
+                            fetch_context,
                             ChainlinkPendingFetchLayer::RemoteAccountProvider,
                             ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
                             1,

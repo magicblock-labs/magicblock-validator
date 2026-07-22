@@ -8,7 +8,7 @@ use magicblock_chainlink::{
 use magicblock_core::{
     link::transactions::TransactionSchedulerHandle, traits::LatestBlockProvider,
 };
-use magicblock_metrics::metrics::AccountFetchOrigin;
+use magicblock_metrics::metrics::AccountFetchContext;
 use magicblock_program::instruction_utils::InstructionUtils;
 use solana_hash::Hash;
 use solana_keypair::Keypair;
@@ -284,7 +284,7 @@ impl UndelegationRequestService {
         let mut delegation_status = match chainlink
             .account_delegation_statuses(
                 &[request.delegated_account],
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
         {
@@ -309,7 +309,7 @@ impl UndelegationRequestService {
                 .ensure_accounts(
                     &[request.delegated_account],
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
             {
@@ -336,7 +336,7 @@ impl UndelegationRequestService {
             delegation_status = match chainlink
                 .account_delegation_statuses(
                     &[request.delegated_account],
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
             {

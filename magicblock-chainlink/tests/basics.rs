@@ -1,7 +1,7 @@
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchOrigin,
+    AccountFetchContext,
 };
 use solana_account::Account;
 use solana_program::clock::Slot;
@@ -49,7 +49,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
         .ensure_accounts(
             &[pubkey],
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -61,7 +61,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
         .ensure_accounts(
             &[pubkey],
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -104,7 +104,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
         .ensure_accounts(
             &[pubkey],
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -119,7 +119,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
         .ensure_accounts(
             &[pubkey],
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
