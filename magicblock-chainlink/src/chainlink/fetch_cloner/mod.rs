@@ -20,8 +20,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
-    is_ata, normalize_native_token_account_for_local_clone,
-    try_derive_supported_ata_pubkeys, EATA_PROGRAM_ID,
+    is_ata, normalize_native_token_account_for_local_clone, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
@@ -2445,11 +2444,7 @@ where
             deleg_record.owner,
         )
         .map(|(wallet_owner, mint)| {
-            try_derive_supported_ata_pubkeys(&wallet_owner, &mint)
-                .token_2022_first()
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
+            ata_projection::derive_supported_ata_pubkeys(&wallet_owner, &mint)
         })
         .unwrap_or_default();
         let mut pubkeys_to_clone =

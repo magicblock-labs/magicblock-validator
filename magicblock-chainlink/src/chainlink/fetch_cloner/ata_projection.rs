@@ -42,6 +42,17 @@ pub(crate) fn derive_eata_pubkey_from_ata_layout(
     derive_eata_pubkey(ata_info_from_layout(ata_pubkey, ata_account)?)
 }
 
+pub(crate) fn derive_supported_ata_pubkeys(
+    owner: &Pubkey,
+    mint: &Pubkey,
+) -> Vec<Pubkey> {
+    try_derive_supported_ata_pubkeys(owner, mint)
+        .token_2022_first()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+}
+
 pub(crate) fn derive_supported_ata_pubkeys_from_raw_eata(
     eata_pubkey: &Pubkey,
     eata_account: &AccountSharedData,
@@ -51,13 +62,7 @@ pub(crate) fn derive_supported_ata_pubkeys_from_raw_eata(
         eata_account.data(),
         EATA_PROGRAM_ID,
     )?;
-    Some(
-        try_derive_supported_ata_pubkeys(&wallet_owner, &mint)
-            .token_2022_first()
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>(),
-    )
+    Some(derive_supported_ata_pubkeys(&wallet_owner, &mint))
 }
 
 fn derive_eata_pubkey(ata_info: AtaInfo) -> Option<Pubkey> {
@@ -212,12 +217,7 @@ where
         eata_account.data(),
         deleg_record.owner,
     )?;
-    let ata_pubkeys = try_derive_supported_ata_pubkeys(&wallet_owner, &mint);
-    let ata_pubkeys = ata_pubkeys
-        .token_2022_first()
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+    let ata_pubkeys = derive_supported_ata_pubkeys(&wallet_owner, &mint);
 
     // eATA updates only carry the projected balance fields. The base ATA is
     // required so the clone preserves the actual token program owner and any
