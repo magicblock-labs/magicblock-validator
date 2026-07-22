@@ -2094,10 +2094,11 @@ where
 
     /// Deferred discovery for a parked colliding-account candidate whose
     /// delegation record was just sighted. The parked entry holds only
-    /// pubkey + slot, so the account is routed through the deduped
-    /// on-demand fetch+clone — the same path the lazy first-use fallback
-    /// takes, run proactively so post-delegation actions are not delayed.
-    /// Only genuine collisions release, so the extra fetch is negligible.
+    /// pubkey + slot, so after the same authority gate discovery applies,
+    /// the account is routed through the deduped on-demand fetch+clone —
+    /// the same path the lazy first-use fallback takes, run proactively so
+    /// post-delegation actions are not delayed. Only genuine collisions
+    /// release, so the extra fetches are negligible.
     async fn clone_released_collision_candidate(
         &self,
         candidate: ParkedCollisionCandidate,
@@ -2119,6 +2120,44 @@ where
         let fetch_context = AccountFetchContext::subscription_update(
             AccountFetchReason::SubscriptionUpdateGreedyDiscovery,
         );
+        // Same authority gate as record-first discovery: app data can
+        // deliberately carry an internal discriminator prefix, so without it
+        // every colliding account delegated to another validator would be
+        // force-cloned (and re-cloned on each commit) from the DLP firehose.
+        let record_context =
+            fetch_context.with_reason(AccountFetchReason::DelegationRecord);
+        let Some((deleg_record, _)) = self
+            .fetch_and_parse_delegation_record(
+                candidate.pubkey,
+                candidate.slot,
+                record_context,
+                CompanionFetchLogContext {
+                    origin: record_context,
+                    primary_pubkey: candidate.pubkey,
+                    context_slot: candidate.slot,
+                },
+            )
+            .await
+        else {
+            trace!(
+                pubkey = %candidate.pubkey,
+                slot = candidate.slot,
+                "Released collision candidate has no resolvable delegation record; falling back to on-demand cloning"
+            );
+            return;
+        };
+        let is_delegated_to_us = deleg_record.authority
+            == self.validator_pubkey
+            || deleg_record.authority == Pubkey::default();
+        if !is_delegated_to_us {
+            metrics::inc_discovered_dlp_update_delegated_elsewhere();
+            trace!(
+                pubkey = %candidate.pubkey,
+                authority = %deleg_record.authority,
+                "Ignoring released collision candidate delegated elsewhere"
+            );
+            return;
+        }
         if let Err(err) = self
             .fetch_and_clone_accounts_with_dedup_forced_refresh(
                 &[candidate.pubkey],

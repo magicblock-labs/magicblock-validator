@@ -4654,6 +4654,96 @@ async fn test_discovered_colliding_delegated_account_account_sourced_record_rele
     colliding_delegated_account_is_cloned(true, false, true).await;
 }
 
+// A released collision candidate delegated to another validator must be
+// ignored like record-first discovery, not force-cloned from the firehose.
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_elsewhere_is_not_cloned() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let other_validator = random_pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let mut app_data = vec![0; DelegationRecord::size_with_discriminator()];
+    app_data[..8].copy_from_slice(&100u64.to_le_bytes());
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: app_data,
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        cloner,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        other_validator,
+        account_owner,
+    );
+
+    let delegation_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    let delegation_record = DelegationRecord {
+        authority: other_validator,
+        owner: account_owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    let delegation_record_account = Account {
+        lamports: 1_000_000,
+        data: delegation_record_to_vec(&delegation_record),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    // Account first so it parks; the late record sighting releases it into
+    // the authority gate, which must drop it.
+    for (pubkey, account) in [
+        (account_pubkey, delegated_account),
+        (delegation_record_pubkey, delegation_record_account),
+    ] {
+        subscription_tx
+            .send(ForwardedSubscriptionUpdate {
+                pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    account,
+                    CURRENT_SLOT,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+                source: SubscriptionSource::Program,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(accounts_bank.get_account(&account_pubkey).is_none());
+    assert_eq!(cloner.clone_request_count(), 0);
+}
+
 async fn colliding_delegated_account_is_cloned(
     record_late: bool,
     stale_in_bank: bool,
