@@ -284,7 +284,7 @@ Key behavior:
 - If a subscription update arrives while an RPC fetch is pending and its slot is at least the fetch start slot, it resolves the pending fetch waiters instead of being forwarded as a separate update.
 - Account-subscription updates for pubkeys no longer watched are dropped and can enqueue a removal update if stale local state exists.
 - Program-subscription updates are allowed even if the pubkey is not in the direct-account LRU, but DLP-owned program updates are first classified for local interest before any delegation-record companion fetch.
-- Absent and unwatched DLP-owned program updates are dropped without fetching a delegation record; explicit RPC/transaction ensure paths still resolve delegation records and clone delegated accounts normally.
+- Absent and unwatched DLP-owned program updates are not dropped solely for lacking local interest. Ordinary non-internal DLP-owned user-account updates still reach greedy discovery so Chainlink can resolve a valid delegation record and execute post-delegation actions. Only updates that are provably irrelevant without delegation-record resolution, such as true internal DLP payloads or raw eATA projection updates without local ATA/eATA projection interest, are dropped before discovery.
 - Existing local delegated non-undelegating accounts are authoritative. DLP program updates for them clean up direct subscriptions and must not fetch a delegation record, clone, or overwrite local state.
 - Existing local undelegating accounts bypass the internal-DLP early drop and continue undelegation completion/redelegation processing so completion remains observable.
 - Non-advancing updates are ignored unless they represent a same-slot delegated refresh needed for undelegate/redelegate recovery.
@@ -301,9 +301,9 @@ The scan uses Base64Zstd account encoding and gets a nearby base-chain slot for 
 
 ### Greedy discovery
 
-Greedy discovery is restricted to locally interesting subscription updates. For DLP-owned program-subscription firehose updates, Chainlink first classifies the pubkey using local bank state, direct-watch state, and ATA/eATA projection interest.
+For DLP-owned program-subscription firehose updates, Chainlink first classifies the pubkey using local bank state, direct-watch state, and ATA/eATA projection interest.
 
-Absent and unwatched DLP-owned program updates are dropped before delegation-record resolution, including updates that would later prove delegated to another validator. This avoids unnecessary companion fetches for irrelevant DLP firehose traffic.
+Greedy discovery remains enabled for ordinary non-internal DLP-owned user-account updates, even when the account is absent locally and not directly watched. This preserves clone-time post-delegation action execution for new delegations discovered from the DLP program subscription. The prefilter may only skip delegation-record resolution for updates that are provably irrelevant from local state and payload shape, including internal DLP records/metadata/commit state and raw eATA updates with no local projection interest.
 
 Updates for directly watched accounts or locally relevant ATA/eATA projection state may still greedily fetch and clone if the delegation record says the account belongs to this validator (or is confined). Explicit RPC/transaction ensure paths are not narrowed by this prefilter: they still fetch delegation records and clone delegated accounts normally.
 
@@ -311,9 +311,11 @@ Updates delegated to other validators are ignored after discovery so this valida
 
 ### Internal DLP update filtering and collision sighting
 
-DLP-owned program-subscription updates are classified for local interest before internal-DLP payload filtering or collision handling. Irrelevant absent/unwatched updates are dropped immediately with zero delegation-record fetches. Updates for existing local delegated non-undelegating accounts clean up direct subscriptions and return without overwriting locally authoritative state. Updates for existing local undelegating accounts and locally relevant ATA/eATA projections continue past the internal-DLP early drop so undelegation completion and projection processing can run.
+DLP-owned program-subscription updates are classified before internal-DLP payload filtering or collision handling. Updates for existing local delegated non-undelegating accounts clean up direct subscriptions and return without overwriting locally authoritative state. Updates for existing local undelegating accounts and locally relevant ATA/eATA projections continue past the internal-DLP early drop so undelegation completion and projection processing can run.
 
 Program-subscription updates whose payload parses as an internal DLP account (delegation record, delegation metadata, commit record, program config) are then dropped in `FetchCloner::process_subscription_update` **before** greedy discovery, with zero remote fetches — their derived "record of a record" PDA never exists, and these updates dominate the DLP program-subscription firehose.
+
+The internal-DLP fast path must not classify ordinary non-internal user-account updates as irrelevant merely because they are absent locally; those updates must fall through to greedy discovery so valid same-slot delegation records can trigger clone and post-delegation action handling.
 
 The exception is a delegated account whose app data byte-collides with an internal DLP discriminator (LE u64 100–103). Such accounts must still reach greedy discovery so their post-delegation actions execute. `DlpCollisionTracker` (single lock, so check-then-park is atomic against sight-then-release) resolves this without a fetch:
 
