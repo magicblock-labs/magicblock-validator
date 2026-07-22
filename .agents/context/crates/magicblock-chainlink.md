@@ -376,6 +376,11 @@ is rejected when it cannot be promoted into the primary tier; it must not be
 returned to fetch waiters or forwarded as a successful update. A rejected
 promotion drops the key's last watch, so it also enqueues a removal
 notification to evict any stale bank entry (e.g. an empty placeholder).
+The rejection is finalized even when its unsubscribe fails — tier state,
+ownership, and the recorded classification are dropped and only the stray
+pubsub subscription is left for the reconciler — because keeping the state
+would let the classification win arbitration against a later fetch and leak
+the account without primary admission.
 When a subscription update wins fetch arbitration before the fetch's
 subscription setup has created any tier state, the update pump admits the
 found account directly into the primary tier (subscribe + admission) before

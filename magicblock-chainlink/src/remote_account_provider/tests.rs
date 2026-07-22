@@ -538,6 +538,76 @@ async fn test_subscription_resolving_pending_fetch_without_tier_state_rejects_wi
 }
 
 #[tokio::test]
+async fn test_subscription_creation_rejection_survives_unsubscribe_failure() {
+    init_logger();
+    // Serializes with tests that read cleanup metric deltas; this test
+    // emits the same metrics.
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
+
+    let protected = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        protected,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    ctx.provider.abort_subscription_reconciler_for_test();
+    let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
+
+    ctx.provider
+        .try_get(protected, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap();
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    let fetch_slot = ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .slot();
+
+    // The rejection decision is final even when the unsubscribe fails:
+    // tier state and classification are dropped and the removal
+    // notification still goes out; only the stray pubsub subscription is
+    // left for the reconciler.
+    ctx.pubsub_client.fail_next_unsubscriptions(1);
+    ctx.pubsub_client
+        .send_account_update(
+            missing,
+            fetch_slot + 1,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+    let provider = ctx.provider.clone();
+    wait_until("rejected promotion to drop tier state", || {
+        !provider.secondary_subscriptions.contains(&missing)
+    })
+    .await;
+    assert!(!ctx.provider.is_watching(&missing));
+    wait_until_ownership_removed(&ctx.provider, &missing).await;
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, missing);
+    assert!(ctx.pubsub_client.subscriptions_union().contains(&missing));
+
+    // A reconciler pass removes the stray subscription.
+    ctx.provider.reconcile_subscriptions_once_for_test().await;
+    assert!(!ctx.pubsub_client.subscriptions_union().contains(&missing));
+}
+
+#[tokio::test]
 async fn test_confirmed_miss_switches_to_grpc_only_promptly() {
     init_logger();
 

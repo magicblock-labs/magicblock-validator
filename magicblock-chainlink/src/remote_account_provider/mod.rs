@@ -718,17 +718,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             if was_secondary
                 && matches!(promotion_result, Ok(PromotionOutcome::NoCapacity))
             {
-                self.cleanup_rejected_subscription(*pubkey).await?;
-                {
-                    let _transition_guard =
-                        self.subscription_transition_lock.lock().await;
-                    self.secondary.remove(pubkey);
-                    self.subscription_ownership.lock().await.remove(pubkey);
-                }
-                // The bank may hold a stale entry (e.g. an empty placeholder
-                // from the confirmed-missing phase); evict it so a later
-                // ensure refetches the account.
-                self.spawn_removal_notification(*pubkey);
+                self.finalize_rejected_promotion(pubkey).await;
                 return Err(
                     RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
                         pubkey: *pubkey,
@@ -737,6 +727,34 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             }
             promotion_result.map(|_| ())
         }
+    }
+
+    /// Finalizes a rejected secondary-tier promotion. The rejection decision
+    /// is final, so the tier state, ownership, and bank entry are dropped
+    /// even when the unsubscribe fails — the reconciler collects the stray
+    /// subscription on a later pass. Keeping the state on unsubscribe
+    /// failure would let the recorded found classification win arbitration
+    /// against a later fetch and leak the account without primary admission.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn finalize_rejected_promotion(&self, pubkey: &Pubkey) {
+        if let Err(err) = self.cleanup_rejected_subscription(*pubkey).await {
+            warn!(
+                pubkey = %pubkey,
+                error = ?err,
+                "Failed to unsubscribe rejected promotion; reconciler will remove the stray subscription"
+            );
+        }
+        {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.secondary.remove(pubkey);
+            self.set_confirmed_missing(*pubkey, false);
+            self.subscription_ownership.lock().await.remove(pubkey);
+        }
+        // The bank may hold a stale entry (e.g. an empty placeholder from
+        // the confirmed-missing phase); evict it so a later ensure
+        // refetches the account.
+        self.spawn_removal_notification(*pubkey);
     }
 
     async fn classification_is_current(
@@ -2245,41 +2263,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                         let err = RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
                                             pubkey: update.pubkey,
                                         };
-                                        match subscription_tiers
-                                            .cleanup_rejected_subscription(
-                                                update.pubkey,
+                                        subscription_tiers
+                                            .finalize_rejected_promotion(
+                                                &update.pubkey,
                                             )
-                                            .await
-                                        {
-                                            Ok(()) => {
-                                                {
-                                                    let _transition_guard =
-                                                        subscription_tiers
-                                                            .subscription_transition_lock
-                                                            .lock()
-                                                            .await;
-                                                    subscription_tiers
-                                                        .secondary
-                                                        .remove(&update.pubkey);
-                                                    subscription_tiers
-                                                        .subscription_ownership
-                                                        .lock()
-                                                        .await
-                                                        .remove(&update.pubkey);
-                                                }
-                                                // Evict the stale bank entry
-                                                // (e.g. an empty placeholder)
-                                                // now that the last watch is
-                                                // gone.
-                                                subscription_tiers
-                                                    .spawn_removal_notification(
-                                                        update.pubkey,
-                                                    );
-                                            }
-                                            Err(cleanup_err) => {
-                                                warn!(pubkey = %update.pubkey, error = ?cleanup_err, "Failed to clean up rejected found subscription");
-                                            }
-                                        }
+                                            .await;
                                         classification_error =
                                             Some(err.to_string());
                                     }
