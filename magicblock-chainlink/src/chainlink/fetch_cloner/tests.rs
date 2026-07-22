@@ -4629,12 +4629,12 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_droppe
 // the same delegation routes it to discovery, in either delivery order.
 #[tokio::test]
 async fn test_discovered_colliding_delegated_account_record_first_is_cloned() {
-    colliding_delegated_account_is_cloned(false, false).await;
+    colliding_delegated_account_is_cloned(false, false, false).await;
 }
 
 #[tokio::test]
 async fn test_discovered_colliding_delegated_account_record_late_is_cloned() {
-    colliding_delegated_account_is_cloned(true, false).await;
+    colliding_delegated_account_is_cloned(true, false, false).await;
 }
 
 // A stale pre-delegation clone in the bank must not settle a released
@@ -4642,12 +4642,22 @@ async fn test_discovered_colliding_delegated_account_record_late_is_cloned() {
 #[tokio::test]
 async fn test_discovered_colliding_delegated_account_record_late_refreshes_stale_bank_copy(
 ) {
-    colliding_delegated_account_is_cloned(true, true).await;
+    colliding_delegated_account_is_cloned(true, true, false).await;
+}
+
+// SubMux dedupes forwards on (pubkey, slot), so a directly watched record
+// PDA can surface only as an account-subscription update; the sighting must
+// still release the parked candidate.
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_account_sourced_record_releases(
+) {
+    colliding_delegated_account_is_cloned(true, false, true).await;
 }
 
 async fn colliding_delegated_account_is_cloned(
     record_late: bool,
     stale_in_bank: bool,
+    record_account_sourced: bool,
 ) {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -4723,15 +4733,30 @@ async fn colliding_delegated_account_is_cloned(
 
     // With the record late, the account update parks awaiting its record and
     // the record update arriving later (e.g. debounced) must release it into
-    // discovery.
+    // discovery. When the record PDA is also directly watched, SubMux may
+    // forward the record as an account-subscription update instead, which
+    // must record the sighting all the same.
+    let record_source = if record_account_sourced {
+        SubscriptionSource::Account
+    } else {
+        SubscriptionSource::Program
+    };
     let mut updates = vec![
-        (delegation_record_pubkey, delegation_record_account),
-        (account_pubkey, delegated_account),
+        (
+            delegation_record_pubkey,
+            delegation_record_account,
+            record_source,
+        ),
+        (
+            account_pubkey,
+            delegated_account,
+            SubscriptionSource::Program,
+        ),
     ];
     if record_late {
         updates.reverse();
     }
-    for (pubkey, account) in updates {
+    for (pubkey, account, source) in updates {
         subscription_tx
             .send(ForwardedSubscriptionUpdate {
                 pubkey,
@@ -4740,7 +4765,7 @@ async fn colliding_delegated_account_is_cloned(
                     CURRENT_SLOT,
                     RemoteAccountUpdateSource::Subscription,
                 ),
-                source: SubscriptionSource::Program,
+                source,
             })
             .await
             .unwrap();

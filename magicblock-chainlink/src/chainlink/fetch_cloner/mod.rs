@@ -1616,11 +1616,14 @@ where
         // delegation record, whose sighting routes the account update to
         // discovery — immediately when the record arrived first, or by
         // releasing the parked update once the record arrives later.
-        if matches!(update.source, SubscriptionSource::Program)
-            && update.account.is_owned_by_delegation_program()
-        {
+        if update.account.is_owned_by_delegation_program() {
             if let Some(account) = update.account.fresh_account() {
                 if is_internal_dlp_account_data(account.data()) {
+                    // Sight record-shaped updates from either source: SubMux
+                    // dedupes forwards on (pubkey, slot), so when the record
+                    // PDA is also directly watched the account-sub copy can
+                    // suppress the program-sub one and must still release
+                    // any parked candidate.
                     let released = is_delegation_record_data(account.data())
                         .then(|| {
                             self.dlp_collision_tracker
@@ -1631,7 +1634,14 @@ where
                     if let Some(released) = released {
                         self.clone_released_collision_candidate(released).await;
                     }
-                    if !self.dlp_collision_tracker.lock().check_or_park(&update)
+                    // Only the program firehose is dropped/parked;
+                    // account-subscription updates are for directly watched
+                    // accounts and always flow into normal processing.
+                    if matches!(update.source, SubscriptionSource::Program)
+                        && !self
+                            .dlp_collision_tracker
+                            .lock()
+                            .check_or_park(&update)
                     {
                         trace!(
                             pubkey = %pubkey,
