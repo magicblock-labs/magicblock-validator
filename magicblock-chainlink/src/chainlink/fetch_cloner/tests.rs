@@ -675,7 +675,8 @@ async fn test_dlp_program_update_classifier_detects_ata_projection_interest() {
 }
 
 #[tokio::test]
-async fn test_dlp_program_update_classifier_drops_irrelevant_update() {
+async fn test_dlp_program_update_classifier_discovers_unwatched_non_eata_update(
+) {
     let validator_keypair = Keypair::new();
     let pubkey = random_pubkey();
     let mut remote_update =
@@ -693,7 +694,37 @@ async fn test_dlp_program_update_classifier_drops_irrelevant_update() {
         fetch_cloner
             .classify_dlp_program_update_interest(pubkey, &remote_update)
             .await,
-        DlpProgramUpdateInterest::DropIrrelevant
+        DlpProgramUpdateInterest::DiscoverDelegatedAccount
+    );
+}
+
+#[tokio::test]
+async fn test_dlp_program_update_classifier_drops_raw_eata_without_projection_interest(
+) {
+    let validator_keypair = Keypair::new();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let mut eata_account = AccountSharedData::from(create_eata_account(
+        &wallet_owner,
+        &mint,
+        777,
+        true,
+    ));
+    eata_account.set_remote_slot(101);
+
+    let FetcherTestCtx { fetch_cloner, .. } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        100,
+        validator_keypair,
+    )
+    .await;
+
+    assert_eq!(
+        fetch_cloner
+            .classify_dlp_program_update_interest(eata_pubkey, &eata_account)
+            .await,
+        DlpProgramUpdateInterest::DropRawEataNoProjectionInterest
     );
 }
 
@@ -4800,7 +4831,7 @@ async fn drain_subscription_update_tasks(
 }
 
 #[tokio::test]
-async fn test_absent_unwatched_dlp_program_update_is_dropped_without_delegation_record_fetch(
+async fn test_absent_unwatched_dlp_program_update_without_delegation_record_is_ignored_after_record_fetch(
 ) {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -4851,10 +4882,11 @@ async fn test_absent_unwatched_dlp_program_update_is_dropped_without_delegation_
 
     assert!(accounts_bank.get_account(&account_pubkey).is_none());
     assert_eq!(cloner.clone_request_count(), 0);
-    assert_eq!(
+    assert!(
         rpc_client.single_account_fetches()
-            + rpc_client.multi_account_fetches(),
-        fetches_before
+            + rpc_client.multi_account_fetches()
+            > fetches_before,
+        "greedy discovery should attempt delegation-record resolution before ignoring the update"
     );
 }
 
@@ -5254,7 +5286,7 @@ async fn test_raw_eata_program_update_with_projection_interest_processes_project
 }
 
 #[tokio::test]
-async fn test_absent_unwatched_dlp_update_delegated_elsewhere_is_ignored_without_record_fetch(
+async fn test_absent_unwatched_dlp_update_delegated_elsewhere_is_ignored_after_record_fetch(
 ) {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -5312,10 +5344,11 @@ async fn test_absent_unwatched_dlp_update_delegated_elsewhere_is_ignored_without
     drain_subscription_update_tasks(&fetch_cloner, Duration::from_secs(1))
         .await;
 
-    assert_eq!(
+    assert!(
         rpc_client.single_account_fetches()
-            + rpc_client.multi_account_fetches(),
-        fetches_before
+            + rpc_client.multi_account_fetches()
+            > fetches_before,
+        "greedy discovery should fetch the delegation record before ignoring other-validator authority"
     );
     assert_eq!(cloner.clone_request_count(), 0);
     assert!(accounts_bank.get_account(&account_pubkey).is_none());
