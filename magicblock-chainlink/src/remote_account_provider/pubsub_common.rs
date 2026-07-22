@@ -84,15 +84,16 @@ impl SubscriptionUpdate {
     }
 }
 
-pub(crate) fn is_internal_dlp_account_data(data: &[u8]) -> bool {
-    let is_delegation_record = data.len()
-        >= DelegationRecord::size_with_discriminator()
+pub(crate) fn is_delegation_record_data(data: &[u8]) -> bool {
+    data.len() >= DelegationRecord::size_with_discriminator()
         && DelegationRecord::try_from_bytes_with_discriminator(
             &data[..DelegationRecord::size_with_discriminator()],
         )
-        .is_ok();
+        .is_ok()
+}
 
-    is_delegation_record
+pub(crate) fn is_internal_dlp_account_data(data: &[u8]) -> bool {
+    is_delegation_record_data(data)
         || DelegationMetadata::try_from_bytes_with_discriminator(data).is_ok()
         || CommitRecord::try_from_bytes_with_discriminator(data).is_ok()
         || ProgramConfig::try_from_bytes_with_discriminator(data).is_ok()

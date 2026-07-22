@@ -5,13 +5,18 @@ use std::{
 };
 
 use magicblock_metrics::metrics::{
+    chainlink_companion_fetch_attempts_sample_count,
+    chainlink_companion_fetch_attempts_sample_sum,
+    chainlink_companion_fetch_duration_sample_count,
+    chainlink_companion_fetch_duration_sample_sum,
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
     chainlink_pending_fetch_waiters_value,
     chainlink_subscription_cleanup_accounts_value,
     chainlink_subscription_registration_accounts_value,
-    chainlink_subscription_release_accounts_value, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome,
+    chainlink_subscription_release_accounts_value, AccountFetchReason,
+    ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
 };
 use solana_account::Account;
 use solana_system_interface::program as system_program;
@@ -63,6 +68,9 @@ async fn setup_provider_with_lru_capacity(
 
     let (forward_tx, forward_rx) = mpsc::channel(1_000);
     let (subscribed_accounts, config) = create_test_lru_cache(lru_capacity);
+    let config = config
+        .with_secondary_subscriptions_lru_capacity(lru_capacity)
+        .unwrap();
     let chain_slot = Arc::<AtomicU64>::default();
 
     let provider = Arc::new(
@@ -87,7 +95,7 @@ async fn setup_provider_with_lru_capacity(
 }
 
 fn pending_accounts_value(
-    origin: AccountFetchOrigin,
+    origin: impl Into<AccountFetchContext>,
     outcome: ChainlinkPendingFetchOutcome,
 ) -> u64 {
     chainlink_pending_fetch_accounts_value(
@@ -97,7 +105,7 @@ fn pending_accounts_value(
     )
 }
 
-fn pending_waiters_value(origin: AccountFetchOrigin) -> u64 {
+fn pending_waiters_value(origin: impl Into<AccountFetchContext>) -> u64 {
     chainlink_pending_fetch_waiters_value(
         origin,
         ChainlinkPendingFetchLayer::RemoteAccountProvider,
@@ -153,7 +161,7 @@ async fn wait_for_direct_subscription(
 }
 
 async fn wait_for_pending_account_delta_at_least(
-    origin: AccountFetchOrigin,
+    origin: impl Into<AccountFetchContext> + Copy,
     outcome: ChainlinkPendingFetchOutcome,
     baseline: u64,
     minimum_delta: u64,
@@ -173,6 +181,1103 @@ async fn wait_for_pending_account_delta_at_least(
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+async fn wait_until(what: &str, condition: impl Fn() -> bool) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    loop {
+        if condition() {
+            break;
+        }
+        assert!(start.elapsed() < timeout, "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Waits for the detached evicted-cleanup task to drop the key's ownership
+/// entry.
+async fn wait_until_ownership_removed<T, U>(
+    provider: &RemoteAccountProvider<T, U>,
+    pubkey: &Pubkey,
+) where
+    T: crate::remote_account_provider::ChainRpcClient,
+    U: ChainPubsubClient,
+{
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    loop {
+        if !provider
+            .subscription_ownership
+            .lock()
+            .await
+            .contains_key(pubkey)
+        {
+            break;
+        }
+        assert!(
+            start.elapsed() < timeout,
+            "timed out waiting for ownership removal of {pubkey}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Accounts that do not exist on chain stay in the secondary LRU and move to
+/// the primary LRU once they are created.
+#[tokio::test]
+async fn test_not_found_account_stays_secondary_and_promotes_on_creation() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(
+        existing,
+        Account {
+            lamports: 500,
+            ..Default::default()
+        },
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    let res = ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap();
+    assert!(!res.is_found());
+    let fetch_slot = res.slot();
+
+    // The account remains in the secondary tier after the fetch resolves.
+    let provider = ctx.provider.clone();
+    wait_until("account to enter secondary tier", || {
+        provider.secondary_subscriptions.contains(&missing)
+    })
+    .await;
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+    assert!(ctx.provider.is_watching(&missing));
+    assert!(ctx.pubsub_client.subscriptions_union().contains(&missing));
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+
+    // An older update must not undo the newer not-found classification.
+    let transition_guard =
+        ctx.provider.subscription_transition_lock.lock().await;
+    let updates_before = ctx.provider.received_updates_count();
+    ctx.pubsub_client
+        .send_account_update(
+            missing,
+            fetch_slot.saturating_sub(1),
+            &Account {
+                lamports: 900,
+                ..Default::default()
+            },
+        )
+        .await;
+    let provider = ctx.provider.clone();
+    wait_until("older subscription update to be processed", || {
+        provider.received_updates_count() > updates_before
+    })
+    .await;
+    drop(transition_guard);
+    let transition_guard =
+        ctx.provider.subscription_transition_lock.lock().await;
+    drop(transition_guard);
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+
+    // A newer creation update promotes the account to the primary LRU.
+    ctx.pubsub_client
+        .send_account_update(
+            missing,
+            fetch_slot + 1,
+            &Account {
+                lamports: 1_000,
+                ..Default::default()
+            },
+        )
+        .await;
+    let provider = ctx.provider.clone();
+    wait_until("account to be promoted", || {
+        provider.lrucache_subscribed_accounts.contains(&missing)
+            && !provider.secondary_subscriptions.contains(&missing)
+    })
+    .await;
+    assert!(!ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+}
+
+#[tokio::test]
+async fn test_subscription_creation_fails_when_primary_capacity_is_protected() {
+    init_logger();
+
+    let protected = random_pubkey();
+    let missing = random_pubkey();
+    let mut ctx = setup_provider_with_lru_capacity(
+        protected,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
+
+    ctx.provider
+        .try_get(protected, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap();
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    let fetch_slot = ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .slot();
+
+    let updates_before = ctx.provider.received_updates_count();
+    ctx.pubsub_client
+        .send_account_update(
+            missing,
+            fetch_slot + 1,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+    let provider = ctx.provider.clone();
+    wait_until("subscription update to be rejected", || {
+        provider.received_updates_count() > updates_before
+    })
+    .await;
+    let transition_guard =
+        ctx.provider.subscription_transition_lock.lock().await;
+    drop(transition_guard);
+
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&protected));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(!ctx.provider.is_watching(&missing));
+    assert!(!ctx.pubsub_client.subscriptions_union().contains(&missing));
+    assert!(ctx._forward_rx.try_recv().is_err());
+    // The rejected promotion dropped the last watch; the removal pipeline
+    // must be notified so a stale empty placeholder cannot outlive it.
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, missing);
+}
+
+/// Models the update-pump race where a subscription update resolves a pending
+/// fetch before the fetch's subscription setup created any tier state.
+fn insert_pending_fetch(
+    provider: &RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    pubkey: Pubkey,
+    fetch_start_slot: u64,
+) -> oneshot::Receiver<FetchResult> {
+    let (waiter_tx, waiter_rx) = oneshot::channel();
+    provider.fetching_accounts.lock().unwrap().insert(
+        pubkey,
+        FetchingAccountState {
+            generation: provider.next_fetching_account_generation(),
+            fetch_start_slot,
+            fetch_context: AccountFetchContext::rpc_get_account(),
+            owner_started_at: std::time::Instant::now(),
+            waiters: vec![waiter_tx],
+        },
+    );
+    waiter_rx
+}
+
+#[tokio::test]
+async fn test_subscription_resolving_pending_fetch_without_tier_state_admits_to_primary(
+) {
+    init_logger();
+
+    let existing = random_pubkey();
+    let pending = random_pubkey();
+    let ctx = setup_provider(existing, Account::default()).await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    let waiter_rx = insert_pending_fetch(&ctx.provider, pending, 100);
+    // Deliver the update as a transport-level subscription (e.g. a gRPC
+    // program subscription) without any provider tier state for the key.
+    ctx.pubsub_client.insert_subscription(pending);
+    ctx.pubsub_client
+        .send_account_update(
+            pending,
+            101,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+
+    let resolved = tokio::time::timeout(Duration::from_secs(2), waiter_rx)
+        .await
+        .expect("timed out waiting for fetch resolution")
+        .expect("waiter channel closed")
+        .expect("subscription-resolved fetch should succeed");
+    assert!(resolved.is_found());
+    // The found account was admitted straight into the primary tier with an
+    // active subscription; the in-flight setup adopts this membership.
+    assert!(ctx.provider.lrucache_subscribed_accounts.contains(&pending));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&pending));
+    assert!(ctx.pubsub_client.subscriptions_union().contains(&pending));
+}
+
+#[tokio::test]
+async fn test_subscription_resolving_pending_fetch_without_tier_state_rejects_without_capacity(
+) {
+    init_logger();
+
+    let protected = random_pubkey();
+    let pending = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        protected,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    let waiter_rx = insert_pending_fetch(&ctx.provider, pending, 100);
+    // Deliver the update as a transport-level subscription (e.g. a gRPC
+    // program subscription) without any provider tier state for the key.
+    ctx.pubsub_client.insert_subscription(pending);
+    ctx.pubsub_client
+        .send_account_update(
+            pending,
+            101,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+
+    // Found results must not reach waiters without primary admission; the
+    // capacity rejection surfaces instead of the account.
+    let err = tokio::time::timeout(Duration::from_secs(2), waiter_rx)
+        .await
+        .expect("timed out waiting for fetch resolution")
+        .expect("waiter channel closed")
+        .expect_err("found account without primary capacity must be rejected");
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountResolutionsFailed(message)
+            if message.contains("No evictable subscription capacity")
+                && message.contains(&pending.to_string())
+    ));
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&protected));
+    assert!(!ctx.provider.is_watching(&pending));
+    // The rejection dropped the recorded classification along with the
+    // placeholder ownership.
+    assert!(ctx
+        .provider
+        .subscription_ownership
+        .lock()
+        .await
+        .get(&pending)
+        .is_none());
+
+    // A later fetch at a slot at or below the rejected update's slot must
+    // re-run the full classification: the found account goes through the
+    // secondary tier and is rejected again, instead of losing arbitration
+    // to the stale classification and being returned without admission.
+    ctx.rpc_client.add_account(
+        pending,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    );
+    let err = ctx
+        .provider
+        .try_get(pending, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountResolutionsFailed(message)
+            if message.contains("NoEvictableSubscriptionCapacity")
+                && message.contains(&pending.to_string())
+    ));
+    assert!(!ctx.provider.is_watching(&pending));
+}
+
+#[tokio::test]
+async fn test_subscription_creation_rejection_survives_unsubscribe_failure() {
+    init_logger();
+    // Serializes with tests that read cleanup metric deltas; this test
+    // emits the same metrics.
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
+
+    let protected = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        protected,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    ctx.provider.abort_subscription_reconciler_for_test();
+    let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
+
+    ctx.provider
+        .try_get(protected, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap();
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    let fetch_slot = ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .slot();
+
+    // The rejection decision is final even when the unsubscribe fails:
+    // tier state and classification are dropped and the removal
+    // notification still goes out; only the stray pubsub subscription is
+    // left for the reconciler.
+    ctx.pubsub_client.fail_next_unsubscriptions(1);
+    ctx.pubsub_client
+        .send_account_update(
+            missing,
+            fetch_slot + 1,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+    let provider = ctx.provider.clone();
+    wait_until("rejected promotion to drop tier state", || {
+        !provider.secondary_subscriptions.contains(&missing)
+    })
+    .await;
+    assert!(!ctx.provider.is_watching(&missing));
+    wait_until_ownership_removed(&ctx.provider, &missing).await;
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, missing);
+    assert!(ctx.pubsub_client.subscriptions_union().contains(&missing));
+
+    // A reconciler pass removes the stray subscription.
+    ctx.provider.reconcile_subscriptions_once_for_test().await;
+    assert!(!ctx.pubsub_client.subscriptions_union().contains(&missing));
+}
+
+async fn direct_account_refcount(
+    provider: &RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    pubkey: &Pubkey,
+) -> usize {
+    provider
+        .subscription_ownership
+        .lock()
+        .await
+        .get(pubkey)
+        .and_then(|ownership| {
+            ownership
+                .reasons
+                .get(&SubscriptionReason::DirectAccount)
+                .copied()
+        })
+        .unwrap_or(0)
+}
+
+#[tokio::test]
+async fn test_promotion_evicted_mid_flight_is_not_treated_as_admitted() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(
+        existing,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    // A key promoted by another transition holds primary membership and
+    // reports the benign departure outcome.
+    assert!(ctx
+        .provider
+        .try_get(existing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&existing));
+    assert_eq!(
+        ctx.provider
+            .subscription_tier_ctx()
+            .try_promote_found_to_primary(existing, false)
+            .await
+            .unwrap(),
+        PromotionOutcome::NotInSecondary
+    );
+
+    // Establish a confirmed-missing secondary entry.
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+
+    // Evict the key from the secondary tier while the promotion awaits the
+    // coverage-restoring subscribe; the promotion must not count the found
+    // result as admitted.
+    ctx.pubsub_client.pause_after_subscribe_insert();
+    let insertions_before = ctx.pubsub_client.subscribe_insertions();
+    let tier_ctx = ctx.provider.subscription_tier_ctx();
+    let promotion = tokio::spawn(async move {
+        tier_ctx.try_promote_found_to_primary(missing, true).await
+    });
+    ctx.pubsub_client
+        .wait_for_subscribe_insertions(insertions_before + 1)
+        .await;
+    ctx.provider.secondary_subscriptions.remove(&missing);
+    ctx.pubsub_client.resume_after_subscribe_insert();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(2), promotion)
+        .await
+        .expect("timed out waiting for promotion")
+        .expect("promotion task should not panic")
+        .expect("promotion should not error");
+    assert_eq!(outcome, PromotionOutcome::Evicted);
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+}
+
+#[tokio::test]
+async fn test_failed_coverage_restore_rolls_back_acquired_reason() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(
+        existing,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+    let refcount_before =
+        direct_account_refcount(&ctx.provider, &missing).await;
+
+    // The coverage-restoring subscribe of a confirmed-missing refetch fails
+    // transiently; the just-acquired reason must be rolled back.
+    ctx.pubsub_client.simulate_disconnect();
+    assert!(ctx
+        .provider
+        .acquire_subscription_with_origin(
+            &missing,
+            SubscriptionReason::DirectAccount,
+            SubscriptionRegistrationOrigin::Fetch(
+                AccountFetchContext::rpc_get_account(),
+            ),
+        )
+        .await
+        .is_err());
+
+    assert_eq!(
+        direct_account_refcount(&ctx.provider, &missing).await,
+        refcount_before
+    );
+    // The key stays confirmed missing until coverage is actually restored.
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+}
+
+#[tokio::test]
+async fn test_confirmed_miss_switches_to_grpc_only_promptly() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(
+        existing,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    // A found account never triggers the gRPC-only switch.
+    assert!(ctx
+        .provider
+        .try_get(existing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx.pubsub_client.prefer_grpc_calls().is_empty());
+
+    // The confirming not-found classification switches the key to
+    // gRPC-only coverage immediately instead of waiting for the
+    // periodic reconciler pass.
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert_eq!(ctx.pubsub_client.prefer_grpc_calls(), vec![missing]);
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+    // The mock is a gRPC client, so coverage stays after the switch.
+    assert!(ctx.pubsub_client.subscriptions_union().contains(&missing));
+}
+
+#[tokio::test]
+async fn test_setup_cancellation_preserves_pump_admitted_primary_membership() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let pending = random_pubkey();
+    let ctx = setup_provider(existing, Account::default()).await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    let waiter_rx = insert_pending_fetch(&ctx.provider, pending, 100);
+    let generation = {
+        let fetching = ctx.provider.fetching_accounts.lock().unwrap();
+        fetching.get(&pending).unwrap().generation
+    };
+    ctx.pubsub_client.insert_subscription(pending);
+    ctx.pubsub_client
+        .send_account_update(
+            pending,
+            101,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+    tokio::time::timeout(Duration::from_secs(2), waiter_rx)
+        .await
+        .expect("timed out waiting for fetch resolution")
+        .expect("waiter channel closed")
+        .expect("subscription-resolved fetch should succeed");
+    assert!(ctx.provider.lrucache_subscribed_accounts.contains(&pending));
+
+    // The claiming try_get_multi future is cancelled before setup adopted
+    // the placeholder; the cleanup must keep the ownership entry because
+    // the update pump already admitted the key into the primary tier.
+    cleanup_classification_placeholders(
+        &ctx.provider.subscription_ownership,
+        &ctx.provider.subscription_transition_lock,
+        &ctx.provider.lrucache_subscribed_accounts,
+        &ctx.provider.secondary_subscriptions,
+        &[(pending, generation)].into_iter().collect(),
+    )
+    .await;
+    assert!(ctx
+        .provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pending));
+    assert!(ctx.provider.lrucache_subscribed_accounts.contains(&pending));
+
+    // A later fetch adopts the membership instead of registering the key
+    // as fetch-owned secondary alongside its primary entry.
+    ctx.rpc_client.add_account(
+        pending,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    );
+    ctx.provider
+        .try_get(pending, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap();
+    assert!(ctx.provider.lrucache_subscribed_accounts.contains(&pending));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&pending));
+    assert!(
+        ctx.provider
+            .has_subscription_reason(
+                &pending,
+                SubscriptionReason::DirectAccount
+            )
+            .await
+    );
+}
+
+#[tokio::test]
+async fn test_repeated_not_found_fetch_preserves_primary_working_set() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        existing,
+        Account {
+            lamports: 500,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    assert!(ctx
+        .provider
+        .try_get(existing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&existing));
+
+    for _ in 0..2 {
+        assert!(!ctx
+            .provider
+            .try_get(missing, AccountFetchContext::rpc_get_account())
+            .await
+            .unwrap()
+            .is_found());
+    }
+
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&existing));
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&existing));
+}
+
+#[tokio::test]
+async fn test_refetching_confirmed_miss_restores_full_coverage_while_pending() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(existing, Account::default()).await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+    let subscribe_attempts = ctx.pubsub_client.subscribe_attempts();
+
+    ctx.rpc_client.block_fetches();
+    let task_handle = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            provider
+                .try_get(missing, AccountFetchContext::rpc_get_account())
+                .await
+        }
+    });
+    let provider = ctx.provider.clone();
+    wait_until("confirmed miss refetch to restore full coverage", || {
+        provider.is_pending(&missing)
+            && !provider
+                .confirmed_missing_subscriptions
+                .lock()
+                .unwrap()
+                .contains(&missing)
+    })
+    .await;
+    assert!(ctx.pubsub_client.subscribe_attempts() > subscribe_attempts);
+
+    ctx.rpc_client.allow_fetches();
+    let remote_account =
+        tokio::time::timeout(Duration::from_secs(2), task_handle)
+            .await
+            .expect("refetch should complete")
+            .expect("refetch should not panic")
+            .expect("refetch should succeed");
+    assert!(!remote_account.is_found());
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+}
+
+#[tokio::test]
+async fn test_manual_unsubscribe_removes_secondary_account() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(existing, Account::default()).await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
+
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+
+    ctx.provider.unsubscribe(&missing).await.unwrap();
+
+    assert!(!ctx.provider.is_watching(&missing));
+    assert!(!ctx.pubsub_client.subscriptions_union().contains(&missing));
+    assert!(
+        !ctx.provider
+            .has_subscription_reason(
+                &missing,
+                SubscriptionReason::DirectAccount
+            )
+            .await
+    );
+    assert_eq!(removed_rx.recv().await, Some(missing));
+}
+
+#[tokio::test]
+async fn test_failed_membership_repair_rolls_back_new_reason() {
+    init_logger();
+
+    let pubkey = random_pubkey();
+    let ctx = setup_provider(pubkey, Account::default()).await;
+    ctx.provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    ctx.provider.lrucache_subscribed_accounts.remove(&pubkey);
+    ctx.pubsub_client.simulate_disconnect();
+    assert!(ctx
+        .provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DelegationRecord)
+        .await
+        .is_err());
+
+    assert!(
+        ctx.provider
+            .has_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+            .await
+    );
+    assert!(
+        !ctx.provider
+            .has_subscription_reason(
+                &pubkey,
+                SubscriptionReason::DelegationRecord,
+            )
+            .await
+    );
+}
+
+#[tokio::test]
+async fn test_secondary_critical_acquire_fails_without_primary_capacity() {
+    init_logger();
+
+    let protected = random_pubkey();
+    let missing = random_pubkey();
+    let ctx =
+        setup_provider_with_lru_capacity(protected, Account::default(), 1)
+            .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+
+    let err = ctx
+        .provider
+        .acquire_subscription(&missing, SubscriptionReason::DelegationRecord)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::NoEvictableSubscriptionCapacity { pubkey }
+            if pubkey == missing
+    ));
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&protected));
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(
+        !ctx.provider
+            .has_subscription_reason(
+                &missing,
+                SubscriptionReason::DelegationRecord,
+            )
+            .await
+    );
+}
+
+#[tokio::test]
+async fn test_secondary_capacity_preserves_protected_account() {
+    init_logger();
+    // Serializes with tests that read capacity-eviction cleanup metric
+    // deltas; this test emits the same metrics.
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
+
+    let primary = random_pubkey();
+    let protected_missing = random_pubkey();
+    let rejected_missing = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        primary,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    ctx.provider.abort_subscription_reconciler_for_test();
+
+    ctx.provider
+        .acquire_subscription(
+            &primary,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    assert!(!ctx
+        .provider
+        .try_get(protected_missing, AccountFetchContext::rpc_get_account(),)
+        .await
+        .unwrap()
+        .is_found());
+    ctx.provider
+        .acquire_subscription(
+            &protected_missing,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    let subscribe_attempts = ctx.pubsub_client.subscribe_attempts();
+    ctx.pubsub_client.fail_next_unsubscriptions(1);
+    let err = ctx
+        .provider
+        .try_get(rejected_missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::NoEvictableSubscriptionCapacity { .. }
+    ));
+    assert!(ctx
+        .provider
+        .secondary_subscriptions
+        .contains(&protected_missing));
+    assert!(ctx.provider.is_watching(&protected_missing));
+    assert!(!ctx.provider.is_watching(&rejected_missing));
+    assert!(!ctx
+        .pubsub_client
+        .subscriptions_union()
+        .contains(&rejected_missing));
+    assert_eq!(ctx.pubsub_client.subscribe_attempts(), subscribe_attempts);
+}
+
+#[tokio::test]
+async fn test_secondary_eviction_unsubscribe_failure_keeps_admission() {
+    init_logger();
+    // Serializes with tests that read capacity-eviction cleanup metric
+    // deltas; this test emits the same metrics.
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
+
+    let existing = random_pubkey();
+    let first_missing = random_pubkey();
+    let second_missing = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        existing,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    ctx.provider.abort_subscription_reconciler_for_test();
+
+    assert!(!ctx
+        .provider
+        .try_get(first_missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    ctx.pubsub_client.fail_next_unsubscriptions(1);
+
+    // The admission stands even though the evicted key's unsubscribe fails;
+    // the stray subscription is removed by the reconciler on a later pass.
+    assert!(!ctx
+        .provider
+        .try_get(second_missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx
+        .provider
+        .secondary_subscriptions
+        .contains(&second_missing));
+    assert!(ctx.provider.is_watching(&second_missing));
+    assert!(!ctx.provider.is_watching(&first_missing));
+    wait_until_ownership_removed(&ctx.provider, &first_missing).await;
+    // The failed unsubscribe leaves a stray pubsub subscription behind for
+    // the reconciler to collect.
+    assert!(ctx
+        .pubsub_client
+        .subscriptions_union()
+        .contains(&first_missing));
+
+    // A reconciler pass removes the stray subscription.
+    ctx.provider.reconcile_subscriptions_once_for_test().await;
+    assert!(!ctx
+        .pubsub_client
+        .subscriptions_union()
+        .contains(&first_missing));
+}
+
+#[tokio::test]
+async fn test_found_fetch_fails_when_primary_capacity_is_protected() {
+    init_logger();
+
+    let protected = random_pubkey();
+    let found = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        protected,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.rpc_client.add_account(
+        found,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    );
+    let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    let err = ctx
+        .provider
+        .try_get(found, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountResolutionsFailed(message)
+            if message.contains("NoEvictableSubscriptionCapacity")
+                && message.contains(&found.to_string())
+    ));
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&protected));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&found));
+    assert!(!ctx.provider.is_watching(&found));
+    assert!(!ctx.pubsub_client.subscriptions_union().contains(&found));
+    // The rejected promotion dropped the last watch; the removal pipeline
+    // must be notified so a stale bank entry cannot outlive it.
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, found);
 }
 
 struct TestSlotConfig {
@@ -236,7 +1341,7 @@ async fn test_try_get_multi_short_multi_account_response_returns_error() {
         provider.try_get_multi(
             &[pubkey1, pubkey2],
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
             None,
         ),
     )
@@ -304,6 +1409,355 @@ async fn setup_matching_slots(
 }
 
 #[tokio::test]
+async fn test_classification_placeholder_cleanup_is_generation_scoped() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let subscription_ownership: SubscriptionOwnershipMap = Default::default();
+    let subscription_transition_lock = Arc::new(AsyncMutex::new(()));
+    let placeholder = SubscriptionOwnership {
+        classification_placeholder_generation: Some(2),
+        ..Default::default()
+    };
+    subscription_ownership
+        .lock()
+        .await
+        .insert(pubkey, placeholder);
+
+    let (primary, _) = create_test_lru_cache(10);
+    let (secondary, _) = create_test_lru_cache(10);
+    cleanup_classification_placeholders(
+        &subscription_ownership,
+        &subscription_transition_lock,
+        &primary,
+        &secondary,
+        &HashMap::from([(pubkey, 1)]),
+    )
+    .await;
+    assert!(subscription_ownership.lock().await.contains_key(&pubkey));
+
+    cleanup_classification_placeholders(
+        &subscription_ownership,
+        &subscription_transition_lock,
+        &primary,
+        &secondary,
+        &HashMap::from([(pubkey, 2)]),
+    )
+    .await;
+    assert!(!subscription_ownership.lock().await.contains_key(&pubkey));
+}
+
+#[tokio::test]
+async fn test_cancelled_subscription_setup_cleans_classification_placeholder() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let generation = 1;
+    let (sender, receiver) = oneshot::channel();
+    let fetching_accounts = Arc::new(Mutex::new(HashMap::from([(
+        pubkey,
+        FetchingAccountState {
+            generation,
+            fetch_start_slot: 0,
+            fetch_context: AccountFetchContext::rpc_get_account(),
+            owner_started_at: std::time::Instant::now(),
+            waiters: vec![sender],
+        },
+    )])));
+    let subscription_ownership: SubscriptionOwnershipMap = Default::default();
+    let subscription_transition_lock = Arc::new(AsyncMutex::new(()));
+    let placeholder = SubscriptionOwnership {
+        classification_placeholder_generation: Some(generation),
+        ..Default::default()
+    };
+    subscription_ownership
+        .lock()
+        .await
+        .insert(pubkey, placeholder);
+
+    let transition_guard = subscription_transition_lock.lock().await;
+    let guard = ClaimedSubscriptionSetupGuard::new(
+        fetching_accounts.clone(),
+        subscription_ownership.clone(),
+        subscription_transition_lock.clone(),
+        create_test_lru_cache(10).0,
+        create_test_lru_cache(10).0,
+        vec![pubkey],
+        HashMap::from([(pubkey, generation)]),
+    );
+    drop(guard);
+
+    assert!(!fetching_accounts.lock().unwrap().contains_key(&pubkey));
+    assert!(receiver.await.unwrap().is_err());
+    assert!(subscription_ownership.lock().await.contains_key(&pubkey));
+    drop(transition_guard);
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while subscription_ownership.lock().await.contains_key(&pubkey) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("classification placeholder cleanup should complete");
+}
+
+#[tokio::test]
+async fn test_failed_placeholder_adoption_preserves_generation_for_cleanup() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let ProviderTestCtx {
+        provider,
+        pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+    let generation = 1;
+    let placeholder = SubscriptionOwnership {
+        classification_placeholder_generation: Some(generation),
+        ..Default::default()
+    };
+    provider
+        .subscription_ownership
+        .lock()
+        .await
+        .insert(pubkey, placeholder);
+
+    pubsub_client.simulate_disconnect();
+    assert!(provider
+        .acquire_subscription_with_origin(
+            &pubkey,
+            SubscriptionReason::DirectAccount,
+            SubscriptionRegistrationOrigin::Fetch(
+                AccountFetchContext::rpc_get_account(),
+            ),
+        )
+        .await
+        .is_err());
+
+    let ownership = provider.subscription_ownership.lock().await;
+    let placeholder = ownership
+        .get(&pubkey)
+        .expect("failed adoption should retain the placeholder for cleanup");
+    assert!(placeholder.is_empty());
+    assert_eq!(
+        placeholder.classification_placeholder_generation,
+        Some(generation)
+    );
+    drop(ownership);
+
+    cleanup_classification_placeholders(
+        &provider.subscription_ownership,
+        &provider.subscription_transition_lock,
+        &provider.lrucache_subscribed_accounts,
+        &provider.secondary_subscriptions,
+        &HashMap::from([(pubkey, generation)]),
+    )
+    .await;
+    assert!(!provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey));
+}
+
+#[tokio::test]
+async fn test_companion_fetch_metrics_record_fast_path_success() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+    let context = AccountFetchContext::subscription_update(
+        AccountFetchReason::ProgramData,
+    );
+    let kind = ChainlinkCompanionFetchKind::ProgramData;
+    let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
+    let attempts_count_before =
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
+    let attempts_sum_before =
+        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome);
+    let duration_count_before =
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
+    let duration_sum_before =
+        chainlink_companion_fetch_duration_sample_sum(context, kind, outcome);
+
+    let res = remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            Some(MatchSlotsConfig {
+                max_retries: 10,
+                retry_interval_ms: 50,
+                min_context_slot: Some(CURRENT_SLOT),
+                companion_fetch_kind: kind,
+            }),
+            context,
+        )
+        .await;
+
+    assert!(res.is_ok());
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        attempts_count_before + 1
+    );
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome),
+        attempts_sum_before + 1.0
+    );
+    assert_eq!(
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
+        duration_count_before + 1
+    );
+    assert!(
+        chainlink_companion_fetch_duration_sample_sum(context, kind, outcome)
+            >= duration_sum_before
+    );
+}
+
+#[tokio::test]
+async fn test_companion_fetch_metrics_record_retry_success() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+    let rpc_to_advance = remote_account_provider.rpc_client.clone();
+    let advance_handle = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        rpc_to_advance.set_slot(CURRENT_SLOT + 1);
+    });
+    let context = AccountFetchContext::subscription_update(
+        AccountFetchReason::ProgramData,
+    );
+    let kind = ChainlinkCompanionFetchKind::ProgramData;
+    let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
+    let attempts_count_before =
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
+    let attempts_sum_before =
+        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome);
+
+    let res = remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            Some(MatchSlotsConfig {
+                max_retries: 20,
+                retry_interval_ms: 10,
+                min_context_slot: Some(CURRENT_SLOT + 1),
+                companion_fetch_kind: kind,
+            }),
+            context,
+        )
+        .await;
+    advance_handle.await.unwrap();
+
+    assert!(res.is_ok());
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        attempts_count_before + 1
+    );
+    assert!(
+        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome)
+            > attempts_sum_before + 1.0
+    );
+}
+
+#[tokio::test]
+async fn test_companion_fetch_metrics_record_slot_mismatch_failure() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    let context = AccountFetchContext::rpc_get_account()
+        .with_reason(AccountFetchReason::DelegationRecord);
+    let kind = ChainlinkCompanionFetchKind::DelegationRecord;
+    let outcome = ChainlinkCompanionFetchOutcome::FailedSlotMismatch;
+    let attempts_count_before =
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
+    let duration_count_before =
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
+
+    // RPC-only retries in the provider test mock use one batch context slot,
+    // which normalizes slots before the terminal mismatch branch. Exercise the
+    // private observation helper directly so this test covers the metric path
+    // without changing production retry behavior.
+    observe_companion_fetch_if_configured(
+        context,
+        Some(kind),
+        outcome,
+        1,
+        std::time::Instant::now(),
+    );
+
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        attempts_count_before + 1
+    );
+    assert_eq!(
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
+        duration_count_before + 1
+    );
+}
+
+#[tokio::test]
+async fn test_companion_fetch_metrics_not_recorded_without_kind() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+    let context = AccountFetchContext::project_ata();
+    let kind = ChainlinkCompanionFetchKind::AtaProjection;
+    let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
+    let attempts_count_before =
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
+    let duration_count_before =
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
+
+    let res = remote_account_provider
+        .try_get_multi_until_slots_match(&[pubkey1, pubkey2], None, context)
+        .await;
+
+    assert!(res.is_ok());
+    assert_eq!(
+        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        attempts_count_before
+    );
+    assert_eq!(
+        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
+        duration_count_before
+    );
+}
+
+#[tokio::test]
 async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
 ) {
     let _metrics_guard =
@@ -333,7 +1787,7 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
                 .try_get_multi(
                     &[pubkey],
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                     None,
                 )
                 .await
@@ -352,12 +1806,20 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
         .expect("owner task should complete")
         .expect("owner task should not panic");
     let err = result.expect_err("setup_subscriptions should fail");
-    assert!(err.to_string().contains("subscription(s) failed"));
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
+    ));
     assert!(!provider.is_pending(&pubkey));
 
     pubsub_client.try_reconnect().await.unwrap();
     let retry = provider
-        .try_get_multi(&[pubkey], None, AccountFetchOrigin::GetAccount, None)
+        .try_get_multi(
+            &[pubkey],
+            None,
+            AccountFetchContext::rpc_get_account(),
+            None,
+        )
         .await
         .expect("retry after cleanup should succeed");
     assert_eq!(retry.len(), 1);
@@ -392,7 +1854,7 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
                 .try_get_multi(
                     &[pubkey],
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                     None,
                 )
                 .await
@@ -409,7 +1871,7 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
                 .try_get_multi(
                     &[pubkey],
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                     None,
                 )
                 .await
@@ -451,8 +1913,14 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
 
     let first_err = first_result.expect_err("owner should fail");
     let second_err = second_result.expect_err("waiter should fail");
-    assert!(first_err.to_string().contains("subscription(s) failed"));
-    assert!(second_err.to_string().contains("subscription(s) failed"));
+    assert!(matches!(
+        first_err,
+        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
+    ));
+    assert!(matches!(
+        second_err,
+        RemoteAccountProviderError::AccountResolutionsFailed(_)
+    ));
     assert!(!provider.is_pending(&pubkey));
 }
 
@@ -999,13 +2467,14 @@ async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
 
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
-    assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
     assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
+    // The evicted key's unsubscribe and ownership cleanup run in a detached
+    // task.
+    wait_until("evicted account is unsubscribed", || {
+        !pubsub_client.subscriptions_union().contains(&pubkey1)
+    })
+    .await;
+    wait_until_ownership_removed(&provider, &pubkey1).await;
     assert!(provider
         .subscription_ownership
         .lock()
@@ -1055,13 +2524,14 @@ async fn test_lru_eviction_and_reason_release_are_serialized() {
 
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
-    assert!(!pubsub_client.subscriptions_union().contains(&pubkey1));
     assert!(pubsub_client.subscriptions_union().contains(&pubkey2));
-    assert!(!provider
-        .subscription_ownership
-        .lock()
-        .await
-        .contains_key(&pubkey1));
+    // The evicted key's unsubscribe and ownership cleanup run in a detached
+    // task.
+    wait_until("evicted account is unsubscribed", || {
+        !pubsub_client.subscriptions_union().contains(&pubkey1)
+    })
+    .await;
+    wait_until_ownership_removed(&provider, &pubkey1).await;
     assert!(provider
         .subscription_ownership
         .lock()
@@ -1097,7 +2567,7 @@ async fn test_try_get_multi_owner_success_cleans_up_pending_entry() {
                 .try_get_multi(
                     &[pubkey],
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                     None,
                 )
                 .await
@@ -1148,16 +2618,16 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         ..
     } = setup_provider(pubkey, account).await;
 
-    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
+    let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
     let owned_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::Owned,
     );
     let joined_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::JoinedExisting,
     );
-    let waiters_baseline = pending_waiters_value(fetch_origin);
+    let waiters_baseline = pending_waiters_value(fetch_context);
 
     rpc_client.block_fetches();
 
@@ -1165,7 +2635,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         let provider = provider.clone();
         async move {
             provider
-                .try_get_multi(&[pubkey], None, fetch_origin, None)
+                .try_get_multi(&[pubkey], None, fetch_context, None)
                 .await
         }
     });
@@ -1176,7 +2646,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         let provider = provider.clone();
         async move {
             provider
-                .try_get_multi(&[pubkey], None, fetch_origin, None)
+                .try_get_multi(&[pubkey], None, fetch_context, None)
                 .await
         }
     });
@@ -1201,7 +2671,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         .expect("waiter fetch should succeed");
 
     let owned_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::Owned,
     )
     .saturating_sub(owned_baseline);
@@ -1210,7 +2680,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         "remote provider owned metric should increase by at least 1; got {owned_delta}"
     );
     let joined_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::JoinedExisting,
     )
     .saturating_sub(joined_baseline);
@@ -1219,7 +2689,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         "remote provider joined-existing metric should increase by at least 1; got {joined_delta}"
     );
     let waiters_delta =
-        pending_waiters_value(fetch_origin).saturating_sub(waiters_baseline);
+        pending_waiters_value(fetch_context).saturating_sub(waiters_baseline);
     assert!(
         waiters_delta >= 1,
         "remote provider waiter metric should increase by at least 1; got {waiters_delta}"
@@ -1248,7 +2718,6 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
     let rpc_client = ChainRpcClientMockBuilder::new()
         .slot(CURRENT_SLOT)
         .clock_sysvar_for_slot(CURRENT_SLOT)
-        .account(pubkey, account)
         .build();
     let (updates_sender, updates_receiver) = mpsc::channel(1_000);
     let pubsub_client =
@@ -1268,13 +2737,13 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         .unwrap(),
     );
 
-    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
+    let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
     let resolved_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
     );
     let late_rpc_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
     );
 
@@ -1284,7 +2753,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         let provider = provider.clone();
         async move {
             provider
-                .try_get_multi(&[pubkey], None, fetch_origin, None)
+                .try_get_multi(&[pubkey], None, fetch_context, None)
                 .await
         }
     });
@@ -1314,7 +2783,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         Some(RemoteAccountUpdateSource::Subscription)
     );
     let resolved_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
     )
     .saturating_sub(resolved_baseline);
@@ -1323,14 +2792,21 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         "remote provider subscription-resolution metric should increase by at least 1; got {resolved_delta}"
     );
 
+    // A discarded result must not reclassify the account even when its
+    // response slot is newer than the subscription update that won.
+    rpc_client.set_current_slot(fetch_start_slot + 1);
     rpc_client.allow_fetches();
     wait_for_pending_account_delta_at_least(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
         late_rpc_baseline,
         1,
     )
     .await;
+    let transition_guard = provider.subscription_transition_lock.lock().await;
+    drop(transition_guard);
+    assert!(provider.lrucache_subscribed_accounts.contains(&pubkey));
+    assert!(!provider.secondary_subscriptions.contains(&pubkey));
 }
 
 #[tokio::test]
@@ -1363,7 +2839,7 @@ async fn test_get_non_existing_account() {
 
     let pubkey = random_pubkey();
     let remote_account = remote_account_provider
-        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     assert!(!remote_account.is_found());
@@ -1416,7 +2892,7 @@ async fn test_get_existing_account_for_valid_slot() {
     };
 
     let remote_account = remote_account_provider
-        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     let AccountAtSlot { account, slot } =
@@ -1456,8 +2932,9 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot() {
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: None,
+                companion_fetch_kind: ChainlinkCompanionFetchKind::ProgramData,
             }),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -1526,8 +3003,10 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
                         max_retries: 3,
                         retry_interval_ms: 10,
                         min_context_slot: None,
+                        companion_fetch_kind:
+                            ChainlinkCompanionFetchKind::ProgramData,
                     }),
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         }
@@ -1603,8 +3082,9 @@ async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: None,
+                companion_fetch_kind: ChainlinkCompanionFetchKind::ProgramData,
             }),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1647,8 +3127,9 @@ async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT + 1),
+                companion_fetch_kind: ChainlinkCompanionFetchKind::ProgramData,
             }),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -1660,6 +3141,70 @@ async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_
     assert!(remote_accounts[1].is_found());
     assert_eq!(remote_accounts[0].slot(), CURRENT_SLOT + 1);
     assert_eq!(remote_accounts[1].slot(), CURRENT_SLOT + 1);
+}
+
+#[tokio::test]
+async fn test_slot_match_retry_reclassifies_found_account_to_primary() {
+    const CURRENT_SLOT: u64 = 42;
+    let missing = random_pubkey();
+    let existing = random_pubkey();
+    let account = Account {
+        lamports: 1,
+        ..Default::default()
+    };
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(CURRENT_SLOT)
+        .clock_sysvar_for_slot(CURRENT_SLOT)
+        .account(existing, account.clone())
+        .build();
+    let (updates_tx, updates_rx) = mpsc::channel(100);
+    let pubsub_client = ChainPubsubClientMock::new(updates_tx, updates_rx);
+    let (forward_tx, _forward_rx) = mpsc::channel(100);
+    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client.clone(),
+            pubsub_client,
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(Arc::<AtomicU64>::default()),
+        )
+        .await
+        .unwrap(),
+    );
+
+    let rpc_to_advance = rpc_client.clone();
+    let account_to_add = account.clone();
+    let advance_handle = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        rpc_to_advance.add_account(missing, account_to_add);
+        rpc_to_advance.set_slot(CURRENT_SLOT + 1);
+    });
+
+    let remote_accounts = provider
+        .try_get_multi_until_slots_match(
+            &[missing, existing],
+            Some(MatchSlotsConfig {
+                max_retries: 10,
+                retry_interval_ms: 10,
+                min_context_slot: Some(CURRENT_SLOT + 1),
+                companion_fetch_kind: ChainlinkCompanionFetchKind::ProgramData,
+            }),
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .unwrap();
+    advance_handle.await.unwrap();
+
+    assert!(remote_accounts.iter().all(RemoteAccount::is_found));
+    assert!(provider.lrucache_subscribed_accounts.contains(&missing));
+    assert!(!provider.secondary_subscriptions.contains(&missing));
+    assert!(!provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
 }
 
 #[tokio::test]
@@ -1686,8 +3231,9 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_accou
                 max_retries: 10,
                 retry_interval_ms: 50,
                 min_context_slot: Some(CURRENT_SLOT),
+                companion_fetch_kind: ChainlinkCompanionFetchKind::ProgramData,
             }),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1703,7 +3249,7 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_accou
 
 #[test]
 fn test_match_slots_retry_delay_honors_configured_interval() {
-    let config = MatchSlotsConfig {
+    let config = MatchSlotsRetryConfig {
         max_retries: 10,
         retry_interval_ms: 50,
         min_context_slot: None,
@@ -1771,6 +3317,15 @@ fn drain_removed_account_rx(rx: &mut mpsc::Receiver<Pubkey>) -> Vec<Pubkey> {
     removed_accounts
 }
 
+/// Awaits the next removal notification. Capacity-eviction cleanup runs as a
+/// detached task, so its effects are asynchronous to the admission call.
+async fn wait_for_removed_account(rx: &mut mpsc::Receiver<Pubkey>) -> Pubkey {
+    tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("timed out waiting for removed account")
+        .expect("removed account channel closed")
+}
+
 // Subscription lifecycle metric readers. Tests read the current counter value
 // for one exact label tuple before and after an operation and compare the delta
 // so they stay robust to global Prometheus counter state shared across runs.
@@ -1817,7 +3372,7 @@ async fn test_add_accounts_up_to_limit_no_eviction() {
     // Add three accounts (up to limit)
     for pk in pubkeys {
         provider
-            .try_get(*pk, AccountFetchOrigin::GetAccount)
+            .try_get(*pk, AccountFetchContext::rpc_get_account())
             .await
             .unwrap();
     }
@@ -1846,45 +3401,43 @@ async fn test_eviction_order() {
 
     // Fill cache: [1, 2, 3] (1 is least recently used)
     provider
-        .try_get(pubkey1, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey1, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     provider
-        .try_get(pubkey2, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey2, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     provider
-        .try_get(pubkey3, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey3, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
 
     // Access pubkey1 to make it more recently used: [2, 3, 1]
     // This should just promote, making order [2, 3, 1]
     provider
-        .try_get(pubkey1, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey1, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
 
     // Add pubkey4, should evict pubkey2 (now least recently used)
     provider
-        .try_get(pubkey4, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey4, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
 
     // Check channel received the evicted account
 
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey2]);
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey2);
 
     // Add pubkey5, should evict pubkey3 (now least recently used)
     provider
-        .try_get(pubkey5, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey5, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
 
     // Check channel received the second evicted account
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey3]);
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey3);
 }
 
 #[tokio::test]
@@ -1902,7 +3455,7 @@ async fn test_multiple_evictions_in_sequence() {
     // Fill cache to capacity (no evictions)
     for pk in pubkeys.iter().take(4) {
         provider
-            .try_get(*pk, AccountFetchOrigin::GetAccount)
+            .try_get(*pk, AccountFetchContext::rpc_get_account())
             .await
             .unwrap();
     }
@@ -1910,14 +3463,16 @@ async fn test_multiple_evictions_in_sequence() {
     // Add more accounts and verify evictions happen in LRU order
     for i in 4..7 {
         provider
-            .try_get(pubkeys[i], AccountFetchOrigin::GetAccount)
+            .try_get(pubkeys[i], AccountFetchContext::rpc_get_account())
             .await
             .unwrap();
         let expected_evicted = pubkeys[i - 4]; // Should evict the account added 4 steps ago
 
         // Verify the evicted account was sent over the channel
-        let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-        assert_eq!(removed_accounts, vec![expected_evicted]);
+        assert_eq!(
+            wait_for_removed_account(&mut removed_rx).await,
+            expected_evicted
+        );
     }
 }
 
@@ -1964,21 +3519,94 @@ async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
     assert!(provider.is_watching(&pubkey3));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
+    // The evicted key's unsubscribe runs in a detached cleanup task.
+    wait_until("evicted account is unsubscribed", || {
+        !provider
+            .pubsub_client()
+            .subscriptions_union()
+            .contains(&pubkey1)
+    })
+    .await;
     assert!(provider
         .pubsub_client()
         .subscriptions_union()
         .contains(&pubkey2));
 
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey1]);
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey1);
 }
 
 #[tokio::test]
-async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
+async fn test_capacity_eviction_unsubscribe_failure_keeps_admission() {
+    init_logger();
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let pubkeys = &[pubkey1, pubkey2];
+
+    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
+    provider.abort_subscription_reconciler_for_test();
+
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider.pubsub_client().fail_next_unsubscriptions(1);
+
+    let evicted_before = registration_metric_value(
+        SubscriptionRegistrationOrigin::Internal,
+        SubscriptionReasonLabel::DirectAccount,
+        SubscriptionRegistrationOutcome::EvictedCandidate,
+    );
+    let cleanup_before = cleanup_metric_value(
+        SubscriptionCleanupSource::CapacityEviction,
+        SubscriptionCleanupOutcome::UnsubscribeFailed,
+    );
+
+    // The admission stands even though the evicted key's unsubscribe fails;
+    // the stray subscription is removed by the reconciler on a later pass.
+    provider
+        .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    let evicted_after = registration_metric_value(
+        SubscriptionRegistrationOrigin::Internal,
+        SubscriptionReasonLabel::DirectAccount,
+        SubscriptionRegistrationOutcome::EvictedCandidate,
+    );
+    assert_eq!(evicted_after - evicted_before, 1);
+
+    assert!(!provider.is_watching(&pubkey1));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey2));
+
+    // Cleanup runs in a detached task: the unsubscribe failure is recorded,
+    // ownership is dropped, and the removal notification still goes out.
+    wait_until("evicted-cleanup unsubscribe failure is recorded", || {
+        cleanup_metric_value(
+            SubscriptionCleanupSource::CapacityEviction,
+            SubscriptionCleanupOutcome::UnsubscribeFailed,
+        ) - cleanup_before
+            == 1
+    })
+    .await;
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey1);
+    assert!(!provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey1));
+}
+
+/// The detached evicted-cleanup task re-checks tier membership under the
+/// evicted key's guard and must skip a key that was re-admitted while the
+/// cleanup was waiting, leaving its subscription and ownership intact.
+#[tokio::test]
+async fn test_evicted_cleanup_skips_readmitted_account() {
     init_logger();
     let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
@@ -1992,53 +3620,52 @@ async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
         .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
-    provider.pubsub_client().fail_next_unsubscriptions(1);
 
-    let registration_before = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-    );
-    let cleanup_before = cleanup_metric_value(
+    // Hold pubkey1's per-key guard so the detached cleanup task spawned by
+    // the eviction below blocks before its membership re-check.
+    let guard = subscription_key_owned_guard_from_map(
+        &provider.subscription_key_locks,
+        pubkey1,
+    )
+    .await;
+
+    let retained_before = cleanup_metric_value(
         SubscriptionCleanupSource::CapacityEviction,
-        SubscriptionCleanupOutcome::UnsubscribeFailed,
+        SubscriptionCleanupOutcome::RetainedIntentionally,
     );
 
-    let err = provider
+    provider
         .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
         .await
-        .unwrap_err();
+        .unwrap();
+    assert!(!provider.is_watching(&pubkey1));
 
-    let registration_after = registration_metric_value(
-        SubscriptionRegistrationOrigin::Internal,
-        SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
-    );
-    let cleanup_after = cleanup_metric_value(
-        SubscriptionCleanupSource::CapacityEviction,
-        SubscriptionCleanupOutcome::UnsubscribeFailed,
-    );
-    assert_eq!(registration_after - registration_before, 1);
-    assert_eq!(cleanup_after - cleanup_before, 1);
+    // Re-admit pubkey1 (as the secondary tier would after a fetch claims it)
+    // before letting the cleanup task proceed.
+    provider.secondary_subscriptions.add(pubkey1);
+    drop(guard);
 
-    assert!(matches!(
-        err,
-        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
-    ));
-    assert!(provider.is_watching(&pubkey2));
-    assert!(
-        provider
-            .has_subscription_reason(
-                &pubkey2,
-                SubscriptionReason::DirectAccount
-            )
-            .await
-    );
+    wait_until("evicted cleanup skipped the re-admitted account", || {
+        cleanup_metric_value(
+            SubscriptionCleanupSource::CapacityEviction,
+            SubscriptionCleanupOutcome::RetainedIntentionally,
+        ) - retained_before
+            == 1
+    })
+    .await;
+
+    // The re-admitted key kept its subscription and ownership; no removal
+    // notification was emitted for it.
+    assert!(provider.is_watching(&pubkey1));
     assert!(provider
         .pubsub_client()
         .subscriptions_union()
-        .contains(&pubkey2));
-
+        .contains(&pubkey1));
+    assert!(provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey1));
     let removed_accounts = drain_removed_account_rx(&mut removed_rx);
     assert!(removed_accounts.is_empty());
 }
@@ -2091,32 +3718,36 @@ async fn test_capacity_eviction_missing_pubsub_subscription_completes_cleanup()
         SubscriptionReasonLabel::DirectAccount,
         SubscriptionRegistrationOutcome::UnsubscribeEvictedError,
     );
-    let cleanup_after = cleanup_metric_value(
-        SubscriptionCleanupSource::CapacityEviction,
-        SubscriptionCleanupOutcome::AlreadyAbsent,
-    );
     assert_eq!(evicted_after - evicted_before, 1);
     assert_eq!(error_after - error_before, 0);
-    assert_eq!(cleanup_after - cleanup_before, 1);
 
     assert!(!provider.is_watching(&pubkey1));
     assert!(provider.is_watching(&pubkey2));
-    assert!(!provider
-        .pubsub_client()
-        .subscriptions_union()
-        .contains(&pubkey1));
     assert!(provider
         .pubsub_client()
         .subscriptions_union()
         .contains(&pubkey2));
+
+    // The evicted key's cleanup runs in a detached task.
+    wait_until("evicted-cleanup already-absent outcome is recorded", || {
+        cleanup_metric_value(
+            SubscriptionCleanupSource::CapacityEviction,
+            SubscriptionCleanupOutcome::AlreadyAbsent,
+        ) - cleanup_before
+            == 1
+    })
+    .await;
+    assert!(!provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey1));
     assert!(!provider
         .subscription_ownership
         .lock()
         .await
         .contains_key(&pubkey1));
 
-    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
-    assert_eq!(removed_accounts, [pubkey1]);
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, pubkey1);
 }
 
 #[tokio::test]
@@ -2150,11 +3781,7 @@ async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribin
     let registration_before = registration_metric_value(
         SubscriptionRegistrationOrigin::Internal,
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::RejectedAndUnsubscribed,
-    );
-    let cleanup_before = cleanup_metric_value(
-        SubscriptionCleanupSource::RejectedNewSubscription,
-        SubscriptionCleanupOutcome::Unsubscribed,
+        SubscriptionRegistrationOutcome::RejectedNoCapacity,
     );
 
     let err = provider
@@ -2165,14 +3792,9 @@ async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribin
     let registration_after = registration_metric_value(
         SubscriptionRegistrationOrigin::Internal,
         SubscriptionReasonLabel::DirectAccount,
-        SubscriptionRegistrationOutcome::RejectedAndUnsubscribed,
-    );
-    let cleanup_after = cleanup_metric_value(
-        SubscriptionCleanupSource::RejectedNewSubscription,
-        SubscriptionCleanupOutcome::Unsubscribed,
+        SubscriptionRegistrationOutcome::RejectedNoCapacity,
     );
     assert_eq!(registration_after - registration_before, 1);
-    assert_eq!(cleanup_after - cleanup_before, 1);
 
     assert!(matches!(
         err,
@@ -2271,7 +3893,7 @@ async fn test_registration_metric_already_present_on_duplicate_acquire() {
 }
 
 #[tokio::test]
-async fn test_registration_metric_preserves_fetch_origin() {
+async fn test_registration_metric_preserves_fetch_context() {
     init_logger();
     let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
@@ -2287,16 +3909,20 @@ async fn test_registration_metric_preserves_fetch_origin() {
         setup_provider(pubkey, account).await;
 
     let before = registration_metric_value(
-        SubscriptionRegistrationOrigin::Fetch(AccountFetchOrigin::GetAccount),
+        SubscriptionRegistrationOrigin::Fetch(
+            AccountFetchContext::rpc_get_account(),
+        ),
         SubscriptionReasonLabel::DirectAccount,
         SubscriptionRegistrationOutcome::AddedBelowCapacity,
     );
     provider
-        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .try_get(pubkey, AccountFetchContext::rpc_get_account())
         .await
         .unwrap();
     let after = registration_metric_value(
-        SubscriptionRegistrationOrigin::Fetch(AccountFetchOrigin::GetAccount),
+        SubscriptionRegistrationOrigin::Fetch(
+            AccountFetchContext::rpc_get_account(),
+        ),
         SubscriptionReasonLabel::DirectAccount,
         SubscriptionRegistrationOutcome::AddedBelowCapacity,
     );
@@ -2515,16 +4141,28 @@ fn test_removed_stuck_pubkey_symbols_are_absent_from_production_code() {
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+    /// Stops the background reconciler so its startup pass cannot race a
+    /// test that injects pubsub failures or asserts on stray subscriptions.
+    fn abort_subscription_reconciler_for_test(&self) {
+        if let Some(handle) = &self._active_subscriptions_task_handle {
+            handle.abort();
+        }
+    }
+
     async fn reconcile_subscriptions_once_for_test(&self) -> usize {
         let never_evicted =
             self.lrucache_subscribed_accounts.never_evicted_accounts();
         subscription_reconciler::reconcile_subscriptions(
             &self.lrucache_subscribed_accounts,
+            &self.secondary_subscriptions,
+            &self.confirmed_missing_subscriptions,
             &self.pubsub_client,
             &never_evicted,
             &self.removed_account_tx,
             Some(&self.subscription_key_locks),
             Some(&self.subscription_ownership),
+            Some(self.fetching_accounts.as_ref()),
+            Some(&self.capacity_eviction_protection),
         )
         .await
     }

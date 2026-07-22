@@ -7,7 +7,8 @@ use dlp_api::{
 use magicblock_metrics::metrics::{
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
-    chainlink_pending_fetch_waiters_value, ChainlinkPendingFetchLayer,
+    chainlink_pending_fetch_waiters_value, AccountFetchContext,
+    AccountFetchReason, ChainlinkPendingFetchLayer,
     ChainlinkPendingFetchOutcome,
 };
 use solana_account::{
@@ -77,6 +78,32 @@ type TestFetchClonerResult = (
     mpsc::Sender<ForwardedSubscriptionUpdate>,
     Arc<ClonerStub>,
 );
+
+async fn handle_executable_sub_update(
+    this: &FetchCloner<
+        ChainRpcClientMock,
+        ChainPubsubClientMock,
+        AccountsBankStub,
+        ClonerStub,
+    >,
+    pubkey: Pubkey,
+    account: AccountSharedData,
+) {
+    let companion_fetch_log_context = CompanionFetchLogContext {
+        origin: AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        ),
+        primary_pubkey: pubkey,
+        context_slot: account.remote_slot(),
+    };
+    program_loader::handle_executable_sub_update_with_context(
+        this,
+        pubkey,
+        account,
+        &companion_fetch_log_context,
+    )
+    .await;
+}
 
 type TestFetchCloner = FetchCloner<
     ChainRpcClientMock,
@@ -580,7 +607,7 @@ async fn wait_for_rpc_fetch_activity(
 }
 
 fn pending_accounts_value(
-    origin: AccountFetchOrigin,
+    origin: impl Into<AccountFetchContext>,
     outcome: ChainlinkPendingFetchOutcome,
 ) -> u64 {
     chainlink_pending_fetch_accounts_value(
@@ -590,7 +617,7 @@ fn pending_accounts_value(
     )
 }
 
-fn pending_waiters_value(origin: AccountFetchOrigin) -> u64 {
+fn pending_waiters_value(origin: impl Into<AccountFetchContext>) -> u64 {
     chainlink_pending_fetch_waiters_value(
         origin,
         ChainlinkPendingFetchLayer::FetchCloner,
@@ -683,7 +710,7 @@ async fn test_fetch_and_clone_single_non_delegated_account() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -721,7 +748,7 @@ async fn test_fetch_and_clone_single_non_existing_account() {
             &[non_existing_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -781,7 +808,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -857,17 +884,27 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
         .await
         .unwrap();
 
+    let update = ForwardedSubscriptionUpdate {
+        pubkey: account_pubkey,
+        account: RemoteAccount::from_fresh_account(
+            account.clone(),
+            CURRENT_SLOT,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Account,
+    };
+    let companion_fetch_log_context = CompanionFetchLogContext {
+        origin: AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        ),
+        primary_pubkey: account_pubkey,
+        context_slot: update.account.slot(),
+    };
+
     let (resolved_account, delegation_record, _actions) = fetch_cloner
         .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-            ForwardedSubscriptionUpdate {
-                pubkey: account_pubkey,
-                account: RemoteAccount::from_fresh_account(
-                    account.clone(),
-                    CURRENT_SLOT,
-                    RemoteAccountUpdateSource::Subscription,
-                ),
-                source: SubscriptionSource::Account,
-            },
+            update,
+            &companion_fetch_log_context,
         )
         .await;
 
@@ -937,7 +974,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_different_authority(
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1017,7 +1054,7 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
             &[deleg_record_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(result.is_ok());
@@ -1031,7 +1068,7 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1137,7 +1174,7 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
             ],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1238,7 +1275,7 @@ async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_d
             &[delegated_pubkey, invalid_delegated_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1309,7 +1346,7 @@ async fn test_deleg_record_stale() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1330,7 +1367,7 @@ async fn test_deleg_record_stale() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     debug!(result = ?result, "Test result after updating delegation record");
@@ -1385,7 +1422,7 @@ async fn test_account_stale() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -1405,7 +1442,7 @@ async fn test_account_stale() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     debug!(result = ?result, "Test result after updating account");
@@ -1467,7 +1504,7 @@ async fn test_delegation_record_unsub_race_condition_prevention() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -1536,7 +1573,7 @@ async fn test_fetch_and_clone_with_dedup_concurrent_requests() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -1613,7 +1650,7 @@ async fn test_undelegation_requested_subscription_behavior() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(result.is_ok());
@@ -1687,7 +1724,7 @@ async fn test_delegated_discovered_after_direct_subscribe_releases_direct_withou
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("delegated account fetch should succeed");
@@ -2152,7 +2189,7 @@ async fn test_delegated_subscription_update_keeps_externally_acquired_undelegati
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("delegated account fetch should succeed");
@@ -2336,7 +2373,7 @@ async fn test_parallel_fetch_prevention_multiple_accounts() {
                     &accounts,
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -2425,7 +2462,7 @@ async fn test_cold_accounts_fetch_is_batched_into_single_rpc_call() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2495,7 +2532,7 @@ async fn test_requerying_same_accounts_adds_no_rpc_calls() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2515,7 +2552,7 @@ async fn test_requerying_same_accounts_adds_no_rpc_calls() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2577,7 +2614,7 @@ async fn test_cold_accounts_fetch_chunks_batches_at_rpc_limit() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2679,7 +2716,7 @@ async fn test_mixed_class_batch_uses_one_main_rpc_call_plus_companions() {
             ],
             Some(&[missing_pubkey]),
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .unwrap();
@@ -2790,7 +2827,7 @@ async fn test_cancel_single_key_keeps_other_keys_in_same_ensure_alive() {
                     &pubkeys,
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -2935,7 +2972,7 @@ async fn test_batched_wire_failure_fails_keys_without_per_key_retry() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(
@@ -2964,7 +3001,7 @@ async fn test_batched_wire_failure_fails_keys_without_per_key_retry() {
             &pubkeys[0..1],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("a single-key retry must succeed");
@@ -3041,7 +3078,7 @@ async fn test_batched_wire_failure_after_deadline_reports_timeout() {
             &pubkeys,
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(
@@ -3107,7 +3144,7 @@ async fn test_overlapping_concurrent_ensures_share_inflight_keys_at_rpc_level()
                     &[key_a, key_b],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3125,7 +3162,7 @@ async fn test_overlapping_concurrent_ensures_share_inflight_keys_at_rpc_level()
                     &[key_b, key_c],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3267,7 +3304,7 @@ async fn test_fetch_with_some_acounts_marked_as_empty_if_not_found() {
             ],
             Some(&[marked_non_existing_account_pubkey]),
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("Fetch and clone failed");
@@ -3369,7 +3406,7 @@ async fn test_confined_delegation_behavior() {
             &[account1_pubkey, account2_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("Failed to fetch and clone accounts");
@@ -3441,7 +3478,7 @@ async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -3579,7 +3616,7 @@ async fn test_program_loader_resolver_error_releases_program_data_refs() {
     let mut program_account_shared = AccountSharedData::from(program_account);
     program_account_shared.set_remote_slot(CURRENT_SLOT);
 
-    program_loader::handle_executable_sub_update(
+    handle_executable_sub_update(
         &fetch_cloner,
         program_pubkey,
         program_account_shared,
@@ -3659,7 +3696,7 @@ async fn test_allowed_programs_filters_programs() {
             &[program_id_allowed, program_id_blocked],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -3731,7 +3768,7 @@ async fn test_allowed_programs_none_allows_all() {
             &[program_id1, program_id2],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -3802,7 +3839,7 @@ async fn test_allowed_programs_empty_allows_all() {
             &[program_id1, program_id2],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -3848,7 +3885,7 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
             fetch_cloner
                 .clone_program_with_ownership(
                     program,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3861,7 +3898,7 @@ async fn test_concurrent_same_slot_program_clone_submits_once() {
             fetch_cloner
                 .clone_program_with_ownership(
                     program,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3921,7 +3958,7 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
             fetch_cloner
                 .clone_program_with_ownership(
                     old_program,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -3934,7 +3971,7 @@ async fn test_newer_program_clone_waits_then_replaces_older_slot() {
             fetch_cloner
                 .clone_program_with_ownership(
                     new_program,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -4015,7 +4052,7 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_fetch() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -4083,7 +4120,7 @@ async fn test_no_program_subscription_for_undelegated_account() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
 
@@ -4334,7 +4371,7 @@ async fn test_fetch_and_clone_non_raw_eata_owned_account_as_delegated() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("Failed to fetch and clone delegated EATA-owned account");
@@ -4469,17 +4506,27 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
     dlp_owned_account_shared.set_delegated(true);
     dlp_owned_account_shared.set_confined(true);
 
+    let update = ForwardedSubscriptionUpdate {
+        pubkey: account_pubkey,
+        account: RemoteAccount::from_fresh_account_shared_data(
+            dlp_owned_account_shared,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Account,
+    };
+    let companion_fetch_log_context = CompanionFetchLogContext {
+        origin: AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateClone,
+        ),
+        primary_pubkey: account_pubkey,
+        context_slot: update.account.slot(),
+    };
+
     let (resolved_account, delegation_record, delegation_actions) =
         fetch_cloner
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-                ForwardedSubscriptionUpdate {
-                    pubkey: account_pubkey,
-                    account: RemoteAccount::from_fresh_account_shared_data(
-                        dlp_owned_account_shared,
-                        RemoteAccountUpdateSource::Subscription,
-                    ),
-                    source: SubscriptionSource::Account,
-                },
+                update,
+                &companion_fetch_log_context,
             )
             .await;
 
@@ -4489,8 +4536,11 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
     assert!(accounts_bank.get_account(&account_pubkey).is_none());
 }
 
+// Accounts whose app data collides with an internal DLP discriminator are
+// dropped before discovery (no remote fetch); they are cloned lazily on
+// first use instead of greedily from the program update.
 #[tokio::test]
-async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned(
+async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_dropped_without_fetch(
 ) {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -4519,6 +4569,8 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned
         accounts_bank,
         rpc_client,
         subscription_tx,
+        fetch_cloner,
+        cloner,
         ..
     } = setup(
         [(account_pubkey, delegated_account.clone())],
@@ -4533,6 +4585,9 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned
         validator_pubkey,
         account_owner,
     );
+
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
 
     use crate::remote_account_provider::{
         RemoteAccount, RemoteAccountUpdateSource,
@@ -4550,10 +4605,373 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned
         })
         .await
         .unwrap();
+    drop(subscription_tx);
 
-    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
-    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
-    tokio::time::timeout(TIMEOUT, async {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while Arc::strong_count(&fetch_cloner) > 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for internal DLP update to be dropped");
+
+    assert!(accounts_bank.get_account(&account_pubkey).is_none());
+    assert_eq!(cloner.clone_request_count(), 0);
+    assert_eq!(
+        rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches(),
+        fetches_before
+    );
+}
+
+// A freshly delegated account whose app data collides with an internal DLP
+// discriminator is still greedily cloned: the delegation-record update from
+// the same delegation routes it to discovery, in either delivery order.
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_record_first_is_cloned() {
+    colliding_delegated_account_is_cloned(false, false, false).await;
+}
+
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_record_late_is_cloned() {
+    colliding_delegated_account_is_cloned(true, false, false).await;
+}
+
+// A stale pre-delegation clone in the bank must not settle a released
+// candidate: the release force-refreshes it into the delegated state.
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_record_late_refreshes_stale_bank_copy(
+) {
+    colliding_delegated_account_is_cloned(true, true, false).await;
+}
+
+// SubMux dedupes forwards on (pubkey, slot), so a directly watched record
+// PDA can surface only as an account-subscription update; the sighting must
+// still release the parked candidate.
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_account_sourced_record_releases(
+) {
+    colliding_delegated_account_is_cloned(true, false, true).await;
+}
+
+// A release pass that settles on pre-delegation state (e.g. joining an
+// in-flight pre-delegation fetch) must retry, not silently accept an
+// undelegated same-slot copy.
+#[tokio::test]
+async fn test_released_collision_candidate_retries_when_clone_settles_stale() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let mut app_data = vec![0; DelegationRecord::size_with_discriminator()];
+    app_data[..8].copy_from_slice(&100u64.to_le_bytes());
+
+    // The RPC still serves the pre-delegation (non-DLP-owned) state.
+    let pre_delegation_account = Account {
+        lamports: 1_000_000,
+        data: app_data.clone(),
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: app_data,
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, pre_delegation_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    let delegation_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    let delegation_record = DelegationRecord {
+        authority: validator_pubkey,
+        owner: account_owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    let delegation_record_account = Account {
+        lamports: 1_000_000,
+        data: delegation_record_to_vec(&delegation_record),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
+
+    for (pubkey, account) in [
+        (account_pubkey, delegated_account),
+        (delegation_record_pubkey, delegation_record_account),
+    ] {
+        subscription_tx
+            .send(ForwardedSubscriptionUpdate {
+                pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    account,
+                    CURRENT_SLOT,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+                source: SubscriptionSource::Program,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // The undelegated same-slot clone must never be accepted as settled.
+    let in_bank = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("release attempts clone the fetched state");
+    assert!(!in_bank.delegated());
+
+    // A single-pass release (no retries) stays below this.
+    let release_fetches = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches()
+        - fetches_before;
+    assert!(
+        release_fetches >= 4,
+        "expected retried clone attempts, saw only {release_fetches} fetches"
+    );
+}
+
+// A released collision candidate delegated to another validator must be
+// ignored like record-first discovery, not force-cloned from the firehose.
+#[tokio::test]
+async fn test_discovered_colliding_delegated_account_elsewhere_is_not_cloned() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let other_validator = random_pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let mut app_data = vec![0; DelegationRecord::size_with_discriminator()];
+    app_data[..8].copy_from_slice(&100u64.to_le_bytes());
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: app_data,
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        cloner,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        other_validator,
+        account_owner,
+    );
+
+    let delegation_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    let delegation_record = DelegationRecord {
+        authority: other_validator,
+        owner: account_owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    let delegation_record_account = Account {
+        lamports: 1_000_000,
+        data: delegation_record_to_vec(&delegation_record),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    // Account first so it parks; the late record sighting releases it into
+    // the authority gate, which must drop it.
+    for (pubkey, account) in [
+        (account_pubkey, delegated_account),
+        (delegation_record_pubkey, delegation_record_account),
+    ] {
+        subscription_tx
+            .send(ForwardedSubscriptionUpdate {
+                pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    account,
+                    CURRENT_SLOT,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+                source: SubscriptionSource::Program,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(accounts_bank.get_account(&account_pubkey).is_none());
+    assert_eq!(cloner.clone_request_count(), 0);
+}
+
+async fn colliding_delegated_account_is_cloned(
+    record_late: bool,
+    stale_in_bank: bool,
+    record_account_sourced: bool,
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let mut app_data = vec![0; DelegationRecord::size_with_discriminator()];
+    app_data[..8].copy_from_slice(&100u64.to_le_bytes());
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: app_data.clone(),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    if stale_in_bank {
+        let mut stale_copy = AccountSharedData::from(Account {
+            lamports: 1_000_000,
+            data: app_data.clone(),
+            owner: account_owner,
+            executable: false,
+            rent_epoch: 0,
+        });
+        stale_copy.set_remote_slot(CURRENT_SLOT - 10);
+        accounts_bank.insert(account_pubkey, stale_copy);
+    }
+
+    let delegation_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    let delegation_record = DelegationRecord {
+        authority: validator_pubkey,
+        owner: account_owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    let delegation_record_account = Account {
+        lamports: 1_000_000,
+        data: delegation_record_to_vec(&delegation_record),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    // With the record late, the account update parks and the record
+    // sighting — from either subscription source — must release it.
+    let record_source = if record_account_sourced {
+        SubscriptionSource::Account
+    } else {
+        SubscriptionSource::Program
+    };
+    let mut updates = vec![
+        (
+            delegation_record_pubkey,
+            delegation_record_account,
+            record_source,
+        ),
+        (
+            account_pubkey,
+            delegated_account,
+            SubscriptionSource::Program,
+        ),
+    ];
+    if record_late {
+        updates.reverse();
+    }
+    for (pubkey, account, source) in updates {
+        subscription_tx
+            .send(ForwardedSubscriptionUpdate {
+                pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    account,
+                    CURRENT_SLOT,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+                source,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    tokio::time::timeout(Duration::from_secs(2), async {
         while !accounts_bank.get_account(&account_pubkey).is_some_and(
             |account| {
                 account.delegated()
@@ -4561,16 +4979,162 @@ async fn test_discovered_dlp_owned_account_with_internal_record_prefix_is_cloned
                     && account.remote_slot() == CURRENT_SLOT
             },
         ) {
-            tokio::time::sleep(POLL_INTERVAL).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("timed out waiting for masquerading delegated account clone");
+    .expect("timed out waiting for colliding delegated account clone");
 
     let cloned_account = accounts_bank
         .get_account(&account_pubkey)
         .expect("account should be greedily cloned from program update");
     assert_eq!(cloned_account.data(), app_data.as_slice());
+}
+
+// Unrelated record-shaped internal updates parking after a candidate must not
+// evict it before its record sighting releases it.
+#[test]
+fn test_dlp_collision_tracker_parked_candidate_survives_record_shaped_firehose_churn(
+) {
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    const SLOT: u64 = 100;
+    let mut tracker = DlpCollisionTracker::new();
+    let candidate_pubkey = random_pubkey();
+    let record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &candidate_pubkey,
+        );
+
+    let record_shaped_update = |pubkey: Pubkey| {
+        let delegation_record = DelegationRecord {
+            authority: random_pubkey(),
+            owner: random_pubkey(),
+            delegation_slot: 1,
+            lamports: 1_000,
+            commit_frequency_ms: 2_000,
+        };
+        ForwardedSubscriptionUpdate {
+            pubkey,
+            account: RemoteAccount::from_fresh_account(
+                Account {
+                    lamports: 1_000,
+                    data: delegation_record_to_vec(&delegation_record),
+                    owner: dlp_api::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+                SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        }
+    };
+
+    assert!(!tracker.check_or_park(&record_shaped_update(candidate_pubkey,)));
+    for _ in 0..PARKED_COLLISION_UPDATES_CAPACITY.get() {
+        let unrelated_record_account = random_pubkey();
+        assert!(tracker
+            .sight_record(unrelated_record_account, SLOT)
+            .is_none());
+        assert!(!tracker
+            .check_or_park(&record_shaped_update(unrelated_record_account,)));
+    }
+
+    let released = tracker.sight_record(record_pubkey, SLOT).expect(
+        "candidate must survive record-shaped firehose churn until sighting",
+    );
+    assert_eq!(released.pubkey, candidate_pubkey);
+    assert_eq!(released.slot, SLOT);
+}
+
+// Stale delegation-record updates replayed out of order (reconnect,
+// multi-client races) must neither lower the sighted slot nor consume a
+// parked candidate their slot does not cover.
+#[test]
+fn test_dlp_collision_tracker_ignores_stale_record_sightings() {
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    let update_at = |pubkey: Pubkey, slot: u64| ForwardedSubscriptionUpdate {
+        pubkey,
+        account: RemoteAccount::from_fresh_account(
+            Account {
+                lamports: 1_000,
+                data: vec![],
+                owner: dlp_api::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+            slot,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Program,
+    };
+
+    let account_pubkey = random_pubkey();
+    let record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+
+    // A stale sighting must not lower the recorded slot: the colliding
+    // account update still routes straight to discovery.
+    let mut tracker = DlpCollisionTracker::new();
+    assert!(tracker.sight_record(record_pubkey, 100).is_none());
+    assert!(tracker.sight_record(record_pubkey, 50).is_none());
+    assert!(tracker.check_or_park(&update_at(account_pubkey, 100)));
+
+    // A stale sighting must not consume a parked candidate it does not
+    // cover; the candidate is released by its own record sighting.
+    let mut tracker = DlpCollisionTracker::new();
+    assert!(!tracker.check_or_park(&update_at(account_pubkey, 100)));
+    assert!(tracker.sight_record(record_pubkey, 50).is_none());
+    let released = tracker
+        .sight_record(record_pubkey, 100)
+        .expect("covering record sighting must release the candidate");
+    assert_eq!(released.pubkey, account_pubkey);
+    assert_eq!(released.slot, 100);
+
+    // A replayed older account update must not downgrade a newer parked
+    // candidate: a record sighting covering only the old slot cannot
+    // release it, and the candidate's own record still does.
+    let mut tracker = DlpCollisionTracker::new();
+    assert!(!tracker.check_or_park(&update_at(account_pubkey, 100)));
+    assert!(!tracker.check_or_park(&update_at(account_pubkey, 90)));
+    assert!(tracker.sight_record(record_pubkey, 90).is_none());
+    let released = tracker
+        .sight_record(record_pubkey, 100)
+        .expect("covering record sighting must release the candidate");
+    assert_eq!(released.pubkey, account_pubkey);
+    assert_eq!(released.slot, 100);
+}
+
+#[test]
+fn test_dlp_collision_tracker_preserves_unsettled_released_candidate() {
+    let account_pubkey = random_pubkey();
+    let record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    let mut tracker = DlpCollisionTracker::new();
+
+    assert!(
+        tracker.preserve_released_candidate(ParkedCollisionCandidate {
+            pubkey: account_pubkey,
+            slot: 100,
+        })
+    );
+    assert!(tracker.sight_record(record_pubkey, 99).is_none());
+
+    let released = tracker.sight_record(record_pubkey, 100).expect(
+        "preserved candidate must be released by a later covering sighting",
+    );
+    assert_eq!(released.pubkey, account_pubkey);
+    assert_eq!(released.slot, 100);
 }
 
 #[tokio::test]
@@ -5881,7 +6445,7 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect_err("actions on non-delegated target must be rejected");
@@ -5934,7 +6498,7 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("DLP-owned normal clone should be normalized, not rejected");
@@ -5987,7 +6551,7 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("DLP-owned magic fee vault should remain delegated");
@@ -6036,7 +6600,7 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("native token clone should be normalized");
@@ -6099,7 +6663,7 @@ async fn test_delegated_malformed_ata_clone_is_rejected() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect_err("malformed delegated ATA clone should be rejected");
@@ -6156,7 +6720,7 @@ async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("non-ATA native token clone should be preserved");
@@ -6208,7 +6772,7 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("plain native token clone should be preserved");
@@ -6301,7 +6865,7 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect(
@@ -6378,7 +6942,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                     delegated_to_other: None,
                     needs_undelegation: false,
                 },
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
             .expect("action-bearing clone should not fail");
@@ -6446,7 +7010,7 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect(
@@ -6508,7 +7072,7 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 delegated_to_other: None,
                 needs_undelegation: false,
             },
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("active delegated targets should be skipped without failing");
@@ -6555,7 +7119,7 @@ async fn test_failed_plain_clone_accepts_concurrent_active_delegation() {
         fetch_cloner
             .clone_account_with_ownership(
                 request,
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
     });
@@ -6613,7 +7177,10 @@ async fn test_other_validator_delegation_does_not_accept_active_local_account()
     cloner.set_fail_next_clone(true);
 
     fetch_cloner
-        .clone_account_with_ownership(request, AccountFetchOrigin::GetAccount)
+        .clone_account_with_ownership(
+            request,
+            AccountFetchContext::rpc_get_account(),
+        )
         .await
         .expect_err(
             "another validator's delegation must not accept local state",
@@ -6673,7 +7240,12 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
         .fetch_and_parse_delegation_record(
             eata_pubkey,
             CURRENT_SLOT,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
+            CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await
         .expect("delegation record with actions should resolve");
@@ -6689,6 +7261,11 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
             delegation_actions.as_ref().expect(
                 "delegation actions should be parsed for our validator",
             ),
+            &CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await
         .expect(
@@ -6737,7 +7314,12 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
         .fetch_and_parse_delegation_record(
             eata_pubkey,
             CURRENT_SLOT,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
+            CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await
         .expect("delegation record should resolve");
@@ -6751,6 +7333,11 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
             &eata_shared,
             Some(&deleg_record),
             &DelegationActions::default(),
+            &CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await;
 
@@ -6804,7 +7391,12 @@ async fn test_fetch_and_parse_delegation_record_releases_direct_ref_when_already
         .fetch_and_parse_delegation_record(
             eata_pubkey,
             CURRENT_SLOT,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
+            CompanionFetchLogContext {
+                origin: AccountFetchContext::rpc_get_account(),
+                primary_pubkey: eata_pubkey,
+                context_slot: CURRENT_SLOT,
+            },
         )
         .await
         .expect("delegation record should resolve");
@@ -7331,7 +7923,7 @@ async fn test_fetch_subscription_race_duplicate_clone() {
                 &[account_pubkey],
                 None,
                 None,
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
         })
@@ -7463,7 +8055,7 @@ async fn test_newer_account_clone_waits_then_replaces_older_slot() {
                     &[account_pubkey],
                     None,
                     Some(NEW_SLOT),
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -7590,7 +8182,7 @@ async fn test_delegated_account_fetch_subscription_race() {
                 &[account_pubkey],
                 None,
                 Some(CURRENT_SLOT),
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
         })
@@ -7698,7 +8290,7 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
                 &[account_pubkey],
                 None,
                 None,
-                AccountFetchOrigin::GetAccount,
+                AccountFetchContext::rpc_get_account(),
             )
             .await
         })
@@ -7732,7 +8324,7 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(
@@ -7788,7 +8380,7 @@ async fn test_ata_projection_releases_ata_direct_ref_after_fetch() {
             &[ata_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("ATA projection fetch should not fail");
@@ -7861,7 +8453,7 @@ async fn test_token_2022_native_ata_projection_normalizes_and_preserves_layout()
             &[ata_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("Token-2022 ATA projection fetch should not fail");
@@ -7947,7 +8539,7 @@ async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
             &[ata_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await
         .expect("fetch should succeed");
@@ -8213,7 +8805,7 @@ async fn test_owned_operation_concurrent_calls_spawn_one_owner_fetch() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8279,7 +8871,7 @@ async fn test_owned_operation_waiters_share_not_found_metadata() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8349,7 +8941,7 @@ async fn test_owned_operation_waiters_share_missing_delegation_record_metadata()
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8387,7 +8979,7 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         1,
         1,
         owner_budget,
-        AccountFetchOrigin::GetAccount,
+        AccountFetchContext::rpc_get_account(),
         ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Created(handles) => handles,
@@ -8402,7 +8994,7 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         2,
         2,
         joiner_budget,
-        AccountFetchOrigin::GetAccount,
+        AccountFetchContext::rpc_get_account(),
         ChainlinkPendingFetchLayer::FetchCloner,
     ) {
         PendingClaim::Joined(handles) => handles,
@@ -8477,16 +9069,16 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
     )
     .await;
 
-    let fetch_origin = AccountFetchOrigin::GetMultipleAccounts;
+    let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
     let owned_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::Owned,
     );
     let joined_baseline = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::JoinedExisting,
     );
-    let waiters_baseline = pending_waiters_value(fetch_origin);
+    let waiters_baseline = pending_waiters_value(fetch_context);
 
     rpc_client.block_fetches();
 
@@ -8498,7 +9090,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
                     &[account_pubkey],
                     None,
                     None,
-                    fetch_origin,
+                    fetch_context,
                 )
                 .await
         })
@@ -8515,7 +9107,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
                     &[account_pubkey],
                     None,
                     None,
-                    fetch_origin,
+                    fetch_context,
                 )
                 .await
         })
@@ -8541,7 +9133,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         .expect("waiter fetch should succeed");
 
     let owned_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::Owned,
     )
     .saturating_sub(owned_baseline);
@@ -8550,7 +9142,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         "fetch_cloner owned metric should increase by at least 1; got {owned_delta}"
     );
     let joined_delta = pending_accounts_value(
-        fetch_origin,
+        fetch_context,
         ChainlinkPendingFetchOutcome::JoinedExisting,
     )
     .saturating_sub(joined_baseline);
@@ -8559,7 +9151,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         "fetch_cloner joined-existing metric should increase by at least 1; got {joined_delta}"
     );
     let waiters_delta =
-        pending_waiters_value(fetch_origin).saturating_sub(waiters_baseline);
+        pending_waiters_value(fetch_context).saturating_sub(waiters_baseline);
     assert!(
         waiters_delta >= 1,
         "fetch_cloner waiter metric should increase by at least 1; got {waiters_delta}"
@@ -8605,7 +9197,7 @@ async fn test_owned_operation_waiter_cancellation_is_local() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8622,7 +9214,7 @@ async fn test_owned_operation_waiter_cancellation_is_local() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8701,7 +9293,7 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8716,7 +9308,7 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8805,7 +9397,7 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8820,7 +9412,7 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8833,7 +9425,7 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -8929,7 +9521,7 @@ async fn test_cancel_all_pending_on_shutdown() {
                         &[pubkey],
                         None,
                         None,
-                        AccountFetchOrigin::GetAccount,
+                        AccountFetchContext::rpc_get_account(),
                     )
                     .await
             }),
@@ -8950,7 +9542,7 @@ async fn test_cancel_all_pending_on_shutdown() {
                         &[pubkey],
                         None,
                         None,
-                        AccountFetchOrigin::GetAccount,
+                        AccountFetchContext::rpc_get_account(),
                     )
                     .await
             }),
@@ -9032,7 +9624,7 @@ async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -9049,7 +9641,7 @@ async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
                     &[account_pubkey],
                     None,
                     None,
-                    AccountFetchOrigin::GetAccount,
+                    AccountFetchContext::rpc_get_account(),
                 )
                 .await
         })
@@ -9225,7 +9817,7 @@ async fn test_delegated_account_owned_by_token_program_does_not_subscribe_progra
             &[account_pubkey],
             None,
             None,
-            AccountFetchOrigin::GetAccount,
+            AccountFetchContext::rpc_get_account(),
         )
         .await;
     assert!(result.is_ok());

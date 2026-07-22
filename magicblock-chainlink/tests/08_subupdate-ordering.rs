@@ -1,4 +1,4 @@
-use magicblock_chainlink::{testing::init_logger, AccountFetchOrigin};
+use magicblock_chainlink::{testing::init_logger, AccountFetchContext};
 use solana_account::{Account, ReadableAccount};
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
@@ -60,7 +60,7 @@ async fn test_subs_receive_out_of_order_updates() {
         .ensure_accounts(
             &[pubkey],
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();

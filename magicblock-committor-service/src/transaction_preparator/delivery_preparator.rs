@@ -365,6 +365,7 @@ impl DeliveryPreparator {
             }
 
             fn decide_flow(
+                &self,
                 err: &Self::ExecutionError,
             ) -> ControlFlow<(), Duration> {
                 match err {
@@ -566,6 +567,13 @@ impl TransactionSendError {
             _ => None,
         }
     }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::CompileError(_) | Self::SignerError(_) => false,
+            Self::MagicBlockRpcClientError(err) => err.is_transient(),
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -584,6 +592,15 @@ impl BufferExecutionError {
         match self {
             Self::AccountAlreadyInitializedError(_, signature) => *signature,
             Self::TransactionSendError(err) => err.signature(),
+        }
+    }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            // Leftover buffer from a prior attempt: the cleanup-and-retry in
+            // `prepare_task_handling_errors` failed, a fresh attempt can heal
+            Self::AccountAlreadyInitializedError(_, _) => true,
+            Self::TransactionSendError(err) => err.is_transient(),
         }
     }
 }
@@ -610,6 +627,20 @@ pub enum InternalError {
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
     #[error("BufferExecutionError: {0}")]
     BufferExecutionError(#[from] BufferExecutionError),
+}
+
+impl InternalError {
+    /// A from-scratch re-preparation recreates missing chunk PDAs, so those
+    /// count as transient alongside RPC and table-sync failures.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::ZeroRetriesRequestedError | Self::BorshError(_) => false,
+            Self::ChunksPDAMissingError(_) => true,
+            Self::TableManiaError(err) => err.is_transient(),
+            Self::MagicBlockRpcClientError(err) => err.is_transient(),
+            Self::BufferExecutionError(err) => err.is_transient(),
+        }
+    }
 }
 
 impl From<MagicBlockRpcClientError> for InternalError {
@@ -641,6 +672,13 @@ impl DeliveryPreparatorError {
         match self {
             Self::FailedToCreateALTError(err)
             | Self::FailedToPrepareBufferAccounts(err) => err.signature(),
+        }
+    }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::FailedToCreateALTError(err)
+            | Self::FailedToPrepareBufferAccounts(err) => err.is_transient(),
         }
     }
 }
