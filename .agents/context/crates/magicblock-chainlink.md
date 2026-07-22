@@ -165,7 +165,8 @@ Empty placeholders are created in `RemoteAccountProvider::try_get_multi` when RP
 Fetch-owned unknown accounts enter a bounded secondary subscription LRU rather
 than the primary working-set LRU. They retain full websocket and gRPC coverage
 while the fetch is pending. A winning not-found result switches to gRPC-only
-coverage when gRPC is available; a winning found result moves the account to
+coverage promptly when gRPC is available (the reconciler repairs the policy on
+later passes if the switch fails); a winning found result moves the account to
 the primary LRU. If protected primary entries leave no promotion capacity, the
 found fetch fails and its secondary subscription is rolled back. Refetching a
 confirmed miss restores full coverage for the duration of the new pending

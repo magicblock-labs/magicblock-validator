@@ -538,6 +538,52 @@ async fn test_subscription_resolving_pending_fetch_without_tier_state_rejects_wi
 }
 
 #[tokio::test]
+async fn test_confirmed_miss_switches_to_grpc_only_promptly() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(
+        existing,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    // A found account never triggers the gRPC-only switch.
+    assert!(ctx
+        .provider
+        .try_get(existing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx.pubsub_client.prefer_grpc_calls().is_empty());
+
+    // The confirming not-found classification switches the key to
+    // gRPC-only coverage immediately instead of waiting for the
+    // periodic reconciler pass.
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert_eq!(ctx.pubsub_client.prefer_grpc_calls(), vec![missing]);
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(ctx
+        .provider
+        .confirmed_missing_subscriptions
+        .lock()
+        .unwrap()
+        .contains(&missing));
+    // The mock is a gRPC client, so coverage stays after the switch.
+    assert!(ctx.pubsub_client.subscriptions_union().contains(&missing));
+}
+
+#[tokio::test]
 async fn test_setup_cancellation_preserves_pump_admitted_primary_membership() {
     init_logger();
 

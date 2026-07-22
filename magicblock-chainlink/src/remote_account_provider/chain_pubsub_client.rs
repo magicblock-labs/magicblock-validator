@@ -453,6 +453,7 @@ pub mod mock {
         subscribe_notify: Arc<Notify>,
         client_id: String,
         transport: Arc<Mutex<PubsubTransport>>,
+        prefer_grpc_calls: Arc<Mutex<Vec<Pubkey>>>,
     }
 
     impl ChainPubsubClientMock {
@@ -487,11 +488,17 @@ pub mod mock {
                     CLIENT_ID.fetch_add(1, AtomicOrdering::SeqCst)
                 ),
                 transport: Arc::new(Mutex::new(PubsubTransport::WebSocket)),
+                prefer_grpc_calls: Arc::new(Mutex::new(Vec::new())),
             }
         }
 
         pub fn set_transport(&self, transport: PubsubTransport) {
             *self.transport.lock() = transport;
+        }
+
+        /// Pubkeys for which `prefer_grpc_subscription` was invoked.
+        pub fn prefer_grpc_calls(&self) -> Vec<Pubkey> {
+            self.prefer_grpc_calls.lock().clone()
         }
 
         /// Simulate a disconnect: clear all subscriptions and mark client as disconnected.
@@ -658,6 +665,26 @@ pub mod mock {
 
     #[async_trait]
     impl ChainPubsubClient for ChainPubsubClientMock {
+        /// Records the call, then mirrors the trait default: subscribe on a
+        /// gRPC client, error on a websocket-only client.
+        async fn prefer_grpc_subscription(
+            &self,
+            pubkey: Pubkey,
+        ) -> RemoteAccountProviderResult<()> {
+            self.prefer_grpc_calls.lock().push(pubkey);
+            match self.transport() {
+                PubsubTransport::Grpc => self.subscribe(pubkey, None).await,
+                PubsubTransport::WebSocket => Err(
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        format!(
+                            "cannot prefer gRPC-only coverage for {pubkey} on \
+                             a websocket-only client"
+                        ),
+                    ),
+                ),
+            }
+        }
+
         fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
             // SAFETY: This can only be None if `take_updates` is called more
             // than once (double take). That would indicate a logic bug in the

@@ -978,7 +978,8 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         }
 
         // Keep full redundancy until the RPC result confirms the account is
-        // missing. The reconciler switches confirmed misses to gRPC-only.
+        // missing; the confirming classification switches to gRPC-only
+        // promptly and the reconciler repairs the policy on later passes.
         // Runs outside the transition lock; the per-key guard held by the
         // caller serializes transitions of this key.
         self.pubsub_client.subscribe(*pubkey, None).await?;
@@ -1036,8 +1037,9 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
     }
 
     /// Moves a confirmed-missing account from the primary to the secondary
-    /// tier. In-memory only; the whole move runs under one transition-lock
-    /// scope and eviction cleanup is deferred to a detached task.
+    /// tier. The tier move runs under one transition-lock scope; eviction
+    /// cleanup is deferred to a detached task and the gRPC-only transport
+    /// switch runs after the lock scope.
     /// Precondition: the caller holds the key's subscription guard.
     async fn move_not_found_to_secondary(&self, pubkey: Pubkey) {
         if self
@@ -1060,35 +1062,52 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             return;
         }
 
-        let evicted = {
+        let (confirmed_missing, evicted) = {
             let _transition_guard =
                 self.subscription_transition_lock.lock().await;
 
             if self.secondary.contains(&pubkey) {
                 self.set_confirmed_missing(pubkey, true);
-                return;
-            }
-            if !self.primary.contains(&pubkey) {
-                return;
-            }
-
-            let evicted =
+                (true, None)
+            } else if !self.primary.contains(&pubkey) {
+                (false, None)
+            } else {
                 match self.add_with_protection(&self.secondary, pubkey).await {
-                    AddAccountOutcome::Added
-                    | AddAccountOutcome::AlreadyPresent => None,
-                    AddAccountOutcome::Evicted(evicted) => Some(evicted),
-                    AddAccountOutcome::NoEvictableCandidate => return,
-                };
-
-            self.primary.remove(&pubkey);
-            // The reconciler applies the gRPC-only transport policy off the
-            // locked path.
-            self.set_confirmed_missing(pubkey, true);
-            evicted
+                    outcome @ (AddAccountOutcome::Added
+                    | AddAccountOutcome::AlreadyPresent
+                    | AddAccountOutcome::Evicted(_)) => {
+                        self.primary.remove(&pubkey);
+                        self.set_confirmed_missing(pubkey, true);
+                        let evicted = match outcome {
+                            AddAccountOutcome::Evicted(evicted) => {
+                                Some(evicted)
+                            }
+                            _ => None,
+                        };
+                        (true, evicted)
+                    }
+                    AddAccountOutcome::NoEvictableCandidate => (false, None),
+                }
+            }
         };
 
         if let Some(evicted) = evicted {
             self.spawn_evicted_cleanup(evicted);
+        }
+        if confirmed_missing {
+            // Drop the websocket leg promptly; the multiplexer only does so
+            // after confirming gRPC coverage and errs otherwise, in which
+            // case full coverage stays and the reconciler applies the
+            // gRPC-only policy on a later pass.
+            if let Err(err) =
+                self.pubsub_client.prefer_grpc_subscription(pubkey).await
+            {
+                debug!(
+                    pubkey = %pubkey,
+                    error = ?err,
+                    "Keeping full coverage for confirmed miss; reconciler applies gRPC-only policy later"
+                );
+            }
         }
     }
 
