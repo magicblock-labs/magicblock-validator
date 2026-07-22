@@ -29,8 +29,6 @@ on:
       - '.github/workflows/ci-redsuite.yml'
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
-  pull_request_review:
-    types: [submitted]
 
 permissions:
   contents: read
@@ -43,61 +41,7 @@ env:
   BENCHER_PROJECT: magicblock-validator-redsuite
 
 jobs:
-  review_gate:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    name: Review Gate
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      run: ${{ steps.decide.outputs.run }}
-    steps:
-      - name: Check review state
-        id: decide
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          allow() { echo "run=$1" >> "$GITHUB_OUTPUT"; echo "$2" | tee -a "$GITHUB_STEP_SUMMARY"; }
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            allow true "push run — no review gate"
-            exit 0
-          fi
-
-          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
-            # review-triggered: GitHub applied no paths filter here
-            if ! gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' \
-              | grep -qE '\.(rs|proto)$|(^|/)Cargo\.(toml|lock)$|^rust-toolchain\.toml$|^\.github/workflows/ci-redsuite\.yml$|^\.github/actions/(setup-build-env|setup-solana)/'; then
-              allow false "PR touches no redsuite-relevant paths"
-              exit 0
-            fi
-          fi
-
-          reviews=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
-            --jq '[.[] | select(.user.login | startswith("coderabbit"))] | length')
-          if [ "$reviews" -eq 0 ]; then
-            allow false "CodeRabbit has not reviewed yet — the suite starts once it has"
-            exit 0
-          fi
-
-          unresolved=$(gh api graphql --paginate \
-            -f query='query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$endCursor){pageInfo{hasNextPage endCursor} nodes{isResolved}}}}}' \
-            -f owner="${REPO%%/*}" -f name="${REPO##*/}" -F pr="$PR" \
-            --jq '.data.repository.pullRequest.reviewThreads.nodes[].isResolved' \
-            | grep -c false || true)
-          if [ "$unresolved" -gt 0 ]; then
-            allow false "$unresolved unresolved review thread(s) — resolve them, then re-run this workflow or push an update"
-            exit 0
-          fi
-          allow true "CodeRabbit reviewed and all review threads resolved"
-        shell: bash
-
   build_er:
-    needs: review_gate
-    if: needs.review_gate.outputs.run == 'true'
     runs-on: blacksmith-32vcpu-ubuntu-2404
     name: Build ER Release Artifact
     timeout-minutes: 90
