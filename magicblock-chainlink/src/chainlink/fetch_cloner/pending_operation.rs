@@ -1,7 +1,7 @@
 use std::{collections::HashMap as StdHashMap, sync::Arc, time::Duration};
 
 use magicblock_metrics::metrics::{
-    self, AccountFetchOrigin, ChainlinkPendingFetchLayer,
+    self, AccountFetchContext, ChainlinkPendingFetchLayer,
     ChainlinkPendingFetchOutcome,
 };
 use scc::HashMap;
@@ -139,7 +139,7 @@ pub(super) struct PendingOwner {
     pubkey: Pubkey,
     generation: PendingGeneration,
     completed: bool,
-    origin: AccountFetchOrigin,
+    origin: AccountFetchContext,
     layer: ChainlinkPendingFetchLayer,
     started_at: std::time::Instant,
 }
@@ -149,7 +149,7 @@ impl PendingOwner {
         pending: Arc<HashMap<Pubkey, Pending>>,
         pubkey: Pubkey,
         generation: PendingGeneration,
-        origin: AccountFetchOrigin,
+        origin: AccountFetchContext,
         layer: ChainlinkPendingFetchLayer,
     ) -> Self {
         Self {
@@ -167,7 +167,7 @@ impl PendingOwner {
         if self.completed {
             return;
         }
-        metrics::observe_chainlink_pending_fetch_owner_duration_seconds(
+        metrics::observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
             self.origin,
             self.layer,
             outcome,
@@ -215,7 +215,7 @@ pub(super) fn claim_or_join_pending(
     generation: PendingGeneration,
     waiter_id: WaiterId,
     total_budget: Duration,
-    origin: AccountFetchOrigin,
+    origin: AccountFetchContext,
     layer: ChainlinkPendingFetchLayer,
 ) -> PendingClaim {
     let (tx, rx) = oneshot::channel();
@@ -230,7 +230,7 @@ pub(super) fn claim_or_join_pending(
                 waiters: StdHashMap::from([(waiter_id, tx)]),
                 cancel: Arc::clone(&cancel),
             });
-            metrics::inc_chainlink_pending_fetch_accounts(
+            metrics::inc_chainlink_pending_fetch_accounts_with_context(
                 origin,
                 layer,
                 ChainlinkPendingFetchOutcome::Owned,
@@ -262,13 +262,15 @@ pub(super) fn claim_or_join_pending(
             let deadline = entry.get().deadline;
             let cancel = Arc::clone(&entry.get().cancel);
             entry.get_mut().waiters.insert(waiter_id, tx);
-            metrics::inc_chainlink_pending_fetch_accounts(
+            metrics::inc_chainlink_pending_fetch_accounts_with_context(
                 origin,
                 layer,
                 ChainlinkPendingFetchOutcome::JoinedExisting,
                 1,
             );
-            metrics::inc_chainlink_pending_fetch_waiters(origin, layer, 1);
+            metrics::inc_chainlink_pending_fetch_waiters_with_context(
+                origin, layer, 1,
+            );
             metrics::inc_chainlink_pending_fetch_waiters_gauge(layer);
             PendingClaim::Joined(PendingHandles {
                 waiter: PendingWaiter::new(
