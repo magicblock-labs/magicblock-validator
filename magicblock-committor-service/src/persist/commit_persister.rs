@@ -254,7 +254,7 @@ impl IntentPersister for IntentPersisterImpl {
             .get_commit_statuses_by_id(message_id)
     }
 
-    /// Returns pending bundles created at or after `min_created_at`.
+    /// Returns pending and failed bundles created at or after `min_created_at`.
     /// NOTE: this constructs `ScheduleIntentBundle` only from existing information.
     /// As persister doesn't save `ScheduleIntentBundle::payer` info, Pubkey::default is used.
     /// `CommittedAccount` information like slot may also be outdated.
@@ -263,11 +263,11 @@ impl IntentPersister for IntentPersisterImpl {
         &self,
         min_created_at: u64,
     ) -> CommitPersistResult<Vec<ScheduledIntentBundle>> {
-        let rows = self
-            .commits_db
-            .lock()
-            .expect(POISONED_MUTEX_MSG)
-            .get_pending_commit_statuses(min_created_at)?;
+        let commits_db = self.commits_db.lock().expect(POISONED_MUTEX_MSG);
+        let mut rows =
+            commits_db.get_pending_commit_statuses(min_created_at)?;
+        rows.extend(commits_db.get_failed_commit_statuses(min_created_at)?);
+        drop(commits_db);
 
         Ok(pending_rows_to_scheduled_intent_bundles(
             rows,

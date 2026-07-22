@@ -122,17 +122,17 @@ Common methods:
 
 ### Errors and retry utilities
 
-`MagicBlockRpcClientError` distinguishes native RPC failures, latest-blockhash/slot failures, ALT deserialize failures, send failures, status timeout/confirmation failures, and submitted transaction errors. `signature()` returns the associated transaction signature for errors that have one.
+`MagicBlockRpcClientError` distinguishes native RPC failures, latest-blockhash/slot failures, ALT deserialize failures, send failures, status timeout/confirmation failures, and submitted transaction errors. `signature()` returns the associated transaction signature for errors that have one. `is_transient()` classifies whether a retry may succeed: ALT deserialize failures and submitted transactions that failed with an on-chain instruction error are deterministic; everything else (transport, RPC availability, unconfirmed status) is transient.
 
 `utils.rs` exposes:
 
 - `send_transaction_with_retries(make_send_fut, mapper, stop_predicate)`, which repeatedly calls an async send operation until success, an unrecoverable mapped error, or a caller-supplied stop condition;
-- `SendErrorMapper`, which maps transport/send errors into a caller's execution error and decides retry delay versus break;
+- `SendErrorMapper`, which maps transport/send errors into a caller's execution error and decides retry delay versus break (`decide_flow` takes `&self`, so mappers can carry caller context such as the committor's action-only idempotency guard);
 - `TransactionErrorMapper`, which lets domain crates map Solana `TransactionError` values while falling back safely for unknown errors;
 - `map_magicblock_client_error` and `try_map_client_error`, used by committor code to preserve domain-specific transaction-error handling;
 - `decide_rpc_error_flow` and `decide_rpc_native_flow`, the shared retry policy for known retryable RPC conditions.
 
-Retry policy is intentionally conservative: IO errors, HTTP 5xx send errors, latest-blockhash fetch errors, and signature-status timeout/confirmation failures may retry; unknown transaction errors and most client errors break unless mapped by the caller.
+Retry policy: IO errors, status-less reqwest errors (connection reset/timeout — the transport-level failures), HTTP 5xx and 429 send errors, node-unhealthy RPC responses, latest-blockhash fetch errors, and signature-status timeout/confirmation failures may retry; unknown transaction errors and remaining client errors break unless mapped by the caller.
 
 ## Runtime flows
 
