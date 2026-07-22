@@ -379,8 +379,10 @@ When a subscription update wins fetch arbitration before the fetch's
 subscription setup has created any tier state, the update pump admits the
 found account directly into the primary tier (subscribe + admission) before
 resolving the waiters; without capacity the waiters fail with the same
-rejection and the pending setup registers the key as a fresh fetch-owned
-secondary entry.
+rejection, the classification recorded for the winning update is dropped (so
+a later fetch re-runs the full tier classification instead of losing
+arbitration to it), and the pending setup registers the key as a fresh
+fetch-owned secondary entry.
 RPC-only slot-match retries apply the same tier classification before returning
 their results.
 

@@ -502,6 +502,39 @@ async fn test_subscription_resolving_pending_fetch_without_tier_state_rejects_wi
         .lrucache_subscribed_accounts
         .contains(&protected));
     assert!(!ctx.provider.is_watching(&pending));
+    // The rejection dropped the recorded classification along with the
+    // placeholder ownership.
+    assert!(ctx
+        .provider
+        .subscription_ownership
+        .lock()
+        .await
+        .get(&pending)
+        .is_none());
+
+    // A later fetch at a slot at or below the rejected update's slot must
+    // re-run the full classification: the found account goes through the
+    // secondary tier and is rejected again, instead of losing arbitration
+    // to the stale classification and being returned without admission.
+    ctx.rpc_client.add_account(
+        pending,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+    );
+    let err = ctx
+        .provider
+        .try_get(pending, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountResolutionsFailed(message)
+            if message.contains("NoEvictableSubscriptionCapacity")
+                && message.contains(&pending.to_string())
+    ));
+    assert!(!ctx.provider.is_watching(&pending));
 }
 
 #[tokio::test]

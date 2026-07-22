@@ -1178,6 +1178,24 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             }
         }
     }
+
+    /// Drops the classification recorded for a pending-fetch winner whose
+    /// primary admission failed: the rejection consumed the found evidence,
+    /// and a later fetch must re-run the full tier classification instead of
+    /// losing arbitration to it and returning the account from the secondary
+    /// tier without primary admission.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn clear_rejected_fetch_classification(&self, pubkey: &Pubkey) {
+        let _transition_guard = self.subscription_transition_lock.lock().await;
+        let mut ownership = self.subscription_ownership.lock().await;
+        if let Some(entry) = ownership.get_mut(pubkey) {
+            if entry.is_empty() {
+                ownership.remove(pubkey);
+            } else {
+                entry.last_classification = None;
+            }
+        }
+    }
 }
 
 /// Result of trying to promote a secondary-tier account into the primary
@@ -2158,6 +2176,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     .await
                                 {
                                     warn!(pubkey = %update.pubkey, error = ?err, "Failed to admit resolved-fetch account to primary subscription tier");
+                                    subscription_tiers
+                                        .clear_rejected_fetch_classification(
+                                            &update.pubkey,
+                                        )
+                                        .await;
                                     classification_error =
                                         Some(err.to_string());
                                 }
