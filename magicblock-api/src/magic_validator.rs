@@ -232,10 +232,8 @@ impl MagicValidator {
         let accountsdb = Arc::new(accountsdb);
         let (mut dispatch, validator_channels) = link(!is_standalone);
         let shared_chain_slot =
-            (!Self::replication_mode_uses_disabled_chainlink(
-                &config.validator.replication_mode,
-            ))
-            .then(Arc::<AtomicU64>::default);
+            (!Self::is_replica_mode(&config.validator.replication_mode))
+                .then(Arc::<AtomicU64>::default);
 
         let step_start = Instant::now();
         let chainlink = Arc::new(
@@ -270,13 +268,20 @@ impl MagicValidator {
             );
             Arc::new(processor)
         };
-        let intent_execution_service = IntentExecutionServiceImpl::new(
-            chainlink.clone(),
-            outbox_client.clone(),
-            committor_processor.clone(),
-            config.ledger.block_time,
-            token.clone(),
-        );
+        let intent_execution_service =
+            if Self::is_replica_mode(&config.validator.replication_mode) {
+                // Replica mode is documented as having no side effects - the
+                // accept/schedule loop must never run.
+                IntentExecutionServiceImpl::disabled()
+            } else {
+                IntentExecutionServiceImpl::new(
+                    chainlink.clone(),
+                    outbox_client.clone(),
+                    committor_processor.clone(),
+                    config.ledger.block_time,
+                    token.clone(),
+                )
+            };
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             tokio::runtime::Handle::current(),
@@ -556,9 +561,7 @@ impl MagicValidator {
         accountsdb: &Arc<AccountsDb>,
         chain_slot: Option<Arc<AtomicU64>>,
     ) -> ApiResult<ChainlinkImpl> {
-        if Self::replication_mode_uses_disabled_chainlink(
-            &config.validator.replication_mode,
-        ) {
+        if Self::is_replica_mode(&config.validator.replication_mode) {
             return ChainlinkImpl::disabled().map_err(ApiError::from);
         }
 
@@ -621,9 +624,7 @@ impl MagicValidator {
         Ok(ChainlinkImpl::enabled(chainlink))
     }
 
-    fn replication_mode_uses_disabled_chainlink(
-        replication_mode: &ReplicationMode,
-    ) -> bool {
+    fn is_replica_mode(replication_mode: &ReplicationMode) -> bool {
         matches!(replication_mode, ReplicationMode::Replica { .. })
     }
 
@@ -1308,26 +1309,24 @@ mod tests {
 
     #[test]
     fn standalone_replication_mode_uses_enabled_chainlink() {
-        assert!(!MagicValidator::replication_mode_uses_disabled_chainlink(
+        assert!(!MagicValidator::is_replica_mode(
             &ReplicationMode::Standalone,
         ));
     }
 
     #[test]
     fn primary_replication_mode_uses_enabled_chainlink() {
-        assert!(!MagicValidator::replication_mode_uses_disabled_chainlink(
-            &ReplicationMode::Primary(replication_config()),
-        ));
+        assert!(!MagicValidator::is_replica_mode(&ReplicationMode::Primary(
+            replication_config()
+        ),));
     }
 
     #[test]
-    fn replica_replication_mode_uses_disabled_chainlink() {
-        assert!(MagicValidator::replication_mode_uses_disabled_chainlink(
-            &ReplicationMode::Replica {
-                config: replication_config(),
-                authority_override: SerdePubkey(Pubkey::new_unique()),
-            },
-        ));
+    fn replica_is_replica_mode() {
+        assert!(MagicValidator::is_replica_mode(&ReplicationMode::Replica {
+            config: replication_config(),
+            authority_override: SerdePubkey(Pubkey::new_unique()),
+        },));
     }
 
     #[test]
