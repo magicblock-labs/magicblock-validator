@@ -36,6 +36,19 @@ impl TableManiaError {
         }
     }
 
+    /// RPC-side failures and table-sync timeouts are transient;
+    /// misuse errors are deterministic.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::MagicBlockRpcClientError(err) => err.is_transient(),
+            Self::TimedOutWaitingForRemoteTablesToUpdate(_)
+            | Self::TimedOutWaitingForLocalTablesToUpdate(_) => true,
+            Self::CannotExtendDeactivatedTable(_)
+            | Self::InvalidAuthority(_, _)
+            | Self::MaxExtendPubkeysExceeded(_, _) => false,
+        }
+    }
+
     pub fn is_sent_transaction_invalid_instruction_data_at(
         &self,
         instruction_index: u8,

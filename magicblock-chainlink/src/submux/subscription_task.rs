@@ -11,9 +11,9 @@ use tracing::*;
 
 /// Timeout for each subscription attempt
 /// NOTE: if retries are defined the timeout is applied per retry
-const SUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(2_000);
+pub(crate) const SUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(2_000);
 /// Timeout for each unsubscription attempt
-const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(1_000);
+pub(crate) const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(1_000);
 /// Minimum interval between alerts for total subscription failures
 const ALERT_ON_TOTAL_SUB_FAILURE_INTERVAL: Duration = Duration::from_mins(5);
 

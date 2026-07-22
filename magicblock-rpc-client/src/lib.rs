@@ -110,6 +110,19 @@ impl MagicBlockRpcClientError {
             _ => None,
         }
     }
+
+    /// True when the failure is plausibly transient (transport, RPC
+    /// availability) and retrying may succeed. Unmapped on-chain instruction
+    /// errors are deterministic and excluded.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::LookupTableDeserialize(_) => false,
+            Self::SentTransactionError(tx_err, _) => {
+                !matches!(tx_err, TransactionError::InstructionError(..))
+            }
+            _ => true,
+        }
+    }
 }
 
 pub type MagicBlockRpcClientResult<T> =

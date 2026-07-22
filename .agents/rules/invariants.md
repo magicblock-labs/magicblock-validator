@@ -187,6 +187,10 @@ The following must not affect committed state:
 
 Any difference in transaction content or execution order must change the blockhash.
 
+A replicated Block must not be persisted before every preceding transaction is
+persisted. At checkpoint slots, the stream order must be Transaction, Block,
+then SuperBlock; next-slot work must not overtake that checkpoint.
+
 Protected account checksums must change whenever protected state changes.
 
 Replica failover must continue the existing blockhash chain. Divergence must be detected by blockhash or checksum mismatch.
