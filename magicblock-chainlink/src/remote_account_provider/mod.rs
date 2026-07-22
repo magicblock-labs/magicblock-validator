@@ -704,6 +704,10 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                     self.secondary.remove(pubkey);
                     self.subscription_ownership.lock().await.remove(pubkey);
                 }
+                // The bank may hold a stale entry (e.g. an empty placeholder
+                // from the confirmed-missing phase); evict it so a later
+                // ensure refetches the account.
+                self.spawn_removal_notification(*pubkey);
                 return Err(
                     RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
                         pubkey: *pubkey,
@@ -869,6 +873,24 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                 warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
                 inc_chainlink_subscription_cleanup_accounts(
                     SubscriptionCleanupSource::CapacityEviction,
+                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                );
+            }
+        });
+    }
+
+    /// Notifies the removal pipeline that `pubkey` lost its last watch, so a
+    /// stale bank entry (e.g. an empty placeholder cloned while the account
+    /// was confirmed missing) is evicted and a later ensure refetches it.
+    /// Detached because the removal consumer takes per-key guards; sending
+    /// inline while holding this key's guard could stall the pipeline.
+    fn spawn_removal_notification(&self, pubkey: Pubkey) {
+        let removed_account_tx = self.removed_account_tx.clone();
+        task::spawn(async move {
+            if let Err(err) = removed_account_tx.send(pubkey).await {
+                warn!(pubkey = %pubkey, error = ?err, "Failed to send removal update for rejected promotion");
+                inc_chainlink_subscription_cleanup_accounts(
+                    SubscriptionCleanupSource::RejectedNewSubscription,
                     SubscriptionCleanupOutcome::RemovalUpdateFailed,
                 );
             }
@@ -2090,19 +2112,29 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                             .await
                                         {
                                             Ok(()) => {
-                                                let _transition_guard =
+                                                {
+                                                    let _transition_guard =
+                                                        subscription_tiers
+                                                            .subscription_transition_lock
+                                                            .lock()
+                                                            .await;
                                                     subscription_tiers
-                                                        .subscription_transition_lock
+                                                        .secondary
+                                                        .remove(&update.pubkey);
+                                                    subscription_tiers
+                                                        .subscription_ownership
                                                         .lock()
-                                                        .await;
+                                                        .await
+                                                        .remove(&update.pubkey);
+                                                }
+                                                // Evict the stale bank entry
+                                                // (e.g. an empty placeholder)
+                                                // now that the last watch is
+                                                // gone.
                                                 subscription_tiers
-                                                    .secondary
-                                                    .remove(&update.pubkey);
-                                                subscription_tiers
-                                                    .subscription_ownership
-                                                    .lock()
-                                                    .await
-                                                    .remove(&update.pubkey);
+                                                    .spawn_removal_notification(
+                                                        update.pubkey,
+                                                    );
                                             }
                                             Err(cleanup_err) => {
                                                 warn!(pubkey = %update.pubkey, error = ?cleanup_err, "Failed to clean up rejected found subscription");

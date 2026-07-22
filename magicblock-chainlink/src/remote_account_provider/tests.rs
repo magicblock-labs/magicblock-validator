@@ -332,6 +332,7 @@ async fn test_subscription_creation_fails_when_primary_capacity_is_protected() {
     )
     .await;
     ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
 
     ctx.provider
         .try_get(protected, AccountFetchContext::rpc_get_account())
@@ -379,6 +380,9 @@ async fn test_subscription_creation_fails_when_primary_capacity_is_protected() {
     assert!(!ctx.provider.is_watching(&missing));
     assert!(!ctx.pubsub_client.subscriptions_union().contains(&missing));
     assert!(ctx._forward_rx.try_recv().is_err());
+    // The rejected promotion dropped the last watch; the removal pipeline
+    // must be notified so a stale empty placeholder cannot outlive it.
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, missing);
 }
 
 #[tokio::test]
@@ -745,6 +749,7 @@ async fn test_found_fetch_fails_when_primary_capacity_is_protected() {
             ..Default::default()
         },
     );
+    let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
     ctx.provider
         .acquire_subscription(
             &protected,
@@ -771,6 +776,9 @@ async fn test_found_fetch_fails_when_primary_capacity_is_protected() {
     assert!(!ctx.provider.secondary_subscriptions.contains(&found));
     assert!(!ctx.provider.is_watching(&found));
     assert!(!ctx.pubsub_client.subscriptions_union().contains(&found));
+    // The rejected promotion dropped the last watch; the removal pipeline
+    // must be notified so a stale bank entry cannot outlive it.
+    assert_eq!(wait_for_removed_account(&mut removed_rx).await, found);
 }
 
 struct TestSlotConfig {
