@@ -238,7 +238,7 @@ jobs:
         run: ./redsuite-dist/redsuite report bmf --out redsuite-bmf.json
         shell: bash
 
-      - uses: bencherdev/bencher@v0.6.8
+      - uses: bencherdev/bencher@v0.6.10
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
 
       - name: Track results with Bencher
