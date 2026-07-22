@@ -761,6 +761,11 @@ pub mod mock {
             &self,
             pubkey: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
+            eprintln!(
+                "UNSUB_CALL {} at:\n{}",
+                pubkey,
+                std::backtrace::Backtrace::force_capture()
+            );
             {
                 let mut to_fail = self.pending_unsubscribe_failures.lock();
                 if *to_fail > 0 {

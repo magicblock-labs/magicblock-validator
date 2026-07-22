@@ -839,6 +839,9 @@ async fn test_secondary_critical_acquire_fails_without_primary_capacity() {
 #[tokio::test]
 async fn test_secondary_capacity_preserves_protected_account() {
     init_logger();
+    // Serializes with tests that read capacity-eviction cleanup metric
+    // deltas; this test emits the same metrics.
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let primary = random_pubkey();
     let protected_missing = random_pubkey();
@@ -853,6 +856,7 @@ async fn test_secondary_capacity_preserves_protected_account() {
     )
     .await;
     ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    ctx.provider.abort_subscription_reconciler_for_test();
 
     ctx.provider
         .acquire_subscription(
@@ -902,6 +906,9 @@ async fn test_secondary_capacity_preserves_protected_account() {
 #[tokio::test]
 async fn test_secondary_eviction_unsubscribe_failure_keeps_admission() {
     init_logger();
+    // Serializes with tests that read capacity-eviction cleanup metric
+    // deltas; this test emits the same metrics.
+    let _metric_guard = SUBSCRIPTION_LIFECYCLE_METRIC_TEST_GUARD.lock().await;
 
     let existing = random_pubkey();
     let first_missing = random_pubkey();
@@ -916,6 +923,7 @@ async fn test_secondary_eviction_unsubscribe_failure_keeps_admission() {
     )
     .await;
     ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    ctx.provider.abort_subscription_reconciler_for_test();
 
     assert!(!ctx
         .provider
@@ -3274,6 +3282,7 @@ async fn test_capacity_eviction_unsubscribe_failure_keeps_admission() {
     let pubkeys = &[pubkey1, pubkey2];
 
     let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
+    provider.abort_subscription_reconciler_for_test();
 
     provider
         .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
@@ -3869,6 +3878,14 @@ fn test_removed_stuck_pubkey_symbols_are_absent_from_production_code() {
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+    /// Stops the background reconciler so its startup pass cannot race a
+    /// test that injects pubsub failures or asserts on stray subscriptions.
+    fn abort_subscription_reconciler_for_test(&self) {
+        if let Some(handle) = &self._active_subscriptions_task_handle {
+            handle.abort();
+        }
+    }
+
     async fn reconcile_subscriptions_once_for_test(&self) -> usize {
         let never_evicted =
             self.lrucache_subscribed_accounts.never_evicted_accounts();
