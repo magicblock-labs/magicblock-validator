@@ -306,10 +306,10 @@ Program-subscription updates whose payload parses as an internal DLP account (de
 
 The exception is a delegated account whose app data byte-collides with an internal DLP discriminator (LE u64 100–103). Such accounts must still reach greedy discovery so their post-delegation actions execute. `DlpCollisionTracker` (single lock, so check-then-park is atomic against sight-then-release) resolves this without a fetch:
 
-- Every delegation-record-shaped update records a sighting (`record pubkey -> slot`) — from the program subscription or, when the record PDA is also directly watched, from the account subscription (SubMux dedupes forwards on `(pubkey, slot)`, so the account-sub copy can suppress the program-sub one). Sightings are monotonic (max slot): a stale record update replayed out of order can neither lower a sighting nor release a parked candidate whose slot it does not cover. Only program-subscription updates are dropped/parked; account-subscription updates always continue into normal processing.
+- Every delegation-record-shaped update records a monotonic sighting (`record pubkey -> max slot`), from either subscription source. Only program-subscription updates are dropped/parked; account-subscription updates always continue into normal processing.
 - An internal-looking account update whose derived delegation-record PDA was sighted at or after its own slot proceeds to greedy discovery (a fresh delegation writes both accounts in one slot).
-- Otherwise the update is parked keyed by its derived record PDA, reduced to pubkey + slot (every internal firehose update parks, so entries must be cheap and the capacity — 16,384 — must outlast firehose churn across the SubMux debounce window). A later record sighting (e.g. delayed by SubMux debounce) pops the candidate and routes it through the deduped on-demand fetch+clone, the same path as the lazy first-use fallback, run proactively so post-delegation actions are not delayed.
-- Genuine internal PDAs always miss the sighting cache and are dropped. A missed sighting (LRU eviction, lost delivery) degrades to lazy on-demand cloning via the normal getAccount/send-transaction paths — never to incorrect state.
+- Otherwise the update is parked (pubkey + slot, keyed by its derived record PDA); a later record sighting releases it into an authority-gated, deduped fetch+clone that retries until the bank reflects the sighted delegation.
+- Genuine internal PDAs always miss the sighting cache and are dropped. A missed sighting degrades to lazy on-demand cloning via the normal getAccount/send-transaction paths — never to incorrect state.
 
 ## RemoteAccountProvider internals
 

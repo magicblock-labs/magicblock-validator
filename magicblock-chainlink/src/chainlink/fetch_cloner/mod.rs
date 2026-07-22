@@ -188,11 +188,8 @@ const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
         None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
     };
 
-/// Capacity for recently sighted delegation-record update slots. A sighting
-/// must outlive the SubMux debounce that can delay the colliding account's
-/// own update, so the capacity is sized for >32k record-shaped updates/s
-/// across that window; entries are a few dozen bytes. Eviction degrades to
-/// lazy on-demand cloning and self-heals at the account's next record touch.
+/// Capacity for recently sighted delegation-record update slots; sized to
+/// outlast DLP firehose churn across the SubMux debounce window.
 const SEEN_DELEGATION_RECORD_SLOTS_CAPACITY: NonZeroUsize =
     match NonZeroUsize::new(65_536) {
         Some(n) => n,
@@ -202,11 +199,8 @@ const SEEN_DELEGATION_RECORD_SLOTS_CAPACITY: NonZeroUsize =
     };
 
 /// Capacity for internal-looking account updates parked until their
-/// delegation record is sighted. Every internal DLP firehose update parks
-/// (nothing distinguishes a colliding candidate at park time), so the
-/// capacity must outlast firehose churn across the SubMux debounce window
-/// that can delay the releasing record sighting. Entries are a few dozen
-/// bytes, so this stays under ~1.5MB.
+/// delegation record is sighted; every internal firehose update parks, so
+/// this must outlast churn across the SubMux debounce window.
 const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
     match NonZeroUsize::new(16_384) {
         Some(n) => n,
@@ -215,9 +209,8 @@ const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
         }
     };
 
-/// A parked internal-looking account update, reduced to what the deferred
-/// deduped fetch+clone needs. Parking pubkey + slot instead of the full
-/// update keeps the DLP firehose from pinning account payloads in memory.
+/// A parked internal-looking account update, reduced to pubkey + slot so
+/// the firehose cannot pin account payloads in memory.
 #[derive(Debug, Clone, Copy)]
 struct ParkedCollisionCandidate {
     pubkey: Pubkey,
@@ -242,12 +235,9 @@ impl DlpCollisionTracker {
         }
     }
 
-    /// Records a delegation-record-shaped update sighting and releases any
-    /// account update parked while waiting for this record. Sightings are
-    /// monotonic — a stale record update replayed out of order (reconnect,
-    /// multi-client races) can neither lower the sighted slot nor consume a
-    /// parked candidate its slot does not cover; the candidate keeps waiting
-    /// for the record sighting of its own delegation.
+    /// Records a delegation-record sighting and releases a parked candidate
+    /// it covers. Monotonic: a stale replayed record can neither lower the
+    /// sighted slot nor consume a candidate parked at a newer slot.
     fn sight_record(
         &mut self,
         record_pubkey: Pubkey,
@@ -277,10 +267,8 @@ impl DlpCollisionTracker {
             .get(&record_pubkey)
             .is_some_and(|&record_slot| record_slot >= update.account.slot());
         if !sighted {
-            // Parking is monotonic like sightings: a replayed older update
-            // must not downgrade the parked slot, or a stale record could
-            // release the candidate with a weakened freshness floor while
-            // the real record finds nothing left to release.
+            // Monotonic like sightings: a replayed older update must not
+            // downgrade the parked slot.
             let parked = self.parked.get_or_insert_mut(record_pubkey, || {
                 ParkedCollisionCandidate {
                     pubkey: update.pubkey,
@@ -1613,21 +1601,15 @@ where
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
-        // Internal DLP payloads (records/metadata/commit state) can never be
-        // greedily cloned, so drop them before discovery issues remote
-        // fetches. The exception is an account whose app data collides with
-        // an internal discriminator: its delegation also writes the
-        // delegation record, whose sighting routes the account update to
-        // discovery — immediately when the record arrived first, or by
-        // releasing the parked update once the record arrives later.
+        // Internal DLP payloads can never be greedily cloned, so drop them
+        // before discovery issues remote fetches; an account whose app data
+        // collides with an internal discriminator is routed to discovery
+        // via its delegation-record sighting instead.
         if update.account.is_owned_by_delegation_program() {
             if let Some(account) = update.account.fresh_account() {
                 if is_internal_dlp_account_data(account.data()) {
-                    // Sight record-shaped updates from either source: SubMux
-                    // dedupes forwards on (pubkey, slot), so when the record
-                    // PDA is also directly watched the account-sub copy can
-                    // suppress the program-sub one and must still release
-                    // any parked candidate.
+                    // Sight records from either source: SubMux dedup can
+                    // deliver a directly watched record account-sourced.
                     let released = is_delegation_record_data(account.data())
                         .then(|| {
                             self.dlp_collision_tracker
@@ -1638,9 +1620,7 @@ where
                     if let Some(released) = released {
                         self.clone_released_collision_candidate(released).await;
                     }
-                    // Only the program firehose is dropped/parked;
-                    // account-subscription updates are for directly watched
-                    // accounts and always flow into normal processing.
+                    // Only the program firehose is dropped/parked.
                     if matches!(update.source, SubscriptionSource::Program)
                         && !self
                             .dlp_collision_tracker
@@ -2096,22 +2076,15 @@ where
         .await
     }
 
-    /// Deferred discovery for a parked colliding-account candidate whose
-    /// delegation record was just sighted. The parked entry holds only
-    /// pubkey + slot, so after the same authority gate discovery applies,
-    /// the account is routed through the deduped on-demand fetch+clone —
-    /// the same path the lazy first-use fallback takes, run proactively so
-    /// post-delegation actions are not delayed. Only genuine collisions
-    /// release, so the extra fetches are negligible.
+    /// Deferred discovery for a parked candidate whose record was just
+    /// sighted: authority-gated like discovery, then cloned through the
+    /// deduped on-demand path. Only genuine collisions release.
     async fn clone_released_collision_candidate(
         &self,
         candidate: ParkedCollisionCandidate,
     ) {
-        // A bank entry only settles the candidate if it already reflects the
-        // delegation the sighting announced. A pre-delegation clone (whose
-        // program update was dropped as internal-looking) must be
-        // force-refreshed, or it would linger undelegated and its
-        // post-delegation actions would never proactively execute.
+        // A pre-delegation bank copy must be force-refreshed; only a
+        // delegated copy at the sighted slot or newer settles the candidate.
         let fresh_delegated_in_bank = self
             .accounts_bank
             .get_account(&candidate.pubkey)
@@ -2124,10 +2097,8 @@ where
         let fetch_context = AccountFetchContext::subscription_update(
             AccountFetchReason::SubscriptionUpdateGreedyDiscovery,
         );
-        // Same authority gate as record-first discovery: app data can
-        // deliberately carry an internal discriminator prefix, so without it
-        // every colliding account delegated to another validator would be
-        // force-cloned (and re-cloned on each commit) from the DLP firehose.
+        // Same authority gate as discovery: accounts delegated to another
+        // validator must not be cloned from the firehose.
         let record_context =
             fetch_context.with_reason(AccountFetchReason::DelegationRecord);
         let Some((deleg_record, _)) = self
@@ -2162,14 +2133,9 @@ where
             );
             return;
         }
-        // The deduped fetch can join an in-flight owner that started before
-        // the delegation and resolves a pre-delegation state, so a single
-        // pass may settle stale. Re-check the bank after each pass and
-        // re-own a min-slot fetch until it reflects the sighted delegation:
-        // strictly newer state always settles, while at the sighted slot
-        // itself only a delegated copy does (the pre-delegation write can
-        // share that slot). Exhausting retries degrades to lazy on-demand
-        // cloning, never to incorrect state.
+        // The deduped fetch can join an in-flight pre-delegation owner and
+        // settle stale; retry until the bank reflects the sighted delegation
+        // (at the sighted slot itself only a delegated copy settles).
         const MAX_RELEASE_CLONE_ATTEMPTS: usize = 3;
         for _ in 0..MAX_RELEASE_CLONE_ATTEMPTS {
             let result = match self

@@ -4654,13 +4654,9 @@ async fn test_discovered_colliding_delegated_account_account_sourced_record_rele
     colliding_delegated_account_is_cloned(true, false, true).await;
 }
 
-// A released candidate whose clone pass settles on pre-delegation state
-// (e.g. by joining an in-flight fetch that started before the delegation)
-// must not silently accept it: an undelegated copy at the sighted slot
-// triggers retries that re-own a min-slot fetch. With the RPC mock pinned
-// to the pre-delegation state the release must exhaust its attempts —
-// observable as repeated clone fetches — and degrade to the lazy fallback
-// without marking the account delegated.
+// A release pass that settles on pre-delegation state (e.g. joining an
+// in-flight pre-delegation fetch) must retry, not silently accept an
+// undelegated same-slot copy.
 #[tokio::test]
 async fn test_released_collision_candidate_retries_when_clone_settles_stale() {
     init_logger();
@@ -4673,8 +4669,7 @@ async fn test_released_collision_candidate_retries_when_clone_settles_stale() {
     let mut app_data = vec![0; DelegationRecord::size_with_discriminator()];
     app_data[..8].copy_from_slice(&100u64.to_le_bytes());
 
-    // The RPC still serves the pre-delegation (non-DLP-owned) state, as an
-    // in-flight pre-delegation fetch owner would have resolved it.
+    // The RPC still serves the pre-delegation (non-DLP-owned) state.
     let pre_delegation_account = Account {
         lamports: 1_000_000,
         data: app_data.clone(),
@@ -4761,8 +4756,7 @@ async fn test_released_collision_candidate_retries_when_clone_settles_stale() {
         .expect("release attempts clone the fetched state");
     assert!(!in_bank.delegated());
 
-    // One authority-gate record fetch plus one fetch per clone attempt at
-    // minimum; a single-pass release (no retries) stays below this.
+    // A single-pass release (no retries) stays below this.
     let release_fetches = rpc_client.single_account_fetches()
         + rpc_client.multi_account_fetches()
         - fetches_before;
@@ -4939,11 +4933,8 @@ async fn colliding_delegated_account_is_cloned(
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
-    // With the record late, the account update parks awaiting its record and
-    // the record update arriving later (e.g. debounced) must release it into
-    // discovery. When the record PDA is also directly watched, SubMux may
-    // forward the record as an account-subscription update instead, which
-    // must record the sighting all the same.
+    // With the record late, the account update parks and the record
+    // sighting — from either subscription source — must release it.
     let record_source = if record_account_sourced {
         SubscriptionSource::Account
     } else {
@@ -5000,9 +4991,8 @@ async fn colliding_delegated_account_is_cloned(
     assert_eq!(cloned_account.data(), app_data.as_slice());
 }
 
-// A parked collision candidate must survive DLP firehose churn: unrelated
-// internal updates parking after it (well beyond the previous 1,024-entry
-// capacity) must not evict it before its record sighting releases it.
+// Unrelated internal updates parking after a candidate must not evict it
+// before its record sighting releases it.
 #[test]
 fn test_dlp_collision_tracker_parked_candidate_survives_firehose_churn() {
     use crate::remote_account_provider::{
