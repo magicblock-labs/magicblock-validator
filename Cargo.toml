@@ -143,7 +143,7 @@ prometheus = "0.13.4"
 # Keep in sync with `solana-storage-proto` codegen.
 
 
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e", features = [
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ffbe5ab", features = [
     "dev-context-only-utils",
 ] }
 solana-transaction-error = { version = "3.0" }
@@ -197,7 +197,7 @@ serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ffbe5ab" }
 solana-account-decoder = { version = "4.0" }
 solana-account-decoder-client-types = { version = "4.0" }
 solana-account-info = { version = "3.1" }
@@ -249,7 +249,7 @@ solana-program = "3.0"
 solana-program-error = { version = "3.0" }
 solana-program-option = { version = "3.0" }
 solana-program-pack = { version = "3.0" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ffbe5ab" }
 solana-pubkey = { version = "4.1" }
 solana-pubsub-client = { version = "4.0" }
 solana-rent = { version = "3.0" }
@@ -281,16 +281,16 @@ solana-transaction = { version = "3.0" }
 [workspace.dependencies.solana-svm]
 features = ["dev-context-only-utils"]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e"
+rev = "ffbe5ab"
 
 [patch.crates-io]
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ffbe5ab" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ffbe5ab" }
 solana-storage-proto = { path = "storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "190146af2ac0890848b50e8fc9d6c926c8205b5e" }
-# Fork mirrors upstream rust-rocksdb; APIs missing from the safe wrapper
-# (disable_manual_compaction, mode-aware rate limiter) are reached through
-# the `raw-ptr` feature + librocksdb-sys directly.
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ffbe5ab" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "ffbe5ab" }
+# Fork is used to enable `disable_manual_compaction` usage
+# Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
+# without patching update isn't possible due to conflict with solana deps
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2" }

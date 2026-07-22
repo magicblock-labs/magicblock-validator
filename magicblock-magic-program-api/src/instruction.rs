@@ -59,8 +59,9 @@ pub enum MagicBlockInstruction {
     ScheduleCommitAndUndelegate,
 
     /// Pops up to N intents from the front of `MagicContext.scheduled_base_intents`
-    /// and for each creates an outbox intent ephemeral account (`MagicIntentAccount`)
-    /// with `status = Accepted`. This is the second part of scheduling a commit.
+    /// and for each CPIs into the outbox intent program's `CreateOutboxIntent`
+    /// to create the corresponding outbox intent PDA with `status = Accepted`.
+    /// This is the second part of scheduling a commit.
     ///
     /// N is determined by the number of writable PDA accounts provided beyond
     /// the four fixed accounts. It is run at the start of the slot.
@@ -73,18 +74,7 @@ pub enum MagicBlockInstruction {
     /// - **4..n** `[WRITE]`         Outbox intent PDAs, one per accepted intent, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     AcceptScheduleCommits,
 
-    /// Records the attempt to realize a scheduled commit on chain.
-    /// Closes the associated outbox intent PDA account.
-    ///
-    /// The signature of this transaction can be pre-calculated since we pass the
-    /// ID of the scheduled commit and retrieve the signature from a globally
-    /// stored hashmap. Transaction uniqueness is guaranteed by the per-intent PDA.
-    ///
-    /// # Account references
-    /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
-    /// - **1.** `[]`              Magic Program
-    /// - **2.** `[WRITE]`         Ephemeral Vault
-    /// - **3.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    /// Deprecated, moved into the outbox intent program. Always errors.
     ScheduledCommitSent(u64),
 
     /// Schedules execution of a single *base intent*.
@@ -319,17 +309,6 @@ pub enum MagicBlockInstruction {
         authority: Pubkey,
         instructions: Vec<Instruction>,
     },
-
-    /// Sets or advances the execution stage of an outbox intent.
-    /// Must be called before sending the L1 transaction.
-    ///
-    /// # Account references
-    /// - **0.** `[SIGNER]` Validator Authority
-    /// - **1.** `[WRITE]`  Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
-    SetIntentExecutionStage {
-        intent_id: u64,
-        stage: ExecutionStage,
-    },
 }
 
 impl MagicBlockInstruction {
@@ -424,4 +403,55 @@ pub enum EphemeralSystemInstruction {
     /// - 1. [WRITE] Ephemeral account to close
     /// - 2. [WRITE] Vault account (source of rent refund)
     CloseEphemeralAccount,
+}
+
+impl EphemeralSystemInstruction {
+    pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
+        bincode::serialize(self)
+    }
+}
+
+/// Instruction(s) for the outbox intent builtin-program: stores accepted
+/// intents in per-intent PDA accounts and tracks their execution stage
+/// until they are sent to Base.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum OutboxIntentInstruction {
+    /// Creates and populates an outbox intent PDA account. CPI-only, called
+    /// by the magic program from `MagicBlockInstruction::AcceptScheduleCommits`
+    /// after popping the intent off `MagicContext`. `data` is the already
+    /// serialized `OutboxIntentBundle` bytes.
+    ///
+    /// # Account references
+    /// - 0. [WRITE, SIGNER] Sponsor (validator authority, pays rent)
+    /// - 1. [WRITE, SIGNER] Outbox intent PDA to create
+    /// - 2. [WRITE]         Vault account (receives rent payment)
+    /// - 3. []              Ephemeral System Program (CPI target)
+    CreateOutboxIntent { data: Vec<u8> },
+
+    /// Records the attempt to realize a scheduled commit on chain.
+    /// Closes the associated outbox intent PDA account.
+    ///
+    /// # Account references
+    /// - 0. [WRITE, SIGNER] Validator Authority (receives rent refund from close)
+    /// - 1. []              Ephemeral System Program (CPI target)
+    /// - 2. [WRITE]         Ephemeral Vault
+    /// - 3. [WRITE]         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    ScheduledCommitSent(u64),
+
+    /// Sets or advances the execution stage of an outbox intent.
+    /// Must be called before sending the L1 transaction.
+    ///
+    /// # Account references
+    /// - 0. [SIGNER] Validator Authority
+    /// - 1. [WRITE]  Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    SetIntentExecutionStage {
+        intent_id: u64,
+        stage: ExecutionStage,
+    },
+}
+
+impl OutboxIntentInstruction {
+    pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
+        bincode::serialize(self)
+    }
 }

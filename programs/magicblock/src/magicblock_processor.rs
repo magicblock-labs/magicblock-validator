@@ -1,8 +1,9 @@
 use magicblock_magic_program_api::instruction::{
     CallbackInstruction, EphemeralSystemInstruction, MagicBlockInstruction,
-    PostDelegationActionExecutorInstruction,
+    OutboxIntentInstruction, PostDelegationActionExecutorInstruction,
 };
 use solana_instruction::error::InstructionError;
+use solana_log_collector::ic_msg;
 use solana_program_runtime::{
     declare_process_instruction, invoke_context::InvokeContext,
 };
@@ -20,7 +21,11 @@ use crate::{
         process_resize_ephemeral_account,
     },
     mutate_accounts::process_mutate_accounts,
-    process_scheduled_commit_sent,
+    outbox_intent::{
+        process_create_outbox_intent::process_create_outbox_intent,
+        process_scheduled_commit_sent::process_scheduled_commit_sent,
+        process_set_intent_execution_stage::process_set_intent_execution_stage,
+    },
     schedule_task::{
         process_cancel_task, process_execute_crank, process_schedule_task,
     },
@@ -28,7 +33,7 @@ use crate::{
         process_accept_scheduled_commits, process_add_action_callback,
         process_execute_callback, process_schedule_cloned_account_undelegation,
         process_schedule_commit, process_schedule_intent_bundle,
-        process_set_intent_execution_stage, ProcessScheduleCommitOptions,
+        ProcessScheduleCommitOptions,
     },
 };
 
@@ -96,16 +101,12 @@ declare_process_instruction!(
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
-            SetIntentExecutionStage { intent_id, stage } => {
-                process_set_intent_execution_stage(
-                    signers,
+            ScheduledCommitSent(_) => {
+                ic_msg!(
                     invoke_context,
-                    intent_id,
-                    stage,
-                )
-            }
-            ScheduledCommitSent(id) => {
-                process_scheduled_commit_sent(signers, invoke_context, id)
+                    "MagicBlockInstruction ERR: deprecated, moved into the outbox intent program"
+                );
+                Err(InstructionError::InvalidInstructionData)
             }
             ScheduleBaseIntent(args) => process_schedule_intent_bundle(
                 signers,
@@ -348,6 +349,38 @@ declare_process_instruction!(
                     invoke_context,
                     transaction_context,
                 )
+            }
+        }
+    }
+);
+
+declare_process_instruction!(
+    OutboxIntentEntrypoint,
+    DEFAULT_COMPUTE_UNITS,
+    |invoke_context| {
+        let instruction: OutboxIntentInstruction =
+            deserialize_instruction(invoke_context)?;
+
+        let transaction_context = &invoke_context.transaction_context;
+        let instruction_context =
+            transaction_context.get_current_instruction_context()?;
+        let signers = instruction_context.get_signers()?;
+
+        match instruction {
+            OutboxIntentInstruction::CreateOutboxIntent { data } => {
+                process_create_outbox_intent(signers, invoke_context, data)
+            }
+            OutboxIntentInstruction::SetIntentExecutionStage {
+                intent_id,
+                stage,
+            } => process_set_intent_execution_stage(
+                signers,
+                invoke_context,
+                intent_id,
+                stage,
+            ),
+            OutboxIntentInstruction::ScheduledCommitSent(id) => {
+                process_scheduled_commit_sent(signers, invoke_context, id)
             }
         }
     }
