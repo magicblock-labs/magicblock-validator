@@ -12,6 +12,7 @@ doctest = false
 
 [dependencies]
 async-trait = { workspace = true }
+backoff = { workspace = true }
 bincode = { workspace = true }
 borsh = { workspace = true }
 futures-util = { workspace = true }
@@ -32,6 +33,7 @@ magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
+pin-project = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
@@ -54,8 +56,10 @@ solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
 
 [dev-dependencies]
+magicblock-program = { workspace = true, features = ["dev-context-only-utils"] }
 solana-signature = { workspace = true, features = ["rand"] }
 rand = { workspace = true }
 tempfile = { workspace = true }
@@ -64,3 +68,4 @@ tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 default = []
+dev-context-only-utils = []

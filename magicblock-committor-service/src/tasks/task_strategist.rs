@@ -4,18 +4,14 @@ use magicblock_core::intent::BaseActionCallback;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
-use tracing::error;
 
 use crate::{
-    persist::{CommitStrategy, IntentPersister},
-    tasks::{
-        commit_task::CommitDelivery, utils::TransactionUtils, BaseActionTask,
-        BaseTask, BaseTaskImpl,
-    },
-    transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+    tasks::{utils::TransactionUtils, BaseActionTask, BaseTask, BaseTaskImpl},
+    utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
 };
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone)]
+#[cfg_attr(feature = "dev-context-only-utils", derive(Debug))]
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,
@@ -99,21 +95,32 @@ impl TransactionStrategy {
 
 pub enum StrategyExecutionMode {
     SingleStage(TransactionStrategy),
-    TwoStage {
-        commit_stage: TransactionStrategy,
-        finalize_stage: TransactionStrategy,
-    },
+    TwoStage(TwoStageExecutionMode),
 }
 
 impl StrategyExecutionMode {
     pub fn uses_alts(&self) -> bool {
         match self {
             Self::SingleStage(value) => value.uses_alts(),
-            Self::TwoStage {
-                commit_stage,
-                finalize_stage,
-            } => commit_stage.uses_alts() || finalize_stage.uses_alts(),
+            Self::TwoStage(value) => value.uses_alts(),
         }
+    }
+}
+
+pub struct TwoStageExecutionMode {
+    pub commit_stage: TransactionStrategy,
+    pub finalize_stage: TransactionStrategy,
+}
+
+impl TwoStageExecutionMode {
+    pub fn uses_alts(&self) -> bool {
+        self.commit_stage.uses_alts() || self.finalize_stage.uses_alts()
+    }
+}
+
+impl From<TwoStageExecutionMode> for StrategyExecutionMode {
+    fn from(value: TwoStageExecutionMode) -> Self {
+        Self::TwoStage(value)
     }
 }
 
@@ -124,14 +131,10 @@ impl TaskStrategist {
     /// Builds execution strategy from [`BaseTask`]s
     /// 1. Optimizes tasks to fit in TX
     /// 2. Chooses the fastest execution mode for Tasks
-    ///
-    /// `uniqueness_nonce` is rendered as a constant-size noop instruction on
-    /// every produced strategy, and is accounted for in all fit decisions.
-    pub fn build_execution_strategy<P: IntentPersister>(
+    pub fn build_execution_strategy(
         commit_tasks: Vec<BaseTaskImpl>,
         finalize_tasks: Vec<BaseTaskImpl>,
         authority: &Pubkey,
-        persister: &Option<P>,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<StrategyExecutionMode> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
@@ -147,9 +150,9 @@ impl TaskStrategist {
                 commit_tasks,
                 finalize_tasks,
                 authority,
-                persister,
                 uniqueness_nonce,
-            );
+            )
+            .map(Into::into);
         }
 
         // Clone tasks since strategies applied to united case maybe suboptimal for regular one
@@ -159,7 +162,6 @@ impl TaskStrategist {
         let single_stage_strategy = match TaskStrategist::build_strategy(
             single_stage_tasks,
             authority,
-            persister,
             uniqueness_nonce,
         ) {
             Ok(strategy) => StrategyExecutionMode::SingleStage(strategy),
@@ -169,9 +171,9 @@ impl TaskStrategist {
                     commit_tasks,
                     finalize_tasks,
                     authority,
-                    persister,
                     uniqueness_nonce,
-                );
+                )
+                .map(Into::into);
             }
             Err(TaskStrategistError::SignerError(err)) => {
                 return Err(err.into())
@@ -190,28 +192,25 @@ impl TaskStrategist {
             commit_tasks,
             finalize_tasks,
             authority,
-            persister,
             uniqueness_nonce,
         )?;
         if two_stage.uses_alts() {
             Ok(single_stage_strategy)
         } else {
-            Ok(two_stage)
+            Ok(two_stage.into())
         }
     }
 
-    fn build_two_stage<P: IntentPersister>(
+    pub fn build_two_stage(
         commit_tasks: Vec<BaseTaskImpl>,
         finalize_tasks: Vec<BaseTaskImpl>,
         authority: &Pubkey,
-        persister: &Option<P>,
         uniqueness_nonce: Option<u64>,
-    ) -> TaskStrategistResult<StrategyExecutionMode> {
+    ) -> TaskStrategistResult<TwoStageExecutionMode> {
         // Build strategy for Commit stage
         let commit_strategy = TaskStrategist::build_strategy(
             commit_tasks,
             authority,
-            persister,
             uniqueness_nonce,
         )?;
 
@@ -219,11 +218,10 @@ impl TaskStrategist {
         let finalize_strategy = TaskStrategist::build_strategy(
             finalize_tasks,
             authority,
-            persister,
             uniqueness_nonce,
         )?;
 
-        Ok(StrategyExecutionMode::TwoStage {
+        Ok(TwoStageExecutionMode {
             commit_stage: commit_strategy,
             finalize_stage: finalize_strategy,
         })
@@ -231,10 +229,9 @@ impl TaskStrategist {
 
     /// Returns [`TransactionStrategy`] for tasks
     /// Returns Error if all optimizations weren't enough
-    pub fn build_strategy<P: IntentPersister>(
+    pub fn build_strategy(
         mut tasks: Vec<BaseTaskImpl>,
         validator: &Pubkey,
-        persistor: &Option<P>,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
@@ -242,10 +239,6 @@ impl TaskStrategist {
             <= MAX_TRANSACTION_WIRE_SIZE
         {
             // Persist tasks strategy
-            if let Some(persistor) = persistor {
-                Self::persist_tasks_strategy(persistor, &tasks, false);
-            }
-
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys: vec![],
@@ -255,11 +248,6 @@ impl TaskStrategist {
         // In case task optimization didn't work
         // attempt using lookup tables for all keys involved in tasks
         else if Self::attempt_lookup_tables(&tasks, uniqueness_nonce) {
-            // Persist tasks strategy
-            if let Some(persistor) = persistor {
-                Self::persist_tasks_strategy(persistor, &tasks, true);
-            }
-
             // Get lookup table keys
             let lookup_tables_keys = Self::collect_lookup_table_keys(
                 validator,
@@ -332,77 +320,6 @@ impl TaskStrategist {
             authority,
             &service_instructions,
         )
-    }
-
-    fn persist_tasks_strategy<P: IntentPersister>(
-        persistor: &P,
-        tasks: &[BaseTaskImpl],
-        uses_lookup_tables: bool,
-    ) {
-        let commit_strategy_from_delivery =
-            |delivery: &CommitDelivery| match delivery {
-                CommitDelivery::StateInArgs => {
-                    if uses_lookup_tables {
-                        CommitStrategy::StateArgsWithLookupTable
-                    } else {
-                        CommitStrategy::StateArgs
-                    }
-                }
-                CommitDelivery::DiffInArgs { .. } => {
-                    if uses_lookup_tables {
-                        CommitStrategy::DiffArgsWithLookupTable
-                    } else {
-                        CommitStrategy::DiffArgs
-                    }
-                }
-                CommitDelivery::StateInBuffer { .. } => {
-                    if uses_lookup_tables {
-                        CommitStrategy::StateBufferWithLookupTable
-                    } else {
-                        CommitStrategy::StateBuffer
-                    }
-                }
-                CommitDelivery::DiffInBuffer { .. } => {
-                    if uses_lookup_tables {
-                        CommitStrategy::DiffBufferWithLookupTable
-                    } else {
-                        CommitStrategy::DiffBuffer
-                    }
-                }
-            };
-
-        for task in tasks {
-            let (commit_id, pubkey, commit_strategy) = match task {
-                BaseTaskImpl::Commit(commit_task) => (
-                    commit_task.commit_id,
-                    commit_task.committed_account.pubkey,
-                    commit_strategy_from_delivery(
-                        &commit_task.delivery_details,
-                    ),
-                ),
-                BaseTaskImpl::CommitFinalize(commit_finalize_task) => (
-                    commit_finalize_task.commit_id,
-                    commit_finalize_task.committed_account.pubkey,
-                    commit_strategy_from_delivery(
-                        &commit_finalize_task.delivery,
-                    ),
-                ),
-                _ => continue,
-            };
-            if let Err(err) = persistor.set_commit_strategy(
-                commit_id,
-                &pubkey,
-                commit_strategy,
-            ) {
-                error!(
-                    commit_id = %commit_id,
-                    pubkey = %pubkey,
-                    strategy = commit_strategy.as_str(),
-                    error = ?err,
-                    "Failed to persist commit strategy"
-                );
-            }
-        }
     }
 
     /// Optimizes tasks so as to bring the transaction size within the limit [`MAX_TRANSACTION_WIRE_SIZE`]
@@ -504,14 +421,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        intent_execution_manager::intent_scheduler::create_test_intent,
-        intent_executor::task_info_fetcher::{
-            TaskInfoFetcher, TaskInfoFetcherResult,
-        },
-        persist::IntentPersisterImpl,
+        intent_engine::intent_scheduler::create_test_intent,
         tasks::{
             commit_task::CommitTask,
             task_builder::{TaskBuilderImpl, TasksBuilder},
+            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
             utils::{create_commit_task, COMMIT_STATE_SIZE_THRESHOLD},
             BaseActionTask, BaseActionTaskV1, FinalizeTask, TaskStrategy,
             UndelegateTask,
@@ -658,13 +572,8 @@ mod tests {
         let task = create_test_commit_task(1, 100, 0);
         let tasks = vec![task.into()];
 
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy");
+        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
+            .expect("Should build strategy");
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
         assert!(strategy.lookup_tables_keys.is_empty());
@@ -677,13 +586,8 @@ mod tests {
         let task = create_test_commit_task(1, 1000, 0); // Large task
         let tasks = vec![task.into()];
 
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy with buffer optimization");
+        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
+            .expect("Should build strategy with buffer optimization");
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
         assert!(matches!(
@@ -699,13 +603,8 @@ mod tests {
         let task = create_test_commit_task(1, 66_000, 0); // Large task
         let tasks = vec![task.into()];
 
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy with buffer optimization");
+        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
+            .expect("Should build strategy with buffer optimization");
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
         assert!(matches!(
@@ -722,13 +621,8 @@ mod tests {
             create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD); // large account but small diff
         let tasks = vec![task.into()];
 
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy with buffer optimization");
+        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
+            .expect("Should build strategy with buffer optimization");
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
         assert_eq!(strategy.optimized_tasks[0].strategy(), TaskStrategy::Args);
@@ -743,13 +637,8 @@ mod tests {
             create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD + 1); // large account but small diff
         let tasks = vec![task.into()];
 
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy with buffer optimization");
+        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
+            .expect("Should build strategy with buffer optimization");
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
         assert_eq!(strategy.optimized_tasks[0].strategy(), TaskStrategy::Args);
@@ -763,13 +652,8 @@ mod tests {
             create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD * 4); // large account but small diff
         let tasks = vec![task.into()];
 
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy with buffer optimization");
+        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
+            .expect("Should build strategy with buffer optimization");
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
         assert_eq!(
@@ -792,13 +676,8 @@ mod tests {
             })
             .collect();
 
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy with buffer optimization");
+        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
+            .expect("Should build strategy with buffer optimization");
 
         for optimized_task in strategy.optimized_tasks {
             assert!(matches!(optimized_task.strategy(), TaskStrategy::Buffer));
@@ -821,13 +700,8 @@ mod tests {
             })
             .collect();
 
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy with buffer optimization");
+        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
+            .expect("Should build strategy with buffer optimization");
 
         for optimized_task in strategy.optimized_tasks {
             assert!(matches!(optimized_task.strategy(), TaskStrategy::Buffer));
@@ -847,19 +721,14 @@ mod tests {
             .map(|i| create_test_commit_task(i, 10000, 0).into())
             .collect();
 
-        let result = TaskStrategist::build_strategy(
-            tasks.clone(),
-            &validator,
-            &None::<IntentPersisterImpl>,
-            Some(42),
-        );
+        let result =
+            TaskStrategist::build_strategy(tasks.clone(), &validator, Some(42));
         assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
 
         // One commit fewer fits again, and the nonce lands on the strategy
         let strategy = TaskStrategist::build_strategy(
             tasks[..NUM_COMMITS as usize - 1].to_vec(),
             &validator,
-            &None::<IntentPersisterImpl>,
             Some(42),
         )
         .expect("should fit with one task fewer");
@@ -880,12 +749,7 @@ mod tests {
             })
             .collect();
 
-        let result = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        );
+        let result = TaskStrategist::build_strategy(tasks, &validator, None);
         assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
     }
 
@@ -953,13 +817,8 @@ mod tests {
             create_test_undelegate_task().into(),
         ];
 
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy");
+        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
+            .expect("Should build strategy");
 
         assert_eq!(strategy.optimized_tasks.len(), 4);
 
@@ -1014,13 +873,9 @@ mod tests {
         let intent = create_test_intent(0, &pubkey, false);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
-        let commit_task = TaskBuilderImpl::commit_tasks(
-            &info_fetcher,
-            &intent,
-            &None::<IntentPersisterImpl>,
-        )
-        .await
-        .unwrap();
+        let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
         let finalize_task =
             TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
                 .await
@@ -1030,7 +885,6 @@ mod tests {
             commit_task,
             finalize_task,
             &Pubkey::new_unique(),
-            &None::<IntentPersisterImpl>,
             None,
         )
         .expect("Execution mode created");
@@ -1048,13 +902,9 @@ mod tests {
         let intent = create_test_intent(0, &pubkeys, true);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
-        let commit_task = TaskBuilderImpl::commit_tasks(
-            &info_fetcher,
-            &intent,
-            &None::<IntentPersisterImpl>,
-        )
-        .await
-        .unwrap();
+        let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
         let finalize_task =
             TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
                 .await
@@ -1064,7 +914,6 @@ mod tests {
             commit_task,
             finalize_task,
             &Pubkey::new_unique(),
-            &None::<IntentPersisterImpl>,
             None,
         )
         .expect("Execution mode created");
@@ -1080,13 +929,9 @@ mod tests {
         let intent = create_test_intent(0, &pubkeys, false);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
-        let commit_task = TaskBuilderImpl::commit_tasks(
-            &info_fetcher,
-            &intent,
-            &None::<IntentPersisterImpl>,
-        )
-        .await
-        .unwrap();
+        let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent)
+            .await
+            .unwrap();
         let finalize_task =
             TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
                 .await
@@ -1096,7 +941,6 @@ mod tests {
             commit_task,
             finalize_task,
             &Pubkey::new_unique(),
-            &None::<IntentPersisterImpl>,
             None,
         )
         .expect("Execution mode created");

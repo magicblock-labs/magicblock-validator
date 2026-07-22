@@ -14,11 +14,11 @@ use magicblock_program::Pubkey;
 use solana_instruction::Instruction;
 
 use crate::{
-    consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{
         commit_finalize_task::CommitFinalizeTask,
         commit_task::{CommitDelivery, CommitTask},
     },
+    utils::MAX_WRITE_CHUNK_SIZE,
 };
 
 #[derive(Debug)]
@@ -308,9 +308,7 @@ mod tests {
     use crate::{
         tasks::utils::TransactionUtils,
         test_utils,
-        transactions::{
-            serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
-        },
+        utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
         ComputeBudgetConfig,
     };
 

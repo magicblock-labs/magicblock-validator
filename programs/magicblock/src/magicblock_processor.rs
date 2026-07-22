@@ -28,7 +28,7 @@ use crate::{
         process_accept_scheduled_commits, process_add_action_callback,
         process_execute_callback, process_schedule_cloned_account_undelegation,
         process_schedule_commit, process_schedule_intent_bundle,
-        ProcessScheduleCommitOptions,
+        process_set_intent_execution_stage, ProcessScheduleCommitOptions,
     },
 };
 
@@ -96,12 +96,17 @@ declare_process_instruction!(
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
-            ScheduledCommitSent((id, _bump)) => process_scheduled_commit_sent(
-                signers,
-                invoke_context,
-                transaction_context,
-                id,
-            ),
+            SetIntentExecutionStage { intent_id, stage } => {
+                process_set_intent_execution_stage(
+                    signers,
+                    invoke_context,
+                    intent_id,
+                    stage,
+                )
+            }
+            ScheduledCommitSent(id) => {
+                process_scheduled_commit_sent(signers, invoke_context, id)
+            }
             ScheduleBaseIntent(args) => process_schedule_intent_bundle(
                 signers,
                 invoke_context,

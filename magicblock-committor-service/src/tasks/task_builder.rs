@@ -11,27 +11,23 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use tracing::error;
 
-use crate::{
-    intent_executor::task_info_fetcher::{
+use crate::tasks::{
+    task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult,
     },
-    persist::IntentPersister,
-    tasks::{
-        utils::{
-            create_action_tasks, create_commit_finalize_task,
-            create_commit_task, COMMIT_STATE_SIZE_THRESHOLD,
-        },
-        BaseTaskImpl, FinalizeTask, UndelegateTask,
+    utils::{
+        create_action_tasks, create_commit_finalize_task, create_commit_task,
+        COMMIT_STATE_SIZE_THRESHOLD,
     },
+    BaseTaskImpl, FinalizeTask, UndelegateTask,
 };
 
 #[async_trait]
 pub trait TasksBuilder {
     // Creates tasks for commit stage
-    async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
+    async fn commit_tasks<C: TaskInfoFetcher>(
         commit_id_fetcher: &Arc<C>,
         base_intent: &ScheduledIntentBundle,
-        persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>>;
 
     // Create tasks for finalize stage
@@ -101,10 +97,9 @@ impl TaskBuilderImpl {
         .collect()
     }
 
-    async fn fetch_commit_stage_info<C: TaskInfoFetcher, P: IntentPersister>(
+    async fn fetch_commit_stage_info<C: TaskInfoFetcher>(
         intent_bundle: &ScheduledIntentBundle,
         task_info_fetcher: &Arc<C>,
-        persister: &Option<P>,
     ) -> TaskBuilderResult<CommitStageTaskInfo> {
         // Fetch necessary data for BaseTasks creation
         let all_committed_accounts = intent_bundle.get_all_committed_accounts();
@@ -133,15 +128,6 @@ impl TaskBuilderImpl {
             Default::default()
         });
 
-        // Persist commit ids for commitees
-        commit_nonces
-            .iter()
-            .for_each(|(pubkey, commit_id) | {
-                if let Err(err) = persister.set_commit_id(intent_bundle.id, pubkey, *commit_id) {
-                    error!(intent_id = intent_bundle.id, pubkey = %pubkey, error = ?err, "Failed to persist commit id");
-                }
-            });
-
         Ok(CommitStageTaskInfo {
             commit_nonces,
             base_accounts,
@@ -152,10 +138,9 @@ impl TaskBuilderImpl {
 #[async_trait]
 impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`BaseTaskImpl`]s for Commit stage
-    async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
+    async fn commit_tasks<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
-        persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
         let mut tasks = Vec::new();
         // Add standalone actions first
@@ -167,12 +152,8 @@ impl TasksBuilder for TaskBuilderImpl {
         let CommitStageTaskInfo {
             mut commit_nonces,
             mut base_accounts,
-        } = Self::fetch_commit_stage_info(
-            intent_bundle,
-            task_info_fetcher,
-            persister,
-        )
-        .await?;
+        } = Self::fetch_commit_stage_info(intent_bundle, task_info_fetcher)
+            .await?;
 
         // Create tasks per intent type
         if let Some(ref value) = intent_bundle.intent_bundle.commit {

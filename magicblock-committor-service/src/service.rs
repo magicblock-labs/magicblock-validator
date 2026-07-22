@@ -1,65 +1,74 @@
-pub mod intent_client;
-
 use std::{
-    collections::{HashMap, HashSet},
-    future::Future,
-    mem,
-    sync::{Arc, Mutex},
+    collections::HashSet, future::Future, mem, num::NonZeroUsize, sync::Arc,
     time::Duration,
 };
 
-use futures_util::future::join_all;
-use intent_client::{
-    ERIntentClient, InternalIntentClientError, ScheduledBaseIntentMeta,
-};
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
-use magicblock_metrics::metrics::{
-    self, AccountFetchContext, AccountFetchReason,
-};
-use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle, Pubkey,
-};
+use magicblock_metrics::metrics::{self};
+use magicblock_program::{outbox_intent_bundles::OutboxIntentBundle, Pubkey};
+use solana_transaction::Transaction;
 use tokio::{
-    sync::broadcast,
     task,
     task::{JoinError, JoinHandle},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument, warn};
+use tracing::error;
 
 use crate::{
-    committor_processor::CommittorProcessor, error::CommittorServiceResult,
-    intent_execution_manager::BroadcastedIntentExecutionResult,
+    committor_processor::CommittorProcessor,
+    error::CommittorServiceResult,
+    intent_engine::db::BacklogDB,
+    intent_executor::error::IntentExecutorError,
+    outbox::{
+        outbox_client::InternalOutboxClientError,
+        outbox_intent_bundles_reader::{
+            OutboxIntentBundlesReader, OutboxIntentBundlesReaderError,
+        },
+        OutboxClient,
+    },
 };
-
-const POISONED_MUTEX_MSG: &str = "ServiceInner intents_meta_map mutex poisoned";
 
 pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
-pub enum IntentExecutionService<R> {
-    Created(ServiceInner<R>),
+pub enum IntentExecutionService<O, D> {
+    Created(ServiceInner<O, D>),
     Started(JoinHandle<()>),
     Stopped,
+    /// Not in `CoordinationMode::Primary` - accept/schedule loop must not run.
+    Disabled,
     Error,
 }
 
-impl<R> IntentExecutionService<R>
+impl<O, D> IntentExecutionService<O, D> {
+    /// Makes `start`/`stop` no-ops. Use when not primary.
+    pub fn disabled() -> Self {
+        Self::Disabled
+    }
+}
+
+impl<O, D: BacklogDB> IntentExecutionService<O, D>
 where
-    R: ERIntentClient,
-    R::Error: Into<IntentExecutionServiceError>,
+    O: OutboxClient,
+    // OutboxClient errors should be convertible to Service errors
+    O::Error: Into<IntentExecutionServiceError>,
+    // OutboxClient errors should be convertible to IntentExecutor error
+    O::Error: Into<IntentExecutorError>,
+    // OutboxReader errors should be convertible to Service errors
+    <O::OutboxReader as OutboxIntentBundlesReader>::Error:
+        Into<IntentExecutionServiceError>,
 {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
-        intent_rpc_client: R,
-        processor: Arc<CommittorProcessor>,
+        intent_client: Arc<O>,
+        processor: Arc<CommittorProcessor<D>>,
         slot_interval: Duration,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self::Created(ServiceInner::new(
             chainlink,
-            intent_rpc_client,
+            intent_client,
             processor,
             slot_interval,
             cancellation_token,
@@ -71,6 +80,10 @@ where
     }
 
     pub fn start(&mut self) -> Result<(), IntentExecutionServiceError> {
+        if matches!(self, Self::Disabled) {
+            return Ok(());
+        }
+
         let Self::Created(service) = self.take() else {
             return Err(IntentExecutionServiceError::InvalidState(
                 "service must be in Created state to start".into(),
@@ -83,6 +96,10 @@ where
     }
 
     pub async fn stop(&mut self) -> Result<(), IntentExecutionServiceError> {
+        if matches!(self, Self::Disabled) {
+            return Ok(());
+        }
+
         let Self::Started(handle) = self.take() else {
             return Err(IntentExecutionServiceError::InvalidState(
                 "service must be in Started state to stop".into(),
@@ -95,59 +112,56 @@ where
     }
 }
 
-pub struct ServiceInner<R> {
+pub struct ServiceInner<O, D> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
     /// ER client specific for Intent needs. Could be switched to RpcClient
-    intent_rpc_client: Arc<R>,
+    outbox_client: Arc<O>,
     /// Processor of accepted intents
-    processor: Arc<CommittorProcessor>,
+    processor: Arc<CommittorProcessor<D>>,
     /// Time interval to scrape MagicContext(ER slot interval)
     // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
     slot_interval: Duration,
     cancellation_token: CancellationToken,
-    /// Meta for ongoing executing intents
-    intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
 }
 
-impl<R> ServiceInner<R>
+impl<O, D: BacklogDB> ServiceInner<O, D>
 where
-    R: ERIntentClient,
-    R::Error: Into<IntentExecutionServiceError>,
+    O: OutboxClient,
+    // OutboxClient errors should be convertible to Service errors
+    O::Error: Into<IntentExecutionServiceError>,
+    // OutboxClient errors should be convertible into IntentExecutor errors
+    O::Error: Into<IntentExecutorError>,
+    // OutboxReader errors should be convertible to Service errors
+    <O::OutboxReader as OutboxIntentBundlesReader>::Error:
+        Into<IntentExecutionServiceError>,
 {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
-        intent_rpc_client: R,
-        processor: Arc<CommittorProcessor>,
+        outbox_client: Arc<O>,
+        processor: Arc<CommittorProcessor<D>>,
         slot_interval: Duration,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             chainlink,
-            intent_rpc_client: Arc::new(intent_rpc_client),
+            outbox_client,
             processor,
             slot_interval,
             cancellation_token,
-            intents_meta_map: Arc::new(Mutex::default()),
         }
     }
 
-    /// Starts 2 workers: one accepting intents, another awaiting and handling results
     fn start(self) -> JoinHandle<()> {
-        let result_subscriber = self.processor.subscribe_for_results();
-        let cancellation_token = self.cancellation_token.clone();
-        tokio::spawn(Self::result_processor(
-            result_subscriber,
-            cancellation_token,
-            self.intents_meta_map.clone(),
-            self.intent_rpc_client.clone(),
-        ));
-
         tokio::task::spawn(self.accept_worker())
     }
 
     async fn accept_worker(self) {
-        if let Err(err) = self.reschedule_pending_bundles().await {
+        // Reschedule existing outbox intents first
+        // We need to ensure that accounts in outbox a scheduled before
+        // we accept new incoming Intents
+        if let Err(err) = self.reschedule_intents().await {
+            // TODO(edwin): alerts
             error!(error = ?err, "Failed to reschedule pending bundles")
         }
 
@@ -160,17 +174,15 @@ where
                 }
                 _ = interval.tick() => {
                     let accept_result = self
-                        .intent_rpc_client
+                        .outbox_client
                         .accept_scheduled_intents()
                         .await;
-                    let intent_bundles = match accept_result {
-                        Ok(value) => value,
-                        Err(err) => {
-                            error!("Failed to accept intents: {}", err);
-                            continue;
-                        }
-                    };
+                    let intent_bundles = accept_result.unwrap_or_else(|(accepted_intents, err)| {
+                        error!("Failed to accept intents: {}", err);
+                        accepted_intents
+                    });
 
+                    let intent_bundles= intent_bundles.into_iter().map(OutboxIntentBundle::accepted).collect();
                     if let Err(err) = self.schedule_intent_execution(intent_bundles).await {
                         error!("Failed to schedule intent execution: {}", err);
                     }
@@ -179,32 +191,50 @@ where
         }
     }
 
-    async fn reschedule_pending_bundles(&self) -> CommittorServiceResult<()> {
-        // Fetch pending and failed bundles from DB
-        let mut bundles = self
-            .processor
-            .load_recovery_intent_bundles()
-            .await
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to load pending intent bundles for recovery");
-            })?;
-        if bundles.is_empty() {
-            return Ok(());
+    async fn reschedule_intents(
+        &self,
+    ) -> Result<(), IntentExecutionServiceError> {
+        /// Number of intents rescheduled at once
+        const RESCHEDULE_CHUNK_SIZE: NonZeroUsize =
+            NonZeroUsize::new(1000).unwrap();
+
+        let mut outbox_bundles_reader = self.outbox_client.outbox_reader();
+        loop {
+            // Read by chunks in order not to overload `IntentExecutionEngine`
+            let mut intent_bundles_chunk = outbox_bundles_reader
+                .read(RESCHEDULE_CHUNK_SIZE.get())
+                .await
+                .map_err(Into::into)?;
+            // Original blockhash is stale after restart; signal recovery so
+            // notify_commit_sent rebuilds the tx with a fresh ER blockhash.
+            intent_bundles_chunk.iter_mut().for_each(|b| {
+                b.inner.sent_transaction = Transaction::default()
+            });
+            if intent_bundles_chunk.is_empty() {
+                return Ok(());
+            }
+
+            let read_len = intent_bundles_chunk.len();
+            // Schedule  without initial persistence as bundle already exists in db
+            let result = self
+                .process_intent_bundles(intent_bundles_chunk, |bundles| {
+                    self.processor.schedule_intent_bundles(bundles)
+                })
+                .await;
+            if let Err(err) = result {
+                error!(error = ?err, "Failed to reschedule pending bundles")
+            }
+
+            // Check if we've rescheduled intents from Outbox
+            if read_len != RESCHEDULE_CHUNK_SIZE.get() {
+                return Ok(());
+            }
         }
-
-        // Retain only recoverable bundles
-        self.retain_recoverable_intent_bundles(&mut bundles).await;
-
-        // Schedule  without initial persisitance as bundle already exists in db
-        self.process_intent_bundles(bundles, |bundles| {
-            self.processor.schedule_recovered_intent_bundles(bundles)
-        })
-        .await
     }
 
     async fn schedule_intent_execution(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
+        intent_bundles: Vec<OutboxIntentBundle>,
     ) -> CommittorServiceResult<()> {
         if intent_bundles.is_empty() {
             return Ok(());
@@ -220,48 +250,32 @@ where
 
     async fn process_intent_bundles<F, Fut>(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
+        intent_bundles: Vec<OutboxIntentBundle>,
         schedule: F,
     ) -> CommittorServiceResult<()>
     where
-        F: FnOnce(Vec<ScheduledIntentBundle>) -> Fut,
+        F: FnOnce(Vec<OutboxIntentBundle>) -> Fut,
         Fut: Future<Output = CommittorServiceResult<()>>,
     {
         if intent_bundles.is_empty() {
             return Ok(());
         }
 
-        // Add metas for intent we schedule
-        let intent_ids: Vec<u64>;
         let pubkeys_being_undelegated = {
-            let mut intent_metas =
-                self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
             let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
             intent_bundles.iter().for_each(|intent| {
-                intent_metas
-                    .insert(intent.id, ScheduledBaseIntentMeta::new(intent));
                 if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
                 {
                     pubkeys_being_undelegated.extend(undelegate);
                 }
             });
-            intent_ids = intent_bundles.iter().map(|b| b.id).collect();
             pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
         };
 
         self.process_undelegation_requests(pubkeys_being_undelegated)
             .await;
 
-        let result = schedule(intent_bundles).await;
-        // If scheduling failed remove from map
-        if result.is_err() {
-            let mut intent_metas =
-                self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
-            intent_ids.iter().for_each(|id| {
-                intent_metas.remove(id);
-            });
-        }
-        result
+        schedule(intent_bundles).await
     }
 
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
@@ -298,132 +312,6 @@ where
             );
         }
     }
-
-    #[instrument(skip(
-        result_subscription,
-        cancellation_token,
-        intents_meta_map,
-        intent_client
-    ))]
-    async fn result_processor(
-        mut result_subscription: broadcast::Receiver<
-            BroadcastedIntentExecutionResult,
-        >,
-        cancellation_token: CancellationToken,
-        intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-        intent_client: Arc<R>,
-    ) {
-        loop {
-            let execution_result = tokio::select! {
-                biased;
-                _ = cancellation_token.cancelled() => {
-                    info!("Shutting down");
-                    return;
-                }
-                execution_result = result_subscription.recv() => {
-                    match execution_result {
-                        Ok(result) => result,
-                        Err(broadcast::error::RecvError::Closed) => {
-                            info!("Intent execution service shut down");
-                            break;
-                        }
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            // SAFETY: This shouldn't happen as our tx execution is faster than Intent execution on Base layer
-                            // If this ever happens it requires investigation
-                            error!(skipped_count = skipped, "Lagging behind intent execution");
-                            continue;
-                        }
-                    }
-                }
-            };
-
-            if let Err(err) = ServiceInner::<R>::process_execution_result(
-                &intent_client,
-                execution_result,
-                &intents_meta_map,
-            )
-            .await
-            {
-                error!(error = ?err, "Failed process intent execution results");
-            }
-        }
-    }
-
-    async fn process_execution_result(
-        intent_client: &Arc<R>,
-        execution_result: BroadcastedIntentExecutionResult,
-        intents_meta_map: &Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-    ) -> Result<(), R::Error> {
-        let intent_id = execution_result.id;
-        let Some(intent_meta) = intents_meta_map
-            .lock()
-            .expect(POISONED_MUTEX_MSG)
-            .remove(&intent_id)
-        else {
-            // Possible if we have duplicate Intents
-            // First one will remove id from map and second could fail.
-            // This should not happen and needs investigation!
-            error!(intent_id, "Failed to find intent metadata");
-            return Ok(());
-        };
-
-        intent_client
-            .notify_commit_sent(intent_meta, execution_result)
-            .await?;
-
-        Ok(())
-    }
-
-    /// Retains bundles whose accounts are still delegated
-    async fn retain_recoverable_intent_bundles(
-        &self,
-        bundles: &mut Vec<ScheduledIntentBundle>,
-    ) {
-        let results = join_all(
-            bundles.iter().map(|b| b.get_all_committed_pubkeys()).map(
-                |pubkeys| async move {
-                    #[allow(deprecated)]
-                    let result = self
-                        .chainlink
-                        .accounts_delegated_on_base_and_er(
-                            &pubkeys,
-                            AccountFetchContext::internal(
-                                AccountFetchReason::RequestedAccount,
-                            ),
-                        )
-                        .await;
-                    result
-                },
-            ),
-        )
-        .await;
-
-        let mut results_iter = results.into_iter();
-        bundles.retain(|bundle| {
-            let Some(result) = results_iter.next() else {
-                error!("Results and bundles must have equal length");
-                return false;
-            };
-            match result {
-                Ok(delegated) if delegated.iter().all(|d| *d) => true,
-                Ok(_) => {
-                    warn!(
-                        intent_id = bundle.id,
-                        "Skipping recovered commit intent because not all accounts are delegated on base and ER"
-                    );
-                    false
-                }
-                Err(err) => {
-                    error!(
-                        intent_id = bundle.id,
-                        error = ?err,
-                        "Failed to verify recovered commit intent accounts"
-                    );
-                    false
-                }
-            }
-        });
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -433,5 +321,9 @@ pub enum IntentExecutionServiceError {
     #[error("JoinError: {0}")]
     JoinError(#[from] JoinError),
     #[error("IntentRpcClientError: {0}")]
-    IntentRpcClientError(#[from] InternalIntentClientError),
+    IntentRpcClientError(#[from] InternalOutboxClientError),
+    #[error("OutboxReaderError")]
+    OutboxReaderError(#[from] OutboxIntentBundlesReaderError),
+    #[error("IntentExecutorError: {0}")]
+    IntentExecutorError(#[from] Box<IntentExecutorError>),
 }

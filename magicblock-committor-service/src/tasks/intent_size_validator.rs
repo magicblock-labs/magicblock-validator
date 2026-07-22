@@ -15,7 +15,7 @@ use crate::{
         },
         BaseTask, BaseTaskImpl, FinalizeTask, UndelegateTask,
     },
-    transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+    utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
 };
 
 /// Checks whether an intent could ever fit on the base layer, so intents

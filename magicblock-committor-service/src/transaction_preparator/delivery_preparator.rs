@@ -28,14 +28,12 @@ use solana_transaction_error::TransactionError;
 use tracing::{error, info};
 
 use crate::{
-    persist::{CommitStatus, IntentPersister},
     tasks::{
         commit_stage_task::{CleanupTask, PreparationTask},
         task_strategist::TransactionStrategy,
         utils::TransactionUtils,
         BaseTaskImpl,
     },
-    utils::persist_status_update,
     ComputeBudgetConfig,
 };
 
@@ -61,11 +59,10 @@ impl DeliveryPreparator {
     }
 
     /// Prepares buffers and necessary pieces for optimized TX
-    pub async fn prepare_for_delivery<P: IntentPersister>(
+    pub async fn prepare_for_delivery(
         &self,
         authority: &Keypair,
         strategy: &mut TransactionStrategy,
-        persister: &Option<P>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let uniqueness_nonce = strategy.uniqueness_nonce;
         let preparation_futures =
@@ -77,7 +74,6 @@ impl DeliveryPreparator {
                 self.prepare_task_handling_errors(
                     authority,
                     task,
-                    persister,
                     uniqueness_nonce,
                 )
                 .await
@@ -102,11 +98,10 @@ impl DeliveryPreparator {
     }
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
-    pub async fn prepare_task<P: IntentPersister>(
+    pub async fn prepare_task(
         &self,
         authority: &Keypair,
         task: &mut BaseTaskImpl,
-        persister: &Option<P>,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_task = match task {
@@ -122,15 +117,6 @@ impl DeliveryPreparator {
             return Ok(());
         };
 
-        // Persist as failed until rewritten
-        let update_status = CommitStatus::BufferAndChunkPartiallyInitialized;
-        persist_status_update(
-            persister,
-            &preparation_task.pubkey,
-            preparation_task.commit_id,
-            update_status,
-        );
-
         // Initialize buffer account. Init + reallocs
         self.initialize_buffer_account(
             authority,
@@ -139,15 +125,6 @@ impl DeliveryPreparator {
         )
         .await?;
 
-        // Persist initialization success
-        let update_status = CommitStatus::BufferAndChunkInitialized;
-        persist_status_update(
-            persister,
-            &preparation_task.pubkey,
-            preparation_task.commit_id,
-            update_status,
-        );
-
         // Writing chunks with some retries
         self.write_buffer_with_retries(
             authority,
@@ -155,14 +132,6 @@ impl DeliveryPreparator {
             uniqueness_nonce,
         )
         .await?;
-        // Persist that buffer account initiated successfully
-        let update_status = CommitStatus::BufferAndChunkFullyInitialized;
-        persist_status_update(
-            persister,
-            &preparation_task.pubkey,
-            preparation_task.commit_id,
-            update_status,
-        );
 
         preparation_task.done();
         Ok(())
@@ -170,16 +139,13 @@ impl DeliveryPreparator {
 
     /// Runs `prepare_task` and, if the buffer was already initialized,
     /// performs cleanup and retries once.
-    pub async fn prepare_task_handling_errors<P: IntentPersister>(
+    pub async fn prepare_task_handling_errors(
         &self,
         authority: &Keypair,
         task: &mut BaseTaskImpl,
-        persister: &Option<P>,
         uniqueness_nonce: Option<u64>,
     ) -> Result<(), InternalError> {
-        let res = self
-            .prepare_task(authority, task, persister, uniqueness_nonce)
-            .await;
+        let res = self.prepare_task(authority, task, uniqueness_nonce).await;
         match res {
             Err(InternalError::BufferExecutionError(
                 BufferExecutionError::AccountAlreadyInitializedError(
@@ -214,8 +180,7 @@ impl DeliveryPreparator {
         self.rpc_client.invalidate_cached_blockhash().await;
 
         // Retry preparation
-        self.prepare_task(authority, task, persister, uniqueness_nonce)
-            .await
+        self.prepare_task(authority, task, uniqueness_nonce).await
     }
 
     /// Initializes buffer account for future writes
