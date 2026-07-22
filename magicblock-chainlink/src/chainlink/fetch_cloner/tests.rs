@@ -4792,6 +4792,56 @@ fn test_dlp_collision_tracker_parked_candidate_survives_firehose_churn() {
     assert_eq!(released.slot, SLOT);
 }
 
+// Stale delegation-record updates replayed out of order (reconnect,
+// multi-client races) must neither lower the sighted slot nor consume a
+// parked candidate their slot does not cover.
+#[test]
+fn test_dlp_collision_tracker_ignores_stale_record_sightings() {
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    let update_at = |pubkey: Pubkey, slot: u64| ForwardedSubscriptionUpdate {
+        pubkey,
+        account: RemoteAccount::from_fresh_account(
+            Account {
+                lamports: 1_000,
+                data: vec![],
+                owner: dlp_api::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+            slot,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Program,
+    };
+
+    let account_pubkey = random_pubkey();
+    let record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+
+    // A stale sighting must not lower the recorded slot: the colliding
+    // account update still routes straight to discovery.
+    let mut tracker = DlpCollisionTracker::new();
+    assert!(tracker.sight_record(record_pubkey, 100).is_none());
+    assert!(tracker.sight_record(record_pubkey, 50).is_none());
+    assert!(tracker.check_or_park(&update_at(account_pubkey, 100)));
+
+    // A stale sighting must not consume a parked candidate it does not
+    // cover; the candidate is released by its own record sighting.
+    let mut tracker = DlpCollisionTracker::new();
+    assert!(!tracker.check_or_park(&update_at(account_pubkey, 100)));
+    assert!(tracker.sight_record(record_pubkey, 50).is_none());
+    let released = tracker
+        .sight_record(record_pubkey, 100)
+        .expect("covering record sighting must release the candidate");
+    assert_eq!(released.pubkey, account_pubkey);
+    assert_eq!(released.slot, 100);
+}
+
 #[tokio::test]
 async fn test_internal_dlp_pda_program_update_is_filtered_after_discovery_miss()
 {

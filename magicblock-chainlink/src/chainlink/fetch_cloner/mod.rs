@@ -239,14 +239,25 @@ impl DlpCollisionTracker {
     }
 
     /// Records a delegation-record-shaped update sighting and releases any
-    /// account update parked while waiting for this record.
+    /// account update parked while waiting for this record. Sightings are
+    /// monotonic — a stale record update replayed out of order (reconnect,
+    /// multi-client races) can neither lower the sighted slot nor consume a
+    /// parked candidate its slot does not cover; the candidate keeps waiting
+    /// for the record sighting of its own delegation.
     fn sight_record(
         &mut self,
         record_pubkey: Pubkey,
         slot: u64,
     ) -> Option<ParkedCollisionCandidate> {
-        self.record_slots.put(record_pubkey, slot);
-        self.parked.pop(&record_pubkey)
+        let sighted_slot =
+            self.record_slots.get_or_insert_mut(record_pubkey, || slot);
+        *sighted_slot = (*sighted_slot).max(slot);
+        let sighted_slot = *sighted_slot;
+        self.parked
+            .peek(&record_pubkey)
+            .is_some_and(|candidate| sighted_slot >= candidate.slot)
+            .then(|| self.parked.pop(&record_pubkey))
+            .flatten()
     }
 
     /// True when the pubkey's delegation record was sighted at or after the
