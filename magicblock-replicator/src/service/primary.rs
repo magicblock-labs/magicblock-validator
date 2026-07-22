@@ -269,22 +269,13 @@ impl Primary {
             Some(
                 self.ctx
                     .broker
-                    .publish_deferred(
-                        subject,
-                        payload,
-                        Some(msg_id.as_str()),
-                    )
+                    .publish_deferred(subject, payload, Some(msg_id.as_str()))
                     .await?,
             )
         } else {
             self.ctx
                 .broker
-                .publish(
-                    subject,
-                    payload,
-                    Some(msg_id.as_str()),
-                    confirm,
-                )
+                .publish(subject, payload, Some(msg_id.as_str()), confirm)
                 .await?;
             None
         };
@@ -313,8 +304,12 @@ impl Primary {
     /// Confirms every transaction published before the next block boundary.
     /// Failed deferred publishes are retried with synchronous confirmation, so
     /// a block can never overtake a transaction that JetStream did not persist.
-    async fn confirm_transactions(&mut self, deadline: Option<Instant>) -> bool {
-        while let Some(mut pending) = self.unconfirmed_transactions.pop_front() {
+    async fn confirm_transactions(
+        &mut self,
+        deadline: Option<Instant>,
+    ) -> bool {
+        while let Some(mut pending) = self.unconfirmed_transactions.pop_front()
+        {
             let confirmed = if let Some(ack) = pending.ack.take() {
                 match deadline {
                     Some(deadline) => {
