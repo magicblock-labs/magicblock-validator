@@ -38,6 +38,7 @@ env:
   REDSUITE_REV: 91abdd5e44db88d922cba8a5d22ed2cfa0e63951
   SOLANA_VERSION: v4.0.3
   RUST_TOOLCHAIN: "1.94.1"
+  BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
 
 jobs:
   build_er:
@@ -231,3 +232,49 @@ jobs:
         shell: bash
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+
+      - name: Export Bencher Metric Format
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: ./redsuite-dist/redsuite report bmf --out redsuite-bmf.json
+        shell: bash
+
+      - uses: bencherdev/bencher@v0.6.8
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+
+      - name: Track results with Bencher
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          set -euo pipefail
+          if [ -z "${BENCHER_API_TOKEN:-}" ]; then
+            echo "BENCHER_API_TOKEN not set — skipping Bencher tracking"
+            exit 0
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            bencher run \
+              --project "$BENCHER_PROJECT" \
+              --key "$BENCHER_API_TOKEN" \
+              --branch "$GITHUB_REF_NAME" \
+              --testbed blacksmith-8vcpu-ubuntu-2404 \
+              --adapter json \
+              --file redsuite-bmf.json
+          else
+            bencher run \
+              --project "$BENCHER_PROJECT" \
+              --key "$BENCHER_API_TOKEN" \
+              --branch "$HEAD_REF" \
+              --start-point "$BASE_REF" \
+              --start-point-hash "$BASE_SHA" \
+              --start-point-clone-thresholds \
+              --start-point-reset \
+              --testbed blacksmith-8vcpu-ubuntu-2404 \
+              --adapter json \
+              --github-actions "$GH_TOKEN" \
+              --file redsuite-bmf.json
+          fi
+        shell: bash
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
