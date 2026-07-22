@@ -155,6 +155,7 @@ This is an RPC/account-query hot path. Avoid changing it to full-db scans or per
 
 ```text
 processor superblock / replication bootstrap
+  -> drain accepted transactions before the Block checkpoint boundary
   -> pause execution or otherwise guarantee no concurrent state transitions
   -> unsafe AccountsDb::take_snapshot(slot)
   -> flush mmap + LMDB
