@@ -256,6 +256,23 @@ impl DlpCollisionTracker {
             .flatten()
     }
 
+    fn preserve_released_candidate(
+        &mut self,
+        candidate: ParkedCollisionCandidate,
+    ) -> bool {
+        let record_pubkey =
+            delegation_record_pda_from_delegated_account(&candidate.pubkey);
+        if !self.parked.contains(&record_pubkey)
+            && self.parked.len() >= PARKED_COLLISION_UPDATES_CAPACITY.get()
+        {
+            return false;
+        }
+
+        let parked = self.parked.get_or_insert_mut(record_pubkey, || candidate);
+        parked.slot = parked.slot.max(candidate.slot);
+        true
+    }
+
     /// True when the pubkey's delegation record was sighted at or after the
     /// update slot: a fresh delegation writes both accounts in one slot, so
     /// the sighting marks a delegated account whose app data collides with an
@@ -2192,10 +2209,15 @@ where
                 return;
             }
         }
+        let preserved = self
+            .dlp_collision_tracker
+            .lock()
+            .preserve_released_candidate(candidate);
         warn!(
             pubkey = %candidate.pubkey,
             slot = candidate.slot,
-            "Released collision candidate did not settle at the sighted slot; lazy on-demand cloning will reconcile"
+            preserved,
+            "Released collision candidate did not settle at the sighted slot; preserving it for a later delegation-record sighting"
         );
     }
 

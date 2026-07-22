@@ -5113,6 +5113,30 @@ fn test_dlp_collision_tracker_ignores_stale_record_sightings() {
     assert_eq!(released.slot, 100);
 }
 
+#[test]
+fn test_dlp_collision_tracker_preserves_unsettled_released_candidate() {
+    let account_pubkey = random_pubkey();
+    let record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    let mut tracker = DlpCollisionTracker::new();
+
+    assert!(
+        tracker.preserve_released_candidate(ParkedCollisionCandidate {
+            pubkey: account_pubkey,
+            slot: 100,
+        })
+    );
+    assert!(tracker.sight_record(record_pubkey, 99).is_none());
+
+    let released = tracker.sight_record(record_pubkey, 100).expect(
+        "preserved candidate must be released by a later covering sighting",
+    );
+    assert_eq!(released.pubkey, account_pubkey);
+    assert_eq!(released.slot, 100);
+}
+
 #[tokio::test]
 async fn test_internal_dlp_pda_program_update_is_filtered_after_discovery_miss()
 {
