@@ -53,7 +53,7 @@ Main consumers include:
 - `magicblock-api`, which calls `link()` during validator construction and holds the `TransactionSchedulerHandle` for service wiring;
 - `magicblock-aperture`, which submits/simulates transactions and consumes account/status events for RPC/pubsub;
 - `magicblock-processor`, which consumes `ValidatorChannelEndpoints`, executes `SchedulerCommand`s, drains `ExecutionTlsStash`, and emits account/status/replication messages;
-- `magicblock-replicator`, which consumes and publishes `link::replication::Message` and uses `wait_for_idle()` during checksum/reset operations;
+- `magicblock-replicator`, which consumes and publishes `link::replication::Message`, uses an ordered replay drain before checksum verification, and uses `wait_for_idle()` to exclude executor writes during checksum/reset operations;
 - `magicblock-ledger`, which replays persisted transactions through `TransactionSchedulerHandle::replay`;
 - `magicblock-committor-service`, `magicblock-services`, `magicblock-account-cloner`, and `magicblock-task-scheduler`, which submit validator-internal transactions, consume scheduled intents, or consume scheduled tasks;
 - `programs/magicblock`, which uses `MagicSys`, `CommittedAccount`, `BaseActionCallback`, coordination mode, and `ExecutionTlsStash`;
@@ -189,11 +189,12 @@ Preserve this single ordered command channel. Moving blocks to a separate path c
 
 ### Scheduler pause / exclusive AccountsDb access
 
-1. External maintenance code calls `TransactionSchedulerHandle::wait_for_idle()`.
-2. The future waits until the processor scheduler has released the shared semaphore because all executors are idle and no pending transactions are being processed.
-3. The returned `OwnedSemaphorePermit` pauses scheduling while held.
-4. Maintenance performs exclusive work such as checksums, snapshots, resets, or defragmentation.
-5. Dropping the permit allows scheduling to resume.
+1. Replay-sensitive maintenance first calls `wait_for_replay_drain()` so the FIFO scheduler acknowledges every command queued before the barrier.
+2. External maintenance code calls `TransactionSchedulerHandle::wait_for_idle()`.
+3. The future waits until the processor scheduler has released the shared semaphore because all executors are idle and no pending transactions are being processed.
+4. The returned `OwnedSemaphorePermit` pauses scheduling while held.
+5. Maintenance performs exclusive work such as checksums, snapshots, resets, or defragmentation.
+6. Dropping the permit allows scheduling to resume.
 
 Never hold the permit across unrelated I/O or long network operations. It blocks transaction processing and is a critical availability/performance lever.
 

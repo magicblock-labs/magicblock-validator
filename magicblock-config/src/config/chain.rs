@@ -53,6 +53,10 @@ pub struct ChainLinkConfig {
     /// updates.
     pub max_monitored_accounts: usize,
 
+    /// The maximum number of accounts to retain in the secondary subscription
+    /// cache.
+    pub secondary_max_monitored_accounts: usize,
+
     /// When true, confined accounts are removed during accounts bank reset.
     pub remove_confined_accounts: bool,
 
@@ -79,6 +83,8 @@ impl Default for ChainLinkConfig {
     fn default() -> Self {
         Self {
             max_monitored_accounts: consts::DEFAULT_MAX_MONITORED_ACCOUNTS,
+            secondary_max_monitored_accounts:
+                consts::DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS,
             remove_confined_accounts: false,
             allowed_programs: None,
             resubscription_delay: Duration::from_millis(
