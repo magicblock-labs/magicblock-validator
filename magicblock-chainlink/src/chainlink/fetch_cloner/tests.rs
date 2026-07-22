@@ -4859,6 +4859,89 @@ async fn test_absent_unwatched_dlp_program_update_is_dropped_without_delegation_
 }
 
 #[tokio::test]
+async fn test_absent_unwatched_dlp_program_update_delegated_to_us_is_greedily_cloned(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let app_data = vec![1, 2, 3, 4];
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: app_data.clone(),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        fetch_cloner: _,
+        cloner,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                delegated_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while accounts_bank.get_account(&account_pubkey).is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for greedy DLP discovery clone");
+
+    assert!(
+        rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches()
+            > fetches_before,
+        "greedy discovery must fetch the delegation record before cloning"
+    );
+    assert!(
+        cloner.clone_request_count() >= 1,
+        "delegated account should be cloned from program update"
+    );
+    let cloned_account = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("delegated account should be cloned from program update");
+    assert!(cloned_account.delegated());
+    assert_eq!(cloned_account.owner(), &account_owner);
+    assert_eq!(cloned_account.data(), app_data.as_slice());
+    assert_eq!(cloned_account.remote_slot(), CURRENT_SLOT);
+}
+
+#[tokio::test]
 async fn test_active_local_delegated_dlp_program_update_cleans_up_without_fetch_or_overwrite(
 ) {
     init_logger();
