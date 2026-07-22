@@ -273,13 +273,17 @@ impl DlpCollisionTracker {
             .get(&record_pubkey)
             .is_some_and(|&record_slot| record_slot >= update.account.slot());
         if !sighted {
-            self.parked.put(
-                record_pubkey,
+            // Parking is monotonic like sightings: a replayed older update
+            // must not downgrade the parked slot, or a stale record could
+            // release the candidate with a weakened freshness floor while
+            // the real record finds nothing left to release.
+            let parked = self.parked.get_or_insert_mut(record_pubkey, || {
                 ParkedCollisionCandidate {
                     pubkey: update.pubkey,
                     slot: update.account.slot(),
-                },
-            );
+                }
+            });
+            parked.slot = parked.slot.max(update.account.slot());
         }
         sighted
     }

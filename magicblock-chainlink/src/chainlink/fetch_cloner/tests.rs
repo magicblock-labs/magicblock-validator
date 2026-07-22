@@ -4863,6 +4863,19 @@ fn test_dlp_collision_tracker_ignores_stale_record_sightings() {
         .expect("covering record sighting must release the candidate");
     assert_eq!(released.pubkey, account_pubkey);
     assert_eq!(released.slot, 100);
+
+    // A replayed older account update must not downgrade a newer parked
+    // candidate: a record sighting covering only the old slot cannot
+    // release it, and the candidate's own record still does.
+    let mut tracker = DlpCollisionTracker::new();
+    assert!(!tracker.check_or_park(&update_at(account_pubkey, 100)));
+    assert!(!tracker.check_or_park(&update_at(account_pubkey, 90)));
+    assert!(tracker.sight_record(record_pubkey, 90).is_none());
+    let released = tracker
+        .sight_record(record_pubkey, 100)
+        .expect("covering record sighting must release the candidate");
+    assert_eq!(released.pubkey, account_pubkey);
+    assert_eq!(released.slot, 100);
 }
 
 #[tokio::test]
