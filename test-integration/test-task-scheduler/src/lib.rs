@@ -27,7 +27,6 @@ use magicblock_config::{
     ValidatorParams,
 };
 use magicblock_program::Pubkey;
-use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
 use program_flexi_counter::{
     instruction::{
         create_delegate_ix_with_commit_frequency_ms, create_init_ix,
@@ -40,7 +39,6 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use tempfile::TempDir;
-use tokio::runtime::Runtime;
 
 pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 
@@ -108,27 +106,7 @@ fn start_validator(
 
 pub fn setup_validator(
 ) -> (TempDir, Child, IntegrationTestContext, Option<Keypair>) {
-    setup_validator_with_migration_tasks(&[])
-}
-
-pub fn setup_validator_with_migration_tasks(
-    tasks: &[DbTask],
-) -> (TempDir, Child, IntegrationTestContext, Option<Keypair>) {
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
-
-    // Seed the migration database before the validator opens it. The handle is
-    // dropped (flushing the WAL) before startup.
-    {
-        let db_path = SchedulerDatabase::path(&temp_dir);
-        let db = SchedulerDatabase::new(&db_path)
-            .expect("failed to open seed database");
-        let runtime = Runtime::new().expect("failed to create runtime");
-        for task in tasks {
-            runtime
-                .block_on(db.insert_task(task))
-                .expect("failed to seed task");
-        }
-    }
 
     // The faucet that pays for cranks must be funded before the validator
     // delegates it on startup.
@@ -245,27 +223,6 @@ pub fn wait_for_hydra_crank_closed(
         false,
         cleanup(validator),
         "hydra crank account {} was not closed before timeout", crank_pda
-    );
-}
-
-pub fn wait_for_empty_db(
-    runtime: &Runtime,
-    db: &SchedulerDatabase,
-    max_timeout: Duration,
-    validator: &mut Child,
-) {
-    let now = Instant::now();
-    while now.elapsed() < max_timeout {
-        let ids = expect!(runtime.block_on(db.get_task_ids()), validator);
-        if ids.is_empty() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    assert!(
-        false,
-        cleanup(validator),
-        "migration database was not emptied before timeout"
     );
 }
 

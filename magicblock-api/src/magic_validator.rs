@@ -61,7 +61,7 @@ use magicblock_services::{
     actions_callback_service::ActionsCallbackService,
     undelegation_request_service::UndelegationRequestService,
 };
-use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
+use magicblock_task_scheduler::TaskSchedulerService;
 use magicblock_validator_admin::claim_fees::{claim_fees, ClaimFeesTask};
 use mdp::state::{
     features::FeaturesSet,
@@ -442,16 +442,11 @@ impl MagicValidator {
             info!("RPC runtime shutdown");
         });
 
-        let task_scheduler_db_path =
-            SchedulerDatabase::path(ledger.ledger_path().parent().expect(
-                "ledger_path didn't have a parent, should never happen",
-            ));
-        debug!(path = %task_scheduler_db_path.display(), "Initializing task scheduler");
+        debug!("Initializing task scheduler");
         let step_start = Instant::now();
         let task_scheduler = faucet_keypair
             .map(|k| {
                 TaskSchedulerService::new(
-                    &task_scheduler_db_path,
                     config.aperture.listen.http(),
                     k.insecure_clone(),
                     dispatch

@@ -4174,7 +4174,6 @@ dependencies = [
  "magicblock-core",
  "magicblock-ledger",
  "magicblock-program",
- "rusqlite",
  "serial_test",
  "solana-account 3.4.0",
  "solana-instruction 3.3.0",

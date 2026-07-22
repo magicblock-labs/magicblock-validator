@@ -16,7 +16,6 @@ magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-ledger = { workspace = true }
 magicblock-program = { workspace = true }
-rusqlite = { workspace = true }
 solana-account = { workspace = true }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }

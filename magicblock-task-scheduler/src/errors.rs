@@ -8,9 +8,6 @@ pub enum TaskSchedulerError {
     InvalidConfiguration(String),
 
     #[error(transparent)]
-    DatabaseConnection(#[from] rusqlite::Error),
-
-    #[error(transparent)]
     Bincode(#[from] bincode::Error),
 
     #[error(transparent)]
