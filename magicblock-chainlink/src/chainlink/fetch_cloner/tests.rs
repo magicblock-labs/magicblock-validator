@@ -4654,6 +4654,124 @@ async fn test_discovered_colliding_delegated_account_account_sourced_record_rele
     colliding_delegated_account_is_cloned(true, false, true).await;
 }
 
+// A released candidate whose clone pass settles on pre-delegation state
+// (e.g. by joining an in-flight fetch that started before the delegation)
+// must not silently accept it: an undelegated copy at the sighted slot
+// triggers retries that re-own a min-slot fetch. With the RPC mock pinned
+// to the pre-delegation state the release must exhaust its attempts —
+// observable as repeated clone fetches — and degrade to the lazy fallback
+// without marking the account delegated.
+#[tokio::test]
+async fn test_released_collision_candidate_retries_when_clone_settles_stale() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let mut app_data = vec![0; DelegationRecord::size_with_discriminator()];
+    app_data[..8].copy_from_slice(&100u64.to_le_bytes());
+
+    // The RPC still serves the pre-delegation (non-DLP-owned) state, as an
+    // in-flight pre-delegation fetch owner would have resolved it.
+    let pre_delegation_account = Account {
+        lamports: 1_000_000,
+        data: app_data.clone(),
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: app_data,
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, pre_delegation_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    let delegation_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    let delegation_record = DelegationRecord {
+        authority: validator_pubkey,
+        owner: account_owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    let delegation_record_account = Account {
+        lamports: 1_000_000,
+        data: delegation_record_to_vec(&delegation_record),
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
+
+    for (pubkey, account) in [
+        (account_pubkey, delegated_account),
+        (delegation_record_pubkey, delegation_record_account),
+    ] {
+        subscription_tx
+            .send(ForwardedSubscriptionUpdate {
+                pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    account,
+                    CURRENT_SLOT,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+                source: SubscriptionSource::Program,
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // The undelegated same-slot clone must never be accepted as settled.
+    let in_bank = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("release attempts clone the fetched state");
+    assert!(!in_bank.delegated());
+
+    // One authority-gate record fetch plus one fetch per clone attempt at
+    // minimum; a single-pass release (no retries) stays below this.
+    let release_fetches = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches()
+        - fetches_before;
+    assert!(
+        release_fetches >= 4,
+        "expected retried clone attempts, saw only {release_fetches} fetches"
+    );
+}
+
 // A released collision candidate delegated to another validator must be
 // ignored like record-first discovery, not force-cloned from the firehose.
 #[tokio::test]

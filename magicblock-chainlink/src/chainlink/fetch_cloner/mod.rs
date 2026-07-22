@@ -2158,22 +2158,67 @@ where
             );
             return;
         }
-        if let Err(err) = self
-            .fetch_and_clone_accounts_with_dedup_forced_refresh(
-                &[candidate.pubkey],
-                None,
-                Some(candidate.slot),
-                fetch_context,
-                &HashSet::from([candidate.pubkey]),
-            )
-            .await
-        {
-            warn!(
-                pubkey = %candidate.pubkey,
-                error = %err,
-                "Failed to clone released colliding delegated account"
-            );
+        // The deduped fetch can join an in-flight owner that started before
+        // the delegation and resolves a pre-delegation state, so a single
+        // pass may settle stale. Re-check the bank after each pass and
+        // re-own a min-slot fetch until it reflects the sighted delegation:
+        // strictly newer state always settles, while at the sighted slot
+        // itself only a delegated copy does (the pre-delegation write can
+        // share that slot). Exhausting retries degrades to lazy on-demand
+        // cloning, never to incorrect state.
+        const MAX_RELEASE_CLONE_ATTEMPTS: usize = 3;
+        for _ in 0..MAX_RELEASE_CLONE_ATTEMPTS {
+            let result = match self
+                .fetch_and_clone_accounts_with_dedup_forced_refresh(
+                    &[candidate.pubkey],
+                    None,
+                    Some(candidate.slot),
+                    fetch_context,
+                    &HashSet::from([candidate.pubkey]),
+                )
+                .await
+            {
+                Ok(result) => result,
+                Err(err) => {
+                    warn!(
+                        pubkey = %candidate.pubkey,
+                        error = %err,
+                        "Failed to clone released colliding delegated account"
+                    );
+                    return;
+                }
+            };
+            let unresolvable = result
+                .not_found_on_chain
+                .iter()
+                .chain(result.missing_delegation_record.iter())
+                .any(|(missing_pubkey, _)| missing_pubkey == &candidate.pubkey);
+            if unresolvable {
+                trace!(
+                    pubkey = %candidate.pubkey,
+                    slot = candidate.slot,
+                    ?result,
+                    "Released collision candidate no longer resolvable on chain"
+                );
+                return;
+            }
+            let settled = self
+                .accounts_bank
+                .get_account(&candidate.pubkey)
+                .is_some_and(|in_bank| {
+                    in_bank.remote_slot() > candidate.slot
+                        || (in_bank.remote_slot() == candidate.slot
+                            && in_bank.delegated())
+                });
+            if settled {
+                return;
+            }
         }
+        warn!(
+            pubkey = %candidate.pubkey,
+            slot = candidate.slot,
+            "Released collision candidate did not settle at the sighted slot; lazy on-demand cloning will reconcile"
+        );
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(
