@@ -293,9 +293,9 @@ where
         .await;
 
         // Report
-        let _ = result.inner.as_ref().inspect_err(|err| {
+        let is_err = result.inner.as_ref().inspect_err(|err| {
             error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
-        });
+        }).is_err();
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
         let broadcasted_result =
             BroadcastedIntentExecutionResult::new(intent.id, result);
@@ -303,7 +303,13 @@ where
             warn!(error = ?err, "No result listeners");
         }
 
-        // TODO(edwin): if intent is Err(T) we need to "lock" pubkeys somehow
+        // Lock intent's pubkeys. This will prevent future intents from execution
+        // if future intent overlaps with failed one(current)
+        if is_err {
+            let pubkeys = intent.get_all_committed_pubkeys();
+            warn!(pubkeys = ?pubkeys, "Intents for following pubkeys are now blocked.");
+            return;
+        }
         // That would
         // Remove executed task from Scheduler to unblock other intents
         // SAFETY: Self::execute is called ONLY after IntentScheduler

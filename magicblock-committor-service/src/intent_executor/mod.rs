@@ -147,6 +147,10 @@ impl IntentExecutionResult {
             && matches!(&self.inner, Err(err) if err.is_transient())
             && (has_dedup_guard || !send_stage_failure)
     }
+
+    pub fn is_err(&self) -> bool {
+        self.inner.is_err()
+    }
 }
 
 #[derive(Default)]
