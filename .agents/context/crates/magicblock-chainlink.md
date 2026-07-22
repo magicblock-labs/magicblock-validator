@@ -372,7 +372,15 @@ Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_to
 
 A found RPC result or subscription update for an account in the secondary tier
 is rejected when it cannot be promoted into the primary tier; it must not be
-returned to fetch waiters or forwarded as a successful update.
+returned to fetch waiters or forwarded as a successful update. A rejected
+promotion drops the key's last watch, so it also enqueues a removal
+notification to evict any stale bank entry (e.g. an empty placeholder).
+When a subscription update wins fetch arbitration before the fetch's
+subscription setup has created any tier state, the update pump admits the
+found account directly into the primary tier (subscribe + admission) before
+resolving the waiters; without capacity the waiters fail with the same
+rejection and the pending setup registers the key as a fresh fetch-owned
+secondary entry.
 RPC-only slot-match retries apply the same tier classification before returning
 their results.
 

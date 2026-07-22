@@ -385,6 +385,125 @@ async fn test_subscription_creation_fails_when_primary_capacity_is_protected() {
     assert_eq!(wait_for_removed_account(&mut removed_rx).await, missing);
 }
 
+/// Models the update-pump race where a subscription update resolves a pending
+/// fetch before the fetch's subscription setup created any tier state.
+fn insert_pending_fetch(
+    provider: &RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    pubkey: Pubkey,
+    fetch_start_slot: u64,
+) -> oneshot::Receiver<FetchResult> {
+    let (waiter_tx, waiter_rx) = oneshot::channel();
+    provider.fetching_accounts.lock().unwrap().insert(
+        pubkey,
+        FetchingAccountState {
+            generation: provider.next_fetching_account_generation(),
+            fetch_start_slot,
+            fetch_context: AccountFetchContext::rpc_get_account(),
+            owner_started_at: std::time::Instant::now(),
+            waiters: vec![waiter_tx],
+        },
+    );
+    waiter_rx
+}
+
+#[tokio::test]
+async fn test_subscription_resolving_pending_fetch_without_tier_state_admits_to_primary(
+) {
+    init_logger();
+
+    let existing = random_pubkey();
+    let pending = random_pubkey();
+    let ctx = setup_provider(existing, Account::default()).await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    let waiter_rx = insert_pending_fetch(&ctx.provider, pending, 100);
+    // Deliver the update as a transport-level subscription (e.g. a gRPC
+    // program subscription) without any provider tier state for the key.
+    ctx.pubsub_client.insert_subscription(pending);
+    ctx.pubsub_client
+        .send_account_update(
+            pending,
+            101,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+
+    let resolved = tokio::time::timeout(Duration::from_secs(2), waiter_rx)
+        .await
+        .expect("timed out waiting for fetch resolution")
+        .expect("waiter channel closed")
+        .expect("subscription-resolved fetch should succeed");
+    assert!(resolved.is_found());
+    // The found account was admitted straight into the primary tier with an
+    // active subscription; the in-flight setup adopts this membership.
+    assert!(ctx.provider.lrucache_subscribed_accounts.contains(&pending));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&pending));
+    assert!(ctx.pubsub_client.subscriptions_union().contains(&pending));
+}
+
+#[tokio::test]
+async fn test_subscription_resolving_pending_fetch_without_tier_state_rejects_without_capacity(
+) {
+    init_logger();
+
+    let protected = random_pubkey();
+    let pending = random_pubkey();
+    let ctx = setup_provider_with_lru_capacity(
+        protected,
+        Account {
+            lamports: 1,
+            ..Default::default()
+        },
+        1,
+    )
+    .await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    ctx.provider
+        .acquire_subscription(
+            &protected,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    let waiter_rx = insert_pending_fetch(&ctx.provider, pending, 100);
+    // Deliver the update as a transport-level subscription (e.g. a gRPC
+    // program subscription) without any provider tier state for the key.
+    ctx.pubsub_client.insert_subscription(pending);
+    ctx.pubsub_client
+        .send_account_update(
+            pending,
+            101,
+            &Account {
+                lamports: 1,
+                ..Default::default()
+            },
+        )
+        .await;
+
+    // Found results must not reach waiters without primary admission; the
+    // capacity rejection surfaces instead of the account.
+    let err = tokio::time::timeout(Duration::from_secs(2), waiter_rx)
+        .await
+        .expect("timed out waiting for fetch resolution")
+        .expect("waiter channel closed")
+        .expect_err("found account without primary capacity must be rejected");
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountResolutionsFailed(message)
+            if message.contains("No evictable subscription capacity")
+                && message.contains(&pending.to_string())
+    ));
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&protected));
+    assert!(!ctx.provider.is_watching(&pending));
+}
+
 #[tokio::test]
 async fn test_repeated_not_found_fetch_preserves_primary_working_set() {
     init_logger();

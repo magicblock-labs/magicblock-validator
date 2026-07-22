@@ -1125,6 +1125,59 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         }
         Ok(outcome)
     }
+
+    /// Admits a key whose pending fetch was just resolved as found by a
+    /// subscription update before the fetch's subscription setup created any
+    /// tier state: subscribes and registers it directly in the primary tier,
+    /// so a found result is never handed to fetch waiters without primary
+    /// admission. The in-flight setup adopts the membership (and skips its
+    /// own subscribe). On rejection the caller fails the waiters; the
+    /// placeholder ownership stays for the pending setup to adopt, which
+    /// then registers the key as a fresh fetch-owned secondary entry.
+    /// Precondition: the caller holds the key's subscription guard.
+    async fn admit_resolved_fetch_to_primary(
+        &self,
+        pubkey: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        let has_capacity = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.has_capacity_with_protection(&self.primary, &pubkey)
+                .await
+        };
+        if !has_capacity {
+            return Err(
+                RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                    pubkey,
+                },
+            );
+        }
+
+        self.pubsub_client.subscribe(pubkey, None).await?;
+
+        let add_outcome = {
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.add_with_protection(&self.primary, pubkey).await
+        };
+        match add_outcome {
+            AddAccountOutcome::Added | AddAccountOutcome::AlreadyPresent => {
+                Ok(())
+            }
+            AddAccountOutcome::Evicted(evicted) => {
+                self.spawn_evicted_cleanup(evicted);
+                Ok(())
+            }
+            AddAccountOutcome::NoEvictableCandidate => {
+                self.cleanup_rejected_subscription(pubkey).await?;
+                Err(
+                    RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                        pubkey,
+                    },
+                )
+            }
+        }
+    }
 }
 
 /// Result of trying to promote a secondary-tier account into the primary
@@ -2085,6 +2138,30 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     }
                                 };
                             if apply_classification
+                                && !subscription_tiers
+                                    .secondary
+                                    .contains(&update.pubkey)
+                                && result.2.is_some()
+                                && !subscription_tiers
+                                    .primary
+                                    .contains(&update.pubkey)
+                            {
+                                // The pending fetch resolved before its
+                                // subscription setup created any tier state;
+                                // admit the found account into the primary
+                                // tier now so it is never handed to waiters
+                                // without primary admission.
+                                if let Err(err) = subscription_tiers
+                                    .admit_resolved_fetch_to_primary(
+                                        update.pubkey,
+                                    )
+                                    .await
+                                {
+                                    warn!(pubkey = %update.pubkey, error = ?err, "Failed to admit resolved-fetch account to primary subscription tier");
+                                    classification_error =
+                                        Some(err.to_string());
+                                }
+                            } else if apply_classification
                                 && subscription_tiers
                                     .secondary
                                     .contains(&update.pubkey)
