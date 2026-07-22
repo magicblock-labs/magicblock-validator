@@ -124,7 +124,13 @@ where
                 persister,
             )
             .await
-            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
+            .map_err(IntentExecutorError::FailedCommitPreparationError)
+            .inspect_err(|_| {
+                // Preparation may have reserved ALTs or initialized
+                // buffers already - surrender strategies for cleanup
+                self.dispose_strategies();
+            })?;
+
             let execution_err = match execution_result {
                 Ok(value) => break Ok(value),
                 Err(err) => err,
@@ -137,7 +143,10 @@ where
                     transaction_preparator,
                     committed_pubkeys,
                 )
-                .await?;
+                .await
+                .inspect_err(|_| {
+                    self.dispose_strategies();
+                })?;
             let cleanup = match flow {
                 ControlFlow::Continue(value) => value,
                 ControlFlow::Break(()) => {
@@ -318,6 +327,16 @@ where
         }))
     }
 
+    /// Surrenders both strategies to the execution report so the engine
+    /// cleanup releases partially prepared resources (ALT reservations,
+    /// buffer accounts) of failed attempts
+    fn dispose_strategies(&mut self) {
+        let commit_strategy = mem::take(&mut self.state.commit_strategy);
+        self.execution_report.dispose(commit_strategy);
+        let finalize_strategy = mem::take(&mut self.state.finalize_strategy);
+        self.execution_report.dispose(finalize_strategy);
+    }
+
     pub fn has_callbacks(&self) -> bool {
         self.state.commit_strategy.has_actions_callbacks()
             || self.state.finalize_strategy.has_actions_callbacks()
@@ -407,14 +426,23 @@ where
                 persister,
             )
             .await
-            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)
+            .inspect_err(|_| {
+                // Preparation may have reserved ALTs or initialized
+                // buffers already - surrender strategy for cleanup
+                self.dispose_strategy();
+            })?;
             let execution_err = match execution_result {
                 Ok(value) => break Ok(value),
                 Err(err) => err,
             };
 
-            let flow = self.patch_finalize_strategy(&execution_err).await?;
-
+            let flow = self
+                .patch_finalize_strategy(&execution_err)
+                .await
+                .inspect_err(|_| {
+                    self.dispose_strategy();
+                })?;
             let cleanup = match flow {
                 ControlFlow::Continue(cleanup) => cleanup,
                 ControlFlow::Break(()) => {
@@ -445,6 +473,13 @@ where
                 Some(self.state.commit_signature),
             )
         })
+    }
+
+    /// Surrenders the finalize strategy to the execution report so the engine
+    /// cleanup releases partially prepared resources of failed attempts
+    fn dispose_strategy(&mut self) {
+        let finalize_strategy = mem::take(&mut self.state.finalize_strategy);
+        self.execution_report.dispose(finalize_strategy);
     }
 
     pub fn has_callbacks(&self) -> bool {

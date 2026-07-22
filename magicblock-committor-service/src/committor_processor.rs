@@ -154,11 +154,11 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
-    /// Fetches pending bundles from DB
-    pub async fn pending_intent_bundles(
+    /// Fetches pending and failed bundles from DB for recovery
+    pub async fn load_recovery_intent_bundles(
         &self,
     ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
-        // Extract pending bundles satisfying predicate
+        // Extract pending and failed bundles satisfying predicate
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -180,7 +180,7 @@ impl CommittorProcessor {
             info!(
                 intent_count = bundles.len(),
                 accounts_count,
-                "Loaded pending commit intents from persistence for recovery"
+                "Loaded commit intents from persistence for recovery"
             );
         }
 

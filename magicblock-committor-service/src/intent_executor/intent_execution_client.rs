@@ -50,6 +50,9 @@ impl IntentExecutionClient {
     {
         struct IntentErrorMapper<TxMap> {
             transaction_error_mapper: TxMap,
+            /// Commit/finalize/undelegate tasks make a duplicate landing fail
+            /// the whole retried transaction, so re-sends cannot double-apply
+            has_dedup_guard: bool,
         }
         impl<TxMap> SendErrorMapper<InternalError> for IntentErrorMapper<TxMap>
         where
@@ -76,12 +79,25 @@ impl IntentExecutionClient {
             }
 
             fn decide_flow(
+                &self,
                 err: &Self::ExecutionError,
             ) -> ControlFlow<(), Duration> {
-                match err {
-                    TransactionStrategyExecutionError::InternalError(
-                        InternalError::MagicBlockRpcClientError(err),
-                    ) => decide_rpc_error_flow(err),
+                let TransactionStrategyExecutionError::InternalError(
+                    InternalError::MagicBlockRpcClientError(err),
+                ) = err
+                else {
+                    return ControlFlow::Break(());
+                };
+                if self.has_dedup_guard {
+                    return decide_rpc_error_flow(err);
+                }
+                // Action-only transactions have no on-chain dedup: a re-send
+                // with a fresh blockhash could execute the actions twice.
+                // Only failures from before signing & sending are retriable.
+                match err.as_ref() {
+                    MagicBlockRpcClientError::GetLatestBlockhash(_) => {
+                        decide_rpc_error_flow(err)
+                    }
                     _ => ControlFlow::Break(()),
                 }
             }
@@ -93,6 +109,9 @@ impl IntentExecutionClient {
         // Send with retries
         let send_error_mapper = IntentErrorMapper {
             transaction_error_mapper: IntentTransactionErrorMapper { tasks },
+            has_dedup_guard: tasks
+                .iter()
+                .any(|task| !matches!(task, BaseTaskImpl::BaseAction(_))),
         };
         let attempt = || async {
             self.send_prepared_message(authority, prepared_message.clone())
