@@ -1707,14 +1707,23 @@ where
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
+        let fresh_update_account = update.account.fresh_account();
+        let is_dlp_owned_update = fresh_update_account
+            .as_ref()
+            .is_some_and(|account| account.owner() == &dlp_api::id());
+        let is_internal_dlp_update =
+            fresh_update_account.as_ref().is_some_and(|account| {
+                is_internal_dlp_account_data(account.data())
+            });
+
         let dlp_program_interest =
             if matches!(update.source, SubscriptionSource::Program)
-                && update.account.is_owned_by_delegation_program()
+                && is_dlp_owned_update
             {
-                match update.account.fresh_account() {
+                match fresh_update_account.as_ref() {
                     Some(account) => Some(
                         self.classify_dlp_program_update_interest(
-                            pubkey, &account,
+                            pubkey, account,
                         )
                         .await,
                     ),
@@ -1726,9 +1735,7 @@ where
 
         match dlp_program_interest {
             Some(DlpProgramUpdateInterest::DropIrrelevant) => {
-                if !update.account.fresh_account().is_some_and(|account| {
-                    is_internal_dlp_account_data(account.data())
-                }) {
+                if !is_internal_dlp_update {
                     trace!(
                         pubkey = %pubkey,
                         "Dropping irrelevant DLP program subscription update"
@@ -1762,10 +1769,10 @@ where
             dlp_program_interest,
             Some(DlpProgramUpdateInterest::ProcessUndelegating)
                 | Some(DlpProgramUpdateInterest::ProcessAtaProjection)
-        ) && update.account.is_owned_by_delegation_program()
+        ) && is_dlp_owned_update
         {
-            if let Some(account) = update.account.fresh_account() {
-                if is_internal_dlp_account_data(account.data()) {
+            if let Some(account) = fresh_update_account.as_ref() {
+                if is_internal_dlp_update {
                     // Sight records from either source: SubMux dedup can
                     // deliver a directly watched record account-sourced.
                     let released = is_delegation_record_data(account.data())
