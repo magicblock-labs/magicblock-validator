@@ -308,7 +308,7 @@ The exception is a delegated account whose app data byte-collides with an intern
 
 - Every delegation-record-shaped program update records a sighting (`record pubkey -> slot`) before being dropped.
 - An internal-looking account update whose derived delegation-record PDA was sighted at or after its own slot proceeds to greedy discovery (a fresh delegation writes both accounts in one slot).
-- Otherwise the update is parked keyed by its derived record PDA; a later record sighting (e.g. delayed by SubMux debounce) pops and releases it directly into `maybe_greedily_clone_discovered_delegated_account`. Discovery declining means drop, as for any internal update.
+- Otherwise the update is parked keyed by its derived record PDA, reduced to pubkey + slot (every internal firehose update parks, so entries must be cheap and the capacity — 16,384 — must outlast firehose churn across the SubMux debounce window). A later record sighting (e.g. delayed by SubMux debounce) pops the candidate and routes it through the deduped on-demand fetch+clone, the same path as the lazy first-use fallback, run proactively so post-delegation actions are not delayed.
 - Genuine internal PDAs always miss the sighting cache and are dropped. A missed sighting (LRU eviction, lost delivery) degrades to lazy on-demand cloning via the normal getAccount/send-transaction paths — never to incorrect state.
 
 ## RemoteAccountProvider internals

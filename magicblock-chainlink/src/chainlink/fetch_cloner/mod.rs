@@ -198,14 +198,27 @@ const SEEN_DELEGATION_RECORD_SLOTS_CAPACITY: NonZeroUsize =
     };
 
 /// Capacity for internal-looking account updates parked until their
-/// delegation record is sighted.
+/// delegation record is sighted. Every internal DLP firehose update parks
+/// (nothing distinguishes a colliding candidate at park time), so the
+/// capacity must outlast firehose churn across the SubMux debounce window
+/// that can delay the releasing record sighting. Entries are a few dozen
+/// bytes, so this stays under ~1.5MB.
 const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
-    match NonZeroUsize::new(1_024) {
+    match NonZeroUsize::new(16_384) {
         Some(n) => n,
         None => {
             panic!("PARKED_COLLISION_UPDATES_CAPACITY must be non-zero")
         }
     };
+
+/// A parked internal-looking account update, reduced to what the deferred
+/// deduped fetch+clone needs. Parking pubkey + slot instead of the full
+/// update keeps the DLP firehose from pinning account payloads in memory.
+#[derive(Debug, Clone, Copy)]
+struct ParkedCollisionCandidate {
+    pubkey: Pubkey,
+    slot: u64,
+}
 
 /// Tracks delegation-record sightings from the DLP program subscription and
 /// internal-looking account updates parked until their record is sighted.
@@ -213,7 +226,8 @@ const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
 /// an update can never be parked after its record sighting already passed.
 struct DlpCollisionTracker {
     record_slots: LruCache<Pubkey, u64>,
-    parked: LruCache<Pubkey, ForwardedSubscriptionUpdate>,
+    /// Keyed by the derived delegation-record PDA of the parked account.
+    parked: LruCache<Pubkey, ParkedCollisionCandidate>,
 }
 
 impl DlpCollisionTracker {
@@ -230,7 +244,7 @@ impl DlpCollisionTracker {
         &mut self,
         record_pubkey: Pubkey,
         slot: u64,
-    ) -> Option<ForwardedSubscriptionUpdate> {
+    ) -> Option<ParkedCollisionCandidate> {
         self.record_slots.put(record_pubkey, slot);
         self.parked.pop(&record_pubkey)
     }
@@ -248,7 +262,13 @@ impl DlpCollisionTracker {
             .get(&record_pubkey)
             .is_some_and(|&record_slot| record_slot >= update.account.slot());
         if !sighted {
-            self.parked.put(record_pubkey, update.clone());
+            self.parked.put(
+                record_pubkey,
+                ParkedCollisionCandidate {
+                    pubkey: update.pubkey,
+                    slot: update.account.slot(),
+                },
+            );
         }
         sighted
     }
@@ -1583,37 +1603,28 @@ where
         // releasing the parked update once the record arrives later.
         if matches!(update.source, SubscriptionSource::Program)
             && update.account.is_owned_by_delegation_program()
-            && update.account.fresh_account().is_some_and(|account| {
-                is_internal_dlp_account_data(account.data())
-            })
         {
-            let released = update
-                .account
-                .fresh_account()
-                .is_some_and(|account| {
-                    is_delegation_record_data(account.data())
-                })
-                .then(|| {
-                    self.dlp_collision_tracker
-                        .lock()
-                        .sight_record(pubkey, update.account.slot())
-                })
-                .flatten();
-            if let Some(released) = released {
-                // The parked update's deferred discovery continuation;
-                // discovery declining means drop, as for any internal update.
-                self.maybe_greedily_clone_discovered_delegated_account(
-                    released.pubkey,
-                    &released,
-                )
-                .await;
-            }
-            if !self.dlp_collision_tracker.lock().check_or_park(&update) {
-                trace!(
-                    pubkey = %pubkey,
-                    "Dropping internal DLP program subscription update"
-                );
-                return;
+            if let Some(account) = update.account.fresh_account() {
+                if is_internal_dlp_account_data(account.data()) {
+                    let released = is_delegation_record_data(account.data())
+                        .then(|| {
+                            self.dlp_collision_tracker
+                                .lock()
+                                .sight_record(pubkey, update.account.slot())
+                        })
+                        .flatten();
+                    if let Some(released) = released {
+                        self.clone_released_collision_candidate(released).await;
+                    }
+                    if !self.dlp_collision_tracker.lock().check_or_park(&update)
+                    {
+                        trace!(
+                            pubkey = %pubkey,
+                            "Dropping internal DLP program subscription update"
+                        );
+                        return;
+                    }
+                }
             }
         }
 
@@ -2054,6 +2065,39 @@ where
             fetch_context.with_reason(AccountFetchReason::AtaProjection),
         )
         .await
+    }
+
+    /// Deferred discovery for a parked colliding-account candidate whose
+    /// delegation record was just sighted. The parked entry holds only
+    /// pubkey + slot, so the account is routed through the deduped
+    /// on-demand fetch+clone — the same path the lazy first-use fallback
+    /// takes, run proactively so post-delegation actions are not delayed.
+    /// Only genuine collisions release, so the extra fetch is negligible.
+    async fn clone_released_collision_candidate(
+        &self,
+        candidate: ParkedCollisionCandidate,
+    ) {
+        if self.accounts_bank.get_account(&candidate.pubkey).is_some() {
+            return;
+        }
+        let fetch_context = AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateGreedyDiscovery,
+        );
+        if let Err(err) = self
+            .fetch_and_clone_accounts_with_dedup(
+                &[candidate.pubkey],
+                None,
+                Some(candidate.slot),
+                fetch_context,
+            )
+            .await
+        {
+            warn!(
+                pubkey = %candidate.pubkey,
+                error = %err,
+                "Failed to clone released colliding delegated account"
+            );
+        }
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(

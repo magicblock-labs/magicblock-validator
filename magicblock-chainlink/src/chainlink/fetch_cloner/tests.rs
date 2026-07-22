@@ -4744,6 +4744,54 @@ async fn colliding_delegated_account_is_cloned(record_late: bool) {
     assert_eq!(cloned_account.data(), app_data.as_slice());
 }
 
+// A parked collision candidate must survive DLP firehose churn: unrelated
+// internal updates parking after it (well beyond the previous 1,024-entry
+// capacity) must not evict it before its record sighting releases it.
+#[test]
+fn test_dlp_collision_tracker_parked_candidate_survives_firehose_churn() {
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    const SLOT: u64 = 100;
+    let mut tracker = DlpCollisionTracker::new();
+    let candidate_pubkey = random_pubkey();
+    let record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &candidate_pubkey,
+        );
+
+    let park = |tracker: &mut DlpCollisionTracker, pubkey: Pubkey| {
+        let update = ForwardedSubscriptionUpdate {
+            pubkey,
+            account: RemoteAccount::from_fresh_account(
+                Account {
+                    lamports: 1_000,
+                    data: vec![],
+                    owner: dlp_api::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+                SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        };
+        assert!(!tracker.check_or_park(&update));
+    };
+
+    park(&mut tracker, candidate_pubkey);
+    for _ in 0..8_192 {
+        park(&mut tracker, random_pubkey());
+    }
+
+    let released = tracker
+        .sight_record(record_pubkey, SLOT)
+        .expect("candidate must survive firehose churn until sighting");
+    assert_eq!(released.pubkey, candidate_pubkey);
+    assert_eq!(released.slot, SLOT);
+}
+
 #[tokio::test]
 async fn test_internal_dlp_pda_program_update_is_filtered_after_discovery_miss()
 {
