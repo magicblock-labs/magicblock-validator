@@ -35,7 +35,7 @@ permissions:
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: 12a6707d51c40d0a02482d21c71c8eacb8cc4a6a
+  REDSUITE_REV: dadc23be7b54754292edcf773f4ba480bb8e1fd0
   SOLANA_VERSION: v4.0.3
   RUST_TOOLCHAIN: "1.94.1"
   BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
@@ -240,7 +240,7 @@ jobs:
           set -euo pipefail
           marker='<!-- redsuite-compare -->'
           compare_output="$(./redsuite-dist/redsuite report compare --brief)"
-          body="$(printf '%s\n## redsuite: PR vs %s\n```\n%s\n```\n' "$marker" "$BASE_REF" "$compare_output")"
+          body="$(printf '%s\n## redsuite: PR vs %s\n_Single-run diff on shared runners — indicative only; statistical verdicts come from Bencher thresholds._\n```\n%s\n```\n' "$marker" "$BASE_REF" "$compare_output")"
           comment_id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
             --jq '.[] | select(.body | startswith("<!-- redsuite-compare -->")) | .id' | head -n1)
           if [ -n "$comment_id" ]; then
