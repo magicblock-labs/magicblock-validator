@@ -102,6 +102,10 @@ use crate::{
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 pub(crate) const DEFAULT_SUBSCRIPTION_RETRIES: usize = 5;
+/// Maximum time a fetch waits for direct-account subscriptions to be confirmed.
+pub(crate) const SETUP_SUBSCRIPTIONS_TIMEOUT: Duration = Duration::from_secs(10);
+/// Interval for reporting waits on a per-pubkey subscription guard.
+const SUBSCRIPTION_KEY_GUARD_WARN_AFTER: Duration = Duration::from_secs(5);
 
 type SubscriptionKeyLocks =
     Arc<AsyncMutex<HashMap<Pubkey, Weak<AsyncMutex<()>>>>>;
@@ -134,7 +138,25 @@ pub(crate) async fn subscription_key_owned_guard_from_map(
     // pubkeys it is about to repair, not for every subscribed account.
     let lock =
         subscription_key_lock_from_map(subscription_key_locks, &pubkey).await;
-    lock.lock_owned().await
+    let waited = std::time::Instant::now();
+    let mut lock_guard = Box::pin(lock.lock_owned());
+    loop {
+        match tokio::time::timeout(
+            SUBSCRIPTION_KEY_GUARD_WARN_AFTER,
+            lock_guard.as_mut(),
+        )
+        .await
+        {
+            Ok(guard) => return guard,
+            Err(_elapsed) => {
+                warn!(
+                    pubkey = %pubkey,
+                    waited_ms = waited.elapsed().as_millis() as u64,
+                    "Still waiting for subscription key guard; a holder is stalling transitions for this pubkey"
+                );
+            }
+        }
+    }
 }
 
 type ChainUpdatesPubsub = (Arc<ChainUpdatesClient>, mpsc::Receiver<()>);
@@ -2688,16 +2710,39 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     claimed_pubkeys.clone(),
                     claimed_generations.clone(),
                 );
-            if let Err(err) = self
-                .setup_subscriptions(&claimed_pubkeys, fetch_context)
-                .await
+            // Bound setup so stalled pubsub cannot exhaust the fetch budget.
+            match tokio::time::timeout(
+                SETUP_SUBSCRIPTIONS_TIMEOUT,
+                self.setup_subscriptions(&claimed_pubkeys, fetch_context),
+            )
+            .await
             {
-                subscription_setup_guard
-                    .cleanup_with_error(err.to_string())
-                    .await;
-                return Err(err);
+                Ok(Ok(())) => subscription_setup_guard.disarm(),
+                Ok(Err(err)) => {
+                    subscription_setup_guard
+                        .cleanup_with_error(err.to_string())
+                        .await;
+                    return Err(err);
+                }
+                Err(_elapsed) => {
+                    let err = RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        format!(
+                            "subscription setup timed out after {}ms",
+                            SETUP_SUBSCRIPTIONS_TIMEOUT.as_millis()
+                        ),
+                    );
+                    warn!(
+                        pubkeys = %pubkeys_str(&claimed_pubkeys),
+                        timeout_ms =
+                            SETUP_SUBSCRIPTIONS_TIMEOUT.as_millis() as u64,
+                        "Subscription setup timed out; aborting fetch"
+                    );
+                    subscription_setup_guard
+                        .cleanup_with_error(err.to_string())
+                        .await;
+                    return Err(err);
+                }
             }
-            subscription_setup_guard.disarm();
 
             // Start the fetch for the claimed pubkeys only. Claim sets
             // above the RPC limit are split into evenly sized chunks

@@ -162,6 +162,9 @@ Empty placeholders are created in `RemoteAccountProvider::try_get_multi` when RP
 4. Waits for either RPC results or a subscription update that is at least as new as the fetch start slot.
 5. Returns results in input order.
 
+Subscription setup is bounded to 10 seconds. A timeout aborts the fetch rather
+than returning account data without confirmed update coverage.
+
 Fetch-owned unknown accounts enter a bounded secondary subscription LRU rather
 than the primary working-set LRU. They retain full websocket and gRPC coverage
 while the fetch is pending. A winning not-found result switches to gRPC-only

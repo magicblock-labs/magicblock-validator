@@ -1924,6 +1924,43 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
     assert!(!provider.is_pending(&pubkey));
 }
 
+#[tokio::test(start_paused = true)]
+async fn test_try_get_multi_subscription_setup_timeout_aborts_fetch() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let ProviderTestCtx {
+        provider,
+        pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+    pubsub_client.block_subscribe();
+
+    let err = provider
+        .try_get_multi(
+            &[pubkey],
+            None,
+            AccountFetchContext::rpc_get_account(),
+            None,
+        )
+        .await
+        .expect_err("fetch should fail when subscription setup times out");
+
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(message)
+            if message.contains("subscription setup timed out")
+    ));
+    assert!(!provider.is_pending(&pubkey));
+    assert!(!provider.is_watching(&pubkey));
+}
+
 #[tokio::test]
 async fn test_ensure_subscription_does_not_duplicate_existing_reason() {
     let pubkey = solana_pubkey::Pubkey::new_unique();

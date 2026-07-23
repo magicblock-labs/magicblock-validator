@@ -59,6 +59,7 @@ url = { workspace = true }
 assert_matches = { workspace = true }
 magicblock-chainlink = { path = ".", features = ["dev-context"] }
 magicblock-metrics = { workspace = true, features = ["dev-context"] }
+tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 default = []
