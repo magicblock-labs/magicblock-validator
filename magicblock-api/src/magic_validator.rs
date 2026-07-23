@@ -1227,12 +1227,6 @@ impl MagicValidator {
         log_timing("shutdown", "accountsdb_flush", step_start);
 
         let step_start = Instant::now();
-        if let Err(err) = self.ledger.flush() {
-            error!(error = ?err, "Failed to flush ledger");
-        }
-        log_timing("shutdown", "ledger_flush", step_start);
-
-        let step_start = Instant::now();
         if let Err(err) = self.ledger.shutdown(true) {
             error!(error = ?err, "Failed to shutdown ledger");
         }
@@ -1266,6 +1260,11 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
+        if let Err(err) = self.ledger.flush() {
+            error!(error = ?err, "Failed to flush during shutdown preparation");
+        }
+        // Second pass drains auto-flushes started while the first one ran, so
+        // the rate-limited waiting happens here, while the RPC still serves.
         if let Err(err) = self.ledger.flush() {
             error!(error = ?err, "Failed to flush during shutdown preparation");
         }
