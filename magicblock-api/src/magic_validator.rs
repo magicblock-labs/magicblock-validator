@@ -1227,12 +1227,6 @@ impl MagicValidator {
         log_timing("shutdown", "accountsdb_flush", step_start);
 
         let step_start = Instant::now();
-        if let Err(err) = self.ledger.flush() {
-            error!(error = ?err, "Failed to flush ledger");
-        }
-        log_timing("shutdown", "ledger_flush", step_start);
-
-        let step_start = Instant::now();
         if let Err(err) = self.ledger.shutdown(true) {
             error!(error = ?err, "Failed to shutdown ledger");
         }
@@ -1268,6 +1262,11 @@ impl MagicValidator {
         self.ledger.cancel_manual_compactions();
         if let Err(err) = self.ledger.flush() {
             error!(error = ?err, "Failed to flush during shutdown preparation");
+        }
+        // Stop background jobs while the RPC is still serving; writes landing
+        // after this point are WAL-backed and recovered on the next open.
+        if let Err(err) = self.ledger.shutdown(true) {
+            error!(error = ?err, "Failed to stop ledger background work");
         }
         log_timing("shutdown", "prepare_ledger_for_shutdown", step_start);
     }
