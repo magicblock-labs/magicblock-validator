@@ -1263,10 +1263,10 @@ impl MagicValidator {
         if let Err(err) = self.ledger.flush() {
             error!(error = ?err, "Failed to flush during shutdown preparation");
         }
-        // Stop background jobs while the RPC is still serving; writes landing
-        // after this point are WAL-backed and recovered on the next open.
-        if let Err(err) = self.ledger.shutdown(true) {
-            error!(error = ?err, "Failed to stop ledger background work");
+        // Second pass drains auto-flushes started while the first one ran, so
+        // the rate-limited waiting happens here, while the RPC still serves.
+        if let Err(err) = self.ledger.flush() {
+            error!(error = ?err, "Failed to flush during shutdown preparation");
         }
         log_timing("shutdown", "prepare_ledger_for_shutdown", step_start);
     }
