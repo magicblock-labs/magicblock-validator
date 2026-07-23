@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 use cleanass::assert_eq;
 use integration_test_tools::{expect, validator::cleanup};
@@ -101,7 +104,16 @@ fn test_schedule_task() {
         failed_tasks
     );
 
-    let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
+    // The task row is deleted asynchronously after the last crank is sent,
+    // so poll for the removal instead of asserting on the first read
+    let started = Instant::now();
+    let tasks = loop {
+        let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
+        if tasks.is_empty() || started.elapsed() >= Duration::from_secs(10) {
+            break tasks;
+        }
+        sleep(Duration::from_millis(100));
+    };
     assert_eq!(
         tasks.len(),
         0,
