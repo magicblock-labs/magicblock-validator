@@ -31,6 +31,9 @@ pub enum ApiError {
     #[error("Failed to delegate magic fee vault for validator '{0}': {1}")]
     FailedToDelegateMagicFeeVault(Pubkey, String),
 
+    #[error("Failed to delegate task scheduler faucet '{0}': {1}")]
+    FailedToDelegateFaucet(Pubkey, String),
+
     #[error("CommittorServiceError")]
     CommittorServiceError(
         Box<magicblock_committor_service::error::CommittorServiceError>,
@@ -65,15 +68,6 @@ pub enum ApiError {
 
     #[error("Ledger Path is missing a parent directory: {0}")]
     LedgerPathIsMissingParent(String),
-
-    #[error("Ledger Path has an invalid faucet keypair file: {0} ({1})")]
-    LedgerInvalidFaucetKeypair(String, String),
-
-    #[error("Ledger Path is missing a faucet keypair file: {0}")]
-    LedgerIsMissingFaucetKeypair(String),
-
-    #[error("Ledger could not write faucet keypair file: {0} ({1})")]
-    LedgerCouldNotWriteFaucetKeypair(String, String),
 
     #[error("Ledger Path has an invalid validator keypair file: {0} ({1})")]
     LedgerInvalidValidatorKeypair(String, String),

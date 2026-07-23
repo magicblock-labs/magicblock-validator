@@ -12,7 +12,7 @@ use test_task_scheduler::{create_delegated_counter, setup_validator};
 /// Test that a task can be scheduled and executed when it has multiple signers
 #[test]
 fn test_schedule_task_signed() {
-    let (_temp_dir, mut validator, ctx) = setup_validator();
+    let (_temp_dir, mut validator, ctx, _) = setup_validator();
     let payer = Keypair::new();
 
     expect!(

@@ -333,28 +333,12 @@ claim-fees-frequency = "24h"
 # Internal Task Scheduler
 # ==============================================================================
 [task-scheduler]
-# If true, clears all pending scheduled tasks on startup.
-# Default: false
-# Env: MBV_TASK_SCHEDULER__RESET
-reset = false
-
-# The minimum interval between task executions.
-# Supports humantime (e.g. "10ms", "1s").
-# Default: "10ms"
-# Env: MBV_TASK_SCHEDULER__MIN_INTERVAL
-min-interval = "10ms"
-
-# How long failed task executions and failed scheduling records are retained.
-# Supports humantime (e.g. "1h", "7d").
-# Default: "14d"
-# Env: MBV_TASK_SCHEDULER__FAILED_TASK_RETENTION
-failed-task-retention = "14d"
-
-# How often old failed task executions and failed scheduling records are deleted.
-# Supports humantime (e.g. "1m", "1h").
-# Default: "1h"
-# Env: MBV_TASK_SCHEDULER__FAILED_TASK_CLEANUP_INTERVAL
-failed-task-cleanup-interval = "1h"
+# Keypair (Base58) the task scheduler uses to pay for hydra cranks. It is
+# delegated to this validator on startup and must be funded separately (the
+# validator does not fund it). Use a dedicated account, not the validator
+# identity.
+# Env: MBV_TASK_SCHEDULER__FAUCET_KEYPAIR
+faucet-keypair = "4SkhwWzaUdkXS5RQZHNFtmaTjvPRNKEZjLRiYPm3y7MGQTWBYYzrwAcvK1vMDwrTHrAy2aGqMJn2s7qbjfxqDLU9"
 
 # ==============================================================================
 # Pre-loaded Programs

@@ -74,13 +74,10 @@ Main consumers:
 Important API:
 
 - `SchedulerDatabase::path(path)` returns `path.join("task_scheduler.sqlite")`;
-- `new(path)` opens SQLite, enables WAL, `synchronous=NORMAL`, `busy_timeout=5000`, and a larger page cache, then creates `tasks`, `failed_scheduling`, and `failed_tasks` tables if missing;
-- `insert_task`, `get_task`, `get_tasks`, `get_task_ids`, `remove_task`, and `unschedule_task` manage scheduled task rows;
-- `insert_failed_scheduling`, `insert_failed_task`, `get_failed_schedulings`, and `get_failed_tasks` manage diagnostic failure records;
-- `apply_crank_batch_completion(...)` atomically applies one batch of success updates, success removals, failed moves, and retry checks using optimistic `tasks.updated_at` tokens;
-- `delete_failed_records_older_than(cutoff)` removes old rows from both failure tables in one transaction.
+- `new(path)` opens SQLite, enables WAL, `synchronous=NORMAL`, and `busy_timeout=5000`, then creates the legacy-compatible `tasks` table if missing;
+- `insert_task`, `get_tasks`, `get_task_ids`, and `remove_task` manage the migration-only task rows used to seed Hydra cranks.
 
-`DbTask` is the persisted runtime task shape. It stores task IDs and timestamps as `i64`, serializes `Vec<Instruction>` with `bincode`, stores authority as a stringified `Pubkey`, and uses `executions_left`, `last_execution_millis`, and `updated_at` to drive future scheduling.
+`DbTask` is the legacy persisted task shape used during Hydra migration. It stores task IDs and timestamps as `i64`, serializes `Vec<Instruction>` with `bincode`, stores authority as a stringified `Pubkey`, and carries `last_execution_millis` so migration can preserve the legacy cadence when choosing the Hydra `start_slot`.
 
 ### `TaskSchedulerService`
 
@@ -119,7 +116,7 @@ MagicValidator::start
   -> if Replica: do not start task scheduler
 ```
 
-On `start()`, `load_persisted_tasks` reads all rows from `tasks`, removes invalid rows (`execution_interval_millis <= 0`, `>= u32::MAX`, or `executions_left <= 0`), and inserts valid rows into the delay queue. Restarted tasks are delayed until the later of their next scheduled time and two slot intervals. That two-slot minimum avoids cranking before the validator has produced a fresh blockhash after restart.
+On `start()`, `migrate_persisted_tasks` reads all legacy rows from `tasks`, removes invalid rows (`execution_interval_millis <= 0`, `>= u32::MAX`, or `executions_left <= 0`), waits for a usable blockhash and delegated/funded faucet, creates each valid Hydra crank, and removes each row only if its crank was created successfully; rows whose crank creation fails remain in the legacy database to be retried on the next startup. If a legacy row has `last_execution_millis > 0`, migration preserves its cadence by converting the remaining wall-clock delay until `last_execution_millis + execution_interval_millis` into slots and adding those slots to the current block snapshot slot for Hydra `start_slot`; overdue or never-run tasks start at the current slot.
 
 ### Schedule request flow
 

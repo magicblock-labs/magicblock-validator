@@ -21,9 +21,7 @@ use crate::{
     },
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
-    schedule_task::{
-        process_cancel_task, process_execute_crank, process_schedule_task,
-    },
+    schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
         process_accept_scheduled_commits, process_add_action_callback,
         process_execute_callback, process_schedule_cloned_account_undelegation,
@@ -226,40 +224,6 @@ declare_process_instruction!(
                 remote_slot,
                 authority,
             ),
-            ExecuteCrank {
-                authority,
-                instructions,
-            } => process_execute_crank(
-                signers,
-                invoke_context,
-                &authority,
-                instructions,
-            ),
-        }
-    }
-);
-
-declare_process_instruction!(
-    CrankEntrypoint,
-    DEFAULT_COMPUTE_UNITS,
-    |invoke_context| {
-        let instruction = deserialize_instruction(invoke_context)?;
-        let transaction_context = &invoke_context.transaction_context;
-        let instruction_context =
-            transaction_context.get_current_instruction_context()?;
-        let signers = instruction_context.get_signers()?;
-
-        match instruction {
-            MagicBlockInstruction::ExecuteCrank {
-                authority,
-                instructions,
-            } => process_execute_crank(
-                signers,
-                invoke_context,
-                &authority,
-                instructions,
-            ),
-            _ => Err(InstructionError::InvalidInstructionData),
         }
     }
 );
@@ -350,36 +314,10 @@ declare_process_instruction!(
 
 #[cfg(test)]
 mod test {
-    use magicblock_magic_program_api::args::ScheduleTaskArgs;
     use solana_instruction::AccountMeta;
     use solana_program_runtime::invoke_context::mock_process_instruction;
 
     use super::*;
-
-    #[test]
-    fn crank_entrypoint_rejects_non_execute_crank_instructions() {
-        let data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(
-            ScheduleTaskArgs {
-                task_id: 1,
-                execution_interval_millis: 10,
-                iterations: 1,
-                instructions: vec![],
-            },
-        ))
-        .unwrap();
-
-        mock_process_instruction(
-            &crate::CRANK_PROGRAM_ID,
-            None,
-            &data,
-            Vec::new(),
-            vec![AccountMeta::new_readonly(crate::CRANK_PROGRAM_ID, false)],
-            Err(InstructionError::InvalidInstructionData),
-            CrankEntrypoint::vm,
-            |_invoke_context| {},
-            |_invoke_context| {},
-        );
-    }
 
     #[test]
     fn callback_entrypoint_rejects_invalid_instruction_data() {

@@ -66,8 +66,8 @@ pub struct ValidatorParams {
     pub ledger: LedgerConfig,
     pub chainlink: ChainLinkConfig,
     pub chain_operation: Option<ChainOperationConfig>,
-    pub task_scheduler: TaskSchedulerConfig,
     pub programs: Vec<LoadableProgram>,
+    pub task_scheduler: TaskSchedulerConfig,
 }
 
 impl ValidatorParams {

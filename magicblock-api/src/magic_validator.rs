@@ -61,7 +61,7 @@ use magicblock_services::{
     actions_callback_service::ActionsCallbackService,
     undelegation_request_service::UndelegationRequestService,
 };
-use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
+use magicblock_task_scheduler::TaskSchedulerService;
 use magicblock_validator_admin::claim_fees::{claim_fees, ClaimFeesTask};
 use mdp::state::{
     features::FeaturesSet,
@@ -83,6 +83,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::{
+    crank_faucet::ensure_faucet_delegated_on_chain,
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
     fund_account::{
@@ -169,6 +170,11 @@ impl MagicValidator {
             config.ledger.verify_keypair,
         )?;
         log_timing("startup", "sync_validator_keypair", step_start);
+
+        // The task scheduler pays for hydra cranks from a configured faucet
+        // account (delegated on startup) rather than the validator identity,
+        // which is not a delegated account.
+        let faucet_keypair = config.task_scheduler.faucet_keypair.clone();
 
         let latest_block = ledger.latest_block().load();
         let mut accountsdb =
@@ -436,24 +442,23 @@ impl MagicValidator {
             info!("RPC runtime shutdown");
         });
 
-        let task_scheduler_db_path =
-            SchedulerDatabase::path(ledger.ledger_path().parent().expect(
-                "ledger_path didn't have a parent, should never happen",
-            ));
-        debug!(path = %task_scheduler_db_path.display(), "Initializing task scheduler");
+        debug!("Initializing task scheduler");
         let step_start = Instant::now();
-        let task_scheduler = TaskSchedulerService::new(
-            &task_scheduler_db_path,
-            &config.task_scheduler,
-            config.aperture.listen.http(),
-            dispatch
-                .tasks_service
-                .take()
-                .expect("tasks_service should be initialized"),
-            ledger.latest_block().clone(),
-            Duration::from_millis(config.ledger.block_time_ms()),
-            token.clone(),
-        )?;
+        let task_scheduler = faucet_keypair
+            .map(|k| {
+                TaskSchedulerService::new(
+                    config.aperture.listen.http(),
+                    k.insecure_clone(),
+                    dispatch
+                        .tasks_service
+                        .take()
+                        .expect("tasks_service should be initialized"),
+                    ledger.latest_block().clone(),
+                    Duration::from_millis(config.ledger.block_time_ms()),
+                    token.clone(),
+                )
+            })
+            .transpose()?;
         log_timing("startup", "task_scheduler_init", step_start);
 
         Ok(Self {
@@ -471,7 +476,7 @@ impl MagicValidator {
             rpc_handle,
             identity: validator_pubkey,
             transaction_scheduler: dispatch.transaction_scheduler,
-            task_scheduler: Some(task_scheduler),
+            task_scheduler,
             transaction_execution,
             replication_handle: None,
             mode_tx,
@@ -919,6 +924,12 @@ impl MagicValidator {
         let chain_operation_config = self.config.chain_operation.clone();
         let block_time_ms = self.config.ledger.block_time_ms();
         let base_fee = self.config.validator.basefee;
+        let faucet_keypair = self
+            .config
+            .task_scheduler
+            .faucet_keypair
+            .as_ref()
+            .map(|k| k.insecure_clone());
 
         // Ephemeral mode does a non-blocking startup balance check.
         // Intentionally fire-and-forget: the task itself exits the process on failure.
@@ -958,6 +969,28 @@ impl MagicValidator {
                 error!("Exiting process");
                 std::process::exit(1);
             }
+
+            if let Some(faucet_keypair) = faucet_keypair {
+                let step_start = Instant::now();
+                let result = ensure_faucet_delegated_on_chain(
+                    rpc_url.clone(),
+                    &faucet_keypair,
+                )
+                .await;
+                log_timing(
+                    "startup_background",
+                    "ensure_faucet_delegated_on_chain",
+                    step_start,
+                );
+                // Without the faucet being funded and delegated the task scheduler
+                // cannot pay for hydra cranks.
+                if let Err(err) = result {
+                    error!(error = ?err, "Task scheduler faucet setup failed");
+                    error!("Exiting process");
+                    std::process::exit(1);
+                }
+            }
+
             if let Some(ref config) = chain_operation_config {
                 if !config.claim_fees_frequency.is_zero() {
                     let step_start = Instant::now();
@@ -1113,10 +1146,6 @@ impl MagicValidator {
         // However there is no proper solution for this right now.
         // An issue to create a shutdown system is open here:
         // https://github.com/magicblock-labs/magicblock-validator/issues/524
-        let task_scheduler = self
-            .task_scheduler
-            .take()
-            .expect("task_scheduler should be initialized");
         let is_primary_mode = {
             let mut mode = CoordinationMode::current();
             while mode == CoordinationMode::StartingUp {
@@ -1129,6 +1158,9 @@ impl MagicValidator {
             mode == CoordinationMode::Primary
         };
         if is_primary_mode {
+            let Some(task_scheduler) = self.task_scheduler.take() else {
+                return Ok(());
+            };
             tokio::spawn(async move {
                 let step_start = Instant::now();
                 let join_handle = match task_scheduler.start().await {
