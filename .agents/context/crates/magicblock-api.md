@@ -65,7 +65,7 @@ The exported public API is intentionally small for production use:
 - `magic_validator::MagicValidator`
   - `try_from_config(ValidatorParams) -> ApiResult<MagicValidator>` builds the service graph and spawns some long-lived components such as transaction execution and the RPC runtime.
   - `start(&mut self) -> ApiResult<()>` performs ledger replay/reset/recovery, switches scheduler/replication mode, and starts post-start services such as slot ticking, ledger truncation, claim-fees, and the task scheduler.
-  - `stop(self)` consumes the validator and shuts down services, joins threads/tasks where available, flushes AccountsDb and ledger, and performs ledger shutdown.
+  - `stop(self)` consumes the validator and shuts down services, joins threads/tasks where available, flushes AccountsDb, syncs the ledger WAL, and performs ledger shutdown.
   - `start_unregister_validator_on_chain(&mut self)` sends a best-effort unregister transaction for standalone ephemeral validators that use on-chain coordination.
   - `prepare_ledger_for_shutdown(&mut self)` stops truncation, cancels manual compactions, and flushes the ledger before final shutdown.
   - `ledger(&self) -> &Ledger` exposes the ledger for the binary to lock and report paths.
@@ -172,10 +172,10 @@ This service is started only for non-replica validators.
 4. Stop claim-fees task.
 5. Join RPC thread, slot ticker, ledger truncator, replication thread, and transaction execution thread.
 6. Flush AccountsDb.
-7. Flush and shut down ledger.
+7. Sync the ledger WAL and shut down ledger.
 8. Join unregister confirmation thread only if it has already finished; shutdown does not wait for that confirmation.
 
-Durable state is flushed only after workers that can admit, commit, truncate, or replicate state are stopped.
+Durable state is flushed or synced only after workers that can admit, commit, truncate, or replicate state are stopped.
 
 ### Domain registry and base-layer operator flow
 

@@ -411,4 +411,4 @@ Shutdown ordering matters:
 2. Stop services while preserving in-flight intent safety.
 3. Stop committor service last among services where needed for in-flight intents.
 4. Join threads.
-5. Flush AccountsDb and ledger.
+5. Flush AccountsDb and durably sync the ledger WAL.

@@ -1389,6 +1389,11 @@ impl Ledger {
             .flush_cfs_opt(&cfs, &FlushOptions::default())
     }
 
+    /// Syncs all outstanding WAL writes to disk.
+    pub fn sync_wal(&self) -> LedgerResult<()> {
+        Ok(self.db.backend.db.flush_wal(true)?)
+    }
+
     /// Graceful db shutdown
     pub fn shutdown(&self, wait: bool) -> LedgerResult<()> {
         let _guard = MeasureGuard {

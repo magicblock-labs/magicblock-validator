@@ -81,7 +81,7 @@ Important constructors and accessors:
 
 - `Ledger::open(path)` and `Ledger::open_with_options(path, LedgerOptions)` create `path/rocksdb`, adjust `ulimit -n` when enabled, open RocksDB, initialize `LatestBlock` from the highest stored blockhash, and initialize the lowest cleanup slot.
 - `ledger_path()`, `banking_trace_path()`, `storage_size()`, `db(self)`, `latest_block()`, and `latest_blockhash()` expose operational handles.
-- `flush()`, `shutdown(wait)`, and `cancel_manual_compactions()` are used during shutdown and maintenance.
+- `flush()`, `sync_wal()`, `shutdown(wait)`, and `cancel_manual_compactions()` are used during shutdown and maintenance.
 
 Primary data APIs:
 
@@ -215,7 +215,7 @@ Preserve compatibility for existing ledger directories unless the change explici
 5. **Preserve on-disk compatibility.** Deprecated key decoders and protobuf/bincode choices must not be removed without an explicit migration strategy.
 6. **Do not replay failed transactions.** Ledger replay must only re-run successful transactions and must use `persist: false`.
 7. **Do not block execution/RPC unnecessarily.** Avoid long compactions, full-column scans, excessive serialization, or unbounded iterator work on hot request or transaction paths.
-8. **Shutdown must protect durability.** Flush and RocksDB background-work cancellation behavior must stay compatible with validator shutdown ordering.
+8. **Shutdown must protect durability.** Flush, WAL sync, and RocksDB background-work cancellation behavior must stay compatible with validator shutdown ordering.
 9. **Metrics labels must stay bounded.** RocksDB/ledger datapoints should use fixed column/operation labels, not pubkeys, signatures, paths, or other high-cardinality values.
 
 ## Common change areas and what to inspect

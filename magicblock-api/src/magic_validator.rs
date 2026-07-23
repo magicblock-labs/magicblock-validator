@@ -1227,10 +1227,10 @@ impl MagicValidator {
         log_timing("shutdown", "accountsdb_flush", step_start);
 
         let step_start = Instant::now();
-        if let Err(err) = self.ledger.flush() {
-            error!(error = ?err, "Failed to flush ledger");
+        if let Err(err) = self.ledger.sync_wal() {
+            error!(error = ?err, "Failed to sync ledger WAL");
         }
-        log_timing("shutdown", "ledger_flush", step_start);
+        log_timing("shutdown", "ledger_wal_sync", step_start);
 
         let step_start = Instant::now();
         if let Err(err) = self.ledger.shutdown(true) {
