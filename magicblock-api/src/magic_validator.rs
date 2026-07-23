@@ -432,7 +432,7 @@ impl MagicValidator {
             log_timing("startup", "rpc_runtime_build", step_start);
             runtime.block_on(rpc.run());
 
-            drop(runtime);
+            runtime.shutdown_timeout(Duration::from_secs(2));
             info!("RPC runtime shutdown");
         });
 
