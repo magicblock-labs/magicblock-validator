@@ -35,7 +35,7 @@ permissions:
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: 3245c582c928448b1a7382cb73cd6de4c19ee33e
+  REDSUITE_REV: c0eedc9ec2aa85424cefd64b05fedeec4972d5f5
   SOLANA_VERSION: v4.0.3
   RUST_TOOLCHAIN: "1.94.1"
   BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
