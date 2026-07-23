@@ -13,6 +13,7 @@ use solana_sdk::{
 };
 use test_task_scheduler::{
     create_delegated_counter, setup_validator, wait_for_incremented_counter,
+    wait_for_task_removed,
 };
 use tokio::runtime::Runtime;
 
@@ -80,6 +81,14 @@ fn test_schedule_task() {
     // Check that the completed task was removed from the database
     let db = expect!(SchedulerDatabase::new(db_path), validator);
     let runtime = expect!(Runtime::new(), validator);
+    wait_for_task_removed(
+        &ctx,
+        &db,
+        &runtime,
+        task_id,
+        Duration::from_secs(10),
+        &mut validator,
+    );
 
     let failed_scheduling =
         expect!(runtime.block_on(db.get_failed_schedulings()), validator);
