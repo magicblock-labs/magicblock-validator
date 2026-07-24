@@ -169,6 +169,33 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // Close Outbox Intent
+    // -----------------
+    pub fn close_outbox_intent(
+        intent_id: u64,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::close_outbox_intent_instruction(intent_id);
+        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
+    }
+
+    pub(crate) fn close_outbox_intent_instruction(
+        intent_id: u64,
+    ) -> Instruction {
+        let account_metas = vec![
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new_readonly(crate::id(), false),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+            AccountMeta::new(outbox_intent_pda(intent_id), false),
+        ];
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CloseOutboxIntent(intent_id),
+            account_metas,
+        )
+    }
+
+    // -----------------
     // Accept Scheduled Commits
     // -----------------
     pub fn accept_scheduled_commits(

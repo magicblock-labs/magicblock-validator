@@ -21,7 +21,10 @@ use crate::{
                 resolve_pending_signature, FinalizeStage,
             },
         },
-        utils::{build_commit_finalize_tasks, execute_two_stage_flow},
+        utils::{
+            build_commit_finalize_tasks, execute_two_stage_flow,
+            report_and_close_intent,
+        },
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
@@ -122,7 +125,6 @@ where
         commit_signature: Signature,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let meta = ScheduledBaseIntentMeta::new(&intent);
         // Commit succeeded so we skip those tasks all together
         let finalize_tasks = TaskBuilderImpl::finalize_tasks(
             &self.ctx.task_info_fetcher,
@@ -161,17 +163,10 @@ where
 
         let finalized_stage =
             finalize_strategy_executor.done(finalize_signature);
-        let result = Ok(ExecutionOutput::TwoStage {
+        Ok(ExecutionOutput::TwoStage {
             commit_signature: finalized_stage.commit_signature,
             finalize_signature: finalized_stage.finalize_signature,
-        });
-        self.ctx
-            .outbox_client
-            .notify_commit_sent(meta, &result, execution_report)
-            .await
-            .map_err(Into::into)?;
-
-        result
+        })
     }
 
     async fn execute_inner(
@@ -211,21 +206,10 @@ where
             // Finalize was already executed on a previous run - notify the
             // outbox so it isn't left pending and rediscovered again.
             (TwoStageProgress::Finalizing { commit, finalize }, true) => {
-                let output = Ok(ExecutionOutput::TwoStage {
+                Ok(ExecutionOutput::TwoStage {
                     commit_signature: *commit,
                     finalize_signature: finalize.signature,
-                });
-                self.ctx
-                    .outbox_client
-                    .notify_commit_sent(
-                        ScheduledBaseIntentMeta::new(&intent),
-                        &output,
-                        execution_report,
-                    )
-                    .await
-                    .map_err(Into::into)?;
-
-                output
+                })
             }
         }
     }
@@ -245,11 +229,19 @@ where
         intent: ScheduledIntentBundle,
     ) -> (IntentExecutionResult, CleanupHandle<T>) {
         // Duplicates AcceptedIntentExecutor::execute
+        let meta = ScheduledBaseIntentMeta::new(&intent);
         let pubkeys = intent.get_all_committed_pubkeys();
         let undelegated_pubkeys = intent.get_undelegated_pubkeys();
 
         let mut execution_report = IntentExecutionReport::default();
         let result = self.execute_inner(intent, &mut execution_report).await;
+        let result = report_and_close_intent(
+            result,
+            meta,
+            &mut execution_report,
+            self.ctx.outbox_client.as_ref(),
+        )
+        .await;
 
         if !pubkeys.is_empty() {
             if result.is_err() {

@@ -183,6 +183,24 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
         .map_err(Into::into)
     }
 
+    async fn close_intent(&self, intent_id: u64) -> Result<(), Self::Error> {
+        let tx = InstructionUtils::close_outbox_intent(
+            intent_id,
+            self.latest_block_provider.blockhash(),
+        );
+
+        self.send_with_backoff(
+            ExponentialBackoff {
+                max_elapsed_time: Some(Duration::from_secs(25)),
+                max_interval: Duration::from_secs(5),
+                ..ExponentialBackoff::default()
+            },
+            &tx,
+        )
+        .await
+        .map_err(Into::into)
+    }
+
     async fn notify_commit_sent(
         &self,
         mut meta: ScheduledBaseIntentMeta,

@@ -26,9 +26,10 @@ use crate::{
     },
     schedule_transactions::{
         process_accept_scheduled_commits, process_add_action_callback,
-        process_execute_callback, process_schedule_cloned_account_undelegation,
-        process_schedule_commit, process_schedule_intent_bundle,
-        process_set_intent_execution_stage, ProcessScheduleCommitOptions,
+        process_close_outbox_intent, process_execute_callback,
+        process_schedule_cloned_account_undelegation, process_schedule_commit,
+        process_schedule_intent_bundle, process_set_intent_execution_stage,
+        ProcessScheduleCommitOptions,
     },
 };
 
@@ -106,6 +107,9 @@ declare_process_instruction!(
             }
             ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(signers, invoke_context, id)
+            }
+            CloseOutboxIntent(id) => {
+                process_close_outbox_intent(signers, invoke_context, id)
             }
             ScheduleBaseIntent(args) => process_schedule_intent_bundle(
                 signers,

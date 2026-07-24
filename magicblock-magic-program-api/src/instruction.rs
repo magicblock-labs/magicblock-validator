@@ -84,7 +84,6 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
     /// - **1.** `[]`              Magic Program
     /// - **2.** `[WRITE]`         Ephemeral Vault
-    /// - **3.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     ScheduledCommitSent(u64),
 
     /// Schedules execution of a single *base intent*.
@@ -330,6 +329,18 @@ pub enum MagicBlockInstruction {
         intent_id: u64,
         stage: ExecutionStage,
     },
+
+    /// Closes the outbox intent PDA on successful execution of the intent.
+    /// Deterministic and mode-independent: runs identically on replicas
+    /// replaying the same transaction, unlike `ScheduledCommitSent` which
+    /// only logs on the validator that actually executed the intent.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
+    /// - **1.** `[]`              Magic Program
+    /// - **2.** `[WRITE]`         Ephemeral Vault
+    /// - **3.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    CloseOutboxIntent(u64),
 }
 
 impl MagicBlockInstruction {

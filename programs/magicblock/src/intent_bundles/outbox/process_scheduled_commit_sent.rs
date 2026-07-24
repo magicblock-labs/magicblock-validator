@@ -5,12 +5,10 @@ use std::{
 
 use lazy_static::lazy_static;
 use magicblock_core::{coordination_mode, intent::outbox::outbox_intent_pda};
-use magicblock_magic_program_api::{
-    instruction::MagicBlockInstruction, EPHEMERAL_VAULT_PUBKEY,
-};
+use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
 use solana_clock::Slot;
 use solana_hash::Hash;
-use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
@@ -129,8 +127,7 @@ pub fn process_scheduled_commit_sent(
         return Ok(());
     }
 
-    let (validator_authority_id, expected_pda) =
-        validate(&signers, invoke_context, intent_id)?;
+    validate(&signers, invoke_context, intent_id)?;
 
     // Only after we passed all checks do we remove the commit from the global hashmap
     // Otherwise a malicious actor could remove a commit from the hashmap without
@@ -163,24 +160,16 @@ pub fn process_scheduled_commit_sent(
 
     // Log data
     log_sent_commit(invoke_context, &commit);
-    commit
-        .error_message
-        .map(|_| Err(InstructionError::Custom(INTENT_FAILED_CODE)))
-        .unwrap_or(Ok(()))?;
-
-    // Close Outbox intent
-    close_outbox_account_cpi(
-        invoke_context,
-        validator_authority_id,
-        expected_pda,
-    )
+    commit.error_message.map_or(Ok(()), |_| {
+        Err(InstructionError::Custom(INTENT_FAILED_CODE))
+    })
 }
 
 fn validate(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     intent_id: u64,
-) -> Result<(Pubkey, Pubkey), InstructionError> {
+) -> Result<(), InstructionError> {
     const VALIDATOR_IDX: u16 = 0;
     const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
     const MAGIC_VAULT_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
@@ -252,7 +241,7 @@ fn validate(
         return Err(InstructionError::InvalidArgument);
     }
 
-    Ok((validator_authority_id, expected_pda))
+    Ok(())
 }
 
 fn log_sent_commit(
@@ -316,27 +305,6 @@ fn log_sent_commit(
             error_message
         );
     }
-}
-
-fn close_outbox_account_cpi(
-    invoke_context: &mut InvokeContext,
-    sponsor: Pubkey,
-    pda: Pubkey,
-) -> Result<(), InstructionError> {
-    invoke_context.native_invoke(
-        Instruction {
-            program_id: crate::id(),
-            accounts: vec![
-                AccountMeta::new(sponsor, true),
-                AccountMeta::new(pda, false),
-                AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
-            ],
-            data: MagicBlockInstruction::CloseEphemeralAccount
-                .try_to_vec()
-                .map_err(|_| InstructionError::InvalidInstructionData)?,
-        },
-        &[],
-    )
 }
 
 #[cfg(test)]

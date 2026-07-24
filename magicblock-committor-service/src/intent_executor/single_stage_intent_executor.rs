@@ -16,7 +16,10 @@ use crate::{
         strategy_executor::utils::{
             requires_uniqueness_nonce, resolve_pending_signature,
         },
-        utils::{build_commit_finalize_tasks, execute_single_stage_flow},
+        utils::{
+            build_commit_finalize_tasks, execute_single_stage_flow,
+            report_and_close_intent,
+        },
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
@@ -80,24 +83,11 @@ where
         )
         .await?;
         match succeeded {
-            // Intent was already executed on a previous run - notify the
-            // outbox so it isn't left pending and rediscovered again.
-            true => {
-                let output = Ok(ExecutionOutput::SingleStage(
-                    self.pending_transaction.signature,
-                ));
-                self.ctx
-                    .outbox_client
-                    .notify_commit_sent(
-                        ScheduledBaseIntentMeta::new(&intent_bundle),
-                        &output,
-                        execution_report,
-                    )
-                    .await
-                    .map_err(Into::into)?;
-
-                output
-            }
+            // Intent was already executed on a previous run - report it so
+            // the outbox isn't left pending and rediscovered again.
+            true => Ok(ExecutionOutput::SingleStage(
+                self.pending_transaction.signature,
+            )),
             false => {
                 // It we're here so previous run determined this should be single stage
                 let (commit_tasks, finalize_tasks) =
@@ -146,12 +136,20 @@ where
         base_intent: ScheduledIntentBundle,
     ) -> (IntentExecutionResult, CleanupHandle<T>) {
         self.started_at = Instant::now();
+        let meta = ScheduledBaseIntentMeta::new(&base_intent);
         let pubkeys = base_intent.get_all_committed_pubkeys();
         let undelegated_pubkeys = base_intent.get_undelegated_pubkeys();
 
         let mut execution_report = IntentExecutionReport::default();
         let result =
             self.execute_inner(base_intent, &mut execution_report).await;
+        let result = report_and_close_intent(
+            result,
+            meta,
+            &mut execution_report,
+            self.ctx.outbox_client.as_ref(),
+        )
+        .await;
         if !pubkeys.is_empty() {
             if result.is_err() {
                 // We can't know what landed on chain, resync everything
