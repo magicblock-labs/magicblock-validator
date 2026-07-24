@@ -655,12 +655,27 @@ pub enum TaskInfoFetcherError {
 }
 
 impl TaskInfoFetcherError {
+    /// RPC-side fetch failures are transient; malformed or absent
+    /// delegation accounts are deterministic.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::MinContextSlotNotReachedError(_, _) => true,
+            Self::MagicBlockRpcClientError(err) => err.is_transient(),
+            _ => false,
+        }
+    }
+
     pub fn map_client_error(
         min_context_slot: u64,
         e: MagicBlockRpcClientError,
     ) -> Self {
         const MIN_CONTEXT_SLOT_MSG1: &str =
             "Minimum context slot has not been reached";
+        const MIN_CONTEXT_SLOT_MSG2: &str = "Min context slot not reached";
+        fn is_min_context_slot_msg(msg: &str) -> bool {
+            msg.contains(MIN_CONTEXT_SLOT_MSG1)
+                || msg.contains(MIN_CONTEXT_SLOT_MSG2)
+        }
 
         let orig = e;
         let err = match &orig {
@@ -674,13 +689,26 @@ impl TaskInfoFetcherError {
 
         match &*err.kind {
             ErrorKind::RpcError(rpc_err) => match rpc_err {
-                RpcError::ForUser(msg)
-                if msg.contains(MIN_CONTEXT_SLOT_MSG1) => {
-                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
-                },
-                RpcError::RpcResponseError { code, .. }
-                if *code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED => {
-                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
+                RpcError::ForUser(msg) if is_min_context_slot_msg(msg) => {
+                    Self::MinContextSlotNotReachedError(
+                        min_context_slot,
+                        Box::new(orig),
+                    )
+                }
+                RpcError::RpcResponseError {
+                    code: JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+                    ..
+                } => Self::MinContextSlotNotReachedError(
+                    min_context_slot,
+                    Box::new(orig),
+                ),
+                RpcError::RpcResponseError { message, .. }
+                    if is_min_context_slot_msg(message) =>
+                {
+                    Self::MinContextSlotNotReachedError(
+                        min_context_slot,
+                        Box::new(orig),
+                    )
                 }
                 _ => Self::MagicBlockRpcClientError(Box::new(orig)),
             },

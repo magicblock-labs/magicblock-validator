@@ -584,6 +584,11 @@ impl MagicValidator {
                     config.chainlink.max_monitored_accounts,
                 )
             })
+            .and_then(|conf| {
+                conf.with_secondary_subscriptions_lru_capacity(
+                    config.chainlink.secondary_max_monitored_accounts,
+                )
+            })
             .map(|conf| conf.with_grpc(config.grpc.clone()))
             .map_err(|err| {
                 ApiError::from(
@@ -1222,12 +1227,6 @@ impl MagicValidator {
         log_timing("shutdown", "accountsdb_flush", step_start);
 
         let step_start = Instant::now();
-        if let Err(err) = self.ledger.flush() {
-            error!(error = ?err, "Failed to flush ledger");
-        }
-        log_timing("shutdown", "ledger_flush", step_start);
-
-        let step_start = Instant::now();
         if let Err(err) = self.ledger.shutdown(true) {
             error!(error = ?err, "Failed to shutdown ledger");
         }
@@ -1261,6 +1260,11 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
+        if let Err(err) = self.ledger.flush() {
+            error!(error = ?err, "Failed to flush during shutdown preparation");
+        }
+        // Second pass drains auto-flushes started while the first one ran, so
+        // the rate-limited waiting happens here, while the RPC still serves.
         if let Err(err) = self.ledger.flush() {
             error!(error = ?err, "Failed to flush during shutdown preparation");
         }

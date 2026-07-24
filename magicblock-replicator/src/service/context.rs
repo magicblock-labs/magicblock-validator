@@ -115,6 +115,10 @@ impl ReplicationContext {
 
     /// Verifies superblock checksum.
     pub async fn verify_checksum(&self, sb: &SuperBlock) -> Result<()> {
+        self.scheduler
+            .wait_for_replay_drain()
+            .await
+            .map_err(Error::Internal)?;
         let _guard = self.scheduler.wait_for_idle().await;
         // SAFETY: Scheduler is paused, no concurrent modifications during checksum.
         let checksum = unsafe { self.accountsdb.checksum() };

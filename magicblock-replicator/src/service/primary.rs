@@ -1,6 +1,6 @@
 //! Primary node: publishes events and holds leader lock.
 
-use std::time::Duration;
+use std::{collections::VecDeque, time::Duration};
 
 use magicblock_core::link::replication::Message;
 use tokio::{
@@ -11,7 +11,7 @@ use tracing::{error, info, instrument, warn};
 
 use super::{ReplicationContext, LOCK_REFRESH_INTERVAL};
 use crate::{
-    nats::{Confirm, Producer, Subjects},
+    nats::{Confirm, PendingPublish, Producer, Subjects},
     watcher::SnapshotWatcher,
     Result,
 };
@@ -21,6 +21,9 @@ const PUBLISH_RETRY_BASE_DELAY: Duration = Duration::from_millis(50);
 const PUBLISH_RETRY_MAX_DELAY: Duration = Duration::from_secs(1);
 const PUBLISH_RETRY_LIMIT: usize = 5;
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
+// Stay below async-nats' configured in-flight acknowledgement limit so an
+// unusually busy slot cannot block publishing before its Block fence arrives.
+const MAX_DEFERRED_TRANSACTION_ACKS: usize = 1024;
 
 /// Primary node: publishes events and holds leader lock.
 pub struct Primary {
@@ -28,6 +31,12 @@ pub struct Primary {
     producer: Producer,
     messages: Receiver<Message>,
     snapshots: SnapshotWatcher,
+    unconfirmed_transactions: VecDeque<PendingTransaction>,
+}
+
+struct PendingTransaction {
+    message: Message,
+    ack: Option<PendingPublish>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +90,7 @@ impl Primary {
             producer,
             messages,
             snapshots,
+            unconfirmed_transactions: VecDeque::new(),
         }
     }
 
@@ -179,10 +189,10 @@ impl Primary {
         let _timing = ShutdownTiming::new("replication_service_drain");
 
         let deadline = Instant::now() + SHUTDOWN_DRAIN_TIMEOUT;
-        // Every message is confirmed here, so this counts messages known to be
-        // persisted. `confirmation_for` trades confirmation for publish
-        // throughput, but there is no throughput left to protect once we are
-        // stopping, and this is the last chance to notice a loss.
+        // Transactions remain pipelined while the producer finishes. Block
+        // fences and the final flush below still guarantee that a successful
+        // drain has confirmed every message without paying one NATS round trip
+        // per queued transaction.
         let mut drained = 0_u64;
 
         if let Some(msg) = pending.take() {
@@ -206,6 +216,13 @@ impl Primary {
                     drained += 1;
                 }
                 DrainNext::ProducerFinished => {
+                    if !self.confirm_transactions(Some(deadline)).await {
+                        warn!(
+                            drained,
+                            "failed to confirm drained replication messages"
+                        );
+                        return;
+                    }
                     info!(drained, "replication shutdown drain complete");
                     return;
                 }
@@ -217,14 +234,13 @@ impl Primary {
         }
     }
 
-    /// Publishes during shutdown, confirming regardless of message kind.
+    /// Publishes during shutdown using the normal ordering fences.
     async fn drain_publish(
         &mut self,
         msg: &Message,
         deadline: Instant,
     ) -> bool {
-        self.publish_with_retry_until(msg, Some(deadline), Confirm::Yes)
-            .await
+        self.publish_ordered_until(msg, Some(deadline)).await
     }
 
     async fn release_producer_lock(&self, lock_state: LockState) {
@@ -250,17 +266,114 @@ impl Primary {
         let (slot, index) = msg.slot_and_index();
         let msg_id = message_id(slot, index);
 
-        self.ctx
-            .broker
-            .publish(subject, payload.into(), Some(msg_id.as_str()), confirm)
-            .await?;
+        let payload = payload.into();
+        let ack = if confirm == Confirm::No {
+            Some(
+                self.ctx
+                    .broker
+                    .publish_deferred(subject, payload, Some(msg_id.as_str()))
+                    .await?,
+            )
+        } else {
+            self.ctx
+                .broker
+                .publish(subject, payload, Some(msg_id.as_str()), confirm)
+                .await?;
+            None
+        };
+        if let Some(ack) = ack {
+            self.unconfirmed_transactions.push_back(PendingTransaction {
+                message: msg.clone(),
+                ack: Some(ack),
+            });
+        }
         self.ctx.update_position(slot, index);
         Ok(())
     }
 
     async fn publish_with_retry(&mut self, msg: &Message) -> bool {
-        self.publish_with_retry_until(msg, None, confirmation_for(msg))
+        self.publish_ordered_until(msg, None).await
+    }
+
+    async fn publish_ordered_until(
+        &mut self,
+        msg: &Message,
+        deadline: Option<Instant>,
+    ) -> bool {
+        let fence = matches!(msg, Message::Block(_))
+            || (matches!(msg, Message::Transaction(_))
+                && self.unconfirmed_transactions.len()
+                    >= MAX_DEFERRED_TRANSACTION_ACKS);
+        if fence && !self.confirm_transactions(deadline).await {
+            return false;
+        }
+        self.publish_with_retry_until(msg, deadline, confirmation_for(msg))
             .await
+    }
+
+    /// Confirms every transaction published before the next block boundary.
+    /// Failed deferred publishes are retried with synchronous confirmation, so
+    /// a block can never overtake a transaction that JetStream did not persist.
+    async fn confirm_transactions(
+        &mut self,
+        deadline: Option<Instant>,
+    ) -> bool {
+        while let Some(mut pending) = self.unconfirmed_transactions.pop_front()
+        {
+            let confirmed = if let Some(ack) = pending.ack.take() {
+                match deadline {
+                    Some(deadline) => {
+                        let Some(remaining) = remaining_until(deadline) else {
+                            self.unconfirmed_transactions.push_front(pending);
+                            return false;
+                        };
+                        match timeout(
+                            remaining,
+                            self.ctx.broker.confirm(ack, false),
+                        )
+                        .await
+                        {
+                            Ok(Ok(())) => true,
+                            Ok(Err(error)) => {
+                                warn!(%error, "transaction publish was not confirmed, retrying");
+                                false
+                            }
+                            Err(_) => {
+                                warn!("timed out confirming a transaction publish");
+                                false
+                            }
+                        }
+                    }
+                    None => match self.ctx.broker.confirm(ack, false).await {
+                        Ok(()) => true,
+                        Err(error) => {
+                            warn!(%error, "transaction publish was not confirmed, retrying");
+                            false
+                        }
+                    },
+                }
+            } else {
+                false
+            };
+
+            if confirmed {
+                continue;
+            }
+            if self
+                .publish_with_retry_until(
+                    &pending.message,
+                    deadline,
+                    Confirm::Yes,
+                )
+                .await
+            {
+                continue;
+            }
+
+            self.unconfirmed_transactions.push_front(pending);
+            return false;
+        }
+        true
     }
 
     async fn publish_with_retry_until(
@@ -392,14 +505,12 @@ pub(crate) async fn next_to_drain(
 
 /// How far each kind of message waits for the server.
 ///
-/// Publishes are issued one at a time, so confirming one costs a round-trip of
-/// publish throughput: affordable only for the rare kinds, and only worth it
-/// where the leader is the last chance to notice the loss.
+/// Transaction acknowledgements are deferred and drained at the next Block, so
+/// the hot path pipelines publishes without allowing a persisted block boundary
+/// to overtake an unconfirmed transaction.
 pub(crate) fn confirmation_for(msg: &Message) -> Confirm {
     match msg {
-        // Hundreds per second, and a lost one is loud regardless: it diverges
-        // accountsdb, which the replica's index check and the superblock
-        // checksum both catch.
+        // Hundreds per second: pipeline acknowledgements until the Block fence.
         Message::Transaction(_) => Confirm::No,
         // A few per second, and a lost one is near-silent: nothing goes
         // unapplied, so no checksum trips, but replicas seed the next slot from

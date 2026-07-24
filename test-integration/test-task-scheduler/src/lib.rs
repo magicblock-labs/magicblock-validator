@@ -25,6 +25,7 @@ use magicblock_config::{
     ValidatorParams,
 };
 use magicblock_program::Pubkey;
+use magicblock_task_scheduler::SchedulerDatabase;
 use program_flexi_counter::{
     instruction::{
         create_delegate_ix_with_commit_frequency_ms, create_init_ix,
@@ -36,6 +37,7 @@ use solana_sdk::{
     signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use tempfile::TempDir;
+use tokio::runtime::Runtime;
 
 pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 
@@ -159,6 +161,30 @@ pub fn wait_for_incremented_counter(
         false,
         cleanup(validator),
         "Failed to wait for incremented counter"
+    );
+}
+
+/// Waits for asynchronous crank completion to remove a task from storage.
+pub fn wait_for_task_removed(
+    ctx: &IntegrationTestContext,
+    db: &SchedulerDatabase,
+    runtime: &Runtime,
+    task_id: i64,
+    max_timeout: Duration,
+    validator: &mut Child,
+) {
+    let now = Instant::now();
+    while now.elapsed() < max_timeout {
+        let task = expect!(runtime.block_on(db.get_task(task_id)), validator);
+        if task.is_none() {
+            return;
+        }
+        expect!(ctx.wait_for_next_slot_ephem(), validator);
+    }
+    assert!(
+        false,
+        cleanup(validator),
+        "Failed to wait for task {task_id} to be removed"
     );
 }
 

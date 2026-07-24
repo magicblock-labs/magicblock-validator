@@ -280,8 +280,7 @@ impl TransactionScheduler {
                 biased;
                 _ = self.slot_ticker.tick() => {
                     if self.coordinator.is_primary() {
-                        let slot = self.transition_to_new_slot().await;
-                        self.handle_superblock(slot).await;
+                        self.advance_primary_slot().await;
                     }
                 }
                 Some(executor) = self.ready_rx.recv() => {
@@ -312,9 +311,13 @@ impl TransactionScheduler {
             }
         }
         if self.coordinator.is_primary() {
-            let slot = self.transition_to_new_slot().await;
-            self.handle_superblock(slot).await;
+            self.advance_primary_slot().await;
         }
+        // No later shutdown step emits replication messages. Release the
+        // producer endpoint as soon as the final Block/SuperBlock is queued so
+        // the replication service can finish draining independently of executor
+        // teardown.
+        self.replication_tx.take();
         // Shutdown: drop executor channels to signal workers to stop,
         // then drain remaining ready notifications
         drop(self.executors);
@@ -355,8 +358,11 @@ impl TransactionScheduler {
         // Wait until the scheduler has no assigned or executing work left,
         // then freeze executor starts while snapshotting.
         let _guard = self.pause_executors_for_snapshot().await;
-        // SAFETY:
-        // we have made sure that no state transitions are in progress via _guard
+        self.take_superblock_snapshot(slot).await;
+    }
+
+    async fn take_superblock_snapshot(&self, slot: Slot) {
+        // SAFETY: The caller holds the scheduler's exclusive execution permit.
         let Ok(checksum) = (unsafe { self.accountsdb.take_snapshot(slot) })
         else {
             error!("failed to create accountsdb snapshot");
@@ -376,6 +382,23 @@ impl TransactionScheduler {
         }
 
         self.coordinator.wait_for_idle().await
+    }
+
+    /// Finalizes the current primary slot, preserving checkpoint stream order.
+    ///
+    /// At a superblock boundary, transactions already accepted by the scheduler
+    /// are drained before the Block is emitted. Holding the pause permit through
+    /// snapshot creation guarantees Transaction -> Block -> SuperBlock ordering
+    /// and prevents next-slot work from overtaking the checkpoint.
+    async fn advance_primary_slot(&mut self) {
+        if !self.slot.is_multiple_of(self.superblock_size) {
+            self.transition_to_new_slot().await;
+            return;
+        }
+
+        let _guard = self.pause_executors_for_snapshot().await;
+        let slot = self.transition_to_new_slot().await;
+        self.take_superblock_snapshot(slot).await;
     }
 
     async fn handle_ready_executor(&mut self, executor: ExecutorId) {
