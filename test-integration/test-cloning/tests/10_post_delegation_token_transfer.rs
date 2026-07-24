@@ -33,6 +33,7 @@ use spl_associated_token_account_interface::instruction::create_associated_token
 use spl_token::{instruction as spl_token_ix, state::Mint};
 use test_kit::init_logger;
 
+const SOURCE_AUTHORITY_SEED: [u8; 32] = [7; 32];
 const SOURCE_EATA_BALANCE: u64 = 200;
 const DESTINATION_EATA_BALANCE: u64 = 100;
 const TRANSFER_AMOUNT: u64 = 100;
@@ -175,9 +176,9 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
 
     let fee_payer = Keypair::new();
     let delegated_account = Keypair::new();
-    let source_authority = Keypair::new();
-    let destination_authority = Keypair::new();
-    let mint = Keypair::new();
+    let source_authority = Keypair::new_from_array(SOURCE_AUTHORITY_SEED);
+    let destination_authority = Keypair::new_from_array([8; 32]);
+    let mint = Keypair::new_from_array([9; 32]);
     let source_ata = derive_ata(&source_authority.pubkey(), &mint.pubkey());
     let destination_ata =
         derive_ata(&destination_authority.pubkey(), &mint.pubkey());
