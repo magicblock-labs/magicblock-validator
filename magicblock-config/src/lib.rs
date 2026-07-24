@@ -145,11 +145,12 @@ impl ValidatorParams {
     /// If no WebSocket remote is present, derives one from the first HTTP remote.
     /// This satisfies the requirement for a subscription-capable endpoint.
     fn ensure_websocket(&mut self) {
-        // Check if a websocket remote already exists
+        // Skip if a subscription-capable remote (websocket or gRPC) exists;
+        // HTTP-only providers may not serve websocket on the same host
         if self
             .remotes
             .iter()
-            .any(|r| matches!(r, Remote::Websocket(_)))
+            .any(|r| matches!(r, Remote::Websocket(_) | Remote::Grpc(_)))
         {
             return;
         }

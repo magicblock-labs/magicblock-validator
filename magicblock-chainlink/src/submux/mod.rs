@@ -1127,12 +1127,9 @@ where
     }
 
     /// Number of clients that must confirm an account subscription for it to be considered active.
-    /// 2/3 of connected clients subscribing immediately.
+    /// One connected transport suffices; the reconciler repairs the rest.
     fn required_account_subscription_confirmations(&self) -> usize {
-        let n = self
-            .connected_clients_subscribing_immediately
-            .load(Ordering::SeqCst) as usize;
-        cmp::max(1, (n * 2) / 3)
+        1
     }
 
     /// Number of clients that must confirm a program subscription for it to be considered
