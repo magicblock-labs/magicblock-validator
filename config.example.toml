@@ -6,8 +6,8 @@
 # comments will be used.
 #
 # CONFIGURATION PRECEDENCE (Highest to Lowest):
-# 1. CLI Arguments      (e.g. --basefee 500)
-# 2. Environment Vars   (e.g. MBV_VALIDATOR__BASEFEE=500)
+# 1. CLI Arguments
+# 2. Environment Vars
 # 3. TOML Config File   (this file)
 # 4. System Defaults
 #
@@ -106,15 +106,9 @@ max-subs-in-new = 400
 max-time-without-optimization-secs = 60
 
 # ==============================================================================
-# Validator Identity & Fees
+# Validator Identity
 # ==============================================================================
 [validator]
-# The minimum fee (in lamports) required to process a transaction.
-# Default: 0
-# CLI: --basefee <UINT>
-# Env: MBV_VALIDATOR__BASEFEE
-basefee = 0
-
 # The validator's identity keypair in Base58 format.
 # Default: A pre-generated devnet keypair
 # CLI: -k, --keypair <BASE58>

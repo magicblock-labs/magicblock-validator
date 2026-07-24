@@ -127,10 +127,11 @@ accounts — and shared traits (`AccountsBank`, `LatestBlockProvider`).
   transactions queue in per-executor heaps for FIFO retry.
 - [`executor/processing.rs`](../magicblock-processor/src/executor/processing.rs) —
   `TransactionExecutor::execute()`: runs the forked SVM batch processor, commits
-  accounts to AccountsDb, emits status/account-update events, persists to ledger,
-  forwards scheduled tasks.
+  accounts and emits account-update events only for successful execution,
+  persists every final status to the ledger, and forwards successful scheduled
+  tasks.
 - [`lib.rs`](../magicblock-processor/src/lib.rs) — `SvmEnv::build_svm_env()`:
-  feature gates, precompiles, builtins.
+  zero-fee processing environment, feature gates, precompiles, builtins.
 - `CoordinationMode`: `StartingUp` (ledger replay) → `Primary` (parallel) or
   `Replica` (strict ordering).
 

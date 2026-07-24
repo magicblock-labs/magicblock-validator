@@ -352,13 +352,6 @@ fn render_config(frame: &mut Frame, area: Rect, state: &TuiState) {
             Span::styled("Lifecycle Mode:    ", Style::default().fg(DARK_GRAY)),
             Span::styled(&config.lifecycle_mode, Style::default().fg(GREEN)),
         ]),
-        Line::from(vec![
-            Span::styled("Base Fee:          ", Style::default().fg(DARK_GRAY)),
-            Span::styled(
-                format!("{} lamports", config.base_fee),
-                Style::default().fg(GREEN),
-            ),
-        ]),
     ];
 
     let paragraph = Paragraph::new(config_lines)

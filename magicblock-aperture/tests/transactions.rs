@@ -350,7 +350,7 @@ async fn test_request_airdrop() {
     assert!(result.is_err(), "airdrop transaction should have failed");
 }
 
-/// Verifies that `get_fee_for_message` returns the correct fee based on the number of signatures.
+/// Verifies that local transaction execution is always fee-free.
 #[tokio::test]
 async fn test_get_fee_for_message() {
     let env = RpcTestEnv::new().await;
@@ -362,7 +362,7 @@ async fn test_get_fee_for_message() {
         .await
         .expect("get_fee_for_message failed");
 
-    assert_eq!(fee, RpcTestEnv::BASE_FEE);
+    assert_eq!(fee, 0);
 }
 
 // --- Signature and Transaction History Tests ---

@@ -14,8 +14,8 @@ use solana_feature_set::{
     curve25519_restrict_msm_length, curve25519_syscall_enabled,
     disable_rent_fees_collection, ed25519_program_enabled,
     enable_poseidon_syscall, enable_sbpf_v3_deployment_and_execution,
-    enable_secp256r1_precompile, enable_transaction_loading_failure_fees,
-    get_sysvar_syscall_enabled, secp256k1_program_enabled, FeatureSet,
+    enable_secp256r1_precompile, get_sysvar_syscall_enabled,
+    secp256k1_program_enabled, FeatureSet,
 };
 use solana_program::{pubkey::Pubkey, rent::Rent};
 use solana_program_runtime::{
@@ -35,11 +35,10 @@ pub struct SvmEnv {
     pub feature_set: FeatureSet,
 }
 
-/// Initialize an SVM environment for transaction processing and retain the active feature set.
+/// Initialize a zero-fee SVM environment and retain the active feature set.
 pub fn build_svm_env(
     accountsdb: &AccountsDb,
     blockhash: BlockHash,
-    fee_per_signature: u64,
 ) -> SvmEnv {
     let mut feature_set = FeatureSet::default();
 
@@ -47,7 +46,6 @@ pub fn build_svm_env(
     // - Rent exemption for all regular accounts (disable collection).
     // - Curve25519 syscalls.
     // - Poseidon syscall.
-    // - Fees for failed transaction loading (DoS mitigation).
     // - sBPF v3 deployment/execution for cloned Devnet programs.
     for id in [
         disable_rent_fees_collection::ID,
@@ -55,7 +53,6 @@ pub fn build_svm_env(
         curve25519_restrict_msm_length::ID,
         enable_poseidon_syscall::ID,
         enable_sbpf_v3_deployment_and_execution::ID,
-        enable_transaction_loading_failure_fees::ID,
         get_sysvar_syscall_enabled::ID,
         ed25519_program_enabled::ID,
         secp256k1_program_enabled::ID,
@@ -96,7 +93,7 @@ pub fn build_svm_env(
 
     let environment = TransactionProcessingEnvironment {
         blockhash,
-        blockhash_lamports_per_signature: fee_per_signature,
+        blockhash_lamports_per_signature: 0,
         feature_set: runtime_features,
         epoch_total_stake: 0,
         program_runtime_environments_for_execution: runtime_environments

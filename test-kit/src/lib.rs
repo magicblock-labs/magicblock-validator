@@ -55,7 +55,7 @@ pub const SUPERBLOCK_SIZE: u64 = 72000;
 pub struct ExecutionTestEnv {
     /// Atomic counter to index the payers array
     payer_index: AtomicUsize,
-    /// The default keypair used for paying transaction fees and signing.
+    /// The default keypair used for signing transactions.
     pub payers: Vec<Keypair>,
     /// A handle to the accounts database, storing all account states.
     pub accountsdb: Arc<AccountsDb>,
@@ -84,8 +84,6 @@ impl Default for ExecutionTestEnv {
 }
 
 impl ExecutionTestEnv {
-    pub const BASE_FEE: u64 = 1000;
-
     /// Creates a new, fully initialized execution test environment.
     ///
     /// This function sets up a complete validator stack:
@@ -95,10 +93,10 @@ impl ExecutionTestEnv {
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
     pub fn new() -> Self {
-        Self::new_with_config(Self::BASE_FEE, 1, false)
+        Self::new_with_config(1, false)
     }
 
-    /// Creates a new, fully initialized validator test environment with given base fee
+    /// Creates a new validator test environment with the given executor setup.
     ///
     /// This function sets up a complete validator stack:
     /// 1.  Creates temporary on-disk storage for the accounts database and ledger.
@@ -106,12 +104,8 @@ impl ExecutionTestEnv {
     /// 3.  Spawns a `TransactionScheduler` with the configured number of worker threads.
     /// 4.  Pre-loads a test program (`guinea`) for use in tests.
     /// 5.  Funds a default `payer` keypair with 1 SOL.
-    pub fn new_with_config(
-        fee: u64,
-        executors: u32,
-        defer_startup: bool,
-    ) -> Self {
-        Self::new_internal(fee, executors, defer_startup, true)
+    pub fn new_with_config(executors: u32, defer_startup: bool) -> Self {
+        Self::new_internal(executors, defer_startup, true)
     }
 
     /// Creates a test environment in Replica mode for replay ordering tests.
@@ -119,7 +113,7 @@ impl ExecutionTestEnv {
     /// The scheduler starts in Replica mode and only accepts replay transactions.
     /// Use `switch_to_primary_mode()` to transition to Primary mode.
     pub fn new_replica_mode(executors: u32, defer_startup: bool) -> Self {
-        Self::new_internal(Self::BASE_FEE, executors, defer_startup, false)
+        Self::new_internal(executors, defer_startup, false)
     }
 
     /// Creates a replica-mode environment with a custom superblock interval.
@@ -129,7 +123,6 @@ impl ExecutionTestEnv {
         superblock_size: u64,
     ) -> Self {
         Self::new_internal_with_superblock_size(
-            Self::BASE_FEE,
             executors,
             defer_startup,
             false,
@@ -139,13 +132,11 @@ impl ExecutionTestEnv {
 
     /// Internal constructor with all parameters.
     fn new_internal(
-        fee: u64,
         executors: u32,
         defer_startup: bool,
         primary_mode: bool,
     ) -> Self {
         Self::new_internal_with_superblock_size(
-            fee,
             executors,
             defer_startup,
             primary_mode,
@@ -154,7 +145,6 @@ impl ExecutionTestEnv {
     }
 
     fn new_internal_with_superblock_size(
-        fee: u64,
         executors: u32,
         defer_startup: bool,
         primary_mode: bool,
@@ -171,7 +161,7 @@ impl ExecutionTestEnv {
 
         let (dispatch, validator_channels) = link(true);
         let blockhash = ledger.latest_block().load().blockhash;
-        let svm_env = build_svm_env(&accountsdb, blockhash, fee);
+        let svm_env = build_svm_env(&accountsdb, blockhash);
         let payers = (0..executors).map(|_| Keypair::new()).collect();
 
         let (mode_tx, mode_rx) = tokio::sync::mpsc::channel(1);

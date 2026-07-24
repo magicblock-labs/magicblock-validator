@@ -26,7 +26,7 @@ struct TestContext {
 
 /// Sets up a test with vault, sponsor, and ephemeral account
 fn setup_test() -> TestContext {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -145,7 +145,7 @@ fn close_ephemeral_account_ix(
 
 #[tokio::test]
 async fn test_create_ephemeral_account_via_cpi() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     // Use the payer (which is a signer) as the sponsor
@@ -250,7 +250,7 @@ async fn test_create_ephemeral_account_via_cpi() {
 
 #[tokio::test]
 async fn test_resize_ephemeral_account_via_cpi() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     // Use the payer (which is a signer) as the sponsor
@@ -351,7 +351,7 @@ async fn test_resize_ephemeral_account_via_cpi() {
 
 #[tokio::test]
 async fn test_close_ephemeral_account_via_cpi() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     // Use the payer (which is a signer) as the sponsor
@@ -446,7 +446,7 @@ async fn test_close_ephemeral_account_via_cpi() {
 
 #[tokio::test]
 async fn test_resize_smaller_via_cpi() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     // Use the payer (which is a signer) as the sponsor
@@ -543,7 +543,7 @@ async fn test_resize_smaller_via_cpi() {
 
 #[tokio::test]
 async fn test_create_resize_close_via_esp_cpi() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -634,7 +634,7 @@ async fn test_create_resize_close_via_esp_cpi() {
 
 #[tokio::test]
 async fn test_esp_direct_call_rejected() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -664,7 +664,7 @@ async fn test_create_via_magic_program_close_via_esp() {
     // The two program IDs are just two doors into the same
     // process_*_ephemeral_account logic and the same vault - an account
     // created through one should be manageable through the other.
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -736,7 +736,7 @@ fn direct_create_instruction(
 
 #[tokio::test]
 async fn test_direct_call_rejected() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -758,7 +758,7 @@ async fn test_direct_call_rejected() {
 
 #[tokio::test]
 async fn test_create_with_non_zero_lamports_fails() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -809,7 +809,7 @@ async fn test_create_already_ephemeral_fails() {
 
 #[tokio::test]
 async fn test_create_with_wrong_vault_fails() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -877,7 +877,7 @@ async fn test_close_non_ephemeral_fails() {
 
 #[tokio::test]
 async fn test_resize_to_zero_size() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -914,7 +914,7 @@ async fn test_resize_to_zero_size() {
 
 #[tokio::test]
 async fn test_close_already_closed() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -959,7 +959,7 @@ async fn test_close_already_closed() {
 
 #[tokio::test]
 async fn test_close_already_closed_double_spend() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -1046,7 +1046,7 @@ async fn test_close_already_closed_double_spend() {
 
 #[tokio::test]
 async fn test_insufficient_balance_fails() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     // Use the payer but give it very low balance
@@ -1081,7 +1081,7 @@ async fn test_insufficient_balance_fails() {
 // The guinea program uses `invoke_signed` with proper seeds to sign for the PDA.
 #[tokio::test]
 async fn test_create_with_pda_sponsor() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     // 1. Derive the global sponsor PDA (same seed as in guinea program)
@@ -1131,7 +1131,7 @@ async fn test_create_with_pda_sponsor() {
 
 #[tokio::test]
 async fn test_pda_wrong_owner_fails() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     // Create a PDA owned by system program (not guinea)
@@ -1164,7 +1164,7 @@ async fn test_pda_wrong_owner_fails() {
 
 #[tokio::test]
 async fn test_non_signer_oncurve_sponsor_fails() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     // Create oncurve account that is NOT a signer
@@ -1189,7 +1189,7 @@ async fn test_non_signer_oncurve_sponsor_fails() {
 
 #[tokio::test]
 async fn test_full_lifecycle() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     let sponsor = env.get_payer().pubkey;
@@ -1245,7 +1245,7 @@ async fn test_full_lifecycle() {
 
 #[tokio::test]
 async fn test_multiple_accounts_same_sponsor() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     init_vault(&env);
 
     // Use payer[0] as sponsor - need to be explicit about which payer

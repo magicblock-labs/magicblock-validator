@@ -23,7 +23,6 @@ use solana_program_runtime::execution_budget::SVMTransactionExecutionAndFeeBudge
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::CheckedTransactionDetails,
-    rollback_accounts::RollbackAccounts,
     transaction_balances::BalanceCollector,
     transaction_processing_result::{
         ProcessedTransaction, TransactionProcessingResult,
@@ -72,14 +71,10 @@ impl super::TransactionExecutor {
         };
 
         // 2. Commit Account State (DB Update)
-        // Note: Failed transactions still pay fees, so we attempt commit even on execution failure.
-        let fee_payer = *transaction.fee_payer();
         // Only send account updates for Execution mode (persist is None).
-        // Wrap the causing transaction in an `Arc` so it can be shared cheaply
-        // across every account it mutated and across the notification channel.
         let notify = persist.is_none();
-        let txn = notify.then(|| Arc::new(transaction.txn.transaction.clone()));
-        if let Err(err) = self.commit_accounts(fee_payer, &processed, txn) {
+        let txn = notify.then_some(&transaction.txn.transaction);
+        if let Err(err) = self.commit_accounts(&processed, txn) {
             return self.handle_failure(
                 transaction,
                 TransactionError::CommitCancelled,
@@ -242,11 +237,16 @@ impl super::TransactionExecutor {
         result: ProcessedTransaction,
         balances: Option<BalanceCollector>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let (pre_balances, post_balances) =
+        let (pre_balances, mut post_balances) =
             transaction_balances(&txn, balances);
+        if result.status().is_err() {
+            // Failed execution commits no account state, so ledger balances must
+            // describe the unchanged persisted state.
+            post_balances.clone_from(&pre_balances);
+        }
         let meta = match result {
             ProcessedTransaction::Executed(executed) => TransactionStatusMeta {
-                fee: executed.loaded_transaction.fee_details.total_fee(),
+                fee: 0,
                 compute_units_consumed: Some(
                     executed.execution_details.executed_units,
                 ),
@@ -264,7 +264,7 @@ impl super::TransactionExecutor {
                 ..Default::default()
             },
             ProcessedTransaction::FeesOnly(fo) => TransactionStatusMeta {
-                fee: fo.fee_details.total_fee(),
+                fee: 0,
                 status: Err(fo.load_error),
                 pre_balances,
                 post_balances,
@@ -350,48 +350,37 @@ impl super::TransactionExecutor {
         Ok(())
     }
 
-    /// Persists account changes to AccountsDb and notifies listeners.
+    /// Persists successful account changes to AccountsDb and notifies listeners.
+    ///
+    /// Failed processed results return before any program-cache, AccountsDb, or
+    /// notification side effect.
     fn commit_accounts(
         &self,
-        fee_payer: Pubkey,
         result: &ProcessedTransaction,
-        txn: Option<Arc<SanitizedTransaction>>,
+        txn: Option<&SanitizedTransaction>,
     ) -> AccountsDbResult<()> {
-        let succeeded = result.status().is_ok();
-        let accounts = match result {
-            ProcessedTransaction::Executed(executed) => {
-                if succeeded && !executed.programs_modified_by_tx.is_empty() {
-                    self.processor.global_program_cache.write().unwrap().merge(
-                        &self.processor.environments,
-                        &executed.programs_modified_by_tx,
-                    );
-                }
-
-                if !succeeded {
-                    &executed.loaded_transaction.accounts[..1]
-                } else {
-                    &executed.loaded_transaction.accounts
-                }
-            }
-            ProcessedTransaction::FeesOnly(fo) => {
-                if let RollbackAccounts::FeePayerOnly { fee_payer: account } =
-                    &fo.rollback_accounts
-                {
-                    return self.insert_and_notify(
-                        &[(fee_payer, account.1.clone())],
-                        txn,
-                        false,
-                    );
-                }
-                return Ok(());
-            }
+        if result.status().is_err() {
+            return Ok(());
+        }
+        let ProcessedTransaction::Executed(executed) = result else {
+            return Ok(());
         };
+        if !executed.programs_modified_by_tx.is_empty() {
+            self.processor.global_program_cache.write().unwrap().merge(
+                &self.processor.environments,
+                &executed.programs_modified_by_tx,
+            );
+        }
+        let accounts = &executed.loaded_transaction.accounts;
 
         let privileged = accounts
             .first()
             .map(|(_, acc)| acc.privileged())
             .unwrap_or(false);
 
+        // Wrap the causing transaction in an `Arc` so it can be shared cheaply
+        // across every account it mutated and across the notification channel.
+        let txn = txn.cloned().map(Arc::new);
         self.insert_and_notify(accounts, txn, privileged)
     }
 
@@ -468,11 +457,7 @@ impl super::TransactionExecutor {
             txn.program_instructions_iter(),
             &self.feature_set,
         )?;
-        let signature_fee = signature_fee(
-            txn,
-            self.environment.blockhash_lamports_per_signature,
-        );
-        let fee_details = FeeDetails::new(signature_fee, 0);
+        let fee_details = FeeDetails::new(0, 0);
         let raise_cpi_limit = self
             .feature_set
             .is_active(&raise_cpi_nesting_limit_to_8::id());
@@ -499,13 +484,4 @@ fn transaction_balances(
         pre.pop().unwrap_or_else(|| vec![0; count]),
         post.pop().unwrap_or_else(|| vec![0; count]),
     )
-}
-
-fn signature_fee(
-    txn: &SanitizedTransaction,
-    lamports_per_signature: u64,
-) -> u64 {
-    txn.message()
-        .num_total_signatures()
-        .saturating_mul(lamports_per_signature)
 }

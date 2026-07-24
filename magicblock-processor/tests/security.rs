@@ -28,7 +28,7 @@ fn setup_confined(env: &ExecutionTestEnv) -> Keypair {
 
 #[tokio::test]
 async fn test_gasless_undelegated_feepayer_modification_fails() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
 
     // 1. Configure Payer: Owned by Guinea (to allow transfer), Undelegated
     {

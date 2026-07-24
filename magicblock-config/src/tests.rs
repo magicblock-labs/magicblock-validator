@@ -62,7 +62,6 @@ fn test_defaults_are_sane() {
     let config = run_cli(vec![]);
 
     // Verify key defaults used in production
-    assert_eq!(config.validator.basefee, consts::DEFAULT_BASE_FEE);
     // Remotes default to [devnet HTTP] + [devnet WS] (added by ensure_websocket)
     assert_eq!(config.remotes.len(), 2);
     assert_eq!(config.aperture.listen.0.port(), 8899);
@@ -136,47 +135,51 @@ fn test_env_overrides_toml() {
 #[test]
 #[parallel]
 fn test_cli_overrides_toml() {
-    // TOML says 100, CLI says 500. CLI should win.
+    // TOML and CLI specify different listen ports. CLI should win.
     let (_dir, config_path) = create_temp_config(
         r#"
-        [validator]
-        basefee = 100
+        [aperture]
+        listen = "127.0.0.1:7000"
         "#,
     );
 
-    let config =
-        run_cli(vec![config_path.to_str().unwrap(), "--basefee", "500"]);
+    let config = run_cli(vec![
+        config_path.to_str().unwrap(),
+        "--listen",
+        "127.0.0.1:7001",
+    ]);
 
-    assert_eq!(config.validator.basefee, 500);
+    assert_eq!(config.aperture.listen.0.port(), 7001);
 }
 
 #[test]
 #[serial]
 fn test_cli_overrides_env() {
-    // Env says 1000, CLI says 2000. CLI should win.
-    let _env = EnvVarGuard::new("MBV_VALIDATOR__BASEFEE", "1000");
+    let _env = EnvVarGuard::new("MBV_APERTURE__LISTEN", "127.0.0.1:7000");
 
-    let config = run_cli(vec!["--basefee", "2000"]);
+    let config = run_cli(vec!["--listen", "127.0.0.1:7001"]);
 
-    assert_eq!(config.validator.basefee, 2000);
+    assert_eq!(config.aperture.listen.0.port(), 7001);
 }
 
 #[test]
 #[serial]
 fn test_full_stack_precedence() {
-    // TOML=100, ENV=200, CLI=300. Result must be 300.
     let (_dir, config_path) = create_temp_config(
         r#"
-        [validator]
-        basefee = 100
+        [aperture]
+        listen = "127.0.0.1:7000"
         "#,
     );
-    let _env = EnvVarGuard::new("MBV_VALIDATOR__BASEFEE", "200");
+    let _env = EnvVarGuard::new("MBV_APERTURE__LISTEN", "127.0.0.1:7001");
 
-    let config =
-        run_cli(vec![config_path.to_str().unwrap(), "--basefee", "300"]);
+    let config = run_cli(vec![
+        config_path.to_str().unwrap(),
+        "--listen",
+        "127.0.0.1:7002",
+    ]);
 
-    assert_eq!(config.validator.basefee, 300);
+    assert_eq!(config.aperture.listen.0.port(), 7002);
 }
 
 // ============================================================================
@@ -186,36 +189,30 @@ fn test_full_stack_precedence() {
 #[test]
 #[parallel]
 fn test_cli_overlay_is_non_destructive() {
-    // CRITICAL: Ensure providing ONE CLI arg (basefee) does NOT reset
-    // other fields in the same struct (keypair) back to defaults.
+    // CRITICAL: Ensure providing one Aperture CLI arg does not reset
+    // unmentioned file values or values in another section.
 
     let custom_keypair = Keypair::new().to_base58_string();
     let (_dir, config_path) = create_temp_config(&format!(
         r#"
         [validator]
-        basefee = 100
         keypair = "{}"
+
+        [aperture]
+        event-processors = 7
         "#,
         custom_keypair
     ));
 
-    // Change ONLY basefee and listen address via CLI
     let config = run_cli(vec![
         config_path.to_str().unwrap(),
-        "--basefee",
-        "500",
         "--listen",
         "127.0.0.1:7000",
     ]);
 
-    // Basefee is updated
-    assert_eq!(config.validator.basefee, 500);
-    // Listen address is updated as well
     assert_eq!(config.aperture.listen.0, "127.0.0.1:7000".parse().unwrap());
-    // Keypair is PRESERVED from TOML
     assert_eq!(config.validator.keypair, custom_keypair.parse().unwrap());
-    // Event processors count is PRESERVED from TOML
-    assert_eq!(config.aperture.event_processors, 1);
+    assert_eq!(config.aperture.event_processors, 7);
 }
 
 #[test]
@@ -230,13 +227,15 @@ fn test_cli_does_not_touch_file_only_fields() {
         "#,
     );
 
-    let config =
-        run_cli(vec![config_path.to_str().unwrap(), "--basefee", "500"]);
+    let config = run_cli(vec![
+        config_path.to_str().unwrap(),
+        "--listen",
+        "127.0.0.1:7000",
+    ]);
 
     // File-only setting preserved
     assert_eq!(config.accountsdb.database_size, 999);
-    // CLI setting applied
-    assert_eq!(config.validator.basefee, 500);
+    assert_eq!(config.aperture.listen.0.port(), 7000);
 }
 
 // ============================================================================
@@ -467,7 +466,6 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // 5. Validator Identity
     // ========================================================================
-    assert_eq!(config.validator.basefee, 0);
     // Verify the specific example keypair is loaded
     assert_eq!(
         config.validator.keypair.0.to_base58_string(),
@@ -587,7 +585,6 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_METRICS__ADDRESS", "127.0.0.1:9091"),
         EnvVarGuard::new("MBV_METRICS__COLLECT_FREQUENCY", "15s"),
         // --- Validator Identity ---
-        EnvVarGuard::new("MBV_VALIDATOR__BASEFEE", "5000"),
         // Using a random valid keypair for testing
         EnvVarGuard::new("MBV_VALIDATOR__KEYPAIR", DEFAULT_VALIDATOR_KEYPAIR),
         // --- Commit Strategy ---
@@ -662,9 +659,10 @@ fn test_env_vars_full_coverage() {
     assert_eq!(config.metrics.address.0.port(), 9091);
     assert_eq!(config.metrics.collect_frequency.as_secs(), 15);
 
-    // Validator
-    assert_eq!(config.validator.basefee, 5000);
-    // (We skip checking the exact keypair bytes, just that it didn't crash)
+    assert_eq!(
+        config.validator.keypair.0.to_base58_string(),
+        DEFAULT_VALIDATOR_KEYPAIR
+    );
 
     // Commit
     assert_eq!(config.commit.compute_unit_price, 500_000);
