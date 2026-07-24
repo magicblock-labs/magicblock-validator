@@ -9,11 +9,12 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
+        calculate_rent_pending_ata_materialization_fee,
         extract_commit_accounts, ConstructionContext, ScheduledIntentBundle,
     },
-    magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
-        check_commit_limits, check_magic_context_id, get_clock,
+        check_commit_limits, check_magic_context_id,
+        fetch_commit_nonces_with_missing_as_zero, get_clock,
         get_parent_program_id, try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
     },
     utils::{
@@ -81,6 +82,27 @@ pub(crate) fn process_schedule_intent_bundle(
     // Get next intent id
     let intent_id = context.next_intent_id();
 
+    let rent_pending_materialization_accounts = {
+        let transaction_context = &*invoke_context.transaction_context;
+        let fee_vault = try_get_fee_vault(
+            transaction_context,
+            invoke_context,
+            PAYER_IDX,
+            MAGIC_CONTEXT_IDX + 1,
+        )?;
+        if fee_vault.is_some() {
+            Some((
+                payer_pubkey,
+                *get_instruction_pubkey_with_idx(
+                    transaction_context,
+                    MAGIC_CONTEXT_IDX + 1,
+                )?,
+            ))
+        } else {
+            None
+        }
+    };
+
     // Determine id and slot
     let (undelegated_pubkeys, scheduled_intent) = {
         let mut construction_context = ConstructionContext::new(
@@ -88,6 +110,7 @@ pub(crate) fn process_schedule_intent_bundle(
             &signers,
             invoke_context,
             secure,
+            rent_pending_materialization_accounts,
         );
 
         // Collect all undelegated account indices.
@@ -109,6 +132,49 @@ pub(crate) fn process_schedule_intent_bundle(
             &payer_pubkey,
             &mut construction_context,
         )?;
+
+        if rent_pending_materialization_accounts.is_some() {
+            let transaction_context =
+                construction_context.transaction_context();
+            let payer_account = get_instruction_account_with_idx(
+                transaction_context,
+                PAYER_IDX,
+            )?;
+            let magic_fee_vault = get_instruction_account_with_idx(
+                transaction_context,
+                MAGIC_CONTEXT_IDX + 1,
+            )?;
+            let rent_pending_pubkeys = scheduled_intent
+                .intent_bundle
+                .rent_pending_ata_materializations
+                .iter()
+                .map(|materialization| materialization.eata_pubkey)
+                .collect::<HashSet<_>>();
+            let committed_accounts =
+                scheduled_intent.get_all_committed_accounts();
+            let nonces = fetch_commit_nonces_with_missing_as_zero(
+                &committed_accounts,
+                &rent_pending_pubkeys,
+            )?;
+            let fee = scheduled_intent
+                .calculate_fee(&nonces)?
+                .checked_add(calculate_rent_pending_ata_materialization_fee(
+                    scheduled_intent
+                        .intent_bundle
+                        .rent_pending_ata_materializations
+                        .len(),
+                )?)
+                .ok_or(InstructionError::ArithmeticOverflow)?;
+            // Charge before local undelegation clears a self-payer's delegated bit.
+            charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
+        } else if let Some(commit_accounts) =
+            scheduled_intent.get_commit_intent_accounts()
+        {
+            check_commit_limits(
+                commit_accounts,
+                construction_context.invoke_context,
+            )?;
+        }
 
         // Change owner to dlp and set undelegating flag.
         // Once account is undelegated we need to make it immutable in our validator.
@@ -135,25 +201,6 @@ pub(crate) fn process_schedule_intent_bundle(
     }
 
     let transaction_context = &*invoke_context.transaction_context;
-    let payer_account =
-        get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
-    let magic_fee_vault = try_get_fee_vault(
-        transaction_context,
-        invoke_context,
-        PAYER_IDX,
-        MAGIC_CONTEXT_IDX + 1,
-    )?;
-    if let Some(magic_fee_vault) = magic_fee_vault {
-        let chargable_accounts = scheduled_intent.get_all_committed_accounts();
-        let nonces = fetch_current_commit_nonces(&chargable_accounts)?;
-        let fee = scheduled_intent.calculate_fee(&nonces)?;
-        charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
-    } else if let Some(commit_accounts) =
-        scheduled_intent.get_commit_intent_accounts()
-    {
-        check_commit_limits(commit_accounts, invoke_context)?;
-    }
-
     let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];
 
     context.add_scheduled_action(scheduled_intent);

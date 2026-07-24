@@ -9,7 +9,10 @@ mod process_schedule_intent_bundle;
 mod process_scheduled_commit_sent;
 pub(crate) mod transaction_scheduler;
 
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use magicblock_core::intent::types::CommittedAccount;
 use magicblock_magic_program_api::{
@@ -152,6 +155,40 @@ pub(crate) fn check_commit_limits(
     } else {
         Ok(())
     }
+}
+
+pub(crate) fn fetch_commit_nonces_with_missing_as_zero(
+    commits: &[CommittedAccount],
+    missing_as_zero: &HashSet<Pubkey>,
+) -> Result<HashMap<Pubkey, u64>, InstructionError> {
+    match fetch_current_commit_nonces(commits) {
+        Ok(nonces) => Ok(nonces),
+        Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR)) => {
+            fetch_commit_nonces_individually(commits, missing_as_zero)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn fetch_commit_nonces_individually(
+    commits: &[CommittedAccount],
+    missing_as_zero: &HashSet<Pubkey>,
+) -> Result<HashMap<Pubkey, u64>, InstructionError> {
+    let mut nonces = HashMap::with_capacity(commits.len());
+    for account in commits {
+        match fetch_current_commit_nonces(std::slice::from_ref(account)) {
+            Ok(fetched) => {
+                nonces.extend(fetched);
+            }
+            Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR))
+                if missing_as_zero.contains(&account.pubkey) =>
+            {
+                nonces.insert(account.pubkey, 0);
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(nonces)
 }
 
 pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {

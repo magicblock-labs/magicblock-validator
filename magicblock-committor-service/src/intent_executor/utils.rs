@@ -444,7 +444,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        intent_executor::task_info_fetcher::TaskInfoFetcherResult,
+        intent_executor::task_info_fetcher::{
+            CommitNonceFetchResult, TaskInfoFetcherResult,
+        },
         tasks::utils::create_commit_task,
     };
 
@@ -464,6 +466,17 @@ mod tests {
                     (*pubkey, if self.0 == Some(*pubkey) { 5 } else { 1 })
                 })
                 .collect())
+        }
+
+        async fn fetch_next_commit_nonces_with_missing_as_zero(
+            &self,
+            pubkeys: &[Pubkey],
+            min_context_slot: u64,
+            _: &[Pubkey],
+        ) -> TaskInfoFetcherResult<CommitNonceFetchResult> {
+            self.fetch_next_commit_nonces(pubkeys, min_context_slot)
+                .await
+                .map(CommitNonceFetchResult::from_nonces)
         }
 
         async fn fetch_current_commit_nonces(

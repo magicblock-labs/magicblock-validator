@@ -139,7 +139,7 @@ Use `CoordinationMode::current()`, `needs_validator_signer()`, `should_schedule_
 
 ### Execution TLS
 
-`tls::ExecutionTlsStash` is a thread-local queue currently used for `TaskRequest`s emitted by Magic Program task scheduling/cancel instructions. The processor clears the stash around execution and drains it after a successful transaction path. Do not use it as a cross-thread channel or persistent store.
+`tls::ExecutionTlsStash` is a thread-local queue currently used for `TaskRequest`s emitted by Magic Program task scheduling/cancel instructions, newly created rent-pending ATA pubkeys that need post-execution validation, and rent-pending ATA materialization pubkeys recorded during scheduling. The processor clears the stash around execution, drains scheduled tasks after a successful transaction path, and verifies newly created rent-pending ATAs before local state is committed. The materialization marker lets that verifier accept a rent-pending ATA that was created, funded, recorded for materialization, and then marked undelegating in the same transaction. Do not use TLS as a cross-thread channel or persistent store.
 
 ### Token/eATA helpers
 
@@ -149,6 +149,7 @@ Use `CoordinationMode::current()`, `needs_validator_signer()`, `should_schedule_
 - eATA derivation: `derive_eata`, `try_derive_eata_address_and_bump`.
 - ATA detection/remapping: `is_ata`, `try_remap_ata_to_eata`.
 - eATA projection: `EphemeralAta` projection helpers require a real base ATA layout and do not synthesize legacy SPL Token accounts from raw eATA data.
+- Rent-pending ATA helpers: `RENT_PENDING_ATA_CLOSE_AUTHORITY` is the rent sysvar sentinel, and `try_get_rent_pending_ata_info` recognizes only canonical delegated non-native SPL Token/Token-2022 ATAs that are not ephemeral, confined, or undelegating. Rent-pending detection builds materialization metadata for Magic Program scheduling; it is not a close authority or settlement bypass.
 - Native-token local projection: `normalize_native_token_account_for_local_clone` strips `is_native` and claimable lamports only for canonical delegated ATA clones, and supports both legacy SPL Token native mint and Token-2022 native mint while preserving Token-2022 account layout/extensions.
 - Projected ATA local safety: `normalize_projected_token_account_for_local_clone` makes virtual projected ATAs uncloseable with `close_authority = Some(Pubkey::default())`; closure/materialization belongs in settlement, not local projection.
 

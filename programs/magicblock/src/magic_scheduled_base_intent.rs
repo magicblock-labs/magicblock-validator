@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+};
 
 pub use magicblock_core::intent::{
     calculate_commit_fee, BaseAction, CommitAndUndelegate, CommitType,
@@ -8,8 +11,11 @@ pub use magicblock_core::intent::{
 };
 use magicblock_core::{
     intent::types::CommittedAccount,
+    tls::ExecutionTlsStash,
     token_programs::{
-        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+        eata_rent_exempt_balance, try_get_rent_pending_ata_info,
+        RentPendingAtaMaterialization, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+        TOKEN_PROGRAM_ID,
     },
     Slot,
 };
@@ -38,6 +44,10 @@ use crate::{
     validator::effective_validator_authority_id,
 };
 
+/// Fixed V1 service fee per rent-pending eATA materialization, charged on top
+/// of the base-layer rent the validator fronts to create the eATA account.
+pub const RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS: u64 =
+    COMMIT_FEE_LAMPORTS;
 /// Context necessary for construction of Schedule Action
 pub struct ConstructionContext<'a, 'ic, 'ix_data> {
     parent_program_id: Option<Pubkey>,
@@ -47,6 +57,8 @@ pub struct ConstructionContext<'a, 'ic, 'ix_data> {
     /// to the delegation program. Legacy `ScheduleBaseIntent` sets this to
     /// `false` for backward compatibility with old deployed contracts.
     pub secure: bool,
+    pub rent_pending_materialization_accounts: Option<(Pubkey, Pubkey)>,
+    rent_pending_materializations: RefCell<Vec<RentPendingAtaMaterialization>>,
     /// Next id to assign to a `BaseAction` being constructed. Incremented
     /// as actions are built, so each action in a bundle gets a unique,
     /// stable id in construction order.
@@ -59,18 +71,61 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
         signers: &'a HashSet<Pubkey>,
         invoke_context: &'a mut InvokeContext<'ic, 'ix_data>,
         secure: bool,
+        rent_pending_materialization_accounts: Option<(Pubkey, Pubkey)>,
     ) -> Self {
         Self {
             parent_program_id,
             signers,
             invoke_context,
             secure,
+            rent_pending_materialization_accounts,
+            rent_pending_materializations: RefCell::new(Vec::new()),
             next_action_id: 0,
         }
     }
 
     pub fn transaction_context(&self) -> &TransactionContext<'ix_data> {
         &*self.invoke_context.transaction_context
+    }
+
+    fn record_rent_pending_materializations(
+        &self,
+        accounts: &[CommitAccountRef<'_, '_>],
+    ) -> Result<(), InstructionError> {
+        let mut materializations =
+            self.rent_pending_materializations.borrow_mut();
+        for (pubkey, account) in accounts {
+            let account = account.to_account_shared_data()?;
+            let Some(info) = try_get_rent_pending_ata_info(pubkey, &account)
+            else {
+                continue;
+            };
+            let Some((delegated_payer, delegated_vault)) =
+                self.rent_pending_materialization_accounts
+            else {
+                ic_msg!(
+                    self.invoke_context,
+                    "ScheduleCommit ERR: rent-pending ATA {} requires delegated payer fee vault",
+                    pubkey
+                );
+                return Err(InstructionError::IllegalOwner);
+            };
+            ExecutionTlsStash::register_scheduled_rent_pending_ata_materialization(
+                info.ata_pubkey,
+            );
+            materializations.push(RentPendingAtaMaterialization {
+                ata_pubkey: info.ata_pubkey,
+                eata_pubkey: info.eata_pubkey,
+                token_program: info.token_program,
+                wallet_owner: info.wallet_owner,
+                mint: info.mint,
+                token_account_data_len: info.token_account_data_len,
+                validator: effective_validator_authority_id(),
+                delegated_payer,
+                delegated_vault,
+            });
+        }
+        Ok(())
     }
 
     fn next_action_id(&mut self) -> u64 {
@@ -260,6 +315,10 @@ impl TryFromArgs<MagicIntentBundleArgs> for MagicIntentBundle {
             commit_finalize,
             commit_finalize_and_undelegate,
             standalone_actions: actions,
+            rent_pending_ata_materializations: context
+                .rent_pending_materializations
+                .borrow()
+                .clone(),
         };
         post_validate_magic_intent_bundle(&this, context)?;
         validate_intent_size(&this).inspect_err(|_| {
@@ -591,6 +650,9 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                     &committed_accounts_ref,
                     context,
                 )?;
+                context.record_rent_pending_materializations(
+                    &committed_accounts_ref,
+                )?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
@@ -616,6 +678,9 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                 validate_commit_type_accounts(
                     &committed_accounts_ref,
                     context,
+                )?;
+                context.record_rent_pending_materializations(
+                    &committed_accounts_ref,
                 )?;
 
                 let committed_accounts = committed_accounts_ref
@@ -712,6 +777,19 @@ pub(crate) fn validate_commit_schedule_permissions(
     }
 }
 
+pub(crate) fn calculate_rent_pending_ata_materialization_fee(
+    count: usize,
+) -> Result<u64, InstructionError> {
+    // The validator fronts the base-layer rent for every eATA it materializes
+    // and never recovers it (the eATA is not closed at undelegation), so the
+    // delegated payer covers that rent in addition to the flat service fee.
+    let per_ata = eata_rent_exempt_balance()
+        .checked_add(RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS)
+        .ok_or(InstructionError::ArithmeticOverflow)?;
+    (count as u64)
+        .checked_mul(per_ata)
+        .ok_or(InstructionError::ArithmeticOverflow)
+}
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -784,6 +862,7 @@ mod tests {
                 commit_finalize: None,
                 commit_finalize_and_undelegate: None,
                 standalone_actions: vec![make_base_action(50_000)],
+                rent_pending_ata_materializations: vec![],
             },
         };
 

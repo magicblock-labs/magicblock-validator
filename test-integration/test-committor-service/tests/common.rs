@@ -11,8 +11,8 @@ use dlp_api::state::{DelegationMetadata, UndelegationRequester};
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
-            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
-            TaskInfoFetcherResult,
+            CacheTaskInfoFetcher, CommitNonceFetchResult, TaskInfoFetcher,
+            TaskInfoFetcherError, TaskInfoFetcherResult,
         },
         IntentExecutorImpl,
     },
@@ -175,6 +175,18 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         _: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+    }
+
+    async fn fetch_next_commit_nonces_with_missing_as_zero(
+        &self,
+        pubkeys: &[Pubkey],
+        _: u64,
+        _: &[Pubkey],
+    ) -> TaskInfoFetcherResult<CommitNonceFetchResult> {
+        Ok(CommitNonceFetchResult {
+            nonces: self.fetch_next_commit_nonces(pubkeys, 0).await?,
+            missing_metadata: Default::default(),
+        })
     }
 
     async fn fetch_current_commit_nonces(

@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
 pub use types::CommittedAccount;
+
+use crate::token_programs::RentPendingAtaMaterialization;
+
 pub mod types;
 
 /// Commits that are covered by User's dlp PDAs
@@ -36,6 +39,7 @@ pub struct MagicIntentBundle {
     pub commit_finalize: Option<CommitType>,
     pub commit_finalize_and_undelegate: Option<CommitAndUndelegate>,
     pub standalone_actions: Vec<BaseAction>,
+    pub rent_pending_ata_materializations: Vec<RentPendingAtaMaterialization>,
 }
 
 impl From<MagicBaseIntent> for MagicIntentBundle {

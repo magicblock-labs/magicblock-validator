@@ -88,7 +88,7 @@ Use `crate::compat::{Instruction, AccountMeta, AccountInfo, Signature}` and `cra
 
 `instruction.rs` defines:
 
-- `MagicBlockInstruction`: the primary bincode-serialized instruction enum for the Magic Program. Variants cover account modification, legacy and bundled commit scheduling, task scheduling/canceling, executable-check toggles, no-op uniqueness, ephemeral account create/resize/close, clone/chunk/cleanup, program finalization, callback attachment, account eviction, and crank execution.
+- `MagicBlockInstruction`: the primary bincode-serialized instruction enum for the Magic Program. Variants cover account modification, legacy and bundled commit scheduling, task scheduling/canceling, executable-check toggles, no-op uniqueness, ephemeral account create/resize/close, local rent-pending ATA creation, clone/chunk/cleanup, program finalization, callback attachment, account eviction, and crank execution.
 - `CallbackInstruction`: instruction enum for the callback executor built-in. Current variant is `ExecuteCallback { instruction }`.
 - `PostDelegationActionExecutorInstruction`: instruction enum for the post-delegation action executor built-in. Current variant is `Execute { cloned_account_pubkey, actions }`.
 - `AccountCloneFields`: clone metadata (`lamports`, `owner`, `executable`, `delegated`, `confined`, `remote_slot`) that must preserve remote/local account semantics across clone instructions.
@@ -183,7 +183,20 @@ magicblock-account-cloner
 3. `programs/magicblock/src/ephemeral_accounts` applies rent math using `EPHEMERAL_RENT_PER_BYTE` and account static-size overhead.
 4. Processor tests assert sponsor/vault lamport movement, signer requirements, PDA sponsor rules, and close/resize behavior.
 
-Changing the rent constant, vault pubkey, or account-meta shape affects user-visible balance semantics and tests.
+`CreateRentPendingAta { wallet_owner }` lives next to the
+ephemeral-account instructions but creates a local canonical token ATA, not a
+generic ephemeral account. Its account metas are payer signer, writable ATA,
+mint, and token program; mint and token-program identity are derived from those
+accounts rather than duplicated in the payload. It reuses the former `Unused`
+bincode slot, so do not insert another variant in that position or assume an
+unused discriminant remains there.
+For Token-2022, rent-pending creation supports default account state plus
+marker-only account extensions such as `ImmutableOwner`,
+`NonTransferableAccount`, and `PausableAccount`; reject required stateful account
+extensions such as `TransferFeeAmount` or `TransferHookAccount` until settlement
+preserves extension state.
+
+Changing the rent constant, vault pubkey, rent-pending ATA instruction shape, or account-meta shape affects user-visible balance semantics and tests.
 
 ### Task scheduling flow
 
@@ -214,7 +227,9 @@ Do not add user-controlled signer bits to `ShortAccountMeta`; callback signer ha
 
 All major public structs/enums derive `Serialize` and `Deserialize` and are serialized with `bincode`. Enum variant order and struct field order matter. Adding fields without compatibility handling, removing variants, or reordering variants can break old transactions, persisted contexts, integration programs, or callback decoders.
 
-The `Unused` instruction variant is intentionally retained as an unused slot after a removed `ScheduleCommitFinalize` path. Do not delete or repurpose it casually; doing so changes discriminants or semantics.
+The former `Unused` instruction slot after the removed `ScheduleCommitFinalize`
+path is now `CreateRentPendingAta`. Treat that discriminant as live wire/API
+surface. Do not delete, reorder, or repurpose it casually.
 
 ### Secure vs legacy action scheduling
 

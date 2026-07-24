@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
 };
@@ -5,7 +6,8 @@ use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
 use solana_pubkey::{pubkey, Pubkey};
 use spl_token::state::Account as SplAccount;
 use spl_token_2022::{
-    extension::StateWithExtensionsMut, state::Account as Token2022Account,
+    extension::{StateWithExtensions, StateWithExtensionsMut},
+    state::Account as Token2022Account,
 };
 
 // Shared program IDs and helper functions for SPL Token, Associated Token, and eATA programs.
@@ -25,9 +27,51 @@ pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
 // Enhanced ATA (eATA) Program ID (SPLxh1...)
 pub const EATA_PROGRAM_ID: Pubkey =
     pubkey!("SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2");
+pub const RENT_PENDING_ATA_CLOSE_AUTHORITY: Pubkey =
+    solana_program::sysvar::rent::ID;
 
 pub const EPHEMERAL_ATA_LEN: usize = 80;
 const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
+
+/// Rent-exempt balance of the base-layer eATA account created when a
+/// rent-pending ATA is materialized. The validator fronts this rent and never
+/// recovers it (the eATA is not closed at undelegation), so the
+/// materialization charge must cover it.
+pub fn eata_rent_exempt_balance() -> u64 {
+    Rent::default().minimum_balance(EPHEMERAL_ATA_LEN)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RentPendingAtaMaterialization {
+    pub ata_pubkey: Pubkey,
+    pub eata_pubkey: Pubkey,
+    pub token_program: Pubkey,
+    pub wallet_owner: Pubkey,
+    pub mint: Pubkey,
+    pub token_account_data_len: u64,
+    pub validator: Pubkey,
+    pub delegated_payer: Pubkey,
+    pub delegated_vault: Pubkey,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RentPendingAtaInfo {
+    pub ata_pubkey: Pubkey,
+    pub eata_pubkey: Pubkey,
+    pub token_program: Pubkey,
+    pub wallet_owner: Pubkey,
+    pub mint: Pubkey,
+    pub amount: u64,
+    pub token_account_data_len: u64,
+}
+
+struct TokenAccountCommon {
+    mint: Pubkey,
+    owner: Pubkey,
+    amount: u64,
+    is_native: COption<u64>,
+    close_authority: COption<Pubkey>,
+}
 
 /// Private WSOL is represented locally by the token amount that maps to eATA,
 /// not by claimable lamports on the projected ATA.
@@ -389,6 +433,131 @@ pub fn try_remap_ata_to_eata(
     Some((eata_pubkey, eata))
 }
 
+pub fn try_get_rent_pending_ata_info(
+    pubkey: &Pubkey,
+    account: &AccountSharedData,
+) -> Option<RentPendingAtaInfo> {
+    if !account.delegated()
+        || account.ephemeral()
+        || account.confined()
+        || account.undelegating()
+    {
+        return None;
+    }
+
+    try_get_rent_pending_ata_info_for_token_program(
+        pubkey,
+        account,
+        account.owner(),
+    )
+}
+
+/// Parses a rent-pending ATA after scheduling has marked it undelegating.
+/// Callers must separately prove rent-pending materialization metadata was
+/// recorded before trusting this shape.
+pub fn try_get_undelegating_rent_pending_ata_info(
+    pubkey: &Pubkey,
+    account: &AccountSharedData,
+) -> Option<RentPendingAtaInfo> {
+    if account.delegated()
+        || account.ephemeral()
+        || account.confined()
+        || !account.undelegating()
+    {
+        return None;
+    }
+
+    [TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID]
+        .into_iter()
+        .find_map(|token_program| {
+            try_get_rent_pending_ata_info_for_token_program(
+                pubkey,
+                account,
+                &token_program,
+            )
+        })
+}
+
+pub fn is_supported_token_program(token_program: &Pubkey) -> bool {
+    *token_program == TOKEN_PROGRAM_ID
+        || *token_program == TOKEN_2022_PROGRAM_ID
+}
+
+fn try_get_rent_pending_ata_info_for_token_program(
+    pubkey: &Pubkey,
+    account: &AccountSharedData,
+    token_program: &Pubkey,
+) -> Option<RentPendingAtaInfo> {
+    let token_account =
+        parse_token_account_for_rent_pending(token_program, account.data())?;
+    if token_account.close_authority
+        != COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
+        || token_account.is_native.is_some()
+    {
+        return None;
+    }
+    // Default owner/mint are reserved: they act as the legacy-decode sentinel
+    // for persisted MagicContext materializations.
+    if token_account.owner == Pubkey::default()
+        || token_account.mint == Pubkey::default()
+    {
+        return None;
+    }
+
+    let expected_ata = derive_ata_with_token_program(
+        &token_account.owner,
+        &token_account.mint,
+        token_program,
+    );
+    if expected_ata != *pubkey {
+        return None;
+    }
+
+    let (eata_pubkey, _) = try_derive_eata_address_and_bump(
+        &token_account.owner,
+        &token_account.mint,
+    )?;
+
+    Some(RentPendingAtaInfo {
+        ata_pubkey: *pubkey,
+        eata_pubkey,
+        token_program: *token_program,
+        wallet_owner: token_account.owner,
+        mint: token_account.mint,
+        amount: token_account.amount,
+        token_account_data_len: account.data().len() as u64,
+    })
+}
+
+fn parse_token_account_for_rent_pending(
+    token_program: &Pubkey,
+    data: &[u8],
+) -> Option<TokenAccountCommon> {
+    if *token_program == TOKEN_PROGRAM_ID {
+        let account = SplAccount::unpack(data).ok()?;
+        Some(TokenAccountCommon {
+            mint: account.mint,
+            owner: account.owner,
+            amount: account.amount,
+            is_native: account.is_native,
+            close_authority: account.close_authority,
+        })
+    } else if *token_program == TOKEN_2022_PROGRAM_ID {
+        let account = StateWithExtensions::<Token2022Account>::unpack(data)
+            .ok()?
+            .base;
+        Some(TokenAccountCommon {
+            mint: account.mint,
+            owner: account.owner,
+            amount: account.amount,
+            is_native: account.is_native,
+            close_authority: account.close_authority,
+        })
+    } else {
+        None
+    }
+}
+
 // ---------------- eATA -> ATA projection helpers ----------------
 
 /// Minimal ephemeral representation of an SPL token account used to build
@@ -470,7 +639,7 @@ impl From<EphemeralAta> for Account {
         data.extend_from_slice(&[0; 7]);
 
         Account {
-            lamports: Rent::default().minimum_balance(data.len()),
+            lamports: eata_rent_exempt_balance(),
             data,
             owner: EATA_PROGRAM_ID,
             executable: false,
@@ -637,5 +806,132 @@ mod tests {
             projected_token.close_authority,
             COption::Some(Pubkey::default())
         );
+    }
+
+    #[test]
+    fn rent_pending_ata_uses_rent_sysvar_close_authority() {
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet_owner, &mint);
+        let token_account = SplAccount {
+            mint,
+            owner: wallet_owner,
+            amount: 9,
+            delegate: COption::None,
+            state: AccountState::Initialized,
+            is_native: COption::None,
+            delegated_amount: 0,
+            close_authority: COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY),
+        };
+
+        let mut data = vec![0u8; SplAccount::LEN];
+        SplAccount::pack(token_account, &mut data).unwrap();
+        let mut account = AccountSharedData::from(Account {
+            owner: TOKEN_PROGRAM_ID,
+            data,
+            lamports: Rent::default().minimum_balance(SplAccount::LEN),
+            executable: false,
+            ..Default::default()
+        });
+        account.set_delegated(true);
+
+        let info = try_get_rent_pending_ata_info(&ata, &account)
+            .expect("rent-pending ATA should be detected");
+        assert_eq!(info.ata_pubkey, ata);
+        assert_eq!(info.wallet_owner, wallet_owner);
+        assert_eq!(info.mint, mint);
+        assert_eq!(info.amount, 9);
+
+        let mut default_close_authority = account.clone();
+        let mut token =
+            SplAccount::unpack(default_close_authority.data()).unwrap();
+        token.close_authority = COption::Some(Pubkey::default());
+        SplAccount::pack(token, default_close_authority.data_as_mut_slice())
+            .unwrap();
+        assert!(
+            try_get_rent_pending_ata_info(&ata, &default_close_authority)
+                .is_none()
+        );
+
+        let mut undelegating_account = account.clone();
+        undelegating_account.set_undelegating(true);
+        assert!(try_get_rent_pending_ata_info(&ata, &undelegating_account)
+            .is_none());
+
+        let mut scheduled_undelegating_account = account.clone();
+        scheduled_undelegating_account.set_owner(Pubkey::new_unique());
+        scheduled_undelegating_account.set_delegated(false);
+        scheduled_undelegating_account.set_undelegating(true);
+        let undelegating_info = try_get_undelegating_rent_pending_ata_info(
+            &ata,
+            &scheduled_undelegating_account,
+        )
+        .expect("scheduled undelegating rent-pending ATA should be detected");
+        assert_eq!(undelegating_info.ata_pubkey, ata);
+        assert_eq!(undelegating_info.wallet_owner, wallet_owner);
+        assert_eq!(undelegating_info.mint, mint);
+        assert_eq!(undelegating_info.amount, 9);
+
+        let mut not_delegated = account.clone();
+        not_delegated.set_delegated(false);
+        assert!(try_get_rent_pending_ata_info(&ata, &not_delegated).is_none());
+
+        let mut ephemeral_account = account.clone();
+        ephemeral_account.set_ephemeral(true);
+        assert!(
+            try_get_rent_pending_ata_info(&ata, &ephemeral_account).is_none()
+        );
+
+        let mut confined_account = account.clone();
+        confined_account.set_confined(true);
+        assert!(
+            try_get_rent_pending_ata_info(&ata, &confined_account).is_none()
+        );
+
+        let mut wrong_owner = account.clone();
+        wrong_owner.set_owner(Pubkey::new_unique());
+        assert!(try_get_rent_pending_ata_info(&ata, &wrong_owner).is_none());
+
+        let mut native_account = account.clone();
+        let mut token = SplAccount::unpack(native_account.data()).unwrap();
+        token.is_native = COption::Some(0);
+        SplAccount::pack(token, native_account.data_as_mut_slice()).unwrap();
+        assert!(try_get_rent_pending_ata_info(&ata, &native_account).is_none());
+    }
+
+    #[test]
+    fn rent_pending_ata_rejects_default_owner_and_mint() {
+        // Default owner/mint are reserved as the MagicContext legacy-decode
+        // sentinel and must never classify as rent-pending.
+        for (wallet_owner, mint) in [
+            (Pubkey::default(), Pubkey::new_unique()),
+            (Pubkey::new_unique(), Pubkey::default()),
+        ] {
+            let ata = derive_ata(&wallet_owner, &mint);
+            let token_account = SplAccount {
+                mint,
+                owner: wallet_owner,
+                amount: 9,
+                delegate: COption::None,
+                state: AccountState::Initialized,
+                is_native: COption::None,
+                delegated_amount: 0,
+                close_authority: COption::Some(
+                    RENT_PENDING_ATA_CLOSE_AUTHORITY,
+                ),
+            };
+            let mut data = vec![0u8; SplAccount::LEN];
+            SplAccount::pack(token_account, &mut data).unwrap();
+            let mut account = AccountSharedData::from(Account {
+                owner: TOKEN_PROGRAM_ID,
+                data,
+                lamports: Rent::default().minimum_balance(SplAccount::LEN),
+                executable: false,
+                ..Default::default()
+            });
+            account.set_delegated(true);
+
+            assert!(try_get_rent_pending_ata_info(&ata, &account).is_none());
+        }
     }
 }

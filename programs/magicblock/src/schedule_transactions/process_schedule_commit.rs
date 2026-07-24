@@ -1,8 +1,14 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::{
-    calculate_commit_fee, types::CommittedAccount, CommitAndUndelegate,
-    CommitType, MagicBaseIntent, UndelegateType,
+use magicblock_core::{
+    intent::{
+        calculate_commit_fee, types::CommittedAccount, CommitAndUndelegate,
+        CommitType, MagicBaseIntent, MagicIntentBundle, UndelegateType,
+    },
+    tls::ExecutionTlsStash,
+    token_programs::{
+        try_get_rent_pending_ata_info, RentPendingAtaMaterialization,
+    },
 };
 // no direct token remap helpers needed here; handled in CommittedAccount builder
 use solana_account::{ReadableAccount, WritableAccount};
@@ -13,10 +19,14 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
+        calculate_rent_pending_ata_materialization_fee,
         validate_commit_schedule_permissions, ScheduledIntentBundle,
     },
-    magic_sys::{fetch_current_commit_nonces, validate_intent_size},
-    schedule_transactions::{self, check_commit_limits, try_get_fee_vault},
+    magic_sys::validate_intent_size,
+    schedule_transactions::{
+        self, check_commit_limits, fetch_commit_nonces_with_missing_as_zero,
+        magic_fee_vault_pubkey, try_get_fee_vault,
+    },
     utils::{
         account_actions::{
             charge_delegated_payer, mark_account_as_undelegated,
@@ -27,6 +37,7 @@ use crate::{
         },
         instruction_utils::InstructionUtils,
     },
+    validator::effective_validator_authority_id,
     MagicContext,
 };
 
@@ -143,6 +154,8 @@ pub(crate) fn process_schedule_commit(
     // program owning the PDAs invoked us directly via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
+    let mut rent_pending_ata_materializations = Vec::new();
+    let mut undelegated_accounts_ref = Vec::new();
     let mut seen_committed_pubkeys: HashSet<Pubkey> = HashSet::new();
     for idx in committees_start..ix_accs_len {
         let acc_pubkey =
@@ -204,6 +217,16 @@ pub(crate) fn process_schedule_commit(
             )?;
 
             let account = acc.to_account_shared_data()?;
+            let rent_pending_info =
+                try_get_rent_pending_ata_info(acc_pubkey, &account);
+            if rent_pending_info.is_some() && magic_fee_vault.is_none() {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit ERR: rent-pending ATA {} requires delegated payer fee vault",
+                    acc_pubkey
+                );
+                return Err(InstructionError::IllegalOwner);
+            }
             let committed = CommittedAccount::from_account_shared(
                 *acc_pubkey,
                 &account,
@@ -225,40 +248,73 @@ pub(crate) fn process_schedule_commit(
                 continue;
             }
 
+            if let Some(info) = rent_pending_info {
+                ExecutionTlsStash::register_scheduled_rent_pending_ata_materialization(
+                    info.ata_pubkey,
+                );
+                rent_pending_ata_materializations.push(
+                    RentPendingAtaMaterialization {
+                        ata_pubkey: info.ata_pubkey,
+                        eata_pubkey: info.eata_pubkey,
+                        token_program: info.token_program,
+                        wallet_owner: info.wallet_owner,
+                        mint: info.mint,
+                        token_account_data_len: info.token_account_data_len,
+                        validator: effective_validator_authority_id(),
+                        delegated_payer: *payer_pubkey,
+                        delegated_vault: magic_fee_vault_pubkey(),
+                    },
+                );
+            }
             committed_accounts.push(committed);
         }
 
         if opts.request_undelegation {
-            // If the account is scheduled to be undelegated then we need to lock it
-            // immediately in order to prevent the following actions:
-            // - writes to the account
-            // - scheduling further commits for this account
-            //
-            // Setting the owner will prevent both, since in both cases the _actual_
-            // owner program needs to sign for the account which is not possible at
-            // that point
-            // NOTE: this owner change only takes effect if the transaction which
-            // includes this instruction succeeds.
-            //
-            // We also set the undelegating flag on the account in order to detect
-            // undelegations for which we miss updates
-            mark_account_as_undelegated(&acc)?;
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit: Marking account {} as undelegating",
-                acc_pubkey
-            );
+            undelegated_accounts_ref.push((*acc_pubkey, acc));
         }
     }
 
     if let Some(fee_vault) = magic_fee_vault {
-        let nonces = fetch_current_commit_nonces(&committed_accounts)?;
-        let fee = calculate_commit_fee(&committed_accounts, &nonces)?;
+        let rent_pending_pubkeys = rent_pending_ata_materializations
+            .iter()
+            .map(|materialization| materialization.eata_pubkey)
+            .collect::<HashSet<_>>();
+        let nonces = fetch_commit_nonces_with_missing_as_zero(
+            &committed_accounts,
+            &rent_pending_pubkeys,
+        )?;
+        let fee = calculate_commit_fee(&committed_accounts, &nonces)?
+            .checked_add(calculate_rent_pending_ata_materialization_fee(
+                rent_pending_ata_materializations.len(),
+            )?)
+            .ok_or(InstructionError::ArithmeticOverflow)?;
         charge_delegated_payer(&payer_account, &fee_vault, fee)?;
     } else if !opts.request_undelegation {
         // We validate commit nonces only for plain commits.
         // If accounts are undelegated we don't want to fail.
         check_commit_limits(&committed_accounts, invoke_context)?;
+    }
+
+    for (acc_pubkey, acc) in undelegated_accounts_ref.iter() {
+        // If the account is scheduled to be undelegated then we need to lock it
+        // immediately in order to prevent the following actions:
+        // - writes to the account
+        // - scheduling further commits for this account
+        //
+        // Setting the owner will prevent both, since in both cases the _actual_
+        // owner program needs to sign for the account which is not possible at
+        // that point
+        // NOTE: this owner change only takes effect if the transaction which
+        // includes this instruction succeeds.
+        //
+        // We also set the undelegating flag on the account in order to detect
+        // undelegations for which we miss updates
+        mark_account_as_undelegated(acc)?;
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit: Marking account {} as undelegating",
+            acc_pubkey
+        );
     }
 
     // NOTE: this is only protected by all the above checks however if the
@@ -296,7 +352,7 @@ pub(crate) fn process_schedule_commit(
         InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
-    let base_intent = if opts.request_undelegation {
+    let mut base_intent: MagicIntentBundle = if opts.request_undelegation {
         MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(committed_accounts),
             undelegate_action: UndelegateType::Standalone,
@@ -307,6 +363,8 @@ pub(crate) fn process_schedule_commit(
         ))
     }
     .into();
+    base_intent.rent_pending_ata_materializations =
+        rent_pending_ata_materializations;
     validate_intent_size(&base_intent).inspect_err(|_| {
         ic_msg!(
             invoke_context,

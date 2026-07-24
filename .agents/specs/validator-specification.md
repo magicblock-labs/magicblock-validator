@@ -369,6 +369,57 @@ Magic Program instructions:
 - `ResizeEphemeralAccount { new_data_len }`
 - `CloseEphemeralAccount`
 
+## Rent-pending ATA materialization
+
+Rent-pending ATAs are local canonical token accounts that let the ER accept
+tokens before the corresponding base-layer eATA exists. They are not generic
+ephemeral accounts. The Magic Program creates them locally through
+`CreateRentPendingAta { wallet_owner }`; the mint and token program are derived
+from the instruction accounts. It recognizes them only when the local token
+account is canonical, owned by SPL Token or Token-2022, non-native, delegated,
+not confined, not undelegating, not ephemeral, and has close authority set to
+the rent sysvar sentinel. Ordinary projected ATAs still use
+`Pubkey::default()` as the uncloseable close authority; that marker is not
+rent-pending.
+
+New local rent-pending ATA creation is free, but the same transaction must leave
+the newly created account with a positive token amount. The processor rejects
+and rolls back a creation transaction that leaves a newly created rent-pending
+ATA at zero balance. The same transaction may also schedule commit-and-undelegate
+for that newly created ATA after materialization metadata has been recorded; in
+that case the post-creation verifier accepts the undelegating token-account shape
+only because the execution TLS materialization marker proves scheduling already
+captured the rent-pending metadata.
+
+When a rent-pending ATA is scheduled for commit or commit-and-undelegate, the
+Magic Program records explicit materialization metadata, charges the delegated
+payer into the magic fee vault for each materialization, and still remaps the
+committed ATA to its eATA form. The committor prepends e-token idempotent eATA
+initialize and delegate-to-this-validator instructions before the normal DLP
+commit task. If the eATA was created after local rent-pending creation and is
+already delegated to another validator, the e-token delegation instruction is
+the expected validator-mismatch failure gate; the DLP commit/undelegation must
+not be treated as successful.
+
+For commit-and-undelegate scheduling paths, fee-vault charging and commit-limit
+checks must happen before local accounts are marked undelegating, because the
+local mutation clears the `delegated` flag and the payer can also be one of the
+undelegated accounts. Token-2022 rent-pending ATA initialization must mirror the
+mint's default account state extension; a mint whose `DefaultAccountState` is
+`Frozen` must create a frozen local rent-pending ATA rather than an initialized
+one. Token-2022 rent-pending ATAs must include `ImmutableOwner` in addition to
+supported marker-only account extensions. Required stateful account extensions
+such as `TransferFeeAmount` or `TransferHookAccount` are rejected until
+settlement preserves their state. Rent-pending eATA fee calculation must use an
+existing base commit nonce when delegation metadata already exists, and default
+the nonce to zero only when that metadata is actually missing.
+Commit-and-undelegate rent reimbursement must use an existing base metadata rent
+payer when present, defaulting to the validator only when rent-pending eATA
+metadata is actually missing.
+The committor must not infer rent-pending materialization from eATA account
+shape alone; without explicit scheduled materialization metadata, missing base
+metadata remains an error.
+
 ## RPC and router specification
 
 The MagicBlock Router API implements most standard Solana JSON-RPC methods and adds MagicBlock-specific methods.

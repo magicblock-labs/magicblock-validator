@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
+use magicblock_core::{
+    intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS},
+    token_programs::eata_rent_exempt_balance,
+};
 use magicblock_magic_program_api::{
     args::{
         ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
@@ -22,7 +25,9 @@ use solana_signer::Signer;
 
 use crate::{
     magic_context::MagicContext,
-    magic_scheduled_base_intent::ScheduledIntentBundle,
+    magic_scheduled_base_intent::{
+        ScheduledIntentBundle, RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS,
+    },
     magic_sys::COMMIT_LIMIT,
     schedule_transactions::{
         magic_fee_vault_pubkey, transaction_scheduler::TransactionScheduler,
@@ -280,10 +285,14 @@ mod tests {
     };
     use magicblock_core::token_programs::{
         derive_ata, derive_ata_with_token_program, derive_eata,
-        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+        EATA_PROGRAM_ID, RENT_PENDING_ATA_CLOSE_AUTHORITY,
+        TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
     };
     use serial_test::serial;
+    use solana_account::WritableAccount;
+    use solana_program::{program_option::COption, program_pack::Pack};
     use solana_seed_derivable::SeedDerivable;
+    use spl_token::state::Account as SplAccount;
     use test_kit::init_logger;
 
     use super::*;
@@ -305,6 +314,20 @@ mod tests {
     ) -> AccountSharedData {
         let ata_account = create_token_2022_ata_account(owner, mint);
         let mut acc = AccountSharedData::from(ata_account);
+        acc.set_delegated(true);
+        acc
+    }
+
+    fn make_rent_pending_spl_ata_account(
+        owner: &Pubkey,
+        mint: &Pubkey,
+        amount: u64,
+    ) -> AccountSharedData {
+        let mut acc = AccountSharedData::from(create_ata_account(owner, mint));
+        let mut token = SplAccount::unpack(acc.data()).unwrap();
+        token.amount = amount;
+        token.close_authority = COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY);
+        SplAccount::pack(token, acc.data_as_mut_slice()).unwrap();
         acc.set_delegated(true);
         acc
     }
@@ -1477,6 +1500,10 @@ mod tests {
 
     /// Helper: builds transaction accounts for a delegated-payer commit.
     /// Payer is delegated+writable; fee vault is delegated+writable.
+    /// Funds the delegated payer generously enough to cover commit fees
+    /// plus rent-inclusive rent-pending materialization charges.
+    const DELEGATED_PAYER_LAMPORTS: u64 = 10_000_000;
+
     fn prepare_delegated_payer_transaction(
         payer: &Keypair,
         program: Pubkey,
@@ -1492,8 +1519,11 @@ mod tests {
         let mut account_data = {
             let mut map = HashMap::new();
 
-            let mut payer_acc =
-                AccountSharedData::new(1_000_000, 0, &system_program::id());
+            let mut payer_acc = AccountSharedData::new(
+                DELEGATED_PAYER_LAMPORTS,
+                0,
+                &system_program::id(),
+            );
             payer_acc.set_delegated(true);
             map.insert(payer.pubkey(), payer_acc);
 
@@ -1576,9 +1606,207 @@ mod tests {
         accounts
             .iter()
             .find(|a| {
-                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
+                a.lamports() == DELEGATED_PAYER_LAMPORTS - COMMIT_FEE_LAMPORTS
+                    && a.delegated()
             })
             .expect("payer should have been debited");
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_rent_pending_ata_without_fee_vault_errors() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"rent_pending_ata_no_fee_vault_____").unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet_owner, &mint);
+
+        // Non-delegated payer: no fee vault path, so a rent-pending ATA
+        // committee must be rejected instead of scheduled without a charge.
+        let mut account_data = {
+            let mut map = HashMap::new();
+            map.insert(
+                payer.pubkey(),
+                AccountSharedData::new(1_000_000, 0, &system_program::id()),
+            );
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
+            );
+            map.insert(
+                ata,
+                make_rent_pending_spl_ata_account(&wallet_owner, &mint, 42),
+            );
+            map
+        };
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(0)),
+        );
+
+        let mut transaction_accounts = vec![(
+            clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        )];
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![ata],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::IllegalOwner),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_rent_pending_ata_records_materialization() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"rent_pending_ata_materialization__").unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet_owner, &mint);
+        let eata = derive_eata(&wallet_owner, &mint);
+        let expected_fee = eata_rent_exempt_balance()
+            + RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS;
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction(
+                &payer,
+                TOKEN_PROGRAM_ID,
+                &[ata],
+                StubNonces::Global(0),
+            );
+        account_data.insert(
+            ata,
+            make_rent_pending_spl_ata_account(&wallet_owner, &mint, 42),
+        );
+
+        let ix =
+            InstructionUtils::schedule_commit_with_delegated_payer_instruction(
+                &payer.pubkey(),
+                vec![ata, ata],
+            );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        processed_scheduled
+            .iter()
+            .find(|a| a.lamports() == expected_fee && a.delegated())
+            .expect(
+                "fee vault should receive rent-pending materialization fee",
+            );
+        processed_scheduled
+            .iter()
+            .find(|a| {
+                a.lamports() == DELEGATED_PAYER_LAMPORTS - expected_fee
+                    && a.delegated()
+            })
+            .expect("payer should be charged rent-pending materialization fee");
+
+        let magic_context_acc = assert_non_accepted_actions(
+            &processed_scheduled,
+            &payer.pubkey(),
+            1,
+        );
+        let magic_context =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap();
+        let intent = &magic_context.scheduled_base_intents[0].intent_bundle;
+
+        assert_eq!(intent.get_all_committed_pubkeys(), vec![eata]);
+        assert_eq!(intent.rent_pending_ata_materializations.len(), 1);
+        let materialization = &intent.rent_pending_ata_materializations[0];
+        assert_eq!(materialization.ata_pubkey, ata);
+        assert_eq!(materialization.eata_pubkey, eata);
+        assert_eq!(materialization.wallet_owner, wallet_owner);
+        assert_eq!(materialization.mint, mint);
+        assert_eq!(materialization.token_program, TOKEN_PROGRAM_ID);
+        assert_eq!(materialization.delegated_payer, payer.pubkey());
+        assert_eq!(materialization.delegated_vault, magic_fee_vault_pubkey());
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_rent_pending_ata_uses_existing_nonce_fee() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"rent_pending_ata_existing_nonce_").unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet_owner, &mint);
+        let eata = derive_eata(&wallet_owner, &mint);
+        let expected_fee = COMMIT_FEE_LAMPORTS
+            + eata_rent_exempt_balance()
+            + RENT_PENDING_ATA_MATERIALIZATION_FEE_LAMPORTS;
+
+        let mut per_account = HashMap::new();
+        per_account.insert(eata, ACTUAL_COMMIT_LIMIT);
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction(
+                &payer,
+                TOKEN_PROGRAM_ID,
+                &[ata],
+                StubNonces::PerAccount(per_account),
+            );
+        account_data.insert(
+            ata,
+            make_rent_pending_spl_ata_account(&wallet_owner, &mint, 42),
+        );
+
+        let ix =
+            InstructionUtils::schedule_commit_with_delegated_payer_instruction(
+                &payer.pubkey(),
+                vec![ata],
+            );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        processed_scheduled
+            .iter()
+            .find(|a| a.lamports() == expected_fee && a.delegated())
+            .expect("fee vault should receive materialization and commit fees");
+        processed_scheduled
+            .iter()
+            .find(|a| {
+                a.lamports() == DELEGATED_PAYER_LAMPORTS - expected_fee
+                    && a.delegated()
+            })
+            .expect("payer should be charged materialization and commit fees");
     }
 
     #[test]
@@ -1629,10 +1857,9 @@ mod tests {
         assert_eq!(vault.lamports(), COMMIT_FEE_LAMPORTS);
 
         // Payer debited by exactly one fee
-        assert!(accounts
-            .iter()
-            .any(|a| a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
-                && a.delegated()));
+        assert!(accounts.iter().any(|a| a.lamports()
+            == DELEGATED_PAYER_LAMPORTS - COMMIT_FEE_LAMPORTS
+            && a.delegated()));
     }
 
     #[test]

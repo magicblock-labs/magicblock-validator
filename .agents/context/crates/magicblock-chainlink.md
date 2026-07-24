@@ -266,6 +266,7 @@ Chainlink has special handling for associated token accounts and ephemeral ATAs:
 - It subscribes to both ATA and eATA using `SubscriptionReason::AtaProjection`.
 - If the eATA exists, has a delegation record for this validator, and can be projected, Chainlink clones a projected delegated ATA into the local bank.
 - Projection preserves the base ATA's owner and data length, which is important for Token-2022 extensions.
+- eATA subscription updates do not overwrite an already-delegated base ATA, except for delegated rent-pending ATA markers detected by `try_get_rent_pending_ata_info`; projecting those markers clears the rent-pending close-authority sentinel while preserving delegated local execution state.
 - Missing eATAs can be remembered in `known_empty_eatas`, but only after confirmed `NotFound` while an eATA subscription is live.
 - Raw eATA PDAs are not marked delegated directly; their state is projected into the corresponding base ATA.
 

@@ -506,7 +506,7 @@ mod tests {
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,
         intent_executor::task_info_fetcher::{
-            TaskInfoFetcher, TaskInfoFetcherResult,
+            CommitNonceFetchResult, TaskInfoFetcher, TaskInfoFetcherResult,
         },
         persist::IntentPersisterImpl,
         tasks::{
@@ -532,6 +532,17 @@ mod tests {
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        }
+
+        async fn fetch_next_commit_nonces_with_missing_as_zero(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+            _: &[Pubkey],
+        ) -> TaskInfoFetcherResult<CommitNonceFetchResult> {
+            self.fetch_next_commit_nonces(pubkeys, 0)
+                .await
+                .map(CommitNonceFetchResult::from_nonces)
         }
 
         async fn fetch_current_commit_nonces(
@@ -996,9 +1007,13 @@ mod tests {
             )]),
         });
 
-        let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-            .await
-            .unwrap();
+        let tasks = TaskBuilderImpl::finalize_tasks(
+            &info_fetcher,
+            &intent,
+            &Pubkey::new_unique(),
+        )
+        .await
+        .unwrap();
 
         let BaseTaskImpl::Undelegate(task) = &tasks[1] else {
             panic!("expected undelegate task");
@@ -1014,22 +1029,24 @@ mod tests {
         let intent = create_test_intent(0, &pubkey, false);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
+        let validator = Pubkey::new_unique();
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
+            &validator,
             &None::<IntentPersisterImpl>,
         )
         .await
         .unwrap();
         let finalize_task =
-            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent, &validator)
                 .await
                 .unwrap();
 
         let execution_mode = TaskStrategist::build_execution_strategy(
             commit_task,
             finalize_task,
-            &Pubkey::new_unique(),
+            &validator,
             &None::<IntentPersisterImpl>,
             None,
         )
@@ -1048,22 +1065,24 @@ mod tests {
         let intent = create_test_intent(0, &pubkeys, true);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
+        let validator = Pubkey::new_unique();
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
+            &validator,
             &None::<IntentPersisterImpl>,
         )
         .await
         .unwrap();
         let finalize_task =
-            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent, &validator)
                 .await
                 .unwrap();
 
         let execution_mode = TaskStrategist::build_execution_strategy(
             commit_task,
             finalize_task,
-            &Pubkey::new_unique(),
+            &validator,
             &None::<IntentPersisterImpl>,
             None,
         )
@@ -1080,22 +1099,24 @@ mod tests {
         let intent = create_test_intent(0, &pubkeys, false);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
+        let validator = Pubkey::new_unique();
         let commit_task = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
+            &validator,
             &None::<IntentPersisterImpl>,
         )
         .await
         .unwrap();
         let finalize_task =
-            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent, &validator)
                 .await
                 .unwrap();
 
         let execution_mode = TaskStrategist::build_execution_strategy(
             commit_task,
             finalize_task,
-            &Pubkey::new_unique(),
+            &validator,
             &None::<IntentPersisterImpl>,
             None,
         )
