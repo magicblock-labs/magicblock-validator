@@ -96,7 +96,7 @@ impl HttpDispatcher {
         self: Arc<Self>,
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
-        if let Some(response) = Self::handle_special_request(&request) {
+        if let Some(response) = self.handle_special_request(&request) {
             return Ok(response);
         }
         // A local macro to simplify error handling. If a Result is an Err,
@@ -233,6 +233,7 @@ impl HttpDispatcher {
     }
 
     fn handle_special_request(
+        &self,
         request: &Request<Incoming>,
     ) -> Option<Response<JsonBody>> {
         if request.method() == Method::OPTIONS {
@@ -242,7 +243,9 @@ impl HttpDispatcher {
         } else if request.uri() == "/health/primary" {
             let mut response = Response::new(JsonBody::from(""));
             Self::set_access_control_headers(&mut response);
-            if CoordinationMode::current() != CoordinationMode::Primary {
+            if CoordinationMode::current() != CoordinationMode::Primary
+                || !self.blocks.is_ready()
+            {
                 *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE
             }
             return Some(response);

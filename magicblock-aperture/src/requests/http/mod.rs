@@ -129,13 +129,17 @@ impl HttpDispatcher {
         &self,
         method: &'static str,
     ) -> RpcResult<()> {
-        if self.needs_onchain_interactions() {
-            Ok(())
-        } else {
-            Err(RpcError::transaction_verification(format!(
+        if !self.needs_onchain_interactions() {
+            return Err(RpcError::transaction_verification(format!(
                 "{method} is only available while validator is primary"
-            )))
+            )));
         }
+        if !self.blocks.is_ready() {
+            return Err(RpcError::unavailable(format!(
+                "{method} is unavailable until the first post-recovery block"
+            )));
+        }
+        Ok(())
     }
 
     /// Fetches an account's data from the `AccountsDb` filling it in from chain

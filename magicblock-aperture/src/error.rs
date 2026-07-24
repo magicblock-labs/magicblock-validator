@@ -169,6 +169,14 @@ impl RpcError {
         }
     }
 
+    pub(crate) fn unavailable<E: Display>(error: E) -> Self {
+        Self {
+            code: INTERNAL_ERROR,
+            message: error.to_string(),
+            http_status: 503,
+        }
+    }
+
     pub(crate) fn custom<E: Display>(error: E, code: i16) -> Self {
         Self {
             code,
