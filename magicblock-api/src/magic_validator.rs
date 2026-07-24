@@ -149,10 +149,7 @@ impl MagicValidator {
         let GenesisConfigInfo {
             accounts: genesis_accounts,
             validator_pubkey,
-        } = create_genesis_config_with_leader(
-            &validator_pubkey,
-            config.validator.basefee,
-        );
+        } = create_genesis_config_with_leader(&validator_pubkey);
 
         let step_start = Instant::now();
         let (ledger, last_slot) =
@@ -357,9 +354,7 @@ impl MagicValidator {
         {
             validator::set_validator_authority_override(pk);
         }
-        let base_fee = config.validator.basefee;
-
-        let svm_env = build_svm_env(&accountsdb, latest_block.blockhash, 0);
+        let svm_env = build_svm_env(&accountsdb, latest_block.blockhash);
         let feature_set = svm_env.feature_set.clone();
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
@@ -383,7 +378,6 @@ impl MagicValidator {
         // (used by the RPC implementation), we effectively disable airdrops
         let node_context = NodeContext {
             identity: validator_pubkey,
-            base_fee,
             featureset: Arc::new(feature_set),
             blocktime: config.ledger.block_time_ms(),
         };
@@ -723,7 +717,6 @@ impl MagicValidator {
         rpc_url: &str,
         config: &ChainOperationConfig,
         block_time_ms: u64,
-        base_fee: u64,
     ) -> ApiResult<()> {
         let country_code = CountryCode::from(config.country_code.alpha3());
         let validator_keypair = validator_authority();
@@ -731,7 +724,7 @@ impl MagicValidator {
             identity: validator_keypair.pubkey(),
             status: ErStatus::Active,
             block_time_ms: block_time_ms as u16,
-            base_fee: base_fee as u16,
+            base_fee: 0,
             features: FeaturesSet::default(),
             load_average: 0,
             country_code,
@@ -918,7 +911,6 @@ impl MagicValidator {
         let identity = self.identity;
         let chain_operation_config = self.config.chain_operation.clone();
         let block_time_ms = self.config.ledger.block_time_ms();
-        let base_fee = self.config.validator.basefee;
 
         // Ephemeral mode does a non-blocking startup balance check.
         // Intentionally fire-and-forget: the task itself exits the process on failure.
@@ -980,7 +972,6 @@ impl MagicValidator {
                     &rpc_url,
                     config,
                     block_time_ms,
-                    base_fee,
                 )
                 .await
                 {

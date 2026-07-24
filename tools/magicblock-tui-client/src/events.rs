@@ -311,7 +311,6 @@ mod tests {
             ledger_path: "/tmp/ledger".to_string(),
             block_time_ms: 400,
             lifecycle_mode: "ephemeral".to_string(),
-            base_fee: 5_000,
             help_url: "https://example.com/help".to_string(),
             version: "1.0.0".to_string(),
             git_version: "abc123".to_string(),

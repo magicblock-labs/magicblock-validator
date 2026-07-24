@@ -9,10 +9,8 @@ use solana_program::{
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
 };
-use solana_transaction_error::TransactionError;
 use test_kit::{ExecutionTestEnv, Signer};
 
-const BASE_FEE: u64 = ExecutionTestEnv::BASE_FEE;
 const TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Helper to setup a guinea instruction with a new account.
@@ -30,23 +28,6 @@ fn setup_guinea_ix(
         &ix_data,
         vec![AccountMeta::new(account, false)],
     )
-}
-
-#[tokio::test]
-async fn test_insufficient_fee() {
-    let env = ExecutionTestEnv::new();
-    let mut payer = env.get_payer();
-    payer.set_lamports(BASE_FEE - 1);
-    payer.commit();
-
-    let ix = setup_guinea_ix(&env, GuineaInstruction::PrintSizes);
-    let txn = env.build_transaction(&[ix]);
-
-    let result = env.execute_transaction(txn).await;
-    assert!(matches!(
-        result,
-        Err(TransactionError::InsufficientFundsForFee)
-    ));
 }
 
 #[tokio::test]
@@ -78,7 +59,7 @@ async fn test_separate_fee_payer() {
         env.get_account(recipient.pubkey()).lamports(),
         LAMPORTS_PER_SOL + AMOUNT
     );
-    assert_eq!(env.get_payer().lamports(), initial_payer_bal - BASE_FEE);
+    assert_eq!(env.get_payer().lamports(), initial_payer_bal);
 }
 
 #[tokio::test]
@@ -107,49 +88,39 @@ async fn test_compute_unit_price_does_not_change_fee() {
         .recv_timeout(TIMEOUT)
         .unwrap();
     assert!(status.meta.status.is_ok());
-    assert_eq!(status.meta.fee, BASE_FEE);
-    assert_eq!(env.get_payer().lamports(), initial_payer_bal - BASE_FEE);
+    assert_eq!(status.meta.fee, 0);
+    assert_eq!(env.get_payer().lamports(), initial_payer_bal);
 }
 
 #[tokio::test]
-async fn test_non_delegated_payer_rejection() {
-    let env = ExecutionTestEnv::new();
-    let mut payer = env.get_payer();
-    payer.set_delegated(false);
-    let initial_bal = payer.lamports();
-    payer.commit();
-
-    let ix = setup_guinea_ix(&env, GuineaInstruction::PrintSizes);
-    let txn = env.build_transaction(&[ix]);
-
-    let result = env.execute_transaction(txn).await;
-    assert!(
-        matches!(result, Err(TransactionError::InvalidAccountForFee)),
-        "Non-delegated payer should be rejected"
-    );
-    assert_eq!(
-        env.get_payer().lamports(),
-        initial_bal,
-        "Rejected tx should not be charged"
-    );
-}
-
-#[tokio::test]
-async fn test_fee_charged_for_failed_transaction() {
+async fn test_failed_transaction_does_not_commit_accounts() {
     let env = ExecutionTestEnv::new();
     env.wait_for_scheduler_ready().await;
     let initial_bal = env.get_payer().lamports();
+    let sender =
+        env.create_account_with_config(LAMPORTS_PER_SOL, 0, guinea::ID);
+    let recipient = env.create_account(LAMPORTS_PER_SOL);
+    const AMOUNT: u64 = 1_000_000;
+    let transfer_ix = Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::Transfer(AMOUNT),
+        vec![
+            AccountMeta::new(sender.pubkey(), false),
+            AccountMeta::new(recipient.pubkey(), false),
+        ],
+    );
 
     // Create invalid instruction (writing to empty data)
-    let ix = setup_guinea_ix(&env, GuineaInstruction::WriteByteToData(42));
+    let fail_ix = setup_guinea_ix(&env, GuineaInstruction::WriteByteToData(42));
     // Hack: manually set data len to 0 to force failure
-    let mut acc = env.get_account(ix.accounts[0].pubkey);
+    let mut acc = env.get_account(fail_ix.accounts[0].pubkey);
     acc.set_data(vec![]);
     env.accountsdb
-        .insert_account(&ix.accounts[0].pubkey, &acc)
+        .insert_account(&fail_ix.accounts[0].pubkey, &acc)
         .unwrap();
+    let target = fail_ix.accounts[0].pubkey;
 
-    let txn = env.build_transaction(&[ix]);
+    let txn = env.build_transaction(&[transfer_ix, fail_ix]);
     env.transaction_scheduler.schedule(txn).await.unwrap();
 
     let status = env
@@ -158,16 +129,30 @@ async fn test_fee_charged_for_failed_transaction() {
         .recv_timeout(TIMEOUT)
         .unwrap();
     assert!(status.meta.status.is_err(), "Transaction should fail");
+    assert_eq!(status.meta.fee, 0);
     assert_eq!(
         env.get_payer().lamports(),
-        initial_bal - BASE_FEE,
-        "Fee should be charged on failure"
+        initial_bal,
+        "Failed transaction changed the payer"
+    );
+    assert_eq!(
+        env.get_account(sender.pubkey()).lamports(),
+        LAMPORTS_PER_SOL
+    );
+    assert_eq!(
+        env.get_account(recipient.pubkey()).lamports(),
+        LAMPORTS_PER_SOL
+    );
+    assert!(env.get_account(target).data().is_empty());
+    assert!(
+        env.dispatch.account_update.try_recv().is_err(),
+        "Failed transaction emitted an account update"
     );
 }
 
 #[tokio::test]
 async fn test_transaction_gasless_mode() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let mut payer = env.get_payer();
     payer.set_lamports(1);
     payer.set_delegated(false);
@@ -202,7 +187,7 @@ async fn test_transaction_gasless_mode() {
 
 #[tokio::test]
 async fn test_transaction_gasless_mode_with_cu_price() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let mut payer = env.get_payer();
     payer.set_lamports(1);
     payer.set_delegated(false);
@@ -242,7 +227,7 @@ async fn test_transaction_gasless_mode_with_cu_price() {
 
 #[tokio::test]
 async fn test_transaction_gasless_mode_with_non_existent_account() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let mut payer = env.get_payer();
     payer.set_lamports(1);
     payer.set_delegated(false);

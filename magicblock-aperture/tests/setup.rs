@@ -66,7 +66,6 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> Arc<ChainlinkImpl> {
 
 impl RpcTestEnv {
     // --- Constants ---
-    pub const BASE_FEE: u64 = ExecutionTestEnv::BASE_FEE;
     pub const INIT_ACCOUNT_BALANCE: u64 = 10_000_000_000;
     pub const TRANSFER_AMOUNT: u64 = 1000;
 
@@ -95,7 +94,7 @@ impl RpcTestEnv {
         const BLOCK_TIME_MS: u64 = 50;
 
         let execution = if defer_scheduler {
-            ExecutionTestEnv::new_with_config(Self::BASE_FEE, 1, true)
+            ExecutionTestEnv::new_with_config(1, true)
         } else {
             ExecutionTestEnv::new()
         };
@@ -106,8 +105,6 @@ impl RpcTestEnv {
 
         let node_context = NodeContext {
             identity: execution.get_payer().pubkey,
-            base_fee: Self::BASE_FEE,
-
             featureset: Default::default(),
             blocktime: BLOCK_TIME_MS,
         };

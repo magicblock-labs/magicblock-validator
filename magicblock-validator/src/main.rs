@@ -77,8 +77,6 @@ async fn run() {
     let block_time_ms = config.ledger.block_time_ms();
     #[cfg(feature = "tui")]
     let lifecycle_mode = format!("{:?}", config.lifecycle);
-    #[cfg(feature = "tui")]
-    let base_fee = config.validator.basefee;
     debug!(%rpc_url, %ws_url, "Validator configured");
     let mut api = match MagicValidator::try_from_config(config).await {
         Ok(api) => api,
@@ -120,7 +118,6 @@ async fn run() {
                 ledger_path,
                 block_time_ms,
                 lifecycle_mode,
-                base_fee,
                 help_url: "https://docs.magicblock.xyz".to_string(),
                 version: version.to_string(),
                 git_version: version.git_version.to_string(),

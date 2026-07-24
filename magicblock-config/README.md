@@ -38,8 +38,8 @@ fn main() -> Result<(), figment::Error> {
 
 The crate resolves configuration values in the following order (highest priority first):
 
-1.  **CLI Arguments**: Explicit flags passed at runtime (e.g., `--basefee 500`).
-2.  **Environment Variables**: System environment variables (e.g., `MBV_VALIDATOR__BASEFEE`).
+1.  **CLI Arguments**: Explicit flags passed at runtime.
+2.  **Environment Variables**: System environment variables.
 3.  **TOML Configuration File**: A structured file passed via `--config <PATH>`.
 4.  **System Defaults**: Hardcoded safe defaults defined in the crate.
 
@@ -55,7 +55,6 @@ Environment variables are mapped using the `figment` provider.
 
 | Struct Field | Config Section | Environment Variable |
 | :--- | :--- | :--- |
-| `validator.basefee` | `[validator]` | `MBV_VALIDATOR__BASEFEE` |
 | `ledger.block_time` | `[ledger]` | `MBV_LEDGER__BLOCK_TIME` |
 | `chain_operation.country_code` | `[chain-operation]` | `MBV_CHAIN_OPERATION__COUNTRY_CODE` |
 
@@ -74,7 +73,6 @@ lifecycle = "offline"
 storage = "/data/ledger"
 
 [validator]
-basefee = 500
 keypair = "9Vo7Tb..."
 
 [accounts-db]
@@ -86,7 +84,7 @@ block-size = "block256"
 
 The configuration is split into domain-specific structs available in `src/config/`:
 
-  * **`ValidatorConfig`**: Identity keypair, base fees.
+  * **`ValidatorConfig`**: Identity keypair and replication mode.
   * **`LedgerConfig`**: Block production timing, verification settings.
   * **`AccountsDbConfig`**: Snapshotting, indexing, and storage size tuning.
   * **`ChainOperationConfig`**: On-chain registration details (Country code, FQDN).
@@ -101,4 +99,3 @@ This crate includes a comprehensive test suite verifying the precedence logic, o
 ```bash
 cargo test -p magicblock-config
 ```
-

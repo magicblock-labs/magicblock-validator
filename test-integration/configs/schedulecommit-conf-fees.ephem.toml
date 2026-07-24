@@ -25,9 +25,6 @@ max-snapshots = 7
 [ledger]
 reset = true
 
-[validator]
-basefee = 1000
-
 [[programs]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
 path = "test-integration/target/deploy/program_schedulecommit.so"

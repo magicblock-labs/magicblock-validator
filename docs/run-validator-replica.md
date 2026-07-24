@@ -139,9 +139,6 @@ remotes = [
   "wss://api.devnet.solana.com",
 ]
 
-[validator]
-basefee = 0
-
 [validator.replication-mode.replica]
 url = "nats://nats.example.com:4222"
 secret = "<NATS_NKEY_SEED>"
