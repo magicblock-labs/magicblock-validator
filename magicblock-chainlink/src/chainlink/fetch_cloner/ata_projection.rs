@@ -22,8 +22,9 @@ use super::{
 use crate::{
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
-        ResolvedAccountSharedData, SubscriptionReason,
+        pubsub_common::SubscriptionSource, ChainPubsubClient, ChainRpcClient,
+        MatchSlotsConfig, RemoteAccount, ResolvedAccountSharedData,
+        SubscriptionReason,
     },
 };
 
@@ -39,6 +40,29 @@ pub(crate) fn derive_eata_pubkey_from_ata_layout(
     ata_account: &AccountSharedData,
 ) -> Option<Pubkey> {
     derive_eata_pubkey(ata_info_from_layout(ata_pubkey, ata_account)?)
+}
+
+pub(crate) fn derive_supported_ata_pubkeys(
+    owner: &Pubkey,
+    mint: &Pubkey,
+) -> Vec<Pubkey> {
+    try_derive_supported_ata_pubkeys(owner, mint)
+        .token_2022_first()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+}
+
+pub(crate) fn derive_supported_ata_pubkeys_from_raw_eata(
+    eata_pubkey: &Pubkey,
+    eata_account: &AccountSharedData,
+) -> Option<Vec<Pubkey>> {
+    let (wallet_owner, mint) = delegation::parse_raw_eata_pda(
+        eata_pubkey,
+        eata_account.data(),
+        EATA_PROGRAM_ID,
+    )?;
+    Some(derive_supported_ata_pubkeys(&wallet_owner, &mint))
 }
 
 fn derive_eata_pubkey(ata_info: AtaInfo) -> Option<Pubkey> {
@@ -103,6 +127,7 @@ pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_up
     this: &FetchCloner<T, U, V, C>,
     eata_pubkey: Pubkey,
     eata_account: &AccountSharedData,
+    update_source: SubscriptionSource,
     deleg_record: Option<&DelegationRecord>,
     delegation_actions: &DelegationActions,
     companion_fetch_log_context: &CompanionFetchLogContext,
@@ -125,11 +150,19 @@ where
         .await;
     }
 
-    delegation::parse_raw_eata_pda(
-        &eata_pubkey,
-        eata_account.data(),
-        EATA_PROGRAM_ID,
-    )?;
+    let ata_pubkeys =
+        derive_supported_ata_pubkeys_from_raw_eata(&eata_pubkey, eata_account)?;
+    if ata_pubkeys.is_empty() {
+        return None;
+    }
+
+    if matches!(update_source, SubscriptionSource::Program)
+        && !this
+            .raw_eata_has_local_projection_interest(eata_pubkey, eata_account)
+            .await?
+    {
+        return None;
+    }
 
     let (deleg_record, delegation_actions) =
         delegation::fetch_and_parse_delegation_record(
@@ -175,12 +208,7 @@ where
         eata_account.data(),
         deleg_record.owner,
     )?;
-    let ata_pubkeys = try_derive_supported_ata_pubkeys(&wallet_owner, &mint);
-    let ata_pubkeys = ata_pubkeys
-        .token_2022_first()
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+    let ata_pubkeys = derive_supported_ata_pubkeys(&wallet_owner, &mint);
 
     // eATA updates only carry the projected balance fields. The base ATA is
     // required so the clone preserves the actual token program owner and any
