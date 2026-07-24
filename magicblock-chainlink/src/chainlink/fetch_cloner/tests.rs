@@ -699,7 +699,7 @@ async fn test_dlp_program_update_classifier_discovers_unwatched_non_eata_update(
 }
 
 #[tokio::test]
-async fn test_dlp_program_update_classifier_drops_raw_eata_without_projection_interest(
+async fn test_dlp_program_update_classifier_defers_raw_eata_without_projection_interest(
 ) {
     let validator_keypair = Keypair::new();
     let wallet_owner = random_pubkey();
@@ -724,7 +724,7 @@ async fn test_dlp_program_update_classifier_drops_raw_eata_without_projection_in
         fetch_cloner
             .classify_dlp_program_update_interest(eata_pubkey, &eata_account)
             .await,
-        DlpProgramUpdateInterest::DropRawEataNoProjectionInterest
+        DlpProgramUpdateInterest::RawEataNoProjectionInterest
     );
 }
 
@@ -5148,9 +5148,41 @@ async fn test_undelegating_internal_looking_dlp_program_update_reaches_completio
     assert!(remote_account_provider.is_watching(&account_pubkey));
 }
 
+fn raw_eata_record_update(
+    eata_pubkey: Pubkey,
+    authority: Pubkey,
+    slot: u64,
+) -> ForwardedSubscriptionUpdate {
+    let record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &eata_pubkey,
+        );
+    let record = DelegationRecord {
+        authority,
+        owner: EATA_PROGRAM_ID,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    ForwardedSubscriptionUpdate {
+        pubkey: record_pubkey,
+        account: RemoteAccount::from_fresh_account(
+            Account {
+                lamports: 1_000,
+                data: delegation_record_to_vec(&record),
+                owner: dlp_api::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+            slot,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Program,
+    }
+}
+
 #[tokio::test]
-async fn test_raw_eata_program_update_without_projection_interest_is_dropped_without_fetch(
-) {
+async fn test_cold_raw_eata_program_update_is_parked_without_fetch() {
     init_logger();
     let validator_keypair = Keypair::new();
     let wallet_owner = random_pubkey();
@@ -5204,6 +5236,183 @@ async fn test_raw_eata_program_update_without_projection_interest_is_dropped_wit
     assert_eq!(cloner.clone_request_count(), 0);
     assert!(accounts_bank.get_account(&eata_pubkey).is_none());
     assert!(accounts_bank.get_account(&ata_pubkey).is_none());
+}
+
+#[tokio::test]
+async fn test_cold_raw_eata_program_update_foreign_record_stays_dropped_without_fetch(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        fetch_cloner,
+        cloner,
+        ..
+    } = setup(
+        [(eata_pubkey, eata_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+    subscription_tx
+        .send(raw_eata_record_update(
+            eata_pubkey,
+            random_pubkey(),
+            CURRENT_SLOT,
+        ))
+        .await
+        .unwrap();
+    drop(subscription_tx);
+
+    drain_subscription_update_tasks(&fetch_cloner, Duration::from_secs(1))
+        .await;
+
+    assert_eq!(
+        rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches(),
+        fetches_before
+    );
+    assert_eq!(cloner.clone_request_count(), 0);
+    assert!(accounts_bank.get_account(&eata_pubkey).is_none());
+    assert!(accounts_bank.get_account(&ata_pubkey).is_none());
+}
+
+async fn cold_raw_eata_greedy_discovery(record_first: bool) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let base_ata_account = create_ata_account(&wallet_owner, &mint);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        cloner,
+        ..
+    } = setup(
+        [
+            (eata_pubkey, eata_account.clone()),
+            (ata_pubkey, base_ata_account.clone()),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_actions_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        system_program::id(),
+    );
+
+    let eata_update = ForwardedSubscriptionUpdate {
+        pubkey: eata_pubkey,
+        account: RemoteAccount::from_fresh_account(
+            eata_account,
+            CURRENT_SLOT,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Program,
+    };
+    let record_update =
+        raw_eata_record_update(eata_pubkey, validator_pubkey, CURRENT_SLOT);
+    let (first, second) = if record_first {
+        (record_update, eata_update)
+    } else {
+        (eata_update, record_update)
+    };
+    subscription_tx.send(first).await.unwrap();
+    subscription_tx.send(second).await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let projected =
+                accounts_bank
+                    .get_account(&ata_pubkey)
+                    .is_some_and(|account| {
+                        account.delegated()
+                            && account.remote_slot() == CURRENT_SLOT
+                    });
+            if projected {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for cold raw eATA greedy discovery");
+
+    let cloned_eata = accounts_bank
+        .get_account(&eata_pubkey)
+        .expect("raw eATA should be cloned by greedy discovery");
+    assert!(!cloned_eata.delegated());
+
+    let projected_ata = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("projected ATA should be cloned into the base ATA pubkey");
+    assert!(projected_ata.delegated());
+    assert_eq!(projected_ata.owner(), &base_ata_account.owner);
+
+    let clone_requests = cloner.clone_requests();
+    let projected_request = clone_requests
+        .iter()
+        .find(|request| {
+            request.pubkey == ata_pubkey
+                && !request.delegation_actions.is_empty()
+        })
+        .expect(
+            "projected ATA clone request should carry post-delegation actions",
+        );
+    assert!(!projected_request.delegation_actions.is_empty());
+}
+
+#[tokio::test]
+async fn test_cold_raw_eata_program_update_released_by_record_sighting_is_greedily_cloned(
+) {
+    cold_raw_eata_greedy_discovery(false).await;
+}
+
+#[tokio::test]
+async fn test_cold_raw_eata_program_update_after_record_sighting_is_greedily_cloned(
+) {
+    cold_raw_eata_greedy_discovery(true).await;
 }
 
 #[tokio::test]
@@ -6008,17 +6217,31 @@ fn test_dlp_collision_tracker_parked_candidate_survives_record_shaped_firehose_c
         }
     };
 
-    assert!(!tracker.check_or_park(&record_shaped_update(candidate_pubkey,)));
+    assert_eq!(
+        tracker.check_or_park(
+            &record_shaped_update(candidate_pubkey),
+            ParkedUpdateKind::InternalCollision
+        ),
+        ParkOutcome::Parked
+    );
     for _ in 0..PARKED_COLLISION_UPDATES_CAPACITY.get() {
         let unrelated_record_account = random_pubkey();
         assert!(tracker
-            .sight_record(unrelated_record_account, SLOT)
+            .sight_record(unrelated_record_account, SLOT, true)
             .is_none());
-        assert!(!tracker
-            .check_or_park(&record_shaped_update(unrelated_record_account,)));
+        assert!(matches!(
+            tracker.check_or_park(
+                &record_shaped_update(unrelated_record_account),
+                ParkedUpdateKind::InternalCollision
+            ),
+            ParkOutcome::Parked | ParkOutcome::CapacityDropped
+        ));
     }
 
-    let released = tracker.sight_record(record_pubkey, SLOT).expect(
+    let released = tracker
+        .sight_record(record_pubkey, SLOT, true)
+        .released()
+        .expect(
         "candidate must survive record-shaped firehose churn until sighting",
     );
     assert_eq!(released.pubkey, candidate_pubkey);
@@ -6059,17 +6282,30 @@ fn test_dlp_collision_tracker_ignores_stale_record_sightings() {
     // A stale sighting must not lower the recorded slot: the colliding
     // account update still routes straight to discovery.
     let mut tracker = DlpCollisionTracker::new();
-    assert!(tracker.sight_record(record_pubkey, 100).is_none());
-    assert!(tracker.sight_record(record_pubkey, 50).is_none());
-    assert!(tracker.check_or_park(&update_at(account_pubkey, 100)));
+    assert!(tracker.sight_record(record_pubkey, 100, true).is_none());
+    assert!(tracker.sight_record(record_pubkey, 50, true).is_none());
+    assert_eq!(
+        tracker.check_or_park(
+            &update_at(account_pubkey, 100),
+            ParkedUpdateKind::InternalCollision
+        ),
+        ParkOutcome::RecordSightedDelegatedToUs
+    );
 
     // A stale sighting must not consume a parked candidate it does not
     // cover; the candidate is released by its own record sighting.
     let mut tracker = DlpCollisionTracker::new();
-    assert!(!tracker.check_or_park(&update_at(account_pubkey, 100)));
-    assert!(tracker.sight_record(record_pubkey, 50).is_none());
+    assert_eq!(
+        tracker.check_or_park(
+            &update_at(account_pubkey, 100),
+            ParkedUpdateKind::InternalCollision
+        ),
+        ParkOutcome::Parked
+    );
+    assert!(tracker.sight_record(record_pubkey, 50, true).is_none());
     let released = tracker
-        .sight_record(record_pubkey, 100)
+        .sight_record(record_pubkey, 100, true)
+        .released()
         .expect("covering record sighting must release the candidate");
     assert_eq!(released.pubkey, account_pubkey);
     assert_eq!(released.slot, 100);
@@ -6078,11 +6314,24 @@ fn test_dlp_collision_tracker_ignores_stale_record_sightings() {
     // candidate: a record sighting covering only the old slot cannot
     // release it, and the candidate's own record still does.
     let mut tracker = DlpCollisionTracker::new();
-    assert!(!tracker.check_or_park(&update_at(account_pubkey, 100)));
-    assert!(!tracker.check_or_park(&update_at(account_pubkey, 90)));
-    assert!(tracker.sight_record(record_pubkey, 90).is_none());
+    assert_eq!(
+        tracker.check_or_park(
+            &update_at(account_pubkey, 100),
+            ParkedUpdateKind::InternalCollision
+        ),
+        ParkOutcome::Parked
+    );
+    assert_eq!(
+        tracker.check_or_park(
+            &update_at(account_pubkey, 90),
+            ParkedUpdateKind::InternalCollision
+        ),
+        ParkOutcome::Parked
+    );
+    assert!(tracker.sight_record(record_pubkey, 90, true).is_none());
     let released = tracker
-        .sight_record(record_pubkey, 100)
+        .sight_record(record_pubkey, 100, true)
+        .released()
         .expect("covering record sighting must release the candidate");
     assert_eq!(released.pubkey, account_pubkey);
     assert_eq!(released.slot, 100);
@@ -6101,13 +6350,17 @@ fn test_dlp_collision_tracker_preserves_unsettled_released_candidate() {
         tracker.preserve_released_candidate(ParkedCollisionCandidate {
             pubkey: account_pubkey,
             slot: 100,
+            kind: ParkedUpdateKind::InternalCollision,
         })
     );
-    assert!(tracker.sight_record(record_pubkey, 99).is_none());
+    assert!(tracker.sight_record(record_pubkey, 99, true).is_none());
 
-    let released = tracker.sight_record(record_pubkey, 100).expect(
-        "preserved candidate must be released by a later covering sighting",
-    );
+    let released = tracker
+        .sight_record(record_pubkey, 100, true)
+        .released()
+        .expect(
+            "preserved candidate must be released by a later covering sighting",
+        );
     assert_eq!(released.pubkey, account_pubkey);
     assert_eq!(released.slot, 100);
 }
