@@ -111,8 +111,7 @@ async fn test_failed_transaction_does_not_commit_accounts() {
     );
 
     // Create invalid instruction (writing to empty data)
-    let fail_ix =
-        setup_guinea_ix(&env, GuineaInstruction::WriteByteToData(42));
+    let fail_ix = setup_guinea_ix(&env, GuineaInstruction::WriteByteToData(42));
     // Hack: manually set data len to 0 to force failure
     let mut acc = env.get_account(fail_ix.accounts[0].pubkey);
     acc.set_data(vec![]);
@@ -136,7 +135,10 @@ async fn test_failed_transaction_does_not_commit_accounts() {
         initial_bal,
         "Failed transaction changed the payer"
     );
-    assert_eq!(env.get_account(sender.pubkey()).lamports(), LAMPORTS_PER_SOL);
+    assert_eq!(
+        env.get_account(sender.pubkey()).lamports(),
+        LAMPORTS_PER_SOL
+    );
     assert_eq!(
         env.get_account(recipient.pubkey()).lamports(),
         LAMPORTS_PER_SOL

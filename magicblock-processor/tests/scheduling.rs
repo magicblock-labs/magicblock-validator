@@ -474,8 +474,7 @@ async fn test_large_queue_mixed_8_executors() {
 #[tokio::test]
 async fn test_wait_for_idle_coordination() {
     let mut env = ExecutionTestEnv::new_with_config(
-        1,
-        true, // defer_startup
+        1, true, // defer_startup
     );
 
     // 1. Acquire permit before scheduler starts (owned to avoid borrow issues)

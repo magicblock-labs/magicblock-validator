@@ -36,10 +36,7 @@ pub struct SvmEnv {
 }
 
 /// Initialize a zero-fee SVM environment and retain the active feature set.
-pub fn build_svm_env(
-    accountsdb: &AccountsDb,
-    blockhash: BlockHash,
-) -> SvmEnv {
+pub fn build_svm_env(accountsdb: &AccountsDb, blockhash: BlockHash) -> SvmEnv {
     let mut feature_set = FeatureSet::default();
 
     // Activate features relevant to ER operations:
