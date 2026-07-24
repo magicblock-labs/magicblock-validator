@@ -56,57 +56,90 @@ pub(crate) struct EventProcessor {
     geyser: Arc<GeyserPluginManager>,
 }
 
-impl EventProcessor {
-    /// Creates a new `EventProcessor` instance by cloning handles to shared state and channels.
-    fn new(
+/// Event-processing service prepared during RPC initialization and started only
+/// after validator recovery is complete.
+///
+/// Deferring the block subscription keeps blockhashes broadcast during ledger
+/// replay out of the RPC cache while preserving those broadcasts for the
+/// execution runtime.
+pub struct EventProcessors {
+    config: ApertureConfig,
+    state: SharedState,
+    account_update_rx: AccountUpdateRx,
+    transaction_status_rx: TransactionStatusRx,
+    cancel: CancellationToken,
+    geyser: Arc<GeyserPluginManager>,
+}
+
+impl EventProcessors {
+    pub(crate) fn try_new(
+        config: &ApertureConfig,
+        state: SharedState,
         channels: &DispatchEndpoints,
-        state: &SharedState,
-        geyser: Arc<GeyserPluginManager>,
+        cancel: CancellationToken,
     ) -> ApertureResult<Self> {
-        let latest_block = state.ledger.latest_block().clone();
-        // Subscribe to block updates immediately to ensure we don't miss any
-        // notifications that might be sent before the `run()` method is polled.
-        let block_update_rx = latest_block.subscribe();
+        // SAFETY:
+        // Geyser plugins use FFI. Operators must ensure each configured plugin
+        // is compatible with this validator.
+        let geyser =
+            unsafe { GeyserPluginManager::new(&config.geyser_plugins) }?.into();
         Ok(Self {
-            subscriptions: state.subscriptions.clone(),
-            transactions: state.transactions.clone(),
-            blocks: state.blocks.clone(),
+            config: config.clone(),
+            state,
             account_update_rx: channels.account_update.clone(),
             transaction_status_rx: channels.transaction_status.clone(),
-            block_update_rx,
+            cancel,
             geyser,
         })
     }
 
-    /// Spawns a specified number of `EventProcessor` workers.
+    /// Starts workers and subscribes them to block updates.
     ///
-    /// Each worker runs in its own Tokio task and will gracefully shut down when the
-    /// provided `CancellationToken` is triggered.
-    ///
-    /// # Arguments
-    /// * `state` - The shared global state of the RPC service.
-    /// * `channels` - The endpoints for receiving validator events.
-    /// * `instances` - The number of concurrent worker tasks to spawn.
-    /// * `cancel` - The token used for graceful shutdown.
-    pub(crate) fn start(
-        config: &ApertureConfig,
-        state: &SharedState,
-        channels: &DispatchEndpoints,
-        cancel: CancellationToken,
-    ) -> ApertureResult<()> {
-        // SAFETY:
-        // Geyser plugin system works with the FFI, and is inherently unsafe,
-        // the plugin must be 100% compatible with the validator to be used
-        // without any memory violations, and it is the responsibility of the
-        // node operator to ensure that loaded plugin is correct and safe to use.
-        let geyser: Arc<_> =
-            unsafe { GeyserPluginManager::new(&config.geyser_plugins) }?.into();
+    /// Call this after ledger replay. Broadcast receivers only observe updates
+    /// sent after subscription, so replayed blockhashes cannot become valid RPC
+    /// blockhashes.
+    pub fn start(self) {
+        let Self {
+            config,
+            state,
+            account_update_rx,
+            transaction_status_rx,
+            cancel,
+            geyser,
+        } = self;
         for id in 0..config.event_processors {
-            let geyser = geyser.clone();
-            let processor = EventProcessor::new(channels, state, geyser)?;
+            let processor = EventProcessor::new(
+                &state,
+                account_update_rx.clone(),
+                transaction_status_rx.clone(),
+                geyser.clone(),
+            );
             tokio::spawn(processor.run(id, cancel.clone()));
         }
-        Ok(())
+    }
+}
+
+impl EventProcessor {
+    /// Creates a new `EventProcessor` instance by cloning handles to shared state and channels.
+    fn new(
+        state: &SharedState,
+        account_update_rx: AccountUpdateRx,
+        transaction_status_rx: TransactionStatusRx,
+        geyser: Arc<GeyserPluginManager>,
+    ) -> Self {
+        let latest_block = state.ledger.latest_block().clone();
+        // Subscribe to block updates immediately to ensure we don't miss any
+        // notifications that might be sent before the `run()` method is polled.
+        let block_update_rx = latest_block.subscribe();
+        Self {
+            subscriptions: state.subscriptions.clone(),
+            transactions: state.transactions.clone(),
+            blocks: state.blocks.clone(),
+            account_update_rx,
+            transaction_status_rx,
+            block_update_rx,
+            geyser,
+        }
     }
 
     /// The main event processing loop for a single worker instance.

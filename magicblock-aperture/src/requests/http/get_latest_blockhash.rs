@@ -11,6 +11,11 @@ impl HttpDispatcher {
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
+        if !self.blocks.is_ready() {
+            return Err(RpcError::unavailable(
+                "blockhash unavailable until the first post-recovery block",
+            ));
+        }
         let info = self.blocks.get_latest();
         let slot = info.slot;
         let response = RpcBlockhash::from(info);

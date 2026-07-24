@@ -126,6 +126,10 @@ impl RpcTestEnv {
             initialize_aperture(&config, state, &execution.dispatch, cancel)
                 .await
                 .expect("failed to initialize aperture test server");
+        // Blocks produced before the event processors subscribe are deliberately
+        // not valid for RPC. Produce one after subscription to make the test RPC
+        // transaction-ready.
+        execution.advance_slot();
 
         let rpc_url = format!("http://{}", server.http_addr());
         let pubsub_url = format!("ws://{}", server.ws_addr());
