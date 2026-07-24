@@ -20,7 +20,8 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
-    is_ata, normalize_native_token_account_for_local_clone, EATA_PROGRAM_ID,
+    is_ata, normalize_native_token_account_for_local_clone,
+    try_derive_supported_ata_pubkeys, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
@@ -209,16 +210,6 @@ const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
             panic!("PARKED_COLLISION_UPDATES_CAPACITY must be non-zero")
         }
     };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DlpProgramUpdateInterest {
-    DropRawEataNoProjectionInterest,
-    DropLocalDelegatedAuthoritative,
-    ProcessUndelegating,
-    ProcessAtaProjection,
-    ProcessDirectlyWatched,
-    DiscoverDelegatedAccount,
-}
 
 /// A parked internal-looking account update, reduced to pubkey + slot so
 /// the firehose cannot pin account payloads in memory.
@@ -482,6 +473,7 @@ where
                     })
             },
         );
+
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
 
@@ -491,101 +483,6 @@ where
     /// Get the current fetch count
     pub fn fetch_count(&self) -> u64 {
         self.fetch_count.load(Ordering::Relaxed)
-    }
-
-    async fn classify_dlp_program_update_interest(
-        &self,
-        pubkey: Pubkey,
-        account: &AccountSharedData,
-    ) -> DlpProgramUpdateInterest {
-        if let Some(local_account) = self.accounts_bank.get_account(&pubkey) {
-            if local_account.undelegating() {
-                return DlpProgramUpdateInterest::ProcessUndelegating;
-            }
-            if local_account.delegated() {
-                return DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative;
-            }
-        }
-
-        if self.remote_account_provider.is_watching(&pubkey) {
-            return DlpProgramUpdateInterest::ProcessDirectlyWatched;
-        }
-
-        if let Some(has_projection_interest) = self
-            .raw_eata_has_local_projection_interest(pubkey, account)
-            .await
-        {
-            return if has_projection_interest {
-                DlpProgramUpdateInterest::ProcessAtaProjection
-            } else {
-                DlpProgramUpdateInterest::DropRawEataNoProjectionInterest
-            };
-        }
-
-        if self.base_ata_has_projection_interest(pubkey, account).await {
-            return DlpProgramUpdateInterest::ProcessAtaProjection;
-        }
-
-        DlpProgramUpdateInterest::DiscoverDelegatedAccount
-    }
-
-    async fn raw_eata_has_local_projection_interest(
-        &self,
-        pubkey: Pubkey,
-        account: &AccountSharedData,
-    ) -> Option<bool> {
-        let ata_pubkeys =
-            ata_projection::derive_supported_ata_pubkeys_from_raw_eata(
-                &pubkey, account,
-            )?;
-
-        for ata_pubkey in ata_pubkeys.iter() {
-            if self.accounts_bank.get_account(ata_pubkey).is_some()
-                || self
-                    .remote_account_provider
-                    .has_subscription_reason(
-                        ata_pubkey,
-                        SubscriptionReason::AtaProjection,
-                    )
-                    .await
-            {
-                return Some(true);
-            }
-        }
-
-        Some(
-            self.remote_account_provider
-                .has_subscription_reason(
-                    &pubkey,
-                    SubscriptionReason::AtaProjection,
-                )
-                .await,
-        )
-    }
-
-    async fn base_ata_has_projection_interest(
-        &self,
-        pubkey: Pubkey,
-        account: &AccountSharedData,
-    ) -> bool {
-        let Some(eata_pubkey) =
-            ata_projection::derive_eata_pubkey_from_ata_account(
-                &pubkey, account,
-            )
-        else {
-            return false;
-        };
-
-        self.remote_account_provider
-            .has_subscription_reason(&pubkey, SubscriptionReason::AtaProjection)
-            .await
-            || self
-                .remote_account_provider
-                .has_subscription_reason(
-                    &eata_pubkey,
-                    SubscriptionReason::AtaProjection,
-                )
-                .await
     }
 
     #[instrument(skip(self, pubkeys))]
@@ -1729,71 +1626,13 @@ where
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
-        let fresh_update_account = update.account.fresh_account();
-        let is_dlp_owned_update = fresh_update_account
-            .as_ref()
-            .is_some_and(|account| account.owner() == &dlp_api::id());
-        let is_internal_dlp_update =
-            fresh_update_account.as_ref().is_some_and(|account| {
-                is_internal_dlp_account_data(account.data())
-            });
-
-        let dlp_program_interest =
-            if matches!(update.source, SubscriptionSource::Program)
-                && is_dlp_owned_update
-            {
-                match fresh_update_account.as_ref() {
-                    Some(account) => Some(
-                        self.classify_dlp_program_update_interest(
-                            pubkey, account,
-                        )
-                        .await,
-                    ),
-                    None => None,
-                }
-            } else {
-                None
-            };
-
-        match dlp_program_interest {
-            Some(DlpProgramUpdateInterest::DropRawEataNoProjectionInterest) => {
-                trace!(
-                    pubkey = %pubkey,
-                    "Dropping raw eATA DLP program update without local projection interest"
-                );
-                return;
-            }
-            Some(DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative) => {
-                self.cleanup_direct_subscription_for_delegated_account(pubkey)
-                    .await;
-                trace!(
-                    pubkey = %pubkey,
-                    "Dropping DLP program update for locally authoritative delegated account"
-                );
-                return;
-            }
-            Some(DlpProgramUpdateInterest::ProcessUndelegating)
-            | Some(DlpProgramUpdateInterest::ProcessAtaProjection)
-            | Some(DlpProgramUpdateInterest::ProcessDirectlyWatched)
-            | Some(DlpProgramUpdateInterest::DiscoverDelegatedAccount)
-            | None => {}
-        }
-
-        // Internal DLP payloads (records/metadata/commit state) can never be
-        // greedily cloned, so drop them before discovery issues remote
-        // fetches. The exception is an account whose app data collides with
-        // an internal discriminator: its delegation also writes the
-        // delegation record, whose sighting routes the account update to
-        // discovery — immediately when the record arrived first, or by
-        // releasing the parked update once the record arrives later.
-        if !matches!(
-            dlp_program_interest,
-            Some(DlpProgramUpdateInterest::ProcessUndelegating)
-                | Some(DlpProgramUpdateInterest::ProcessAtaProjection)
-        ) && is_dlp_owned_update
-        {
-            if let Some(account) = fresh_update_account.as_ref() {
-                if is_internal_dlp_update {
+        // Internal DLP payloads can never be greedily cloned, so drop them
+        // before discovery issues remote fetches; an account whose app data
+        // collides with an internal discriminator is routed to discovery
+        // via its delegation-record sighting instead.
+        if update.account.is_owned_by_delegation_program() {
+            if let Some(account) = update.account.fresh_account() {
+                if is_internal_dlp_account_data(account.data()) {
                     // Sight records from either source: SubMux dedup can
                     // deliver a directly watched record account-sourced.
                     let released = is_delegation_record_data(account.data())
@@ -1829,6 +1668,7 @@ where
         {
             return;
         }
+
         // A late forwarded update can arrive after an account was removed from
         // the provider watch set. If a new subscription already won the race,
         // is_watching is true and this update can be processed normally. If this
@@ -1878,7 +1718,6 @@ where
             context_slot: update_slot,
         };
 
-        let update_source = update.source;
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
@@ -1893,10 +1732,9 @@ where
                 AccountFetchReason::SubscriptionUpdateClone,
             );
         let projected_ata_clone_request = self
-            .maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
+            .maybe_build_projected_ata_clone_request_from_subscription_update(
                 pubkey,
                 &account,
-                update_source,
                 deleg_record.as_ref(),
                 &delegation_actions,
                 &companion_fetch_log_context,
@@ -2325,31 +2163,6 @@ where
         // (at the sighted slot itself only a delegated copy settles).
         const MAX_RELEASE_CLONE_ATTEMPTS: usize = 3;
         for _ in 0..MAX_RELEASE_CLONE_ATTEMPTS {
-            // The candidate may have been parked before local undelegation
-            // started. Do not let its later record sighting bypass the normal
-            // confirmation check and overwrite protected local state.
-            if self
-                .accounts_bank
-                .get_account(&candidate.pubkey)
-                .is_some_and(|in_bank| {
-                    in_bank.undelegating()
-                        && account_still_undelegating_on_chain(
-                            &candidate.pubkey,
-                            true,
-                            in_bank.remote_slot(),
-                            Some(deleg_record),
-                            &self.validator_pubkey,
-                        )
-                })
-            {
-                trace!(
-                    pubkey = %candidate.pubkey,
-                    slot = candidate.slot,
-                    "Ignoring released collision candidate while local undelegation remains pending"
-                );
-                return;
-            }
-
             let result = match self
                 .fetch_and_clone_accounts_with_dedup_forced_refresh(
                     &[candidate.pubkey],
@@ -2472,7 +2285,11 @@ where
             deleg_record.owner,
         )
         .map(|(wallet_owner, mint)| {
-            ata_projection::derive_supported_ata_pubkeys(&wallet_owner, &mint)
+            try_derive_supported_ata_pubkeys(&wallet_owner, &mint)
+                .token_2022_first()
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
         let mut pubkeys_to_clone =
@@ -2969,31 +2786,10 @@ where
         delegation_actions: &DelegationActions,
         companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> Option<AccountCloneRequest> {
-        self.maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
-            eata_pubkey,
-            eata_account,
-            SubscriptionSource::Account,
-            deleg_record,
-            delegation_actions,
-            companion_fetch_log_context,
-        )
-        .await
-    }
-
-    async fn maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
-        &self,
-        eata_pubkey: Pubkey,
-        eata_account: &AccountSharedData,
-        update_source: SubscriptionSource,
-        deleg_record: Option<&DelegationRecord>,
-        delegation_actions: &DelegationActions,
-        companion_fetch_log_context: &CompanionFetchLogContext,
-    ) -> Option<AccountCloneRequest> {
         ata_projection::maybe_build_projected_ata_clone_request_from_subscription_update(
             self,
             eata_pubkey,
             eata_account,
-            update_source,
             deleg_record,
             delegation_actions,
             companion_fetch_log_context,
