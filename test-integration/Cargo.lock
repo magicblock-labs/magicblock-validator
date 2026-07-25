@@ -156,7 +156,7 @@ dependencies = [
  "bincode",
  "libsecp256k1",
  "num-traits",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-account-info 3.1.1",
  "solana-big-mod-exp 3.0.0",
  "solana-blake3-hasher 3.1.0",
@@ -170,7 +170,7 @@ dependencies = [
  "solana-loader-v3-interface 6.1.1",
  "solana-poseidon",
  "solana-program-entrypoint 3.1.1",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-pubkey 4.1.0",
  "solana-sbpf",
  "solana-sdk-ids 3.1.0",
@@ -186,7 +186,7 @@ dependencies = [
  "solana-svm-type-overrides",
  "solana-sysvar 3.1.1",
  "solana-sysvar-id 3.1.0",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "thiserror 2.0.18",
 ]
 
@@ -1937,7 +1937,7 @@ dependencies = [
  "getrandom 0.2.17",
  "magicblock-delegation-program-api 3.0.0",
  "magicblock-magic-program-api 0.10.1",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-account-info 2.3.0",
  "solana-account-info 3.1.1",
  "solana-address 2.5.0",
@@ -3791,7 +3791,7 @@ dependencies = [
  "solana-pubkey 4.1.0",
  "solana-signature",
  "solana-transaction",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0",
  "solana-transaction-error 3.1.0",
  "solana-transaction-status-client-types",
  "spl-token-2022-interface",
@@ -3832,7 +3832,7 @@ dependencies = [
  "solana-system-interface 2.0.0",
  "static_assertions",
  "strum",
- "thiserror 2.0.18",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3864,7 +3864,7 @@ dependencies = [
  "solana-system-interface 2.0.0",
  "static_assertions",
  "strum",
- "thiserror 2.0.18",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3897,7 +3897,7 @@ dependencies = [
  "solana-storage-proto",
  "solana-svm-measure",
  "solana-transaction",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0",
  "solana-transaction-error 3.1.0",
  "solana-transaction-status",
  "thiserror 2.0.18",
@@ -3974,7 +3974,7 @@ dependencies = [
  "solana-loader-v4-program",
  "solana-precompile-error",
  "solana-program 3.0.0",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0",
  "solana-pubkey 4.1.0",
  "solana-sdk-ids 3.1.0",
  "solana-svm",
@@ -3982,7 +3982,7 @@ dependencies = [
  "solana-svm-transaction",
  "solana-system-program",
  "solana-transaction",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0",
  "solana-transaction-error 3.1.0",
  "solana-transaction-status",
  "solana-zk-elgamal-proof-program",
@@ -4014,7 +4014,7 @@ dependencies = [
  "solana-keypair",
  "solana-loader-v3-interface 6.1.1",
  "solana-loader-v4-interface 3.1.0",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0",
  "solana-pubkey 4.1.0",
  "solana-sdk-ids 3.1.0",
  "solana-seed-derivable",
@@ -4023,7 +4023,7 @@ dependencies = [
  "solana-svm-log-collector",
  "solana-sysvar 3.1.1",
  "solana-transaction",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0",
  "thiserror 2.0.18",
 ]
 
@@ -5931,7 +5931,7 @@ dependencies = [
  "program-flexi-counter",
  "program-schedulecommit",
  "rand 0.8.6",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-commitment-config",
  "solana-pubkey 4.1.0",
  "solana-rpc-client",
@@ -6414,7 +6414,23 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "3.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=14cb96c8e8b352ce95c7b84d3ad73a777a4d1195#14cb96c8e8b352ce95c7b84d3ad73a777a4d1195"
+dependencies = [
+ "bincode",
+ "qualifier_attr",
+ "serde",
+ "serde_bytes",
+ "solana-account-info 3.1.1",
+ "solana-clock 3.1.0",
+ "solana-instruction 3.3.0",
+ "solana-pubkey 4.1.0",
+ "solana-sdk-ids 3.1.0",
+ "solana-sysvar 3.1.1",
+]
+
+[[package]]
+name = "solana-account"
+version = "3.4.0"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1#03950095887b011818886b68e06fde6a1a94def1"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -6441,7 +6457,7 @@ dependencies = [
  "bv",
  "serde",
  "serde_json",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-account-decoder-client-types",
  "solana-address-lookup-table-interface 3.0.1",
  "solana-clock 3.1.0",
@@ -6480,7 +6496,7 @@ dependencies = [
  "bs58",
  "serde",
  "serde_json",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-pubkey 4.1.0",
  "zstd",
 ]
@@ -6728,7 +6744,7 @@ dependencies = [
  "agave-syscalls",
  "bincode",
  "qualifier_attr",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-bincode 3.1.0",
  "solana-clock 3.1.0",
  "solana-instruction 3.3.0",
@@ -6736,7 +6752,7 @@ dependencies = [
  "solana-loader-v4-interface 3.1.0",
  "solana-packet 4.1.0",
  "solana-program-entrypoint 3.1.1",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-pubkey 4.1.0",
  "solana-sbpf",
  "solana-sdk-ids 3.1.0",
@@ -6745,7 +6761,7 @@ dependencies = [
  "solana-svm-measure",
  "solana-svm-type-overrides",
  "solana-system-interface 3.1.0",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
 ]
 
 [[package]]
@@ -6818,7 +6834,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b591fbaed6d9ab4cba6a5a82eb5df208072ced2e5b74c59e9d309ff87af0615f"
 dependencies = [
  "solana-fee-structure",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
 ]
 
 [[package]]
@@ -6859,7 +6875,7 @@ version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a22bcf5088ebe5cb2aa548580d0a466de813032b425707a7745a2a63a7764cdc"
 dependencies = [
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
 ]
 
 [[package]]
@@ -6871,7 +6887,7 @@ dependencies = [
  "bincode",
  "serde",
  "serde_derive",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-instruction 3.3.0",
  "solana-pubkey 3.0.0",
  "solana-sdk-ids 3.1.0",
@@ -7146,7 +7162,7 @@ dependencies = [
  "bincode",
  "serde",
  "serde_derive",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-account-info 3.1.1",
  "solana-instruction 3.3.0",
  "solana-program-error 3.0.1",
@@ -7208,7 +7224,7 @@ dependencies = [
  "bincode",
  "chrono",
  "memmap2 0.5.10",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-clock 3.1.0",
  "solana-cluster-type",
  "solana-epoch-schedule 3.0.0",
@@ -7539,21 +7555,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b5191cd34f04e4ec9fd5f2ac8a431ba9ffd6c827511fd35f2cae0256a0c6b12"
 dependencies = [
  "log",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-bincode 3.1.0",
  "solana-bpf-loader-program",
  "solana-instruction 3.3.0",
  "solana-loader-v3-interface 6.1.1",
  "solana-loader-v4-interface 3.1.0",
  "solana-packet 4.1.0",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-pubkey 4.1.0",
  "solana-sbpf",
  "solana-sdk-ids 3.1.0",
  "solana-svm-log-collector",
  "solana-svm-measure",
  "solana-svm-type-overrides",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
 ]
 
 [[package]]
@@ -7679,7 +7695,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "805fd25b29e5a1a0e6c3dd6320c9da80f275fbe4ff6e392617c303a2085c435e"
 dependencies = [
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-hash 3.1.0",
  "solana-nonce 3.1.0",
  "solana-sdk-ids 3.1.0",
@@ -7994,7 +8010,6 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "4.0.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=14cb96c8e8b352ce95c7b84d3ad73a777a4d1195#14cb96c8e8b352ce95c7b84d3ad73a777a4d1195"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -8032,7 +8047,52 @@ dependencies = [
  "solana-system-interface 3.1.0",
  "solana-sysvar 3.1.1",
  "solana-sysvar-id 3.1.0",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "solana-program-runtime"
+version = "4.0.0"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1#03950095887b011818886b68e06fde6a1a94def1"
+dependencies = [
+ "base64 0.22.1",
+ "bincode",
+ "cfg-if",
+ "itertools 0.12.1",
+ "log",
+ "percentage",
+ "rand 0.8.6",
+ "serde",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
+ "solana-account-info 3.1.1",
+ "solana-clock 3.1.0",
+ "solana-epoch-rewards 3.0.1",
+ "solana-epoch-schedule 3.0.0",
+ "solana-fee-structure",
+ "solana-hash 4.2.0",
+ "solana-instruction 3.3.0",
+ "solana-last-restart-slot 3.0.1",
+ "solana-loader-v3-interface 6.1.1",
+ "solana-program-entrypoint 3.1.1",
+ "solana-pubkey 4.1.0",
+ "solana-rent 3.1.0",
+ "solana-sbpf",
+ "solana-sdk-ids 3.1.0",
+ "solana-slot-hashes 3.0.1",
+ "solana-stable-layout 3.0.1",
+ "solana-stake-interface 2.0.2",
+ "solana-svm-callback",
+ "solana-svm-feature-set",
+ "solana-svm-log-collector",
+ "solana-svm-measure",
+ "solana-svm-timings",
+ "solana-svm-transaction",
+ "solana-svm-type-overrides",
+ "solana-system-interface 3.1.0",
+ "solana-sysvar 3.1.1",
+ "solana-sysvar-id 3.1.0",
+ "solana-transaction-context 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "thiserror 2.0.18",
 ]
 
@@ -8170,7 +8230,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-account-decoder",
  "solana-account-decoder-client-types",
  "solana-clock 3.1.0",
@@ -8224,7 +8284,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-account-decoder-client-types",
  "solana-address 2.5.0",
  "solana-clock 3.1.0",
@@ -8278,7 +8338,7 @@ dependencies = [
  "bincode",
  "bs58",
  "serde",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-epoch-info",
  "solana-epoch-rewards-hasher",
  "solana-fee-structure",
@@ -8678,7 +8738,6 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "4.0.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=14cb96c8e8b352ce95c7b84d3ad73a777a4d1195#14cb96c8e8b352ce95c7b84d3ad73a777a4d1195"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -8699,7 +8758,7 @@ dependencies = [
  "solana-nonce-account",
  "solana-program-entrypoint 3.1.1",
  "solana-program-pack 3.1.0",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0",
  "solana-pubkey 4.1.0",
  "solana-rent 3.1.0",
  "solana-sdk-ids 3.1.0",
@@ -8712,7 +8771,7 @@ dependencies = [
  "solana-svm-type-overrides",
  "solana-system-interface 3.1.0",
  "solana-sysvar-id 3.1.0",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0",
  "solana-transaction-error 3.1.0",
  "spl-generic-token",
  "thiserror 2.0.18",
@@ -8724,7 +8783,7 @@ version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4006b0da7e50cba514ced6b47bcf8f9591552458200e361fd4bdef4068cb2fed"
 dependencies = [
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-clock 3.1.0",
  "solana-precompile-error",
  "solana-pubkey 4.1.0",
@@ -8840,21 +8899,21 @@ dependencies = [
  "bincode",
  "log",
  "serde",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-bincode 3.1.0",
  "solana-fee-calculator 3.2.2",
  "solana-instruction 3.3.0",
  "solana-nonce 3.1.0",
  "solana-nonce-account",
  "solana-packet 4.1.0",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-pubkey 4.1.0",
  "solana-sdk-ids 3.1.0",
  "solana-svm-log-collector",
  "solana-svm-type-overrides",
  "solana-system-interface 3.1.0",
  "solana-sysvar 3.1.1",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
 ]
 
 [[package]]
@@ -8994,12 +9053,27 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "4.0.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=14cb96c8e8b352ce95c7b84d3ad73a777a4d1195#14cb96c8e8b352ce95c7b84d3ad73a777a4d1195"
 dependencies = [
  "bincode",
  "qualifier_attr",
  "serde",
  "solana-account 3.4.0",
+ "solana-instruction 3.3.0",
+ "solana-instructions-sysvar 3.0.0",
+ "solana-pubkey 4.1.0",
+ "solana-rent 3.1.0",
+ "solana-sbpf",
+ "solana-sdk-ids 3.1.0",
+]
+
+[[package]]
+name = "solana-transaction-context"
+version = "4.0.0"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1#03950095887b011818886b68e06fde6a1a94def1"
+dependencies = [
+ "bincode",
+ "serde",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-instruction 3.3.0",
  "solana-instructions-sysvar 3.0.0",
  "solana-pubkey 4.1.0",
@@ -9092,7 +9166,7 @@ dependencies = [
  "solana-reward-info",
  "solana-signature",
  "solana-transaction",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-transaction-error 3.1.0",
  "thiserror 2.0.18",
 ]
@@ -9173,7 +9247,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "serde",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-bincode 3.1.0",
  "solana-bls-signatures",
  "solana-clock 3.1.0",
@@ -9182,7 +9256,7 @@ dependencies = [
  "solana-instruction 3.3.0",
  "solana-keypair",
  "solana-packet 4.1.0",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-pubkey 4.1.0",
  "solana-rent 3.1.0",
  "solana-sdk-ids 3.1.0",
@@ -9190,7 +9264,7 @@ dependencies = [
  "solana-slot-hashes 3.0.1",
  "solana-system-interface 3.1.0",
  "solana-transaction",
- "solana-transaction-context",
+ "solana-transaction-context 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-vote-interface 5.1.1",
  "thiserror 2.0.18",
 ]
@@ -9217,7 +9291,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "solana-instruction 3.3.0",
- "solana-program-runtime",
+ "solana-program-runtime 4.0.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-sdk-ids 3.1.0",
  "solana-svm-log-collector",
  "solana-zk-sdk 5.0.1",
@@ -9782,7 +9856,7 @@ dependencies = [
  "magicblock-delegation-program-api 3.1.0",
  "program-flexi-counter",
  "program-mini",
- "solana-account 3.4.0",
+ "solana-account 3.4.0 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1)",
  "solana-commitment-config",
  "solana-loader-v2-interface 3.0.0",
  "solana-loader-v3-interface 6.1.1",
@@ -11502,3 +11576,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "solana-svm"
+version = "4.0.0"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=03950095887b011818886b68e06fde6a1a94def1#03950095887b011818886b68e06fde6a1a94def1"
