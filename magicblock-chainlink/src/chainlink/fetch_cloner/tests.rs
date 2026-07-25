@@ -5468,6 +5468,98 @@ async fn test_raw_eata_greedy_missing_delegation_record_is_ignored_without_proje
 }
 
 #[tokio::test]
+async fn test_program_source_raw_eata_without_projection_interest_still_uses_greedy_deleg_record(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (eata_pubkey, eata_account.clone()),
+            (ata_pubkey, ata_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let projected = accounts_bank
+                .get_account(&ata_pubkey)
+                .is_some_and(|account| account.delegated());
+            if projected {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for greedy raw eATA projection");
+
+    let clone_requests = cloner.clone_requests();
+    assert!(
+        clone_requests
+            .iter()
+            .any(|request| request.pubkey == eata_pubkey),
+        "raw eATA should be cloned by greedy discovery"
+    );
+    let projected_ata_request = clone_requests
+        .iter()
+        .find(|request| request.pubkey == ata_pubkey)
+        .expect("projected ATA should be cloned by greedy discovery");
+    assert!(projected_ata_request.account.delegated());
+    assert!(
+        rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches()
+            > fetches_before,
+        "greedy raw eATA projection must fetch companion accounts"
+    );
+    // This protects the caller split: the non-greedy projection helper may
+    // keep its local-interest gate when no delegation record is supplied, but
+    // the greedy path must pass Some(&deleg_record) and bypass that gate.
+}
+
+#[tokio::test]
 async fn test_raw_eata_program_update_with_projection_interest_processes_projection(
 ) {
     init_logger();
