@@ -5886,6 +5886,7 @@ async fn test_released_collision_candidate_keeps_pending_undelegation_locked() {
     };
 
     let FetcherTestCtx {
+        fetch_cloner,
         remote_account_provider,
         accounts_bank,
         rpc_client,
@@ -5936,7 +5937,6 @@ async fn test_released_collision_candidate_keeps_pending_undelegation_locked() {
         })
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
 
     let mut local_undelegating =
         AccountSharedData::new(1_000_000, app_data.len(), &dlp_api::id());
@@ -5964,7 +5964,10 @@ async fn test_released_collision_candidate_keeps_pending_undelegation_locked() {
         })
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    drop(subscription_tx);
+
+    drain_subscription_update_tasks(&fetch_cloner, Duration::from_secs(1))
+        .await;
 
     let account_after = accounts_bank
         .get_account(&account_pubkey)
