@@ -537,22 +537,17 @@ where
         pubkey: &Pubkey,
         ata_pubkeys: &[Pubkey],
     ) -> bool {
-        for ata_pubkey in ata_pubkeys.iter() {
-            if self.accounts_bank.get_account(ata_pubkey).is_some()
-                || self
-                    .remote_account_provider
-                    .has_subscription_reason(
-                        ata_pubkey,
-                        SubscriptionReason::AtaProjection,
-                    )
-                    .await
-            {
-                return true;
-            }
+        if ata_pubkeys.iter().any(|ata_pubkey| {
+            self.accounts_bank.get_account(ata_pubkey).is_some()
+        }) {
+            return true;
         }
 
         self.remote_account_provider
-            .has_subscription_reason(pubkey, SubscriptionReason::AtaProjection)
+            .has_any_subscription_reason(
+                ata_pubkeys.iter().chain(std::iter::once(pubkey)),
+                SubscriptionReason::AtaProjection,
+            )
             .await
     }
 
