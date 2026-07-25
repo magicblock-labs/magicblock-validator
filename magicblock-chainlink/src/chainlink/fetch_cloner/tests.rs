@@ -699,7 +699,7 @@ async fn test_dlp_program_update_classifier_discovers_unwatched_non_eata_update(
 }
 
 #[tokio::test]
-async fn test_dlp_program_update_classifier_drops_raw_eata_without_projection_interest(
+async fn test_dlp_program_update_classifier_routes_raw_eata_without_projection_interest_to_greedy_discovery(
 ) {
     let validator_keypair = Keypair::new();
     let wallet_owner = random_pubkey();
@@ -724,7 +724,7 @@ async fn test_dlp_program_update_classifier_drops_raw_eata_without_projection_in
         fetch_cloner
             .classify_dlp_program_update_interest(eata_pubkey, &eata_account)
             .await,
-        DlpProgramUpdateInterest::DropRawEataNoProjectionInterest
+        DlpProgramUpdateInterest::DiscoverDelegatedAccount
     );
 }
 

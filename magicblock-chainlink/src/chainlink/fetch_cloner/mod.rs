@@ -212,7 +212,6 @@ const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DlpProgramUpdateInterest {
-    DropRawEataNoProjectionInterest,
     DropLocalDelegatedAuthoritative,
     ProcessUndelegating,
     ProcessAtaProjection,
@@ -518,7 +517,7 @@ where
             return if has_projection_interest {
                 DlpProgramUpdateInterest::ProcessAtaProjection
             } else {
-                DlpProgramUpdateInterest::DropRawEataNoProjectionInterest
+                DlpProgramUpdateInterest::DiscoverDelegatedAccount
             };
         }
 
@@ -1756,13 +1755,6 @@ where
             };
 
         match dlp_program_interest {
-            Some(DlpProgramUpdateInterest::DropRawEataNoProjectionInterest) => {
-                trace!(
-                    pubkey = %pubkey,
-                    "Dropping raw eATA DLP program update without local projection interest"
-                );
-                return;
-            }
             Some(DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative) => {
                 self.cleanup_direct_subscription_for_delegated_account(pubkey)
                     .await;
