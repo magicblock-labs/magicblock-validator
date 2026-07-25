@@ -8537,9 +8537,10 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
     eata_shared.set_remote_slot(CURRENT_SLOT);
 
     let projected_ata_request = fetch_cloner
-        .maybe_build_projected_ata_clone_request_from_subscription_update(
+        .maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
             eata_pubkey,
             &eata_shared,
+            SubscriptionSource::Account,
             Some(&deleg_record),
             delegation_actions.as_ref().expect(
                 "delegation actions should be parsed for our validator",
@@ -8611,9 +8612,10 @@ async fn test_projected_ata_clone_request_from_eata_update_requires_ata_in_bank(
     eata_shared.set_remote_slot(CURRENT_SLOT);
 
     let projected_ata_request = fetch_cloner
-        .maybe_build_projected_ata_clone_request_from_subscription_update(
+        .maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
             eata_pubkey,
             &eata_shared,
+            SubscriptionSource::Account,
             Some(&deleg_record),
             &DelegationActions::default(),
             &CompanionFetchLogContext {

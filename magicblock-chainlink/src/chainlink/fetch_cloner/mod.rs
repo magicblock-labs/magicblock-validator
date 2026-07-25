@@ -2512,9 +2512,10 @@ where
                     );
                     false
                 } else if let Some(projected_ata_clone_request) = self
-                    .maybe_build_projected_ata_clone_request_from_subscription_update(
+                    .maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
                         pubkey,
                         &account,
+                        update.source,
                         Some(&deleg_record),
                         &delegation_actions,
                         &CompanionFetchLogContext {
@@ -2945,25 +2946,6 @@ where
             error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
             (None, None, DelegationActions::default())
         }
-    }
-
-    async fn maybe_build_projected_ata_clone_request_from_subscription_update(
-        &self,
-        eata_pubkey: Pubkey,
-        eata_account: &AccountSharedData,
-        deleg_record: Option<&DelegationRecord>,
-        delegation_actions: &DelegationActions,
-        companion_fetch_log_context: &CompanionFetchLogContext,
-    ) -> Option<AccountCloneRequest> {
-        self.maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
-            eata_pubkey,
-            eata_account,
-            SubscriptionSource::Account,
-            deleg_record,
-            delegation_actions,
-            companion_fetch_log_context,
-        )
-        .await
     }
 
     async fn maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
