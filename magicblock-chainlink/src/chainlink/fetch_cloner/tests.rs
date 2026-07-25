@@ -5149,28 +5149,288 @@ async fn test_undelegating_internal_looking_dlp_program_update_reaches_completio
 }
 
 #[tokio::test]
-async fn test_raw_eata_program_update_without_projection_interest_is_dropped_without_fetch(
+async fn test_raw_eata_program_update_without_projection_interest_greedily_projects_ata(
 ) {
     init_logger();
     let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let wallet_owner = random_pubkey();
     let mint = random_pubkey();
-    let eata_pubkey = derive_eata(&wallet_owner, &mint);
     const CURRENT_SLOT: u64 = 100;
     const AMOUNT: u64 = 777;
 
-    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
     let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
 
     let FetcherTestCtx {
         accounts_bank,
         rpc_client,
         subscription_tx,
-        fetch_cloner,
-        cloner,
         ..
     } = setup(
-        [(eata_pubkey, eata_account.clone())],
+        [
+            (eata_pubkey, eata_account.clone()),
+            (ata_pubkey, ata_account.clone()),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let has_eata = accounts_bank.get_account(&eata_pubkey).is_some();
+            let has_projected_ata = accounts_bank
+                .get_account(&ata_pubkey)
+                .is_some_and(|account| {
+                    account.delegated() && account.remote_slot() == CURRENT_SLOT
+                });
+            if has_eata && has_projected_ata {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for greedy raw eATA projection");
+
+    assert!(
+        rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches()
+            > fetches_before,
+        "greedy raw eATA projection must fetch companion accounts before cloning"
+    );
+    let cloned_eata = accounts_bank
+        .get_account(&eata_pubkey)
+        .expect("raw eATA should be cloned from greedy discovery");
+    assert_eq!(cloned_eata.owner(), &EATA_PROGRAM_ID);
+    assert_eq!(cloned_eata.remote_slot(), CURRENT_SLOT);
+
+    let projected_ata = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("ATA should be projected from greedy raw eATA discovery");
+    assert!(projected_ata.delegated());
+    assert_eq!(projected_ata.owner(), &ata_account.owner);
+    assert_eq!(projected_ata.remote_slot(), CURRENT_SLOT);
+    let projected_amount =
+        u64::from_le_bytes(projected_ata.data()[64..72].try_into().unwrap());
+    assert_eq!(projected_amount, AMOUNT);
+}
+
+#[tokio::test]
+async fn test_raw_eata_greedy_projection_carries_post_delegation_actions() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let action_program_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+    let action_program_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_sdk_ids::bpf_loader::id(),
+        executable: true,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (eata_pubkey, eata_account.clone()),
+            (ata_pubkey, ata_account),
+            (action_program_pubkey, action_program_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_actions_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        action_program_pubkey,
+    );
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let has_eata = accounts_bank.get_account(&eata_pubkey).is_some();
+            let has_projected_ata = accounts_bank
+                .get_account(&ata_pubkey)
+                .map(|account| account.delegated())
+                .unwrap_or(false);
+            let has_action_program =
+                accounts_bank.get_account(&action_program_pubkey).is_some();
+            if has_eata && has_projected_ata && has_action_program {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for greedy raw eATA action projection");
+
+    let clone_requests = cloner.clone_requests();
+    let projected_ata_request = clone_requests
+        .iter()
+        .find(|request| request.pubkey == ata_pubkey)
+        .expect("projected ATA should be cloned");
+    assert!(projected_ata_request.account.delegated());
+    assert!(
+        !projected_ata_request.delegation_actions.is_empty(),
+        "post-delegation actions must stay attached to the projected ATA"
+    );
+}
+
+#[tokio::test]
+async fn test_raw_eata_greedy_delegated_elsewhere_is_ignored_after_record_fetch(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let other_validator = random_pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (eata_pubkey, eata_account.clone()),
+            (ata_pubkey, ata_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        other_validator,
+        EATA_PROGRAM_ID,
+    );
+
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+    drop(subscription_tx);
+
+    drain_subscription_update_tasks(&fetch_cloner, Duration::from_secs(1))
+        .await;
+
+    assert!(
+        rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches()
+            > fetches_before,
+        "greedy discovery should fetch the delegation record before ignoring other authority"
+    );
+    assert_eq!(cloner.clone_request_count(), 0);
+    assert!(accounts_bank.get_account(&eata_pubkey).is_none());
+    assert!(accounts_bank.get_account(&ata_pubkey).is_none());
+}
+
+#[tokio::test]
+async fn test_raw_eata_greedy_missing_delegation_record_is_ignored_without_projection(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (eata_pubkey, eata_account.clone()),
+            (ata_pubkey, ata_account),
+        ],
         CURRENT_SLOT,
         validator_keypair.insecure_clone(),
     )
@@ -5196,10 +5456,11 @@ async fn test_raw_eata_program_update_without_projection_interest_is_dropped_wit
     drain_subscription_update_tasks(&fetch_cloner, Duration::from_secs(1))
         .await;
 
-    assert_eq!(
+    assert!(
         rpc_client.single_account_fetches()
-            + rpc_client.multi_account_fetches(),
-        fetches_before
+            + rpc_client.multi_account_fetches()
+            > fetches_before,
+        "greedy discovery should attempt delegation-record resolution before ignoring the update"
     );
     assert_eq!(cloner.clone_request_count(), 0);
     assert!(accounts_bank.get_account(&eata_pubkey).is_none());
