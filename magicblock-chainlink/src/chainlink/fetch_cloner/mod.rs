@@ -510,10 +510,14 @@ where
             return DlpProgramUpdateInterest::ProcessDirectlyWatched;
         }
 
-        if let Some(has_projection_interest) = self
-            .raw_eata_has_local_projection_interest(pubkey, account)
-            .await
+        if let Some(ata_pubkeys) =
+            ata_projection::derive_supported_ata_pubkeys_from_raw_eata(
+                &pubkey, account,
+            )
         {
+            let has_projection_interest = self
+                .raw_eata_has_local_projection_interest(&pubkey, &ata_pubkeys)
+                .await;
             return if has_projection_interest {
                 DlpProgramUpdateInterest::ProcessAtaProjection
             } else {
@@ -530,14 +534,9 @@ where
 
     async fn raw_eata_has_local_projection_interest(
         &self,
-        pubkey: Pubkey,
-        account: &AccountSharedData,
-    ) -> Option<bool> {
-        let ata_pubkeys =
-            ata_projection::derive_supported_ata_pubkeys_from_raw_eata(
-                &pubkey, account,
-            )?;
-
+        pubkey: &Pubkey,
+        ata_pubkeys: &[Pubkey],
+    ) -> bool {
         for ata_pubkey in ata_pubkeys.iter() {
             if self.accounts_bank.get_account(ata_pubkey).is_some()
                 || self
@@ -548,18 +547,13 @@ where
                     )
                     .await
             {
-                return Some(true);
+                return true;
             }
         }
 
-        Some(
-            self.remote_account_provider
-                .has_subscription_reason(
-                    &pubkey,
-                    SubscriptionReason::AtaProjection,
-                )
-                .await,
-        )
+        self.remote_account_provider
+            .has_subscription_reason(pubkey, SubscriptionReason::AtaProjection)
+            .await
     }
 
     async fn base_ata_has_projection_interest(

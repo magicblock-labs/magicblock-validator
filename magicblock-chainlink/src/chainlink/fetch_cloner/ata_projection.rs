@@ -158,8 +158,8 @@ where
 
     if matches!(update_source, SubscriptionSource::Program)
         && !this
-            .raw_eata_has_local_projection_interest(eata_pubkey, eata_account)
-            .await?
+            .raw_eata_has_local_projection_interest(&eata_pubkey, &ata_pubkeys)
+            .await
     {
         return None;
     }
