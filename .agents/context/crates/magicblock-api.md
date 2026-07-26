@@ -67,7 +67,7 @@ The exported public API is intentionally small for production use:
   - `start(&mut self) -> ApiResult<()>` performs ledger replay/reset/recovery, switches scheduler/replication mode, and starts post-start services such as slot ticking, ledger truncation, claim-fees, and the task scheduler.
   - `stop(self)` consumes the validator and shuts down services, joins threads/tasks where available, flushes AccountsDb and ledger, and performs ledger shutdown.
   - `start_unregister_validator_on_chain(&mut self)` sends a best-effort unregister transaction for standalone ephemeral validators that use on-chain coordination.
-  - `prepare_ledger_for_shutdown(&mut self)` stops truncation, cancels manual compactions, disables automatic compactions, lifts the ledger's background IO rate limit (safe only once compactions are stopped), and flushes the ledger before final shutdown. Ordering matters: lifting the throttle earlier would let compaction IO saturate the disk while the RPC still serves.
+  - `prepare_ledger_for_shutdown(&mut self)` stops truncation, cancels manual compactions, disables automatic compactions, waits (bounded) for in-flight compactions to quiesce, lifts the ledger's background IO rate limit, and flushes the ledger before final shutdown. Ordering matters: lifting the throttle before compactions stop would let compaction IO saturate the disk while the RPC still serves.
   - `ledger(&self) -> &Ledger` exposes the ledger for the binary to lock and report paths.
 - `domain_registry_manager::DomainRegistryManager`
   - builds Solana RPC clients for the Magic Domain Program;

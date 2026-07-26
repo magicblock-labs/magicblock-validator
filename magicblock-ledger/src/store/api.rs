@@ -6,6 +6,7 @@ use std::{
         atomic::{AtomicI64, Ordering},
         Arc, RwLock,
     },
+    time::{Duration, Instant},
 };
 
 use bincode::{deserialize, serialize};
@@ -1404,6 +1405,34 @@ impl Ledger {
     /// speed; call only after compactions have been stopped.
     pub fn lift_rate_limit(&self) {
         self.db.backend.lift_rate_limit();
+    }
+
+    /// Best-effort wait until no compactions are running, so lifting the
+    /// rate limit cannot hand an in-flight compaction full disk bandwidth.
+    /// Bounded: a throttled job mid-run may need minutes, and shutdown must
+    /// not stall on it.
+    pub fn wait_for_quiescent_compactions(&self, timeout: Duration) {
+        const RUNNING_COMPACTIONS: &str = "rocksdb.num-running-compactions";
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.db.backend.db.property_int_value(RUNNING_COMPACTIONS) {
+                Ok(Some(running)) if running > 0 => {
+                    if Instant::now() >= deadline {
+                        warn!(
+                            running,
+                            "Compactions still running after quiesce timeout"
+                        );
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Ok(_) => return,
+                Err(err) => {
+                    warn!(error = ?err, "Failed to query running compactions");
+                    return;
+                }
+            }
+        }
     }
 
     /// Disables automatic compactions on all columns; used at shutdown so

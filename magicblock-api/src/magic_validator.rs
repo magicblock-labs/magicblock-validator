@@ -1266,6 +1266,10 @@ impl MagicValidator {
         if let Err(err) = self.ledger.disable_auto_compactions() {
             error!(error = ?err, "Failed to disable auto compactions during shutdown preparation");
         }
+        // Disabling does not cancel a compaction already mid-run; give it a
+        // bounded window to finish before handing it full disk bandwidth.
+        self.ledger
+            .wait_for_quiescent_compactions(Duration::from_secs(2));
         // Compactions are stopped; unthrottled flushes only compete with
         // foreground work for the few seconds before exit.
         self.ledger.lift_rate_limit();
