@@ -1260,7 +1260,13 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
-        // Compactions are canceled; unthrottled flushes only compete with
+        // Stop auto compactions too: with the throttle lifted below, a
+        // flush-triggered compaction would otherwise run at full disk speed
+        // while the RPC still serves.
+        if let Err(err) = self.ledger.disable_auto_compactions() {
+            error!(error = ?err, "Failed to disable auto compactions during shutdown preparation");
+        }
+        // Compactions are stopped; unthrottled flushes only compete with
         // foreground work for the few seconds before exit.
         self.ledger.lift_rate_limit();
         if let Err(err) = self.ledger.flush() {

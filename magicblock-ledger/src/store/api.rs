@@ -1401,9 +1401,32 @@ impl Ledger {
     }
 
     /// Lifts the background IO rate limit so shutdown flushes run at disk
-    /// speed; call only after manual compactions have been canceled.
+    /// speed; call only after compactions have been stopped.
     pub fn lift_rate_limit(&self) {
-        crate::database::rocksdb_options::lift_rate_limit();
+        self.db.backend.lift_rate_limit();
+    }
+
+    /// Disables automatic compactions on all columns; used at shutdown so
+    /// flush-induced L0 growth cannot schedule compactions that would run
+    /// unthrottled once the rate limit is lifted.
+    pub fn disable_auto_compactions(&self) -> LedgerResult<()> {
+        let cfs = [
+            self.transaction_status_cf.handle(),
+            self.address_signatures_cf.handle(),
+            self.slot_signatures_cf.handle(),
+            self.blocktime_cf.handle(),
+            self.blockhash_cf.handle(),
+            self.transaction_cf.handle(),
+            self.transaction_memos_cf.handle(),
+            self.perf_samples_cf.handle(),
+        ];
+        for cf in cfs {
+            self.db
+                .backend
+                .db
+                .set_options_cf(cf, &[("disable_auto_compactions", "true")])?;
+        }
+        Ok(())
     }
 
     /// Cancels manual compaction

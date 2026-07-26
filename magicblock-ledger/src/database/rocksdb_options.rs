@@ -1,30 +1,41 @@
-use std::sync::atomic::{AtomicPtr, Ordering};
-
 use rocksdb::{AsRawPtr, Options};
 
 use super::options::AccessType;
 
-/// Handle to the ledger's rate limiter, kept alive for the process lifetime
-/// so shutdown can lift the throttle for the final memtable flush.
-static RATE_LIMITER: AtomicPtr<librocksdb_sys::rocksdb_ratelimiter_t> =
-    AtomicPtr::new(std::ptr::null_mut());
+/// Owned reference to this DB's rate limiter, kept so shutdown can lift the
+/// throttle for the final memtable flush.
+#[derive(Debug)]
+pub(crate) struct RateLimiterHandle(*mut librocksdb_sys::rocksdb_ratelimiter_t);
 
-/// Raises the background IO rate limit to effectively unlimited. Once
-/// truncation compactions are canceled at shutdown, throttling only
-/// stretches the final flush into restart downtime.
-pub fn lift_rate_limit() {
-    let limiter = RATE_LIMITER.load(Ordering::Acquire);
-    if !limiter.is_null() {
+// SAFETY: the underlying RateLimiter is internally synchronized;
+// SetBytesPerSecond and destroy are safe from any thread.
+unsafe impl Send for RateLimiterHandle {}
+unsafe impl Sync for RateLimiterHandle {}
+
+impl RateLimiterHandle {
+    /// Raises the background IO rate limit to effectively unlimited. Once
+    /// compactions are stopped at shutdown, throttling only stretches the
+    /// final flush into restart downtime.
+    pub(crate) fn lift(&self) {
         unsafe {
             librocksdb_sys::rocksdb_ratelimiter_set_bytes_per_second(
-                limiter,
+                self.0,
                 i64::MAX,
             );
         }
     }
 }
 
-pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
+impl Drop for RateLimiterHandle {
+    fn drop(&mut self) {
+        // Drops our shared_ptr reference; the DB keeps its own while open.
+        unsafe { librocksdb_sys::rocksdb_ratelimiter_destroy(self.0) }
+    }
+}
+
+pub fn get_rocksdb_options(
+    access_type: &AccessType,
+) -> (Options, RateLimiterHandle) {
     let mut options = Options::default();
 
     // Create missing items to support a clean start
@@ -87,7 +98,7 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     // The safe wrapper only exposes kWritesOnly, so go through the C API.
     // RateLimiter parameters: rate_bytes_per_sec, refill_period_us, fairness
     const RATE_LIMITER_MODE_ALL_IO: std::ffi::c_int = 2; // RateLimiter::Mode::kAllIo
-    unsafe {
+    let rate_limiter = unsafe {
         let ratelimiter = librocksdb_sys::rocksdb_ratelimiter_create_with_mode(
             48 * 1024 * 1024,
             100 * 1000,
@@ -99,16 +110,16 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
             options.as_raw_ptr(),
             ratelimiter,
         );
-        // Keep our reference instead of destroying it so lift_rate_limit
-        // can adjust the limiter at shutdown.
-        RATE_LIMITER.store(ratelimiter, Ordering::Release);
-    }
+        // Keep our reference instead of destroying it so shutdown can lift
+        // the throttle for this DB's final flush.
+        RateLimiterHandle(ratelimiter)
+    };
 
     // Dynamic level bytes is a good default to balance levels
     options.set_level_compaction_dynamic_level_bytes(true);
     options.set_report_bg_io_stats(true);
 
-    options
+    (options, rate_limiter)
 }
 
 // Returns whether automatic compactions should be disabled for the entire
