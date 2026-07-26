@@ -365,6 +365,9 @@ impl super::TransactionExecutor {
         let ProcessedTransaction::Executed(executed) = result else {
             return Ok(());
         };
+        if !executed.was_successful() {
+            return Ok(());
+        }
         if !executed.programs_modified_by_tx.is_empty() {
             self.processor.global_program_cache.write().unwrap().merge(
                 &self.processor.environments,
