@@ -1260,6 +1260,9 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
+        // Compactions are canceled; unthrottled flushes only compete with
+        // foreground work for the few seconds before exit.
+        self.ledger.lift_rate_limit();
         if let Err(err) = self.ledger.flush() {
             error!(error = ?err, "Failed to flush during shutdown preparation");
         }

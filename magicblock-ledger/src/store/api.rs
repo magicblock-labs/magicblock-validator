@@ -1400,6 +1400,12 @@ impl Ledger {
         Ok(())
     }
 
+    /// Lifts the background IO rate limit so shutdown flushes run at disk
+    /// speed; call only after manual compactions have been canceled.
+    pub fn lift_rate_limit(&self) {
+        crate::database::rocksdb_options::lift_rate_limit();
+    }
+
     /// Cancels manual compaction
     /// Here we utilize the internal of `disable_manual_compaction`
     /// Which not only disables future manual compaction,

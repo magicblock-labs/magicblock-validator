@@ -8,5 +8,5 @@ pub mod ledger_column;
 pub mod meta;
 pub mod options;
 mod rocks_db;
-mod rocksdb_options;
+pub(crate) mod rocksdb_options;
 pub mod write_batch;

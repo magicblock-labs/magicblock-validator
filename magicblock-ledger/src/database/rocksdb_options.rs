@@ -1,6 +1,28 @@
+use std::sync::atomic::{AtomicPtr, Ordering};
+
 use rocksdb::{AsRawPtr, Options};
 
 use super::options::AccessType;
+
+/// Handle to the ledger's rate limiter, kept alive for the process lifetime
+/// so shutdown can lift the throttle for the final memtable flush.
+static RATE_LIMITER: AtomicPtr<librocksdb_sys::rocksdb_ratelimiter_t> =
+    AtomicPtr::new(std::ptr::null_mut());
+
+/// Raises the background IO rate limit to effectively unlimited. Once
+/// truncation compactions are canceled at shutdown, throttling only
+/// stretches the final flush into restart downtime.
+pub fn lift_rate_limit() {
+    let limiter = RATE_LIMITER.load(Ordering::Acquire);
+    if !limiter.is_null() {
+        unsafe {
+            librocksdb_sys::rocksdb_ratelimiter_set_bytes_per_second(
+                limiter,
+                i64::MAX,
+            );
+        }
+    }
+}
 
 pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     let mut options = Options::default();
@@ -77,7 +99,9 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
             options.as_raw_ptr(),
             ratelimiter,
         );
-        librocksdb_sys::rocksdb_ratelimiter_destroy(ratelimiter);
+        // Keep our reference instead of destroying it so lift_rate_limit
+        // can adjust the limiter at shutdown.
+        RATE_LIMITER.store(ratelimiter, Ordering::Release);
     }
 
     // Dynamic level bytes is a good default to balance levels

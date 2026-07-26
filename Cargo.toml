@@ -168,12 +168,12 @@ spl-token-2022 = { package = "spl-token-2022-interface", version = "2.1" }
 
 
 # Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
-librocksdb-sys = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2" }
+librocksdb-sys = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "c6a3f91f" }
 prost = "0.14"
 protobuf-src = "1.1"
 rand = "0.9"
 reqwest = "0.12"
-rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2", features = [
+rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "c6a3f91f", features = [
     "raw-ptr"
 ] }
 rusqlite = { version = "0.37.0", features = ["bundled"] } # bundled sqlite 3.44
@@ -269,4 +269,4 @@ solana-transaction-context = { git = "https://github.com/magicblock-labs/magicbl
 # (disable_manual_compaction, mode-aware rate limiter) are reached through
 # the `raw-ptr` feature + librocksdb-sys directly.
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
-rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2" }
+rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "c6a3f91f" }
