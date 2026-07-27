@@ -3342,11 +3342,14 @@ where
         min_context_slot: Option<u64>,
         fetch_context: AccountFetchContext,
     ) -> RefreshDecision {
-        // Resolve the delegation record coherently with the caller's
-        // requested slot (invariant 1.8), defaulting to the latest observed
-        // chain slot.
-        let record_slot = min_context_slot
-            .unwrap_or_else(|| self.remote_account_provider.chain_slot());
+        // Resolve the delegation record at the freshest of the caller's
+        // requested slot and the latest observed chain slot (matching the
+        // account-fetch rule at subscription_slot.max(chain_slot())), so the
+        // classification is slot-coherent (invariant 1.8).
+        let record_slot = min_context_slot.map_or_else(
+            || self.remote_account_provider.chain_slot(),
+            |slot| slot.max(self.remote_account_provider.chain_slot()),
+        );
         if in_bank.undelegating() {
             debug!(
                 pubkey = %pubkey,
