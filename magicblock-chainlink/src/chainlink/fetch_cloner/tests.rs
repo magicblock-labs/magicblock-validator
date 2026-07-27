@@ -8598,6 +8598,129 @@ async fn test_token_2022_native_ata_projection_normalizes_and_preserves_layout()
 }
 
 #[tokio::test]
+async fn test_deferred_post_delegation_action_retries_after_dependency_completes(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let target_pubkey = random_pubkey();
+    let dependency_pubkey = random_pubkey();
+    let dependency_owner = random_pubkey();
+    let dependency_account = Account {
+        lamports: 1_000_000,
+        data: vec![9, 8, 7, 6],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(dependency_pubkey, dependency_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        dependency_pubkey,
+        validator_pubkey,
+        dependency_owner,
+    );
+
+    let mut locked_dependency = AccountSharedData::from(Account {
+        lamports: 2_000_000,
+        data: vec![1, 1, 1, 1],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    locked_dependency.set_remote_slot(CURRENT_SLOT - 1);
+    locked_dependency.set_delegated(false);
+    locked_dependency.set_undelegating(true);
+    accounts_bank.insert(dependency_pubkey, locked_dependency);
+
+    let mut target_account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    target_account.set_remote_slot(CURRENT_SLOT);
+    target_account.set_delegated(true);
+
+    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
+        system_program::id(),
+        &[1],
+        vec![AccountMeta::new(dependency_pubkey, false)],
+    )]);
+
+    // While the dependency is undelegating, the action defers.
+    let deferred = fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: target_pubkey,
+                account: target_account.clone(),
+                commit_frequency_ms: None,
+                delegation_actions: actions,
+                delegated_to_other: None,
+                needs_undelegation: false,
+            },
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await;
+    assert!(matches!(
+        deferred,
+        Err(ChainlinkError::DelegationActionDependenciesUndelegating(_))
+    ));
+    assert!(cloner.clone_requests().is_empty());
+
+    // The dependency's undelegation completes: its bank entry flips out of
+    // the locked state and it is cloned into its post-undelegation state.
+    let mut completed_dependency = accounts_bank
+        .get_account(&dependency_pubkey)
+        .expect("dependency must remain in the bank");
+    completed_dependency.set_undelegating(false);
+    accounts_bank.insert(dependency_pubkey, completed_dependency.clone());
+
+    let mut completed_dependency_request_account = completed_dependency;
+    completed_dependency_request_account.set_delegated(true);
+    fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: dependency_pubkey,
+                account: completed_dependency_request_account,
+                commit_frequency_ms: None,
+                delegation_actions: DelegationActions::default(),
+                delegated_to_other: None,
+                needs_undelegation: false,
+            },
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("dependency completion clone should succeed");
+
+    // Completing the dependency drained the deferral: the intended target is
+    // cloned with its action attached (invariant 1.6).
+    let target_request = cloner
+        .clone_requests()
+        .into_iter()
+        .find(|request| request.pubkey == target_pubkey)
+        .expect("deferred target must be retried after dependency completion");
+    assert!(!target_request.needs_undelegation);
+    assert!(!target_request.delegation_actions.is_empty());
+}
+
+#[tokio::test]
 async fn test_fetch_refreshes_projected_ata_after_eata_redelegation() {
     init_logger();
     let validator_keypair = Keypair::new();

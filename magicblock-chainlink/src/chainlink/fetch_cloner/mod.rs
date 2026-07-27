@@ -159,6 +159,13 @@ where
 
     pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
 
+    /// Post-delegation action targets deferred because a writable dependency
+    /// is still undelegating, keyed by that dependency. Drained and retried
+    /// once the dependency's undelegation completes and the dependency is
+    /// cloned into its post-undelegation state (invariant 1.6: the intended
+    /// action must eventually execute).
+    action_deferrals: Arc<Mutex<ActionDeferrals>>,
+
     pending_operation_timeout_ms: Arc<AtomicU64>,
 
     /// Risk checker for post-delegation action addresses.
@@ -171,6 +178,9 @@ struct PendingUndelegationGuard {
     pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
     pubkey: Pubkey,
 }
+
+type ActionDeferrals =
+    hash_map::HashMap<Pubkey, Vec<(AccountCloneRequest, AccountFetchContext)>>;
 
 impl Drop for PendingUndelegationGuard {
     fn drop(&mut self) {
@@ -344,6 +354,7 @@ where
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
+            action_deferrals: self.action_deferrals.clone(),
             pending_operation_timeout_ms: self
                 .pending_operation_timeout_ms
                 .clone(),
@@ -451,6 +462,7 @@ where
             )),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
             pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
+            action_deferrals: Arc::new(Mutex::new(hash_map::HashMap::new())),
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
@@ -1301,9 +1313,11 @@ where
         }
 
         if request.delegation_actions.is_empty() {
-            return Ok(self
-                .clone_account_with_ownership(request, fetch_context)
-                .await?);
+            let signature = self
+                .clone_account_with_ownership(request.clone(), fetch_context)
+                .await?;
+            self.retry_deferred_actions_for(&request.pubkey).await;
+            return Ok(signature);
         }
 
         if !request.account.delegated() {
@@ -1330,12 +1344,27 @@ where
         .await;
 
         match result {
-            Ok(signature) => Ok(signature),
+            Ok(signature) => {
+                self.retry_deferred_actions_for(&request.pubkey).await;
+                Ok(signature)
+            }
             Err(err) => {
-                if matches!(
-                    err,
-                    ChainlinkError::DelegationActionDependenciesUndelegating(_)
-                ) {
+                // A still-undelegating writable dependency defers the whole
+                // action: retain the target under its dependencies and retry
+                // it once they complete undelegation (invariant 1.6), instead
+                // of undelegating it with no path to retry.
+                if let ChainlinkError::DelegationActionDependenciesUndelegating(
+                    ref dependencies,
+                ) = err
+                {
+                    if let Ok(mut deferrals) = self.action_deferrals.lock() {
+                        for dependency in dependencies {
+                            deferrals
+                                .entry(*dependency)
+                                .or_default()
+                                .push((request.clone(), fetch_context));
+                        }
+                    }
                     return Err(err);
                 }
 
@@ -1363,7 +1392,10 @@ where
                     )
                     .await
                 {
-                    Ok(signature) => Ok(signature),
+                    Ok(signature) => {
+                        self.retry_deferred_actions_for(&pubkey).await;
+                        Ok(signature)
+                    }
                     Err(undelegation_err) => {
                         warn!(
                             pubkey = %pubkey,
@@ -1374,6 +1406,43 @@ where
                         Err(err)
                     }
                 }
+            }
+        }
+    }
+
+    /// Retries post-delegation action targets that were deferred while
+    /// `dependency` was still undelegating (invariant 1.6). Invoked after any
+    /// successful clone of the dependency into its post-undelegation state:
+    /// a plain/completed dependency makes the retried action unsatisfiable
+    /// (rescue path handles it), a re-delegated dependency lets the intended
+    /// action finally execute. Targets whose dependencies are still
+    /// undelegating simply re-register through the same deferral path.
+    async fn retry_deferred_actions_for(&self, dependency: &Pubkey) {
+        let deferred = self
+            .action_deferrals
+            .lock()
+            .ok()
+            .and_then(|mut deferrals| deferrals.remove(dependency))
+            .unwrap_or_default();
+        for (request, fetch_context) in deferred {
+            debug!(
+                dependency = %dependency,
+                target = %request.pubkey,
+                "Retrying deferred post-delegation action target"
+            );
+            if let Err(err) = Box::pin(
+                self.clone_account_with_post_delegation_action_invariants(
+                    request,
+                    fetch_context,
+                ),
+            )
+            .await
+            {
+                debug!(
+                    dependency = %dependency,
+                    error = ?err,
+                    "Deferred post-delegation action retry not completed"
+                );
             }
         }
     }
@@ -2024,6 +2093,32 @@ where
                     pending_undelegation,
                 ),
             );
+        }
+
+        // Revalidate post-refresh state: a writable dependency that is
+        // present but no longer delegated (undelegation completed meanwhile,
+        // or it is delegated to another validator) can never be written by
+        // the action, so treat it as unsatisfiable up front instead of
+        // discovering it through a failing clone transaction.
+        let mut unsatisfiable = writable_dependencies
+            .iter()
+            .filter(|dependency| {
+                self.accounts_bank.get_account(dependency).is_some_and(
+                    |account| {
+                        !account.delegated()
+                            && !account.undelegating()
+                            && !account.ephemeral()
+                            && !account.confined()
+                    },
+                )
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        if !unsatisfiable.is_empty() {
+            unsatisfiable.sort_unstable();
+            return Err(ChainlinkError::MissingDelegationActionAccounts(
+                unsatisfiable,
+            ));
         }
 
         if result.missing_delegation_record.is_empty() {
