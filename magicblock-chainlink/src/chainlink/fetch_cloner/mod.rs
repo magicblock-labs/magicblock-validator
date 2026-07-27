@@ -1998,6 +1998,7 @@ where
                     AccountFetchReason::ActionDependencyForcedRefresh,
                 ),
                 &writable_dependencies,
+                None,
             )
             .await?;
         if result.missing_delegation_record.is_empty() {
@@ -2170,6 +2171,7 @@ where
                     Some(candidate.slot),
                     fetch_context,
                     &HashSet::from([candidate.pubkey]),
+                    Some((candidate.pubkey, deleg_record.delegation_slot)),
                 )
                 .await
             {
@@ -2197,16 +2199,20 @@ where
                 );
                 return;
             }
-            let settled = self
-                .accounts_bank
-                .get_account(&candidate.pubkey)
-                .is_some_and(|in_bank| {
-                    in_bank.remote_slot() > candidate.slot
-                        || (in_bank.remote_slot() == candidate.slot
-                            && in_bank.delegated())
-                });
+            let in_bank = self.accounts_bank.get_account(&candidate.pubkey);
+            let settled = in_bank.as_ref().is_some_and(|in_bank| {
+                in_bank.remote_slot() > candidate.slot
+                    || (in_bank.remote_slot() == candidate.slot
+                        && in_bank.delegated())
+            });
             if settled {
                 return;
+            }
+            if in_bank.is_some_and(|in_bank| {
+                in_bank.undelegating()
+                    && deleg_record.delegation_slot <= in_bank.remote_slot()
+            }) {
+                break;
             }
         }
         let preserved = self
@@ -3455,6 +3461,7 @@ where
             slot,
             fetch_context,
             &HashSet::new(),
+            None,
         )
         .await
     }
@@ -3466,6 +3473,7 @@ where
         slot: Option<u64>,
         fetch_context: AccountFetchContext,
         force_refresh_pubkeys: &HashSet<Pubkey>,
+        confirmed_redelegation: Option<(Pubkey, u64)>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
         // in the bank (e.g. native programs) or they don't exist and the transaction
@@ -3490,9 +3498,10 @@ where
 
         // Phase 1: Sync bank check — separate undelegating accounts
         // (which need async RPC) from non-undelegating (handled
-        // synchronously). A forced action-dependency refresh must not replace
-        // a locally undelegating account; the locked runtime guard rejects
-        // the action if that dependency is still unsafe at execution time.
+        // synchronously). A forced refresh may replace a locally undelegating
+        // account only when its caller supplies a matching newer delegation
+        // generation. Action dependencies never do; the locked runtime guard
+        // rejects the action if that dependency remains unsafe.
         let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
         for pubkey in pubkeys.iter() {
             if force_refresh_pubkeys.contains(*pubkey) {
@@ -3500,9 +3509,20 @@ where
                     self.accounts_bank.get_account(pubkey)
                 {
                     if account_in_bank.undelegating() {
-                        bank_hit_no_fetch_undelegating_still_valid_count += 1;
-                        in_bank.insert(**pubkey);
-                        continue;
+                        let can_replace_undelegating = confirmed_redelegation
+                            .is_some_and(
+                                |(confirmed_pubkey, delegation_slot)| {
+                                    confirmed_pubkey == **pubkey
+                                        && delegation_slot
+                                            > account_in_bank.remote_slot()
+                                },
+                            );
+                        if !can_replace_undelegating {
+                            bank_hit_no_fetch_undelegating_still_valid_count +=
+                                1;
+                            in_bank.insert(**pubkey);
+                            continue;
+                        }
                     }
                 }
                 forced_refresh_remote_required_count += 1;

@@ -4645,6 +4645,99 @@ async fn test_discovered_colliding_delegated_account_record_late_refreshes_stale
     colliding_delegated_account_is_cloned(true, true, false).await;
 }
 
+#[tokio::test]
+async fn test_released_collision_candidate_checks_undelegation_generation() {
+    const CURRENT_SLOT: u64 = 100;
+
+    for (delegation_slot, should_refresh) in
+        [(CURRENT_SLOT, true), (CURRENT_SLOT - 10, false)]
+    {
+        let validator_keypair = Keypair::new();
+        let validator_pubkey = validator_keypair.pubkey();
+        let account_pubkey = random_pubkey();
+        let account_owner = random_pubkey();
+        let delegated_account = Account {
+            lamports: 1_000_000,
+            data: vec![1, 2, 3, 4],
+            owner: dlp_api::id(),
+            executable: false,
+            rent_epoch: 0,
+        };
+
+        let FetcherTestCtx {
+            accounts_bank,
+            cloner,
+            fetch_cloner,
+            remote_account_provider,
+            rpc_client,
+            ..
+        } = setup(
+            [(account_pubkey, delegated_account.clone())],
+            CURRENT_SLOT,
+            validator_keypair,
+        )
+        .await;
+        add_delegation_record_with_slot_for(
+            &rpc_client,
+            account_pubkey,
+            validator_pubkey,
+            account_owner,
+            delegation_slot,
+        );
+
+        let mut undelegating = AccountSharedData::from(delegated_account);
+        undelegating.set_remote_slot(CURRENT_SLOT - 10);
+        undelegating.set_undelegating(true);
+        accounts_bank.insert(account_pubkey, undelegating.clone());
+        if !should_refresh {
+            remote_account_provider
+                .acquire_subscription(
+                    &account_pubkey,
+                    SubscriptionReason::UndelegationTracking,
+                )
+                .await
+                .unwrap();
+        }
+        let fetches_before = rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches();
+
+        fetch_cloner
+            .clone_released_collision_candidate(ParkedCollisionCandidate {
+                pubkey: account_pubkey,
+                slot: CURRENT_SLOT,
+            })
+            .await;
+
+        let in_bank = accounts_bank
+            .get_account(&account_pubkey)
+            .expect("collision candidate must remain in the bank");
+        if should_refresh {
+            assert!(in_bank.delegated());
+            assert!(!in_bank.undelegating());
+            assert_eq!(in_bank.owner(), &account_owner);
+            assert_eq!(in_bank.remote_slot(), CURRENT_SLOT);
+        } else {
+            assert_eq!(in_bank, undelegating);
+            assert_eq!(cloner.clone_request_count(), 0);
+            assert_eq!(
+                rpc_client.single_account_fetches()
+                    + rpc_client.multi_account_fetches()
+                    - fetches_before,
+                1,
+                "same generation needs only the authority lookup"
+            );
+            assert!(
+                remote_account_provider
+                    .has_subscription_reason(
+                        &account_pubkey,
+                        SubscriptionReason::UndelegationTracking,
+                    )
+                    .await
+            );
+        }
+    }
+}
+
 // SubMux dedupes forwards on (pubkey, slot), so a directly watched record
 // PDA can surface only as an account-subscription update; the sighting must
 // still release the parked candidate.
