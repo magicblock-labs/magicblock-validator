@@ -6898,6 +6898,115 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
 }
 
 #[tokio::test]
+async fn test_post_delegation_actions_never_refresh_undelegating_dependency() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let target_pubkey = random_pubkey();
+    let dependency_pubkey = random_pubkey();
+    let dependency_owner = random_pubkey();
+    let dependency_account = Account {
+        lamports: 1_000_000,
+        data: vec![9, 8, 7, 6],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(dependency_pubkey, dependency_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        dependency_pubkey,
+        validator_pubkey,
+        dependency_owner,
+    );
+
+    let mut locked_dependency = AccountSharedData::from(Account {
+        lamports: 2_000_000,
+        data: vec![1, 1, 1, 1],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    locked_dependency.set_remote_slot(CURRENT_SLOT - 1);
+    locked_dependency.set_delegated(false);
+    locked_dependency.set_undelegating(true);
+    accounts_bank.insert(dependency_pubkey, locked_dependency);
+
+    let mut target_account = AccountSharedData::from(Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    });
+    target_account.set_remote_slot(CURRENT_SLOT);
+    target_account.set_delegated(true);
+
+    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
+        system_program::id(),
+        &[1],
+        vec![AccountMeta::new(dependency_pubkey, false)],
+    )]);
+
+    let result = fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: target_pubkey,
+                account: target_account,
+                commit_frequency_ms: None,
+                delegation_actions: actions,
+                delegated_to_other: None,
+                needs_undelegation: false,
+            },
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await;
+
+    // The dependency is kept locked (the record-aware gate proves the
+    // undelegation is still pending) and is never refreshed, while the
+    // target is cloned normally with its actions attached.
+    assert!(result.is_ok());
+
+    let dependency_after = accounts_bank
+        .get_account(&dependency_pubkey)
+        .expect("dependency must remain in the bank");
+    assert!(dependency_after.undelegating());
+    assert!(!dependency_after.delegated());
+    assert_eq!(dependency_after.remote_slot(), CURRENT_SLOT - 1);
+    assert_eq!(dependency_after.lamports(), 2_000_000);
+    assert_eq!(dependency_after.data(), &[1, 1, 1, 1]);
+
+    let clone_requests = cloner.clone_requests();
+    assert!(
+        clone_requests
+            .iter()
+            .all(|request| request.pubkey != dependency_pubkey),
+        "undelegating dependency must not be force-refreshed"
+    );
+    let target_request = clone_requests
+        .iter()
+        .find(|request| request.pubkey == target_pubkey)
+        .expect("target clone request should exist");
+    assert!(!target_request.needs_undelegation);
+    assert!(!target_request.delegation_actions.is_empty());
+}
+
+#[tokio::test]
 async fn test_post_delegation_actions_execute_once_across_remote_slots() {
     init_logger();
     let validator_keypair = Keypair::new();

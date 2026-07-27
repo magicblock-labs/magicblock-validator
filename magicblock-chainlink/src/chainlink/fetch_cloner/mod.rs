@@ -3494,6 +3494,14 @@ where
         let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
         for pubkey in pubkeys.iter() {
             if force_refresh_pubkeys.contains(*pubkey) {
+                if let Some(account_in_bank) =
+                    self.accounts_bank.get_account(pubkey)
+                {
+                    if account_in_bank.undelegating() {
+                        undelegating_checks.push((**pubkey, account_in_bank));
+                        continue;
+                    }
+                }
                 forced_refresh_remote_required_count += 1;
                 continue;
             }
