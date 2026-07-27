@@ -129,7 +129,18 @@ impl IntentExecutorError {
             finalize_signature,
         }
     }
+}
 
+/// Maps a single-stage execution failure to [`IntentExecutorError`], using the
+/// same signature for commit and finalize (one transaction for both stages).
+pub(crate) fn single_stage_finalize_execution_error(
+    err: TransactionStrategyExecutionError,
+) -> IntentExecutorError {
+    let signature = err.signature();
+    IntentExecutorError::from_finalize_execution_error(err, signature)
+}
+
+impl IntentExecutorError {
     /// True when re-executing the whole intent from scratch may succeed:
     /// the failure was transport/RPC-side rather than deterministic.
     /// Once a commit landed (two-stage finalize failures) re-execution would
@@ -671,11 +682,7 @@ mod tests {
             )),
         );
 
-        let wrapped =
-            super::IntentExecutorError::from_finalize_execution_error(
-                err,
-                Some(signature),
-            );
+        let wrapped = super::single_stage_finalize_execution_error(err);
         assert_eq!(
             wrapped.signatures(),
             Some((signature, Some(signature)))

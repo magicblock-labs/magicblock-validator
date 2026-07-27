@@ -10,8 +10,8 @@ use tracing::{error, instrument};
 use crate::{
     intent_executor::{
         error::{
-            IntentExecutorError, IntentExecutorResult,
-            TransactionStrategyExecutionError,
+            single_stage_finalize_execution_error, IntentExecutorError,
+            IntentExecutorResult, TransactionStrategyExecutionError,
         },
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
@@ -133,12 +133,7 @@ where
             }
         };
 
-        result.map_err(|err| {
-            // Single-stage executes commit+finalize in one transaction; mirror the
-            // success-path semantics in `commit_persister::finalize_base_intent`.
-            let signature = err.signature();
-            IntentExecutorError::from_finalize_execution_error(err, signature)
-        })
+        result.map_err(single_stage_finalize_execution_error)
     }
 
     pub fn has_callbacks(&self) -> bool {
