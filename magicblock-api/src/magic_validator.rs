@@ -11,8 +11,9 @@ use std::{
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
-    initialize_aperture,
+    prepare_aperture,
     state::{NodeContext, SharedState},
+    EventProcessors,
 };
 use magicblock_chainlink::{
     config::ChainlinkConfig, remote_account_provider::Endpoints, ProdChainlink,
@@ -117,6 +118,7 @@ pub struct MagicValidator {
     intent_execution_service: IntentExecutionServiceImpl,
     replication_service: Option<ReplicationService>,
     undelegation_request_service: Option<Arc<UndelegationRequestService>>,
+    aperture_events: Option<EventProcessors>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -412,7 +414,7 @@ impl MagicValidator {
             chainlink.clone(),
         );
         let step_start = Instant::now();
-        let rpc = initialize_aperture(
+        let (rpc, aperture_events) = prepare_aperture(
             &config.aperture,
             shared_state,
             &dispatch,
@@ -464,6 +466,7 @@ impl MagicValidator {
             intent_execution_service,
             replication_service,
             undelegation_request_service,
+            aperture_events: Some(aperture_events),
             token,
             ledger,
             ledger_truncator,
@@ -1047,6 +1050,14 @@ impl MagicValidator {
                     })?;
             }
         }
+
+        // Subscribe Aperture only after ledger replay and local bank cleanup.
+        // Executors still receive replay-time block broadcasts, while RPC starts
+        // with no valid blockhash and waits for the next live block.
+        self.aperture_events
+            .take()
+            .expect("Aperture event processors should only start once")
+            .start();
 
         // Notify the scheduler that ledger replay and bank cleanup is complete.
         if self.is_standalone {

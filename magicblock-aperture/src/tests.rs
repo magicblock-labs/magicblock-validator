@@ -25,7 +25,7 @@ use crate::{
     server::websocket::dispatch::WsConnectionChannel,
     state::{ChainlinkImpl, InnerChainlinkImpl, SharedState},
     utils::ProgramFilters,
-    EventProcessor,
+    EventProcessors,
 };
 
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
@@ -49,6 +49,7 @@ mod event_processor {
     use magicblock_config::{
         config::ApertureConfig, consts::DEFAULT_LEDGER_BLOCK_TIME_MS,
     };
+    use magicblock_core::link::blocks::{BlockHash, LatestBlockInner};
 
     use super::*;
     use crate::state::NodeContext;
@@ -72,10 +73,69 @@ mod event_processor {
         );
         let cancel = CancellationToken::new();
         let config = ApertureConfig::default();
-        EventProcessor::start(&config, &state, &env.dispatch, cancel)
-            .expect("failed to start an event processor");
+        let events = EventProcessors::try_new(
+            &config,
+            state.clone(),
+            &env.dispatch,
+            cancel,
+        )
+        .expect("failed to initialize event processors");
+        events.start();
         env.advance_slot();
         (state, env)
+    }
+
+    #[tokio::test]
+    async fn block_updates_before_event_start_are_not_cached() {
+        let env = ExecutionTestEnv::new_with_config(
+            ExecutionTestEnv::BASE_FEE,
+            1,
+            true,
+        );
+        env.advance_slot();
+        let state = SharedState::new(
+            NodeContext {
+                identity: env.get_payer().pubkey,
+                blocktime: DEFAULT_LEDGER_BLOCK_TIME_MS,
+                ..Default::default()
+            },
+            env.accountsdb.clone(),
+            env.ledger.clone(),
+            Arc::new(chainlink(&env.accountsdb)),
+        );
+        let recovered = LatestBlockInner::new(2, BlockHash::new_unique(), 1);
+        env.ledger.latest_block().store(recovered.clone());
+
+        assert!(!state.blocks.is_ready());
+        assert!(!state.blocks.contains(&recovered.blockhash));
+
+        let events = EventProcessors::try_new(
+            &ApertureConfig::default(),
+            state.clone(),
+            &env.dispatch,
+            CancellationToken::new(),
+        )
+        .expect("failed to initialize event processors");
+        events.start();
+
+        tokio::task::yield_now().await;
+        assert!(
+            !state.blocks.is_ready(),
+            "subscribing after recovery must not expose the recovered blockhash"
+        );
+
+        let live = LatestBlockInner::new(3, BlockHash::new_unique(), 2);
+        env.ledger.latest_block().store(live.clone());
+        timeout(Duration::from_secs(1), async {
+            while !state.blocks.is_ready() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("fresh block was not cached");
+
+        assert!(state.blocks.contains(&live.blockhash));
+        assert!(!state.blocks.contains(&recovered.blockhash));
     }
 
     /// Awaits a message from a receiver with a timeout, panicking if no message
