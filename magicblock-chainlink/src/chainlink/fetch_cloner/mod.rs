@@ -3339,8 +3339,14 @@ where
         &self,
         pubkey: &Pubkey,
         in_bank: &AccountSharedData,
+        min_context_slot: Option<u64>,
         fetch_context: AccountFetchContext,
     ) -> RefreshDecision {
+        // Resolve the delegation record coherently with the caller's
+        // requested slot (invariant 1.8), defaulting to the latest observed
+        // chain slot.
+        let record_slot = min_context_slot
+            .unwrap_or_else(|| self.remote_account_provider.chain_slot());
         if in_bank.undelegating() {
             debug!(
                 pubkey = %pubkey,
@@ -3359,14 +3365,12 @@ where
                 let projected_deleg_record = self
                     .fetch_and_parse_delegation_record(
                         eata_pubkey,
-                        self.remote_account_provider.chain_slot(),
+                        record_slot,
                         undelegating_refresh_context,
                         CompanionFetchLogContext {
                             origin: undelegating_refresh_context,
                             primary_pubkey: eata_pubkey,
-                            context_slot: self
-                                .remote_account_provider
-                                .chain_slot(),
+                            context_slot: record_slot,
                         },
                     )
                     .await;
@@ -3388,12 +3392,12 @@ where
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,
-                    self.remote_account_provider.chain_slot(),
+                    record_slot,
                     undelegating_refresh_context,
                     CompanionFetchLogContext {
                         origin: undelegating_refresh_context,
                         primary_pubkey: *pubkey,
-                        context_slot: self.remote_account_provider.chain_slot(),
+                        context_slot: record_slot,
                     },
                 )
                 .await;
@@ -3490,15 +3494,25 @@ where
 
         // Phase 1: Sync bank check — separate undelegating accounts
         // (which need async RPC) from non-undelegating (handled
-        // synchronously)
-        let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
+        // synchronously). Forced keys additionally carry the caller's
+        // requested slot so the undelegation gate classifies them from a
+        // slot-coherent delegation record.
+        let mut undelegating_checks: Vec<(
+            Pubkey,
+            AccountSharedData,
+            Option<u64>,
+        )> = vec![];
         for pubkey in pubkeys.iter() {
             if force_refresh_pubkeys.contains(*pubkey) {
                 if let Some(account_in_bank) =
                     self.accounts_bank.get_account(pubkey)
                 {
                     if account_in_bank.undelegating() {
-                        undelegating_checks.push((**pubkey, account_in_bank));
+                        undelegating_checks.push((
+                            **pubkey,
+                            account_in_bank,
+                            slot,
+                        ));
                         continue;
                     }
                 }
@@ -3509,7 +3523,7 @@ where
                 self.accounts_bank.get_account(pubkey)
             {
                 if account_in_bank.undelegating() {
-                    undelegating_checks.push((**pubkey, account_in_bank));
+                    undelegating_checks.push((**pubkey, account_in_bank, None));
                 } else {
                     if account_in_bank.owner().eq(&dlp_api::id()) {
                         debug!(
@@ -3539,7 +3553,9 @@ where
         // Phase 2: Parallel undelegation checks via JoinSet
         if !undelegating_checks.is_empty() {
             let mut join_set = JoinSet::new();
-            for (pubkey, account_in_bank) in undelegating_checks {
+            for (pubkey, account_in_bank, min_context_slot) in
+                undelegating_checks
+            {
                 let this = self.clone();
                 join_set.spawn(async move {
                     let decision = match tokio::time::timeout(
@@ -3547,6 +3563,7 @@ where
                         this.should_refresh_undelegating_in_bank_account(
                             &pubkey,
                             &account_in_bank,
+                            min_context_slot,
                             fetch_context,
                         ),
                     )

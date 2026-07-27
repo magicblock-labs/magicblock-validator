@@ -132,7 +132,7 @@ Before fetching remotely:
 
 1. Blacklisted accounts are filtered out.
 2. Existing non-undelegating accounts in `AccountsDb` are treated as ready.
-3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed.
+3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed. Forced-refresh requests (e.g. post-delegation action dependencies) do not bypass this gate: forced undelegating keys take the same path, with the caller's requested slot passed as the record's min context slot so the classification resolves the account and its delegation record from a coherent slot (delegation slot-consistency invariant).
 4. Remaining pubkeys enter `pending_requests` ownership coordination.
 
 Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. The upper dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="fetch_cloner"`. Owner-side internal waiters are not counted in the active waiter gauge; only callers that join existing work are counted. Metric labels remain bounded enum/static values and do not include pubkeys, signatures, errors, endpoint URLs, or raw messages.
@@ -236,6 +236,7 @@ Delegation records may carry encrypted or cleartext post-delegation actions. Cha
 - validates signer addresses through `RiskService` when configured,
 - collects action dependencies from instruction program IDs and account metas,
 - force-refreshes writable dependencies that are absent or not currently delegated,
+- never force-refreshes a dependency that is locally undelegating: such keys are routed through `should_refresh_undelegating_in_bank_account` (with the caller's requested slot as the record's min context slot, so classification is slot-coherent per the delegation slot-consistency invariant), and may only be overridden after a confirmed undelegation or a newer delegation slot. Covered by `test_post_delegation_actions_never_refresh_undelegating_dependency`,
 - errors with `MissingDelegationActionAccounts` if required delegated writable dependencies cannot be resolved.
 
 Do not execute or ignore these actions blindly. They are part of clone-time invariants for post-delegation behavior.
