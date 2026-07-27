@@ -313,6 +313,11 @@ impl TransactionScheduler {
         if self.coordinator.is_primary() {
             self.advance_primary_slot().await;
         }
+        // No later shutdown step emits replication messages. Release the
+        // producer endpoint as soon as the final Block/SuperBlock is queued so
+        // the replication service can finish draining independently of executor
+        // teardown.
+        self.replication_tx.take();
         // Shutdown: drop executor channels to signal workers to stop,
         // then drain remaining ready notifications
         drop(self.executors);

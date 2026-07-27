@@ -19,7 +19,7 @@ use super::{
     columns::Column,
     iterator::IteratorMode,
     options::{AccessType, LedgerOptions},
-    rocksdb_options::get_rocksdb_options,
+    rocksdb_options::{get_rocksdb_options, RateLimiterHandle},
 };
 use crate::errors::{LedgerError, LedgerResult};
 
@@ -32,6 +32,8 @@ pub struct Rocks {
     access_type: AccessType,
     /// Oldest slot we want to keep in DB, slots before will be removed
     oldest_slot: Arc<AtomicU64>,
+    /// This DB's background IO rate limiter; kept so shutdown can lift it.
+    rate_limiter: RateLimiterHandle,
 }
 
 impl Rocks {
@@ -42,7 +44,7 @@ impl Rocks {
         fs::create_dir_all(path)?;
 
         let oldest_slot = Arc::new(DEFAULT_OLD_SLOT.into());
-        let db_options = get_rocksdb_options(&access_type);
+        let (db_options, rate_limiter) = get_rocksdb_options(&access_type);
         let descriptors = cf_descriptors(path, &options, &oldest_slot);
 
         let db = match access_type {
@@ -56,7 +58,15 @@ impl Rocks {
             db,
             access_type,
             oldest_slot,
+            rate_limiter,
         })
+    }
+
+    /// Raises the background IO rate limit to effectively unlimited so
+    /// shutdown flushes run at disk speed; call only after compactions
+    /// have been stopped.
+    pub fn lift_rate_limit(&self) {
+        self.rate_limiter.lift();
     }
 
     pub fn destroy(path: &Path) -> LedgerResult<()> {

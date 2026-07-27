@@ -180,12 +180,9 @@ where
     }
 
     async fn reschedule_pending_bundles(&self) -> CommittorServiceResult<()> {
-        // Fetch pending and failed bundles from DB
-        let mut bundles = self
-            .processor
-            .load_recovery_intent_bundles()
-            .await
-            .inspect_err(|err| {
+        // Fetch pending bundles from DB
+        let mut bundles =
+            self.processor.pending_intent_bundles().await.inspect_err(|err| {
                 error!(error = ?err, "Failed to load pending intent bundles for recovery");
             })?;
         if bundles.is_empty() {

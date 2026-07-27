@@ -189,14 +189,10 @@ impl Primary {
         let _timing = ShutdownTiming::new("replication_service_drain");
 
         let deadline = Instant::now() + SHUTDOWN_DRAIN_TIMEOUT;
-        if !self.confirm_transactions(Some(deadline)).await {
-            warn!("failed to confirm published transactions during shutdown");
-            return;
-        }
-        // Every message is confirmed here, so this counts messages known to be
-        // persisted. `confirmation_for` trades confirmation for publish
-        // throughput, but there is no throughput left to protect once we are
-        // stopping, and this is the last chance to notice a loss.
+        // Transactions remain pipelined while the producer finishes. Block
+        // fences and the final flush below still guarantee that a successful
+        // drain has confirmed every message without paying one NATS round trip
+        // per queued transaction.
         let mut drained = 0_u64;
 
         if let Some(msg) = pending.take() {
@@ -220,6 +216,13 @@ impl Primary {
                     drained += 1;
                 }
                 DrainNext::ProducerFinished => {
+                    if !self.confirm_transactions(Some(deadline)).await {
+                        warn!(
+                            drained,
+                            "failed to confirm drained replication messages"
+                        );
+                        return;
+                    }
                     info!(drained, "replication shutdown drain complete");
                     return;
                 }
@@ -231,14 +234,13 @@ impl Primary {
         }
     }
 
-    /// Publishes during shutdown, confirming regardless of message kind.
+    /// Publishes during shutdown using the normal ordering fences.
     async fn drain_publish(
         &mut self,
         msg: &Message,
         deadline: Instant,
     ) -> bool {
-        self.publish_with_retry_until(msg, Some(deadline), Confirm::Yes)
-            .await
+        self.publish_ordered_until(msg, Some(deadline)).await
     }
 
     async fn release_producer_lock(&self, lock_state: LockState) {
@@ -290,14 +292,22 @@ impl Primary {
     }
 
     async fn publish_with_retry(&mut self, msg: &Message) -> bool {
+        self.publish_ordered_until(msg, None).await
+    }
+
+    async fn publish_ordered_until(
+        &mut self,
+        msg: &Message,
+        deadline: Option<Instant>,
+    ) -> bool {
         let fence = matches!(msg, Message::Block(_))
             || (matches!(msg, Message::Transaction(_))
                 && self.unconfirmed_transactions.len()
                     >= MAX_DEFERRED_TRANSACTION_ACKS);
-        if fence && !self.confirm_transactions(None).await {
+        if fence && !self.confirm_transactions(deadline).await {
             return false;
         }
-        self.publish_with_retry_until(msg, None, confirmation_for(msg))
+        self.publish_with_retry_until(msg, deadline, confirmation_for(msg))
             .await
     }
 
