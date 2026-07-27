@@ -219,7 +219,7 @@ Do not bypass the scheduler or write accounts directly from this crate. The loca
 
 ### Post-delegation actions
 
-Delegation actions originate from DLP delegation records and are parsed/validated in Chainlink. This crate only transports and executes them as part of clone finalization. Actions attached to non-delegated or unresolved DLP-owned accounts should be rejected before they reach this crate; if that boundary changes, inspect `magicblock-chainlink/src/fetch_cloner/mod.rs` and its tests.
+Delegation actions originate from DLP delegation records and are parsed/validated in Chainlink. This crate transports them as part of clone finalization. Immediately before native invocation, the Magic Program executor revalidates every writable action account from the locked transaction context and accepts only delegated, ephemeral, or confined accounts that are not undelegating. A rejection fails the transaction, so the preceding clone and every action mutation roll back atomically. If that boundary changes, inspect `magicblock-chainlink/src/chainlink/fetch_cloner/mod.rs`, `programs/magicblock/src/clone_account/common.rs`, and their processor tests.
 
 ### Program loaders
 
@@ -236,7 +236,7 @@ The cloner treats `RemoteProgramLoader::V1` specially and sends all other non-re
 3. `AccountCloneFields` must faithfully carry lamports, owner, executable, delegated, confined, and remote slot from the resolved account.
 4. Large account clones must be completed with `CloneAccountContinue(is_last=true)` or cleaned up with `CleanupPartialClone` on failure.
 5. Transaction size preflight must remain in place for chunked transactions, especially when post-delegation actions are present.
-6. Post-delegation actions for delegated clones must remain synchronized between clone instructions and post-delegation action executor instructions.
+6. Post-delegation actions for delegated clones must remain synchronized between clone instructions and post-delegation action executor instructions, and writable action accounts must be revalidated under transaction locks before invocation.
 7. Program clone buffer PDAs must remain deterministic and cleanup-compatible.
 8. Program finalization must preserve loader-specific authority and deployment semantics.
 9. Retracted programs must not be deployed locally as usable programs.

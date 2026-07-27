@@ -21,7 +21,7 @@ use solana_transaction_context::{
 
 use crate::{
     errors::MagicBlockProgramError,
-    utils::instruction_sysvar,
+    utils::{accounts::find_instruction_account, instruction_sysvar},
     validator::{effective_validator_authority_id, validator_authority_id},
 };
 
@@ -294,6 +294,33 @@ pub fn execute_post_delegation_actions(
         delegated_target,
         &actions,
     )?;
+    for account_meta in actions
+        .iter()
+        .flat_map(|action| action.accounts.iter())
+        .filter(|account_meta| account_meta.is_writable)
+    {
+        let instruction_account = find_instruction_account(
+            invoke_context,
+            invoke_context.transaction_context,
+            "Post-delegation action account not found",
+            &account_meta.pubkey,
+        )?;
+        let locally_writable = {
+            let account = instruction_account.borrow()?;
+            !account.undelegating()
+                && (account.delegated()
+                    || account.ephemeral()
+                    || account.confined())
+        };
+        if !locally_writable {
+            ic_msg!(
+                invoke_context,
+                "Post-delegation action account {} is not locally writable",
+                account_meta.pubkey
+            );
+            return Err(InstructionError::IllegalOwner);
+        }
+    }
     for action in actions {
         let signers = post_delegation_action_signers(&action);
         invoke_context.native_invoke(action, &signers)?;
