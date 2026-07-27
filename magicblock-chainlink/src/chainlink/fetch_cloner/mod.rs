@@ -1332,6 +1332,13 @@ where
         match result {
             Ok(signature) => Ok(signature),
             Err(err) => {
+                if matches!(
+                    err,
+                    ChainlinkError::DelegationActionDependenciesUndelegating(_)
+                ) {
+                    return Err(err);
+                }
+
                 let pubkey = request.pubkey;
                 if self
                     .accounts_bank
@@ -2000,6 +2007,25 @@ where
                 &writable_dependencies,
             )
             .await?;
+
+        let mut pending_undelegation = writable_dependencies
+            .iter()
+            .filter(|dependency| {
+                self.accounts_bank
+                    .get_account(dependency)
+                    .is_some_and(|account| account.undelegating())
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        if !pending_undelegation.is_empty() {
+            pending_undelegation.sort_unstable();
+            return Err(
+                ChainlinkError::DelegationActionDependenciesUndelegating(
+                    pending_undelegation,
+                ),
+            );
+        }
+
         if result.missing_delegation_record.is_empty() {
             return Ok(());
         }

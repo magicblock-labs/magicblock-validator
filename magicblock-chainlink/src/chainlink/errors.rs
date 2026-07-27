@@ -55,6 +55,9 @@ pub enum ChainlinkError {
     #[error("Missing accounts required by delegation actions: {0:?}")]
     MissingDelegationActionAccounts(Vec<Pubkey>),
 
+    #[error("Delegation action dependencies still undelegating, action deferred: {0:?}")]
+    DelegationActionDependenciesUndelegating(Vec<Pubkey>),
+
     #[error("timeout waiting for pending request for {0}")]
     PendingRequestTimeout(Pubkey),
 

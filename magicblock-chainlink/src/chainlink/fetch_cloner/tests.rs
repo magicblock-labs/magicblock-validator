@@ -6977,10 +6977,13 @@ async fn test_post_delegation_actions_never_refresh_undelegating_dependency() {
         )
         .await;
 
-    // The dependency is kept locked (the record-aware gate proves the
-    // undelegation is still pending) and is never refreshed, while the
-    // target is cloned normally with its actions attached.
-    assert!(result.is_ok());
+    let err = result.expect_err(
+        "action must be deferred while a writable dependency is undelegating",
+    );
+    assert!(matches!(
+        err,
+        ChainlinkError::DelegationActionDependenciesUndelegating(_)
+    ));
 
     let dependency_after = accounts_bank
         .get_account(&dependency_pubkey)
@@ -6998,12 +7001,12 @@ async fn test_post_delegation_actions_never_refresh_undelegating_dependency() {
             .all(|request| request.pubkey != dependency_pubkey),
         "undelegating dependency must not be force-refreshed"
     );
-    let target_request = clone_requests
-        .iter()
-        .find(|request| request.pubkey == target_pubkey)
-        .expect("target clone request should exist");
-    assert!(!target_request.needs_undelegation);
-    assert!(!target_request.delegation_actions.is_empty());
+    assert!(
+        clone_requests
+            .iter()
+            .all(|request| request.pubkey != target_pubkey),
+        "deferred action must leave the target un-cloned for a later retry"
+    );
 }
 
 #[tokio::test]
