@@ -8595,6 +8595,81 @@ async fn test_token_2022_native_ata_projection_normalizes_and_preserves_layout()
 }
 
 #[tokio::test]
+async fn test_fetch_refreshes_projected_ata_after_eata_redelegation() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const LOCAL_SLOT: u64 = CURRENT_SLOT - 1;
+    const LOCAL_ATA_AMOUNT: u64 = 999;
+
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, 777, true);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [
+            (ata_pubkey, ata_account.clone()),
+            (eata_pubkey, eata_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    // The companion eATA record belongs to a NEWER delegation instance: the
+    // eATA completed undelegation and was redelegated after the projection
+    // was created, so the locked projection must be refreshed, not kept.
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        CURRENT_SLOT + 1,
+    );
+
+    let mut local_ata = create_ata_account(&wallet_owner, &mint);
+    local_ata.data[64..72].copy_from_slice(&LOCAL_ATA_AMOUNT.to_le_bytes());
+    let mut local_ata_shared = AccountSharedData::from(local_ata);
+    local_ata_shared.set_owner(dlp_api::id());
+    local_ata_shared.set_remote_slot(LOCAL_SLOT);
+    local_ata_shared.set_undelegating(true);
+    accounts_bank.insert(ata_pubkey, local_ata_shared);
+
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[ata_pubkey],
+            None,
+            None,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("fetch should succeed");
+    assert!(result.is_ok());
+
+    let ata_after = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("ATA should still exist in bank");
+    assert!(
+        !ata_after.undelegating(),
+        "redelegated eATA must refresh the projection instead of keeping it locked"
+    );
+    assert_ne!(
+        *ata_after.owner(),
+        dlp_api::id(),
+        "refreshed projection must no longer be locked to the delegation program"
+    );
+}
+
+#[tokio::test]
 async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -8632,7 +8707,7 @@ async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
         eata_pubkey,
         validator_pubkey,
         EATA_PROGRAM_ID,
-        CURRENT_SLOT + 1,
+        LOCAL_SLOT,
     );
 
     let mut local_ata = create_ata_account(&wallet_owner, &mint);
