@@ -1260,6 +1260,26 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
+        // Stop auto compactions too: with the throttle lifted, a
+        // flush-triggered compaction would otherwise run at full disk speed
+        // while the RPC still serves.
+        match self.ledger.disable_auto_compactions() {
+            Ok(()) => {
+                // Disabling does not cancel a compaction already mid-run;
+                // give it a bounded window to finish before handing it full
+                // disk bandwidth.
+                self.ledger
+                    .wait_for_quiescent_compactions(Duration::from_secs(2));
+                // Compactions are stopped; unthrottled flushes only compete
+                // with foreground work for the few seconds before exit.
+                self.ledger.lift_rate_limit();
+            }
+            Err(err) => {
+                // Some column may still schedule compactions: keep the
+                // throttle and accept a slower flush over disk saturation.
+                error!(error = ?err, "Failed to disable auto compactions; keeping IO throttle for shutdown flush");
+            }
+        }
         if let Err(err) = self.ledger.flush() {
             error!(error = ?err, "Failed to flush during shutdown preparation");
         }

@@ -81,7 +81,7 @@ Important constructors and accessors:
 
 - `Ledger::open(path)` and `Ledger::open_with_options(path, LedgerOptions)` create `path/rocksdb`, adjust `ulimit -n` when enabled, open RocksDB, initialize `LatestBlock` from the highest stored blockhash, and initialize the lowest cleanup slot.
 - `ledger_path()`, `banking_trace_path()`, `storage_size()`, `db(self)`, `latest_block()`, and `latest_blockhash()` expose operational handles.
-- `flush()`, `shutdown(wait)`, and `cancel_manual_compactions()` are used during shutdown and maintenance.
+- `flush()`, `shutdown(wait)`, `cancel_manual_compactions()`, `disable_auto_compactions()`, `wait_for_quiescent_compactions(timeout)`, and `lift_rate_limit()` are used during shutdown and maintenance. Each `Rocks` owns a handle to its DB-wide 48 MiB/s kAllIo rate limiter (`rocksdb_options.rs`); the limiter charges flush writes as well as compaction IO, so shutdown lifts it — only after compactions are stopped and given a bounded window to quiesce — to keep the final flush from stretching into restart downtime.
 
 Primary data APIs:
 

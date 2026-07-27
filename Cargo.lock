@@ -3209,7 +3209,7 @@ dependencies = [
 [[package]]
 name = "librocksdb-sys"
 version = "0.18.0+10.7.5"
-source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=50c94dc2#50c94dc2c29cc27d8e1214eb56b6bc2d1cd73857"
+source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=c6a3f91f#c6a3f91fbf9d89c718e223cb1ea856589738b8e1"
 dependencies = [
  "bindgen",
  "bzip2-sys",
@@ -5662,7 +5662,7 @@ checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
 [[package]]
 name = "rocksdb"
 version = "0.24.0"
-source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=50c94dc2#50c94dc2c29cc27d8e1214eb56b6bc2d1cd73857"
+source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=c6a3f91f#c6a3f91fbf9d89c718e223cb1ea856589738b8e1"
 dependencies = [
  "libc",
  "librocksdb-sys",
