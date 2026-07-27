@@ -3380,6 +3380,7 @@ where
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
                     record.owner == EATA_PROGRAM_ID
                         && record.authority == self.validator_pubkey
+                        && record.delegation_slot <= in_bank.remote_slot()
                 }) {
                     debug!(
                         pubkey = %pubkey,
