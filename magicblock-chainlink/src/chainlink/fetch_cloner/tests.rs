@@ -6898,7 +6898,8 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
 }
 
 #[tokio::test]
-async fn test_post_delegation_actions_never_refresh_undelegating_dependency() {
+async fn test_undelegating_action_dependency_stays_locked_and_target_is_rescued(
+) {
     init_logger();
     let validator_keypair = Keypair::new();
     let validator_pubkey = validator_keypair.pubkey();
@@ -6916,6 +6917,7 @@ async fn test_post_delegation_actions_never_refresh_undelegating_dependency() {
     };
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         cloner,
         fetch_cloner,
@@ -6945,7 +6947,14 @@ async fn test_post_delegation_actions_never_refresh_undelegating_dependency() {
     locked_dependency.set_remote_slot(CURRENT_SLOT - 1);
     locked_dependency.set_delegated(false);
     locked_dependency.set_undelegating(true);
-    accounts_bank.insert(dependency_pubkey, locked_dependency);
+    accounts_bank.insert(dependency_pubkey, locked_dependency.clone());
+    remote_account_provider
+        .acquire_subscription(
+            &dependency_pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
 
     let mut target_account = AccountSharedData::from(Account {
         lamports: 1_000_000,
@@ -6963,7 +6972,10 @@ async fn test_post_delegation_actions_never_refresh_undelegating_dependency() {
         vec![AccountMeta::new(dependency_pubkey, false)],
     )]);
 
-    let result = fetch_cloner
+    // The stub does not execute the Magic Program guard. Simulate its atomic
+    // rejection so Chainlink exercises the established rescue path.
+    cloner.set_fail_next_clone(true);
+    fetch_cloner
         .clone_account_with_post_delegation_action_invariants(
             AccountCloneRequest {
                 pubkey: target_pubkey,
@@ -6975,38 +6987,33 @@ async fn test_post_delegation_actions_never_refresh_undelegating_dependency() {
             },
             AccountFetchContext::rpc_get_account(),
         )
-        .await;
+        .await
+        .expect("unsafe action should reach terminal rescue");
 
-    let err = result.expect_err(
-        "action must be deferred while a writable dependency is undelegating",
+    assert_eq!(
+        accounts_bank.get_account(&dependency_pubkey),
+        Some(locked_dependency)
     );
-    assert!(matches!(
-        err,
-        ChainlinkError::DelegationActionDependenciesUndelegating(_)
-    ));
-
-    let dependency_after = accounts_bank
-        .get_account(&dependency_pubkey)
-        .expect("dependency must remain in the bank");
-    assert!(dependency_after.undelegating());
-    assert!(!dependency_after.delegated());
-    assert_eq!(dependency_after.remote_slot(), CURRENT_SLOT - 1);
-    assert_eq!(dependency_after.lamports(), 2_000_000);
-    assert_eq!(dependency_after.data(), &[1, 1, 1, 1]);
-
+    assert_eq!(
+        fetch_cloner.fetch_count(),
+        0,
+        "the undelegating dependency must not be remotely refreshed"
+    );
+    assert!(
+        remote_account_provider
+            .has_subscription_reason(
+                &dependency_pubkey,
+                SubscriptionReason::UndelegationTracking,
+            )
+            .await
+    );
     let clone_requests = cloner.clone_requests();
-    assert!(
-        clone_requests
-            .iter()
-            .all(|request| request.pubkey != dependency_pubkey),
-        "undelegating dependency must not be force-refreshed"
-    );
-    assert!(
-        clone_requests
-            .iter()
-            .all(|request| request.pubkey != target_pubkey),
-        "deferred action must leave the target un-cloned for a later retry"
-    );
+    assert_eq!(clone_requests.len(), 2);
+    assert!(clone_requests
+        .iter()
+        .all(|request| request.pubkey == target_pubkey));
+    assert!(!clone_requests[0].needs_undelegation);
+    assert!(clone_requests[1].needs_undelegation);
 }
 
 #[tokio::test]
@@ -8598,204 +8605,6 @@ async fn test_token_2022_native_ata_projection_normalizes_and_preserves_layout()
 }
 
 #[tokio::test]
-async fn test_deferred_post_delegation_action_retries_after_dependency_completes(
-) {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let validator_pubkey = validator_keypair.pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let target_pubkey = random_pubkey();
-    let dependency_pubkey = random_pubkey();
-    let dependency_owner = random_pubkey();
-    let dependency_account = Account {
-        lamports: 1_000_000,
-        data: vec![9, 8, 7, 6],
-        owner: dlp_api::id(),
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        accounts_bank,
-        cloner,
-        fetch_cloner,
-        rpc_client,
-        ..
-    } = setup(
-        [(dependency_pubkey, dependency_account)],
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    add_delegation_record_for(
-        &rpc_client,
-        dependency_pubkey,
-        validator_pubkey,
-        dependency_owner,
-    );
-
-    let mut locked_dependency = AccountSharedData::from(Account {
-        lamports: 2_000_000,
-        data: vec![1, 1, 1, 1],
-        owner: dlp_api::id(),
-        executable: false,
-        rent_epoch: 0,
-    });
-    locked_dependency.set_remote_slot(CURRENT_SLOT - 1);
-    locked_dependency.set_delegated(false);
-    locked_dependency.set_undelegating(true);
-    accounts_bank.insert(dependency_pubkey, locked_dependency);
-
-    let mut target_account = AccountSharedData::from(Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: system_program::id(),
-        executable: false,
-        rent_epoch: 0,
-    });
-    target_account.set_remote_slot(CURRENT_SLOT);
-    target_account.set_delegated(true);
-
-    let actions = DelegationActions::from(vec![Instruction::new_with_bytes(
-        system_program::id(),
-        &[1],
-        vec![AccountMeta::new(dependency_pubkey, false)],
-    )]);
-
-    // While the dependency is undelegating, the action defers.
-    let deferred = fetch_cloner
-        .clone_account_with_post_delegation_action_invariants(
-            AccountCloneRequest {
-                pubkey: target_pubkey,
-                account: target_account.clone(),
-                commit_frequency_ms: None,
-                delegation_actions: actions,
-                delegated_to_other: None,
-                needs_undelegation: false,
-            },
-            AccountFetchContext::rpc_get_account(),
-        )
-        .await;
-    assert!(matches!(
-        deferred,
-        Err(ChainlinkError::DelegationActionDependenciesUndelegating(_))
-    ));
-    assert!(cloner.clone_requests().is_empty());
-
-    // The dependency's undelegation completes: its bank entry flips out of
-    // the locked state and it is cloned into its post-undelegation state.
-    let mut completed_dependency = accounts_bank
-        .get_account(&dependency_pubkey)
-        .expect("dependency must remain in the bank");
-    completed_dependency.set_undelegating(false);
-    accounts_bank.insert(dependency_pubkey, completed_dependency.clone());
-
-    let mut completed_dependency_request_account = completed_dependency;
-    completed_dependency_request_account.set_delegated(true);
-    fetch_cloner
-        .clone_account_with_post_delegation_action_invariants(
-            AccountCloneRequest {
-                pubkey: dependency_pubkey,
-                account: completed_dependency_request_account,
-                commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
-                delegated_to_other: None,
-                needs_undelegation: false,
-            },
-            AccountFetchContext::rpc_get_account(),
-        )
-        .await
-        .expect("dependency completion clone should succeed");
-
-    // Completing the dependency drained the deferral: the intended target is
-    // cloned with its action attached (invariant 1.6).
-    let target_request = cloner
-        .clone_requests()
-        .into_iter()
-        .find(|request| request.pubkey == target_pubkey)
-        .expect("deferred target must be retried after dependency completion");
-    assert!(!target_request.needs_undelegation);
-    assert!(!target_request.delegation_actions.is_empty());
-}
-
-#[tokio::test]
-async fn test_fetch_refreshes_projected_ata_after_eata_redelegation() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let validator_pubkey = validator_keypair.pubkey();
-    let wallet_owner = random_pubkey();
-    let mint = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-    const LOCAL_SLOT: u64 = CURRENT_SLOT - 1;
-    const LOCAL_ATA_AMOUNT: u64 = 999;
-
-    let ata_pubkey = derive_ata(&wallet_owner, &mint);
-    let eata_pubkey = derive_eata(&wallet_owner, &mint);
-    let ata_account = create_ata_account(&wallet_owner, &mint);
-    let eata_account = create_eata_account(&wallet_owner, &mint, 777, true);
-
-    let FetcherTestCtx {
-        accounts_bank,
-        fetch_cloner,
-        rpc_client,
-        ..
-    } = setup(
-        [
-            (ata_pubkey, ata_account.clone()),
-            (eata_pubkey, eata_account),
-        ],
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    // The companion eATA record belongs to a NEWER delegation instance: the
-    // eATA completed undelegation and was redelegated after the projection
-    // was created, so the locked projection must be refreshed, not kept.
-    add_delegation_record_with_slot_for(
-        &rpc_client,
-        eata_pubkey,
-        validator_pubkey,
-        EATA_PROGRAM_ID,
-        CURRENT_SLOT + 1,
-    );
-
-    let mut local_ata = create_ata_account(&wallet_owner, &mint);
-    local_ata.data[64..72].copy_from_slice(&LOCAL_ATA_AMOUNT.to_le_bytes());
-    let mut local_ata_shared = AccountSharedData::from(local_ata);
-    local_ata_shared.set_owner(dlp_api::id());
-    local_ata_shared.set_remote_slot(LOCAL_SLOT);
-    local_ata_shared.set_undelegating(true);
-    accounts_bank.insert(ata_pubkey, local_ata_shared);
-
-    let result = fetch_cloner
-        .fetch_and_clone_accounts_with_dedup(
-            &[ata_pubkey],
-            None,
-            None,
-            AccountFetchContext::rpc_get_account(),
-        )
-        .await
-        .expect("fetch should succeed");
-    assert!(result.is_ok());
-
-    let ata_after = accounts_bank
-        .get_account(&ata_pubkey)
-        .expect("ATA should still exist in bank");
-    assert!(
-        !ata_after.undelegating(),
-        "redelegated eATA must refresh the projection instead of keeping it locked"
-    );
-    assert_ne!(
-        *ata_after.owner(),
-        dlp_api::id(),
-        "refreshed projection must no longer be locked to the delegation program"
-    );
-}
-
-#[tokio::test]
 async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -8833,7 +8642,7 @@ async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
         eata_pubkey,
         validator_pubkey,
         EATA_PROGRAM_ID,
-        LOCAL_SLOT,
+        CURRENT_SLOT + 1,
     );
 
     let mut local_ata = create_ata_account(&wallet_owner, &mint);

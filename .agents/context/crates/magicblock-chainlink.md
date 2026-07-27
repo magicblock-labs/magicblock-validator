@@ -132,7 +132,7 @@ Before fetching remotely:
 
 1. Blacklisted accounts are filtered out.
 2. Existing non-undelegating accounts in `AccountsDb` are treated as ready.
-3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed. Forced-refresh requests (e.g. post-delegation action dependencies) do not bypass this gate: forced undelegating keys take the same path, with the delegation record resolved at the freshest of the caller's requested slot and the latest observed chain slot so the classification uses a coherent slot (delegation slot-consistency invariant).
+3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed. Locally undelegating post-delegation action dependencies remain local bank hits and are not remotely force-refreshed.
 4. Remaining pubkeys enter `pending_requests` ownership coordination.
 
 Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. The upper dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="fetch_cloner"`. Owner-side internal waiters are not counted in the active waiter gauge; only callers that join existing work are counted. Metric labels remain bounded enum/static values and do not include pubkeys, signatures, errors, endpoint URLs, or raw messages.
@@ -236,11 +236,10 @@ Delegation records may carry encrypted or cleartext post-delegation actions. Cha
 - validates signer addresses through `RiskService` when configured,
 - collects action dependencies from instruction program IDs and account metas,
 - force-refreshes writable dependencies that are absent or not currently delegated,
-- never force-refreshes a dependency that is locally undelegating: such keys are routed through `should_refresh_undelegating_in_bank_account` (with the record resolved at the freshest of the caller's requested slot and the latest observed chain slot, matching the account-fetch max-slot rule, so classification is slot-coherent per the delegation slot-consistency invariant), and may only be overridden after a confirmed undelegation or a newer delegation slot,
-- defers the whole action when a writable dependency is still undelegating after the gate (`DelegationActionDependenciesUndelegating`): the target clone is aborted without rescue-undelegation and retained in the `action_deferrals` registry keyed by the dependency; when the dependency's undelegation completes and the dependency is cloned into its post-undelegation state, the deferral drains and the intended action is retried (post-delegation exactly-once invariant). A dependency found non-delegated at that point is unsatisfiable and takes the normal rescue path. Covered by `test_post_delegation_actions_never_refresh_undelegating_dependency` and `test_deferred_post_delegation_action_retries_after_dependency_completes`,
+- leaves locally undelegating writable dependencies as bank hits instead of remotely force-refreshing and overwriting their lock,
 - errors with `MissingDelegationActionAccounts` if required delegated writable dependencies cannot be resolved.
 
-Do not execute or ignore these actions blindly. They are part of clone-time invariants for post-delegation behavior.
+Chainlink's dependency fetch is an availability preflight. The Magic Program executor authoritatively revalidates every writable action account from the locked transaction context and rejects plain or undelegating accounts, rolling back the clone and action transaction atomically. The target then follows the established rescue-undelegation path; no action-bearing activation commits, so there is no deferred retry state. Do not execute or ignore these actions blindly.
 
 ### Program account resolution
 
@@ -278,7 +277,7 @@ Pitfalls:
 - If canonical delegated ATA normalization reports malformed token-program data, reject the clone request instead of forwarding the unnormalized account to the cloner.
 - Projected ATAs are virtual eATA views and should be uncloseable locally; do not preserve base close authority on the projected clone.
 - Same-slot delegated refreshes are a narrow ordering exception for allowing a delegated update over plain/undelegating local state at the same `remote_slot`. They do not mean same-slot re-delegation to the same validator is fully supported; without a delegation generation/index, `account_still_undelegating_on_chain` cannot distinguish `delegation_slot == remote_slot_in_bank` from a still-pending undelegation, and `magicblock-chainlink/tests/07_redeleg_us_same_slot.rs` remains ignored for that reason.
-- Undelegating ATAs may remain in bank while a companion eATA is still delegated to this validator — but only for the same (still pending) delegation instance: `should_refresh_undelegating_in_bank_account` also requires `record.delegation_slot <= remote_slot` on the companion record, so an eATA that completed undelegation and was redelegated at a newer delegation slot refreshes the projection instead of keeping a stale locked copy.
+- Undelegating ATAs may remain in bank while a companion eATA is still delegated to this validator.
 
 ## Runtime flow: subscription updates
 
@@ -511,7 +510,7 @@ Preserve these invariants when editing this crate:
 7. **Pending request and pending clone deduplication must clean up by generation/key** to avoid stale owners unblocking or deleting newer work.
 8. **Program-data subscriptions for LoaderV3 must be cleaned up on all paths.**
 9. **ATA/eATA projection must preserve base ATA layout and token-program ownership.**
-10. **Post-delegation action dependencies must be available before clone-time action handling.**
+10. **Post-delegation action dependencies must be available before clone-time action handling, and every writable dependency must be revalidated under transaction locks before native invocation.**
 11. **Disabled/non-primary mode must not perform remote fetches or transaction account ensures.**
 12. **This crate must not weaken processor/SVM access validation.** It only prepares local account state.
 13. **Fetch/clone and subscription paths must remain performance-conscious.** Preserve deduplication, bounded waiting, LRU protections, low subscription churn, and non-blocking behavior unless a documented correctness requirement forces a tradeoff.

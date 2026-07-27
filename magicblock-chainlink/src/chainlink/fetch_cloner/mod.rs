@@ -159,13 +159,6 @@ where
 
     pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
 
-    /// Post-delegation action targets deferred because a writable dependency
-    /// is still undelegating, keyed by that dependency. Drained and retried
-    /// once the dependency's undelegation completes and the dependency is
-    /// cloned into its post-undelegation state (invariant 1.6: the intended
-    /// action must eventually execute).
-    action_deferrals: Arc<Mutex<ActionDeferrals>>,
-
     pending_operation_timeout_ms: Arc<AtomicU64>,
 
     /// Risk checker for post-delegation action addresses.
@@ -178,9 +171,6 @@ struct PendingUndelegationGuard {
     pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
     pubkey: Pubkey,
 }
-
-type ActionDeferrals =
-    hash_map::HashMap<Pubkey, Vec<(AccountCloneRequest, AccountFetchContext)>>;
 
 impl Drop for PendingUndelegationGuard {
     fn drop(&mut self) {
@@ -354,7 +344,6 @@ where
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
-            action_deferrals: self.action_deferrals.clone(),
             pending_operation_timeout_ms: self
                 .pending_operation_timeout_ms
                 .clone(),
@@ -462,7 +451,6 @@ where
             )),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
             pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
-            action_deferrals: Arc::new(Mutex::new(hash_map::HashMap::new())),
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
@@ -1313,11 +1301,9 @@ where
         }
 
         if request.delegation_actions.is_empty() {
-            let signature = self
-                .clone_account_with_ownership(request.clone(), fetch_context)
-                .await?;
-            self.retry_deferred_actions_for(&request.pubkey).await;
-            return Ok(signature);
+            return Ok(self
+                .clone_account_with_ownership(request, fetch_context)
+                .await?);
         }
 
         if !request.account.delegated() {
@@ -1344,30 +1330,8 @@ where
         .await;
 
         match result {
-            Ok(signature) => {
-                self.retry_deferred_actions_for(&request.pubkey).await;
-                Ok(signature)
-            }
+            Ok(signature) => Ok(signature),
             Err(err) => {
-                // A still-undelegating writable dependency defers the whole
-                // action: retain the target under its dependencies and retry
-                // it once they complete undelegation (invariant 1.6), instead
-                // of undelegating it with no path to retry.
-                if let ChainlinkError::DelegationActionDependenciesUndelegating(
-                    ref dependencies,
-                ) = err
-                {
-                    if let Ok(mut deferrals) = self.action_deferrals.lock() {
-                        for dependency in dependencies {
-                            deferrals
-                                .entry(*dependency)
-                                .or_default()
-                                .push((request.clone(), fetch_context));
-                        }
-                    }
-                    return Err(err);
-                }
-
                 let pubkey = request.pubkey;
                 if self
                     .accounts_bank
@@ -1392,10 +1356,7 @@ where
                     )
                     .await
                 {
-                    Ok(signature) => {
-                        self.retry_deferred_actions_for(&pubkey).await;
-                        Ok(signature)
-                    }
+                    Ok(signature) => Ok(signature),
                     Err(undelegation_err) => {
                         warn!(
                             pubkey = %pubkey,
@@ -1406,43 +1367,6 @@ where
                         Err(err)
                     }
                 }
-            }
-        }
-    }
-
-    /// Retries post-delegation action targets that were deferred while
-    /// `dependency` was still undelegating (invariant 1.6). Invoked after any
-    /// successful clone of the dependency into its post-undelegation state:
-    /// a plain/completed dependency makes the retried action unsatisfiable
-    /// (rescue path handles it), a re-delegated dependency lets the intended
-    /// action finally execute. Targets whose dependencies are still
-    /// undelegating simply re-register through the same deferral path.
-    async fn retry_deferred_actions_for(&self, dependency: &Pubkey) {
-        let deferred = self
-            .action_deferrals
-            .lock()
-            .ok()
-            .and_then(|mut deferrals| deferrals.remove(dependency))
-            .unwrap_or_default();
-        for (request, fetch_context) in deferred {
-            debug!(
-                dependency = %dependency,
-                target = %request.pubkey,
-                "Retrying deferred post-delegation action target"
-            );
-            if let Err(err) = Box::pin(
-                self.clone_account_with_post_delegation_action_invariants(
-                    request,
-                    fetch_context,
-                ),
-            )
-            .await
-            {
-                debug!(
-                    dependency = %dependency,
-                    error = ?err,
-                    "Deferred post-delegation action retry not completed"
-                );
             }
         }
     }
@@ -2076,51 +2000,6 @@ where
                 &writable_dependencies,
             )
             .await?;
-
-        let mut pending_undelegation = writable_dependencies
-            .iter()
-            .filter(|dependency| {
-                self.accounts_bank
-                    .get_account(dependency)
-                    .is_some_and(|account| account.undelegating())
-            })
-            .copied()
-            .collect::<Vec<_>>();
-        if !pending_undelegation.is_empty() {
-            pending_undelegation.sort_unstable();
-            return Err(
-                ChainlinkError::DelegationActionDependenciesUndelegating(
-                    pending_undelegation,
-                ),
-            );
-        }
-
-        // Revalidate post-refresh state: a writable dependency that is
-        // present but no longer delegated (undelegation completed meanwhile,
-        // or it is delegated to another validator) can never be written by
-        // the action, so treat it as unsatisfiable up front instead of
-        // discovering it through a failing clone transaction.
-        let mut unsatisfiable = writable_dependencies
-            .iter()
-            .filter(|dependency| {
-                self.accounts_bank.get_account(dependency).is_some_and(
-                    |account| {
-                        !account.delegated()
-                            && !account.undelegating()
-                            && !account.ephemeral()
-                            && !account.confined()
-                    },
-                )
-            })
-            .copied()
-            .collect::<Vec<_>>();
-        if !unsatisfiable.is_empty() {
-            unsatisfiable.sort_unstable();
-            return Err(ChainlinkError::MissingDelegationActionAccounts(
-                unsatisfiable,
-            ));
-        }
-
         if result.missing_delegation_record.is_empty() {
             return Ok(());
         }
@@ -3460,17 +3339,8 @@ where
         &self,
         pubkey: &Pubkey,
         in_bank: &AccountSharedData,
-        min_context_slot: Option<u64>,
         fetch_context: AccountFetchContext,
     ) -> RefreshDecision {
-        // Resolve the delegation record at the freshest of the caller's
-        // requested slot and the latest observed chain slot (matching the
-        // account-fetch rule at subscription_slot.max(chain_slot())), so the
-        // classification is slot-coherent (invariant 1.8).
-        let record_slot = min_context_slot.map_or_else(
-            || self.remote_account_provider.chain_slot(),
-            |slot| slot.max(self.remote_account_provider.chain_slot()),
-        );
         if in_bank.undelegating() {
             debug!(
                 pubkey = %pubkey,
@@ -3489,19 +3359,20 @@ where
                 let projected_deleg_record = self
                     .fetch_and_parse_delegation_record(
                         eata_pubkey,
-                        record_slot,
+                        self.remote_account_provider.chain_slot(),
                         undelegating_refresh_context,
                         CompanionFetchLogContext {
                             origin: undelegating_refresh_context,
                             primary_pubkey: eata_pubkey,
-                            context_slot: record_slot,
+                            context_slot: self
+                                .remote_account_provider
+                                .chain_slot(),
                         },
                     )
                     .await;
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
                     record.owner == EATA_PROGRAM_ID
                         && record.authority == self.validator_pubkey
-                        && record.delegation_slot <= in_bank.remote_slot()
                 }) {
                     debug!(
                         pubkey = %pubkey,
@@ -3517,12 +3388,12 @@ where
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,
-                    record_slot,
+                    self.remote_account_provider.chain_slot(),
                     undelegating_refresh_context,
                     CompanionFetchLogContext {
                         origin: undelegating_refresh_context,
                         primary_pubkey: *pubkey,
-                        context_slot: record_slot,
+                        context_slot: self.remote_account_provider.chain_slot(),
                     },
                 )
                 .await;
@@ -3619,25 +3490,18 @@ where
 
         // Phase 1: Sync bank check — separate undelegating accounts
         // (which need async RPC) from non-undelegating (handled
-        // synchronously). Forced keys additionally carry the caller's
-        // requested slot so the undelegation gate classifies them from a
-        // slot-coherent delegation record.
-        let mut undelegating_checks: Vec<(
-            Pubkey,
-            AccountSharedData,
-            Option<u64>,
-        )> = vec![];
+        // synchronously). A forced action-dependency refresh must not replace
+        // a locally undelegating account; the locked runtime guard rejects
+        // the action if that dependency is still unsafe at execution time.
+        let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
         for pubkey in pubkeys.iter() {
             if force_refresh_pubkeys.contains(*pubkey) {
                 if let Some(account_in_bank) =
                     self.accounts_bank.get_account(pubkey)
                 {
                     if account_in_bank.undelegating() {
-                        undelegating_checks.push((
-                            **pubkey,
-                            account_in_bank,
-                            slot,
-                        ));
+                        bank_hit_no_fetch_undelegating_still_valid_count += 1;
+                        in_bank.insert(**pubkey);
                         continue;
                     }
                 }
@@ -3648,7 +3512,7 @@ where
                 self.accounts_bank.get_account(pubkey)
             {
                 if account_in_bank.undelegating() {
-                    undelegating_checks.push((**pubkey, account_in_bank, None));
+                    undelegating_checks.push((**pubkey, account_in_bank));
                 } else {
                     if account_in_bank.owner().eq(&dlp_api::id()) {
                         debug!(
@@ -3678,9 +3542,7 @@ where
         // Phase 2: Parallel undelegation checks via JoinSet
         if !undelegating_checks.is_empty() {
             let mut join_set = JoinSet::new();
-            for (pubkey, account_in_bank, min_context_slot) in
-                undelegating_checks
-            {
+            for (pubkey, account_in_bank) in undelegating_checks {
                 let this = self.clone();
                 join_set.spawn(async move {
                     let decision = match tokio::time::timeout(
@@ -3688,7 +3550,6 @@ where
                         this.should_refresh_undelegating_in_bank_account(
                             &pubkey,
                             &account_in_bank,
-                            min_context_slot,
                             fetch_context,
                         ),
                     )

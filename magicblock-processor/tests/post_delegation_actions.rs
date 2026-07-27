@@ -13,6 +13,7 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 use solana_signer::Signer;
+use solana_transaction_error::TransactionError;
 use test_kit::ExecutionTestEnv;
 
 /// Inserts the magic context account so that scheduling instructions which
@@ -54,6 +55,11 @@ async fn executor_runs_post_delegation_actions_after_clone() {
 
     let action_payer = Pubkey::new_unique();
     env.fund_account(action_payer, 1_000_000);
+    let mut action_payer_account = env.get_account(action_payer);
+    action_payer_account.set_delegated(true);
+    env.accountsdb
+        .insert_account(&action_payer, &action_payer_account)
+        .unwrap();
 
     let schedule_task_action = Instruction::new_with_bincode(
         guinea::ID,
@@ -105,6 +111,77 @@ async fn executor_runs_post_delegation_actions_after_clone() {
 
     let counter_account = env.get_account(counter);
     assert_eq!(counter_account.data(), &[1]);
+}
+
+#[tokio::test]
+async fn executor_rejects_unwritable_action_dependencies_atomically() {
+    generate_validator_authority_if_needed();
+
+    for undelegating in [false, true] {
+        let env = ExecutionTestEnv::new_with_config(0, 1, false);
+        let validator = validator_authority();
+        env.fund_account(validator.pubkey(), 10_000_000);
+
+        let target = Pubkey::new_unique();
+        env.accountsdb
+            .insert_account(
+                &target,
+                &AccountSharedData::new(100, 0, &system_program::id()),
+            )
+            .unwrap();
+
+        let counter = Pubkey::new_unique();
+        let mut counter_account = AccountSharedData::new(1_000, 1, &guinea::ID);
+        counter_account.set_undelegating(undelegating);
+        counter_account.set_data_from_slice(&[0]);
+        env.accountsdb
+            .insert_account(&counter, &counter_account)
+            .unwrap();
+
+        let actions = vec![Instruction::new_with_bincode(
+            guinea::ID,
+            &GuineaInstruction::Increment,
+            vec![AccountMeta::new(counter, false)],
+        )];
+        let clone_ix = InstructionUtils::clone_account_instruction(
+            target,
+            vec![9],
+            AccountCloneFields {
+                lamports: 1_000_000,
+                owner: system_program::id(),
+                delegated: true,
+                remote_slot: 1,
+                ..Default::default()
+            },
+            actions.clone(),
+        );
+        let executor_ix =
+            InstructionUtils::post_delegation_action_executor_instruction(
+                target, actions,
+            );
+
+        let txn = env.build_transaction_with_signers(
+            &[clone_ix, executor_ix],
+            &[&validator],
+        );
+        assert_eq!(
+            env.execute_transaction(txn).await.unwrap_err(),
+            TransactionError::InstructionError(
+                1,
+                solana_instruction::error::InstructionError::IllegalOwner,
+            )
+        );
+
+        let target_account = env.get_account(target);
+        assert!(!target_account.delegated(), "clone must roll back");
+        assert!(
+            target_account.data().is_empty(),
+            "the cloned data must roll back with the rejected action"
+        );
+        let counter_account = env.get_account(counter);
+        assert_eq!(counter_account.undelegating(), undelegating);
+        assert_eq!(counter_account.data(), &[0]);
+    }
 }
 
 #[tokio::test]
