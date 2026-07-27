@@ -134,11 +134,10 @@ where
         };
 
         result.map_err(|err| {
-            IntentExecutorError::from_finalize_execution_error(
-                err,
-                // TODO(edwin): shall one stage have same signature for commit & finalize
-                None,
-            )
+            // Single-stage executes commit+finalize in one transaction; mirror the
+            // success-path semantics in `commit_persister::finalize_base_intent`.
+            let signature = err.signature();
+            IntentExecutorError::from_finalize_execution_error(err, signature)
         })
     }
 

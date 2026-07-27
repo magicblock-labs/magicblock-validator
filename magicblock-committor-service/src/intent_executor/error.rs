@@ -657,6 +657,33 @@ mod tests {
     }
 
     #[test]
+    fn single_stage_finalize_failure_reports_shared_signature() {
+        let signature = solana_signature::Signature::new_unique();
+        let err = TransactionStrategyExecutionError::InternalError(
+            InternalError::MagicBlockRpcClientError(Box::new(
+                MagicBlockRpcClientError::SentTransactionError(
+                    solana_transaction_error::TransactionError::InstructionError(
+                        0,
+                        solana_instruction::error::InstructionError::Custom(1),
+                    ),
+                    signature,
+                ),
+            )),
+        );
+
+        let wrapped =
+            super::IntentExecutorError::from_finalize_execution_error(
+                err,
+                Some(signature),
+            );
+        assert_eq!(
+            wrapped.signatures(),
+            Some((signature, Some(signature)))
+        );
+        assert!(!wrapped.is_transient());
+    }
+
+    #[test]
     fn unrelated_internal_errors_do_not_trigger_single_stage_split() {
         let err = TransactionStrategyExecutionError::InternalError(
             InternalError::MagicBlockRpcClientError(Box::new(
