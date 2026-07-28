@@ -16,7 +16,7 @@ This crate is small and dependency-light. It is not on the transaction execution
 
 ## Update requirement
 
-Update this guide in the same change whenever `magicblock-version` behavior or contracts change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever `magicblock-version` behavior or contracts change. Include changes to:
 
 - `Version` fields, serialization behavior, `Display` / `Debug` formatting, or the `semver!` / `version!` macros;
 - how `major`, `minor`, `patch`, `commit`, `feature_set`, `client`, `solana_core`, or `git_version` are computed;
@@ -119,7 +119,7 @@ HTTP getVersion request
        magicblock-core = version.to_string()
 ```
 
-The RPC field names are external compatibility surface. Do not rename them or swap `git-commit` from `git_version` to the numeric `commit` field without updating RPC tests, docs, and downstream tooling expectations.
+The RPC field names are external compatibility surface. Do not rename them or swap `git-commit` from `git_version` to the numeric `commit` field without updating RPC tests and downstream tooling expectations and queuing the documentation update for weekly maintenance.
 
 ### Validator/TUI display flow
 

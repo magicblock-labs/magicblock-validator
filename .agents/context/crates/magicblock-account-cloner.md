@@ -19,7 +19,7 @@ This crate is on the account-availability path for transaction submission, RPC r
 
 ## Update requirement
 
-Update this document in the same change whenever behavior in `magicblock-account-cloner` changes, or whenever another crate changes the clone requests or Magic Program instructions this crate consumes. Update it for changes to:
+Queue an update to this document for the weekly documentation-maintenance task whenever behavior in `magicblock-account-cloner` changes, or whenever another crate changes the clone requests or Magic Program instructions this crate consumes. Include changes to:
 
 - the `ChainlinkCloner` public constructor or its `Cloner` trait implementation,
 - account clone sizing, chunking, cleanup, post-delegation action handling, or transaction-size limits,

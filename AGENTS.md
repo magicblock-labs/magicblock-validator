@@ -34,6 +34,24 @@ approve, or recommend merging the pull request until the violation is resolved.
 In the final reply, explicitly state whether the invariant review found any
 violation and identify the validation or evidence used for that conclusion.
 
+## Pull request and GitHub policy
+
+- Do not mix documentation updates into feature, fix, refactor, or other code
+  pull requests. Documentation updates are handled in a dedicated weekly
+  documentation-maintenance task, which is currently started manually. See
+  `.agents/memory/agent-memory-and-docs.md`.
+- Before pushing to GitHub, follow `.github/PULL_REQUEST_TEMPLATE.md` and the
+  repository's existing pull request convention. Use a
+  `type(scope): summary` title where the scope is optional, and keep the
+  `Summary`, `Breaking Changes`, and `Test Plan` structure.
+- Run only targeted tests locally before a GitHub push. When fixing an existing
+  pull request, run one relevant unit test or one relevant integration test
+  instead of a full suite. Broader validation belongs in CI. See
+  `.agents/rules/testing-and-validation.md`.
+- Never mention or include the name of an agent, assistant, model, or automation
+  tool in branch names, commit messages, pull request titles or bodies, review
+  replies, or any other GitHub-visible metadata.
+
 ## Directory layout
 
 - `.agents/rules/` — invariant behavioral and decision-making rules agents must follow.
@@ -53,6 +71,8 @@ Before changing code, consult the matching `./.agents` material so the change do
 
 The validator is performance-sensitive infrastructure. Changes must not degrade critical-path performance unless there is no viable alternative; if a tradeoff is unavoidable, call it out explicitly with the reason, expected impact, and any mitigation.
 
-For durable-knowledge and documentation-stewardship requirements, follow `.agents/memory/agent-memory-and-docs.md`. In every task's final reply, state whether agent docs were updated, or why no update was needed.
+For durable-knowledge and documentation-stewardship requirements, follow `.agents/memory/agent-memory-and-docs.md`. In every task's final reply, state whether agent docs were updated or whether a follow-up was queued for weekly maintenance.
 
-If anything is added to, removed from, renamed, or reorganized inside `./.agents/`, update this `AGENTS.md` file in the same change so this entrypoint remains accurate.
+During a documentation-only change, if anything is added to, removed from,
+renamed, or reorganized inside `./.agents/`, update this `AGENTS.md` file in the
+same change so this entrypoint remains accurate.

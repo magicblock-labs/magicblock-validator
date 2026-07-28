@@ -17,7 +17,7 @@ This crate sits on storage, RPC-history, startup/recovery, replication, and exec
 
 ## Update requirement
 
-Update this guide in the same change whenever behavior or contracts in `magicblock-ledger` change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-ledger` change. Include changes to:
 
 - `Ledger`, `LatestBlock`, `LatestBlockInner`, `SignatureInfosForAddress`, or exported error/API types;
 - RocksDB column families, key encodings, serialization formats, protobuf/bincode compatibility, or column options;

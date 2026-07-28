@@ -21,7 +21,7 @@ Do not put Magic Program execution logic, validation policy, persistence, RPC be
 
 ## Update requirement
 
-Update this guide in the same change whenever behavior or contracts in `magicblock-magic-program-api` change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-magic-program-api` change. Include changes to:
 
 - any public constant, program ID, fixed account, PDA seed, PDA derivation, or rent/context-size constant;
 - `MagicBlockInstruction`, `CallbackInstruction`, `PostDelegationActionExecutorInstruction`, `AccountCloneFields`, account-modification types, or serialization behavior;

@@ -19,7 +19,7 @@ Chainlink is on the account-availability hot path for RPC reads and transaction 
 
 ## Update requirement
 
-Whenever behavior in `magicblock-chainlink` changes, or another crate changes Chainlink flows, update this document in the same change for changes to:
+Whenever behavior in `magicblock-chainlink` changes, or another crate changes Chainlink flows, queue an update to this document for the weekly documentation-maintenance task for changes to:
 
 - account fetch/clone classification,
 - delegation-record resolution or local delegated/confined/undelegating flags,

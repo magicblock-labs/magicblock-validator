@@ -32,7 +32,7 @@ Do not add new runtime services here just because the crate name says
 
 ## Update Requirement
 
-Update this document in the same change when:
+Queue an update to this document for the weekly documentation-maintenance task when:
 
 - this crate gains or loses exports;
 - the legacy `ScheduledCommitsProcessor` trait or account error surface changes;
