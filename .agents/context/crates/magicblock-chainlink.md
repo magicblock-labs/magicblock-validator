@@ -370,6 +370,9 @@ Fetches use `min_context_slot` to avoid serving account data older than the fres
 A pubkey can be held for multiple reasons:
 
 - `DirectAccount`: normal account monitoring and normal LRU capacity management.
+- `NegativeCache`: one idempotent owner that retains a confirmed-missing
+  account in the evictable secondary tier after FetchCloner releases its
+  per-fetch `DirectAccount` owner.
 - `DelegationRecord`: temporary/explicit monitoring for delegation record PDAs.
 - `ProgramData`: LoaderV3 program-data accounts.
 - `UndelegationTracking`: protected monitoring while an account is expected to complete undelegation on base.
@@ -378,6 +381,10 @@ A pubkey can be held for multiple reasons:
 Ownership is reference-counted per reason. Releasing one reason does not unsubscribe while other reasons remain.
 
 `ensure_subscription` differs from `acquire_subscription`: it does not increment an already-held reason. This is used by eATA projection to keep an LRU entry warm without unbounded refcount growth.
+
+Confirmed-miss admission similarly ensures exactly one `NegativeCache` owner.
+An authoritative found result removes that owner and establishes or retains
+`DirectAccount` ownership atomically with primary-tier promotion.
 
 Registration outcome metrics (`chainlink_subscription_registration_accounts_total`, exported as `mbv_chainlink_subscription_registration_accounts_total`) are emitted once per claimed subscription attempt by entrypoint, fetch reason, subscription reason, and terminal registration outcome. Waiter-only fetch callers do not independently set up subscriptions and are not counted separately; direct `try_get_multi` owners preserve their `AccountFetchContext`, while callers without a fetch context use `entrypoint="internal", fetch_reason="requested_account"`.
 

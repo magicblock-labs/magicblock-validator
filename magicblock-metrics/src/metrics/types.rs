@@ -626,6 +626,7 @@ impl SubscriptionRegistrationOrigin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscriptionReasonLabel {
     DirectAccount,
+    NegativeCache,
     DelegationRecord,
     ProgramData,
     UndelegationTracking,
@@ -636,6 +637,7 @@ impl SubscriptionReasonLabel {
     pub fn as_str(&self) -> &str {
         match self {
             Self::DirectAccount => "direct_account",
+            Self::NegativeCache => "negative_cache",
             Self::DelegationRecord => "delegation_record",
             Self::ProgramData => "program_data",
             Self::UndelegationTracking => "undelegation_tracking",

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::config::RemoteAccountProviderConfig,
@@ -93,6 +95,17 @@ async fn ixtest_read_multiple_accounts_exceeding_capacity() {
         .unwrap();
 
     debug!("{}", ctx.cloner.dump_account_keys(false));
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while pubkeys[..remove_len]
+            .iter()
+            .any(|pubkey| ctx.cloner.get_account(pubkey).is_some())
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for detached capacity-eviction cleanup");
 
     // Verify that the first added accounts are not present in the cache
     for pubkey in &pubkeys[..remove_len] {

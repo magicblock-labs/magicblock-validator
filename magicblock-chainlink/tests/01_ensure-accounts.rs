@@ -3,7 +3,7 @@ use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
-    assert_not_undelegating, assert_remain_undelegating,
+    assert_not_undelegating, assert_remain_undelegating, assert_subscribed,
     assert_subscribed_without_delegation_record,
     testing::deleg::add_delegation_record_for, AccountFetchContext,
 };
@@ -48,7 +48,7 @@ async fn test_write_non_existing_account() {
 
     assert_not_found!(res, &pubkeys);
     assert_not_cloned!(cloner, &pubkeys);
-    assert_not_subscribed!(chainlink, &[&pubkey]);
+    assert_subscribed!(chainlink, &[&pubkey]);
 }
 
 // -----------------

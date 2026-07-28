@@ -1,6 +1,6 @@
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
-    assert_not_cloned, assert_not_subscribed,
+    assert_not_cloned, assert_not_subscribed, assert_subscribed,
     assert_subscribed_without_delegation_record,
     testing::{deleg::add_delegation_record_for, init_logger},
     AccountFetchContext,
@@ -63,6 +63,7 @@ async fn test_deleg_after_subscribe_case2() {
             .await
             .unwrap();
         assert_not_cloned!(cloner, &[pubkey]);
+        assert_subscribed!(&chainlink, &[&pubkey]);
     }
 
     // 2. Account created with original owner
@@ -77,11 +78,11 @@ async fn test_deleg_after_subscribe_case2() {
         let acc =
             account_shared_with_owner_and_slot(&acc, program_pubkey, slot);
 
-        // When the account is created we do not receive any update since we do not sub to a non-existing account
+        // The confirmed-miss watch forwards account creation immediately.
         let updated = ctx
             .send_and_receive_account_update(pubkey, acc.clone(), Some(400))
             .await;
-        assert!(!updated);
+        assert!(updated);
 
         chainlink
             .ensure_accounts(

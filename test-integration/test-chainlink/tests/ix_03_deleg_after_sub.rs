@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
-    assert_subscribed_without_delegation_record, testing::init_logger,
-    AccountFetchContext,
+    assert_subscribed, assert_subscribed_without_delegation_record,
+    testing::init_logger, AccountFetchContext,
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::ixtest_context::IxtestContext;
@@ -33,7 +35,7 @@ async fn ixtest_deleg_after_subscribe_case2() {
 
         assert_not_found!(res, &pubkeys);
         assert_not_cloned!(ctx.cloner, &pubkeys);
-        assert_not_subscribed!(ctx.chainlink, &[&counter_pda]);
+        assert_subscribed!(ctx.chainlink, &[&counter_pda]);
     }
 
     // 2. Account created with original owner (program)
@@ -77,6 +79,24 @@ async fn ixtest_deleg_after_subscribe_case2() {
             )
             .await
             .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let cloned_as_delegated = ctx
+                    .cloner
+                    .get_account(&counter_pda)
+                    .is_some_and(|account| account.delegated());
+                if cloned_as_delegated
+                    && !ctx.chainlink.is_watching(&counter_pda)
+                    && !ctx.chainlink.is_watching(&deleg_record_pubkey)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("timed out waiting for delegated-account watch cleanup");
 
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
         assert_cloned_as_delegated!(

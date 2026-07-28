@@ -364,6 +364,32 @@ async fn test_not_found_account_stays_secondary_and_promotes_on_creation() {
     assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
     assert!(ctx.provider.is_watching(&missing));
     assert!(ctx.pubsub_client.subscriptions_union().contains(&missing));
+    assert_eq!(
+        subscription_reason_refcount(
+            &ctx.provider,
+            &missing,
+            SubscriptionReason::NegativeCache,
+        )
+        .await,
+        1
+    );
+
+    // Reclassifying the same miss preserves exactly one durable cache owner.
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert_eq!(
+        subscription_reason_refcount(
+            &ctx.provider,
+            &missing,
+            SubscriptionReason::NegativeCache,
+        )
+        .await,
+        1
+    );
 
     // An older update must not undo the newer not-found classification.
     let transition_guard =
@@ -408,6 +434,80 @@ async fn test_not_found_account_stays_secondary_and_promotes_on_creation() {
             && !provider.secondary_subscriptions.contains(&missing)
     })
     .await;
+    assert_eq!(
+        subscription_reason_refcount(
+            &ctx.provider,
+            &missing,
+            SubscriptionReason::NegativeCache,
+        )
+        .await,
+        0
+    );
+    assert!(
+        direct_account_refcount(&ctx.provider, &missing).await > 0,
+        "found promotion must retain normal direct ownership"
+    );
+}
+
+#[tokio::test]
+async fn test_primary_reacquire_clears_evicted_negative_cache_owner() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_provider(existing, Account::default()).await;
+    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    ctx.provider
+        .release_single_subscription(
+            &missing,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        subscription_reason_refcount(
+            &ctx.provider,
+            &missing,
+            SubscriptionReason::NegativeCache,
+        )
+        .await,
+        1
+    );
+
+    // Model the interval after secondary capacity eviction and before its
+    // detached cleanup acquires this key's guard.
+    ctx.provider.secondary_subscriptions.remove(&missing);
+    ctx.provider
+        .acquire_subscription(&missing, SubscriptionReason::DelegationRecord)
+        .await
+        .unwrap();
+
+    assert!(ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+    assert_eq!(
+        subscription_reason_refcount(
+            &ctx.provider,
+            &missing,
+            SubscriptionReason::NegativeCache,
+        )
+        .await,
+        0
+    );
+    assert!(ctx
+        .provider
+        .release_single_subscription(
+            &missing,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .unwrap());
+    assert!(!ctx.provider.is_watching(&missing));
 }
 
 #[tokio::test]
@@ -511,7 +611,34 @@ async fn test_subscription_resolving_pending_fetch_without_tier_state_admits_to_
     let existing = random_pubkey();
     let pending = random_pubkey();
     let ctx = setup_provider(existing, Account::default()).await;
+    ctx.provider.abort_subscription_reconciler_for_test().await;
     ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+
+    // Model a confirmed miss after secondary capacity eviction detached its
+    // tier entry but before cleanup acquired this key.
+    assert!(!ctx
+        .provider
+        .try_get(pending, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    ctx.provider
+        .release_single_subscription(
+            &pending,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .unwrap();
+    ctx.provider.secondary_subscriptions.remove(&pending);
+    assert_eq!(
+        subscription_reason_refcount(
+            &ctx.provider,
+            &pending,
+            SubscriptionReason::NegativeCache,
+        )
+        .await,
+        1
+    );
 
     let waiter_rx = insert_pending_fetch(&ctx.provider, pending, 100);
     // Deliver the update as a transport-level subscription (e.g. a gRPC
@@ -539,6 +666,34 @@ async fn test_subscription_resolving_pending_fetch_without_tier_state_admits_to_
     assert!(ctx.provider.lrucache_subscribed_accounts.contains(&pending));
     assert!(!ctx.provider.secondary_subscriptions.contains(&pending));
     assert!(ctx.pubsub_client.subscriptions_union().contains(&pending));
+    assert_eq!(
+        subscription_reason_refcount(
+            &ctx.provider,
+            &pending,
+            SubscriptionReason::NegativeCache,
+        )
+        .await,
+        0
+    );
+    assert!(ctx
+        .provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pending));
+
+    // The pending setup can still adopt the classification-only entry.
+    ctx.provider
+        .acquire_subscription_with_origin(
+            &pending,
+            SubscriptionReason::DirectAccount,
+            SubscriptionRegistrationOrigin::Fetch(
+                AccountFetchContext::rpc_get_account(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(direct_account_refcount(&ctx.provider, &pending).await, 1);
 }
 
 #[tokio::test]
@@ -708,17 +863,25 @@ async fn direct_account_refcount(
     provider: &RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
     pubkey: &Pubkey,
 ) -> usize {
+    subscription_reason_refcount(
+        provider,
+        pubkey,
+        SubscriptionReason::DirectAccount,
+    )
+    .await
+}
+
+async fn subscription_reason_refcount(
+    provider: &RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    pubkey: &Pubkey,
+    reason: SubscriptionReason,
+) -> usize {
     provider
         .subscription_ownership
         .lock()
         .await
         .get(pubkey)
-        .and_then(|ownership| {
-            ownership
-                .reasons
-                .get(&SubscriptionReason::DirectAccount)
-                .copied()
-        })
+        .and_then(|ownership| ownership.reasons.get(&reason).copied())
         .unwrap_or(0)
 }
 
@@ -727,6 +890,7 @@ async fn test_promotion_evicted_mid_flight_is_not_treated_as_admitted() {
     init_logger();
 
     let existing = random_pubkey();
+    let early_evicted = random_pubkey();
     let missing = random_pubkey();
     let ctx = setup_provider(
         existing,
@@ -753,10 +917,27 @@ async fn test_promotion_evicted_mid_flight_is_not_treated_as_admitted() {
     assert_eq!(
         ctx.provider
             .subscription_tier_ctx()
-            .try_promote_found_to_primary(existing, None)
+            .try_promote_found_to_primary(existing, None, true)
             .await
             .unwrap(),
         PromotionOutcome::NotInSecondary
+    );
+
+    // An eviction before promotion starts is not a benign primary hit.
+    assert!(!ctx
+        .provider
+        .try_get(early_evicted, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    ctx.provider.secondary_subscriptions.remove(&early_evicted);
+    assert_eq!(
+        ctx.provider
+            .subscription_tier_ctx()
+            .try_promote_found_to_primary(early_evicted, None, true)
+            .await
+            .unwrap(),
+        PromotionOutcome::Evicted
     );
 
     // Establish a confirmed-missing secondary entry.
@@ -775,7 +956,9 @@ async fn test_promotion_evicted_mid_flight_is_not_treated_as_admitted() {
     let insertions_before = ctx.pubsub_client.subscribe_insertions();
     let tier_ctx = ctx.provider.subscription_tier_ctx();
     let promotion = tokio::spawn(async move {
-        tier_ctx.try_promote_found_to_primary(missing, None).await
+        tier_ctx
+            .try_promote_found_to_primary(missing, None, true)
+            .await
     });
     ctx.pubsub_client
         .wait_for_subscribe_insertions(insertions_before + 1)

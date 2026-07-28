@@ -634,8 +634,9 @@ async fn cleanup_classification_placeholders(
 
 /// Internal ownership/refcount key for shared pubsub subscriptions.
 ///
-/// `DirectAccount` is normal remote-account monitoring and is the only
-/// subscription reason that should participate in normal capacity eviction.
+/// `DirectAccount` is normal remote-account monitoring. `NegativeCache` is
+/// idempotent ownership for confirmed misses retained in the evictable
+/// secondary tier after FetchCloner releases its per-fetch direct owner.
 /// `UndelegationTracking` is protected ownership for delegated accounts that
 /// are being undelegated and must never be treated as normal capacity-evictable
 /// ownership.
@@ -648,6 +649,7 @@ async fn cleanup_classification_placeholders(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscriptionReason {
     DirectAccount,
+    NegativeCache,
     DelegationRecord,
     ProgramData,
     UndelegationTracking,
@@ -658,6 +660,7 @@ impl From<SubscriptionReason> for SubscriptionReasonLabel {
     fn from(reason: SubscriptionReason) -> Self {
         match reason {
             SubscriptionReason::DirectAccount => Self::DirectAccount,
+            SubscriptionReason::NegativeCache => Self::NegativeCache,
             SubscriptionReason::DelegationRecord => Self::DelegationRecord,
             SubscriptionReason::ProgramData => Self::ProgramData,
             SubscriptionReason::UndelegationTracking => {
@@ -702,8 +705,24 @@ impl SubscriptionOwnership {
         *self.reasons.entry(reason).or_default() += 1;
     }
 
+    fn ensure(&mut self, reason: SubscriptionReason) {
+        self.classification_placeholder_generation = None;
+        self.reasons.entry(reason).or_insert(1);
+    }
+
     fn contains(&self, reason: SubscriptionReason) -> bool {
         self.reasons.contains_key(&reason)
+    }
+
+    fn can_retain_as_negative_cache(&self) -> bool {
+        self.contains(SubscriptionReason::DirectAccount)
+            && self.reasons.keys().all(|reason| {
+                matches!(
+                    reason,
+                    SubscriptionReason::DirectAccount
+                        | SubscriptionReason::NegativeCache
+                )
+            })
     }
 
     fn release(&mut self, reason: SubscriptionReason) -> bool {
@@ -744,6 +763,52 @@ impl SubscriptionOwnership {
 
     fn is_empty(&self) -> bool {
         self.reasons.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum NegativeCacheOwnershipUpdate {
+    None,
+    Ensure,
+    Promote { ensure_direct_ownership: bool },
+}
+
+fn apply_negative_cache_ownership_update(
+    ownership: &mut HashMap<Pubkey, SubscriptionOwnership>,
+    pubkey: Pubkey,
+    update: NegativeCacheOwnershipUpdate,
+) {
+    match update {
+        NegativeCacheOwnershipUpdate::None => {}
+        NegativeCacheOwnershipUpdate::Ensure => {
+            ownership
+                .entry(pubkey)
+                .or_default()
+                .ensure(SubscriptionReason::NegativeCache);
+        }
+        NegativeCacheOwnershipUpdate::Promote {
+            ensure_direct_ownership,
+        } => {
+            if ensure_direct_ownership {
+                let ownership = ownership.entry(pubkey).or_default();
+                ownership.release_all(SubscriptionReason::NegativeCache);
+                ownership.ensure(SubscriptionReason::DirectAccount);
+            } else {
+                let remove_empty =
+                    ownership.get_mut(&pubkey).is_some_and(|ownership| {
+                        ownership
+                            .release_all(SubscriptionReason::NegativeCache);
+                        ownership.is_empty()
+                            && ownership.last_classification.is_none()
+                            && ownership
+                                .classification_placeholder_generation
+                                .is_none()
+                    });
+                if remove_empty {
+                    ownership.remove(&pubkey);
+                }
+            }
+        }
     }
 }
 
@@ -1573,7 +1638,11 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                 }
             } else {
                 match self
-                    .try_promote_found_to_primary(pubkey, acquire_reason)
+                    .try_promote_found_to_primary(
+                        pubkey,
+                        acquire_reason,
+                        false,
+                    )
                     .await
                 {
                     Ok(PromotionOutcome::Promoted) => Ok(()),
@@ -1755,7 +1824,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                 subscription_guard: transition.take_subscription_guard(),
             })
         } else {
-            match self.try_promote_found_to_primary(pubkey, None).await {
+            match self.try_promote_found_to_primary(pubkey, None, true).await {
                 Ok(PromotionOutcome::NoCapacity) => {
                     self.finalize_rejected_promotion(&pubkey).await;
                     transition.commit();
@@ -1883,11 +1952,18 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         let add_outcome = {
             let _transition_guard =
                 self.subscription_transition_lock.lock().await;
+            // A detached secondary eviction leaves ownership in place until
+            // cleanup acquires this key. If a direct primary admission wins
+            // first, its newly acquired reason replaces the stale
+            // negative-cache owner in this same tier transition.
             let add_outcome = self
                 .add_with_protection(
                     &self.primary,
                     *pubkey,
                     acquire_reason.then_some(reason),
+                    NegativeCacheOwnershipUpdate::Promote {
+                        ensure_direct_ownership: false,
+                    },
                 )
                 .await;
             if !matches!(add_outcome, AddAccountOutcome::NoEvictableCandidate)
@@ -1986,6 +2062,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         cache: &AccountsLruCache,
         pubkey: Pubkey,
         acquire_reason: Option<SubscriptionReason>,
+        negative_cache_update: NegativeCacheOwnershipUpdate,
     ) -> AddAccountOutcome {
         let mut ownership = self.subscription_ownership.lock().await;
         let fetching = self
@@ -2019,6 +2096,11 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             if let Some(reason) = acquire_reason {
                 ownership.entry(pubkey).or_default().acquire(reason);
             }
+            apply_negative_cache_ownership_update(
+                &mut ownership,
+                pubkey,
+                negative_cache_update,
+            );
         }
         if let AddAccountOutcome::Evicted(evicted) = outcome {
             self.pubsub_client
@@ -2288,6 +2370,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                 &self.secondary,
                 *pubkey,
                 acquire_reason.then_some(reason),
+                NegativeCacheOwnershipUpdate::None,
             )
             .await
         };
@@ -2357,16 +2440,13 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             return false;
         }
 
-        let direct_only = self
+        let cache_eligible = self
             .subscription_ownership
             .lock()
             .await
             .get(&pubkey)
-            .is_some_and(|ownership| {
-                ownership.reasons.len() == 1
-                    && ownership.contains(SubscriptionReason::DirectAccount)
-            });
-        if !direct_only {
+            .is_some_and(SubscriptionOwnership::can_retain_as_negative_cache);
+        if !cache_eligible {
             return false;
         }
 
@@ -2379,13 +2459,24 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             let _transition_guard =
                 self.subscription_transition_lock.lock().await;
 
-            if self.secondary.contains(&pubkey) {
+            let outcome = if self.secondary.contains(&pubkey) {
+                let mut ownership = self.subscription_ownership.lock().await;
+                apply_negative_cache_ownership_update(
+                    &mut ownership,
+                    pubkey,
+                    NegativeCacheOwnershipUpdate::Ensure,
+                );
                 (true, None)
             } else if !self.primary.contains(&pubkey) {
                 (false, None)
             } else {
                 match self
-                    .add_with_protection(&self.secondary, pubkey, None)
+                    .add_with_protection(
+                        &self.secondary,
+                        pubkey,
+                        None,
+                        NegativeCacheOwnershipUpdate::Ensure,
+                    )
                     .await
                 {
                     outcome @ (AddAccountOutcome::Added
@@ -2402,7 +2493,8 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                     }
                     AddAccountOutcome::NoEvictableCandidate => (false, None),
                 }
-            }
+            };
+            outcome
         };
 
         if let Some(evicted) = evicted {
@@ -2423,13 +2515,30 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         &self,
         pubkey: Pubkey,
         acquire_reason: Option<SubscriptionReason>,
+        ensure_direct_ownership: bool,
     ) -> RemoteAccountProviderResult<PromotionOutcome> {
         // Not-in-secondary at entry is benign: the caller's key may hold
         // primary membership or never have been tiered (e.g. never-evict
         // keys). Only a mid-flight departure (re-check below) distinguishes
         // eviction.
         if !self.secondary.contains(&pubkey) {
-            return Ok(PromotionOutcome::NotInSecondary);
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            if self.primary.contains(&pubkey)
+                || !self.primary.can_evict(&pubkey)
+            {
+                self.finish_negative_cache_promotion(
+                    pubkey,
+                    ensure_direct_ownership,
+                )
+                .await;
+                return Ok(PromotionOutcome::NotInSecondary);
+            }
+            return Ok(if ensure_direct_ownership {
+                PromotionOutcome::Evicted
+            } else {
+                PromotionOutcome::NotInSecondary
+            });
         }
 
         let publication = PendingAccountSubscriptionPublication::new(
@@ -2447,11 +2556,18 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             // tier while the coverage subscribe was in flight — promoted by
             // another transition (benign) or evicted by another key's
             // admission (the found result must not count as admitted).
-            if !self.secondary.contains(&pubkey) {
+            let outcome = if !self.secondary.contains(&pubkey) {
                 (self.departed_promotion_outcome(&pubkey), None)
             } else {
                 match self
-                    .add_with_protection(&self.primary, pubkey, acquire_reason)
+                    .add_with_protection(
+                        &self.primary,
+                        pubkey,
+                        acquire_reason,
+                        NegativeCacheOwnershipUpdate::Promote {
+                            ensure_direct_ownership,
+                        },
+                    )
                     .await
                 {
                     AddAccountOutcome::Added
@@ -2467,7 +2583,17 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                         (PromotionOutcome::NoCapacity, None)
                     }
                 }
+            };
+            if outcome.0 == PromotionOutcome::NotInSecondary
+                && self.primary.contains(&pubkey)
+            {
+                self.finish_negative_cache_promotion(
+                    pubkey,
+                    ensure_direct_ownership,
+                )
+                .await;
             }
+            outcome
         };
 
         if let Some(evicted) = evicted {
@@ -2477,6 +2603,25 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             publication.commit();
         }
         Ok(outcome)
+    }
+
+    /// Converts durable confirmed-miss ownership after authoritative primary
+    /// admission. Found classifications ensure a normal direct owner; generic
+    /// acquisitions already publish their own requested ownership reason.
+    /// Precondition: the caller holds the transition lock.
+    async fn finish_negative_cache_promotion(
+        &self,
+        pubkey: Pubkey,
+        ensure_direct_ownership: bool,
+    ) {
+        let mut ownership = self.subscription_ownership.lock().await;
+        apply_negative_cache_ownership_update(
+            &mut ownership,
+            pubkey,
+            NegativeCacheOwnershipUpdate::Promote {
+                ensure_direct_ownership,
+            },
+        );
     }
 
     /// Outcome for a key that departed the secondary tier mid-promotion:
@@ -2527,7 +2672,15 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
         let add_outcome = {
             let _transition_guard =
                 self.subscription_transition_lock.lock().await;
-            self.add_with_protection(&self.primary, pubkey, None).await
+            self.add_with_protection(
+                &self.primary,
+                pubkey,
+                None,
+                NegativeCacheOwnershipUpdate::Promote {
+                    ensure_direct_ownership: false,
+                },
+            )
+            .await
         };
         match add_outcome {
             AddAccountOutcome::Added | AddAccountOutcome::AlreadyPresent => {
@@ -3575,6 +3728,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                     .try_promote_found_to_primary(
                                         update.pubkey,
                                         None,
+                                        true,
                                     )
                                     .await
                                 {

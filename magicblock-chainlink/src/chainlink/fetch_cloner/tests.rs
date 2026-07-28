@@ -733,8 +733,12 @@ async fn test_fetch_and_clone_single_non_existing_account() {
 
     // Setup with no accounts (empty collection)
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
+        mut forward_rx,
+        rpc_client,
         fetch_cloner,
+        subscription_tx,
         ..
     } = setup(
         std::iter::empty::<(Pubkey, Account)>(),
@@ -760,6 +764,90 @@ async fn test_fetch_and_clone_single_non_existing_account() {
     // Verify no account was cloned
     let cloned_account = accounts_bank.get_account(&non_existing_pubkey);
     assert!(cloned_account.is_none());
+
+    // FetchCloner releases its per-fetch direct ownership, but a confirmed
+    // miss remains watched through one durable negative-cache owner.
+    assert!(remote_account_provider.is_watching(&non_existing_pubkey));
+    assert!(
+        remote_account_provider
+            .has_subscription_reason(
+                &non_existing_pubkey,
+                SubscriptionReason::NegativeCache,
+            )
+            .await
+    );
+    assert!(
+        !remote_account_provider
+            .has_subscription_reason(
+                &non_existing_pubkey,
+                SubscriptionReason::DirectAccount,
+            )
+            .await
+    );
+
+    // Re-fetching the miss must not accumulate cache ownership.
+    fetch_cloner
+        .fetch_and_clone_accounts(
+            &[non_existing_pubkey],
+            None,
+            None,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        !remote_account_provider
+            .has_subscription_reason(
+                &non_existing_pubkey,
+                SubscriptionReason::DirectAccount,
+            )
+            .await
+    );
+
+    // A later subscription update converts the negative-cache owner into a
+    // normal direct owner and reaches the clone pipeline.
+    let created = Account {
+        lamports: 1_000,
+        ..Default::default()
+    };
+    rpc_client.add_account(non_existing_pubkey, created.clone());
+    remote_account_provider
+        .pubsub_client()
+        .send_account_update(non_existing_pubkey, 101, &created)
+        .await;
+    let forwarded = tokio::time::timeout(Duration::from_secs(1), async {
+        forward_rx.recv().await
+    })
+    .await
+    .expect("timed out waiting for negative-cache update to be forwarded")
+    .expect("subscription forwarder closed unexpectedly");
+    subscription_tx
+        .send(forwarded)
+        .await
+        .expect("fetch-cloner update channel closed unexpectedly");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while accounts_bank.get_account(&non_existing_pubkey).is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for negative-cache update to be cloned");
+    assert!(
+        !remote_account_provider
+            .has_subscription_reason(
+                &non_existing_pubkey,
+                SubscriptionReason::NegativeCache,
+            )
+            .await
+    );
+    assert!(
+        remote_account_provider
+            .has_subscription_reason(
+                &non_existing_pubkey,
+                SubscriptionReason::DirectAccount,
+            )
+            .await
+    );
 }
 
 #[tokio::test]

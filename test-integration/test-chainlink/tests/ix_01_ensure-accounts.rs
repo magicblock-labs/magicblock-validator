@@ -1,7 +1,7 @@
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
-    assert_subscribed_without_delegation_record,
+    assert_subscribed, assert_subscribed_without_delegation_record,
     testing::{init_logger, utils::random_pubkey},
     AccountFetchContext,
 };
@@ -26,7 +26,7 @@ async fn ixtest_write_non_existing_account() {
 
     assert_not_found!(res, &pubkeys);
     assert_not_cloned!(ctx.cloner, &pubkeys);
-    assert_not_subscribed!(ctx.chainlink, &pubkeys);
+    assert_subscribed!(ctx.chainlink, &pubkeys);
 }
 
 // -----------------
