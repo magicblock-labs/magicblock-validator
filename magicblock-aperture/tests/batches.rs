@@ -1,6 +1,19 @@
 use json::{JsonContainerTrait, JsonValueTrait, Value};
 use setup::RpcTestEnv;
 
+const REMOTE_ACCOUNT_CLAIMS_HEADER: &str = "X-MB-Remote-Account-Claims";
+
+fn remote_account_claims_header(response: &reqwest::Response) -> u64 {
+    response
+        .headers()
+        .get(REMOTE_ACCOUNT_CLAIMS_HEADER)
+        .expect("remote account claims header should be present")
+        .to_str()
+        .expect("remote account claims header should be valid ASCII")
+        .parse::<u64>()
+        .expect("remote account claims header should be an integer")
+}
+
 mod setup;
 
 #[tokio::test]
@@ -59,4 +72,31 @@ async fn test_batch_requests() {
         res2["result"].is_object(),
         "getIdentity should return an object"
     );
+}
+
+#[tokio::test]
+async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetches_triggered(
+) {
+    let env = RpcTestEnv::new().await;
+    let client = reqwest::Client::new();
+    let rpc_url = env.rpc.url();
+    let batch_request = json::json!([
+        {"jsonrpc": "2.0", "method": "getVersion", "id": 1},
+        {"jsonrpc": "2.0", "method": "getIdentity", "id": 2}
+    ]);
+
+    let response = client
+        .post(rpc_url)
+        .json(&batch_request)
+        .send()
+        .await
+        .expect("batch HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = response
+        .json()
+        .await
+        .expect("batch response body should decode");
+    assert!(body.is_array(), "batch response should be an array");
 }
