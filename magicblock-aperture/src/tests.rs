@@ -109,14 +109,15 @@ mod event_processor {
         assert!(!state.blocks.is_ready());
         assert!(!state.blocks.contains(&recovered.blockhash));
 
+        let cancel = CancellationToken::new();
         let events = EventProcessors::try_new(
             &ApertureConfig::default(),
             state.clone(),
             &env.dispatch,
-            CancellationToken::new(),
+            cancel.clone(),
         )
         .expect("failed to initialize event processors");
-        events.start();
+        let handles = events.start_for_test();
 
         tokio::task::yield_now().await;
         assert!(
@@ -136,6 +137,14 @@ mod event_processor {
 
         assert!(state.blocks.contains(&live.blockhash));
         assert!(!state.blocks.contains(&recovered.blockhash));
+
+        cancel.cancel();
+        for handle in handles {
+            timeout(Duration::from_secs(1), handle)
+                .await
+                .expect("event processor did not stop")
+                .expect("event processor panicked");
+        }
     }
 
     /// Awaits a message from a receiver with a timeout, panicking if no message
