@@ -744,41 +744,45 @@ where
         client_key: usize,
         transport: PubsubTransport,
     ) -> AttachingClientGuard {
-        Self::register_attaching_client_inner(
-            state, client_key, transport, false, false, true,
+        let mut state_guard =
+            state.lock().unwrap_or_else(|poison| poison.into_inner());
+        Self::register_attaching_client_locked(
+            state,
+            &mut state_guard,
+            client_key,
+            transport,
+            false,
+            false,
         )
-        .expect("replacement attach registration must succeed")
     }
 
     fn try_register_websocket_policy_refresh(
         state: &Arc<Mutex<ClientPublicationState>>,
         client_key: usize,
     ) -> Option<AttachingClientGuard> {
-        Self::register_attaching_client_inner(
+        let mut state_guard =
+            state.lock().unwrap_or_else(|poison| poison.into_inner());
+        if state_guard.attaching_clients.contains_key(&client_key) {
+            return None;
+        }
+        Some(Self::register_attaching_client_locked(
             state,
+            &mut state_guard,
             client_key,
             PubsubTransport::WebSocket,
             true,
             true,
-            false,
-        )
+        ))
     }
 
-    fn register_attaching_client_inner(
+    fn register_attaching_client_locked(
         state: &Arc<Mutex<ClientPublicationState>>,
+        state_guard: &mut ClientPublicationState,
         client_key: usize,
         transport: PubsubTransport,
         refresh_account_policy: bool,
         serialize_account_refresh: bool,
-        replace_existing: bool,
-    ) -> Option<AttachingClientGuard> {
-        let mut state_guard =
-            state.lock().unwrap_or_else(|poison| poison.into_inner());
-        if !replace_existing
-            && state_guard.attaching_clients.contains_key(&client_key)
-        {
-            return None;
-        }
+    ) -> AttachingClientGuard {
         let attempt = state_guard.next_generation();
         let notify = Arc::new(Notify::new());
         let mut dirty_accounts = HashSet::new();
@@ -811,13 +815,13 @@ where
         if let Some(replaced) = replaced {
             replaced.notify.notify_one();
         }
-        Some(AttachingClientGuard {
+        AttachingClientGuard {
             state: state.clone(),
             client_key,
             attempt,
             notify,
             armed: true,
-        })
+        }
     }
 
     fn mark_websocket_policy_refresh(state: &mut ClientPublicationState) {
