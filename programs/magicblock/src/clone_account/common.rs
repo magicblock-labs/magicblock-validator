@@ -307,10 +307,19 @@ pub fn execute_post_delegation_actions(
         )?;
         let locally_writable = {
             let account = instruction_account.borrow()?;
-            !account.undelegating()
-                && (account.delegated()
-                    || account.ephemeral()
-                    || account.confined())
+            // An account with no lamports and no data does not exist yet: it
+            // can only become writable by being created inside the action
+            // itself (e.g. an ephemeral account or rent-pending ATA
+            // materialized through a Magic CPI). Post-execution writable
+            // validation still rejects the transaction atomically if the
+            // action leaves it without a mutability flag.
+            let not_created_yet =
+                account.lamports() == 0 && account.data().is_empty();
+            not_created_yet
+                || (!account.undelegating()
+                    && (account.delegated()
+                        || account.ephemeral()
+                        || account.confined()))
         };
         if !locally_writable {
             ic_msg!(

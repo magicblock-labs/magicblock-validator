@@ -239,7 +239,7 @@ Delegation records may carry encrypted or cleartext post-delegation actions. Cha
 - leaves locally undelegating writable dependencies as bank hits instead of remotely force-refreshing and overwriting their lock,
 - errors with `MissingDelegationActionAccounts` if required delegated writable dependencies cannot be resolved.
 
-Chainlink's dependency fetch is an availability preflight. The Magic Program executor authoritatively revalidates every writable action account from the locked transaction context and rejects plain or undelegating accounts, rolling back the clone and action transaction atomically. The target then follows the established rescue-undelegation path; no action-bearing activation commits, so there is no deferred retry state. Do not execute or ignore these actions blindly.
+Chainlink's dependency fetch is an availability preflight. The Magic Program executor authoritatively revalidates every writable action account from the locked transaction context and rejects plain or undelegating accounts (not-yet-created accounts pass, since actions legitimately create ephemeral accounts such as receipts and rent-pending ATAs; post-execution writable validation still rejects the transaction if they end up without a mutability flag), rolling back the clone and action transaction atomically. The target then follows the established rescue-undelegation path; no action-bearing activation commits, so there is no deferred retry state. Do not execute or ignore these actions blindly.
 
 ### Program account resolution
 
