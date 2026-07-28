@@ -1,6 +1,12 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use magicblock_core::link::transactions::TransactionSimulationResult;
+use magicblock_metrics::metrics::{
+    AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason,
+};
 use solana_message::inner_instruction::InnerInstructions;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
@@ -25,6 +31,7 @@ impl HttpDispatcher {
     pub(crate) async fn simulate_transaction(
         &self,
         request: &mut JsonRequest,
+        remote_account_claims: Arc<AtomicU64>,
     ) -> HandlerResult {
         self.require_primary_rpc_method("simulateTransaction")?;
 
@@ -48,7 +55,15 @@ impl HttpDispatcher {
             .inspect_err(|err| {
                 debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
-        self.ensure_transaction_accounts(&transaction.txn).await?;
+        let fetch_context = AccountFetchContext::new_with_claims_counter(
+            AccountFetchEntrypoint::SendTransaction(
+                *transaction.txn.signature(),
+            ),
+            AccountFetchReason::RequestedAccount,
+            remote_account_claims.clone(),
+        );
+        self.ensure_transaction_accounts(&transaction.txn, fetch_context)
+            .await?;
         let number_of_accounts = transaction.txn.message().account_keys().len();
 
         let replacement_blockhash = config
@@ -102,8 +117,12 @@ impl HttpDispatcher {
                             .map_err(RpcError::invalid_params)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let current_accounts =
-                    self.read_accounts_with_ensure(&pubkeys).await;
+                let fetch_context = Self::rpc_get_multiple_accounts_context(
+                    remote_account_claims.clone(),
+                );
+                let current_accounts = self
+                    .read_accounts_with_ensure(&pubkeys, fetch_context)
+                    .await;
                 let post_simulation_accounts = post_simulation_accounts
                     .into_iter()
                     .collect::<HashMap<_, _>>();

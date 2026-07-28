@@ -208,17 +208,6 @@ impl HttpDispatcher {
     async fn read_accounts_with_ensure(
         &self,
         pubkeys: &[Pubkey],
-    ) -> Vec<Option<AccountSharedData>> {
-        self.read_accounts_with_ensure_with_context(
-            pubkeys,
-            AccountFetchContext::rpc_get_multiple_accounts(),
-        )
-        .await
-    }
-
-    async fn read_accounts_with_ensure_with_context(
-        &self,
-        pubkeys: &[Pubkey],
         fetch_context: AccountFetchContext,
     ) -> Vec<Option<AccountSharedData>> {
         if !self.needs_onchain_interactions() {
@@ -245,6 +234,14 @@ impl HttpDispatcher {
             .iter()
             .map(|pubkey| self.accountsdb.get_account(pubkey))
             .collect()
+    }
+
+    async fn read_accounts_with_ensure_with_context(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_context: AccountFetchContext,
+    ) -> Vec<Option<AccountSharedData>> {
+        self.read_accounts_with_ensure(pubkeys, fetch_context).await
     }
 
     /// Decodes, validates, and sanitizes a transaction from its string representation.
@@ -310,6 +307,7 @@ impl HttpDispatcher {
     async fn ensure_transaction_accounts(
         &self,
         transaction: &SanitizedTransaction,
+        fetch_context: AccountFetchContext,
     ) -> RpcResult<()> {
         // Hard bound on account preparation: if the cloning pipeline is
         // degraded the transaction must fail with an error instead of
@@ -323,7 +321,10 @@ impl HttpDispatcher {
             .start_timer();
         match tokio::time::timeout(
             ENSURE_ACCOUNTS_TIMEOUT,
-            self.chainlink.ensure_transaction_accounts(transaction),
+            self.chainlink.ensure_transaction_accounts_with_context(
+                transaction,
+                fetch_context,
+            ),
         )
         .await
         .unwrap_or_else(|_elapsed| {

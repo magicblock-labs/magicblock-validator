@@ -282,8 +282,17 @@ impl HttpDispatcher {
             IsBlockhashValid => self.is_blockhash_valid(request),
             MinimumLedgerSlot => self.get_first_available_block(request),
             RequestAirdrop => self.request_airdrop(request).await,
-            SendTransaction => self.send_transaction(request).await,
-            SimulateTransaction => self.simulate_transaction(request).await,
+            SendTransaction => {
+                self.send_transaction(request, remote_account_claims.clone())
+                    .await
+            }
+            SimulateTransaction => {
+                self.simulate_transaction(
+                    request,
+                    remote_account_claims.clone(),
+                )
+                .await
+            }
             GetRoutes => self.get_routes(request),
             // Alias for getLatestBlockhash; exists for Magic Router SDK compatibility.
             GetBlockhashForAccounts => self.get_latest_blockhash(request),

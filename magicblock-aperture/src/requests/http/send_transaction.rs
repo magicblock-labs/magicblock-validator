@@ -1,4 +1,7 @@
+use std::sync::{atomic::AtomicU64, Arc};
+
 use magicblock_metrics::metrics::{
+    AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason,
     TRANSACTION_PROCESSING_TIME, TRANSACTION_SKIP_PREFLIGHT,
 };
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -18,6 +21,7 @@ impl HttpDispatcher {
     pub(crate) async fn send_transaction(
         &self,
         request: &mut JsonRequest,
+        remote_account_claims: Arc<AtomicU64>,
     ) -> HandlerResult {
         self.require_primary_rpc_method("sendTransaction")?;
         let _timer = TRANSACTION_PROCESSING_TIME.start_timer();
@@ -42,7 +46,13 @@ impl HttpDispatcher {
             return Err(TransactionError::AlreadyProcessed.into());
         }
 
-        self.ensure_transaction_accounts(&transaction.txn).await?;
+        let fetch_context = AccountFetchContext::new_with_claims_counter(
+            AccountFetchEntrypoint::SendTransaction(signature),
+            AccountFetchReason::RequestedAccount,
+            remote_account_claims,
+        );
+        self.ensure_transaction_accounts(&transaction.txn, fetch_context)
+            .await?;
 
         // Based on the preflight flag, either execute and await the result,
         // or schedule (fire-and-forget) for background processing.
