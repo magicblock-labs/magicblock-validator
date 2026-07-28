@@ -1,10 +1,10 @@
 # Testing and Validation
 
-This file tells agents how to validate changes. Keep it focused on commands and workflow. If validation behavior changes, update this file in the same change.
+This file tells agents how to validate changes. Keep it focused on commands and workflow. If validation behavior changes, queue an update to this file for the weekly documentation-maintenance task.
 
 ## Baseline rule
 
-Every code change must be validated. Use the repository-local `mbv-check` skill for Rust changes once it is available in the agent environment. The intent of that skill is to run this validator's standard Rust quality gate and help fix any failures.
+Every code change must be validated. Use the repository-local `mbv-check` skill for Rust changes only when full local validation is explicitly requested or appropriate outside a GitHub push workflow. The intent of that skill is to run this validator's standard Rust quality gate and help fix any failures.
 
 Crate guides should name relevant packages/suites and validation intent, but exact command syntax belongs here or in executable skills.
 
@@ -12,7 +12,9 @@ The validator is performance-sensitive. When a change touches critical RPC, acco
 
 For correctness, security, and protocol invariants, read `.agents/rules/invariants.md`, `.agents/rules/validator-goals.md`, and `.agents/specs/validator-specification.md`; this file only defines how to validate changes against those invariants. When a change touches signer/authority checks, account-sync correctness, lock acquisition/ordering, or any path driven by untrusted RPC/transaction input, add or run the test that exercises the security-relevant behavior (for example concurrency/race tests, delegation/sync ordering tests, or auth-rejection tests). If you cannot validate a security-relevant path, say so and call out the residual risk explicitly — do not treat it as low priority.
 
-Until or unless the skill provides a more specific command set, treat the required baseline as:
+For local validation before any GitHub push, run only tests targeted to the touched behavior; do not run a full workspace or integration suite. When fixing an existing pull request, run exactly one relevant unit test or one relevant integration test. Let CI provide the broader test coverage.
+
+For explicitly requested full local validation and for CI, use:
 
 ```bash
 make fmt
@@ -22,11 +24,11 @@ cargo nextest run --workspace
 
 Run tests with `cargo nextest`. If `nextest` is not available in the environment, fall back to `cargo test` for the same scope (for example `cargo test --workspace`). This is the single source of truth for that choice; other sections assume it.
 
-For small or targeted changes, run the smallest relevant test first, then run the broader checks before handing off if time allows.
+For work that will not be pushed to GitHub, run the smallest relevant test first and run broader checks only when explicitly requested or justified by the task.
 
 For documentation-only changes, at minimum verify the changed files are in the right location and that links/filenames mentioned in `AGENTS.md` and `.agents/` stay in sync.
 
-When you discover a new reliable way to test, debug, benchmark, or validate the codebase, update this file or the relevant crate-specific guide before finishing. If the approach is specific to one crate, prefer `.agents/context/crates/<crate>.md` and link from broader docs only when needed.
+When you discover a new reliable way to test, debug, benchmark, or validate the codebase, identify the documentation follow-up for the weekly maintenance task. If the approach is specific to one crate, target `.agents/context/crates/<crate>.md`; otherwise target this file.
 
 ## Choosing what to run
 
@@ -42,7 +44,10 @@ Use the crate map and touched files to pick tests:
 
 Always report exactly which commands were run and whether they passed. Also report any performance-sensitive paths touched, what performance validation was performed, and any unavoidable performance tradeoff or unmeasured risk.
 
-## Workspace checks
+## Full workspace checks
+
+Run these only when full local validation is explicitly requested or in CI, not
+as part of a GitHub push workflow.
 
 Common root-level commands:
 
@@ -226,4 +231,4 @@ When finishing a task, include:
 - any remaining risk, especially for integration tests that require validators or long-running suites,
 - any performance-sensitive paths touched and whether performance regression risk was measured, reasoned about, or left unmeasured,
 - any security-relevant paths touched (signer/authority enforcement, base-layer sync, locking/concurrency, untrusted-input handling), confirmation that no security property was weakened, and how that was checked or what residual risk remains,
-- whether agent documentation was updated for any durable discovery, or why no update was needed.
+- whether a durable documentation follow-up was queued for the weekly maintenance task, or why none was needed.
