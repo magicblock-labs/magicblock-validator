@@ -327,9 +327,11 @@ pub fn execute_post_delegation_actions(
             // accepting an absent signer would let a delegation-record author
             // squat any unused pubkey. Legitimate creations authorize the new
             // account with program (PDA) signatures inside the invoked
-            // program's CPIs instead.
-            let not_created_yet = !signer_pubkeys
-                .contains(&account_meta.pubkey)
+            // program's CPIs instead. An undelegating account is never eligible,
+            // even when drained empty, so it stays locked while its base-layer
+            // undelegation completes.
+            let not_created_yet = !account.undelegating()
+                && !signer_pubkeys.contains(&account_meta.pubkey)
                 && account.lamports() == 0
                 && account.data().is_empty();
             not_created_yet

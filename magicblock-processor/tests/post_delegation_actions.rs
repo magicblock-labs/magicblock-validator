@@ -185,6 +185,79 @@ async fn executor_rejects_unwritable_action_dependencies_atomically() {
     }
 }
 
+/// An undelegating dependency that has been drained to zero lamports and empty
+/// data must stay rejected: emptiness would otherwise satisfy the
+/// not-yet-created carve-out and bypass the undelegating lock, letting a
+/// post-delegation action reach a still-protected account as writable. The
+/// account is locked until its base-layer undelegation completes.
+#[tokio::test]
+async fn executor_rejects_empty_undelegating_action_dependency() {
+    generate_validator_authority_if_needed();
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let validator = validator_authority();
+    env.fund_account(validator.pubkey(), 10_000_000);
+
+    let target = Pubkey::new_unique();
+    env.accountsdb
+        .insert_account(
+            &target,
+            &AccountSharedData::new(100, 0, &system_program::id()),
+        )
+        .unwrap();
+
+    // Drained (zero lamports, empty data) but still undelegating and present.
+    let counter = Pubkey::new_unique();
+    let mut counter_account = AccountSharedData::new(0, 0, &guinea::ID);
+    counter_account.set_undelegating(true);
+    env.accountsdb
+        .insert_account(&counter, &counter_account)
+        .unwrap();
+    assert!(
+        env.get_account(counter).undelegating(),
+        "drained undelegating account must persist in AccountsDb"
+    );
+
+    let actions = vec![Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::Increment,
+        vec![AccountMeta::new(counter, false)],
+    )];
+    let clone_ix = InstructionUtils::clone_account_instruction(
+        target,
+        vec![9],
+        AccountCloneFields {
+            lamports: 1_000_000,
+            owner: system_program::id(),
+            delegated: true,
+            remote_slot: 1,
+            ..Default::default()
+        },
+        actions.clone(),
+    );
+    let executor_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            target, actions,
+        );
+
+    let txn = env.build_transaction_with_signers(
+        &[clone_ix, executor_ix],
+        &[&validator],
+    );
+    assert_eq!(
+        env.execute_transaction(txn).await.unwrap_err(),
+        TransactionError::InstructionError(
+            1,
+            solana_instruction::error::InstructionError::IllegalOwner,
+        )
+    );
+
+    let target_account = env.get_account(target);
+    assert!(!target_account.delegated(), "clone must roll back");
+    assert!(target_account.data().is_empty());
+    let counter_account = env.get_account(counter);
+    assert!(counter_account.undelegating(), "the lock must be preserved");
+}
+
 /// Regression (e-token shuttle private-transfer PostActs): actions create
 /// accounts mid-flight — group receipts, permission PDAs, rent-pending ATAs —
 /// via Magic CPIs, and declare them writable (non-signer) in their metas; the
