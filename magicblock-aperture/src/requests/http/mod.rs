@@ -25,6 +25,7 @@ use magicblock_metrics::metrics::{
 use prelude::JsonBody;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
 };
@@ -165,6 +166,17 @@ impl HttpDispatcher {
     ) -> AccountFetchContext {
         AccountFetchContext::new_with_claims_counter(
             AccountFetchEntrypoint::RpcGetMultipleAccounts,
+            AccountFetchReason::RequestedAccount,
+            remote_account_claims,
+        )
+    }
+
+    fn send_transaction_context(
+        signature: Signature,
+        remote_account_claims: Arc<AtomicU64>,
+    ) -> AccountFetchContext {
+        AccountFetchContext::new_with_claims_counter(
+            AccountFetchEntrypoint::SendTransaction(signature),
             AccountFetchReason::RequestedAccount,
             remote_account_claims,
         )

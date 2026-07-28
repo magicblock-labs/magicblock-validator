@@ -4,9 +4,6 @@ use std::{
 };
 
 use magicblock_core::link::transactions::TransactionSimulationResult;
-use magicblock_metrics::metrics::{
-    AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason,
-};
 use solana_message::inner_instruction::InnerInstructions;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
@@ -55,11 +52,8 @@ impl HttpDispatcher {
             .inspect_err(|err| {
                 debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
-        let fetch_context = AccountFetchContext::new_with_claims_counter(
-            AccountFetchEntrypoint::SendTransaction(
-                *transaction.txn.signature(),
-            ),
-            AccountFetchReason::RequestedAccount,
+        let fetch_context = Self::send_transaction_context(
+            *transaction.txn.signature(),
             remote_account_claims.clone(),
         );
         self.ensure_transaction_accounts(&transaction.txn, fetch_context)
