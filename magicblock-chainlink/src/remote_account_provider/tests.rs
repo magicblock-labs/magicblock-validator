@@ -18,7 +18,7 @@ use magicblock_metrics::metrics::{
     ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
     ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
 };
-use solana_account::Account;
+use solana_account::{Account, AccountSharedData};
 use solana_system_interface::program as system_program;
 use tokio::sync::mpsc;
 
@@ -70,6 +70,47 @@ async fn setup_provider_with_lru_capacity(
     let (subscribed_accounts, config) = create_test_lru_cache(lru_capacity);
     let config = config
         .with_secondary_subscriptions_lru_capacity(lru_capacity)
+        .unwrap();
+    let chain_slot = Arc::<AtomicU64>::default();
+
+    let provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client.clone(),
+            pubsub_client.clone(),
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(chain_slot),
+        )
+        .await
+        .unwrap(),
+    );
+
+    ProviderTestCtx {
+        provider,
+        rpc_client,
+        pubsub_client,
+        _forward_rx: forward_rx,
+    }
+}
+
+async fn setup_provider_multi(
+    accounts: Vec<(Pubkey, Account)>,
+) -> ProviderTestCtx {
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(100)
+        .clock_sysvar_for_slot(100)
+        .accounts(accounts.into_iter().collect())
+        .build();
+
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+
+    let (forward_tx, forward_rx) = mpsc::channel(1_000);
+    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let config = config
+        .with_secondary_subscriptions_lru_capacity(1000)
         .unwrap();
     let chain_slot = Arc::<AtomicU64>::default();
 
@@ -2668,6 +2709,64 @@ async fn test_try_get_multi_owner_success_cleans_up_pending_entry() {
         .expect("fetch should succeed");
     assert_eq!(result.len(), 1);
     assert!(!provider.is_pending(&pubkey));
+}
+
+#[tokio::test]
+async fn test_remote_account_claims_count_owned_unique_requested_pubkeys() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    init_logger();
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let account1 = AccountSharedData::new(1, 0, &Pubkey::new_unique()).into();
+    let account2 = AccountSharedData::new(2, 0, &Pubkey::new_unique()).into();
+    let ctx =
+        setup_provider_multi(vec![(pubkey1, account1), (pubkey2, account2)])
+            .await;
+    let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
+
+    let result = ctx
+        .provider
+        .try_get_multi(
+            &[pubkey1, pubkey1, pubkey2],
+            None,
+            fetch_context.clone(),
+            None,
+        )
+        .await
+        .expect("multi-account fetch should succeed");
+
+    assert_eq!(result.len(), 3);
+    assert_eq!(
+        fetch_context.remote_account_claims_value(),
+        2,
+        "duplicate requested pubkeys should count once per owned direct claim"
+    );
+}
+
+#[tokio::test]
+async fn test_remote_account_claims_ignore_companion_fetch_reason() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    init_logger();
+
+    let pubkey = Pubkey::new_unique();
+    let account = AccountSharedData::new(1, 0, &Pubkey::new_unique()).into();
+    let ctx = setup_provider_multi(vec![(pubkey, account)]).await;
+    let fetch_context = AccountFetchContext::rpc_get_account()
+        .with_reason(AccountFetchReason::DelegationRecord);
+
+    ctx.provider
+        .try_get_multi(&[pubkey], None, fetch_context.clone(), None)
+        .await
+        .expect("companion-like fetch should succeed");
+
+    assert_eq!(
+        fetch_context.remote_account_claims_value(),
+        0,
+        "companion fetch reasons must not contribute to the response-header count"
+    );
 }
 
 #[tokio::test]
