@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicBool, AtomicU16, Ordering},
+        atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
@@ -47,6 +47,55 @@ use crate::remote_account_provider::{
 
 // Log every 10 secs (given chain slot time is 400ms)
 const CLOCK_LOG_SLOT_FREQ: u64 = 25;
+static NEXT_SUBSCRIPTION_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_subscription_id() -> u64 {
+    NEXT_SUBSCRIPTION_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn remove_subscription_if_id(
+    subscriptions: &Mutex<HashMap<Pubkey, AccountSubscription>>,
+    pubkey: &Pubkey,
+    subscription_id: u64,
+) {
+    let mut subscriptions =
+        subscriptions.lock().expect("subscriptions lock poisoned");
+    if subscriptions.get(pubkey).is_some_and(|subscription| {
+        subscription.subscription_id == subscription_id
+    }) {
+        subscriptions.remove(pubkey);
+    }
+}
+
+struct PendingSubscriptionSetup {
+    subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+    pubkey: Pubkey,
+    subscription_id: u64,
+    setup_completion_token: CancellationToken,
+    completion_token: CancellationToken,
+    armed: bool,
+}
+
+impl PendingSubscriptionSetup {
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingSubscriptionSetup {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        remove_subscription_if_id(
+            &self.subscriptions,
+            &self.pubkey,
+            self.subscription_id,
+        );
+        self.setup_completion_token.cancel();
+        self.completion_token.cancel();
+    }
+}
 
 /// Errors indicating the websocket connection itself is broken, as opposed
 /// to the server rejecting an individual request.
@@ -98,6 +147,8 @@ pub struct ChainPubsubActor {
     /// Indicates whether the actor is connected or has been disconnected due RPC to connection
     /// issues
     is_connected: Arc<AtomicBool>,
+    /// Once set, reconnects must never reopen subscription admission.
+    is_shutting_down: Arc<AtomicBool>,
     /// Channel used to signal connection issues to the submux
     abort_sender: mpsc::Sender<()>,
 }
@@ -160,6 +211,7 @@ impl ChainPubsubActor {
             shutdown_token,
             client_id: client_id.to_string(),
             is_connected: Arc::new(AtomicBool::new(true)),
+            is_shutting_down: Arc::new(AtomicBool::new(false)),
             abort_sender,
         };
         me.start_worker(messages_receiver);
@@ -169,14 +221,22 @@ impl ChainPubsubActor {
         Ok((me, subscription_updates_receiver))
     }
 
-    #[instrument(skip(subscriptions, program_subs, shutdown_token), fields(client_id = %client_id))]
+    #[instrument(skip(subscriptions, program_subs, is_connected, is_shutting_down, shutdown_token), fields(client_id = %client_id))]
     async fn shutdown(
         client_id: &str,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        is_connected: Arc<AtomicBool>,
+        is_shutting_down: Arc<AtomicBool>,
         shutdown_token: CancellationToken,
     ) {
         info!(client_id = client_id, "Shutting down pubsub actor");
+        Self::close_admission_for_shutdown(
+            &subscriptions,
+            &program_subs,
+            &is_connected,
+            &is_shutting_down,
+        );
         let result = Self::drain_and_wait_for_listener_completion(
             client_id,
             subscriptions,
@@ -187,6 +247,42 @@ impl ChainPubsubActor {
             warn!(error = ?err, client_id, "Timed out while shutting down pubsub subscriptions");
         }
         shutdown_token.cancel();
+    }
+
+    fn close_admission_for_shutdown(
+        subscriptions: &Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        program_subs: &Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        is_connected: &Arc<AtomicBool>,
+        is_shutting_down: &Arc<AtomicBool>,
+    ) {
+        // Reconnect publishes connected state under these same locks. This
+        // makes the terminal flag, admission close, and later drain snapshots
+        // atomic with respect to reconnect completion and subscription setup.
+        let _subscriptions =
+            subscriptions.lock().expect("subscriptions lock poisoned");
+        let _program_subs = program_subs
+            .lock()
+            .expect("program subscriptions lock poisoned");
+        is_shutting_down.store(true, Ordering::SeqCst);
+        is_connected.store(false, Ordering::SeqCst);
+    }
+
+    fn publish_reconnected_if_not_shutting_down(
+        subscriptions: &Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        program_subs: &Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        is_connected: &Arc<AtomicBool>,
+        is_shutting_down: &Arc<AtomicBool>,
+    ) -> bool {
+        let _subscriptions =
+            subscriptions.lock().expect("subscriptions lock poisoned");
+        let _program_subs = program_subs
+            .lock()
+            .expect("program subscriptions lock poisoned");
+        if is_shutting_down.load(Ordering::SeqCst) {
+            return false;
+        }
+        is_connected.store(true, Ordering::SeqCst);
+        true
     }
 
     // Reconnect must not drop pooled PubsubClient instances until all
@@ -225,9 +321,9 @@ impl ChainPubsubActor {
 
     // Reconnect-only safety gate: callers that may drop or replace pooled
     // PubsubClient instances must drain subscription maps and wait here before
-    // calling PubSubConnectionPool::reconnect(). Explicit unsubscribe may cancel
-    // listeners without waiting because it does not drop pooled clients and leaves
-    // the map entry visible until listener cleanup completes.
+    // calling PubSubConnectionPool::reconnect(). Explicit unsubscribe waits
+    // for its exact listener completion in the per-message handler below
+    // without blocking this actor's message loop.
     //
     // Entries are removed from the maps only after their listener completion
     // signal has fired. Timed-out entries are intentionally left in the map so
@@ -248,7 +344,11 @@ impl ChainPubsubActor {
                     (
                         *pubkey,
                         AccountSubscription {
+                            subscription_id: sub.subscription_id,
                             cancellation_token: sub.cancellation_token.clone(),
+                            setup_completion_token: sub
+                                .setup_completion_token
+                                .clone(),
                             completion_token: sub.completion_token.clone(),
                         },
                     )
@@ -305,13 +405,17 @@ impl ChainPubsubActor {
         sub: AccountSubscription,
         map: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
     ) -> RemoteAccountProviderResult<()> {
+        let subscription_id = sub.subscription_id;
         let result =
             Self::cancel_and_wait_for_stream_drop(client_id, kind, pubkey, sub)
                 .await;
         if result.is_ok() {
-            map.lock()
-                .expect("subscriptions lock poisoned")
-                .remove(&pubkey);
+            let mut map = map.lock().expect("subscriptions lock poisoned");
+            if map.get(&pubkey).is_some_and(|current| {
+                current.subscription_id == subscription_id
+            }) {
+                map.remove(&pubkey);
+            }
         }
         result
     }
@@ -327,11 +431,27 @@ impl ChainPubsubActor {
         // Dead or winding-down listeners are not live coverage.
         subs.iter()
             .filter(|(_, sub)| {
-                !sub.cancellation_token.is_cancelled()
+                sub.setup_completion_token.is_cancelled()
+                    && !sub.cancellation_token.is_cancelled()
                     && !sub.completion_token.is_cancelled()
             })
             .map(|(pubkey, _)| *pubkey)
             .collect()
+    }
+
+    pub fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
+        if !self.is_connected.load(Ordering::SeqCst) {
+            return false;
+        }
+        self.subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .get(pubkey)
+            .is_some_and(|sub| {
+                sub.setup_completion_token.is_cancelled()
+                    && !sub.cancellation_token.is_cancelled()
+                    && !sub.completion_token.is_cancelled()
+            })
     }
 
     pub async fn send_msg(
@@ -359,6 +479,7 @@ impl ChainPubsubActor {
         let pubsub_connection = self.pubsub_connection.clone();
         let client_id = self.client_id.clone();
         let is_connected = self.is_connected.clone();
+        let is_shutting_down = self.is_shutting_down.clone();
         let abort_sender = self.abort_sender.clone();
         tokio::spawn(async move {
             let mut pending_messages = FuturesUnordered::new();
@@ -373,6 +494,8 @@ impl ChainPubsubActor {
                             let pubsub_client_config = pubsub_client_config.clone();
                             let abort_sender = abort_sender.clone();
                             let is_connected = is_connected.clone();
+                            let is_shutting_down =
+                                is_shutting_down.clone();
                             pending_messages.push(Self::handle_msg(
                                 subs,
                                 program_subs,
@@ -382,6 +505,7 @@ impl ChainPubsubActor {
                                 abort_sender,
                                 &client_id,
                                 is_connected,
+                                is_shutting_down,
                                 shutdown_token.clone(),
                                 msg
                             ));
@@ -399,7 +523,7 @@ impl ChainPubsubActor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[instrument(skip(subscriptions, program_subs, pubsub_connection, subscription_updates_sender, pubsub_client_config, abort_sender, is_connected, shutdown_token, msg), fields(client_id = %client_id))]
+    #[instrument(skip(subscriptions, program_subs, pubsub_connection, subscription_updates_sender, pubsub_client_config, abort_sender, is_connected, is_shutting_down, shutdown_token, msg), fields(client_id = %client_id))]
     async fn handle_msg(
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
@@ -409,6 +533,7 @@ impl ChainPubsubActor {
         abort_sender: mpsc::Sender<()>,
         client_id: &str,
         is_connected: Arc<AtomicBool>,
+        is_shutting_down: Arc<AtomicBool>,
         shutdown_token: CancellationToken,
         msg: ChainPubsubActorMessage,
     ) {
@@ -480,15 +605,31 @@ impl ChainPubsubActor {
                     send_ok(response, client_id);
                     return;
                 }
-                let cancellation_token = subscriptions
+                let subscription = subscriptions
                     .lock()
                     .expect("subcriptions lock poisoned")
                     .get(&pubkey)
-                    .map(|sub| sub.cancellation_token.clone());
+                    .map(|sub| AccountSubscription {
+                        subscription_id: sub.subscription_id,
+                        cancellation_token: sub.cancellation_token.clone(),
+                        setup_completion_token: sub
+                            .setup_completion_token
+                            .clone(),
+                        completion_token: sub.completion_token.clone(),
+                    });
 
-                if let Some(cancellation_token) = cancellation_token {
-                    cancellation_token.cancel();
-                    send_ok(response, client_id);
+                if let Some(subscription) = subscription {
+                    let client_id = client_id.to_string();
+                    tokio::spawn(async move {
+                        let result = Self::cancel_and_wait_for_stream_drop(
+                            &client_id,
+                            "account",
+                            pubkey,
+                            subscription,
+                        )
+                        .await;
+                        let _ = response.send(result);
+                    });
                 } else {
                     let _ = response
                         .send(Err(RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
@@ -538,6 +679,7 @@ impl ChainPubsubActor {
                     program_subs,
                     client_id,
                     is_connected,
+                    is_shutting_down,
                 )
                 .await;
                 let _ = response.send(result);
@@ -559,6 +701,8 @@ impl ChainPubsubActor {
                     client_id,
                     subscriptions,
                     program_subs,
+                    is_connected,
+                    is_shutting_down,
                     shutdown_token,
                 )
                 .await;
@@ -584,47 +728,96 @@ impl ChainPubsubActor {
         retries: Option<usize>,
         client_id: &str,
     ) {
-        {
-            let mut subs_lock =
-                subs.lock().expect("subscriptions lock poisoned");
-            match subs_lock.get(&pubkey) {
-                Some(sub) if sub.completion_token.is_cancelled() => {
-                    // Listener already finished: replace the orphaned entry
-                    // with a fresh subscription.
-                    subs_lock.remove(&pubkey);
-                }
-                Some(_) => {
-                    // Active or winding down; a lost winding-down sub is
-                    // repaired by the reconciler.
-                    trace!("Subscription already exists");
-                    let _ = sub_response.send(Ok(()));
+        let cancellation_token = CancellationToken::new();
+        let setup_completion_token = CancellationToken::new();
+        let completion_token = CancellationToken::new();
+        let subscription_id = next_subscription_id();
+
+        loop {
+            let pending_completion = {
+                let mut subs_lock =
+                    subs.lock().expect("subscriptions lock poisoned");
+                if !is_connected.load(Ordering::SeqCst) {
+                    drop(subs_lock);
+                    let _ = sub_response.send(Err(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            format!("Client {client_id} disconnected"),
+                        ),
+                    ));
                     return;
                 }
-                None => {}
+                match subs_lock.get(&pubkey) {
+                    Some(sub) if sub.completion_token.is_cancelled() => {
+                        subs_lock.remove(&pubkey);
+                        subs_lock.insert(
+                            pubkey,
+                            AccountSubscription {
+                                subscription_id,
+                                cancellation_token: cancellation_token.clone(),
+                                setup_completion_token: setup_completion_token
+                                    .clone(),
+                                completion_token: completion_token.clone(),
+                            },
+                        );
+                        None
+                    }
+                    Some(sub) if sub.cancellation_token.is_cancelled() => {
+                        Some(sub.completion_token.clone())
+                    }
+                    Some(sub) if !sub.setup_completion_token.is_cancelled() => {
+                        Some(sub.setup_completion_token.clone())
+                    }
+                    Some(_) => {
+                        trace!("Subscription already exists");
+                        let _ = sub_response.send(Ok(()));
+                        return;
+                    }
+                    None => {
+                        // Publish the setup token before doing network work so
+                        // unsubscribe can cancel this exact listener.
+                        subs_lock.insert(
+                            pubkey,
+                            AccountSubscription {
+                                subscription_id,
+                                cancellation_token: cancellation_token.clone(),
+                                setup_completion_token: setup_completion_token
+                                    .clone(),
+                                completion_token: completion_token.clone(),
+                            },
+                        );
+                        None
+                    }
+                }
+            };
+
+            let Some(pending_completion) = pending_completion else {
+                break;
+            };
+            let timeout = subscription_completion_timeout();
+            if tokio::time::timeout(timeout, pending_completion.cancelled())
+                .await
+                .is_err()
+            {
+                let _ = sub_response.send(Err(
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        format!(
+                            "Timed out waiting for previous account subscription listener {pubkey} to finish"
+                        ),
+                    ),
+                ));
+                return;
             }
         }
 
+        let mut setup_guard = PendingSubscriptionSetup {
+            subscriptions: subs.clone(),
+            pubkey,
+            subscription_id,
+            setup_completion_token: setup_completion_token.clone(),
+            completion_token: completion_token.clone(),
+            armed: true,
+        };
         trace!("Adding subscription");
-
-        let cancellation_token = CancellationToken::new();
-        let completion_token = CancellationToken::new();
-
-        // Insert into subscriptions HashMap immediately to prevent race condition
-        // with unsubscribe operations
-        // Assuming that messages to this actor are processed in the order they are sent
-        // then this eliminates the possibility of an unsubscribe being processed before
-        // the sub's cancellation token was added to the map
-        {
-            let mut subs_lock =
-                subs.lock().expect("subscriptions lock poisoned");
-            subs_lock.insert(
-                pubkey,
-                AccountSubscription {
-                    cancellation_token: cancellation_token.clone(),
-                    completion_token: completion_token.clone(),
-                },
-            );
-        }
 
         let config = RpcAccountInfoConfig {
             commitment: Some(commitment_config),
@@ -645,10 +838,6 @@ impl ChainPubsubActor {
                 biased;
                 _ = cancellation_token.cancelled() => {
                     trace!("Subscription cancelled during setup");
-                    subs.lock()
-                        .expect("subscriptions lock poisoned")
-                        .remove(&pubkey);
-                    completion_token.cancel();
                     let _ = sub_response.send(Err(
                         RemoteAccountProviderError::AccountSubscriptionsFailed(
                             format!("Subscription for {pubkey} cancelled during setup"),
@@ -697,10 +886,6 @@ impl ChainPubsubActor {
                             ),
                         );
                     }
-                    subs.lock()
-                        .expect("subscriptions lock poisoned")
-                        .remove(&pubkey);
-                    completion_token.cancel();
                     // RPC failed - inform the requester
                     let _ = sub_response.send(Err(err.into()));
                     return;
@@ -708,7 +893,9 @@ impl ChainPubsubActor {
             };
         };
 
-        // RPC succeeded - confirm to the requester that the subscription was made
+        // RPC succeeded - publish live readiness before confirming to callers.
+        setup_completion_token.cancel();
+        setup_guard.disarm();
         let _ = sub_response.send(Ok(()));
 
         let client_id = client_id.to_string();
@@ -787,9 +974,7 @@ impl ChainPubsubActor {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out");
                 inc_pubsub_unsubscribe_timeout_count(&client_id, "account");
             }
-            subs.lock()
-                .expect("subscriptions lock poisoned")
-                .remove(&pubkey);
+            remove_subscription_if_id(&subs, &pubkey, subscription_id);
             completion_token.cancel();
         });
     }
@@ -809,33 +994,95 @@ impl ChainPubsubActor {
         commitment_config: CommitmentConfig,
         client_id: &str,
     ) {
-        if program_subs
-            .lock()
-            .expect("program subscriptions lock poisoned")
-            .contains_key(&program_pubkey)
-        {
-            trace!("Program subscription already exists");
-            let _ = sub_response.send(Ok(()));
-            return;
-        }
-
-        trace!("Adding program subscription");
-
         let cancellation_token = CancellationToken::new();
+        let setup_completion_token = CancellationToken::new();
         let completion_token = CancellationToken::new();
+        let subscription_id = next_subscription_id();
 
-        {
-            let mut program_subs_lock = program_subs
-                .lock()
-                .expect("program subscriptions lock poisoned");
-            program_subs_lock.insert(
-                program_pubkey,
-                AccountSubscription {
-                    cancellation_token: cancellation_token.clone(),
-                    completion_token: completion_token.clone(),
-                },
-            );
+        loop {
+            let pending_completion = {
+                let mut program_subs_lock = program_subs
+                    .lock()
+                    .expect("program subscriptions lock poisoned");
+                if !is_connected.load(Ordering::SeqCst) {
+                    drop(program_subs_lock);
+                    let _ = sub_response.send(Err(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            format!("Client {client_id} disconnected"),
+                        ),
+                    ));
+                    return;
+                }
+                match program_subs_lock.get(&program_pubkey) {
+                    Some(sub) if sub.completion_token.is_cancelled() => {
+                        program_subs_lock.remove(&program_pubkey);
+                        program_subs_lock.insert(
+                            program_pubkey,
+                            AccountSubscription {
+                                subscription_id,
+                                cancellation_token: cancellation_token.clone(),
+                                setup_completion_token: setup_completion_token
+                                    .clone(),
+                                completion_token: completion_token.clone(),
+                            },
+                        );
+                        None
+                    }
+                    Some(sub) if sub.cancellation_token.is_cancelled() => {
+                        Some(sub.completion_token.clone())
+                    }
+                    Some(sub) if !sub.setup_completion_token.is_cancelled() => {
+                        Some(sub.setup_completion_token.clone())
+                    }
+                    Some(_) => {
+                        trace!("Program subscription already exists");
+                        let _ = sub_response.send(Ok(()));
+                        return;
+                    }
+                    None => {
+                        program_subs_lock.insert(
+                            program_pubkey,
+                            AccountSubscription {
+                                subscription_id,
+                                cancellation_token: cancellation_token.clone(),
+                                setup_completion_token: setup_completion_token
+                                    .clone(),
+                                completion_token: completion_token.clone(),
+                            },
+                        );
+                        None
+                    }
+                }
+            };
+
+            let Some(pending_completion) = pending_completion else {
+                break;
+            };
+            let timeout = subscription_completion_timeout();
+            if tokio::time::timeout(timeout, pending_completion.cancelled())
+                .await
+                .is_err()
+            {
+                let _ = sub_response.send(Err(
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        format!(
+                            "Timed out waiting for previous program subscription listener {program_pubkey} to finish"
+                        ),
+                    ),
+                ));
+                return;
+            }
         }
+
+        let mut setup_guard = PendingSubscriptionSetup {
+            subscriptions: program_subs.clone(),
+            pubkey: program_pubkey,
+            subscription_id,
+            setup_completion_token: setup_completion_token.clone(),
+            completion_token: completion_token.clone(),
+            armed: true,
+        };
+        trace!("Adding program subscription");
 
         let config = RpcProgramAccountsConfig {
             account_config: RpcAccountInfoConfig {
@@ -856,11 +1103,6 @@ impl ChainPubsubActor {
             biased;
             _ = cancellation_token.cancelled() => {
                 trace!("Program subscription cancelled during setup");
-                program_subs
-                    .lock()
-                    .expect("program_subs lock poisoned")
-                    .remove(&program_pubkey);
-                completion_token.cancel();
                 let _ = sub_response.send(Err(
                     RemoteAccountProviderError::AccountSubscriptionsFailed(
                         format!(
@@ -899,11 +1141,6 @@ impl ChainPubsubActor {
                     is_connected.clone(),
                     &format!("Failed to subscribe to program {program_pubkey}"),
                 );
-                program_subs
-                    .lock()
-                    .expect("program_subs lock poisoned")
-                    .remove(&program_pubkey);
-                completion_token.cancel();
                 // RPC failed - inform the requester
                 let _ = sub_response.send(Err(err.into()));
                 return;
@@ -911,6 +1148,8 @@ impl ChainPubsubActor {
         };
 
         // RPC succeeded - confirm to the requester that the subscription was made
+        setup_completion_token.cancel();
+        setup_guard.disarm();
         let _ = sub_response.send(Ok(()));
 
         let client_id = client_id.to_string();
@@ -1017,10 +1256,11 @@ impl ChainPubsubActor {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out for program");
                 inc_pubsub_unsubscribe_timeout_count(&client_id, "program");
             }
-            program_subs
-                .lock()
-                .expect("program_subs lock poisoned")
-                .remove(&program_pubkey);
+            remove_subscription_if_id(
+                &program_subs,
+                &program_pubkey,
+                subscription_id,
+            );
             completion_token.cancel();
         });
     }
@@ -1033,12 +1273,22 @@ impl ChainPubsubActor {
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         client_id: &str,
         is_connected: Arc<AtomicBool>,
+        is_shutting_down: Arc<AtomicBool>,
     ) -> RemoteAccountProviderResult<()> {
+        let shutting_down_error = || {
+            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(format!(
+                "Client {client_id} is shutting down"
+            ))
+        };
+        if is_shutting_down.load(Ordering::SeqCst) {
+            return Err(shutting_down_error());
+        }
+
         // 1. Drain subscriptions and wait until borrowed pubsub streams are dropped.
         Self::drain_and_wait_for_listener_completion(
             client_id,
-            subs,
-            program_subs,
+            subs.clone(),
+            program_subs.clone(),
         )
         .await?;
 
@@ -1068,8 +1318,16 @@ impl ChainPubsubActor {
         // 4. Unsubscribe immediately
         unsubscribe().await;
 
-        // 5. We are now connected again
-        is_connected.store(true, Ordering::SeqCst);
+        // 5. Publish connected state only if shutdown did not become
+        // terminal while the network work was in flight.
+        if !Self::publish_reconnected_if_not_shutting_down(
+            &subs,
+            &program_subs,
+            &is_connected,
+            &is_shutting_down,
+        ) {
+            return Err(shutting_down_error());
+        }
 
         // 6. Prune any idle connections left over from before the
         //    disruption
@@ -1146,6 +1404,212 @@ mod tests {
 
     use super::*;
 
+    fn completed_setup_token() -> CancellationToken {
+        let token = CancellationToken::new();
+        token.cancel();
+        token
+    }
+
+    #[test]
+    fn cancelled_pending_setup_cleans_only_its_subscription() {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let pubkey = Pubkey::new_unique();
+        let setup_completion_token = CancellationToken::new();
+        let completion_token = CancellationToken::new();
+        let subscription_id = next_subscription_id();
+        subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .insert(
+                pubkey,
+                AccountSubscription {
+                    subscription_id,
+                    cancellation_token: CancellationToken::new(),
+                    setup_completion_token: setup_completion_token.clone(),
+                    completion_token: completion_token.clone(),
+                },
+            );
+
+        let setup_guard = PendingSubscriptionSetup {
+            subscriptions: subscriptions.clone(),
+            pubkey,
+            subscription_id,
+            setup_completion_token: setup_completion_token.clone(),
+            completion_token: completion_token.clone(),
+            armed: true,
+        };
+        let replacement_id = next_subscription_id();
+        subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .insert(
+                pubkey,
+                AccountSubscription {
+                    subscription_id: replacement_id,
+                    cancellation_token: CancellationToken::new(),
+                    setup_completion_token: completed_setup_token(),
+                    completion_token: CancellationToken::new(),
+                },
+            );
+
+        drop(setup_guard);
+        assert!(setup_completion_token.is_cancelled());
+        assert!(completion_token.is_cancelled());
+        assert_eq!(
+            subscriptions
+                .lock()
+                .expect("subscriptions lock poisoned")
+                .get(&pubkey)
+                .expect("replacement must remain")
+                .subscription_id,
+            replacement_id
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_closes_admission_before_waiting_for_listener_completion()
+    {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let program_subs = Arc::new(Mutex::new(HashMap::new()));
+        let pubkey = Pubkey::new_unique();
+        let cancellation_token = CancellationToken::new();
+        let completion_token = CancellationToken::new();
+        subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .insert(
+                pubkey,
+                AccountSubscription {
+                    subscription_id: next_subscription_id(),
+                    cancellation_token: cancellation_token.clone(),
+                    setup_completion_token: completed_setup_token(),
+                    completion_token: completion_token.clone(),
+                },
+            );
+
+        let is_connected = Arc::new(AtomicBool::new(true));
+        let is_shutting_down = Arc::new(AtomicBool::new(false));
+        let shutdown_token = CancellationToken::new();
+        let shutdown = tokio::spawn(ChainPubsubActor::shutdown(
+            "test_client",
+            subscriptions.clone(),
+            program_subs,
+            is_connected.clone(),
+            is_shutting_down.clone(),
+            shutdown_token.clone(),
+        ));
+
+        cancellation_token.cancelled().await;
+        assert!(!is_connected.load(Ordering::SeqCst));
+        assert!(is_shutting_down.load(Ordering::SeqCst));
+        assert!(
+            !shutdown_token.is_cancelled(),
+            "shutdown must still be waiting for listener completion"
+        );
+
+        let admitted_after_shutdown = {
+            let _subscriptions =
+                subscriptions.lock().expect("subscriptions lock poisoned");
+            is_connected.load(Ordering::SeqCst)
+        };
+        assert!(!admitted_after_shutdown);
+
+        completion_token.cancel();
+        shutdown.await.unwrap();
+        assert!(shutdown_token.is_cancelled());
+        assert!(subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn shutdown_prevents_inflight_reconnect_from_reopening_admission() {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let program_subs = Arc::new(Mutex::new(HashMap::new()));
+        let old_pubkey = Pubkey::new_unique();
+        let old_cancellation = CancellationToken::new();
+        let old_completion = CancellationToken::new();
+        subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .insert(
+                old_pubkey,
+                AccountSubscription {
+                    subscription_id: next_subscription_id(),
+                    cancellation_token: old_cancellation.clone(),
+                    setup_completion_token: completed_setup_token(),
+                    completion_token: old_completion.clone(),
+                },
+            );
+
+        let is_connected = Arc::new(AtomicBool::new(false));
+        let is_shutting_down = Arc::new(AtomicBool::new(false));
+        let (reconnect_ready_tx, reconnect_ready_rx) = oneshot::channel();
+        let (reconnect_continue_tx, reconnect_continue_rx) = oneshot::channel();
+        let reconnect = tokio::spawn({
+            let subscriptions = subscriptions.clone();
+            let program_subs = program_subs.clone();
+            let is_connected = is_connected.clone();
+            let is_shutting_down = is_shutting_down.clone();
+            async move {
+                let _ = reconnect_ready_tx.send(());
+                reconnect_continue_rx.await.unwrap();
+                ChainPubsubActor::publish_reconnected_if_not_shutting_down(
+                    &subscriptions,
+                    &program_subs,
+                    &is_connected,
+                    &is_shutting_down,
+                )
+            }
+        });
+        reconnect_ready_rx.await.unwrap();
+
+        let shutdown_token = CancellationToken::new();
+        let shutdown = tokio::spawn(ChainPubsubActor::shutdown(
+            "test_client",
+            subscriptions.clone(),
+            program_subs.clone(),
+            is_connected.clone(),
+            is_shutting_down.clone(),
+            shutdown_token,
+        ));
+        old_cancellation.cancelled().await;
+
+        reconnect_continue_tx.send(()).unwrap();
+        assert!(
+            !reconnect.await.unwrap(),
+            "in-flight reconnect must not reopen terminal admission"
+        );
+        let new_pubkey = Pubkey::new_unique();
+        let admitted = {
+            let mut subscriptions =
+                subscriptions.lock().expect("subscriptions lock poisoned");
+            if is_connected.load(Ordering::SeqCst) {
+                subscriptions.insert(
+                    new_pubkey,
+                    AccountSubscription {
+                        subscription_id: next_subscription_id(),
+                        cancellation_token: CancellationToken::new(),
+                        setup_completion_token: completed_setup_token(),
+                        completion_token: CancellationToken::new(),
+                    },
+                );
+                true
+            } else {
+                false
+            }
+        };
+        assert!(!admitted);
+
+        old_completion.cancel();
+        shutdown.await.unwrap();
+        assert!(subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .is_empty());
+    }
+
     #[tokio::test]
     async fn drain_and_wait_for_listener_completion_waits_for_account_and_program_completion(
     ) {
@@ -1162,7 +1626,9 @@ mod tests {
             .insert(
                 account_pubkey,
                 AccountSubscription {
+                    subscription_id: next_subscription_id(),
                     cancellation_token: account_cancellation_token.clone(),
+                    setup_completion_token: completed_setup_token(),
                     completion_token: account_completion_token.clone(),
                 },
             );
@@ -1175,7 +1641,9 @@ mod tests {
             .insert(
                 program_pubkey,
                 AccountSubscription {
+                    subscription_id: next_subscription_id(),
                     cancellation_token: program_cancellation_token.clone(),
+                    setup_completion_token: completed_setup_token(),
                     completion_token: program_completion_token.clone(),
                 },
             );
@@ -1237,7 +1705,9 @@ mod tests {
             .insert(
                 account_pubkey,
                 AccountSubscription {
+                    subscription_id: next_subscription_id(),
                     cancellation_token: cancellation_token.clone(),
+                    setup_completion_token: completed_setup_token(),
                     completion_token,
                 },
             );
@@ -1274,7 +1744,9 @@ mod tests {
             .insert(
                 pubkey,
                 AccountSubscription {
+                    subscription_id: next_subscription_id(),
                     cancellation_token: cancellation_token.clone(),
+                    setup_completion_token: completed_setup_token(),
                     completion_token: completion_token.clone(),
                 },
             );
@@ -1305,5 +1777,89 @@ mod tests {
             .lock()
             .expect("subscriptions lock poisoned")
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn completed_drain_does_not_remove_replacement_subscription() {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let pubkey = Pubkey::new_unique();
+        let old_cancellation = CancellationToken::new();
+        let old_completion = CancellationToken::new();
+        let old_completion_signal = old_completion.clone();
+        let old_id = next_subscription_id();
+        subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .insert(
+                pubkey,
+                AccountSubscription {
+                    subscription_id: old_id,
+                    cancellation_token: old_cancellation.clone(),
+                    setup_completion_token: completed_setup_token(),
+                    completion_token: old_completion.clone(),
+                },
+            );
+
+        let drain = tokio::spawn({
+            let subscriptions = subscriptions.clone();
+            async move {
+                ChainPubsubActor::cancel_wait_and_remove_on_success(
+                    "test_client",
+                    "account",
+                    pubkey,
+                    AccountSubscription {
+                        subscription_id: old_id,
+                        cancellation_token: old_cancellation,
+                        setup_completion_token: completed_setup_token(),
+                        completion_token: old_completion,
+                    },
+                    subscriptions,
+                )
+                .await
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !subscriptions
+                .lock()
+                .expect("subscriptions lock poisoned")
+                .get(&pubkey)
+                .expect("old subscription should remain while draining")
+                .cancellation_token
+                .is_cancelled()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("drain should cancel the old subscription");
+
+        let replacement_id = next_subscription_id();
+        subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .insert(
+                pubkey,
+                AccountSubscription {
+                    subscription_id: replacement_id,
+                    cancellation_token: CancellationToken::new(),
+                    setup_completion_token: completed_setup_token(),
+                    completion_token: CancellationToken::new(),
+                },
+            );
+        // The old listener completes after the replacement has been installed.
+        // The exact-generation check must leave the replacement alone.
+        old_completion_signal.cancel();
+        drain.await.unwrap().unwrap();
+
+        assert_eq!(
+            subscriptions
+                .lock()
+                .expect("subscriptions lock poisoned")
+                .get(&pubkey)
+                .expect("replacement must survive old drain completion")
+                .subscription_id,
+            replacement_id
+        );
     }
 }

@@ -163,20 +163,32 @@ Empty placeholders are created in `RemoteAccountProvider::try_get_multi` when RP
 5. Returns results in input order.
 
 Fetch-owned unknown accounts enter a bounded secondary subscription LRU rather
-than the primary working-set LRU. They retain full websocket and gRPC coverage
-while the fetch is pending. A winning not-found result switches to gRPC-only
-coverage promptly when gRPC is available (the reconciler repairs the policy on
-later passes if the switch fails); a winning found result moves the account to
-the primary LRU. If protected primary entries leave no promotion capacity, the
-found fetch fails and its secondary subscription is rolled back. Refetching a
-confirmed miss restores full coverage for the duration of the new pending
-fetch. Results discarded by fetch/subscription generation arbitration
-must not change tiers. Per-account classification retains the winning slot and
-source while the subscription is owned: older updates are ignored for tier
-movement, and subscription data wins an equal-slot tie over RPC data.
-Classification-only ownership created before subscription acquisition is tagged
-with the fetch generation and removed on setup failure or cancellation, so stale
-cleanup cannot delete a newer generation's state.
+than the primary working-set LRU. Pending-fetch transport coverage follows the
+strongest request across both pending-fetch dedup layers. Read-only RPC fetches
+(`rpc_get_account` and `rpc_get_multiple_accounts`) start with
+`GrpcPreferred` coverage while every requester is read-only. A transaction or
+internal requester that owns or joins the same pending pubkey monotonically
+escalates that generation to `Full` websocket and gRPC coverage.
+Terminal resolution atomically closes coverage admission; if `Full` wins,
+that transport is established before waiters are notified, and the same
+per-key transition guard remains held through any post-notification downgrade.
+`GrpcPreferred` subscribes gRPC first and omits websocket work only after every
+currently connected gRPC client covers the key; otherwise it falls back to
+full coverage.
+
+A winning not-found result remains in the secondary tier with
+`GrpcPreferred` coverage. A winning found result restores full coverage before
+moving the account to the primary LRU. If protected primary entries leave no
+promotion capacity, the found fetch fails and its secondary subscription is
+rolled back. Refetches use the same strongest-request rule: a read-only
+refetch can remain `GrpcPreferred`, while any concurrent non-read requester
+requires full coverage. Results discarded by fetch/subscription generation
+arbitration must not change tiers. Per-account classification retains the
+winning slot and source while the subscription is owned: older updates are
+ignored for tier movement, and subscription data wins an equal-slot tie over
+RPC data. Classification-only ownership created before subscription
+acquisition is tagged with the fetch generation and removed on setup failure
+or cancellation, so stale cleanup cannot delete a newer generation's state.
 
 The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="remote_account_provider"`. Claimed pubkeys record `owned`; calls that join existing `fetching_accounts` work record `joined_existing`, waiter total, and active waiter gauge. Subscription-update wins record `resolved_by_subscription_update`, while late RPC completions after such a win or replacement record `rpc_fetch_completed_after_update`. `FetchingAccountState` stores bounded metric metadata (`AccountFetchContext` and owner start time) so subscription-update completion preserves the original entrypoint/fetch reason without adding pubkey/signature labels.
 
@@ -412,18 +424,23 @@ delegated, undelegating, in-flight-fetch, never-evict, and
 `UndelegationTracking` protections. Tier changes acquire the per-pubkey lock
 first; the global subscription transition lock is taken after it, only for
 short in-memory critical sections over the composite tier state (both LRUs,
-ownership map, confirmed-missing set), and is never held across pubsub
-subscribe/unsubscribe network calls. Per-pubkey locks may be held across
-network calls for their own key. Cleanup of a key evicted by another key's
-admission (unsubscribe plus removal notification) runs as a detached task that
-takes the evicted key's lock itself and skips keys re-admitted in the
-meantime; if its unsubscribe fails, the reconciler removes the stray
-subscription on a later pass. Secondary capacity is bounded
-independently at the configured primary LRU capacity, so the total direct-watch
-bound is twice that setting. Pending fetches briefly retain websocket coverage;
-confirmed misses do not use websocket subscriptions while gRPC is healthy.
-The confirmed-missing set is a bounded subset of the secondary tier; pending or
-failed fetches remain secondary but retain full transport coverage.
+and ownership map), and is never held across pubsub subscribe/unsubscribe
+network calls. Per-pubkey locks may be held across network calls for their own
+key. Cleanup of a key evicted by another key's admission (unsubscribe plus
+removal notification) runs as a detached task that takes the evicted key's lock
+itself and skips keys re-admitted in the meantime; if its unsubscribe fails,
+the reconciler removes the stray subscription on a later pass.
+
+Secondary capacity is configured independently with
+`secondary-max-monitored-accounts` (default 20,000), while primary capacity
+uses `max-monitored-accounts` (default 5,000). The bounded LRU portion of the
+direct watch set is therefore the sum of those capacities. Read-only pending
+fetches and not-found accounts prefer gRPC; non-read pending fetches require
+full transport coverage. This permits deployments to raise the secondary tier
+to 100,000 or 200,000 without proportional websocket churn while complete gRPC
+coverage is healthy. If gRPC coverage is incomplete or lost, correctness takes
+priority and full fallback may temporarily create websocket work proportional
+to the secondary tier.
 
 When an account is evicted from subscription capacity, the provider sends a removal update. `InnerChainlink::subscribe_account_removals` listens for these and may submit `Cloner::evict_account` to remove stale local state, but only if the bank account is neither delegated nor undelegating.
 
@@ -431,19 +448,27 @@ Removal handling is serialized with same-pubkey subscription transitions via `ev
 
 ### Reconciliation
 
-If subscription metrics are enabled, a background task periodically runs `subscription_reconciler::reconcile_subscriptions` to compare the LRU with actual pubsub-client subscriptions, update metrics, and notify removal for subscriptions that vanished.
+A background task periodically runs `subscription_reconciler::reconcile_subscriptions` to compare the LRUs with actual pubsub-client subscriptions and notify removal for subscriptions that vanished. When subscription metrics are enabled, the same pass also updates metrics.
 
 When the pubsub client is `SubMuxClient`, reconciliation snapshots are intentionally based only on currently connected inner clients. Disconnected/reconnecting clients are ignored by `subscriptions_union()` and `subscriptions_intersection()` until the reconnect path has reconnected them, resubscribed programs/accounts from the authoritative trackers, performed its catch-up pass, and marked them connected again. Reconciler-triggered SubMux subscribe/unsubscribe repair operations also fan out only to connected clients; reconnecting clients catch up through the reconnect path instead. If no inner pubsub client is connected, reconciliation skips repair/noisy LRU-vs-pubsub mismatch reporting for that tick because there is no live client to inspect or repair.
 
-SubMux persists the desired gRPC-only policy for confirmed misses. Reconnects
-restore those keys on gRPC clients and exclude them from websocket
-clients; reconciliation compares transports separately so a lingering
-websocket leg cannot mask missing gRPC coverage. If every gRPC client is down,
-reconciliation restores full fallback coverage until gRPC returns.
-Repair is verified against a fresh subscription snapshot; a secondary entry
-without protected ownership, live delegated/undelegating state, or an in-flight
-fetch is evicted if neither preferred nor fallback subscription establishes
-coverage.
+SubMux persists the desired `GrpcPreferred` policy for secondary entries.
+Reconnects restore those keys on gRPC clients and omit them from websocket
+clients only after complete connected-gRPC coverage is established.
+Reconciliation snapshots live pending-fetch coverage requirements once, then
+rechecks the relevant requirement under the key lock: a secondary entry with
+non-read pending demand is repaired to full coverage, while other secondary
+entries prefer gRPC. Transport snapshots are compared separately so a
+lingering websocket leg cannot mask missing gRPC coverage. If complete gRPC
+coverage is unavailable, reconciliation immediately restores full fallback
+coverage until gRPC returns.
+
+Repair is verified against a fresh subscription snapshot. A secondary entry
+without protected ownership, live delegated/undelegating state, or an
+in-flight fetch is evicted if neither preferred nor fallback subscription
+establishes coverage. Removal revokes reconnect authority before tracker state
+is dropped, and stale cleanup plus removal notification remain
+cancellation-safe.
 
 Laserstream `Status` items are left to the pinned SDK's replaying reconnect
 path. The SDK retains write-updated account/program filters and its internal
@@ -467,6 +492,23 @@ Responsibilities:
 - reconnect clients after abort signals and resubscribe all tracked accounts/program subscriptions,
 - expose subscription union/intersection and connection metrics.
 
+Attach and reconnect publication uses one desired-state baseline followed by a
+coalesced dirty-key catch-up pass. The publication journal mutex protects only
+short in-memory bookkeeping and is never held across transport I/O. Provider
+mutations publish provisional `Absent`, `Full`, or `GrpcPreferred` policy with
+a begin/update/finish handshake; attaching clients stay unpublished while a
+relevant mutation or same-key blocker is outstanding. Generation checks and
+notifications prevent an aborted or superseded publication from exposing
+stale desired state.
+
+Account operations are serialized per key. A caller may return after the
+required transport quorum is reached, but the per-key settlement guard remains
+held until detached fanout and rollback legs settle, so a later same-key
+operation cannot overtake them. Actor setup and listener cleanup use exact
+subscription IDs, and terminal shutdown closes admission before draining
+in-flight setup. Program subscriptions use the same desired-versus-confirmed
+publication boundary during attach.
+
 Default timing constants:
 
 - output channel size: `5_000`,
@@ -482,7 +524,8 @@ Changing SubMux behavior can affect ordering, duplicate clone submissions, and p
 
 `RemoteAccountProviderConfig` includes:
 
-- subscription LRU capacity (`DEFAULT_MAX_MONITORED_ACCOUNTS` by default),
+- primary subscription LRU capacity (`DEFAULT_MAX_MONITORED_ACCOUNTS`, 5,000, by default),
+- independent secondary subscription LRU capacity (`DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS`, 20,000, by default),
 - validator lifecycle mode,
 - subscription metrics flag,
 - startup program subscriptions (defaults to the Delegation Program),
@@ -514,6 +557,7 @@ Preserve these invariants when editing this crate:
 11. **Disabled/non-primary mode must not perform remote fetches or transaction account ensures.**
 12. **This crate must not weaken processor/SVM access validation.** It only prepares local account state.
 13. **Fetch/clone and subscription paths must remain performance-conscious.** Preserve deduplication, bounded waiting, LRU protections, low subscription churn, and non-blocking behavior unless a documented correctness requirement forces a tradeoff.
+14. **Transport preference must not reduce account observability.** A read-only secondary watch may omit websocket work only after complete connected-gRPC coverage exists; any concurrent non-read pending requester requires full coverage, found accounts restore full coverage before primary admission, and incomplete or lost gRPC coverage falls back to full transport coverage.
 
 ## Common change areas and what to inspect
 

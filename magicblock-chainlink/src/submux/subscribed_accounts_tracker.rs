@@ -16,6 +16,14 @@ pub trait SubscribedAccountsTracker: Send + Sync + 'static {
     ///
     /// Each pubkey appears at most once in the returned set.
     fn subscribed_accounts(&self) -> HashSet<Pubkey>;
+
+    /// Returns whether one pubkey is currently subscribed.
+    ///
+    /// Implementors backed by a keyed collection should override this to
+    /// avoid cloning the complete subscription set during attach catch-up.
+    fn contains(&self, pubkey: &Pubkey) -> bool {
+        self.subscribed_accounts().contains(pubkey)
+    }
 }
 
 #[cfg(test)]
@@ -49,6 +57,10 @@ pub mod mock {
     impl SubscribedAccountsTracker for MockSubscribedAccountsTracker {
         fn subscribed_accounts(&self) -> HashSet<Pubkey> {
             self.subscriptions.lock().unwrap().iter().copied().collect()
+        }
+
+        fn contains(&self, pubkey: &Pubkey) -> bool {
+            self.subscriptions.lock().unwrap().contains(pubkey)
         }
     }
 }

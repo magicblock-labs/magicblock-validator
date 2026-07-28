@@ -154,7 +154,12 @@ impl fmt::Display for SubscriptionUpdate {
 }
 
 pub struct AccountSubscription {
+    pub subscription_id: u64,
     pub cancellation_token: CancellationToken,
+    /// Cancelled once the subscribe RPC has succeeded or the setup attempt
+    /// has been removed. Duplicate callers wait for this before rechecking
+    /// the map, so pending setup is never mistaken for live coverage.
+    pub setup_completion_token: CancellationToken,
     pub completion_token: CancellationToken,
 }
 

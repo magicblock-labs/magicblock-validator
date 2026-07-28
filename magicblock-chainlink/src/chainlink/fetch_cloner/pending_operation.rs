@@ -12,6 +12,9 @@ use tokio::{
 };
 
 use super::{super::errors::ChainlinkError, types::FetchAndCloneResult};
+use crate::remote_account_provider::{
+    is_read_rpc_fetch_context, PendingFetchCoverageRequirement,
+};
 
 pub(super) type PendingGeneration = u64;
 pub(super) type WaiterId = u64;
@@ -21,6 +24,7 @@ pub(super) struct Pending {
     pub deadline: Instant,
     pub waiters: StdHashMap<WaiterId, oneshot::Sender<PendingTerminal>>,
     pub cancel: Arc<Notify>,
+    pub requires_full_coverage: Arc<PendingFetchCoverageRequirement>,
 }
 
 #[derive(Debug, Clone)]
@@ -201,6 +205,7 @@ pub(super) struct PendingHandles {
     pub waiter: PendingWaiter,
     pub deadline: Instant,
     pub cancel: Arc<Notify>,
+    pub requires_full_coverage: Arc<PendingFetchCoverageRequirement>,
     pub owner: Option<PendingOwner>,
 }
 
@@ -224,11 +229,16 @@ pub(super) fn claim_or_join_pending(
         scc::hash_map::Entry::Vacant(entry) => {
             let deadline = Instant::now() + total_budget;
             let cancel = Arc::new(Notify::new());
+            let requires_full_coverage =
+                Arc::new(PendingFetchCoverageRequirement::new(
+                    !is_read_rpc_fetch_context(origin),
+                ));
             entry.insert_entry(Pending {
                 generation,
                 deadline,
                 waiters: StdHashMap::from([(waiter_id, tx)]),
                 cancel: Arc::clone(&cancel),
+                requires_full_coverage: Arc::clone(&requires_full_coverage),
             });
             metrics::inc_chainlink_pending_fetch_accounts_with_context(
                 origin,
@@ -248,6 +258,7 @@ pub(super) fn claim_or_join_pending(
                 ),
                 deadline,
                 cancel,
+                requires_full_coverage,
                 owner: Some(PendingOwner::new(
                     pending.clone(),
                     pubkey,
@@ -261,6 +272,11 @@ pub(super) fn claim_or_join_pending(
             let generation = entry.get().generation;
             let deadline = entry.get().deadline;
             let cancel = Arc::clone(&entry.get().cancel);
+            let requires_full_coverage =
+                Arc::clone(&entry.get().requires_full_coverage);
+            if !is_read_rpc_fetch_context(origin) {
+                requires_full_coverage.require_full();
+            }
             entry.get_mut().waiters.insert(waiter_id, tx);
             metrics::inc_chainlink_pending_fetch_accounts_with_context(
                 origin,
@@ -284,6 +300,7 @@ pub(super) fn claim_or_join_pending(
                 ),
                 deadline,
                 cancel,
+                requires_full_coverage,
                 owner: None,
             })
         }

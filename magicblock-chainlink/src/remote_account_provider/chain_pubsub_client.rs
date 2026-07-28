@@ -37,6 +37,33 @@ pub enum PubsubTransport {
     Grpc,
 }
 
+/// Desired account-subscription state while the provider is publishing an
+/// authoritative tracker update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountSubscriptionPublicationPolicy {
+    Absent,
+    Full,
+    GrpcPreferred,
+}
+
+/// Identifies one provider-to-pubsub publication attempt.
+///
+/// Tokens are opaque to callers. A provider must finish every returned token,
+/// including on cancellation or error, so attaching clients are not left
+/// blocked indefinitely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AccountSubscriptionPublicationToken {
+    pub(crate) pubkey: Pubkey,
+    pub(crate) generation: u64,
+}
+
+/// Final outcome of a provider publication attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountSubscriptionPublicationOutcome {
+    Committed,
+    Aborted,
+}
+
 // -----------------
 // Trait
 // -----------------
@@ -64,6 +91,13 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     /// This means that if any client is subscribed to a pubkey, it will be
     /// included in the returned set even if other clients are not subscribed to it.
     fn subscriptions_union(&self) -> HashSet<Pubkey>;
+
+    /// Returns whether this client currently provides live coverage for one
+    /// pubkey. Implementors should override this when they can avoid cloning
+    /// their full subscription set.
+    fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
+        self.subscriptions_union().contains(pubkey)
+    }
 
     /// Returns the intersection of subscriptions across all underlying
     /// clients. For a single client this is identical to [ChainPubsubClient::subscriptions_union].
@@ -132,6 +166,58 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
             }
         }
     }
+
+    /// Revokes gRPC-only reconnect authority without changing any live
+    /// transport subscriptions.
+    fn revoke_grpc_subscription_preference(&self, _pubkey: &Pubkey) {}
+
+    /// Restores gRPC-only reconnect authority without changing any live
+    /// transport subscriptions.
+    fn reinstate_grpc_subscription_preference(&self, _pubkey: Pubkey) {}
+
+    /// Clears any temporary removal authority after the provider has
+    /// committed the key's absence from its authoritative trackers.
+    fn finalize_subscription_removal(&self, _pubkey: &Pubkey) {}
+
+    /// Starts publishing a provider-side desired-state change.
+    ///
+    /// Multiplexers use the returned token to keep attaching clients
+    /// unpublished until the transport operation and authoritative tracker
+    /// mutation agree. Simple clients do not need a publication handshake and
+    /// therefore return `None`.
+    fn begin_account_subscription_publication(
+        &self,
+        _pubkey: Pubkey,
+        _policy: AccountSubscriptionPublicationPolicy,
+    ) -> Option<AccountSubscriptionPublicationToken> {
+        None
+    }
+
+    /// Changes the provisional policy of an in-flight publication attempt.
+    ///
+    /// This is used, for example, when gRPC-first admission falls back to full
+    /// websocket coverage before the provider commits its tracker entry.
+    fn update_account_subscription_publication(
+        &self,
+        _token: AccountSubscriptionPublicationToken,
+        _policy: AccountSubscriptionPublicationPolicy,
+    ) {
+    }
+
+    /// Finishes a provider publication attempt after its authoritative
+    /// tracker mutation has committed or after the attempt has aborted.
+    fn finish_account_subscription_publication(
+        &self,
+        _token: AccountSubscriptionPublicationToken,
+        _outcome: AccountSubscriptionPublicationOutcome,
+    ) {
+    }
+
+    /// Marks one authoritative account key dirty for every attaching client.
+    ///
+    /// Multi-step provider mutations should prefer the begin/finish handshake;
+    /// this hook is for already-atomic tracker mutations and repair paths.
+    fn mark_account_subscription_dirty(&self, _pubkey: Pubkey) {}
 }
 
 #[async_trait]
@@ -279,6 +365,10 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
     fn subscriptions_union(&self) -> HashSet<Pubkey> {
         self.actor.subscriptions()
+    }
+
+    fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
+        self.actor.is_subscribed(pubkey)
     }
 
     fn subs_immediately(&self) -> bool {
@@ -448,8 +538,17 @@ pub mod mock {
         subscribe_insertions: Arc<AtomicU64>,
         subscribe_insert_notify: Arc<Notify>,
         subscribe_continue_notify: Arc<Notify>,
+        unsubscribe_pause_after_remove: Arc<Mutex<bool>>,
+        unsubscribe_removals: Arc<AtomicU64>,
+        unsubscribe_remove_notify: Arc<Notify>,
+        unsubscribe_continue_notify: Arc<Notify>,
         subscribe_attempts: Arc<AtomicU64>,
+        unsubscribe_attempts: Arc<AtomicU64>,
+        unsubscribe_blocked: Arc<Mutex<bool>>,
+        unsubscribe_attempt_notify: Arc<Notify>,
         program_subscribe_attempts: Arc<AtomicU64>,
+        program_subscribe_blocked: Arc<Mutex<bool>>,
+        program_subscribe_notify: Arc<Notify>,
         subscribe_notify: Arc<Notify>,
         client_id: String,
         transport: Arc<Mutex<PubsubTransport>>,
@@ -480,8 +579,17 @@ pub mod mock {
                 subscribe_insertions: Arc::new(AtomicU64::new(0)),
                 subscribe_insert_notify: Arc::new(Notify::new()),
                 subscribe_continue_notify: Arc::new(Notify::new()),
+                unsubscribe_pause_after_remove: Arc::new(Mutex::new(false)),
+                unsubscribe_removals: Arc::new(AtomicU64::new(0)),
+                unsubscribe_remove_notify: Arc::new(Notify::new()),
+                unsubscribe_continue_notify: Arc::new(Notify::new()),
                 subscribe_attempts: Arc::new(AtomicU64::new(0)),
+                unsubscribe_attempts: Arc::new(AtomicU64::new(0)),
+                unsubscribe_blocked: Arc::new(Mutex::new(false)),
+                unsubscribe_attempt_notify: Arc::new(Notify::new()),
                 program_subscribe_attempts: Arc::new(AtomicU64::new(0)),
+                program_subscribe_blocked: Arc::new(Mutex::new(false)),
+                program_subscribe_notify: Arc::new(Notify::new()),
                 subscribe_notify: Arc::new(Notify::new()),
                 client_id: format!(
                     "mock:{}",
@@ -518,6 +626,28 @@ pub mod mock {
             *self.pending_unsubscribe_failures.lock() = n;
         }
 
+        pub fn block_unsubscribe(&self) {
+            *self.unsubscribe_blocked.lock() = true;
+        }
+
+        pub fn release_unsubscribe(&self) {
+            *self.unsubscribe_blocked.lock() = false;
+            self.unsubscribe_attempt_notify.notify_waiters();
+        }
+
+        pub async fn wait_for_unsubscribe_attempts(&self, min_attempts: u64) {
+            loop {
+                let notified = self.unsubscribe_attempt_notify.notified();
+                tokio::pin!(notified);
+                if self.unsubscribe_attempts.load(AtomicOrdering::SeqCst)
+                    >= min_attempts
+                {
+                    break;
+                }
+                notified.await;
+            }
+        }
+
         pub fn fail_next_program_subscriptions(&self, n: usize) {
             *self.pending_program_subscribe_failures.lock() = n;
         }
@@ -530,6 +660,31 @@ pub mod mock {
 
         pub fn program_subscribe_attempts(&self) -> u64 {
             self.program_subscribe_attempts.load(AtomicOrdering::SeqCst)
+        }
+
+        pub fn block_program_subscribe(&self) {
+            *self.program_subscribe_blocked.lock() = true;
+        }
+
+        pub fn release_program_subscribe(&self) {
+            *self.program_subscribe_blocked.lock() = false;
+            self.program_subscribe_notify.notify_waiters();
+        }
+
+        pub async fn wait_for_program_subscribe_attempts(
+            &self,
+            min_attempts: u64,
+        ) {
+            loop {
+                let notified = self.program_subscribe_notify.notified();
+                tokio::pin!(notified);
+                if self.program_subscribe_attempts.load(AtomicOrdering::SeqCst)
+                    >= min_attempts
+                {
+                    break;
+                }
+                notified.await;
+            }
         }
 
         async fn send(&self, update: SubscriptionUpdate) {
@@ -618,6 +773,32 @@ pub mod mock {
             }
         }
 
+        pub fn pause_after_unsubscribe_remove(&self) {
+            *self.unsubscribe_pause_after_remove.lock() = true;
+        }
+
+        pub fn resume_after_unsubscribe_remove(&self) {
+            *self.unsubscribe_pause_after_remove.lock() = false;
+            self.unsubscribe_continue_notify.notify_waiters();
+        }
+
+        pub fn unsubscribe_removals(&self) -> u64 {
+            self.unsubscribe_removals.load(AtomicOrdering::SeqCst)
+        }
+
+        pub async fn wait_for_unsubscribe_removals(&self, min_removals: u64) {
+            loop {
+                let notified = self.unsubscribe_remove_notify.notified();
+                tokio::pin!(notified);
+                if self.unsubscribe_removals.load(AtomicOrdering::SeqCst)
+                    >= min_removals
+                {
+                    break;
+                }
+                notified.await;
+            }
+        }
+
         /// Wait until at least `min_attempts` subscribe attempts have been made.
         /// Used for testing to ensure subscribes are being called.
         pub async fn wait_for_subscribe_attempts(&self, min_attempts: u64) {
@@ -638,6 +819,10 @@ pub mod mock {
 
         pub fn subscribe_attempts(&self) -> u64 {
             self.subscribe_attempts.load(AtomicOrdering::SeqCst)
+        }
+
+        pub fn unsubscribe_attempts(&self) -> u64 {
+            self.unsubscribe_attempts.load(AtomicOrdering::SeqCst)
         }
 
         pub fn is_connected_and_resubscribed(&self) -> bool {
@@ -673,6 +858,7 @@ pub mod mock {
         ) -> RemoteAccountProviderResult<()> {
             self.prefer_grpc_calls.lock().push(pubkey);
             match self.transport() {
+                PubsubTransport::Grpc if self.is_subscribed(&pubkey) => Ok(()),
                 PubsubTransport::Grpc => self.subscribe(pubkey, None).await,
                 PubsubTransport::WebSocket => Err(
                     RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
@@ -756,6 +942,16 @@ pub mod mock {
         ) -> RemoteAccountProviderResult<()> {
             self.program_subscribe_attempts
                 .fetch_add(1, AtomicOrdering::SeqCst);
+            self.program_subscribe_notify.notify_waiters();
+
+            loop {
+                let notified = self.program_subscribe_notify.notified();
+                tokio::pin!(notified);
+                if !*self.program_subscribe_blocked.lock() {
+                    break;
+                }
+                notified.await;
+            }
 
             {
                 let mut to_fail =
@@ -788,6 +984,17 @@ pub mod mock {
             &self,
             pubkey: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
+            self.unsubscribe_attempts
+                .fetch_add(1, AtomicOrdering::SeqCst);
+            self.unsubscribe_attempt_notify.notify_waiters();
+            loop {
+                let notified = self.unsubscribe_attempt_notify.notified();
+                tokio::pin!(notified);
+                if !*self.unsubscribe_blocked.lock() {
+                    break;
+                }
+                notified.await;
+            }
             {
                 let mut to_fail = self.pending_unsubscribe_failures.lock();
                 if *to_fail > 0 {
@@ -800,8 +1007,19 @@ pub mod mock {
                 }
             }
 
-            let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
-            if subscribed_pubkeys.remove(&pubkey) {
+            let removed = self.subscribed_pubkeys.lock().remove(&pubkey);
+            if removed {
+                self.unsubscribe_removals
+                    .fetch_add(1, AtomicOrdering::SeqCst);
+                self.unsubscribe_remove_notify.notify_waiters();
+                loop {
+                    let notified = self.unsubscribe_continue_notify.notified();
+                    tokio::pin!(notified);
+                    if !*self.unsubscribe_pause_after_remove.lock() {
+                        break;
+                    }
+                    notified.await;
+                }
                 Ok(())
             } else {
                 Err(
@@ -819,6 +1037,10 @@ pub mod mock {
         fn subscriptions_union(&self) -> HashSet<Pubkey> {
             let subs = self.subscribed_pubkeys.lock();
             subs.iter().copied().collect()
+        }
+
+        fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
+            self.subscribed_pubkeys.lock().contains(pubkey)
         }
 
         fn subs_immediately(&self) -> bool {

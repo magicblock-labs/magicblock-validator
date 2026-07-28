@@ -20,7 +20,7 @@ const ALERT_ON_TOTAL_SUB_FAILURE_INTERVAL: Duration = Duration::from_mins(5);
 use crate::remote_account_provider::{
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
     errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
-    DEFAULT_SUBSCRIPTION_RETRIES,
+    SubscriptionKeyGuard, DEFAULT_SUBSCRIPTION_RETRIES,
 };
 
 #[derive(Clone, Debug)]
@@ -29,6 +29,12 @@ pub enum AccountSubscriptionTask {
     SubscribeProgram(Pubkey, usize),
     Unsubscribe(Pubkey),
     Shutdown,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SubscriptionTaskSettlement {
+    pub(crate) quorum_succeeded: bool,
+    pub(crate) successful_legs: usize,
 }
 
 impl AccountSubscriptionTask {
@@ -48,6 +54,38 @@ impl AccountSubscriptionTask {
     pub async fn process<T>(
         self,
         clients: Vec<Arc<T>>,
+    ) -> RemoteAccountProviderResult<()>
+    where
+        T: ChainPubsubClient + ReconnectableClient + Send + Sync + 'static,
+    {
+        self.process_inner(clients, None, None).await
+    }
+
+    pub(crate) async fn process_with_settlement_guard<T, F>(
+        self,
+        clients: Vec<Arc<T>>,
+        settlement_guard: SubscriptionKeyGuard,
+        settlement_finalizer: F,
+    ) -> RemoteAccountProviderResult<()>
+    where
+        T: ChainPubsubClient + ReconnectableClient + Send + Sync + 'static,
+        F: FnOnce(SubscriptionTaskSettlement) + Send + 'static,
+    {
+        self.process_inner(
+            clients,
+            Some(settlement_guard),
+            Some(Box::new(settlement_finalizer)),
+        )
+        .await
+    }
+
+    async fn process_inner<T>(
+        self,
+        clients: Vec<Arc<T>>,
+        settlement_guard: Option<SubscriptionKeyGuard>,
+        mut settlement_finalizer: Option<
+            Box<dyn FnOnce(SubscriptionTaskSettlement) + Send>,
+        >,
     ) -> RemoteAccountProviderResult<()>
     where
         T: ChainPubsubClient + ReconnectableClient + Send + Sync + 'static,
@@ -76,6 +114,12 @@ impl AccountSubscriptionTask {
         // Validate inputs
         if total_clients == 0 {
             let op_name = self.op_name();
+            if let Some(finalize) = settlement_finalizer.take() {
+                finalize(SubscriptionTaskSettlement {
+                    quorum_succeeded: false,
+                    successful_legs: 0,
+                });
+            }
             return Err(
                 RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                     format!("No clients provided for {op_name}"),
@@ -86,6 +130,12 @@ impl AccountSubscriptionTask {
         if matches!(self, Subscribe(_, _, _) | SubscribeProgram(_, _))
             && required_confirmations == 0
         {
+            if let Some(finalize) = settlement_finalizer.take() {
+                finalize(SubscriptionTaskSettlement {
+                    quorum_succeeded: false,
+                    successful_legs: 0,
+                });
+            }
             return Err(
                 RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                     "Required confirmations must be greater than zero"
@@ -96,6 +146,10 @@ impl AccountSubscriptionTask {
 
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
+            // The caller may return as soon as its confirmation threshold is
+            // met, but this guard keeps later same-key mux operations blocked
+            // until every already-started client leg has settled.
+            let _settlement_guard = settlement_guard;
             let mut futures = FuturesUnordered::new();
             for client in clients.iter() {
                 let client = client.clone();
@@ -166,6 +220,8 @@ impl AccountSubscriptionTask {
             let mut failed_client_ids = Vec::new();
             let mut tx = Some(tx);
             let mut successes = 0;
+            let mut successful_legs = 0;
+            let mut caller_accepted_quorum = false;
             let op_name = self.op_name();
 
             while let Some((result, count_as_success, client_id)) =
@@ -173,13 +229,15 @@ impl AccountSubscriptionTask {
             {
                 match result {
                     Ok(_) => {
+                        successful_legs += 1;
                         if !count_as_success {
                             continue;
                         }
                         successes += 1;
                         if successes >= required_confirmations {
                             if let Some(tx) = tx.take() {
-                                let _ = tx.send(Ok(()));
+                                caller_accepted_quorum =
+                                    tx.send(Ok(())).is_ok();
                             }
                         }
                     }
@@ -197,10 +255,12 @@ impl AccountSubscriptionTask {
                             // For Unsubscribe, "does not exist" is
                             // effectively a successful confirmation —
                             // the subscription is already gone.
+                            successful_legs += 1;
                             successes += 1;
                             if successes >= required_confirmations {
                                 if let Some(tx) = tx.take() {
-                                    let _ = tx.send(Ok(()));
+                                    caller_accepted_quorum =
+                                        tx.send(Ok(())).is_ok();
                                 }
                             }
                         } else {
@@ -213,6 +273,12 @@ impl AccountSubscriptionTask {
             }
 
             if let Some(tx) = tx {
+                if let Some(finalize) = settlement_finalizer.take() {
+                    finalize(SubscriptionTaskSettlement {
+                        quorum_succeeded: false,
+                        successful_legs,
+                    });
+                }
                 let msg = format!(
                     "Not enough clients succeeded to {}: {}. Required {}, got {}",
                     op_name.to_lowercase(),
@@ -229,7 +295,16 @@ impl AccountSubscriptionTask {
                 maybe_alert(&err, successes);
 
                 let _ = tx.send(err);
-            } else if !errors.is_empty() {
+            } else {
+                if let Some(finalize) = settlement_finalizer.take() {
+                    finalize(SubscriptionTaskSettlement {
+                        quorum_succeeded: caller_accepted_quorum,
+                        successful_legs,
+                    });
+                }
+                if errors.is_empty() {
+                    return;
+                }
                 // If at least one client returned an `OK` response we only log a warning for the
                 // ones that failed.
                 // The failed clients will also trigger the reconnection logic

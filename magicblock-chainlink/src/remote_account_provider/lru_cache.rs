@@ -99,7 +99,7 @@ impl AccountsLruCache {
         is_evictable: F,
     ) -> AddAccountOutcome
     where
-        F: Fn(&Pubkey) -> bool,
+        F: FnMut(&Pubkey) -> bool,
     {
         // The cloning pipeline itself depends on some accounts that should
         // never be evicted.
@@ -119,10 +119,10 @@ impl AccountsLruCache {
     fn add_with_evict_filter_inner<F>(
         subs: &mut LruCache<Pubkey, ()>,
         pubkey: Pubkey,
-        is_evictable: F,
+        mut is_evictable: F,
     ) -> AddAccountOutcome
     where
-        F: Fn(&Pubkey) -> bool,
+        F: FnMut(&Pubkey) -> bool,
     {
         // If the pubkey is already in the cache, we just promote it
         if subs.promote(&pubkey) {
@@ -260,6 +260,10 @@ impl SubscribedAccountsTracker for AccountsLruCache {
         let subs = self.subscribed_accounts.lock();
         subs.iter().map(|(k, _)| *k).collect()
     }
+
+    fn contains(&self, pubkey: &Pubkey) -> bool {
+        AccountsLruCache::contains(self, pubkey)
+    }
 }
 
 /// Authoritative account set used by SubMux reconnects. Transport policy is
@@ -284,6 +288,10 @@ impl SubscribedAccountsTracker for TieredSubscribedAccountsTracker {
         let mut subscriptions = self.primary.pubkeys();
         subscriptions.extend(self.secondary.pubkeys());
         subscriptions
+    }
+
+    fn contains(&self, pubkey: &Pubkey) -> bool {
+        self.primary.contains(pubkey) || self.secondary.contains(pubkey)
     }
 }
 

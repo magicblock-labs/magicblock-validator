@@ -1,4 +1,5 @@
 use std::{
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::{atomic::AtomicU64, Arc},
     time::Duration,
@@ -20,7 +21,7 @@ use magicblock_metrics::metrics::{
 };
 use solana_account::Account;
 use solana_system_interface::program as system_program;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use super::*;
 use crate::{
@@ -41,6 +42,20 @@ struct ProviderTestCtx {
         Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
     rpc_client: ChainRpcClientMock,
     pubsub_client: ChainPubsubClientMock,
+    _forward_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
+}
+
+struct MultiplexedProviderTestCtx {
+    provider: Arc<
+        RemoteAccountProvider<
+            ChainRpcClientMock,
+            SubMuxClient<ChainPubsubClientMock>,
+        >,
+    >,
+    rpc_client: ChainRpcClientMock,
+    websocket_client: Arc<ChainPubsubClientMock>,
+    grpc_client: Arc<ChainPubsubClientMock>,
+    _abort_senders: Vec<mpsc::Sender<()>>,
     _forward_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
 }
 
@@ -90,6 +105,70 @@ async fn setup_provider_with_lru_capacity(
         provider,
         rpc_client,
         pubsub_client,
+        _forward_rx: forward_rx,
+    }
+}
+
+async fn setup_multiplexed_provider(
+    pubkey: Pubkey,
+    account: Account,
+) -> MultiplexedProviderTestCtx {
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(100)
+        .clock_sysvar_for_slot(100)
+        .accounts(vec![(pubkey, account)].into_iter().collect())
+        .build();
+
+    let (ws_updates_sender, ws_updates_receiver) = mpsc::channel(1_000);
+    let websocket_client = Arc::new(ChainPubsubClientMock::new(
+        ws_updates_sender,
+        ws_updates_receiver,
+    ));
+    let (grpc_updates_sender, grpc_updates_receiver) = mpsc::channel(1_000);
+    let grpc_client = Arc::new(ChainPubsubClientMock::new(
+        grpc_updates_sender,
+        grpc_updates_receiver,
+    ));
+    grpc_client.set_transport(PubsubTransport::Grpc);
+
+    let (ws_abort_sender, ws_abort_receiver) = mpsc::channel(1);
+    let (grpc_abort_sender, grpc_abort_receiver) = mpsc::channel(1);
+    let (subscribed_accounts, config) = create_test_lru_cache(1_000);
+    let secondary_subscriptions =
+        Arc::new(AccountsLruCache::new(NonZeroUsize::new(1_000).unwrap()));
+    let tracker = Arc::new(TieredSubscribedAccountsTracker::new(
+        subscribed_accounts.clone(),
+        secondary_subscriptions.clone(),
+    ));
+    let pubsub_client = SubMuxClient::new(
+        vec![
+            (websocket_client.clone(), ws_abort_receiver),
+            (grpc_client.clone(), grpc_abort_receiver),
+        ],
+        tracker,
+        None,
+    );
+    let (forward_tx, forward_rx) = mpsc::channel(1_000);
+    let provider = Arc::new(
+        RemoteAccountProvider::new_with_secondary_subscriptions(
+            rpc_client.clone(),
+            pubsub_client,
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            secondary_subscriptions,
+            ChainSlot::new(Arc::<AtomicU64>::default()),
+        )
+        .await
+        .unwrap(),
+    );
+
+    MultiplexedProviderTestCtx {
+        provider,
+        rpc_client,
+        websocket_client,
+        grpc_client,
+        _abort_senders: vec![ws_abort_sender, grpc_abort_sender],
         _forward_rx: forward_rx,
     }
 }
@@ -223,6 +302,33 @@ async fn wait_until_ownership_removed<T, U>(
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn test_subscription_key_registry_cleans_cancelled_waiter() {
+    let registry = Arc::new(SubscriptionKeyLockRegistry::default());
+    let pubkey = Pubkey::new_unique();
+    let owner = registry.acquire(pubkey).await;
+    let waiter_registry = registry.clone();
+    let waiter =
+        tokio::spawn(async move { waiter_registry.acquire(pubkey).await });
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while registry.registrations(&pubkey) != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("waiter should register for the held key");
+
+    // On the current-thread runtime the waiter cannot run between these two
+    // statements: the owner observes a registered waiter, then cancellation
+    // must remove the last registry entry.
+    drop(owner);
+    waiter.abort();
+    let join = waiter.await;
+    assert!(matches!(join, Err(err) if err.is_cancelled()));
+    assert_eq!(registry.len(), 0);
+}
+
 /// Accounts that do not exist on chain stay in the secondary LRU and move to
 /// the primary LRU once they are created.
 #[tokio::test]
@@ -258,12 +364,6 @@ async fn test_not_found_account_stays_secondary_and_promotes_on_creation() {
     assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
     assert!(ctx.provider.is_watching(&missing));
     assert!(ctx.pubsub_client.subscriptions_union().contains(&missing));
-    assert!(ctx
-        .provider
-        .confirmed_missing_subscriptions
-        .lock()
-        .unwrap()
-        .contains(&missing));
 
     // An older update must not undo the newer not-found classification.
     let transition_guard =
@@ -308,12 +408,6 @@ async fn test_not_found_account_stays_secondary_and_promotes_on_creation() {
             && !provider.secondary_subscriptions.contains(&missing)
     })
     .await;
-    assert!(!ctx
-        .provider
-        .confirmed_missing_subscriptions
-        .lock()
-        .unwrap()
-        .contains(&missing));
 }
 
 #[tokio::test]
@@ -399,6 +493,9 @@ fn insert_pending_fetch(
             generation: provider.next_fetching_account_generation(),
             fetch_start_slot,
             fetch_context: AccountFetchContext::rpc_get_account(),
+            requires_full_coverage: Arc::new(
+                PendingFetchCoverageRequirement::new(false),
+            ),
             owner_started_at: std::time::Instant::now(),
             waiters: vec![waiter_tx],
         },
@@ -556,7 +653,7 @@ async fn test_subscription_creation_rejection_survives_unsubscribe_failure() {
     )
     .await;
     ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
-    ctx.provider.abort_subscription_reconciler_for_test();
+    ctx.provider.abort_subscription_reconciler_for_test().await;
     let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
 
     ctx.provider
@@ -656,7 +753,7 @@ async fn test_promotion_evicted_mid_flight_is_not_treated_as_admitted() {
     assert_eq!(
         ctx.provider
             .subscription_tier_ctx()
-            .try_promote_found_to_primary(existing, false)
+            .try_promote_found_to_primary(existing, None)
             .await
             .unwrap(),
         PromotionOutcome::NotInSecondary
@@ -678,7 +775,7 @@ async fn test_promotion_evicted_mid_flight_is_not_treated_as_admitted() {
     let insertions_before = ctx.pubsub_client.subscribe_insertions();
     let tier_ctx = ctx.provider.subscription_tier_ctx();
     let promotion = tokio::spawn(async move {
-        tier_ctx.try_promote_found_to_primary(missing, true).await
+        tier_ctx.try_promote_found_to_primary(missing, None).await
     });
     ctx.pubsub_client
         .wait_for_subscribe_insertions(insertions_before + 1)
@@ -709,6 +806,7 @@ async fn test_failed_coverage_restore_rolls_back_acquired_reason() {
         },
     )
     .await;
+    ctx.provider.abort_subscription_reconciler_for_test().await;
     ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
 
     assert!(!ctx
@@ -717,17 +815,11 @@ async fn test_failed_coverage_restore_rolls_back_acquired_reason() {
         .await
         .unwrap()
         .is_found());
-    assert!(ctx
-        .provider
-        .confirmed_missing_subscriptions
-        .lock()
-        .unwrap()
-        .contains(&missing));
     let refcount_before =
         direct_account_refcount(&ctx.provider, &missing).await;
 
-    // The coverage-restoring subscribe of a confirmed-missing refetch fails
-    // transiently; the just-acquired reason must be rolled back.
+    // Both the gRPC repair and full-coverage fallback fail transiently; the
+    // just-acquired reason must be rolled back.
     ctx.pubsub_client.simulate_disconnect();
     assert!(ctx
         .provider
@@ -745,17 +837,10 @@ async fn test_failed_coverage_restore_rolls_back_acquired_reason() {
         direct_account_refcount(&ctx.provider, &missing).await,
         refcount_before
     );
-    // The key stays confirmed missing until coverage is actually restored.
-    assert!(ctx
-        .provider
-        .confirmed_missing_subscriptions
-        .lock()
-        .unwrap()
-        .contains(&missing));
 }
 
 #[tokio::test]
-async fn test_confirmed_miss_switches_to_grpc_only_promptly() {
+async fn test_fetch_owned_secondary_arms_grpc_only_and_promotes_found() {
     init_logger();
 
     let existing = random_pubkey();
@@ -770,34 +855,780 @@ async fn test_confirmed_miss_switches_to_grpc_only_promptly() {
     .await;
     ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
 
-    // A found account never triggers the gRPC-only switch.
+    // Fetch-owned watches are armed gRPC-only from the start; a found result
+    // restores full coverage on promotion to the primary tier.
+    let subscribe_attempts = ctx.pubsub_client.subscribe_attempts();
     assert!(ctx
         .provider
         .try_get(existing, AccountFetchContext::rpc_get_account())
         .await
         .unwrap()
         .is_found());
-    assert!(ctx.pubsub_client.prefer_grpc_calls().is_empty());
+    assert_eq!(ctx.pubsub_client.prefer_grpc_calls(), vec![existing]);
+    // The gRPC-only arm plus the full-coverage restore after the found
+    // classification each subscribe once.
+    assert_eq!(
+        ctx.pubsub_client.subscribe_attempts(),
+        subscribe_attempts + 2
+    );
 
-    // The confirming not-found classification switches the key to
-    // gRPC-only coverage immediately instead of waiting for the
-    // periodic reconciler pass.
+    // A miss never leaves gRPC-only coverage: the confirming not-found
+    // classification reaffirms the policy without transport work.
     assert!(!ctx
         .provider
         .try_get(missing, AccountFetchContext::rpc_get_account())
         .await
         .unwrap()
         .is_found());
-    assert_eq!(ctx.pubsub_client.prefer_grpc_calls(), vec![missing]);
+    assert_eq!(
+        ctx.pubsub_client.prefer_grpc_calls(),
+        vec![existing, missing, missing]
+    );
     assert!(ctx.provider.secondary_subscriptions.contains(&missing));
-    assert!(ctx
-        .provider
-        .confirmed_missing_subscriptions
-        .lock()
-        .unwrap()
-        .contains(&missing));
     // The mock is a gRPC client, so coverage stays after the switch.
     assert!(ctx.pubsub_client.subscriptions_union().contains(&missing));
+}
+
+#[tokio::test]
+async fn test_cancelled_secondary_promotion_restores_previous_authority() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_multiplexed_provider(existing, Account::default()).await;
+    ctx.provider.abort_subscription_reconciler_for_test().await;
+
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(ctx.grpc_client.is_subscribed(&missing));
+    assert!(!ctx.websocket_client.is_subscribed(&missing));
+
+    ctx.websocket_client.pause_after_subscribe_insert();
+    ctx.grpc_client.pause_after_subscribe_insert();
+    let websocket_insertions_before =
+        ctx.websocket_client.subscribe_insertions();
+    let grpc_insertions_before = ctx.grpc_client.subscribe_insertions();
+    let provider = ctx.provider.clone();
+    let promotion = tokio::spawn(async move {
+        provider
+            .acquire_subscription(
+                &missing,
+                SubscriptionReason::DelegationRecord,
+            )
+            .await
+    });
+    ctx.websocket_client
+        .wait_for_subscribe_insertions(websocket_insertions_before + 1)
+        .await;
+    ctx.grpc_client
+        .wait_for_subscribe_insertions(grpc_insertions_before + 1)
+        .await;
+
+    promotion.abort();
+    assert!(
+        promotion.await.unwrap_err().is_cancelled(),
+        "promotion caller should be cancelled"
+    );
+
+    let subscription_key_locks = ctx.provider.subscription_key_locks.clone();
+    let (waiter_started_tx, waiter_started_rx) = oneshot::channel();
+    let (acquired_tx, mut acquired_rx) = oneshot::channel();
+    let same_key = tokio::spawn(async move {
+        let _ = waiter_started_tx.send(());
+        let guard = subscription_key_owned_guard_from_map(
+            &subscription_key_locks,
+            missing,
+        )
+        .await;
+        let _ = acquired_tx.send(guard);
+    });
+    waiter_started_rx.await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), &mut acquired_rx,)
+            .await
+            .is_err(),
+        "promotion transaction must retain the key through SubMux fanout"
+    );
+
+    // Rollback waits for every original SubMux leg to settle before restoring
+    // the previous gRPC-only secondary authority.
+    ctx.grpc_client.resume_after_subscribe_insert();
+    ctx.websocket_client.resume_after_subscribe_insert();
+    let same_key_guard =
+        tokio::time::timeout(Duration::from_secs(2), &mut acquired_rx)
+            .await
+            .expect("timed out waiting for promotion transaction")
+            .expect("same-key waiter sender should remain live");
+    drop(same_key_guard);
+    same_key.await.unwrap();
+
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(ctx.grpc_client.is_subscribed(&missing));
+    assert!(!ctx.websocket_client.is_subscribed(&missing));
+    assert!(
+        ctx.provider
+            .has_subscription_reason(
+                &missing,
+                SubscriptionReason::DirectAccount
+            )
+            .await
+    );
+    assert!(
+        !ctx.provider
+            .has_subscription_reason(
+                &missing,
+                SubscriptionReason::DelegationRecord
+            )
+            .await
+    );
+}
+
+#[tokio::test]
+async fn test_read_rpc_secondary_avoids_websocket_transport_work() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_multiplexed_provider(existing, Account::default()).await;
+    let ws_subscribe_baseline = ctx.websocket_client.subscribe_attempts();
+    let ws_unsubscribe_baseline = ctx.websocket_client.unsubscribe_attempts();
+    let grpc_subscribe_baseline = ctx.grpc_client.subscribe_attempts();
+
+    ctx.rpc_client.block_fetches();
+    let task_handle = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            provider
+                .try_get(missing, AccountFetchContext::rpc_get_account())
+                .await
+        }
+    });
+    wait_until("read RPC fetch to enter the secondary tier", || {
+        ctx.provider.is_pending(&missing)
+            && ctx.provider.secondary_subscriptions.contains(&missing)
+    })
+    .await;
+    assert_eq!(
+        ctx.websocket_client.subscribe_attempts(),
+        ws_subscribe_baseline
+    );
+    assert_eq!(
+        ctx.websocket_client.unsubscribe_attempts(),
+        ws_unsubscribe_baseline
+    );
+    assert_eq!(
+        ctx.grpc_client.subscribe_attempts(),
+        grpc_subscribe_baseline + 1
+    );
+
+    // A reconciler pass must preserve the pending secondary policy without
+    // introducing a websocket leg.
+    let never_evicted = ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .never_evicted_accounts();
+    subscription_reconciler::reconcile_subscriptions(
+        &ctx.provider.lrucache_subscribed_accounts,
+        &ctx.provider.secondary_subscriptions,
+        &ctx.provider.pubsub_client,
+        &never_evicted,
+        &ctx.provider.removed_account_tx,
+        Some(&ctx.provider.subscription_key_locks),
+        Some(&ctx.provider.subscription_transition_lock),
+        Some(&ctx.provider.subscription_ownership),
+        Some(ctx.provider.fetching_accounts.as_ref()),
+        Some(&ctx.provider.capacity_eviction_protection),
+    )
+    .await;
+    assert_eq!(
+        ctx.websocket_client.subscribe_attempts(),
+        ws_subscribe_baseline
+    );
+    assert_eq!(
+        ctx.websocket_client.unsubscribe_attempts(),
+        ws_unsubscribe_baseline
+    );
+
+    ctx.rpc_client.allow_fetches();
+    let remote_account =
+        tokio::time::timeout(Duration::from_secs(2), task_handle)
+            .await
+            .expect("fetch should complete")
+            .expect("fetch should not panic")
+            .expect("fetch should succeed");
+    assert!(!remote_account.is_found());
+    assert_eq!(
+        ctx.grpc_client.subscribe_attempts(),
+        grpc_subscribe_baseline + 1,
+        "not-found classification should be transport-idempotent"
+    );
+    assert_eq!(
+        ctx.websocket_client.unsubscribe_attempts(),
+        ws_unsubscribe_baseline
+    );
+
+    // Refetching the confirmed miss remains gRPC-only.
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert_eq!(
+        ctx.websocket_client.subscribe_attempts(),
+        ws_subscribe_baseline
+    );
+    assert_eq!(
+        ctx.websocket_client.unsubscribe_attempts(),
+        ws_unsubscribe_baseline
+    );
+    assert_eq!(
+        ctx.grpc_client.subscribe_attempts(),
+        grpc_subscribe_baseline + 1
+    );
+
+    // A found account restores full coverage before entering the primary
+    // working set.
+    assert!(ctx
+        .provider
+        .try_get(existing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert_eq!(
+        ctx.websocket_client.subscribe_attempts(),
+        ws_subscribe_baseline + 1
+    );
+    assert_eq!(
+        ctx.websocket_client.unsubscribe_attempts(),
+        ws_unsubscribe_baseline
+    );
+    assert!(ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .contains(&existing));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&existing));
+}
+
+#[tokio::test]
+async fn test_transaction_waiter_escalates_read_rpc_pending_fetch() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_multiplexed_provider(existing, Account::default()).await;
+    ctx.rpc_client.block_fetches();
+
+    let read_owner = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            provider
+                .try_get(missing, AccountFetchContext::rpc_get_account())
+                .await
+        }
+    });
+    wait_until("read owner to establish gRPC-first coverage", || {
+        ctx.provider.is_pending(&missing)
+            && ctx.grpc_client.is_subscribed(&missing)
+            && !ctx.websocket_client.is_subscribed(&missing)
+    })
+    .await;
+
+    let transaction_waiter = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            provider
+                .try_get(
+                    missing,
+                    AccountFetchContext::send_transaction(
+                        solana_signature::Signature::new_unique(),
+                    ),
+                )
+                .await
+        }
+    });
+    wait_until("transaction waiter to restore full coverage", || {
+        ctx.provider
+            .fetching_accounts
+            .lock()
+            .unwrap()
+            .get(&missing)
+            .is_some_and(|state| state.requires_full_coverage.requires_full())
+            && ctx.websocket_client.is_subscribed(&missing)
+    })
+    .await;
+
+    ctx.provider.reconcile_subscriptions_once_for_test().await;
+    assert!(
+        ctx.websocket_client.is_subscribed(&missing),
+        "reconciliation must preserve the waiter's full-coverage requirement"
+    );
+
+    ctx.rpc_client.allow_fetches();
+    let read_result = tokio::time::timeout(Duration::from_secs(2), read_owner)
+        .await
+        .expect("read owner should complete")
+        .expect("read owner should not panic")
+        .expect("read owner should succeed");
+    let transaction_result =
+        tokio::time::timeout(Duration::from_secs(2), transaction_waiter)
+            .await
+            .expect("transaction waiter should complete")
+            .expect("transaction waiter should not panic")
+            .expect("transaction waiter should succeed");
+    assert!(!read_result.is_found());
+    assert!(!transaction_result.is_found());
+    wait_until("not-found result to restore gRPC preference", || {
+        !ctx.websocket_client.is_subscribed(&missing)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn test_transaction_batch_escalates_joined_fetches_before_new_setup() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let joined_a = random_pubkey();
+    let joined_b = random_pubkey();
+    let newly_claimed = random_pubkey();
+    let ctx = setup_multiplexed_provider(existing, Account::default()).await;
+    ctx.rpc_client.block_fetches();
+
+    let read_owner_a = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            provider
+                .try_get(joined_a, AccountFetchContext::rpc_get_account())
+                .await
+        }
+    });
+    let read_owner_b = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            provider
+                .try_get(joined_b, AccountFetchContext::rpc_get_account())
+                .await
+        }
+    });
+    wait_until("read owners to establish gRPC-first coverage", || {
+        [joined_a, joined_b].into_iter().all(|pubkey| {
+            ctx.provider.is_pending(&pubkey)
+                && ctx.grpc_client.is_subscribed(&pubkey)
+                && !ctx.websocket_client.is_subscribed(&pubkey)
+        })
+    })
+    .await;
+
+    ctx.websocket_client.pause_after_subscribe_insert();
+    ctx.grpc_client.pause_after_subscribe_insert();
+    let ws_insertions = ctx.websocket_client.subscribe_insertions();
+    let grpc_insertions = ctx.grpc_client.subscribe_insertions();
+
+    let transaction_batch = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            provider
+                .try_get_multi(
+                    &[joined_a, joined_b, newly_claimed],
+                    None,
+                    AccountFetchContext::send_transaction(
+                        solana_signature::Signature::new_unique(),
+                    ),
+                    None,
+                )
+                .await
+        }
+    });
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        ctx.websocket_client
+            .wait_for_subscribe_insertions(ws_insertions + 2),
+    )
+    .await
+    .expect("both joined keys should begin websocket escalation concurrently");
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        ctx.grpc_client
+            .wait_for_subscribe_insertions(grpc_insertions + 2),
+    )
+    .await
+    .expect("both joined keys should begin gRPC escalation concurrently");
+    for joined in [joined_a, joined_b] {
+        assert!(ctx.websocket_client.is_subscribed(&joined));
+        assert!(ctx.grpc_client.is_subscribed(&joined));
+    }
+    assert!(!ctx.websocket_client.is_subscribed(&newly_claimed));
+    assert!(!ctx.grpc_client.is_subscribed(&newly_claimed));
+
+    ctx.websocket_client.resume_after_subscribe_insert();
+    ctx.grpc_client.resume_after_subscribe_insert();
+    wait_until("new key setup to follow joined-key escalation", || {
+        ctx.websocket_client.is_subscribed(&newly_claimed)
+            && ctx.grpc_client.is_subscribed(&newly_claimed)
+    })
+    .await;
+    ctx.rpc_client.allow_fetches();
+
+    for read_owner in [read_owner_a, read_owner_b] {
+        assert!(!tokio::time::timeout(Duration::from_secs(2), read_owner)
+            .await
+            .expect("read owner should complete")
+            .expect("read owner should not panic")
+            .expect("read owner should succeed")
+            .is_found());
+    }
+    let transaction_results =
+        tokio::time::timeout(Duration::from_secs(2), transaction_batch)
+            .await
+            .expect("transaction batch should complete")
+            .expect("transaction batch should not panic")
+            .expect("transaction batch should succeed");
+    assert_eq!(transaction_results.len(), 3);
+    assert!(transaction_results
+        .into_iter()
+        .all(|account| !account.is_found()));
+}
+
+#[tokio::test]
+async fn test_terminal_resolution_honors_full_requirement_after_key_lock() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_multiplexed_provider(existing, Account::default()).await;
+    let missing_result = ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .expect("initial read should succeed");
+    assert!(!missing_result.is_found());
+    assert!(ctx.grpc_client.is_subscribed(&missing));
+    assert!(!ctx.websocket_client.is_subscribed(&missing));
+
+    let generation = ctx.provider.next_fetching_account_generation();
+    let coverage = Arc::new(PendingFetchCoverageRequirement::new(false));
+    ctx.provider.fetching_accounts.lock().unwrap().insert(
+        missing,
+        FetchingAccountState {
+            generation,
+            fetch_start_slot: 100,
+            fetch_context: AccountFetchContext::rpc_get_account(),
+            requires_full_coverage: Arc::clone(&coverage),
+            owner_started_at: std::time::Instant::now(),
+            waiters: Vec::new(),
+        },
+    );
+
+    // Model the terminal RPC resolver winning the per-key lock before a
+    // transaction joins the still-open pending generation.
+    let subscription_guard =
+        ctx.provider.subscription_key_guard(&missing).await;
+    let transaction_waiter = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            provider
+                .try_get(
+                    missing,
+                    AccountFetchContext::send_transaction(
+                        solana_signature::Signature::new_unique(),
+                    ),
+                )
+                .await
+        }
+    });
+    wait_until("transaction waiter to publish its full requirement", || {
+        coverage.requires_full()
+            && ctx
+                .provider
+                .fetching_accounts
+                .lock()
+                .unwrap()
+                .get(&missing)
+                .is_some_and(|state| state.waiters.len() == 1)
+    })
+    .await;
+
+    let state = remove_fetching_account_if_generation_matches(
+        &mut ctx.provider.fetching_accounts.lock().unwrap(),
+        &missing,
+        generation,
+    )
+    .expect("terminal resolver should still own the generation");
+    let retain_full_until_resolution = state.requires_full_coverage.resolve();
+    assert!(retain_full_until_resolution);
+    assert!(
+        !coverage.require_full(),
+        "coverage admission must close atomically at terminal resolution"
+    );
+    let classification = ctx
+        .provider
+        .subscription_tier_ctx()
+        .apply_fetch_classification(
+            &missing,
+            101,
+            true,
+            retain_full_until_resolution,
+            subscription_guard,
+        )
+        .await
+        .expect("terminal classification should succeed");
+    assert!(classification.prefer_grpc_after_resolution);
+    assert!(
+        ctx.websocket_client.is_subscribed(&missing),
+        "full coverage must be established before terminal waiters are notified"
+    );
+
+    // A newer Full generation may publish under the fetching lock while the
+    // old terminal outcome still owns the per-key guard. It must not resolve
+    // and disappear before the old outcome performs its final recheck.
+    let newer_generation = ctx.provider.next_fetching_account_generation();
+    let newer_coverage = Arc::new(PendingFetchCoverageRequirement::new(true));
+    ctx.provider.fetching_accounts.lock().unwrap().insert(
+        missing,
+        FetchingAccountState {
+            generation: newer_generation,
+            fetch_start_slot: 102,
+            fetch_context: AccountFetchContext::rpc_get_account(),
+            requires_full_coverage: Arc::clone(&newer_coverage),
+            owner_started_at: std::time::Instant::now(),
+            waiters: Vec::new(),
+        },
+    );
+    let (newer_started_tx, newer_started_rx) = oneshot::channel();
+    let newer_terminal = tokio::spawn({
+        let provider = ctx.provider.clone();
+        async move {
+            let _ = newer_started_tx.send(());
+            let _subscription_guard =
+                provider.subscription_key_guard(&missing).await;
+            let state = remove_fetching_account_if_generation_matches(
+                &mut provider.fetching_accounts.lock().unwrap(),
+                &missing,
+                newer_generation,
+            )
+            .expect("newer terminal should own its generation");
+            state.requires_full_coverage.resolve()
+        }
+    });
+    newer_started_rx
+        .await
+        .expect("newer terminal task should start");
+    tokio::task::yield_now().await;
+    assert!(
+        !newer_terminal.is_finished(),
+        "old terminal outcome must retain the key guard through notification"
+    );
+
+    for waiter in state.waiters {
+        let _ = waiter.send(Ok(missing_result.clone()));
+    }
+    ctx.provider
+        .subscription_tier_ctx()
+        .prefer_grpc_after_fetch_resolution(
+            missing,
+            classification.subscription_guard,
+        )
+        .await;
+    assert!(
+        ctx.websocket_client.is_subscribed(&missing),
+        "old terminal downgrade must preserve a newer Full generation"
+    );
+    assert!(
+        newer_terminal
+            .await
+            .expect("newer terminal should not panic"),
+        "newer Full generation should retain full coverage"
+    );
+
+    let transaction_result =
+        tokio::time::timeout(Duration::from_secs(2), transaction_waiter)
+            .await
+            .expect("transaction waiter should complete")
+            .expect("transaction waiter should not panic")
+            .expect("transaction waiter should succeed");
+    assert!(!transaction_result.is_found());
+
+    let final_guard = ctx.provider.subscription_key_guard(&missing).await;
+    ctx.provider
+        .subscription_tier_ctx()
+        .prefer_grpc_after_fetch_resolution(missing, final_guard)
+        .await;
+    assert!(!ctx.websocket_client.is_subscribed(&missing));
+}
+
+#[tokio::test]
+async fn test_cancelled_grpc_first_admission_restores_absence() {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_multiplexed_provider(existing, Account::default()).await;
+    ctx.grpc_client.pause_after_subscribe_insert();
+    let insertions_before = ctx.grpc_client.subscribe_insertions();
+    let completions_before =
+        ctx.provider.pubsub_client.grpc_preference_completions();
+
+    let provider = ctx.provider.clone();
+    let setup = tokio::spawn(async move {
+        provider
+            .try_get(missing, AccountFetchContext::rpc_get_account())
+            .await
+    });
+    ctx.grpc_client
+        .wait_for_subscribe_insertions(insertions_before + 1)
+        .await;
+
+    // Hold publication after gRPC preference succeeds, then cancel the caller.
+    // Recovery retains the key guard while returning to the original absence.
+    let transition_guard =
+        ctx.provider.subscription_transition_lock.lock().await;
+    ctx.grpc_client.resume_after_subscribe_insert();
+    wait_until("gRPC preference to complete", || {
+        ctx.provider.pubsub_client.grpc_preference_completions()
+            > completions_before
+    })
+    .await;
+    setup.abort();
+    assert!(
+        setup.await.unwrap_err().is_cancelled(),
+        "subscription setup should be cancelled at LRU publication"
+    );
+    assert!(!ctx.provider.is_pending(&missing));
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+    assert!(!ctx.provider.secondary_subscriptions.contains(&missing));
+
+    let subscription_key_locks = ctx.provider.subscription_key_locks.clone();
+    let (waiter_started_tx, waiter_started_rx) = oneshot::channel();
+    let (acquired_tx, mut acquired_rx) = oneshot::channel();
+    let same_key = tokio::spawn(async move {
+        let _ = waiter_started_tx.send(());
+        let guard = subscription_key_owned_guard_from_map(
+            &subscription_key_locks,
+            missing,
+        )
+        .await;
+        let _ = acquired_tx.send(guard);
+    });
+    waiter_started_rx.await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), &mut acquired_rx,)
+            .await
+            .is_err(),
+        "cancelled caller must not release the admission's key guard"
+    );
+
+    drop(transition_guard);
+    let same_key_guard =
+        tokio::time::timeout(Duration::from_secs(2), &mut acquired_rx)
+            .await
+            .expect("timed out waiting for admission transaction")
+            .expect("same-key waiter sender should remain live");
+    drop(same_key_guard);
+    same_key.await.unwrap();
+    assert!(!ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(!ctx.provider.lrucache_subscribed_accounts.contains(&missing));
+    assert!(!ctx.grpc_client.is_subscribed(&missing));
+    assert!(!ctx.websocket_client.is_subscribed(&missing));
+    assert!(!ctx
+        .provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&missing));
+
+    // A subsequently attached gRPC client must not resurrect the cancelled
+    // provisional admission.
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let attached_grpc =
+        Arc::new(ChainPubsubClientMock::new(updates_sender, updates_receiver));
+    attached_grpc.set_transport(PubsubTransport::Grpc);
+    let (_abort_sender, abort_receiver) = mpsc::channel(1);
+    let tracker = Arc::new(TieredSubscribedAccountsTracker::new(
+        ctx.provider.lrucache_subscribed_accounts.clone(),
+        ctx.provider.secondary_subscriptions.clone(),
+    ));
+    ctx.provider
+        .pubsub_client
+        .add_client(attached_grpc.clone(), abort_receiver, tracker)
+        .await
+        .unwrap();
+    assert!(attached_grpc.is_subscribed(&clock::ID));
+    assert!(!attached_grpc.is_subscribed(&missing));
+}
+
+#[tokio::test]
+async fn test_failed_secondary_repair_revokes_reconnect_authority_before_eviction(
+) {
+    init_logger();
+
+    let existing = random_pubkey();
+    let missing = random_pubkey();
+    let ctx = setup_multiplexed_provider(existing, Account::default()).await;
+    ctx.provider.abort_subscription_reconciler_for_test().await;
+    assert!(!ctx
+        .provider
+        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .await
+        .unwrap()
+        .is_found());
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+
+    // Leave both clients visible to SubMux but unable to repair coverage.
+    // Preference and full-coverage fallback both fail, making the reconciler
+    // finalize eviction of the dead secondary watch.
+    ctx.websocket_client.simulate_disconnect();
+    ctx.grpc_client.simulate_disconnect();
+    let never_evicted = ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .never_evicted_accounts();
+    subscription_reconciler::reconcile_subscriptions(
+        &ctx.provider.lrucache_subscribed_accounts,
+        &ctx.provider.secondary_subscriptions,
+        &ctx.provider.pubsub_client,
+        &never_evicted,
+        &ctx.provider.removed_account_tx,
+        Some(&ctx.provider.subscription_key_locks),
+        Some(&ctx.provider.subscription_transition_lock),
+        Some(&ctx.provider.subscription_ownership),
+        Some(ctx.provider.fetching_accounts.as_ref()),
+        Some(&ctx.provider.capacity_eviction_protection),
+    )
+    .await;
+    assert!(!ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(!ctx
+        .provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&missing));
+
+    // A later gRPC attachment must not resurrect policy for the key evicted
+    // from the authoritative tracker.
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let attached_grpc =
+        Arc::new(ChainPubsubClientMock::new(updates_sender, updates_receiver));
+    attached_grpc.set_transport(PubsubTransport::Grpc);
+    let (_abort_sender, abort_receiver) = mpsc::channel(1);
+    let tracker = Arc::new(TieredSubscribedAccountsTracker::new(
+        ctx.provider.lrucache_subscribed_accounts.clone(),
+        ctx.provider.secondary_subscriptions.clone(),
+    ));
+    ctx.provider
+        .pubsub_client
+        .add_client(attached_grpc.clone(), abort_receiver, tracker)
+        .await
+        .unwrap();
+    assert!(attached_grpc.is_subscribed(&clock::ID));
+    assert!(!attached_grpc.is_subscribed(&missing));
 }
 
 #[tokio::test]
@@ -923,48 +1754,66 @@ async fn test_repeated_not_found_fetch_preserves_primary_working_set() {
 }
 
 #[tokio::test]
-async fn test_refetching_confirmed_miss_restores_full_coverage_while_pending() {
+async fn test_transaction_refetch_of_secondary_miss_restores_full_coverage() {
     init_logger();
 
     let existing = random_pubkey();
     let missing = random_pubkey();
-    let ctx = setup_provider(existing, Account::default()).await;
-    ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
+    let ctx = setup_multiplexed_provider(existing, Account::default()).await;
 
+    let fetch_context = AccountFetchContext::send_transaction(
+        solana_signature::Signature::new_unique(),
+    );
     assert!(!ctx
         .provider
-        .try_get(missing, AccountFetchContext::rpc_get_account())
+        .try_get(missing, fetch_context)
         .await
         .unwrap()
         .is_found());
-    assert!(ctx
-        .provider
-        .confirmed_missing_subscriptions
-        .lock()
-        .unwrap()
-        .contains(&missing));
-    let subscribe_attempts = ctx.pubsub_client.subscribe_attempts();
+    assert!(ctx.provider.secondary_subscriptions.contains(&missing));
+    assert!(ctx.grpc_client.is_subscribed(&missing));
+    assert!(!ctx.websocket_client.is_subscribed(&missing));
+    let ws_subscribe_attempts = ctx.websocket_client.subscribe_attempts();
 
     ctx.rpc_client.block_fetches();
     let task_handle = tokio::spawn({
         let provider = ctx.provider.clone();
-        async move {
-            provider
-                .try_get(missing, AccountFetchContext::rpc_get_account())
-                .await
-        }
+        async move { provider.try_get(missing, fetch_context).await }
     });
     let provider = ctx.provider.clone();
-    wait_until("confirmed miss refetch to restore full coverage", || {
+    wait_until("transaction refetch to restore full coverage", || {
         provider.is_pending(&missing)
-            && !provider
-                .confirmed_missing_subscriptions
-                .lock()
-                .unwrap()
-                .contains(&missing)
+            && provider.secondary_subscriptions.contains(&missing)
+            && ctx.websocket_client.is_subscribed(&missing)
     })
     .await;
-    assert!(ctx.pubsub_client.subscribe_attempts() > subscribe_attempts);
+    assert_eq!(
+        ctx.websocket_client.subscribe_attempts(),
+        ws_subscribe_attempts + 1
+    );
+    assert!(ctx.grpc_client.is_subscribed(&missing));
+
+    let never_evicted = ctx
+        .provider
+        .lrucache_subscribed_accounts
+        .never_evicted_accounts();
+    subscription_reconciler::reconcile_subscriptions(
+        &ctx.provider.lrucache_subscribed_accounts,
+        &ctx.provider.secondary_subscriptions,
+        &ctx.provider.pubsub_client,
+        &never_evicted,
+        &ctx.provider.removed_account_tx,
+        Some(&ctx.provider.subscription_key_locks),
+        Some(&ctx.provider.subscription_transition_lock),
+        Some(&ctx.provider.subscription_ownership),
+        Some(ctx.provider.fetching_accounts.as_ref()),
+        Some(&ctx.provider.capacity_eviction_protection),
+    )
+    .await;
+    assert!(
+        ctx.websocket_client.is_subscribed(&missing),
+        "reconciliation must preserve full coverage for a pending transaction fetch"
+    );
 
     ctx.rpc_client.allow_fetches();
     let remote_account =
@@ -974,12 +1823,10 @@ async fn test_refetching_confirmed_miss_restores_full_coverage_while_pending() {
             .expect("refetch should not panic")
             .expect("refetch should succeed");
     assert!(!remote_account.is_found());
-    assert!(ctx
-        .provider
-        .confirmed_missing_subscriptions
-        .lock()
-        .unwrap()
-        .contains(&missing));
+    wait_until("not-found result to restore gRPC preference", || {
+        !ctx.websocket_client.is_subscribed(&missing)
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -1119,7 +1966,7 @@ async fn test_secondary_capacity_preserves_protected_account() {
     )
     .await;
     ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
-    ctx.provider.abort_subscription_reconciler_for_test();
+    ctx.provider.abort_subscription_reconciler_for_test().await;
 
     ctx.provider
         .acquire_subscription(
@@ -1186,7 +2033,7 @@ async fn test_secondary_eviction_unsubscribe_failure_keeps_admission() {
     )
     .await;
     ctx.pubsub_client.set_transport(PubsubTransport::Grpc);
-    ctx.provider.abort_subscription_reconciler_for_test();
+    ctx.provider.abort_subscription_reconciler_for_test().await;
 
     assert!(!ctx
         .provider
@@ -1456,6 +2303,9 @@ async fn test_cancelled_subscription_setup_cleans_classification_placeholder() {
             generation,
             fetch_start_slot: 0,
             fetch_context: AccountFetchContext::rpc_get_account(),
+            requires_full_coverage: Arc::new(
+                PendingFetchCoverageRequirement::new(false),
+            ),
             owner_started_at: std::time::Instant::now(),
             waiters: vec![sender],
         },
@@ -2135,6 +2985,121 @@ async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notif
 }
 
 #[tokio::test]
+async fn test_releasing_absent_reason_preserves_existing_subscription() {
+    let pubkey = Pubkey::new_unique();
+    let ctx = setup_provider(pubkey, Account::default()).await;
+    ctx.provider.abort_subscription_reconciler_for_test().await;
+
+    ctx.provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    let unsubscribe_attempts = ctx.pubsub_client.unsubscribe_attempts();
+
+    let unsubscribed = ctx
+        .provider
+        .release_single_subscription(
+            &pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .unwrap();
+
+    assert!(!unsubscribed);
+    assert_eq!(
+        ctx.pubsub_client.unsubscribe_attempts(),
+        unsubscribe_attempts
+    );
+    assert!(ctx.provider.is_watching(&pubkey));
+    assert!(ctx.pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(
+        ctx.provider
+            .has_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+            .await
+    );
+}
+
+#[tokio::test]
+async fn test_cancelled_final_release_restores_previous_authority() {
+    #[derive(Clone, Copy, Debug)]
+    enum ReleaseKind {
+        Normal,
+        Silent,
+        Manual,
+    }
+
+    for release_kind in [
+        ReleaseKind::Normal,
+        ReleaseKind::Silent,
+        ReleaseKind::Manual,
+    ] {
+        let pubkey = Pubkey::new_unique();
+        let ctx = setup_provider(pubkey, Account::default()).await;
+        ctx.provider.abort_subscription_reconciler_for_test().await;
+        let mut removed_rx = ctx.provider.try_get_removed_account_rx().unwrap();
+        drain_removed_account_rx(&mut removed_rx);
+
+        ctx.provider
+            .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+            .await
+            .unwrap();
+        let subscribe_attempts = ctx.pubsub_client.subscribe_attempts();
+        ctx.pubsub_client.pause_after_unsubscribe_remove();
+        let removals_before = ctx.pubsub_client.unsubscribe_removals();
+
+        let provider = ctx.provider.clone();
+        let release = tokio::spawn(async move {
+            match release_kind {
+                ReleaseKind::Normal => provider
+                    .release_single_subscription(
+                        &pubkey,
+                        SubscriptionReason::DirectAccount,
+                    )
+                    .await
+                    .map(|_| ()),
+                ReleaseKind::Silent => provider
+                    .release_subscription_reason_silently_for_delegated_account(
+                        &pubkey,
+                        SubscriptionReason::DirectAccount,
+                    )
+                    .await
+                    .map(|_| ()),
+                ReleaseKind::Manual => provider.unsubscribe(&pubkey).await,
+            }
+        });
+        ctx.pubsub_client
+            .wait_for_unsubscribe_removals(removals_before + 1)
+            .await;
+
+        release.abort();
+        assert!(
+            release.await.unwrap_err().is_cancelled(),
+            "{release_kind:?} caller should be cancelled"
+        );
+
+        ctx.pubsub_client.resume_after_unsubscribe_remove();
+        wait_until("cancelled release to restore transport coverage", || {
+            ctx.pubsub_client.is_subscribed(&pubkey)
+                && ctx.pubsub_client.subscribe_attempts() > subscribe_attempts
+        })
+        .await;
+
+        assert!(ctx.provider.is_watching(&pubkey));
+        assert!(ctx
+            .provider
+            .subscription_ownership
+            .lock()
+            .await
+            .contains_key(&pubkey));
+        assert!(ctx.pubsub_client.subscriptions_union().contains(&pubkey));
+        assert!(matches!(
+            removed_rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+}
+
+#[tokio::test]
 async fn test_delegated_direct_cleanup_keeps_undelegation_tracking() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -2308,6 +3273,7 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
         _forward_rx,
         ..
     } = setup_provider(pubkey, account).await;
+    provider.abort_subscription_reconciler_for_test().await;
 
     pubsub_client.pause_after_subscribe_insert();
     let insertions_before = pubsub_client.subscribe_insertions();
@@ -2333,7 +3299,10 @@ async fn test_reconciler_does_not_unsubscribe_registration_between_pubsub_and_lr
             .await
     });
 
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    wait_until("reconciler to queue behind registration", || {
+        provider.subscription_key_locks.registrations(&pubkey) == 2
+    })
+    .await;
 
     assert!(
         pubsub_client.subscriptions_union().contains(&pubkey),
@@ -3200,11 +4169,6 @@ async fn test_slot_match_retry_reclassifies_found_account_to_primary() {
     assert!(remote_accounts.iter().all(RemoteAccount::is_found));
     assert!(provider.lrucache_subscribed_accounts.contains(&missing));
     assert!(!provider.secondary_subscriptions.contains(&missing));
-    assert!(!provider
-        .confirmed_missing_subscriptions
-        .lock()
-        .unwrap()
-        .contains(&missing));
 }
 
 #[tokio::test]
@@ -3545,7 +4509,7 @@ async fn test_capacity_eviction_unsubscribe_failure_keeps_admission() {
     let pubkeys = &[pubkey1, pubkey2];
 
     let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
-    provider.abort_subscription_reconciler_for_test();
+    provider.abort_subscription_reconciler_for_test().await;
 
     provider
         .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
@@ -3681,6 +4645,7 @@ async fn test_capacity_eviction_missing_pubsub_subscription_completes_cleanup()
     let pubkeys = &[pubkey1, pubkey2];
 
     let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
+    provider.abort_subscription_reconciler_for_test().await;
 
     provider
         .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
@@ -4143,9 +5108,17 @@ fn test_removed_stuck_pubkey_symbols_are_absent_from_production_code() {
 impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Stops the background reconciler so its startup pass cannot race a
     /// test that injects pubsub failures or asserts on stray subscriptions.
-    fn abort_subscription_reconciler_for_test(&self) {
+    async fn abort_subscription_reconciler_for_test(&self) {
         if let Some(handle) = &self._active_subscriptions_task_handle {
             handle.abort();
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            while !handle.is_finished() {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timed out stopping background subscription reconciler"
+                );
+                tokio::task::yield_now().await;
+            }
         }
     }
 
@@ -4155,11 +5128,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         subscription_reconciler::reconcile_subscriptions(
             &self.lrucache_subscribed_accounts,
             &self.secondary_subscriptions,
-            &self.confirmed_missing_subscriptions,
             &self.pubsub_client,
             &never_evicted,
             &self.removed_account_tx,
             Some(&self.subscription_key_locks),
+            Some(&self.subscription_transition_lock),
             Some(&self.subscription_ownership),
             Some(self.fetching_accounts.as_ref()),
             Some(&self.capacity_eviction_protection),

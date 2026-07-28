@@ -38,7 +38,7 @@ use crate::{
     remote_account_provider::{
         chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_slot::ChainSlot, pubsub_common::SubscriptionSource,
-        RemoteAccountProvider, RemoteAccountUpdateSource,
+        PubsubTransport, RemoteAccountProvider, RemoteAccountUpdateSource,
         SubscriptionReleaseMode,
     },
     testing::{
@@ -3209,6 +3209,146 @@ async fn test_overlapping_concurrent_ensures_share_inflight_keys_at_rpc_level()
         "expected one 2-key batch and one single-key call, \
          got {multi_calls} multi + {single_calls} single"
     );
+}
+
+#[tokio::test]
+async fn test_transaction_waiter_escalates_read_owned_fetch_to_full_coverage() {
+    init_logger();
+    let missing = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(CURRENT_SLOT)
+        .clock_sysvar_for_slot(CURRENT_SLOT)
+        .build();
+    let (ws_updates_tx, ws_updates_rx) = mpsc::channel(1_000);
+    let websocket_client =
+        Arc::new(ChainPubsubClientMock::new(ws_updates_tx, ws_updates_rx));
+    let (grpc_updates_tx, grpc_updates_rx) = mpsc::channel(1_000);
+    let grpc_client =
+        Arc::new(ChainPubsubClientMock::new(grpc_updates_tx, grpc_updates_rx));
+    grpc_client.set_transport(PubsubTransport::Grpc);
+    let (ws_abort_tx, ws_abort_rx) = mpsc::channel(1);
+    let (grpc_abort_tx, grpc_abort_rx) = mpsc::channel(1);
+    let (subscribed_accounts, config) = create_test_lru_cache(1_000);
+    let pubsub_client = crate::submux::SubMuxClient::new(
+        vec![
+            (websocket_client.clone(), ws_abort_rx),
+            (grpc_client.clone(), grpc_abort_rx),
+        ],
+        subscribed_accounts.clone(),
+        None,
+    );
+    let (forward_tx, _forward_rx) = mpsc::channel(1_000);
+    let remote_account_provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client.clone(),
+            pubsub_client,
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(Arc::<AtomicU64>::default()),
+        )
+        .await
+        .unwrap(),
+    );
+    let accounts_bank = Arc::new(AccountsBankStub::default());
+    let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    let (subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &remote_account_provider,
+        &accounts_bank,
+        &cloner,
+        Keypair::new(),
+        subscription_rx,
+        None,
+        None,
+    );
+    let _lifecycle_senders = (ws_abort_tx, grpc_abort_tx, subscription_tx);
+
+    rpc_client.block_fetches();
+    let read_owner = tokio::spawn({
+        let fetch_cloner = fetch_cloner.clone();
+        async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[missing],
+                    None,
+                    None,
+                    AccountFetchContext::rpc_get_account(),
+                )
+                .await
+        }
+    });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while !(remote_account_provider.is_pending(&missing)
+        && grpc_client.is_subscribed(&missing)
+        && !websocket_client.is_subscribed(&missing))
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "read owner did not establish gRPC-first coverage"
+        );
+        tokio::task::yield_now().await;
+    }
+
+    let transaction_waiter = tokio::spawn({
+        let fetch_cloner = fetch_cloner.clone();
+        async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[missing],
+                    None,
+                    None,
+                    AccountFetchContext::send_transaction(
+                        solana_signature::Signature::new_unique(),
+                    ),
+                )
+                .await
+        }
+    });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while !(fetch_cloner.pending_request_waiter_count(&missing) == Some(2)
+        && websocket_client.is_subscribed(&missing))
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "transaction waiter did not escalate to full coverage"
+        );
+        tokio::task::yield_now().await;
+    }
+    rpc_client.allow_fetches();
+    let read_result = tokio::time::timeout(Duration::from_secs(2), read_owner)
+        .await
+        .expect("read owner should complete")
+        .expect("read owner should not panic")
+        .expect("read owner should succeed");
+    let transaction_result =
+        tokio::time::timeout(Duration::from_secs(2), transaction_waiter)
+            .await
+            .expect("transaction waiter should complete")
+            .expect("transaction waiter should not panic")
+            .expect("transaction waiter should succeed");
+    assert_eq!(
+        read_result.not_found_on_chain,
+        vec![(missing, CURRENT_SLOT)]
+    );
+    assert_eq!(
+        transaction_result.not_found_on_chain,
+        vec![(missing, CURRENT_SLOT)]
+    );
+    assert_eq!(fetch_cloner.fetch_count(), 1);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while websocket_client.is_subscribed(&missing) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "not-found classification did not restore gRPC preference"
+        );
+        tokio::task::yield_now().await;
+    }
 }
 
 #[tokio::test]
@@ -9250,6 +9390,55 @@ async fn test_pending_deadline_is_not_extended_by_late_joiners() {
         joiner_terminal,
         PendingTerminal::Failed(PendingFailure::TimedOut)
     ));
+}
+
+#[tokio::test]
+async fn test_pending_non_read_waiter_escalates_shared_coverage_requirement() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    let pending = Arc::new(scc::HashMap::<Pubkey, Pending>::new());
+    let pubkey = random_pubkey();
+
+    let owner_handles = match claim_or_join_pending(
+        pending.clone(),
+        pubkey,
+        1,
+        1,
+        Duration::from_secs(1),
+        AccountFetchContext::rpc_get_account(),
+        ChainlinkPendingFetchLayer::FetchCloner,
+    ) {
+        PendingClaim::Created(handles) => handles,
+        PendingClaim::Joined(_) => panic!("expected read owner"),
+    };
+    assert!(!owner_handles.requires_full_coverage.requires_full());
+
+    let joiner_handles = match claim_or_join_pending(
+        pending.clone(),
+        pubkey,
+        2,
+        2,
+        Duration::from_secs(1),
+        AccountFetchContext::send_transaction(
+            solana_signature::Signature::new_unique(),
+        ),
+        ChainlinkPendingFetchLayer::FetchCloner,
+    ) {
+        PendingClaim::Joined(handles) => handles,
+        PendingClaim::Created(_) => panic!("expected transaction waiter"),
+    };
+    assert!(Arc::ptr_eq(
+        &owner_handles.requires_full_coverage,
+        &joiner_handles.requires_full_coverage
+    ));
+    assert!(owner_handles.requires_full_coverage.requires_full());
+
+    finish_pending(
+        &pending,
+        pubkey,
+        owner_handles.waiter.generation(),
+        PendingTerminal::Failed(PendingFailure::Cancelled),
+    );
 }
 
 #[tokio::test]

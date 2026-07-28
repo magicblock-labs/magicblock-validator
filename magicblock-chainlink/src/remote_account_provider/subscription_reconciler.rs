@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    sync::{atomic::AtomicU16, Mutex},
+    sync::{atomic::AtomicU16, Arc},
 };
 
 use magicblock_core::logger::log_trace_warn;
@@ -9,67 +9,213 @@ use magicblock_metrics::metrics::{
     SubscriptionCleanupSource,
 };
 use solana_pubkey::Pubkey;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tracing::*;
 
+#[cfg(test)]
+use super::PendingFetchCoverageRequirement;
 use super::{
-    subscription_key_owned_guard_from_map, AccountsLruCache, ChainPubsubClient,
-    FetchingAccounts, PubsubTransport,
-    SharedCapacityEvictionProtectionPredicate, SubscriptionKeyLocks,
-    SubscriptionOwnershipMap, SubscriptionReason,
+    subscription_key_owned_guard_from_map,
+    AccountSubscriptionPublicationPolicy, AccountsLruCache, ChainPubsubClient,
+    FetchingAccounts, PendingAccountSubscriptionPublication, PubsubTransport,
+    SharedCapacityEvictionProtectionPredicate, SubscriptionKeyGuard,
+    SubscriptionKeyLocks, SubscriptionOwnershipMap, SubscriptionReason,
 };
 use crate::remote_account_provider::RemoteAccountProviderError;
 
-/// Unsubscribes from pubsub and sends a removal notification to trigger bank
-/// removal.
-///
-/// This is the core logic shared between:
-/// - Normal unsubscribe flow (after removing from LRU cache)
-/// - Reconciliation flow (account missing from LRU cache)
 // NOTE: Pubkey stringification overhead is acceptable here since this is a cold path
 // (network I/O dwarfs the stringification cost)
-#[instrument(skip(pubsub_client, removed_account_tx), fields(pubkey = %pubkey))]
-pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
+#[instrument(skip(pubsub_client), fields(pubkey = %pubkey))]
+async fn unsubscribe_for_removal<T: ChainPubsubClient>(
     pubkey: Pubkey,
     pubsub_client: &T,
-    removed_account_tx: &mpsc::Sender<Pubkey>,
     cleanup_source: SubscriptionCleanupSource,
-) -> bool {
+) -> Option<SubscriptionCleanupOutcome> {
     match pubsub_client.unsubscribe(pubkey).await {
-        Ok(()) => {
-            if let Err(err) = removed_account_tx.send(pubkey).await {
-                warn!(error = ?err, "Failed to send removal update");
-                inc_chainlink_subscription_cleanup_accounts(
-                    cleanup_source,
-                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
-                );
-            } else {
-                inc_chainlink_subscription_cleanup_accounts(
-                    cleanup_source,
-                    SubscriptionCleanupOutcome::Unsubscribed,
-                );
-            }
-            true
-        }
+        Ok(()) => Some(SubscriptionCleanupOutcome::Unsubscribed),
         Err(err) => {
             if matches!(
                 err,
                 RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
             ) {
-                debug!(error = ?err, "Failed to unsubscribe");
-                inc_chainlink_subscription_cleanup_accounts(
-                    cleanup_source,
-                    SubscriptionCleanupOutcome::AlreadyAbsent,
-                );
+                debug!(error = ?err, "Subscription is already absent");
+                Some(SubscriptionCleanupOutcome::AlreadyAbsent)
             } else {
                 warn!(error = ?err, "Failed to unsubscribe");
                 inc_chainlink_subscription_cleanup_accounts(
                     cleanup_source,
                     SubscriptionCleanupOutcome::UnsubscribeFailed,
                 );
+                None
             }
-            false
         }
+    }
+}
+
+struct PendingRemovalNotification {
+    pubkey: Pubkey,
+    removed_account_tx: mpsc::Sender<Pubkey>,
+    cleanup_source: SubscriptionCleanupSource,
+    cleanup_outcome: SubscriptionCleanupOutcome,
+    pending: bool,
+}
+
+impl PendingRemovalNotification {
+    async fn send(mut self) {
+        let result = self.removed_account_tx.send(self.pubkey).await;
+        self.pending = false;
+        match result {
+            Ok(()) => inc_chainlink_subscription_cleanup_accounts(
+                self.cleanup_source,
+                self.cleanup_outcome,
+            ),
+            Err(err) => {
+                warn!(pubkey = %self.pubkey, error = ?err, "Failed to send removal update");
+                inc_chainlink_subscription_cleanup_accounts(
+                    self.cleanup_source,
+                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                );
+            }
+        }
+    }
+}
+
+impl Drop for PendingRemovalNotification {
+    fn drop(&mut self) {
+        if !self.pending {
+            return;
+        }
+        let pubkey = self.pubkey;
+        let removed_account_tx = self.removed_account_tx.clone();
+        let cleanup_source = self.cleanup_source;
+        let cleanup_outcome = self.cleanup_outcome;
+        tokio::spawn(async move {
+            match removed_account_tx.send(pubkey).await {
+                Ok(()) => inc_chainlink_subscription_cleanup_accounts(
+                    cleanup_source,
+                    cleanup_outcome,
+                ),
+                Err(err) => {
+                    warn!(pubkey = %pubkey, error = ?err, "Failed to send removal update");
+                    inc_chainlink_subscription_cleanup_accounts(
+                        cleanup_source,
+                        SubscriptionCleanupOutcome::RemovalUpdateFailed,
+                    );
+                }
+            }
+        });
+    }
+}
+
+async fn notify_removal(
+    pubkey: Pubkey,
+    removed_account_tx: &mpsc::Sender<Pubkey>,
+    cleanup_source: SubscriptionCleanupSource,
+    cleanup_outcome: SubscriptionCleanupOutcome,
+) {
+    PendingRemovalNotification {
+        pubkey,
+        removed_account_tx: removed_account_tx.clone(),
+        cleanup_source,
+        cleanup_outcome,
+        pending: true,
+    }
+    .send()
+    .await;
+}
+
+struct PendingStaleSubscriptionCleanup<T: ChainPubsubClient> {
+    pubkey: Pubkey,
+    pubsub_client: Option<T>,
+    removed_account_tx: Option<mpsc::Sender<Pubkey>>,
+    subscription_guard: Option<SubscriptionKeyGuard>,
+    pending: bool,
+}
+
+impl<T: ChainPubsubClient> PendingStaleSubscriptionCleanup<T> {
+    fn new(
+        pubkey: Pubkey,
+        pubsub_client: &T,
+        removed_account_tx: &mpsc::Sender<Pubkey>,
+        subscription_guard: Option<SubscriptionKeyGuard>,
+    ) -> Self {
+        pubsub_client.revoke_grpc_subscription_preference(&pubkey);
+        Self {
+            pubkey,
+            pubsub_client: Some(pubsub_client.clone()),
+            removed_account_tx: Some(removed_account_tx.clone()),
+            subscription_guard,
+            pending: true,
+        }
+    }
+
+    async fn finish(mut self) {
+        let cleanup_outcome = unsubscribe_for_removal(
+            self.pubkey,
+            self.pubsub_client
+                .as_ref()
+                .expect("pending cleanup client must exist"),
+            SubscriptionCleanupSource::Reconciler,
+        )
+        .await;
+        if let Some(cleanup_outcome) = cleanup_outcome {
+            self.pubsub_client
+                .as_ref()
+                .expect("pending cleanup client must exist")
+                .finalize_subscription_removal(&self.pubkey);
+            drop(self.subscription_guard.take());
+            self.pending = false;
+            let removed_account_tx = self
+                .removed_account_tx
+                .take()
+                .expect("pending cleanup sender must exist");
+            notify_removal(
+                self.pubkey,
+                &removed_account_tx,
+                SubscriptionCleanupSource::Reconciler,
+                cleanup_outcome,
+            )
+            .await;
+        } else {
+            drop(self.subscription_guard.take());
+            self.pending = false;
+        }
+    }
+}
+
+impl<T: ChainPubsubClient> Drop for PendingStaleSubscriptionCleanup<T> {
+    fn drop(&mut self) {
+        if !self.pending {
+            return;
+        }
+        let pubkey = self.pubkey;
+        let Some(pubsub_client) = self.pubsub_client.take() else {
+            return;
+        };
+        let Some(removed_account_tx) = self.removed_account_tx.take() else {
+            return;
+        };
+        let subscription_guard = self.subscription_guard.take();
+        tokio::spawn(async move {
+            pubsub_client.revoke_grpc_subscription_preference(&pubkey);
+            let cleanup_outcome = unsubscribe_for_removal(
+                pubkey,
+                &pubsub_client,
+                SubscriptionCleanupSource::Reconciler,
+            )
+            .await;
+            if let Some(cleanup_outcome) = cleanup_outcome {
+                pubsub_client.finalize_subscription_removal(&pubkey);
+                drop(subscription_guard);
+                notify_removal(
+                    pubkey,
+                    &removed_account_tx,
+                    SubscriptionCleanupSource::Reconciler,
+                    cleanup_outcome,
+                )
+                .await;
+            }
+        });
     }
 }
 
@@ -98,6 +244,8 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
 /// from unsubscribing an account that is in the middle of being registered, while
 /// still allowing tests to exercise the unlocked reconciliation path by passing
 /// `None`.
+/// When `subscription_transition_lock` is provided, composite LRU/ownership
+/// removals use the same short critical section as normal tier transitions.
 ///
 /// Returns the expected total number of monitored accounts: LRU-tracked accounts
 /// plus never-evicted accounts.
@@ -105,11 +253,11 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
 pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &AccountsLruCache,
     secondary_subscriptions: &AccountsLruCache,
-    confirmed_missing_subscriptions: &Mutex<HashSet<Pubkey>>,
     pubsub_client: &PubsubClient,
     never_evicted: &[Pubkey],
     removed_account_tx: &mpsc::Sender<Pubkey>,
     subscription_key_locks: Option<&SubscriptionKeyLocks>,
+    subscription_transition_lock: Option<&Arc<AsyncMutex<()>>>,
     subscription_ownership: Option<&SubscriptionOwnershipMap>,
     fetching_accounts: Option<&FetchingAccounts>,
     capacity_eviction_protection: Option<
@@ -164,8 +312,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         .difference(&lru_pubkeys)
         .filter(|pk| !secondary_pubkeys.contains(pk))
         .collect();
-    // C) Confirmed misses prefer gRPC-only coverage. Pending/unclassified
-    // secondary accounts, and every secondary account while gRPC is
+    // C) Every secondary account prefers gRPC-only coverage. When gRPC is
     // unavailable, retain full coverage.
     let grpc_snapshot = pubsub_client
         .subscription_reconciliation_snapshot_for_transport(
@@ -175,30 +322,40 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         .subscription_reconciliation_snapshot_for_transport(
             PubsubTransport::WebSocket,
         );
-    let secondary_to_repair: Vec<Pubkey> = {
-        let confirmed_missing = confirmed_missing_subscriptions
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        secondary_pubkeys
-            .iter()
-            .filter(|pubkey| {
-                if confirmed_missing.contains(pubkey) {
-                    match &grpc_snapshot {
-                        Some(grpc) => {
-                            !grpc.intersection.contains(pubkey)
-                                || websocket_snapshot
-                                    .as_ref()
-                                    .is_some_and(|ws| ws.union.contains(pubkey))
-                        }
-                        None => !pubsub_snapshot.intersection.contains(pubkey),
+    let pending_full_coverage: HashSet<Pubkey> = fetching_accounts
+        .map(|fetching_accounts| {
+            fetching_accounts
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .iter()
+                .filter_map(|(pubkey, state)| {
+                    state
+                        .requires_full_coverage
+                        .requires_full()
+                        .then_some(*pubkey)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let secondary_to_repair: Vec<Pubkey> = secondary_pubkeys
+        .iter()
+        .filter(|pubkey| {
+            if pending_full_coverage.contains(pubkey) {
+                !pubsub_snapshot.intersection.contains(pubkey)
+            } else {
+                match &grpc_snapshot {
+                    Some(grpc) => {
+                        !grpc.intersection.contains(pubkey)
+                            || websocket_snapshot
+                                .as_ref()
+                                .is_some_and(|ws| ws.union.contains(pubkey))
                     }
-                } else {
-                    !pubsub_snapshot.intersection.contains(pubkey)
+                    None => !pubsub_snapshot.intersection.contains(pubkey),
                 }
-            })
-            .copied()
-            .collect()
-    };
+            }
+        })
+        .copied()
+        .collect();
 
     trace!(
         lru_count = lru_count,
@@ -282,6 +439,11 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 continue;
             }
 
+            let publication = PendingAccountSubscriptionPublication::new(
+                pubsub_client,
+                pubkey,
+                AccountSubscriptionPublicationPolicy::Full,
+            );
             let resub_err = pubsub_client.subscribe(pubkey, None).await.err();
             if let Some(err) = &resub_err {
                 warn!(pubkey = %pubkey, error = ?err, "Failed to resubscribe account");
@@ -293,42 +455,87 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 .subscription_reconciliation_snapshot()
                 .is_some_and(|s| s.union.contains(&pubkey));
             if delivered_somewhere {
+                publication.commit();
                 continue;
-            }
-
-            // Undelegation tracking must stay watched until undelegation
-            // completes; keep the entry and retry next cycle.
-            if let Some(ownership) = subscription_ownership {
-                if ownership.lock().await.get(&pubkey).is_some_and(|own| {
-                    own.contains(SubscriptionReason::UndelegationTracking)
-                }) {
-                    continue;
-                }
             }
 
             // No client holds the subscription: evict so the account is
             // re-cloned fresh on next use instead of going stale.
-            warn!(
-                pubkey = %pubkey,
-                error = ?resub_err,
-                "Resubscribe did not take effect on any client; evicting account to prevent stale state"
-            );
-            subscribed_accounts.remove(&pubkey);
-            if let Some(ownership) = subscription_ownership {
-                ownership.lock().await.remove(&pubkey);
+            let removed = {
+                let _transition_guard = match subscription_transition_lock {
+                    Some(lock) => Some(lock.lock().await),
+                    None => None,
+                };
+
+                if !subscribed_accounts.contains(&pubkey) {
+                    false
+                } else {
+                    let mut ownership = match subscription_ownership {
+                        Some(ownership) => Some(ownership.lock().await),
+                        None => None,
+                    };
+                    let fetching = fetching_accounts.map(|fetching_accounts| {
+                        fetching_accounts
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner())
+                    });
+                    let is_protected =
+                        fetching.as_ref().is_some_and(|fetching| {
+                            fetching.contains_key(&pubkey)
+                        }) || capacity_eviction_protection.is_some_and(
+                            |protection| {
+                                protection
+                                    .read()
+                                    .unwrap_or_else(|poison| {
+                                        poison.into_inner()
+                                    })
+                                    .as_ref()
+                                    .is_some_and(|predicate| {
+                                        predicate(&pubkey).is_protected()
+                                    })
+                            },
+                        ) || ownership.as_ref().is_some_and(|ownership| {
+                            ownership.get(&pubkey).is_some_and(|own| {
+                                own.contains(
+                                    SubscriptionReason::UndelegationTracking,
+                                )
+                            })
+                        });
+
+                    if is_protected {
+                        false
+                    } else {
+                        warn!(
+                            pubkey = %pubkey,
+                            error = ?resub_err,
+                            "Resubscribe did not take effect on any client; evicting account to prevent stale state"
+                        );
+                        publication.update(
+                            AccountSubscriptionPublicationPolicy::Absent,
+                        );
+                        pubsub_client
+                            .revoke_grpc_subscription_preference(&pubkey);
+                        subscribed_accounts.remove(&pubkey);
+                        if let Some(ownership) = ownership.as_mut() {
+                            ownership.remove(&pubkey);
+                        }
+                        pubsub_client.finalize_subscription_removal(&pubkey);
+                        true
+                    }
+                }
+            };
+            if !removed {
+                continue;
             }
-            if let Err(err) = removed_account_tx.send(pubkey).await {
-                warn!(pubkey = %pubkey, error = ?err, "Failed to send removal update for dead subscription");
-                inc_chainlink_subscription_cleanup_accounts(
-                    SubscriptionCleanupSource::Reconciler,
-                    SubscriptionCleanupOutcome::RemovalUpdateFailed,
-                );
-            } else {
-                inc_chainlink_subscription_cleanup_accounts(
-                    SubscriptionCleanupSource::Reconciler,
-                    SubscriptionCleanupOutcome::Unsubscribed,
-                );
-            }
+            publication.commit();
+            drop(_subscription_guard);
+            notify_removal(
+                pubkey,
+                removed_account_tx,
+                SubscriptionCleanupSource::Reconciler,
+                SubscriptionCleanupOutcome::Unsubscribed,
+            )
+            .await;
         }
     }
 
@@ -376,12 +583,72 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 continue;
             }
 
-            unsubscribe_and_notify_removal(
+            let claimed_for_cleanup = {
+                let _transition_guard = match subscription_transition_lock {
+                    Some(lock) => Some(lock.lock().await),
+                    None => None,
+                };
+                if subscribed_accounts.contains(&pubkey)
+                    || secondary_subscriptions.contains(&pubkey)
+                {
+                    false
+                } else {
+                    let mut ownership = match subscription_ownership {
+                        Some(ownership) => Some(ownership.lock().await),
+                        None => None,
+                    };
+                    let fetching = fetching_accounts.map(|fetching_accounts| {
+                        fetching_accounts
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner())
+                    });
+                    let is_protected =
+                        fetching.as_ref().is_some_and(|fetching| {
+                            fetching.contains_key(&pubkey)
+                        }) || capacity_eviction_protection.is_some_and(
+                            |protection| {
+                                protection
+                                    .read()
+                                    .unwrap_or_else(|poison| {
+                                        poison.into_inner()
+                                    })
+                                    .as_ref()
+                                    .is_some_and(|predicate| {
+                                        predicate(&pubkey).is_protected()
+                                    })
+                            },
+                        ) || ownership.as_ref().is_some_and(|ownership| {
+                            ownership.get(&pubkey).is_some_and(|own| {
+                                own.contains(
+                                    SubscriptionReason::UndelegationTracking,
+                                )
+                            })
+                        });
+                    if is_protected {
+                        false
+                    } else {
+                        if let Some(ownership) = ownership.as_mut() {
+                            ownership.remove(&pubkey);
+                        }
+                        true
+                    }
+                }
+            };
+            if !claimed_for_cleanup {
+                trace!(
+                    pubkey = %pubkey,
+                    "Skipping stale unsubscribe because account became authoritative or protected"
+                );
+                continue;
+            }
+
+            PendingStaleSubscriptionCleanup::new(
                 pubkey,
                 pubsub_client,
                 removed_account_tx,
-                SubscriptionCleanupSource::Reconciler,
+                _subscription_guard,
             )
+            .finish()
             .await;
         }
     }
@@ -395,83 +662,118 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             continue;
         }
 
-        let grpc_preferred = confirmed_missing_subscriptions
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .contains(&pubkey);
-        let has_grpc = grpc_snapshot.is_some();
-        let preferred_result = if grpc_preferred && has_grpc {
-            pubsub_client.prefer_grpc_subscription(pubkey).await
-        } else {
-            pubsub_client.subscribe(pubkey, None).await
-        };
-        if let Err(err) = &preferred_result {
-            debug!(pubkey = %pubkey, error = ?err, "Secondary repair failed; restoring full coverage");
-        }
-        let preferred_covered = pubsub_client
-            .subscription_reconciliation_snapshot()
-            .is_some_and(|snapshot| snapshot.union.contains(&pubkey));
-        if preferred_result.is_err() || !preferred_covered {
+        let requires_full_coverage =
+            fetching_accounts.is_some_and(|fetching_accounts| {
+                fetching_accounts
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .get(&pubkey)
+                    .is_some_and(|state| {
+                        state.requires_full_coverage.requires_full()
+                    })
+            });
+        let publication = PendingAccountSubscriptionPublication::new(
+            pubsub_client,
+            pubkey,
+            if requires_full_coverage {
+                AccountSubscriptionPublicationPolicy::Full
+            } else {
+                AccountSubscriptionPublicationPolicy::GrpcPreferred
+            },
+        );
+        let covered = if requires_full_coverage {
             if let Err(err) = pubsub_client.subscribe(pubkey, None).await {
-                warn!(pubkey = %pubkey, error = ?err, "Failed to repair secondary account subscription");
+                warn!(pubkey = %pubkey, error = ?err, "Failed to restore full coverage for pending secondary account");
             }
-        }
-
-        let covered = pubsub_client
-            .subscription_reconciliation_snapshot()
-            .is_some_and(|snapshot| snapshot.union.contains(&pubkey));
-        if covered {
-            continue;
-        }
-
-        if fetching_accounts.is_some_and(|fetching_accounts| {
-            fetching_accounts
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .contains_key(&pubkey)
-        }) {
-            continue;
-        }
-
-        if capacity_eviction_protection.is_some_and(|protection| {
-            protection
-                .read()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .as_ref()
-                .is_some_and(|predicate| predicate(&pubkey).is_protected())
-        }) {
-            continue;
-        }
-
-        if let Some(ownership) = subscription_ownership {
-            if ownership.lock().await.get(&pubkey).is_some_and(|own| {
-                own.contains(SubscriptionReason::UndelegationTracking)
-            }) {
-                continue;
-            }
-        }
-
-        warn!(pubkey = %pubkey, "Secondary repair did not take effect on any client; evicting account to prevent stale state");
-        secondary_subscriptions.remove(&pubkey);
-        confirmed_missing_subscriptions
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .remove(&pubkey);
-        if let Some(ownership) = subscription_ownership {
-            ownership.lock().await.remove(&pubkey);
-        }
-        if let Err(err) = removed_account_tx.send(pubkey).await {
-            warn!(pubkey = %pubkey, error = ?err, "Failed to send removal update for dead secondary subscription");
-            inc_chainlink_subscription_cleanup_accounts(
-                SubscriptionCleanupSource::Reconciler,
-                SubscriptionCleanupOutcome::RemovalUpdateFailed,
-            );
+            pubsub_client
+                .subscription_reconciliation_snapshot()
+                .is_some_and(|snapshot| snapshot.intersection.contains(&pubkey))
         } else {
-            inc_chainlink_subscription_cleanup_accounts(
-                SubscriptionCleanupSource::Reconciler,
-                SubscriptionCleanupOutcome::Unsubscribed,
-            );
+            let preferred_result =
+                pubsub_client.prefer_grpc_subscription(pubkey).await;
+            if let Err(err) = &preferred_result {
+                debug!(pubkey = %pubkey, error = ?err, "Secondary repair failed; restoring full coverage");
+            }
+            let preferred_covered = pubsub_client.is_subscribed(&pubkey);
+            if preferred_result.is_err() || !preferred_covered {
+                publication.update(AccountSubscriptionPublicationPolicy::Full);
+                if let Err(err) = pubsub_client.subscribe(pubkey, None).await {
+                    warn!(pubkey = %pubkey, error = ?err, "Failed to repair secondary account subscription");
+                }
+            }
+            pubsub_client.is_subscribed(&pubkey)
+        };
+        if covered {
+            publication.commit();
+            continue;
         }
+
+        let removed = {
+            let _transition_guard = match subscription_transition_lock {
+                Some(lock) => Some(lock.lock().await),
+                None => None,
+            };
+
+            if !secondary_subscriptions.contains(&pubkey) {
+                false
+            } else {
+                let mut ownership = match subscription_ownership {
+                    Some(ownership) => Some(ownership.lock().await),
+                    None => None,
+                };
+                let fetching = fetching_accounts.map(|fetching_accounts| {
+                    fetching_accounts
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner())
+                });
+                let is_protected = fetching
+                    .as_ref()
+                    .is_some_and(|fetching| fetching.contains_key(&pubkey))
+                    || capacity_eviction_protection.is_some_and(|protection| {
+                        protection
+                            .read()
+                            .unwrap_or_else(|poison| poison.into_inner())
+                            .as_ref()
+                            .is_some_and(|predicate| {
+                                predicate(&pubkey).is_protected()
+                            })
+                    })
+                    || ownership.as_ref().is_some_and(|ownership| {
+                        ownership.get(&pubkey).is_some_and(|own| {
+                            own.contains(
+                                SubscriptionReason::UndelegationTracking,
+                            )
+                        })
+                    });
+
+                if is_protected {
+                    false
+                } else {
+                    warn!(pubkey = %pubkey, "Secondary repair did not take effect on any client; evicting account to prevent stale state");
+                    pubsub_client.revoke_grpc_subscription_preference(&pubkey);
+                    publication
+                        .update(AccountSubscriptionPublicationPolicy::Absent);
+                    secondary_subscriptions.remove(&pubkey);
+                    if let Some(ownership) = ownership.as_mut() {
+                        ownership.remove(&pubkey);
+                    }
+                    pubsub_client.finalize_subscription_removal(&pubkey);
+                    true
+                }
+            }
+        };
+        if !removed {
+            continue;
+        }
+        publication.commit();
+        drop(_subscription_guard);
+        notify_removal(
+            pubkey,
+            removed_account_tx,
+            SubscriptionCleanupSource::Reconciler,
+            SubscriptionCleanupOutcome::Unsubscribed,
+        )
+        .await;
     }
 
     // We assume that reconciling worked and now our subscribed accounts are up to date
@@ -483,7 +785,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
 async fn acquire_subscription_key_guard(
     subscription_key_locks: Option<&SubscriptionKeyLocks>,
     pubkey: Pubkey,
-) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+) -> Option<SubscriptionKeyGuard> {
     match subscription_key_locks {
         Some(subscription_key_locks) => Some(
             subscription_key_owned_guard_from_map(
@@ -498,7 +800,7 @@ async fn acquire_subscription_key_guard(
 
 #[cfg(test)]
 mod tests {
-    use std::{num::NonZeroUsize, sync::Arc};
+    use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
     use solana_pubkey::Pubkey;
     use tokio::sync::mpsc;
@@ -523,6 +825,474 @@ mod tests {
         Pubkey::from(bytes)
     }
 
+    #[tokio::test]
+    async fn test_dead_primary_removal_is_atomic_and_releases_key_before_notify(
+    ) {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        let pubkey = create_test_pubkey(1);
+        let lru =
+            Arc::new(AccountsLruCache::new(NonZeroUsize::new(10).unwrap()));
+        let secondary =
+            Arc::new(AccountsLruCache::new(NonZeroUsize::new(10).unwrap()));
+        lru.add(pubkey);
+        let ownership: SubscriptionOwnershipMap = Default::default();
+        ownership
+            .lock()
+            .await
+            .entry(pubkey)
+            .or_default()
+            .acquire(SubscriptionReason::DirectAccount);
+        let subscription_key_locks: SubscriptionKeyLocks = Default::default();
+        let transition_lock = Arc::new(AsyncMutex::new(()));
+        let transition_guard = transition_lock.lock().await;
+        mock_client.silently_noop_next_subscriptions(1);
+
+        // Keep the notification channel full. Normal reconciliation applies
+        // bounded backpressure after releasing the key guard; cancellation
+        // transfers only its one in-flight notification to recovery.
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(1);
+        let sentinel = create_test_pubkey(2);
+        removed_tx.send(sentinel).await.unwrap();
+
+        let mut reconcile = tokio::spawn({
+            let lru = lru.clone();
+            let secondary = secondary.clone();
+            let mock_client = mock_client.clone();
+            let removed_tx = removed_tx.clone();
+            let subscription_key_locks = subscription_key_locks.clone();
+            let transition_lock = transition_lock.clone();
+            let ownership = ownership.clone();
+            async move {
+                reconcile_subscriptions(
+                    &lru,
+                    &secondary,
+                    &mock_client,
+                    &[],
+                    &removed_tx,
+                    Some(&subscription_key_locks),
+                    Some(&transition_lock),
+                    Some(&ownership),
+                    None,
+                    None,
+                )
+                .await
+            }
+        });
+
+        mock_client.wait_for_subscribe_attempts(1).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), async {
+                while lru.contains(&pubkey) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .is_err(),
+            "LRU removal must wait for the transition lock"
+        );
+        assert!(lru.contains(&pubkey));
+        assert!(ownership.lock().await.contains_key(&pubkey));
+
+        drop(transition_guard);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if !lru.contains(&pubkey)
+                    && !ownership.lock().await.contains_key(&pubkey)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("reconciler should commit LRU and ownership removal");
+
+        let key_guard = tokio::time::timeout(
+            Duration::from_secs(1),
+            subscription_key_owned_guard_from_map(
+                &subscription_key_locks,
+                pubkey,
+            ),
+        )
+        .await
+        .expect("notification backpressure must not retain the key guard");
+        drop(key_guard);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut reconcile,)
+                .await
+                .is_err(),
+            "full notification channel should backpressure reconciliation"
+        );
+        reconcile.abort();
+        assert!(reconcile.await.unwrap_err().is_cancelled());
+
+        assert_eq!(removed_rx.recv().await, Some(sentinel));
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), removed_rx.recv())
+                .await
+                .expect("cancelled notification recovery should complete"),
+            Some(pubkey)
+        );
+        assert!(removed_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_already_absent_unsubscribe_still_notifies_removal() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        let pubkey = create_test_pubkey(1);
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(1);
+
+        let cleanup_outcome = unsubscribe_for_removal(
+            pubkey,
+            &mock_client,
+            SubscriptionCleanupSource::Reconciler,
+        )
+        .await
+        .expect("already-absent is a terminal cleanup outcome");
+        assert!(matches!(
+            cleanup_outcome,
+            SubscriptionCleanupOutcome::AlreadyAbsent
+        ));
+        notify_removal(
+            pubkey,
+            &removed_tx,
+            SubscriptionCleanupSource::Reconciler,
+            cleanup_outcome,
+        )
+        .await;
+
+        assert_eq!(removed_rx.recv().await, Some(pubkey));
+        assert!(removed_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stale_pubsub_cleanup_claims_detached_ownership() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        let pubkey = create_test_pubkey(1);
+        mock_client.insert_subscription(pubkey);
+        let primary =
+            Arc::new(AccountsLruCache::new(NonZeroUsize::new(10).unwrap()));
+        let secondary =
+            Arc::new(AccountsLruCache::new(NonZeroUsize::new(10).unwrap()));
+        let ownership: SubscriptionOwnershipMap = Default::default();
+        ownership
+            .lock()
+            .await
+            .entry(pubkey)
+            .or_default()
+            .acquire(SubscriptionReason::DirectAccount);
+        let key_locks: SubscriptionKeyLocks = Default::default();
+        let transition_lock = Arc::new(AsyncMutex::new(()));
+        let fetching_accounts = FetchingAccounts::default();
+        let protection: SharedCapacityEvictionProtectionPredicate =
+            Default::default();
+        let (removed_tx, mut removed_rx) = mpsc::channel(1);
+
+        reconcile_subscriptions(
+            &primary,
+            &secondary,
+            &mock_client,
+            &[],
+            &removed_tx,
+            Some(&key_locks),
+            Some(&transition_lock),
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&protection),
+        )
+        .await;
+
+        assert!(!ownership.lock().await.contains_key(&pubkey));
+        assert!(!mock_client.is_subscribed(&pubkey));
+        assert_eq!(removed_rx.recv().await, Some(pubkey));
+        assert!(removed_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_stale_pubsub_cleanup_finishes_and_notifies() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        let pubkey = create_test_pubkey(1);
+        mock_client.insert_subscription(pubkey);
+        mock_client.block_unsubscribe();
+        let primary =
+            Arc::new(AccountsLruCache::new(NonZeroUsize::new(10).unwrap()));
+        let secondary =
+            Arc::new(AccountsLruCache::new(NonZeroUsize::new(10).unwrap()));
+        let ownership: SubscriptionOwnershipMap = Default::default();
+        ownership
+            .lock()
+            .await
+            .entry(pubkey)
+            .or_default()
+            .acquire(SubscriptionReason::DirectAccount);
+        let key_locks: SubscriptionKeyLocks = Default::default();
+        let transition_lock = Arc::new(AsyncMutex::new(()));
+        let fetching_accounts = FetchingAccounts::default();
+        let protection: SharedCapacityEvictionProtectionPredicate =
+            Default::default();
+        let (removed_tx, mut removed_rx) = mpsc::channel(1);
+
+        let reconcile = tokio::spawn({
+            let primary = primary.clone();
+            let secondary = secondary.clone();
+            let mock_client = mock_client.clone();
+            let ownership = ownership.clone();
+            let key_locks = key_locks.clone();
+            let transition_lock = transition_lock.clone();
+            async move {
+                reconcile_subscriptions(
+                    &primary,
+                    &secondary,
+                    &mock_client,
+                    &[],
+                    &removed_tx,
+                    Some(&key_locks),
+                    Some(&transition_lock),
+                    Some(&ownership),
+                    Some(&fetching_accounts),
+                    Some(&protection),
+                )
+                .await
+            }
+        });
+
+        mock_client.wait_for_unsubscribe_attempts(1).await;
+        assert!(!ownership.lock().await.contains_key(&pubkey));
+        reconcile.abort();
+        assert!(reconcile.await.unwrap_err().is_cancelled());
+
+        mock_client.wait_for_unsubscribe_attempts(2).await;
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(50),
+                subscription_key_owned_guard_from_map(&key_locks, pubkey),
+            )
+            .await
+            .is_err(),
+            "cleanup recovery must retain the per-key guard"
+        );
+
+        mock_client.release_unsubscribe();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), removed_rx.recv())
+                .await
+                .expect("cleanup recovery should notify removal"),
+            Some(pubkey)
+        );
+        assert!(!mock_client.is_subscribed(&pubkey));
+        let key_guard = tokio::time::timeout(
+            Duration::from_secs(1),
+            subscription_key_owned_guard_from_map(&key_locks, pubkey),
+        )
+        .await
+        .expect("cleanup recovery should release the per-key guard");
+        drop(key_guard);
+    }
+
+    #[tokio::test]
+    async fn test_dead_secondary_rechecks_fetch_protection_under_transition_lock(
+    ) {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        mock_client.set_transport(PubsubTransport::Grpc);
+        let pubkey = create_test_pubkey(1);
+        let primary =
+            Arc::new(AccountsLruCache::new(NonZeroUsize::new(10).unwrap()));
+        let secondary =
+            Arc::new(AccountsLruCache::new(NonZeroUsize::new(10).unwrap()));
+        secondary.add(pubkey);
+        let ownership: SubscriptionOwnershipMap = Default::default();
+        ownership
+            .lock()
+            .await
+            .entry(pubkey)
+            .or_default()
+            .acquire(SubscriptionReason::DirectAccount);
+        let fetching_accounts = Arc::new(FetchingAccounts::default());
+        let capacity_eviction_protection:
+            SharedCapacityEvictionProtectionPredicate = Default::default();
+        let subscription_key_locks: SubscriptionKeyLocks = Default::default();
+        let transition_lock = Arc::new(AsyncMutex::new(()));
+
+        // Hold both locks so an implementation that checks protections
+        // before the transition lock deterministically blocks on ownership
+        // only after observing the old, unprotected fetching state.
+        let transition_guard = transition_lock.lock().await;
+        let ownership_guard = ownership.lock().await;
+        mock_client.silently_noop_next_subscriptions(2);
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(1);
+
+        let reconcile = tokio::spawn({
+            let primary = primary.clone();
+            let secondary = secondary.clone();
+            let mock_client = mock_client.clone();
+            let removed_tx = removed_tx.clone();
+            let subscription_key_locks = subscription_key_locks.clone();
+            let transition_lock = transition_lock.clone();
+            let ownership = ownership.clone();
+            let fetching_accounts = fetching_accounts.clone();
+            let capacity_eviction_protection =
+                capacity_eviction_protection.clone();
+            async move {
+                reconcile_subscriptions(
+                    &primary,
+                    &secondary,
+                    &mock_client,
+                    &[],
+                    &removed_tx,
+                    Some(&subscription_key_locks),
+                    Some(&transition_lock),
+                    Some(&ownership),
+                    Some(fetching_accounts.as_ref()),
+                    Some(&capacity_eviction_protection),
+                )
+                .await
+            }
+        });
+
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            mock_client.wait_for_subscribe_attempts(2),
+        )
+        .await
+        .expect("secondary repair should attempt both preferred and fallback coverage");
+        tokio::task::yield_now().await;
+        fetching_accounts.lock().unwrap().insert(
+            pubkey,
+            FetchingAccountState {
+                generation: 1,
+                fetch_start_slot: 0,
+                fetch_context: AccountFetchContext::rpc_get_account(),
+                requires_full_coverage: Arc::new(
+                    PendingFetchCoverageRequirement::new(false),
+                ),
+                owner_started_at: std::time::Instant::now(),
+                waiters: Vec::new(),
+            },
+        );
+        drop(ownership_guard);
+        drop(transition_guard);
+
+        tokio::time::timeout(Duration::from_secs(1), reconcile)
+            .await
+            .expect("reconciliation should complete")
+            .unwrap();
+        assert!(secondary.contains(&pubkey));
+        assert!(ownership.lock().await.contains_key(&pubkey));
+        assert!(removed_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_dead_primary_respects_fetch_and_capacity_protections() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+        let pubkey = create_test_pubkey(1);
+        let primary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        primary.add(pubkey);
+        let ownership: SubscriptionOwnershipMap = Default::default();
+        ownership
+            .lock()
+            .await
+            .entry(pubkey)
+            .or_default()
+            .acquire(SubscriptionReason::DirectAccount);
+        let fetching_accounts = FetchingAccounts::default();
+        let capacity_eviction_protection:
+            SharedCapacityEvictionProtectionPredicate = Default::default();
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+
+        fetching_accounts.lock().unwrap().insert(
+            pubkey,
+            FetchingAccountState {
+                generation: 1,
+                fetch_start_slot: 0,
+                fetch_context: AccountFetchContext::rpc_get_account(),
+                requires_full_coverage: Arc::new(
+                    PendingFetchCoverageRequirement::new(false),
+                ),
+                owner_started_at: std::time::Instant::now(),
+                waiters: Vec::new(),
+            },
+        );
+        mock_client.silently_noop_next_subscriptions(1);
+        reconcile_subscriptions(
+            &primary,
+            &secondary,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            None,
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&capacity_eviction_protection),
+        )
+        .await;
+        assert!(primary.contains(&pubkey));
+        assert!(ownership.lock().await.contains_key(&pubkey));
+        assert!(removed_rx.try_recv().is_err());
+
+        fetching_accounts.lock().unwrap().remove(&pubkey);
+        *capacity_eviction_protection.write().unwrap() =
+            Some(Arc::new(|_| CapacityEvictionProtection {
+                delegated: true,
+                undelegating: false,
+            }));
+        mock_client.silently_noop_next_subscriptions(1);
+        reconcile_subscriptions(
+            &primary,
+            &secondary,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            None,
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&capacity_eviction_protection),
+        )
+        .await;
+        assert!(primary.contains(&pubkey));
+        assert!(ownership.lock().await.contains_key(&pubkey));
+        assert!(removed_rx.try_recv().is_err());
+
+        *capacity_eviction_protection.write().unwrap() = None;
+        mock_client.silently_noop_next_subscriptions(1);
+        reconcile_subscriptions(
+            &primary,
+            &secondary,
+            &mock_client,
+            &[],
+            &removed_tx,
+            None,
+            None,
+            Some(&ownership),
+            Some(&fetching_accounts),
+            Some(&capacity_eviction_protection),
+        )
+        .await;
+        assert!(!primary.contains(&pubkey));
+        assert!(!ownership.lock().await.contains_key(&pubkey));
+        assert_eq!(removed_rx.try_recv(), Ok(pubkey));
+    }
+
     /// Secondary-tier accounts in pubsub but not in the main LRU must not be
     /// unsubscribed as stale.
     #[tokio::test]
@@ -544,10 +1314,10 @@ mod tests {
         reconcile_subscriptions(
             &lru,
             &secondary,
-            &Mutex::new(HashSet::new()),
             &mock_client,
             &[],
             &removed_tx,
+            None,
             None,
             None,
             None,
@@ -577,10 +1347,10 @@ mod tests {
         reconcile_subscriptions(
             &lru,
             &secondary,
-            &Mutex::new(HashSet::new()),
             &mock_client,
             &[],
             &removed_tx,
+            None,
             None,
             None,
             None,
@@ -604,7 +1374,6 @@ mod tests {
         let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
         let secondary = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
         secondary.add(pk);
-        let confirmed_missing = Mutex::new(HashSet::from([pk]));
         let ownership: SubscriptionOwnershipMap = Default::default();
         ownership
             .lock()
@@ -621,6 +1390,9 @@ mod tests {
                 generation: 1,
                 fetch_start_slot: 0,
                 fetch_context: AccountFetchContext::rpc_get_account(),
+                requires_full_coverage: Arc::new(
+                    PendingFetchCoverageRequirement::new(false),
+                ),
                 owner_started_at: std::time::Instant::now(),
                 waiters: Vec::new(),
             },
@@ -631,10 +1403,10 @@ mod tests {
         reconcile_subscriptions(
             &lru,
             &secondary,
-            &confirmed_missing,
             &mock_client,
             &[],
             &removed_tx,
+            None,
             None,
             Some(&ownership),
             Some(&fetching_accounts),
@@ -643,7 +1415,6 @@ mod tests {
         .await;
 
         assert!(secondary.contains(&pk));
-        assert!(confirmed_missing.lock().unwrap().contains(&pk));
         assert!(ownership.lock().await.contains_key(&pk));
         assert!(removed_rx.try_recv().is_err());
         assert_eq!(mock_client.subscribe_attempts(), 2);
@@ -658,10 +1429,10 @@ mod tests {
         reconcile_subscriptions(
             &lru,
             &secondary,
-            &confirmed_missing,
             &mock_client,
             &[],
             &removed_tx,
+            None,
             None,
             Some(&ownership),
             Some(&fetching_accounts),
@@ -670,7 +1441,6 @@ mod tests {
         .await;
 
         assert!(secondary.contains(&pk));
-        assert!(confirmed_missing.lock().unwrap().contains(&pk));
         assert!(ownership.lock().await.contains_key(&pk));
         assert!(removed_rx.try_recv().is_err());
         assert_eq!(mock_client.subscribe_attempts(), 4);
@@ -680,10 +1450,10 @@ mod tests {
         reconcile_subscriptions(
             &lru,
             &secondary,
-            &confirmed_missing,
             &mock_client,
             &[],
             &removed_tx,
+            None,
             None,
             Some(&ownership),
             Some(&fetching_accounts),
@@ -692,7 +1462,6 @@ mod tests {
         .await;
 
         assert!(!secondary.contains(&pk));
-        assert!(!confirmed_missing.lock().unwrap().contains(&pk));
         assert!(!ownership.lock().await.contains_key(&pk));
         assert_eq!(removed_rx.try_recv(), Ok(pk));
         assert_eq!(mock_client.subscribe_attempts(), 6);
@@ -920,10 +1689,10 @@ mod tests {
         reconcile_subscriptions(
             &lru,
             &AccountsLruCache::new(NonZeroUsize::new(10).unwrap()),
-            &Mutex::new(HashSet::new()),
             &mock_client,
             &[],
             &removed_tx,
+            None,
             None,
             Some(&ownership),
             None,
@@ -1202,10 +1971,10 @@ mod tests {
         reconcile_subscriptions(
             subscribed_accounts,
             &secondary,
-            &Mutex::new(HashSet::new()),
             pubsub_client,
             never_evicted,
             removed_account_tx,
+            None,
             None,
             None,
             None,

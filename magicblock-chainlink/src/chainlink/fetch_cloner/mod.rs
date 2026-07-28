@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map, HashSet},
+    collections::{hash_map, HashMap as StdHashMap, HashSet},
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -15,6 +15,7 @@ use dlp_api::{
         UndelegationRequest,
     },
 };
+use futures_util::future::join_all;
 use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
@@ -101,8 +102,9 @@ use crate::{
             SubscriptionSource,
         },
         CapacityEvictionProtection, ChainPubsubClient, ChainRpcClient,
-        ForwardedSubscriptionUpdate, MatchSlotsConfig, RemoteAccount,
-        RemoteAccountProvider, ResolvedAccountSharedData, SubscriptionReason,
+        ForwardedSubscriptionUpdate, MatchSlotsConfig,
+        PendingFetchCoverageRequirement, RemoteAccount, RemoteAccountProvider,
+        ResolvedAccountSharedData, SubscriptionReason,
     },
 };
 
@@ -313,6 +315,7 @@ struct ClaimedOperation {
     generation: u64,
     deadline: tokio::time::Instant,
     cancel: Arc<tokio::sync::Notify>,
+    requires_full_coverage: Arc<PendingFetchCoverageRequirement>,
     owner: PendingOwner,
 }
 
@@ -700,6 +703,10 @@ where
             .map(|op| op.pubkey)
             .filter(|pubkey| mark_empty_set.contains(pubkey))
             .collect::<HashSet<_>>();
+        let coverage_requirements = claimed
+            .iter()
+            .map(|op| (op.pubkey, Arc::clone(&op.requires_full_coverage)))
+            .collect::<StdHashMap<_, _>>();
         task::spawn(async move {
             let pubkeys =
                 claimed.iter().map(|op| op.pubkey).collect::<Vec<_>>();
@@ -723,6 +730,7 @@ where
                     mark_empty_ref,
                     slot,
                     fetch_context,
+                    Some(&coverage_requirements),
                 ),
             )
             .await
@@ -806,6 +814,7 @@ where
                 generation,
                 deadline,
                 cancel,
+                requires_full_coverage: _,
                 mut owner,
             } = op;
             let pubkeys = [pubkey];
@@ -2910,6 +2919,7 @@ where
                 mark_empty_if_not_found,
                 slot,
                 fetch_context,
+                None,
             )
             .await
         {
@@ -2936,13 +2946,24 @@ where
         .await
     }
 
-    #[instrument(skip(self, pubkeys, mark_empty_if_not_found), fields(tx_sig = tracing::field::Empty))]
+    #[instrument(
+        skip(
+            self,
+            pubkeys,
+            mark_empty_if_not_found,
+            coverage_requirements
+        ),
+        fields(tx_sig = tracing::field::Empty)
+    )]
     async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
         fetch_context: AccountFetchContext,
+        coverage_requirements: Option<
+            &StdHashMap<Pubkey, Arc<PendingFetchCoverageRequirement>>,
+        >,
     ) -> ChainlinkResult<Vec<RemoteAccount>> {
         if let Some(sig) = fetch_context.signature() {
             tracing::Span::current().record("tx_sig", sig.to_string());
@@ -2963,11 +2984,12 @@ where
 
         let accs = self
             .remote_account_provider
-            .try_get_multi(
+            .try_get_multi_with_coverage_requirements(
                 pubkeys,
                 mark_empty_if_not_found,
                 fetch_context,
                 min_context_slot,
+                coverage_requirements,
             )
             .await?;
 
@@ -3670,6 +3692,7 @@ where
 
         let mut waiters: Vec<PendingWaiter> = vec![];
         let mut claimed_ops: Vec<ClaimedOperation> = vec![];
+        let mut coverage_escalations = HashSet::new();
         for pubkey in pubkeys {
             match self.claim_or_join_owned_operation(*pubkey, fetch_context) {
                 PendingClaim::Created(handles) => {
@@ -3677,6 +3700,7 @@ where
                         waiter,
                         deadline,
                         cancel,
+                        requires_full_coverage,
                         owner,
                     } = handles;
                     let waiter_pubkey = waiter.pubkey();
@@ -3699,11 +3723,17 @@ where
                         generation: waiter.generation(),
                         deadline,
                         cancel,
+                        requires_full_coverage,
                         owner,
                     });
                     waiters.push(waiter);
                 }
-                PendingClaim::Joined(handles) => waiters.push(handles.waiter),
+                PendingClaim::Joined(handles) => {
+                    if handles.requires_full_coverage.requires_full() {
+                        coverage_escalations.insert(handles.waiter.pubkey());
+                    }
+                    waiters.push(handles.waiter);
+                }
             }
         }
         if !claimed_ops.is_empty() {
@@ -3713,6 +3743,15 @@ where
                 slot,
                 fetch_context,
             );
+        }
+        let escalation_results =
+            join_all(coverage_escalations.into_iter().map(|pubkey| {
+                self.remote_account_provider
+                    .ensure_pending_fetch_full_coverage(pubkey)
+            }))
+            .await;
+        for result in escalation_results {
+            result?;
         }
 
         let mut final_result = FetchAndCloneResult {

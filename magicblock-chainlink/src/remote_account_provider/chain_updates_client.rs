@@ -154,6 +154,14 @@ impl ChainPubsubClient for ChainUpdatesClient {
         }
     }
 
+    fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
+        use ChainUpdatesClient::*;
+        match self {
+            WebSocket(client) => client.is_subscribed(pubkey),
+            Laser(client) => client.is_subscribed(pubkey),
+        }
+    }
+
     fn subs_immediately(&self) -> bool {
         use ChainUpdatesClient::*;
         match self {

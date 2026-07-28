@@ -258,6 +258,15 @@ impl ChainPubsubClient for ChainLaserClientImpl {
             .collect()
     }
 
+    fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
+        let effective_pubkey = if *pubkey == clock::ID {
+            &SLOT_SUBSCRIPTION_DUMMY
+        } else {
+            pubkey
+        };
+        self.subscriptions.read().contains(effective_pubkey)
+    }
+
     fn subs_immediately(&self) -> bool {
         // All gRPC clients backfill, so delayed subscriptions behave like
         // immediate subscriptions from the caller's perspective.
