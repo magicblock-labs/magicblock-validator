@@ -294,6 +294,16 @@ pub fn execute_post_delegation_actions(
         delegated_target,
         &actions,
     )?;
+    // Signer authority in `native_invoke` is keyed by pubkey across the whole
+    // action bundle, so a pubkey that is a signer in any meta receives signer
+    // privilege even where another meta marks it writable and non-signer.
+    // Collect the full signer-pubkey set to gate the not-yet-created carve-out
+    // on it, rather than the current meta's own signer flag.
+    let signer_pubkeys: HashSet<Pubkey> = actions
+        .iter()
+        .flat_map(|action| action.accounts.iter())
+        .filter_map(|account| account.is_signer.then_some(account.pubkey))
+        .collect();
     for account_meta in actions
         .iter()
         .flat_map(|action| action.accounts.iter())
@@ -312,13 +322,14 @@ pub fn execute_post_delegation_actions(
             // itself (e.g. an ephemeral account or rent-pending ATA
             // materialized through a Magic CPI). Post-execution writable
             // validation still rejects the transaction atomically if the
-            // action leaves it without a mutability flag. Signer metas are
+            // action leaves it without a mutability flag. Signer pubkeys are
             // excluded: action signers are synthesized without signatures, so
             // accepting an absent signer would let a delegation-record author
             // squat any unused pubkey. Legitimate creations authorize the new
             // account with program (PDA) signatures inside the invoked
             // program's CPIs instead.
-            let not_created_yet = !account_meta.is_signer
+            let not_created_yet = !signer_pubkeys
+                .contains(&account_meta.pubkey)
                 && account.lamports() == 0
                 && account.data().is_empty();
             not_created_yet
