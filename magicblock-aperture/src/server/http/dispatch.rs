@@ -20,6 +20,7 @@ use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics::{
     RPC_REQUESTS_COUNT, RPC_REQUEST_HANDLING_TIME,
 };
+use tokio::sync::Semaphore;
 
 use crate::{
     requests::{
@@ -58,6 +59,9 @@ pub(crate) struct HttpDispatcher {
     /// A handle to the transaction scheduler for processing
     /// `sendTransaction` and `simulateTransaction`.
     pub(crate) transactions_scheduler: TransactionSchedulerHandle,
+    /// Bounds concurrent iterator-based ledger scans so a burst of degraded
+    /// (e.g. tombstone-scanning) queries cannot exhaust threads or the DB.
+    blocking_reads: Semaphore,
 }
 
 impl HttpDispatcher {
@@ -69,6 +73,12 @@ impl HttpDispatcher {
         state: SharedState,
         channels: &DispatchEndpoints,
     ) -> Arc<Self> {
+        // Mirror the runtime's worker count: the same ledger-scan concurrency
+        // the workers previously allowed implicitly, now without starving them.
+        let permits = std::thread::available_parallelism()
+            .map(|n| (n.get() / 2).saturating_sub(1))
+            .unwrap_or(1)
+            .max(2);
         Arc::new(Self {
             context: state.context,
             accountsdb: state.accountsdb.clone(),
@@ -77,6 +87,7 @@ impl HttpDispatcher {
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             transactions_scheduler: channels.transaction_scheduler.clone(),
+            blocking_reads: Semaphore::new(permits),
         })
     }
 
@@ -177,7 +188,7 @@ impl HttpDispatcher {
         match request.method {
             GetAccountInfo => self.get_account_info(request).await,
             GetBalance => self.get_balance(request).await,
-            GetBlock => self.get_block(request),
+            GetBlock => self.run_blocking(|| self.get_block(request)).await,
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_block_height(request),
             GetBlockTime => self.get_block_time(request),
@@ -200,7 +211,10 @@ impl HttpDispatcher {
                 self.get_recent_performance_samples(request)
             }
             GetSignatureStatuses => self.get_signature_statuses(request),
-            GetSignaturesForAddress => self.get_signatures_for_address(request),
+            GetSignaturesForAddress => {
+                self.run_blocking(|| self.get_signatures_for_address(request))
+                    .await
+            }
             GetSlot => self.get_slot(request),
             GetSlotLeader => self.get_slot_leader(request),
             GetSlotLeaders => self.get_slot_leaders(request),
@@ -265,5 +279,34 @@ impl HttpDispatcher {
         headers.insert(ACCESS_CONTROL_ALLOW_METHODS, hv("POST, OPTIONS, GET"));
         headers.insert(ACCESS_CONTROL_ALLOW_HEADERS, hv("*"));
         headers.insert(ACCESS_CONTROL_MAX_AGE, hv("86400"));
+    }
+}
+
+impl HttpDispatcher {
+    /// Runs an iterator-based ledger scan (`getBlock`,
+    /// `getSignaturesForAddress`) via `block_in_place`: such scans crawl the
+    /// range tombstones left behind by the ledger truncator and must never
+    /// pin an RPC runtime worker and starve every other request. The
+    /// `blocking_reads` semaphore bounds how many run at once; waiters queue
+    /// in async land without occupying any thread.
+    ///
+    /// Single-key ledger gets stay inline: they remain cheap under tombstones
+    /// (signature-keyed columns are never range-deleted), and the per-call
+    /// `block_in_place` core handoff is too costly for hot point lookups.
+    ///
+    /// Falls back to running inline on current-thread runtimes (tests), where
+    /// `block_in_place` would panic.
+    async fn run_blocking<T>(&self, f: impl FnOnce() -> T) -> T {
+        use tokio::runtime::{Handle, RuntimeFlavor};
+        // The semaphore is never closed, so acquisition cannot fail.
+        let _permit = self.blocking_reads.acquire().await.ok();
+        let multi_threaded = Handle::try_current()
+            .map(|h| h.runtime_flavor() == RuntimeFlavor::MultiThread)
+            .unwrap_or_default();
+        if multi_threaded {
+            tokio::task::block_in_place(f)
+        } else {
+            f()
+        }
     }
 }
