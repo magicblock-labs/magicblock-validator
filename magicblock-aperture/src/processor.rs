@@ -99,6 +99,15 @@ impl EventProcessors {
     /// sent after subscription, so replayed blockhashes cannot become valid RPC
     /// blockhashes.
     pub fn start(self) {
+        let _ = self.start_tracked();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn start_for_test(self) -> Vec<tokio::task::JoinHandle<()>> {
+        self.start_tracked()
+    }
+
+    fn start_tracked(self) -> Vec<tokio::task::JoinHandle<()>> {
         let Self {
             config,
             state,
@@ -107,15 +116,17 @@ impl EventProcessors {
             cancel,
             geyser,
         } = self;
-        for id in 0..config.event_processors {
-            let processor = EventProcessor::new(
-                &state,
-                account_update_rx.clone(),
-                transaction_status_rx.clone(),
-                geyser.clone(),
-            );
-            tokio::spawn(processor.run(id, cancel.clone()));
-        }
+        (0..config.event_processors)
+            .map(|id| {
+                let processor = EventProcessor::new(
+                    &state,
+                    account_update_rx.clone(),
+                    transaction_status_rx.clone(),
+                    geyser.clone(),
+                );
+                tokio::spawn(processor.run(id, cancel.clone()))
+            })
+            .collect()
     }
 }
 
