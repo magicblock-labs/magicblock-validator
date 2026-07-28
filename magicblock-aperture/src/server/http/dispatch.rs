@@ -1,11 +1,17 @@
 use core::str;
-use std::{convert::Infallible, sync::Arc};
+use std::{
+    convert::Infallible,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use futures::{stream::FuturesOrdered, StreamExt};
 use hyper::{
     body::Incoming,
     header::{
-        HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderName, HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS,
         ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
         ACCESS_CONTROL_MAX_AGE,
     },
@@ -111,6 +117,9 @@ impl HttpDispatcher {
         if let Some(response) = self.handle_special_request(&request) {
             return Ok(response);
         }
+
+        let remote_account_claims = Arc::new(AtomicU64::new(0));
+
         // A local macro to simplify error handling. If a Result is an Err,
         // it immediately formats it into a JSON-RPC error response and returns.
         macro_rules! unwrap {
@@ -120,6 +129,10 @@ impl HttpDispatcher {
                     Err(error) => {
                         let mut resp = ResponseErrorPayload::encode($id, error);
                         Self::set_access_control_headers(&mut resp);
+                        Self::set_remote_account_claims_header(
+                            &mut resp,
+                            &remote_account_claims,
+                        );
                         return Ok(resp);
                     }
                 }
@@ -130,6 +143,10 @@ impl HttpDispatcher {
                     Err(error) => {
                         let mut resp = ResponseErrorPayload::encode($id, error);
                         Self::set_access_control_headers(&mut resp);
+                        Self::set_remote_account_claims_header(
+                            &mut resp,
+                            &remote_account_claims,
+                        );
                         resp
                     }
                 }
@@ -143,7 +160,8 @@ impl HttpDispatcher {
         // Resolve the handler for request and process it
         let (response, id) = match request {
             RpcRequest::Single(mut r) => {
-                let response = self.process(&mut r).await;
+                let response =
+                    self.process(&mut r, remote_account_claims.clone()).await;
                 (response, Some(r.id))
             }
             RpcRequest::Multi(requests) => {
@@ -152,8 +170,10 @@ impl HttpDispatcher {
                 const CLOSE_BR: u8 = b']';
                 let mut jobs = FuturesOrdered::new();
                 for mut r in requests {
-                    let j = async {
-                        let response = self.process(&mut r).await;
+                    let claims = remote_account_claims.clone();
+                    let dispatcher = self.clone();
+                    let j = async move {
+                        let response = dispatcher.process(&mut r, claims).await;
                         (response, r)
                     };
                     jobs.push_back(j);
@@ -174,10 +194,18 @@ impl HttpDispatcher {
         // Handle any errors from the handling stage
         let mut response = unwrap!(response, id.as_ref());
         Self::set_access_control_headers(&mut response);
+        Self::set_remote_account_claims_header(
+            &mut response,
+            &remote_account_claims,
+        );
         Ok(response)
     }
 
-    async fn process(&self, request: &mut JsonHttpRequest) -> HandlerResult {
+    async fn process(
+        &self,
+        request: &mut JsonHttpRequest,
+        _remote_account_claims: Arc<AtomicU64>,
+    ) -> HandlerResult {
         // Route the request to the correct handler based on the method name.
         use crate::requests::JsonRpcHttpMethod::*;
         let method = request.method.as_str();
@@ -267,6 +295,21 @@ impl HttpDispatcher {
             return Some(response);
         }
         None
+    }
+
+    const REMOTE_ACCOUNT_CLAIMS_HEADER: HeaderName =
+        HeaderName::from_static("x-mb-remote-account-claims");
+
+    fn set_remote_account_claims_header(
+        response: &mut Response<JsonBody>,
+        remote_account_claims: &AtomicU64,
+    ) {
+        let claims = remote_account_claims.load(Ordering::Relaxed).to_string();
+        let value = HeaderValue::from_str(&claims)
+            .expect("u64 remote account claims header value should be valid");
+        response
+            .headers_mut()
+            .insert(Self::REMOTE_ACCOUNT_CLAIMS_HEADER, value);
     }
 
     /// Set CORS/Access control related headers (required by explorers/web apps)
