@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -140,6 +140,7 @@ impl IntentPersisterImpl {
                 commit_status: CommitStatus::Pending,
                 last_retried_at: created_at,
                 retries_count: 0,
+                remote_slot: account.remote_slot,
             }
         };
 
@@ -163,6 +164,23 @@ impl IntentPersisterImpl {
                 .map(move |account| create_row(undelegate, account))
         })
         .collect()
+    }
+
+    /// Loads pending/failed bundles for restart recovery, each paired with
+    /// the `commit_id` (nonce) its committed accounts were persisted with.
+    /// See [`RecoveredIntent`] for why this isn't part of the
+    /// `IntentPersister::pending_intent_bundles` trait method.
+    pub fn recoverable_intents(
+        &self,
+        min_created_at: u64,
+    ) -> CommitPersistResult<Vec<RecoveredIntent>> {
+        let commits_db = self.commits_db.lock().expect(POISONED_MUTEX_MSG);
+        let mut rows =
+            commits_db.get_pending_commit_statuses(min_created_at)?;
+        rows.extend(commits_db.get_failed_commit_statuses(min_created_at)?);
+        drop(commits_db);
+
+        Ok(pending_rows_to_recovered_intents(rows, min_created_at))
     }
 }
 
@@ -481,10 +499,31 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
     }
 }
 
+/// A recovered bundle paired with the `commit_id` (nonce) each of its
+/// committed accounts was persisted with. `commit_id` is committor-internal
+/// bookkeeping, not chain-facing state, so it doesn't live on
+/// `CommittedAccount`/`ScheduledIntentBundle` themselves - keeping it bundled
+/// here (rather than a separate map keyed by bundle id) means a consumer can
+/// never observe a bundle without its matching commit_ids.
+pub struct RecoveredIntent {
+    pub bundle: ScheduledIntentBundle,
+    pub commit_ids: HashMap<Pubkey, u64>,
+}
+
 fn pending_rows_to_scheduled_intent_bundles(
     rows: Vec<CommitStatusRow>,
     min_created_at: u64,
 ) -> Vec<ScheduledIntentBundle> {
+    pending_rows_to_recovered_intents(rows, min_created_at)
+        .into_iter()
+        .map(|recovered| recovered.bundle)
+        .collect()
+}
+
+fn pending_rows_to_recovered_intents(
+    rows: Vec<CommitStatusRow>,
+    min_created_at: u64,
+) -> Vec<RecoveredIntent> {
     let mut grouped_rows = BTreeMap::<u64, Vec<CommitStatusRow>>::new();
     for row in rows {
         grouped_rows.entry(row.message_id).or_default().push(row);
@@ -519,13 +558,13 @@ fn pending_rows_to_scheduled_intent_bundles(
                 Some(rows)
             }
         })
-        .filter_map(intent_bundle_from_rows)
+        .filter_map(recovered_intent_from_rows)
         .collect()
 }
 
-fn intent_bundle_from_rows(
+fn recovered_intent_from_rows(
     rows: Vec<CommitStatusRow>,
-) -> Option<ScheduledIntentBundle> {
+) -> Option<RecoveredIntent> {
     let first = rows.first()?;
     let message_id = first.message_id;
     let slot = first.slot;
@@ -533,11 +572,15 @@ fn intent_bundle_from_rows(
 
     let mut commit_finalize_accounts = Vec::new();
     let mut commit_finalize_and_undelegate_accounts = Vec::new();
+    let mut commit_ids = HashMap::new();
     for row in rows {
+        let pubkey = row.pubkey;
+        let commit_id = row.commit_id;
         let Some((account, undelegate)) = committed_account_from_row(row)
         else {
             continue;
         };
+        commit_ids.insert(pubkey, commit_id);
         if undelegate {
             commit_finalize_and_undelegate_accounts.push(account);
         } else {
@@ -563,13 +606,16 @@ fn intent_bundle_from_rows(
         return None;
     }
 
-    Some(ScheduledIntentBundle {
-        id: message_id,
-        slot,
-        blockhash,
-        sent_transaction: Transaction::default(),
-        payer: Pubkey::default(),
-        intent_bundle,
+    Some(RecoveredIntent {
+        bundle: ScheduledIntentBundle {
+            id: message_id,
+            slot,
+            blockhash,
+            sent_transaction: Transaction::default(),
+            payer: Pubkey::default(),
+            intent_bundle,
+        },
+        commit_ids,
     })
 }
 
@@ -595,7 +641,7 @@ fn committed_account_from_row(
                 executable: false,
                 rent_epoch: 0,
             },
-            remote_slot: 0,
+            remote_slot: row.remote_slot,
         },
         row.undelegate,
     ))
@@ -729,11 +775,67 @@ mod tests {
         let empty_account = rows.iter().find(|r| r.data.is_none()).unwrap();
         assert_eq!(empty_account.commit_type, types::CommitType::EmptyAccount);
         assert_eq!(empty_account.lamports, 1000);
+        assert_eq!(empty_account.remote_slot, 1);
 
         let data_account = rows.iter().find(|r| r.data.is_some()).unwrap();
         assert_eq!(data_account.commit_type, types::CommitType::DataAccount);
         assert_eq!(data_account.lamports, 2000);
         assert_eq!(data_account.data, Some(vec![1, 2, 3]));
+        assert_eq!(data_account.remote_slot, 2);
+    }
+
+    #[test]
+    fn test_remote_slot_round_trips_through_persistence() {
+        // Regression test: `remote_slot` (the base chain slot observed when
+        // the intent was built) must survive create_commit_rows -> DB ->
+        // committed_account_from_row, since recovery-time staleness checks
+        // depend on it reflecting the original scheduling slot, not 0.
+        let message = create_test_message(1, commit_only_bundle());
+        let rows = IntentPersisterImpl::create_commit_rows(&message);
+        assert!(rows.iter().any(|r| r.remote_slot == 1));
+        assert!(rows.iter().any(|r| r.remote_slot == 2));
+
+        let (persister, _temp_file) = create_test_persister();
+        persister.start_base_intent(&message).unwrap();
+        let stored = persister.get_commit_statuses_by_message(1).unwrap();
+        assert!(stored.iter().any(|r| r.remote_slot == 1));
+        assert!(stored.iter().any(|r| r.remote_slot == 2));
+
+        let reconstructed = pending_rows_to_scheduled_intent_bundles(stored, 0);
+        let remote_slots: Vec<u64> = reconstructed[0]
+            .get_all_committed_accounts()
+            .iter()
+            .map(|a| a.remote_slot)
+            .collect();
+        assert!(remote_slots.contains(&1));
+        assert!(remote_slots.contains(&2));
+    }
+
+    #[test]
+    fn test_recoverable_intents_pairs_bundle_with_its_commit_ids() {
+        let owner = Pubkey::new_unique();
+        let blockhash = Hash::new_unique();
+        let pubkey_a = Pubkey::new_unique();
+        let pubkey_b = Pubkey::new_unique();
+
+        let (persister, _temp_file) = create_test_persister();
+        persister
+            .commits_db
+            .lock()
+            .unwrap()
+            .insert_commit_status_rows(&[
+                pending_row(1, pubkey_a, owner, blockhash, false, None),
+                pending_row(1, pubkey_b, owner, blockhash, false, None),
+            ])
+            .unwrap();
+        persister.set_commit_id(1, &pubkey_a, 5).unwrap();
+        persister.set_commit_id(1, &pubkey_b, 7).unwrap();
+
+        let recovered = persister.recoverable_intents(0).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].bundle.id, 1);
+        assert_eq!(recovered[0].commit_ids.get(&pubkey_a), Some(&5));
+        assert_eq!(recovered[0].commit_ids.get(&pubkey_b), Some(&7));
     }
 
     #[test]
@@ -960,6 +1062,7 @@ mod tests {
             commit_strategy: Default::default(),
             last_retried_at: 1,
             retries_count: 0,
+            remote_slot: 0,
         }
     }
 

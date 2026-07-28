@@ -13,7 +13,9 @@ use intent_client::{
     ERIntentClient, InternalIntentClientError, ScheduledBaseIntentMeta,
 };
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
+use magicblock_chainlink::{
+    errors::ChainlinkResult, ProdChainlink, ProdInnerChainlink,
+};
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason,
 };
@@ -26,11 +28,13 @@ use tokio::{
     task::{JoinError, JoinHandle},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument, warn};
+use tracing::{error, info, instrument};
 
 use crate::{
     committor_processor::CommittorProcessor, error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
+    intent_executor::task_info_fetcher::TaskInfoFetcherResult,
+    persist::RecoveredIntent,
 };
 
 const POISONED_MUTEX_MSG: &str = "ServiceInner intents_meta_map mutex poisoned";
@@ -180,20 +184,27 @@ where
     }
 
     async fn reschedule_pending_bundles(&self) -> CommittorServiceResult<()> {
-        // Fetch pending and failed bundles from DB
-        let mut bundles = self
+        // Fetch pending and failed bundles from DB, unfiltered
+        let recovered = self
             .processor
             .load_recovery_intent_bundles()
             .await
             .inspect_err(|err| {
                 error!(error = ?err, "Failed to load pending intent bundles for recovery");
             })?;
+        if recovered.is_empty() {
+            return Ok(());
+        }
+
+        // Drop bundles that are no longer safe to replay
+        let mut bundles = self.retain_recoverable_intents(recovered).await;
         if bundles.is_empty() {
             return Ok(());
         }
 
-        // Retain only recoverable bundles
-        self.retain_recoverable_intent_bundles(&mut bundles).await;
+        // Bundles are out of date and missing some info now that they
+        // survived the recovery filters, which needed the original values.
+        self.processor.refresh_intent_bundles(&mut bundles).await?;
 
         // Schedule  without initial persisitance as bundle already exists in db
         self.process_intent_bundles(bundles, |bundles| {
@@ -374,55 +385,116 @@ where
         Ok(())
     }
 
-    /// Retains bundles whose accounts are still delegated
-    async fn retain_recoverable_intent_bundles(
+    /// Filters recovered intents down to the ones still safe to replay,
+    /// checking up to `JOIN_CHUNK_SIZE` at a time in parallel.
+    async fn retain_recoverable_intents(
         &self,
-        bundles: &mut Vec<ScheduledIntentBundle>,
-    ) {
-        let results = join_all(
-            bundles.iter().map(|b| b.get_all_committed_pubkeys()).map(
-                |pubkeys| async move {
-                    #[allow(deprecated)]
-                    let result = self
-                        .chainlink
-                        .accounts_delegated_on_base_and_er(
-                            &pubkeys,
-                            AccountFetchContext::internal(
-                                AccountFetchReason::RequestedAccount,
-                            ),
-                        )
-                        .await;
-                    result
-                },
-            ),
-        )
-        .await;
+        recovered: Vec<RecoveredIntent>,
+    ) -> Vec<ScheduledIntentBundle> {
+        const JOIN_CHUNK_SIZE: usize = 10;
 
-        let mut results_iter = results.into_iter();
-        bundles.retain(|bundle| {
-            let Some(result) = results_iter.next() else {
-                error!("Results and bundles must have equal length");
-                return false;
-            };
-            match result {
-                Ok(delegated) if delegated.iter().all(|d| *d) => true,
-                Ok(_) => {
-                    warn!(
-                        intent_id = bundle.id,
-                        "Skipping recovered commit intent because not all accounts are delegated on base and ER"
-                    );
-                    false
-                }
-                Err(err) => {
-                    error!(
-                        intent_id = bundle.id,
-                        error = ?err,
-                        "Failed to verify recovered commit intent accounts"
-                    );
-                    false
-                }
-            }
+        let mut to_keep = Vec::with_capacity(recovered.len());
+        for chunk in recovered.chunks(JOIN_CHUNK_SIZE) {
+            let iter = chunk.iter().map(|recovered| async move {
+                self.is_intent_retriable(recovered).await
+            });
+            to_keep.extend(join_all(iter).await);
+        }
+
+        recovered
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| to_keep[*i])
+            .map(|(_, el)| el.bundle)
+            .collect()
+    }
+
+    /// An intent is retriable only if its delegation session is unchanged
+    /// and its commit nonce hasn't already landed on chain.
+    async fn is_intent_retriable(&self, recovered: &RecoveredIntent) -> bool {
+        let pubkeys = recovered.bundle.get_all_committed_pubkeys();
+        let result = self
+            .is_same_delegation_session(&pubkeys, recovered)
+            .await
+            .inspect_err(|err| {
+                error!(intent_id = recovered.bundle.id, error = ?err, "Failed to check delegation session for recovery");
+            })
+            .unwrap_or(false);
+
+        if !result {
+            false
+        } else {
+            self.is_valid_nonce(&pubkeys, recovered)
+                .await
+                .inspect_err(|err| {
+                    error!(intent_id = recovered.bundle.id, error = ?err, "Failed to check commit nonce for recovery");
+                })
+                .unwrap_or(false)
+        }
+    }
+
+    /// True if every committed account is still delegated (or undelegating)
+    /// at the same `remote_slot` recorded when the intent was scheduled.
+    async fn is_same_delegation_session(
+        &self,
+        pubkeys: &[Pubkey],
+        recovered: &RecoveredIntent,
+    ) -> ChainlinkResult<bool> {
+        let recovered_accounts = recovered.bundle.get_all_committed_accounts();
+        let current_accounts = self
+            .chainlink
+            .fetch_accounts(
+                pubkeys,
+                AccountFetchContext::internal(
+                    AccountFetchReason::RequestedAccount,
+                ),
+            )
+            .await?
+            .into_iter()
+            .collect::<Option<Vec<_>>>();
+        let Some(current_accounts) = current_accounts else {
+            return Ok(false);
+        };
+        if current_accounts.len() != pubkeys.len() {
+            return Ok(false);
+        }
+
+        let same_session = recovered_accounts
+            .into_iter()
+            .zip(current_accounts)
+            .all(|(recovered, actual)| {
+                // 1. If account delegated using remote_slot we ensure
+                // that account is within same delegation "session" and wasn't redelegated
+                // 2. We handle `undelegating` state as well because undelegation could fail
+                // If that is the case we want to retry undelegate intent
+                // We need to make sure that is within same session as well
+                // NOTE: here we rely `validate_not_delegated` & `should_refresh_undelegating_in_bank_account`
+                // If account delegated - remote_slot doesn't change
+                // If account undelegating - until it is remote_slot doesn't change
+                (actual.delegated() || actual.undelegating())
+                    && recovered.remote_slot == actual.remote_slot()
+            });
+        Ok(same_session)
+    }
+
+    /// False if any committed account's persisted `commit_id` has already
+    /// been consumed on chain, or couldn't be verified.
+    async fn is_valid_nonce(
+        &self,
+        pubkeys: &[Pubkey],
+        recovered: &RecoveredIntent,
+    ) -> TaskInfoFetcherResult<bool> {
+        let current_nonces = self
+            .processor
+            .fetch_current_commit_nonces(pubkeys, 0)
+            .await?;
+
+        let valid = recovered.commit_ids.iter().all(|(pubkey, commit_id)| {
+            current_nonces
+                .get(pubkey)
+                .is_some_and(|current_nonce| commit_id > current_nonce)
         });
+        Ok(valid)
     }
 }
 

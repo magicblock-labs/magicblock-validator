@@ -32,7 +32,7 @@ use crate::{
     },
     persist::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
-        MessageSignatures,
+        MessageSignatures, RecoveredIntent,
     },
 };
 const POISONED_MUTEX_MSG: &str =
@@ -154,43 +154,40 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
-    /// Fetches pending and failed bundles from DB for recovery
+    /// Fetches pending and failed bundles from DB for recovery. No filtering.
     pub async fn load_recovery_intent_bundles(
         &self,
-    ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
-        // Extract pending and failed bundles satisfying predicate
+    ) -> CommittorServiceResult<Vec<RecoveredIntent>> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let mut bundles = self.persister.pending_intent_bundles(
-            now.saturating_sub(RECOVERY_MAX_AGE_SECS),
-        )?;
+        let recovered = self
+            .persister
+            .recoverable_intents(now.saturating_sub(RECOVERY_MAX_AGE_SECS))?;
 
-        if bundles.is_empty() {
-            return Ok(bundles);
-        }
-
-        // Log info about extracted bundles
-        {
-            let accounts_count: usize = bundles
+        if !recovered.is_empty() {
+            let accounts_count: usize = recovered
                 .iter()
-                .map(|bundle| bundle.get_all_committed_pubkeys().len())
+                .map(|r| r.bundle.get_all_committed_pubkeys().len())
                 .sum();
             info!(
-                intent_count = bundles.len(),
+                intent_count = recovered.len(),
                 accounts_count,
                 "Loaded commit intents from persistence for recovery"
             );
         }
 
-        // Extracted bundles are out of data and missing some of the info
-        self.refresh_intent_bundles(&mut bundles).await?;
-
-        Ok(bundles)
+        Ok(recovered)
     }
 
-    async fn refresh_intent_bundles(
+    /// Stamps `payer` and `remote_slot` on recovered bundles with current
+    /// values so execution (fetching nonces/base accounts) uses a fresh
+    /// `min_context_slot`. Must run only on bundles that already survived
+    /// the caller's nonce and delegation-session recovery filters, since it
+    /// destroys the original scheduling-time `remote_slot` those filters
+    /// depend on.
+    pub(crate) async fn refresh_intent_bundles(
         &self,
         intent_bundles: &mut [ScheduledIntentBundle],
     ) -> CommittorServiceResult<()> {

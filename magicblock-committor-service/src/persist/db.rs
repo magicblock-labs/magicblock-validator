@@ -54,6 +54,10 @@ pub struct CommitStatusRow {
     pub last_retried_at: u64,
     /// Number of times the commit was retried
     pub retries_count: u16,
+    /// The base chain slot at which the committed account's state was
+    /// observed when the intent was built (`CommittedAccount::remote_slot`).
+    /// Defaults to 0 for rows written before this column existed.
+    pub remote_slot: u64,
 }
 
 #[derive(Debug)]
@@ -86,7 +90,8 @@ impl fmt::Display for CommitStatusRow {
     commit_status: {},
     commit_strategy: {},
     last_retried_at: {},
-    retries_count: {}
+    retries_count: {},
+    remote_slot: {}
 }}",
             self.message_id,
             self.pubkey,
@@ -102,7 +107,8 @@ impl fmt::Display for CommitStatusRow {
             self.commit_status,
             self.commit_strategy.as_str(),
             self.last_retried_at,
-            self.retries_count
+            self.retries_count,
+            self.remote_slot
         )
     }
 }
@@ -124,7 +130,8 @@ const ALL_COMMIT_STATUS_COLUMNS: &str = "
     commit_stage_signature,
     finalize_stage_signature,
     last_retried_at,
-    retries_count
+    retries_count,
+    remote_slot
 ";
 
 const SELECT_ALL_COMMIT_STATUS_COLUMNS: &str = r#"
@@ -145,7 +152,8 @@ SELECT
     commit_stage_signature,
     finalize_stage_signature,
     last_retried_at,
-    retries_count
+    retries_count,
+    remote_slot
 FROM commit_status
 "#;
 
@@ -366,6 +374,7 @@ impl CommittsDb {
                 finalize_stage_signature TEXT,
                 last_retried_at          INTEGER NOT NULL,
                 retries_count            INTEGER NOT NULL,
+                remote_slot              INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (message_id, commit_id, pubkey)
             );
             CREATE INDEX IF NOT EXISTS idx_commits_pubkey ON commit_status (pubkey);
@@ -373,12 +382,32 @@ impl CommittsDb {
             CREATE INDEX IF NOT EXISTS idx_commits_commit_id ON commit_status (commit_id);
         COMMIT;",
         ) {
-            Ok(_) => Ok(()),
+            Ok(_) => {}
             Err(err) => {
                 error!(error = ?err, "Failed to create commit_status table");
-                Err(err)
+                return Err(err);
             }
         }
+        self.migrate_add_remote_slot_column()
+    }
+
+    /// Adds the `remote_slot` column to `commit_status` for databases created
+    /// before this column existed. `CREATE TABLE IF NOT EXISTS` above is a
+    /// no-op against an already-existing table, so a missing column needs an
+    /// explicit, idempotent `ALTER TABLE`. Existing rows backfill to 0, which
+    /// is indistinguishable from "never verified" for the recovery filter
+    /// since real base chain slots are never 0.
+    fn migrate_add_remote_slot_column(&self) -> Result<()> {
+        let has_column = self
+            .conn
+            .prepare("SELECT 1 FROM pragma_table_info('commit_status') WHERE name = 'remote_slot'")?
+            .exists([])?;
+        if has_column {
+            return Ok(());
+        }
+        self.conn.execute_batch(
+            "ALTER TABLE commit_status ADD COLUMN remote_slot INTEGER NOT NULL DEFAULT 0;",
+        )
     }
 
     // -----------------
@@ -502,7 +531,7 @@ impl CommittsDb {
         tx.execute(
             &format!(
                 "INSERT INTO commit_status ({ALL_COMMIT_STATUS_COLUMNS}) VALUES
-            (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             ),
             params![
             u64_into_i64(commit.message_id),
@@ -526,6 +555,7 @@ impl CommittsDb {
                 .map(|s| s.to_string()),
             u64_into_i64(commit.last_retried_at),
             commit.retries_count,
+            u64_into_i64(commit.remote_slot),
         ],
         )?;
         Ok(())
@@ -777,6 +807,10 @@ fn extract_committor_row(
         let retries_count: i64 = row.get(16)?;
         retries_count.try_into().unwrap_or_default()
     };
+    let remote_slot: u64 = {
+        let remote_slot: i64 = row.get(17)?;
+        i64_into_u64(remote_slot)
+    };
 
     Ok(CommitStatusRow {
         message_id,
@@ -791,6 +825,7 @@ fn extract_committor_row(
         commit_type,
         created_at,
         commit_strategy,
+        remote_slot,
         commit_status,
         last_retried_at,
         retries_count,
@@ -817,6 +852,93 @@ mod tests {
         (db, temp_file)
     }
 
+    #[test]
+    fn test_migrate_add_remote_slot_column_backfills_existing_rows() {
+        test_utils::init_test_logger();
+        let temp_file = NamedTempFile::new().unwrap();
+        let db = CommittsDb::new(temp_file.path()).unwrap();
+
+        // Simulate a pre-migration database: create the table without the
+        // remote_slot column, exactly as it looked before this column existed.
+        db.conn
+            .execute_batch(
+                "
+        CREATE TABLE commit_status (
+            message_id               INTEGER NOT NULL,
+            pubkey                   TEXT NOT NULL,
+            commit_id                INTEGER NOT NULL,
+            delegated_account_owner  TEXT NOT NULL,
+            slot                     INTEGER NOT NULL,
+            ephemeral_blockhash      TEXT NOT NULL,
+            undelegate               INTEGER NOT NULL,
+            lamports                 INTEGER NOT NULL,
+            data                     BLOB,
+            commit_type              TEXT NOT NULL,
+            created_at               INTEGER NOT NULL,
+            commit_strategy          TEXT NOT NULL,
+            commit_status            TEXT NOT NULL,
+            commit_stage_signature   TEXT,
+            finalize_stage_signature TEXT,
+            last_retried_at          INTEGER NOT NULL,
+            retries_count            INTEGER NOT NULL,
+            PRIMARY KEY (message_id, commit_id, pubkey)
+        );",
+            )
+            .unwrap();
+
+        // A real, fully-valid row (not migration-affected placeholder
+        // strings) so we can round-trip it through the typed read path below
+        // and catch any parsing issue the migration might introduce, not
+        // just confirm the new column exists.
+        let old_row = create_test_row(1, 0);
+        db.conn
+            .execute(
+                "INSERT INTO commit_status (
+                    message_id, pubkey, commit_id, delegated_account_owner,
+                    slot, ephemeral_blockhash, undelegate, lamports, data,
+                    commit_type, created_at, commit_strategy, commit_status,
+                    commit_stage_signature, finalize_stage_signature,
+                    last_retried_at, retries_count
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                params![
+                    u64_into_i64(old_row.message_id),
+                    old_row.pubkey.to_string(),
+                    u64_into_i64(old_row.commit_id),
+                    old_row.delegated_account_owner.to_string(),
+                    u64_into_i64(old_row.slot),
+                    old_row.ephemeral_blockhash.to_string(),
+                    if old_row.undelegate { 1 } else { 0 },
+                    u64_into_i64(old_row.lamports),
+                    old_row.data.as_deref(),
+                    old_row.commit_type.as_str(),
+                    u64_into_i64(old_row.created_at),
+                    old_row.commit_strategy.as_str(),
+                    old_row.commit_status.as_str(),
+                    None::<String>,
+                    None::<String>,
+                    u64_into_i64(old_row.last_retried_at),
+                    old_row.retries_count,
+                ],
+            )
+            .unwrap();
+
+        // Running create_commit_status_table against the pre-existing table
+        // (CREATE TABLE IF NOT EXISTS is a no-op) must still add the column.
+        db.create_commit_status_table().unwrap();
+        // And it must be idempotent on repeated calls (e.g. every startup).
+        db.create_commit_status_table().unwrap();
+
+        // The row must still be readable through the normal typed query
+        // path, with every pre-existing field intact and remote_slot
+        // backfilled to 0.
+        let migrated_row = db.get_commit_statuses_by_id(1).unwrap();
+        let expected_row = CommitStatusRow {
+            remote_slot: 0,
+            ..old_row
+        };
+        assert_eq!(migrated_row, vec![expected_row]);
+    }
+
     // Helper to create a test CommitStatusRow
     fn create_test_row(message_id: u64, commit_id: u64) -> CommitStatusRow {
         CommitStatusRow {
@@ -835,6 +957,7 @@ mod tests {
             commit_strategy: CommitStrategy::StateArgs,
             last_retried_at: 1000,
             retries_count: 0,
+            remote_slot: 100,
         }
     }
 
