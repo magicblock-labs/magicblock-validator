@@ -2797,6 +2797,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             }
         }
 
+        if fetch_context.should_count_remote_account_claims()
+            && !claimed_pubkeys.is_empty()
+        {
+            let unique_claimed_pubkey_count = claimed_pubkeys
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>()
+                .len();
+            fetch_context
+                .add_remote_account_claims(unique_claimed_pubkey_count);
+        }
+
         // Setup subscriptions and trigger the fetch only for pubkeys this
         // call actually claimed. Waiter-only pubkeys already have a
         // subscription and an in-flight fetch owned by the original

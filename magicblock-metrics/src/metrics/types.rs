@@ -253,6 +253,18 @@ impl AccountFetchContext {
         Self { reason, ..self }
     }
 
+    pub fn should_count_remote_account_claims(&self) -> bool {
+        if self.reason != AccountFetchReason::RequestedAccount {
+            return false;
+        }
+        matches!(
+            self.entrypoint,
+            AccountFetchEntrypoint::RpcGetAccount
+                | AccountFetchEntrypoint::RpcGetMultipleAccounts
+                | AccountFetchEntrypoint::SendTransaction(_)
+        )
+    }
+
     pub fn add_remote_account_claims(&self, count: usize) {
         self.remote_account_claims
             .fetch_add(count as u64, Ordering::Relaxed);
