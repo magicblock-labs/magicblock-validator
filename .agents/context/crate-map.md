@@ -82,5 +82,5 @@ The validator is performance-sensitive. When changing any crate on RPC, account 
 - For commit or undelegation bugs, start with `magicblock-program`, `magicblock-committor-service`, and `magicblock-services` for request-triggered scheduling.
 - For RPC behavior, start with `magicblock-aperture`; check `magicblock-chainlink` if reads trigger cloning.
 - For validator lifecycle/startup/shutdown, start with `magicblock-api` and `magicblock-validator`.
-- When adding, removing, renaming, or repurposing a crate, update this file and `AGENTS.md` in the same change.
+- When adding, removing, renaming, or repurposing a crate, queue updates to this file and `AGENTS.md` for the weekly documentation-maintenance task.
 - When changing crate responsibilities, note whether performance-sensitive work moved onto or off of a hot path and document any expected regression or mitigation.

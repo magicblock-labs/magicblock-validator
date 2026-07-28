@@ -19,7 +19,7 @@ Chainlink is on the account-availability hot path for RPC reads and transaction 
 
 ## Update requirement
 
-Whenever behavior in `magicblock-chainlink` changes, or another crate changes Chainlink flows, update this document in the same change for changes to:
+Whenever behavior in `magicblock-chainlink` changes, or another crate changes Chainlink flows, queue an update to this document for the weekly documentation-maintenance task for changes to:
 
 - account fetch/clone classification,
 - delegation-record resolution or local delegated/confined/undelegating flags,
@@ -239,7 +239,7 @@ Delegation records may carry encrypted or cleartext post-delegation actions. Cha
 - leaves locally undelegating writable dependencies as bank hits instead of remotely force-refreshing and overwriting their lock,
 - errors with `MissingDelegationActionAccounts` if required delegated writable dependencies cannot be resolved.
 
-Chainlink's dependency fetch is an availability preflight. The Magic Program executor authoritatively revalidates every writable action account from the locked transaction context and rejects plain or undelegating accounts, rolling back the clone and action transaction atomically. The target then follows the established rescue-undelegation path; no action-bearing activation commits, so there is no deferred retry state. Do not execute or ignore these actions blindly.
+Chainlink's dependency fetch is an availability preflight. The Magic Program executor authoritatively revalidates every writable action account from the locked transaction context and rejects plain or undelegating accounts (not-yet-created non-signer accounts pass, since actions legitimately create ephemeral accounts such as receipts and rent-pending ATAs under program (PDA) signatures; absent accounts whose pubkey is a signer anywhere in the action bundle stay rejected (gated on the whole signer-pubkey set, defeating duplicate-meta squats) to prevent pubkey squatting via synthesized signers, and post-execution writable validation still rejects the transaction if a created account ends up without a mutability flag), rolling back the clone and action transaction atomically. The target then follows the established rescue-undelegation path; no action-bearing activation commits, so there is no deferred retry state. Do not execute or ignore these actions blindly.
 
 ### Program account resolution
 

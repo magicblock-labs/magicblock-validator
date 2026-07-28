@@ -19,7 +19,7 @@ This crate sits directly on startup and shutdown paths and coordinates hot-path 
 
 ## Update requirement
 
-Update this document in the same change whenever `magicblock-api` behavior or contracts change. Update it for changes to:
+Queue an update to this document for the weekly documentation-maintenance task whenever `magicblock-api` behavior or contracts change. Include changes to:
 
 - `MagicValidator::try_from_config`, `start`, `stop`, `prepare_ledger_for_shutdown`, or validator registration/unregistration behavior;
 - startup/shutdown ordering, service ownership, cancellation semantics, or thread/runtime spawning;
