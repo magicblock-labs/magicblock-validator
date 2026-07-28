@@ -236,14 +236,6 @@ impl HttpDispatcher {
             .collect()
     }
 
-    async fn read_accounts_with_ensure_with_context(
-        &self,
-        pubkeys: &[Pubkey],
-        fetch_context: AccountFetchContext,
-    ) -> Vec<Option<AccountSharedData>> {
-        self.read_accounts_with_ensure(pubkeys, fetch_context).await
-    }
-
     /// Decodes, validates, and sanitizes a transaction from its string representation.
     ///
     /// This is a crucial pre-processing step for both `sendTransaction` and

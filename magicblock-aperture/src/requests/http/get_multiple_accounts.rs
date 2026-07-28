@@ -36,12 +36,9 @@ impl HttpDispatcher {
         let accounts = pubkeys
             .iter()
             .zip(
-                self.read_accounts_with_ensure_with_context(
-                    &pubkeys,
-                    fetch_context,
-                )
-                .await
-                .into_iter(),
+                self.read_accounts_with_ensure(&pubkeys, fetch_context)
+                    .await
+                    .into_iter(),
             )
             .map(|(pubkey, acc)| {
                 acc.filter(|account| {
