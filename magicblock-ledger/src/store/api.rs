@@ -276,7 +276,7 @@ impl Ledger {
     // Block time
     // -----------------
 
-    pub(crate) fn get_block_time(
+    pub fn get_block_time(
         &self,
         slot: Slot,
     ) -> LedgerResult<Option<UnixTimestamp>> {
