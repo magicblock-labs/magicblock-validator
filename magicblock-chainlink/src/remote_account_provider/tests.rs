@@ -1212,23 +1212,7 @@ async fn test_read_rpc_secondary_avoids_websocket_transport_work() {
 
     // A reconciler pass must preserve the pending secondary policy without
     // introducing a websocket leg.
-    let never_evicted = ctx
-        .provider
-        .lrucache_subscribed_accounts
-        .never_evicted_accounts();
-    subscription_reconciler::reconcile_subscriptions(
-        &ctx.provider.lrucache_subscribed_accounts,
-        &ctx.provider.secondary_subscriptions,
-        &ctx.provider.pubsub_client,
-        &never_evicted,
-        &ctx.provider.removed_account_tx,
-        Some(&ctx.provider.subscription_key_locks),
-        Some(&ctx.provider.subscription_transition_lock),
-        Some(&ctx.provider.subscription_ownership),
-        Some(ctx.provider.fetching_accounts.as_ref()),
-        Some(&ctx.provider.capacity_eviction_protection),
-    )
-    .await;
+    ctx.provider.reconcile_subscriptions_once_for_test().await;
     assert_eq!(
         ctx.websocket_client.subscribe_attempts(),
         ws_subscribe_baseline
@@ -1769,23 +1753,7 @@ async fn test_failed_secondary_repair_revokes_reconnect_authority_before_evictio
     // finalize eviction of the dead secondary watch.
     ctx.websocket_client.simulate_disconnect();
     ctx.grpc_client.simulate_disconnect();
-    let never_evicted = ctx
-        .provider
-        .lrucache_subscribed_accounts
-        .never_evicted_accounts();
-    subscription_reconciler::reconcile_subscriptions(
-        &ctx.provider.lrucache_subscribed_accounts,
-        &ctx.provider.secondary_subscriptions,
-        &ctx.provider.pubsub_client,
-        &never_evicted,
-        &ctx.provider.removed_account_tx,
-        Some(&ctx.provider.subscription_key_locks),
-        Some(&ctx.provider.subscription_transition_lock),
-        Some(&ctx.provider.subscription_ownership),
-        Some(ctx.provider.fetching_accounts.as_ref()),
-        Some(&ctx.provider.capacity_eviction_protection),
-    )
-    .await;
+    ctx.provider.reconcile_subscriptions_once_for_test().await;
     assert!(!ctx.provider.secondary_subscriptions.contains(&missing));
     assert!(!ctx
         .provider
@@ -1976,23 +1944,7 @@ async fn test_transaction_refetch_of_secondary_miss_restores_full_coverage() {
     );
     assert!(ctx.grpc_client.is_subscribed(&missing));
 
-    let never_evicted = ctx
-        .provider
-        .lrucache_subscribed_accounts
-        .never_evicted_accounts();
-    subscription_reconciler::reconcile_subscriptions(
-        &ctx.provider.lrucache_subscribed_accounts,
-        &ctx.provider.secondary_subscriptions,
-        &ctx.provider.pubsub_client,
-        &never_evicted,
-        &ctx.provider.removed_account_tx,
-        Some(&ctx.provider.subscription_key_locks),
-        Some(&ctx.provider.subscription_transition_lock),
-        Some(&ctx.provider.subscription_ownership),
-        Some(ctx.provider.fetching_accounts.as_ref()),
-        Some(&ctx.provider.capacity_eviction_protection),
-    )
-    .await;
+    ctx.provider.reconcile_subscriptions_once_for_test().await;
     assert!(
         ctx.websocket_client.is_subscribed(&missing),
         "reconciliation must preserve full coverage for a pending transaction fetch"
@@ -5292,16 +5244,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Stops the background reconciler so its startup pass cannot race a
     /// test that injects pubsub failures or asserts on stray subscriptions.
     async fn abort_subscription_reconciler_for_test(&self) {
-        if let Some(handle) = &self._active_subscriptions_task_handle {
+        let handle = self
+            ._active_subscriptions_task_handle
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take();
+        if let Some(handle) = handle {
             handle.abort();
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-            while !handle.is_finished() {
-                assert!(
-                    tokio::time::Instant::now() < deadline,
-                    "timed out stopping background subscription reconciler"
+            let _ = tokio::time::timeout(Duration::from_secs(2), handle)
+                .await
+                .expect(
+                    "timed out stopping background subscription reconciler",
                 );
-                tokio::task::yield_now().await;
-            }
         }
     }
 

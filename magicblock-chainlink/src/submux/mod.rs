@@ -993,6 +993,15 @@ where
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
             .clone();
+        let unsubscribed = unsubscribed_accounts
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        subscriptions.retain(|pubkey| !unsubscribed.contains(pubkey));
+        effective_grpc_only.retain(|pubkey| !unsubscribed.contains(pubkey));
+        drop(unsubscribed);
+
+        // Apply pending provider policy once, after settled tombstones, so it
+        // remains authoritative while preserving transport-specific fallback.
         for (pubkey, policy) in &pending {
             match policy {
                 AccountSubscriptionPublicationPolicy::Absent => {
@@ -1040,27 +1049,6 @@ where
                     !effective_grpc_only.contains(pubkey)
                         || !grpc_fully_covered_pubkeys.contains(pubkey)
                 });
-            }
-        }
-        let unsubscribed = unsubscribed_accounts
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        subscriptions.retain(|pubkey| {
-            !unsubscribed.contains(pubkey) || pending.contains_key(pubkey)
-        });
-        for (pubkey, policy) in pending {
-            match policy {
-                AccountSubscriptionPublicationPolicy::Absent => {
-                    subscriptions.remove(&pubkey);
-                }
-                AccountSubscriptionPublicationPolicy::Full => {
-                    subscriptions.insert(pubkey);
-                }
-                AccountSubscriptionPublicationPolicy::GrpcPreferred => {
-                    if client.transport() == PubsubTransport::Grpc {
-                        subscriptions.insert(pubkey);
-                    }
-                }
             }
         }
         subscriptions

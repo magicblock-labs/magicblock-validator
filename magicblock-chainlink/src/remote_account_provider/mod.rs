@@ -2851,7 +2851,7 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
 
     /// Task that periodically reconciles subscriptions and updates the
     /// active subscriptions gauge
-    _active_subscriptions_task_handle: Option<task::JoinHandle<()>>,
+    _active_subscriptions_task_handle: Mutex<Option<task::JoinHandle<()>>>,
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
@@ -2860,7 +2860,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
     fn drop(&mut self) {
         // The reconciler loops forever; abort it so a dropped provider
         // doesn't leak the task and the state it holds
-        if let Some(handle) = &self._active_subscriptions_task_handle {
+        if let Some(handle) = self
+            ._active_subscriptions_task_handle
+            .get_mut()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take()
+        {
             handle.abort();
         }
     }
@@ -3170,7 +3175,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
-            _active_subscriptions_task_handle: active_subscriptions_updater,
+            _active_subscriptions_task_handle: Mutex::new(
+                active_subscriptions_updater,
+            ),
         };
 
         let updates = me.pubsub_client.take_updates();

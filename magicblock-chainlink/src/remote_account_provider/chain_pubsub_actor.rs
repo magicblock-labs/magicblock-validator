@@ -58,8 +58,9 @@ fn remove_subscription_if_id(
     pubkey: &Pubkey,
     subscription_id: u64,
 ) {
-    let mut subscriptions =
-        subscriptions.lock().expect("subscriptions lock poisoned");
+    let mut subscriptions = subscriptions
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     if subscriptions.get(pubkey).is_some_and(|subscription| {
         subscription.subscription_id == subscription_id
     }) {
@@ -258,11 +259,12 @@ impl ChainPubsubActor {
         // Reconnect publishes connected state under these same locks. This
         // makes the terminal flag, admission close, and later drain snapshots
         // atomic with respect to reconnect completion and subscription setup.
-        let _subscriptions =
-            subscriptions.lock().expect("subscriptions lock poisoned");
+        let _subscriptions = subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let _program_subs = program_subs
             .lock()
-            .expect("program subscriptions lock poisoned");
+            .unwrap_or_else(|poison| poison.into_inner());
         is_shutting_down.store(true, Ordering::SeqCst);
         is_connected.store(false, Ordering::SeqCst);
     }
@@ -273,11 +275,12 @@ impl ChainPubsubActor {
         is_connected: &Arc<AtomicBool>,
         is_shutting_down: &Arc<AtomicBool>,
     ) -> bool {
-        let _subscriptions =
-            subscriptions.lock().expect("subscriptions lock poisoned");
+        let _subscriptions = subscriptions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let _program_subs = program_subs
             .lock()
-            .expect("program subscriptions lock poisoned");
+            .unwrap_or_else(|poison| poison.into_inner());
         if is_shutting_down.load(Ordering::SeqCst) {
             return false;
         }
@@ -338,7 +341,7 @@ impl ChainPubsubActor {
             map: &Mutex<HashMap<Pubkey, AccountSubscription>>,
         ) -> Vec<(Pubkey, AccountSubscription)> {
             map.lock()
-                .expect("subscriptions lock poisoned")
+                .unwrap_or_else(|poison| poison.into_inner())
                 .iter()
                 .map(|(pubkey, sub)| {
                     (
@@ -410,7 +413,8 @@ impl ChainPubsubActor {
             Self::cancel_and_wait_for_stream_drop(client_id, kind, pubkey, sub)
                 .await;
         if result.is_ok() {
-            let mut map = map.lock().expect("subscriptions lock poisoned");
+            let mut map =
+                map.lock().unwrap_or_else(|poison| poison.into_inner());
             if map.get(&pubkey).is_some_and(|current| {
                 current.subscription_id == subscription_id
             }) {
@@ -427,7 +431,7 @@ impl ChainPubsubActor {
         let subs = self
             .subscriptions
             .lock()
-            .expect("subscriptions lock poisoned");
+            .unwrap_or_else(|poison| poison.into_inner());
         // Dead or winding-down listeners are not live coverage.
         subs.iter()
             .filter(|(_, sub)| {
@@ -445,7 +449,7 @@ impl ChainPubsubActor {
         }
         self.subscriptions
             .lock()
-            .expect("subscriptions lock poisoned")
+            .unwrap_or_else(|poison| poison.into_inner())
             .get(pubkey)
             .is_some_and(|sub| {
                 sub.setup_completion_token.is_cancelled()
@@ -607,7 +611,7 @@ impl ChainPubsubActor {
                 }
                 let subscription = subscriptions
                     .lock()
-                    .expect("subcriptions lock poisoned")
+                    .unwrap_or_else(|poison| poison.into_inner())
                     .get(&pubkey)
                     .map(|sub| AccountSubscription {
                         subscription_id: sub.subscription_id,
@@ -736,7 +740,7 @@ impl ChainPubsubActor {
         loop {
             let pending_completion = {
                 let mut subs_lock =
-                    subs.lock().expect("subscriptions lock poisoned");
+                    subs.lock().unwrap_or_else(|poison| poison.into_inner());
                 if !is_connected.load(Ordering::SeqCst) {
                     drop(subs_lock);
                     let _ = sub_response.send(Err(
@@ -1003,7 +1007,7 @@ impl ChainPubsubActor {
             let pending_completion = {
                 let mut program_subs_lock = program_subs
                     .lock()
-                    .expect("program subscriptions lock poisoned");
+                    .unwrap_or_else(|poison| poison.into_inner());
                 if !is_connected.load(Ordering::SeqCst) {
                     drop(program_subs_lock);
                     let _ = sub_response.send(Err(
@@ -1365,8 +1369,9 @@ impl ChainPubsubActor {
             _client_id: &str,
             subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         ) {
-            let subs_lock =
-                subscriptions.lock().expect("subscriptions lock poisoned");
+            let subs_lock = subscriptions
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
             let canceled_len = subs_lock.len();
             for AccountSubscription {
                 cancellation_token, ..

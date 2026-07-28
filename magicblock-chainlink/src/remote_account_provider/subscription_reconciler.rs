@@ -19,7 +19,8 @@ use super::{
     AccountSubscriptionPublicationPolicy, AccountsLruCache, ChainPubsubClient,
     FetchingAccounts, PendingAccountSubscriptionPublication, PubsubTransport,
     SharedCapacityEvictionProtectionPredicate, SubscriptionKeyGuard,
-    SubscriptionKeyLocks, SubscriptionOwnershipMap, SubscriptionReason,
+    SubscriptionKeyLocks, SubscriptionOwnership, SubscriptionOwnershipMap,
+    SubscriptionReason,
 };
 use crate::remote_account_provider::RemoteAccountProviderError;
 
@@ -217,6 +218,30 @@ impl<T: ChainPubsubClient> Drop for PendingStaleSubscriptionCleanup<T> {
             }
         });
     }
+}
+
+fn is_eviction_protected(
+    pubkey: &Pubkey,
+    ownership: Option<&SubscriptionOwnership>,
+    fetching_accounts: Option<&FetchingAccounts>,
+    capacity_eviction_protection: Option<
+        &SharedCapacityEvictionProtectionPredicate,
+    >,
+) -> bool {
+    fetching_accounts.is_some_and(|fetching_accounts| {
+        fetching_accounts
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .contains_key(pubkey)
+    }) || capacity_eviction_protection.is_some_and(|protection| {
+        protection
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .as_ref()
+            .is_some_and(|predicate| predicate(pubkey).is_protected())
+    }) || ownership.is_some_and(|ownership| {
+        ownership.contains(SubscriptionReason::UndelegationTracking)
+    })
 }
 
 /// Reconciles subscription state between the LRU cache and the pubsub client.
@@ -474,33 +499,14 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                         Some(ownership) => Some(ownership.lock().await),
                         None => None,
                     };
-                    let fetching = fetching_accounts.map(|fetching_accounts| {
-                        fetching_accounts
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                    });
-                    let is_protected =
-                        fetching.as_ref().is_some_and(|fetching| {
-                            fetching.contains_key(&pubkey)
-                        }) || capacity_eviction_protection.is_some_and(
-                            |protection| {
-                                protection
-                                    .read()
-                                    .unwrap_or_else(|poison| {
-                                        poison.into_inner()
-                                    })
-                                    .as_ref()
-                                    .is_some_and(|predicate| {
-                                        predicate(&pubkey).is_protected()
-                                    })
-                            },
-                        ) || ownership.as_ref().is_some_and(|ownership| {
-                            ownership.get(&pubkey).is_some_and(|own| {
-                                own.contains(
-                                    SubscriptionReason::UndelegationTracking,
-                                )
-                            })
-                        });
+                    let is_protected = is_eviction_protected(
+                        &pubkey,
+                        ownership
+                            .as_ref()
+                            .and_then(|ownership| ownership.get(&pubkey)),
+                        fetching_accounts,
+                        capacity_eviction_protection,
+                    );
 
                     if is_protected {
                         false
@@ -597,33 +603,14 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                         Some(ownership) => Some(ownership.lock().await),
                         None => None,
                     };
-                    let fetching = fetching_accounts.map(|fetching_accounts| {
-                        fetching_accounts
-                            .lock()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                    });
-                    let is_protected =
-                        fetching.as_ref().is_some_and(|fetching| {
-                            fetching.contains_key(&pubkey)
-                        }) || capacity_eviction_protection.is_some_and(
-                            |protection| {
-                                protection
-                                    .read()
-                                    .unwrap_or_else(|poison| {
-                                        poison.into_inner()
-                                    })
-                                    .as_ref()
-                                    .is_some_and(|predicate| {
-                                        predicate(&pubkey).is_protected()
-                                    })
-                            },
-                        ) || ownership.as_ref().is_some_and(|ownership| {
-                            ownership.get(&pubkey).is_some_and(|own| {
-                                own.contains(
-                                    SubscriptionReason::UndelegationTracking,
-                                )
-                            })
-                        });
+                    let is_protected = is_eviction_protected(
+                        &pubkey,
+                        ownership
+                            .as_ref()
+                            .and_then(|ownership| ownership.get(&pubkey)),
+                        fetching_accounts,
+                        capacity_eviction_protection,
+                    );
                     if is_protected {
                         false
                     } else {
@@ -721,30 +708,14 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                     Some(ownership) => Some(ownership.lock().await),
                     None => None,
                 };
-                let fetching = fetching_accounts.map(|fetching_accounts| {
-                    fetching_accounts
-                        .lock()
-                        .unwrap_or_else(|poison| poison.into_inner())
-                });
-                let is_protected = fetching
-                    .as_ref()
-                    .is_some_and(|fetching| fetching.contains_key(&pubkey))
-                    || capacity_eviction_protection.is_some_and(|protection| {
-                        protection
-                            .read()
-                            .unwrap_or_else(|poison| poison.into_inner())
-                            .as_ref()
-                            .is_some_and(|predicate| {
-                                predicate(&pubkey).is_protected()
-                            })
-                    })
-                    || ownership.as_ref().is_some_and(|ownership| {
-                        ownership.get(&pubkey).is_some_and(|own| {
-                            own.contains(
-                                SubscriptionReason::UndelegationTracking,
-                            )
-                        })
-                    });
+                let is_protected = is_eviction_protected(
+                    &pubkey,
+                    ownership
+                        .as_ref()
+                        .and_then(|ownership| ownership.get(&pubkey)),
+                    fetching_accounts,
+                    capacity_eviction_protection,
+                );
 
                 if is_protected {
                     false
@@ -883,18 +854,13 @@ mod tests {
         });
 
         mock_client.wait_for_subscribe_attempts(1).await;
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), async {
-                while lru.contains(&pubkey) {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .is_err(),
-            "LRU removal must wait for the transition lock"
-        );
+        // Paused time advances only after runnable work has quiesced, so the
+        // reconciler has reached the held transition lock before these checks.
+        tokio::time::pause();
+        tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(lru.contains(&pubkey));
         assert!(ownership.lock().await.contains_key(&pubkey));
+        tokio::time::resume();
 
         drop(transition_guard);
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -920,12 +886,14 @@ mod tests {
         .await
         .expect("notification backpressure must not retain the key guard");
         drop(key_guard);
+        tokio::time::pause();
         assert!(
             tokio::time::timeout(Duration::from_millis(50), &mut reconcile,)
                 .await
                 .is_err(),
             "full notification channel should backpressure reconciliation"
         );
+        tokio::time::resume();
         reconcile.abort();
         assert!(reconcile.await.unwrap_err().is_cancelled());
 
@@ -1074,6 +1042,7 @@ mod tests {
         assert!(reconcile.await.unwrap_err().is_cancelled());
 
         mock_client.wait_for_unsubscribe_attempts(2).await;
+        tokio::time::pause();
         assert!(
             tokio::time::timeout(
                 Duration::from_millis(50),
@@ -1083,6 +1052,7 @@ mod tests {
             .is_err(),
             "cleanup recovery must retain the per-key guard"
         );
+        tokio::time::resume();
 
         mock_client.release_unsubscribe();
         assert_eq!(
