@@ -1,7 +1,8 @@
 use guinea::GuineaInstruction;
+use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs, instruction::AccountCloneFields,
-    MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
+    EPHEMERAL_VAULT_PUBKEY, MAGIC_CONTEXT_PUBKEY, MAGIC_CONTEXT_SIZE,
 };
 use magicblock_program::{
     instruction_utils::InstructionUtils,
@@ -182,6 +183,405 @@ async fn executor_rejects_unwritable_action_dependencies_atomically() {
         assert_eq!(counter_account.undelegating(), undelegating);
         assert_eq!(counter_account.data(), &[0]);
     }
+}
+
+/// A drained (zero-lamport, empty) but still-undelegating dependency must stay
+/// rejected: emptiness must not let it slip through the not-yet-created
+/// carve-out and bypass the undelegating lock.
+#[tokio::test]
+async fn executor_rejects_empty_undelegating_action_dependency() {
+    generate_validator_authority_if_needed();
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let validator = validator_authority();
+    env.fund_account(validator.pubkey(), 10_000_000);
+
+    let target = Pubkey::new_unique();
+    env.accountsdb
+        .insert_account(
+            &target,
+            &AccountSharedData::new(100, 0, &system_program::id()),
+        )
+        .unwrap();
+
+    // Drained (zero lamports, empty data) but still undelegating and present.
+    let counter = Pubkey::new_unique();
+    let mut counter_account = AccountSharedData::new(0, 0, &guinea::ID);
+    counter_account.set_undelegating(true);
+    env.accountsdb
+        .insert_account(&counter, &counter_account)
+        .unwrap();
+    assert!(
+        env.get_account(counter).undelegating(),
+        "drained undelegating account must persist in AccountsDb"
+    );
+
+    let actions = vec![Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::Increment,
+        vec![AccountMeta::new(counter, false)],
+    )];
+    let clone_ix = InstructionUtils::clone_account_instruction(
+        target,
+        vec![9],
+        AccountCloneFields {
+            lamports: 1_000_000,
+            owner: system_program::id(),
+            delegated: true,
+            remote_slot: 1,
+            ..Default::default()
+        },
+        actions.clone(),
+    );
+    let executor_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            target, actions,
+        );
+
+    let txn = env.build_transaction_with_signers(
+        &[clone_ix, executor_ix],
+        &[&validator],
+    );
+    assert_eq!(
+        env.execute_transaction(txn).await.unwrap_err(),
+        TransactionError::InstructionError(
+            1,
+            solana_instruction::error::InstructionError::IllegalOwner,
+        )
+    );
+
+    let target_account = env.get_account(target);
+    assert!(!target_account.delegated(), "clone must roll back");
+    assert!(target_account.data().is_empty());
+    let counter_account = env.get_account(counter);
+    assert!(counter_account.undelegating(), "the lock must be preserved");
+}
+
+/// Actions legitimately create accounts mid-flight (receipts, permission PDAs,
+/// rent-pending ATAs) via Magic CPIs, declaring them writable non-signer and
+/// authorizing them with a program (PDA) signature. Such not-yet-created
+/// accounts must pass the pre-invocation check; post-execution validation
+/// still governs the result.
+#[tokio::test]
+async fn executor_allows_writable_action_account_created_by_the_action() {
+    generate_validator_authority_if_needed();
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let validator = validator_authority();
+    env.fund_account(validator.pubkey(), 10_000_000);
+
+    // Ephemeral vault, flagged the way the validator initializes it.
+    env.fund_account_with_owner(
+        EPHEMERAL_VAULT_PUBKEY,
+        1_000_000,
+        magicblock_magic_program_api::ID,
+    );
+    let mut vault_account = env.get_account(EPHEMERAL_VAULT_PUBKEY);
+    vault_account.set_ephemeral(true);
+    env.accountsdb
+        .insert_account(&EPHEMERAL_VAULT_PUBKEY, &vault_account)
+        .unwrap();
+
+    let target = Pubkey::new_unique();
+    env.accountsdb
+        .insert_account(
+            &target,
+            &AccountSharedData::new(100, 0, &system_program::id()),
+        )
+        .unwrap();
+
+    // Delegated sponsor paying the ephemeral rent from inside the action.
+    let sponsor = Pubkey::new_unique();
+    env.fund_account(sponsor, 100_000_000);
+    let mut sponsor_account = env.get_account(sponsor);
+    sponsor_account.set_delegated(true);
+    env.accountsdb
+        .insert_account(&sponsor, &sponsor_account)
+        .unwrap();
+
+    // A PDA of the invoked program, not yet created, declared writable
+    // non-signer; the program authorizes it by signing the Magic CPI with seeds.
+    let (receipt, _) = guinea::ephemeral_pda();
+    let actions = vec![Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::CreateEphemeralPdaAccount { data_len: 8 },
+        vec![
+            AccountMeta::new_readonly(magicblock_magic_program_api::ID, false),
+            AccountMeta::new(sponsor, true),
+            AccountMeta::new(receipt, false),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+        ],
+    )];
+
+    let clone_ix = InstructionUtils::clone_account_instruction(
+        target,
+        vec![9],
+        AccountCloneFields {
+            lamports: 1_000_000,
+            owner: system_program::id(),
+            delegated: true,
+            remote_slot: 1,
+            ..Default::default()
+        },
+        actions.clone(),
+    );
+    let executor_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            target, actions,
+        );
+
+    let txn = env.build_transaction_with_signers(
+        &[clone_ix, executor_ix],
+        &[&validator],
+    );
+    env.execute_transaction(txn).await.unwrap();
+
+    let receipt_account = env.get_account(receipt);
+    assert!(
+        receipt_account.ephemeral(),
+        "the action must create the receipt as an ephemeral account"
+    );
+    assert_eq!(receipt_account.data().len(), 8);
+
+    let target_account = env.get_account(target);
+    assert!(target_account.delegated());
+    assert_eq!(target_account.data(), &[9]);
+}
+
+/// A nonexistent account declared writable AND signer must stay rejected:
+/// action signers are synthesized without signatures, so an absent signer
+/// could satisfy a program's signer check and squat any unused pubkey.
+#[tokio::test]
+async fn executor_rejects_nonexistent_writable_signer_action_account() {
+    generate_validator_authority_if_needed();
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let validator = validator_authority();
+    env.fund_account(validator.pubkey(), 10_000_000);
+
+    env.fund_account_with_owner(
+        EPHEMERAL_VAULT_PUBKEY,
+        1_000_000,
+        magicblock_magic_program_api::ID,
+    );
+    let mut vault_account = env.get_account(EPHEMERAL_VAULT_PUBKEY);
+    vault_account.set_ephemeral(true);
+    env.accountsdb
+        .insert_account(&EPHEMERAL_VAULT_PUBKEY, &vault_account)
+        .unwrap();
+
+    let target = Pubkey::new_unique();
+    env.accountsdb
+        .insert_account(
+            &target,
+            &AccountSharedData::new(100, 0, &system_program::id()),
+        )
+        .unwrap();
+
+    let sponsor = Pubkey::new_unique();
+    env.fund_account(sponsor, 100_000_000);
+    let mut sponsor_account = env.get_account(sponsor);
+    sponsor_account.set_delegated(true);
+    env.accountsdb
+        .insert_account(&sponsor, &sponsor_account)
+        .unwrap();
+
+    // No keypair exists for this pubkey; the action asks for it as a
+    // writable signer to squat it via the keypair-based creation path.
+    let squatted = Pubkey::new_unique();
+    let actions = vec![Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::CreateEphemeralAccount { data_len: 8 },
+        vec![
+            AccountMeta::new_readonly(magicblock_magic_program_api::ID, false),
+            AccountMeta::new(sponsor, true),
+            AccountMeta::new(squatted, true),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+        ],
+    )];
+
+    let clone_ix = InstructionUtils::clone_account_instruction(
+        target,
+        vec![9],
+        AccountCloneFields {
+            lamports: 1_000_000,
+            owner: system_program::id(),
+            delegated: true,
+            remote_slot: 1,
+            ..Default::default()
+        },
+        actions.clone(),
+    );
+    let executor_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            target, actions,
+        );
+
+    let txn = env.build_transaction_with_signers(
+        &[clone_ix, executor_ix],
+        &[&validator],
+    );
+    assert_eq!(
+        env.execute_transaction(txn).await.unwrap_err(),
+        TransactionError::InstructionError(
+            1,
+            solana_instruction::error::InstructionError::IllegalOwner,
+        )
+    );
+
+    assert!(
+        env.accountsdb.get_account(&squatted).is_none(),
+        "the squatted pubkey must not be created"
+    );
+    let target_account = env.get_account(target);
+    assert!(!target_account.delegated(), "clone must roll back");
+}
+
+/// Duplicate-meta squat: the absent pubkey appears once writable non-signer and
+/// once read-only signer. Signer authority is keyed by pubkey, so a per-meta
+/// check is insufficient — the carve-out must gate on the whole signer set.
+#[tokio::test]
+async fn executor_rejects_squat_via_duplicate_writable_and_signer_metas() {
+    generate_validator_authority_if_needed();
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let validator = validator_authority();
+    env.fund_account(validator.pubkey(), 10_000_000);
+
+    env.fund_account_with_owner(
+        EPHEMERAL_VAULT_PUBKEY,
+        1_000_000,
+        magicblock_magic_program_api::ID,
+    );
+    let mut vault_account = env.get_account(EPHEMERAL_VAULT_PUBKEY);
+    vault_account.set_ephemeral(true);
+    env.accountsdb
+        .insert_account(&EPHEMERAL_VAULT_PUBKEY, &vault_account)
+        .unwrap();
+
+    let target = Pubkey::new_unique();
+    env.accountsdb
+        .insert_account(
+            &target,
+            &AccountSharedData::new(100, 0, &system_program::id()),
+        )
+        .unwrap();
+
+    let sponsor = Pubkey::new_unique();
+    env.fund_account(sponsor, 100_000_000);
+    let mut sponsor_account = env.get_account(sponsor);
+    sponsor_account.set_delegated(true);
+    env.accountsdb
+        .insert_account(&sponsor, &sponsor_account)
+        .unwrap();
+
+    // `squatted` is the positional ephemeral account (writable, non-signer) so
+    // it dodges a per-meta signer check, while a trailing duplicate meta marks
+    // the same pubkey a signer so `native_invoke` grants it signer authority.
+    let squatted = Pubkey::new_unique();
+    let actions = vec![Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::CreateEphemeralAccount { data_len: 8 },
+        vec![
+            AccountMeta::new_readonly(magicblock_magic_program_api::ID, false),
+            AccountMeta::new(sponsor, true),
+            AccountMeta::new(squatted, false),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+            AccountMeta::new_readonly(squatted, true),
+        ],
+    )];
+
+    let clone_ix = InstructionUtils::clone_account_instruction(
+        target,
+        vec![9],
+        AccountCloneFields {
+            lamports: 1_000_000,
+            owner: system_program::id(),
+            delegated: true,
+            remote_slot: 1,
+            ..Default::default()
+        },
+        actions.clone(),
+    );
+    let executor_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            target, actions,
+        );
+
+    let txn = env.build_transaction_with_signers(
+        &[clone_ix, executor_ix],
+        &[&validator],
+    );
+    assert_eq!(
+        env.execute_transaction(txn).await.unwrap_err(),
+        TransactionError::InstructionError(
+            1,
+            solana_instruction::error::InstructionError::IllegalOwner,
+        )
+    );
+
+    assert!(
+        env.accountsdb.get_account(&squatted).is_none(),
+        "the squatted pubkey must not be created"
+    );
+    let target_account = env.get_account(target);
+    assert!(!target_account.delegated(), "clone must roll back");
+}
+
+/// If the action declares a nonexistent account writable but never creates it,
+/// post-execution writable validation must still fail the transaction and roll
+/// back the clone.
+#[tokio::test]
+async fn nonexistent_writable_action_account_left_uncreated_still_rolls_back() {
+    generate_validator_authority_if_needed();
+    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let validator = validator_authority();
+    env.fund_account(validator.pubkey(), 10_000_000);
+
+    let target = Pubkey::new_unique();
+    env.accountsdb
+        .insert_account(
+            &target,
+            &AccountSharedData::new(100, 0, &system_program::id()),
+        )
+        .unwrap();
+
+    // Declared writable, but the action never creates it.
+    let phantom = Pubkey::new_unique();
+    let actions = vec![Instruction::new_with_bincode(
+        guinea::ID,
+        &GuineaInstruction::ComputeBalances,
+        vec![AccountMeta::new(phantom, false)],
+    )];
+
+    let clone_ix = InstructionUtils::clone_account_instruction(
+        target,
+        vec![9],
+        AccountCloneFields {
+            lamports: 1_000_000,
+            owner: system_program::id(),
+            delegated: true,
+            remote_slot: 1,
+            ..Default::default()
+        },
+        actions.clone(),
+    );
+    let executor_ix =
+        InstructionUtils::post_delegation_action_executor_instruction(
+            target, actions,
+        );
+
+    let txn = env.build_transaction_with_signers(
+        &[clone_ix, executor_ix],
+        &[&validator],
+    );
+    assert_eq!(
+        env.execute_transaction(txn).await.unwrap_err(),
+        TransactionError::InvalidWritableAccount,
+    );
+
+    let target_account = env.get_account(target);
+    assert!(!target_account.delegated(), "clone must roll back");
+    assert!(
+        target_account.data().is_empty(),
+        "the cloned data must roll back with the rejected action"
+    );
 }
 
 #[tokio::test]
