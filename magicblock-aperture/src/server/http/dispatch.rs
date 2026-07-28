@@ -212,10 +212,8 @@ impl HttpDispatcher {
             GetRecentPerformanceSamples => {
                 self.get_recent_performance_samples(request)
             }
-            GetSignatureStatuses => {
-                self.run_blocking(|| self.get_signature_statuses(request))
-                    .await
-            }
+            // Gates only its ledger fallbacks; cache hits answer inline.
+            GetSignatureStatuses => self.get_signature_statuses(request).await,
             GetSignaturesForAddress => {
                 self.run_blocking(|| self.get_signatures_for_address(request))
                     .await
@@ -298,7 +296,7 @@ impl HttpDispatcher {
     ///
     /// Falls back to running inline on current-thread runtimes (tests), where
     /// `block_in_place` would panic.
-    async fn run_blocking<T>(&self, f: impl FnOnce() -> T) -> T {
+    pub(crate) async fn run_blocking<T>(&self, f: impl FnOnce() -> T) -> T {
         use tokio::runtime::{Handle, RuntimeFlavor};
         // The semaphore is never closed, so acquisition cannot fail.
         let _permit = self.blocking_reads.acquire().await.ok();
