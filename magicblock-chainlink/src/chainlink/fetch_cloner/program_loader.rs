@@ -68,7 +68,7 @@ fn schedule_deferred_verify<T, U, V, C>(
     }
     let this = this.clone();
     let account = account.clone();
-    let ctx = *companion_fetch_log_context;
+    let ctx = companion_fetch_log_context.clone();
     let delay = PROGRAM_VERIFY_THROTTLE.saturating_sub(elapsed)
         + Duration::from_millis(10);
     tokio::task::spawn(async move {
@@ -244,8 +244,9 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
     let program_load_context = AccountFetchContext::subscription_update(
         AccountFetchReason::ProgramLoad,
     );
-    let program_data_context =
-        program_load_context.with_reason(AccountFetchReason::ProgramData);
+    let program_data_context = program_load_context
+        .clone()
+        .with_reason(AccountFetchReason::ProgramData);
 
     let (program_account, program_data_account) =
         if account.owner().eq(&LOADER_V3) {
