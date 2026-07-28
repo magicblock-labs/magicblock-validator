@@ -1,20 +1,20 @@
 # Agent Memory and Documentation Stewardship
 
-This file defines how agents keep repository knowledge current. Treat the files in `./.agents/` as the repository's persistent agent memory: when an agent discovers durable information that future agents should rely on, the agent must update these documents in the same change whenever practical.
+This file defines how agents keep repository knowledge current. Treat the files in `./.agents/` as the repository's persistent agent memory. Documentation updates are batched into a dedicated weekly maintenance task, which is currently started manually.
 
 `AGENTS.md`, `.agents/README.md`, overview docs, and crate guides should point here instead of restating this policy.
 
 ## Core rule
 
-Whenever you discover that the current `./.agents/` guidance is missing, incomplete, inaccurate, or stale, update it before finishing the task.
+Do not update documentation in a feature, fix, refactor, or other code pull request. When current guidance is missing, incomplete, inaccurate, or stale, identify the exact documentation follow-up in the task handoff so it can be handled by the weekly documentation-maintenance task.
 
-This applies even when the discovery is incidental to another task. Do not leave known gaps for a future agent unless you are blocked from editing documentation; if blocked, report the exact missing update and where it should go.
+This applies even when the discovery is incidental to another task. Dedicated documentation tasks, including the weekly maintenance task and explicit instruction-policy changes, may update documentation in documentation-only pull requests.
 
-**Documented elsewhere is not an excuse to skip the update.** A durable fact being present in the source code, a code comment, an unrelated `.agents/` file, an external repo, or any other location does *not* satisfy this rule. The test is not "does this fact exist somewhere?" — it is "would an agent who opens the single most relevant `.agents/` document for this concern find it there?" If the answer is no, you must capture it in that document, even if a related or partial mention already lives in a different file. Each `.agents/` document must be self-sufficient for an agent working in the area it covers; never rely on the reader having read another file. When the same fact is genuinely relevant in two places, put the full explanation in the most specific canonical file and add a short pointer (not a silent omission) from the other.
+**Documented elsewhere is not an excuse to omit the follow-up.** A durable fact being present in the source code, a code comment, an unrelated `.agents/` file, an external repo, or any other location does *not* make the relevant agent guidance complete. The test is "would an agent who opens the single most relevant `.agents/` document for this concern find it there?" If the answer is no, name that document and the missing information in the handoff. During weekly maintenance, put the full explanation in the most specific canonical file and add a short pointer from other relevant files.
 
-Concretely: if you investigate code to answer a question and find that the mechanism, behavior, or invariant you relied on is *not* spelled out in the crate/spec/rules document an agent would consult for that area, document it there now — regardless of whether a higher-level or differently-scoped file happens to mention it.
+Concretely: if you investigate code and find that the mechanism, behavior, or invariant you relied on is not spelled out in the crate, specification, or rules document an agent would consult, queue that exact update for the weekly documentation task rather than adding it to the code pull request.
 
-**This rule applies to read-only and question-answering tasks too, not only code changes.** If you investigate the code to answer a question and learn a durable fact — especially a divergence from agave/Solana upstream behavior (e.g. a missing limit, different default, or relaxed validation) — capture it before finishing, then report it per the Final response requirement below.
+**This rule applies to read-only and question-answering tasks too, not only code changes.** If you learn a durable fact — especially a divergence from agave/Solana upstream behavior, such as a missing limit, different default, or relaxed validation — include the documentation follow-up in the handoff.
 
 ## What must be captured
 
@@ -45,6 +45,8 @@ If no suitable document exists, create a new focused file in `.agents/` or `.age
 
 ## How to update
 
+Apply these steps during the dedicated weekly documentation-maintenance task or another explicitly requested documentation-only task:
+
 Keep updates concise and operational:
 
 1. State the behavior or workflow future agents need to know.
@@ -53,8 +55,8 @@ Keep updates concise and operational:
 4. Call out performance-sensitive paths and tradeoffs if relevant.
 5. Avoid duplicating large blocks across files; link or point to the canonical file instead.
 
-When behavior changes in code, update the docs in the same change as the implementation. When the task is documentation-only, verify that file paths and cross-references remain accurate.
+The weekly task should review the durable documentation follow-ups and merged code changes since the previous pass, update the relevant documentation, and submit only documentation changes. Verify that file paths and cross-references remain accurate.
 
 ## Final response requirement
 
-When finishing a task, report whether agent documentation was updated. If it was not updated, state why no durable agent-memory update was needed, or list the blocked documentation follow-up explicitly.
+When finishing a task, report whether agent documentation was updated. For code tasks, state either that no durable documentation follow-up was needed or list the exact follow-up for the weekly maintenance task.

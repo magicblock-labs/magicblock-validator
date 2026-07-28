@@ -17,7 +17,7 @@ This crate is not production runtime code, but it wraps performance- and correct
 
 ## Update requirement
 
-Update this guide in the same change whenever `test-kit` behavior or contracts change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever `test-kit` behavior or contracts change. Include changes to:
 
 - `ExecutionTestEnv` construction, scheduler startup/mode handling, shutdown behavior, default fee, block time, or superblock sizing;
 - helper semantics that mark accounts delegated, fund payers, advance slots, load programs, or write directly to `AccountsDb`/`Ledger`;

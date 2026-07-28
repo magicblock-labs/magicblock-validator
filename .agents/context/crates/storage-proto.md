@@ -16,7 +16,7 @@ This crate is on the ledger persistence/read path through `magicblock-ledger`. I
 
 ## Update requirement
 
-Update this guide in the same change whenever `storage-proto` behavior or contracts change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever `storage-proto` behavior or contracts change. Include changes to:
 
 - protobuf files under `storage-proto/proto/`, field numbers, enum values, optionality, or package names;
 - build-time code generation in `storage-proto/build.rs`, including generated module names or `tonic_prost_build` options;
