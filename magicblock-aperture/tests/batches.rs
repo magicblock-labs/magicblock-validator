@@ -94,9 +94,52 @@ async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetc
 
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
-    let body: json::Value = response
-        .json()
-        .await
-        .expect("batch response body should decode");
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("batch response body should decode"),
+    )
+    .expect("batch response body should be valid JSON");
     assert!(body.is_array(), "batch response should be an array");
+}
+
+#[tokio::test]
+async fn test_mixed_batch_requests_emit_remote_account_claims_header_zero() {
+    let env = RpcTestEnv::new().await;
+    let account = env.create_account();
+    let batch_request = json::json!([
+        {"jsonrpc": "2.0", "method": "getVersion", "id": 1},
+        {
+            "jsonrpc": "2.0",
+            "method": "getAccountInfo",
+            "params": [account.pubkey.to_string()],
+            "id": 2
+        },
+        {
+            "jsonrpc": "2.0",
+            "method": "getBalance",
+            "params": [account.pubkey.to_string()],
+            "id": 3
+        }
+    ]);
+
+    let response = reqwest::Client::new()
+        .post(env.rpc.url())
+        .json(&batch_request)
+        .send()
+        .await
+        .expect("mixed batch HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("mixed batch response body should decode"),
+    )
+    .expect("mixed batch response body should be valid JSON");
+    assert!(body.is_array(), "mixed batch response should be an array");
+    assert_eq!(body.as_array().unwrap().len(), 3);
 }

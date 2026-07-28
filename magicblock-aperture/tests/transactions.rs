@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use json::JsonValueTrait;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::link::blocks::BlockHash;
 use setup::RpcTestEnv;
@@ -14,6 +15,19 @@ use solana_rpc_client_api::config::{
 use solana_signature::Signature;
 use solana_transaction_status::UiTransactionEncoding;
 use test_kit::guinea;
+
+const REMOTE_ACCOUNT_CLAIMS_HEADER: &str = "X-MB-Remote-Account-Claims";
+
+fn remote_account_claims_header(response: &reqwest::Response) -> u64 {
+    response
+        .headers()
+        .get(REMOTE_ACCOUNT_CLAIMS_HEADER)
+        .expect("remote account claims header should be present")
+        .to_str()
+        .expect("remote account claims header should be valid ASCII")
+        .parse::<u64>()
+        .expect("remote account claims header should be an integer")
+}
 
 mod setup;
 
@@ -61,6 +75,40 @@ async fn test_send_transaction_success() {
         RpcTestEnv::INIT_ACCOUNT_BALANCE + RpcTestEnv::TRANSFER_AMOUNT,
         "recipient account balance was not properly credited"
     );
+}
+
+#[tokio::test]
+async fn test_send_transaction_emits_remote_account_claims_header_zero() {
+    let env = RpcTestEnv::new().await;
+    let transaction = env.build_transfer_txn();
+    let encoded = bs58::encode(
+        bincode::serialize(&transaction).expect("transaction should serialize"),
+    )
+    .into_string();
+    let request = json::json!({
+        "jsonrpc": "2.0",
+        "method": "sendTransaction",
+        "params": [encoded],
+        "id": 1,
+    });
+
+    let response = reqwest::Client::new()
+        .post(env.rpc.url())
+        .json(&request)
+        .send()
+        .await
+        .expect("sendTransaction HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("sendTransaction response body should decode"),
+    )
+    .expect("sendTransaction response body should be valid JSON");
+    assert!(body["result"].is_str(), "response should contain signature");
 }
 
 /// Verifies the higher-level `send_and_confirm_transaction` method works correctly,
@@ -207,6 +255,90 @@ async fn test_simulate_transaction_success() {
         RpcTestEnv::INIT_ACCOUNT_BALANCE,
         "recipient balance should not change after simulation"
     );
+}
+
+#[tokio::test]
+async fn test_simulate_transaction_emits_remote_account_claims_header_zero() {
+    let env = RpcTestEnv::new().await;
+    let transaction = env.build_transfer_txn();
+    let encoded = bs58::encode(
+        bincode::serialize(&transaction).expect("transaction should serialize"),
+    )
+    .into_string();
+    let request = json::json!({
+        "jsonrpc": "2.0",
+        "method": "simulateTransaction",
+        "params": [encoded],
+        "id": 1,
+    });
+
+    let response = reqwest::Client::new()
+        .post(env.rpc.url())
+        .json(&request)
+        .send()
+        .await
+        .expect("simulateTransaction HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("simulateTransaction response body should decode"),
+    )
+    .expect("simulateTransaction response body should be valid JSON");
+    assert!(body["result"].is_object(), "response should contain result");
+}
+
+#[tokio::test]
+async fn test_simulate_transaction_with_requested_accounts_emits_remote_account_claims_header_zero(
+) {
+    let env = RpcTestEnv::new().await;
+    let sender = Pubkey::new_unique();
+    let recipient = Pubkey::new_unique();
+    let transaction =
+        env.build_transfer_txn_with_params(sender, recipient, false);
+    let encoded = bs58::encode(
+        bincode::serialize(&transaction).expect("transaction should serialize"),
+    )
+    .into_string();
+    let request = json::json!({
+        "jsonrpc": "2.0",
+        "method": "simulateTransaction",
+        "params": [
+            encoded,
+            {
+                "accounts": {
+                    "encoding": "base64",
+                    "addresses": [
+                        sender.to_string(),
+                        recipient.to_string(),
+                        guinea::ID.to_string()
+                    ]
+                }
+            }
+        ],
+        "id": 1,
+    });
+
+    let response = reqwest::Client::new()
+        .post(env.rpc.url())
+        .json(&request)
+        .send()
+        .await
+        .expect("simulateTransaction HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("simulateTransaction response body should decode"),
+    )
+    .expect("simulateTransaction response body should be valid JSON");
+    assert!(body["result"].is_object(), "response should contain result");
 }
 
 #[tokio::test]
