@@ -1,24 +1,11 @@
 use std::collections::HashSet;
 
 use json::JsonValueTrait;
-use setup::{RpcTestEnv, TOKEN_PROGRAM_ID};
+use setup::{remote_account_claims_header, RpcTestEnv, TOKEN_PROGRAM_ID};
 use solana_account::{accounts_equal, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::request::TokenAccountsFilter;
 use test_kit::guinea;
-
-const REMOTE_ACCOUNT_CLAIMS_HEADER: &str = "X-MB-Remote-Account-Claims";
-
-fn remote_account_claims_header(response: &reqwest::Response) -> u64 {
-    response
-        .headers()
-        .get(REMOTE_ACCOUNT_CLAIMS_HEADER)
-        .expect("remote account claims header should be present")
-        .to_str()
-        .expect("remote account claims header should be valid ASCII")
-        .parse::<u64>()
-        .expect("remote account claims header should be an integer")
-}
 
 mod setup;
 

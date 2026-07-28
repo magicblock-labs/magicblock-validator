@@ -40,6 +40,18 @@ use tokio_util::sync::CancellationToken;
 
 pub const TOKEN_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+pub const REMOTE_ACCOUNT_CLAIMS_HEADER: &str = "X-MB-Remote-Account-Claims";
+
+pub fn remote_account_claims_header(response: &reqwest::Response) -> u64 {
+    response
+        .headers()
+        .get(REMOTE_ACCOUNT_CLAIMS_HEADER)
+        .expect("remote account claims header should be present")
+        .to_str()
+        .expect("remote account claims header should be valid ASCII")
+        .parse::<u64>()
+        .expect("remote account claims header should be an integer")
+}
 
 /// An end-to-end integration testing environment for the RPC server.
 ///

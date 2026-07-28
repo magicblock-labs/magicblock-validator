@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use json::JsonValueTrait;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::link::blocks::BlockHash;
-use setup::RpcTestEnv;
+use setup::{remote_account_claims_header, RpcTestEnv};
 use solana_account::ReadableAccount;
 use solana_account_decoder::UiAccountEncoding;
 use solana_pubkey::Pubkey;
@@ -15,19 +15,6 @@ use solana_rpc_client_api::config::{
 use solana_signature::Signature;
 use solana_transaction_status::UiTransactionEncoding;
 use test_kit::guinea;
-
-const REMOTE_ACCOUNT_CLAIMS_HEADER: &str = "X-MB-Remote-Account-Claims";
-
-fn remote_account_claims_header(response: &reqwest::Response) -> u64 {
-    response
-        .headers()
-        .get(REMOTE_ACCOUNT_CLAIMS_HEADER)
-        .expect("remote account claims header should be present")
-        .to_str()
-        .expect("remote account claims header should be valid ASCII")
-        .parse::<u64>()
-        .expect("remote account claims header should be an integer")
-}
 
 mod setup;
 

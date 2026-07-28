@@ -1,18 +1,5 @@
 use json::{JsonContainerTrait, JsonValueTrait, Value};
-use setup::RpcTestEnv;
-
-const REMOTE_ACCOUNT_CLAIMS_HEADER: &str = "X-MB-Remote-Account-Claims";
-
-fn remote_account_claims_header(response: &reqwest::Response) -> u64 {
-    response
-        .headers()
-        .get(REMOTE_ACCOUNT_CLAIMS_HEADER)
-        .expect("remote account claims header should be present")
-        .to_str()
-        .expect("remote account claims header should be valid ASCII")
-        .parse::<u64>()
-        .expect("remote account claims header should be an integer")
-}
+use setup::{remote_account_claims_header, RpcTestEnv};
 
 mod setup;
 
