@@ -18,7 +18,7 @@ This crate is intentionally dependency-light and has no dependency on other work
 
 ## Update requirement
 
-Whenever an agent changes behavior in `magicblock-metrics`, or changes another crate in a way that changes metrics exposed by this crate, this document must be updated in the same change.
+Whenever behavior in `magicblock-metrics` changes, or another crate changes the metrics exposed by this crate, queue an update to this document for the weekly documentation-maintenance task.
 
 Update this file for changes to:
 
@@ -315,7 +315,7 @@ Current counters include:
 - `inc_rpc_client_signature_status_batch_count()`,
 - `inc_rpc_client_signature_status_batch_signatures_count(count)`.
 
-Some names/help strings are investigation-oriented (`*_a_count`, "Get mupltiple account count"). Treat them as current implementation, but if you formalize or rename them, update dashboards/alerts and this guide in the same change.
+Some names/help strings are investigation-oriented (`*_a_count`, "Get mupltiple account count"). Treat them as current implementation, but if you formalize or rename them, queue dashboard, alert, and guide updates for the weekly documentation-maintenance task.
 
 ### Pubsub clients and gRPC streams
 

@@ -19,7 +19,7 @@ End-to-end commit/undelegation semantics live in .agents/specs/validator-specifi
 
 ## Update requirement
 
-Update this guide in the same change whenever behavior or contracts in `magicblock-services` change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-services` change. Include changes to:
 
 - exported modules or public constructors in `magicblock-services/src/lib.rs`, `actions_callback_service.rs`, or `undelegation_request_service.rs`;
 - the `ActionsCallbackService` transaction layout, signer handling, blockhash source, or callback response encoding;

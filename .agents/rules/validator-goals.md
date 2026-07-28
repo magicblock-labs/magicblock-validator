@@ -138,7 +138,7 @@ Do not bypass delegation records, access validation, commit nonces, or intent pe
 
 Do not trade away any security property — signer/authority enforcement, base-layer sync integrity, or resistance to attacker-triggerable conditions — for performance, simplicity, or compatibility. There is no acceptable tradeoff here.
 
-Do not add protocol behavior in an isolated crate without updating the docs and checking the cross-crate architecture.
+Do not add protocol behavior in an isolated crate without checking the cross-crate architecture and identifying the corresponding documentation follow-up for the weekly maintenance task.
 
 ## Change checklist
 
@@ -152,5 +152,5 @@ Before finishing a feature, bug fix, or refactor, ask:
 5. Did I avoid blocking critical scheduler/RPC/executor paths?
 6. Did I avoid degrading critical-path latency, throughput, memory use, lock contention, and I/O behavior?
 7. If a performance tradeoff was unavoidable, did I explicitly call out why, the expected impact, and mitigation?
-8. Did I update the relevant file in `.agents/` if behavior changed?
-9. Did I update or create agent documentation for any newly discovered durable behavior, workflow, pitfall, invariant, crate responsibility, validation approach, or stale/missing guidance?
+8. Did I identify the relevant `.agents/` documentation follow-up if behavior changed?
+9. Did I queue any newly discovered durable behavior, workflow, pitfall, invariant, crate responsibility, validation approach, or stale/missing guidance for the weekly documentation-maintenance task?
