@@ -20,6 +20,7 @@ use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics::{
     RPC_REQUESTS_COUNT, RPC_REQUEST_HANDLING_TIME,
 };
+use tokio::sync::Semaphore;
 
 use crate::{
     requests::{
@@ -58,6 +59,9 @@ pub(crate) struct HttpDispatcher {
     /// A handle to the transaction scheduler for processing
     /// `sendTransaction` and `simulateTransaction`.
     pub(crate) transactions_scheduler: TransactionSchedulerHandle,
+    /// Bounds concurrent blocking ledger reads so a burst of degraded
+    /// (e.g. tombstone-scanning) queries cannot exhaust threads or the DB.
+    blocking_reads: Semaphore,
 }
 
 impl HttpDispatcher {
@@ -69,6 +73,12 @@ impl HttpDispatcher {
         state: SharedState,
         channels: &DispatchEndpoints,
     ) -> Arc<Self> {
+        // Mirror the runtime's worker count: the same ledger-read concurrency
+        // the workers previously allowed implicitly, now without starving them.
+        let permits = std::thread::available_parallelism()
+            .map(|n| (n.get() / 2).saturating_sub(1))
+            .unwrap_or(1)
+            .max(1);
         Arc::new(Self {
             context: state.context,
             accountsdb: state.accountsdb.clone(),
@@ -77,6 +87,7 @@ impl HttpDispatcher {
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             transactions_scheduler: channels.transaction_scheduler.clone(),
+            blocking_reads: Semaphore::new(permits),
         })
     }
 
@@ -177,10 +188,12 @@ impl HttpDispatcher {
         match request.method {
             GetAccountInfo => self.get_account_info(request).await,
             GetBalance => self.get_balance(request).await,
-            GetBlock => run_blocking(|| self.get_block(request)),
+            GetBlock => self.run_blocking(|| self.get_block(request)).await,
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_block_height(request),
-            GetBlockTime => run_blocking(|| self.get_block_time(request)),
+            GetBlockTime => {
+                self.run_blocking(|| self.get_block_time(request)).await
+            }
             GetBlocks => self.get_blocks(request),
             GetBlocksWithLimit => self.get_blocks_with_limit(request),
             GetClusterNodes => self.get_cluster_nodes(request),
@@ -200,10 +213,12 @@ impl HttpDispatcher {
                 self.get_recent_performance_samples(request)
             }
             GetSignatureStatuses => {
-                run_blocking(|| self.get_signature_statuses(request))
+                self.run_blocking(|| self.get_signature_statuses(request))
+                    .await
             }
             GetSignaturesForAddress => {
-                run_blocking(|| self.get_signatures_for_address(request))
+                self.run_blocking(|| self.get_signatures_for_address(request))
+                    .await
             }
             GetSlot => self.get_slot(request),
             GetSlotLeader => self.get_slot_leader(request),
@@ -220,7 +235,9 @@ impl HttpDispatcher {
             }
             GetTokenLargestAccounts => self.get_token_largest_accounts(request),
             GetTokenSupply => self.get_token_supply(request),
-            GetTransaction => run_blocking(|| self.get_transaction(request)),
+            GetTransaction => {
+                self.run_blocking(|| self.get_transaction(request)).await
+            }
             GetTransactionCount => self.get_transaction_count(request),
             GetVersion => self.get_version(request),
             GetVoteAccounts => self.get_vote_accounts(request),
@@ -272,20 +289,26 @@ impl HttpDispatcher {
     }
 }
 
-/// Runs a ledger (RocksDB) reading handler via `block_in_place`: a slow read
-/// (e.g. scanning range tombstones left behind by the ledger truncator) must
-/// never pin an RPC runtime worker and starve every other request.
-///
-/// Falls back to running inline on current-thread runtimes (tests), where
-/// `block_in_place` would panic.
-fn run_blocking<T>(f: impl FnOnce() -> T) -> T {
-    use tokio::runtime::{Handle, RuntimeFlavor};
-    let multi_threaded = Handle::try_current()
-        .map(|h| h.runtime_flavor() == RuntimeFlavor::MultiThread)
-        .unwrap_or_default();
-    if multi_threaded {
-        tokio::task::block_in_place(f)
-    } else {
-        f()
+impl HttpDispatcher {
+    /// Runs a ledger (RocksDB) reading handler via `block_in_place`: a slow
+    /// read (e.g. scanning range tombstones left behind by the ledger
+    /// truncator) must never pin an RPC runtime worker and starve every other
+    /// request. The `blocking_reads` semaphore bounds how many such reads run
+    /// at once; waiters queue in async land without occupying any thread.
+    ///
+    /// Falls back to running inline on current-thread runtimes (tests), where
+    /// `block_in_place` would panic.
+    async fn run_blocking<T>(&self, f: impl FnOnce() -> T) -> T {
+        use tokio::runtime::{Handle, RuntimeFlavor};
+        // The semaphore is never closed, so acquisition cannot fail.
+        let _permit = self.blocking_reads.acquire().await.ok();
+        let multi_threaded = Handle::try_current()
+            .map(|h| h.runtime_flavor() == RuntimeFlavor::MultiThread)
+            .unwrap_or_default();
+        if multi_threaded {
+            tokio::task::block_in_place(f)
+        } else {
+            f()
+        }
     }
 }
