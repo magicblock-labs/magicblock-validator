@@ -185,11 +185,9 @@ async fn executor_rejects_unwritable_action_dependencies_atomically() {
     }
 }
 
-/// An undelegating dependency that has been drained to zero lamports and empty
-/// data must stay rejected: emptiness would otherwise satisfy the
-/// not-yet-created carve-out and bypass the undelegating lock, letting a
-/// post-delegation action reach a still-protected account as writable. The
-/// account is locked until its base-layer undelegation completes.
+/// A drained (zero-lamport, empty) but still-undelegating dependency must stay
+/// rejected: emptiness must not let it slip through the not-yet-created
+/// carve-out and bypass the undelegating lock.
 #[tokio::test]
 async fn executor_rejects_empty_undelegating_action_dependency() {
     generate_validator_authority_if_needed();
@@ -258,15 +256,11 @@ async fn executor_rejects_empty_undelegating_action_dependency() {
     assert!(counter_account.undelegating(), "the lock must be preserved");
 }
 
-/// Regression (e-token shuttle private-transfer PostActs): actions create
-/// accounts mid-flight — group receipts, permission PDAs, rent-pending ATAs —
-/// via Magic CPIs, and declare them writable (non-signer) in their metas; the
-/// created account is authorized by a program (PDA) signature inside the
-/// invoked program's CPI. Such an account does not exist when the executor
-/// revalidates writable action accounts, so rejecting it pre-invocation
-/// (IllegalOwner) kills every such action and rescue-undelegates the target.
-/// Not-yet-created non-signer accounts must pass the pre-invocation check;
-/// post-execution writable validation still governs the result.
+/// Actions legitimately create accounts mid-flight (receipts, permission PDAs,
+/// rent-pending ATAs) via Magic CPIs, declaring them writable non-signer and
+/// authorizing them with a program (PDA) signature. Such not-yet-created
+/// accounts must pass the pre-invocation check; post-execution validation
+/// still governs the result.
 #[tokio::test]
 async fn executor_allows_writable_action_account_created_by_the_action() {
     generate_validator_authority_if_needed();
@@ -303,9 +297,8 @@ async fn executor_allows_writable_action_account_created_by_the_action() {
         .insert_account(&sponsor, &sponsor_account)
         .unwrap();
 
-    // The receipt exists nowhere until the action itself creates it. It is a
-    // PDA of the invoked program, declared writable but NOT signer — the
-    // program authorizes its creation by signing the Magic CPI with seeds.
+    // A PDA of the invoked program, not yet created, declared writable
+    // non-signer; the program authorizes it by signing the Magic CPI with seeds.
     let (receipt, _) = guinea::ephemeral_pda();
     let actions = vec![Instruction::new_with_bincode(
         guinea::ID,
@@ -354,11 +347,8 @@ async fn executor_allows_writable_action_account_created_by_the_action() {
 }
 
 /// A nonexistent account declared writable AND signer must stay rejected:
-/// action signers are synthesized without signatures, so letting an absent
-/// signer through would allow a delegation-record author to squat any unused
-/// pubkey (e.g. satisfying `CreateEphemeralAccount`'s signer check without
-/// possessing the key). Creation must be authorized by a program (PDA)
-/// signature inside the invoked program instead.
+/// action signers are synthesized without signatures, so an absent signer
+/// could satisfy a program's signer check and squat any unused pubkey.
 #[tokio::test]
 async fn executor_rejects_nonexistent_writable_signer_action_account() {
     generate_validator_authority_if_needed();
@@ -444,12 +434,9 @@ async fn executor_rejects_nonexistent_writable_signer_action_account() {
     assert!(!target_account.delegated(), "clone must roll back");
 }
 
-/// Duplicate-meta variant of the squat: the absent pubkey appears once as a
-/// writable non-signer meta (which a per-meta signer check would let through)
-/// and once as a read-only signer meta. Signer authority in `native_invoke` is
-/// keyed by pubkey, so the invoked program still sees it as a signer and could
-/// create it. The carve-out must therefore be gated on the action's whole
-/// signer-pubkey set, not the writable occurrence's own flag.
+/// Duplicate-meta squat: the absent pubkey appears once writable non-signer and
+/// once read-only signer. Signer authority is keyed by pubkey, so a per-meta
+/// check is insufficient — the carve-out must gate on the whole signer set.
 #[tokio::test]
 async fn executor_rejects_squat_via_duplicate_writable_and_signer_metas() {
     generate_validator_authority_if_needed();
@@ -537,10 +524,9 @@ async fn executor_rejects_squat_via_duplicate_writable_and_signer_metas() {
     assert!(!target_account.delegated(), "clone must roll back");
 }
 
-/// Letting not-yet-created accounts through the pre-invocation check must not
-/// weaken the invariant: if the action declares a nonexistent account writable
-/// but never creates it, post-execution writable validation fails the whole
-/// transaction and the clone rolls back atomically.
+/// If the action declares a nonexistent account writable but never creates it,
+/// post-execution writable validation must still fail the transaction and roll
+/// back the clone.
 #[tokio::test]
 async fn nonexistent_writable_action_account_left_uncreated_still_rolls_back() {
     generate_validator_authority_if_needed();

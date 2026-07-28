@@ -295,10 +295,8 @@ pub fn execute_post_delegation_actions(
         &actions,
     )?;
     // Signer authority in `native_invoke` is keyed by pubkey across the whole
-    // action bundle, so a pubkey that is a signer in any meta receives signer
-    // privilege even where another meta marks it writable and non-signer.
-    // Collect the full signer-pubkey set to gate the not-yet-created carve-out
-    // on it, rather than the current meta's own signer flag.
+    // action bundle, so the carve-out below is gated on the full signer set,
+    // not on any single meta's signer flag.
     let signer_pubkeys: HashSet<Pubkey> = actions
         .iter()
         .flat_map(|action| action.accounts.iter())
@@ -317,19 +315,13 @@ pub fn execute_post_delegation_actions(
         )?;
         let locally_writable = {
             let account = instruction_account.borrow()?;
-            // An account with no lamports and no data does not exist yet: it
-            // can only become writable by being created inside the action
-            // itself (e.g. an ephemeral account or rent-pending ATA
-            // materialized through a Magic CPI). Post-execution writable
-            // validation still rejects the transaction atomically if the
-            // action leaves it without a mutability flag. Signer pubkeys are
-            // excluded: action signers are synthesized without signatures, so
-            // accepting an absent signer would let a delegation-record author
-            // squat any unused pubkey. Legitimate creations authorize the new
-            // account with program (PDA) signatures inside the invoked
-            // program's CPIs instead. An undelegating account is never eligible,
-            // even when drained empty, so it stays locked while its base-layer
-            // undelegation completes.
+            // An empty account can be created inside the action itself (e.g. an
+            // ephemeral receipt or rent-pending ATA via a Magic CPI); allow it
+            // as writable, since post-execution validation still rejects it if
+            // the action leaves it without a mutability flag. Excluded: signer
+            // pubkeys (synthesized without signatures, so an absent signer could
+            // squat any unused pubkey) and undelegating accounts (stay locked
+            // until base-layer undelegation completes, even when drained empty).
             let not_created_yet = !account.undelegating()
                 && !signer_pubkeys.contains(&account_meta.pubkey)
                 && account.lamports() == 0

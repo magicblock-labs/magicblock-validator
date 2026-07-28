@@ -273,10 +273,8 @@ fn create_ephemeral_account(
     Ok(())
 }
 
-/// Creates an ephemeral account at a program-derived address, signing the
-/// Magic CPI with the PDA seeds. Mirrors how programs materialize accounts
-/// (receipts, rent-pending ATAs) from inside post-delegation actions, where
-/// no keypair signature is available.
+/// Creates an ephemeral account at a PDA, signing the Magic CPI with its seeds
+/// (mirrors how post-delegation actions materialize accounts without a keypair).
 fn create_ephemeral_pda_account(
     mut accounts: slice::Iter<AccountInfo>,
     data_len: u32,
