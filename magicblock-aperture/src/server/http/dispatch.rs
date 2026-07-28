@@ -59,7 +59,7 @@ pub(crate) struct HttpDispatcher {
     /// A handle to the transaction scheduler for processing
     /// `sendTransaction` and `simulateTransaction`.
     pub(crate) transactions_scheduler: TransactionSchedulerHandle,
-    /// Bounds concurrent blocking ledger reads so a burst of degraded
+    /// Bounds concurrent iterator-based ledger scans so a burst of degraded
     /// (e.g. tombstone-scanning) queries cannot exhaust threads or the DB.
     blocking_reads: Semaphore,
 }
@@ -73,12 +73,12 @@ impl HttpDispatcher {
         state: SharedState,
         channels: &DispatchEndpoints,
     ) -> Arc<Self> {
-        // Mirror the runtime's worker count: the same ledger-read concurrency
+        // Mirror the runtime's worker count: the same ledger-scan concurrency
         // the workers previously allowed implicitly, now without starving them.
         let permits = std::thread::available_parallelism()
             .map(|n| (n.get() / 2).saturating_sub(1))
             .unwrap_or(1)
-            .max(1);
+            .max(2);
         Arc::new(Self {
             context: state.context,
             accountsdb: state.accountsdb.clone(),
@@ -191,9 +191,7 @@ impl HttpDispatcher {
             GetBlock => self.run_blocking(|| self.get_block(request)).await,
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_block_height(request),
-            GetBlockTime => {
-                self.run_blocking(|| self.get_block_time(request)).await
-            }
+            GetBlockTime => self.get_block_time(request),
             GetBlocks => self.get_blocks(request),
             GetBlocksWithLimit => self.get_blocks_with_limit(request),
             GetClusterNodes => self.get_cluster_nodes(request),
@@ -212,8 +210,7 @@ impl HttpDispatcher {
             GetRecentPerformanceSamples => {
                 self.get_recent_performance_samples(request)
             }
-            // Gates only its ledger fallbacks; cache hits answer inline.
-            GetSignatureStatuses => self.get_signature_statuses(request).await,
+            GetSignatureStatuses => self.get_signature_statuses(request),
             GetSignaturesForAddress => {
                 self.run_blocking(|| self.get_signatures_for_address(request))
                     .await
@@ -233,9 +230,7 @@ impl HttpDispatcher {
             }
             GetTokenLargestAccounts => self.get_token_largest_accounts(request),
             GetTokenSupply => self.get_token_supply(request),
-            GetTransaction => {
-                self.run_blocking(|| self.get_transaction(request)).await
-            }
+            GetTransaction => self.get_transaction(request),
             GetTransactionCount => self.get_transaction_count(request),
             GetVersion => self.get_version(request),
             GetVoteAccounts => self.get_vote_accounts(request),
@@ -288,15 +283,20 @@ impl HttpDispatcher {
 }
 
 impl HttpDispatcher {
-    /// Runs a ledger (RocksDB) reading handler via `block_in_place`: a slow
-    /// read (e.g. scanning range tombstones left behind by the ledger
-    /// truncator) must never pin an RPC runtime worker and starve every other
-    /// request. The `blocking_reads` semaphore bounds how many such reads run
-    /// at once; waiters queue in async land without occupying any thread.
+    /// Runs an iterator-based ledger scan (`getBlock`,
+    /// `getSignaturesForAddress`) via `block_in_place`: such scans crawl the
+    /// range tombstones left behind by the ledger truncator and must never
+    /// pin an RPC runtime worker and starve every other request. The
+    /// `blocking_reads` semaphore bounds how many run at once; waiters queue
+    /// in async land without occupying any thread.
+    ///
+    /// Single-key ledger gets stay inline: they remain cheap under tombstones
+    /// (signature-keyed columns are never range-deleted), and the per-call
+    /// `block_in_place` core handoff is too costly for hot point lookups.
     ///
     /// Falls back to running inline on current-thread runtimes (tests), where
     /// `block_in_place` would panic.
-    pub(crate) async fn run_blocking<T>(&self, f: impl FnOnce() -> T) -> T {
+    async fn run_blocking<T>(&self, f: impl FnOnce() -> T) -> T {
         use tokio::runtime::{Handle, RuntimeFlavor};
         // The semaphore is never closed, so acquisition cannot fail.
         let _permit = self.blocking_reads.acquire().await.ok();

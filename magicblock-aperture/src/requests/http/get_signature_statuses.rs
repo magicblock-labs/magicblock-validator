@@ -18,11 +18,7 @@ impl HttpDispatcher {
     /// checks a hot in-memory cache of recent transactions before falling back to the
     /// persistent ledger. The returned list has the same length as the input, with
     /// `null` entries for signatures that are not found.
-    ///
-    /// Only the ledger fallbacks run under the blocking-read gate: cache hits
-    /// (clients polling recently submitted transactions) must stay responsive
-    /// even when degraded ledger reads hold every permit.
-    pub(crate) async fn get_signature_statuses(
+    pub(crate) fn get_signature_statuses(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
@@ -34,11 +30,8 @@ impl HttpDispatcher {
             ));
         }
         let mut statuses = Vec::with_capacity(signatures.len());
-        let mut misses = Vec::new();
 
-        for (index, signature) in
-            signatures.into_iter().map(Into::into).enumerate()
-        {
+        for signature in signatures.into_iter().map(Into::into) {
             // Level 1: Check the hot in-memory cache first.
             if let Some(Some(cached_status)) = self.transactions.get(&signature)
             {
@@ -46,31 +39,18 @@ impl HttpDispatcher {
                     cached_status.slot,
                     cached_status.result.clone(),
                 )));
-            } else {
-                statuses.push(None);
-                misses.push((index, signature));
+                continue;
             }
-        }
 
-        // Level 2: Fall back to the persistent ledger for historical lookups.
-        if !misses.is_empty() {
-            let resolved = self
-                .run_blocking(|| {
-                    misses
-                        .into_iter()
-                        .map(|(index, signature)| {
-                            self.ledger
-                                .get_transaction_status(signature, Slot::MAX)
-                                .map(|status| (index, status))
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .await?;
-            for (index, ledger_status) in resolved {
-                if let Some((slot, meta)) = ledger_status {
-                    statuses[index] =
-                        Some(build_transaction_status(slot, meta.status));
-                }
+            // Level 2: Fall back to the persistent ledger for historical lookups.
+            let ledger_status =
+                self.ledger.get_transaction_status(signature, Slot::MAX)?;
+            if let Some((slot, meta)) = ledger_status {
+                let status = build_transaction_status(slot, meta.status);
+                statuses.push(Some(status));
+            } else {
+                // The signature was not found in the cache or the ledger.
+                statuses.push(None);
             }
         }
 
