@@ -177,10 +177,10 @@ impl HttpDispatcher {
         match request.method {
             GetAccountInfo => self.get_account_info(request).await,
             GetBalance => self.get_balance(request).await,
-            GetBlock => self.get_block(request),
+            GetBlock => run_blocking(|| self.get_block(request)),
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_block_height(request),
-            GetBlockTime => self.get_block_time(request),
+            GetBlockTime => run_blocking(|| self.get_block_time(request)),
             GetBlocks => self.get_blocks(request),
             GetBlocksWithLimit => self.get_blocks_with_limit(request),
             GetClusterNodes => self.get_cluster_nodes(request),
@@ -199,8 +199,12 @@ impl HttpDispatcher {
             GetRecentPerformanceSamples => {
                 self.get_recent_performance_samples(request)
             }
-            GetSignatureStatuses => self.get_signature_statuses(request),
-            GetSignaturesForAddress => self.get_signatures_for_address(request),
+            GetSignatureStatuses => {
+                run_blocking(|| self.get_signature_statuses(request))
+            }
+            GetSignaturesForAddress => {
+                run_blocking(|| self.get_signatures_for_address(request))
+            }
             GetSlot => self.get_slot(request),
             GetSlotLeader => self.get_slot_leader(request),
             GetSlotLeaders => self.get_slot_leaders(request),
@@ -216,7 +220,7 @@ impl HttpDispatcher {
             }
             GetTokenLargestAccounts => self.get_token_largest_accounts(request),
             GetTokenSupply => self.get_token_supply(request),
-            GetTransaction => self.get_transaction(request),
+            GetTransaction => run_blocking(|| self.get_transaction(request)),
             GetTransactionCount => self.get_transaction_count(request),
             GetVersion => self.get_version(request),
             GetVoteAccounts => self.get_vote_accounts(request),
@@ -265,5 +269,23 @@ impl HttpDispatcher {
         headers.insert(ACCESS_CONTROL_ALLOW_METHODS, hv("POST, OPTIONS, GET"));
         headers.insert(ACCESS_CONTROL_ALLOW_HEADERS, hv("*"));
         headers.insert(ACCESS_CONTROL_MAX_AGE, hv("86400"));
+    }
+}
+
+/// Runs a ledger (RocksDB) reading handler via `block_in_place`: a slow read
+/// (e.g. scanning range tombstones left behind by the ledger truncator) must
+/// never pin an RPC runtime worker and starve every other request.
+///
+/// Falls back to running inline on current-thread runtimes (tests), where
+/// `block_in_place` would panic.
+fn run_blocking<T>(f: impl FnOnce() -> T) -> T {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    let multi_threaded = Handle::try_current()
+        .map(|h| h.runtime_flavor() == RuntimeFlavor::MultiThread)
+        .unwrap_or_default();
+    if multi_threaded {
+        tokio::task::block_in_place(f)
+    } else {
+        f()
     }
 }
