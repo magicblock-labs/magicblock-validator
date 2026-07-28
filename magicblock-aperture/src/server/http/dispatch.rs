@@ -337,6 +337,7 @@ impl HttpDispatcher {
     ) {
         let claims = remote_account_claims.load(Ordering::Relaxed).to_string();
         let value = HeaderValue::from_str(&claims)
+            // SAFETY: a stringified u64 is always a valid header value
             .expect("u64 remote account claims header value should be valid");
         response
             .headers_mut()

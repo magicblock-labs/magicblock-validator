@@ -254,6 +254,8 @@ impl AccountFetchContext {
     }
 
     pub fn should_count_remote_account_claims(&self) -> bool {
+        // We only count fetches due to direct user requests, not due to internal
+        // fetches, i.e. to get a companion account
         if self.reason != AccountFetchReason::RequestedAccount {
             return false;
         }

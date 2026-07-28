@@ -611,7 +611,7 @@ where
                 this,
                 input.eata_pubkey,
                 context_slot,
-                delegation_record_context.clone(),
+                delegation_record_context,
                 &companion_fetch_log_context,
             )
             .await

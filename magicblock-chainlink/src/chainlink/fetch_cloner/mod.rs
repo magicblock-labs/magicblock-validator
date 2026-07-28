@@ -2163,16 +2163,17 @@ where
         let record_context = fetch_context
             .clone()
             .with_reason(AccountFetchReason::DelegationRecord);
+        let companion_fetch_log_context = CompanionFetchLogContext {
+            origin: record_context.clone(),
+            primary_pubkey: candidate.pubkey,
+            context_slot: candidate.slot,
+        };
         let Some((deleg_record, _)) = self
             .fetch_and_parse_delegation_record(
                 candidate.pubkey,
                 candidate.slot,
-                record_context.clone(),
-                CompanionFetchLogContext {
-                    origin: record_context.clone(),
-                    primary_pubkey: candidate.pubkey,
-                    context_slot: candidate.slot,
-                },
+                record_context,
+                companion_fetch_log_context,
             )
             .await
         else {
@@ -2286,17 +2287,18 @@ where
         let record_context = discovery_context
             .clone()
             .with_reason(AccountFetchReason::DelegationRecord);
+        let companion_fetch_log_context = CompanionFetchLogContext {
+            origin: record_context.clone(),
+            primary_pubkey: pubkey,
+            context_slot: account.remote_slot(),
+        };
 
         let Some((deleg_record, delegation_actions)) = self
             .fetch_and_parse_delegation_record(
                 pubkey,
                 account.remote_slot(),
-                record_context.clone(),
-                CompanionFetchLogContext {
-                    origin: record_context.clone(),
-                    primary_pubkey: pubkey,
-                    context_slot: account.remote_slot(),
-                },
+                record_context,
+                companion_fetch_log_context,
             )
             .await
         else {
@@ -3401,18 +3403,17 @@ where
                 let undelegating_refresh_context = fetch_context
                     .clone()
                     .with_reason(AccountFetchReason::UndelegatingRefresh);
+                let companion_fetch_log_context = CompanionFetchLogContext {
+                    origin: undelegating_refresh_context.clone(),
+                    primary_pubkey: eata_pubkey,
+                    context_slot: self.remote_account_provider.chain_slot(),
+                };
                 let projected_deleg_record = self
                     .fetch_and_parse_delegation_record(
                         eata_pubkey,
                         self.remote_account_provider.chain_slot(),
-                        undelegating_refresh_context.clone(),
-                        CompanionFetchLogContext {
-                            origin: undelegating_refresh_context.clone(),
-                            primary_pubkey: eata_pubkey,
-                            context_slot: self
-                                .remote_account_provider
-                                .chain_slot(),
-                        },
+                        undelegating_refresh_context,
+                        companion_fetch_log_context,
                     )
                     .await;
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
@@ -3431,16 +3432,17 @@ where
             let undelegating_refresh_context = fetch_context
                 .clone()
                 .with_reason(AccountFetchReason::UndelegatingRefresh);
+            let companion_fetch_log_context = CompanionFetchLogContext {
+                origin: undelegating_refresh_context.clone(),
+                primary_pubkey: *pubkey,
+                context_slot: self.remote_account_provider.chain_slot(),
+            };
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,
                     self.remote_account_provider.chain_slot(),
-                    undelegating_refresh_context.clone(),
-                    CompanionFetchLogContext {
-                        origin: undelegating_refresh_context.clone(),
-                        primary_pubkey: *pubkey,
-                        context_slot: self.remote_account_provider.chain_slot(),
-                    },
+                    undelegating_refresh_context,
+                    companion_fetch_log_context,
                 )
                 .await;
 
@@ -3611,7 +3613,7 @@ where
                         this.should_refresh_undelegating_in_bank_account(
                             &pubkey,
                             &account_in_bank,
-                            fetch_context.clone(),
+                            fetch_context,
                         ),
                     )
                     .await
