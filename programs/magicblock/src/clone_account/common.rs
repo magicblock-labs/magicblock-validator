@@ -312,9 +312,15 @@ pub fn execute_post_delegation_actions(
             // itself (e.g. an ephemeral account or rent-pending ATA
             // materialized through a Magic CPI). Post-execution writable
             // validation still rejects the transaction atomically if the
-            // action leaves it without a mutability flag.
-            let not_created_yet =
-                account.lamports() == 0 && account.data().is_empty();
+            // action leaves it without a mutability flag. Signer metas are
+            // excluded: action signers are synthesized without signatures, so
+            // accepting an absent signer would let a delegation-record author
+            // squat any unused pubkey. Legitimate creations authorize the new
+            // account with program (PDA) signatures inside the invoked
+            // program's CPIs instead.
+            let not_created_yet = !account_meta.is_signer
+                && account.lamports() == 0
+                && account.data().is_empty();
             not_created_yet
                 || (!account.undelegating()
                     && (account.delegated()
