@@ -204,7 +204,7 @@ impl HttpDispatcher {
     async fn process(
         &self,
         request: &mut JsonHttpRequest,
-        _remote_account_claims: Arc<AtomicU64>,
+        remote_account_claims: Arc<AtomicU64>,
     ) -> HandlerResult {
         // Route the request to the correct handler based on the method name.
         use crate::requests::JsonRpcHttpMethod::*;
@@ -215,8 +215,14 @@ impl HttpDispatcher {
             .start_timer();
 
         match request.method {
-            GetAccountInfo => self.get_account_info(request).await,
-            GetBalance => self.get_balance(request).await,
+            GetAccountInfo => {
+                self.get_account_info(request, remote_account_claims.clone())
+                    .await
+            }
+            GetBalance => {
+                self.get_balance(request, remote_account_claims.clone())
+                    .await
+            }
             GetBlock => self.run_blocking(|| self.get_block(request)).await,
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_block_height(request),
@@ -234,7 +240,13 @@ impl HttpDispatcher {
             GetIdentity => self.get_identity(request),
             GetLargestAccounts => self.get_largest_accounts(request),
             GetLatestBlockhash => self.get_latest_blockhash(request),
-            GetMultipleAccounts => self.get_multiple_accounts(request).await,
+            GetMultipleAccounts => {
+                self.get_multiple_accounts(
+                    request,
+                    remote_account_claims.clone(),
+                )
+                .await
+            }
             GetProgramAccounts => self.get_program_accounts(request),
             GetRecentPerformanceSamples => {
                 self.get_recent_performance_samples(request)
@@ -249,7 +261,11 @@ impl HttpDispatcher {
             GetSlotLeaders => self.get_slot_leaders(request),
             GetSupply => self.get_supply(request),
             GetTokenAccountBalance => {
-                self.get_token_account_balance(request).await
+                self.get_token_account_balance(
+                    request,
+                    remote_account_claims.clone(),
+                )
+                .await
             }
             GetTokenAccountsByDelegate => {
                 self.get_token_accounts_by_delegate(request)
@@ -271,7 +287,13 @@ impl HttpDispatcher {
             GetRoutes => self.get_routes(request),
             // Alias for getLatestBlockhash; exists for Magic Router SDK compatibility.
             GetBlockhashForAccounts => self.get_latest_blockhash(request),
-            GetDelegationStatus => self.get_delegation_status(request).await,
+            GetDelegationStatus => {
+                self.get_delegation_status(
+                    request,
+                    remote_account_claims.clone(),
+                )
+                .await
+            }
             MethodNotFound => Err(RpcError::method_not_found()),
         }
     }

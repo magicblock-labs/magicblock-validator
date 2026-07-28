@@ -1,4 +1,7 @@
-use std::mem::size_of;
+use std::{
+    mem::size_of,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use solana_account::AccountSharedData;
 use solana_account_decoder::{
@@ -20,13 +23,17 @@ impl HttpDispatcher {
     pub(crate) async fn get_token_account_balance(
         &self,
         request: &mut JsonRequest,
+        remote_account_claims: Arc<AtomicU64>,
     ) -> HandlerResult {
         let pubkey = parse_params!(request.params()?, Serde32Bytes);
         let pubkey: Pubkey = some_or_err!(pubkey);
 
         // Fetch the target token account.
+        let token_account_fetch_context =
+            Self::rpc_get_account_context(remote_account_claims.clone());
         let token_account: AccountSharedData = some_or_err!(
-            self.read_account_with_ensure(&pubkey).await,
+            self.read_account_with_ensure(&pubkey, token_account_fetch_context)
+                .await,
             "token account not found or is not a token account"
         );
 
@@ -41,8 +48,11 @@ impl HttpDispatcher {
             })?;
 
         // Fetch the mint account to get the token's decimals.
+        let mint_fetch_context =
+            Self::rpc_get_account_context(remote_account_claims);
         let mint_account: AccountSharedData = some_or_err!(
-            self.read_account_with_ensure(&mint_pubkey).await,
+            self.read_account_with_ensure(&mint_pubkey, mint_fetch_context)
+                .await,
             "mint account not found"
         );
         let decimals =
