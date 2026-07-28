@@ -411,11 +411,15 @@ impl Ledger {
     // As far as we are concerned these are just the time when we advanced to
     // a specific slot.
     pub fn write_block(&self, block: LatestBlockInner) -> LedgerResult<()> {
-        self.blocktime_cf
-            .put(block.slot, &block.clock.unix_timestamp)?;
-        self.blocktime_cf.try_increase_entry_counter(1);
+        // Blocktime and blockhash must land atomically: readers treat the
+        // pair as one record (e.g. getBlockTime vs getBlock availability),
+        // so a split write must never be observable or partially persisted.
+        let mut batch = self.db.batch();
+        batch.put::<cf::Blocktime>(block.slot, &block.clock.unix_timestamp)?;
+        batch.put::<cf::Blockhash>(block.slot, &block.blockhash)?;
+        self.db.write(batch)?;
 
-        self.blockhash_cf.put(block.slot, &block.blockhash)?;
+        self.blocktime_cf.try_increase_entry_counter(1);
         self.blockhash_cf.try_increase_entry_counter(1);
         self.latest_block.store(block);
         Ok(())
