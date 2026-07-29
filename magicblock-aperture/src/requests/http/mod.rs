@@ -182,6 +182,17 @@ impl HttpDispatcher {
         )
     }
 
+    fn simulate_transaction_context(
+        signature: Signature,
+        remote_account_claims: Arc<AtomicU64>,
+    ) -> AccountFetchContext {
+        AccountFetchContext::new_with_claims_counter(
+            AccountFetchEntrypoint::SimulateTransaction(signature),
+            AccountFetchReason::RequestedAccount,
+            remote_account_claims,
+        )
+    }
+
     /// Fetches an account's data from the `AccountsDb` filling it in from chain
     /// as needed.
     #[instrument(skip_all)]

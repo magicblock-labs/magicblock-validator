@@ -52,7 +52,7 @@ impl HttpDispatcher {
             .inspect_err(|err| {
                 debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
-        let fetch_context = Self::send_transaction_context(
+        let fetch_context = Self::simulate_transaction_context(
             *transaction.txn.signature(),
             remote_account_claims.clone(),
         );
