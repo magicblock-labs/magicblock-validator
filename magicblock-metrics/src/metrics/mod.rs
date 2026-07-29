@@ -1611,6 +1611,9 @@ mod fetch_context_metric_tests {
         );
         let undelegating_context = AccountFetchContext::rpc_get_account()
             .with_reason(AccountFetchReason::UndelegatingRefresh);
+        let simulation_context = AccountFetchContext::simulate_transaction(
+            solana_signature::Signature::from([1u8; 64]),
+        );
 
         let action_labels = &[
             "rpc_get_account",
@@ -1724,6 +1727,30 @@ mod fetch_context_metric_tests {
                 undelegating_labels
             ),
             before_undelegating + 1
+        );
+
+        let simulation_labels = &[
+            "simulate_transaction",
+            "requested_account",
+            "fetch_cloner",
+            "owned",
+        ];
+        let before_simulation = counter_value(
+            &CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL,
+            simulation_labels,
+        );
+        inc_chainlink_pending_fetch_accounts_with_context(
+            simulation_context,
+            ChainlinkPendingFetchLayer::FetchCloner,
+            ChainlinkPendingFetchOutcome::Owned,
+            1,
+        );
+        assert_eq!(
+            counter_value(
+                &CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL,
+                simulation_labels,
+            ),
+            before_simulation + 1
         );
     }
 }
