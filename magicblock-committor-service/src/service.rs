@@ -185,26 +185,33 @@ where
 
     async fn reschedule_pending_bundles(&self) -> CommittorServiceResult<()> {
         // Fetch pending and failed bundles from DB, unfiltered
-        let recovered = self
-            .processor
-            .load_recovery_intent_bundles()
-            .await
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to load pending intent bundles for recovery");
-            })?;
+        let slot = self.processor.get_slot();
+        let recovered = self.processor.load_recovery_intent_bundles();
+        let (slot, recovered) = {
+            let (slot, recovered) = tokio::join!(slot, recovered);
+            let slot = slot?;
+            let recovered = recovered
+                .inspect_err(|err| {
+                    error!(error = ?err, "Failed to load pending intent bundles for recovery");
+                })?;
+            (slot, recovered)
+        };
         if recovered.is_empty() {
             return Ok(());
         }
 
         // Drop bundles that are no longer safe to replay
-        let mut bundles = self.retain_recoverable_intents(recovered).await;
+        let mut bundles =
+            self.retain_recoverable_intents(recovered, slot).await;
         if bundles.is_empty() {
             return Ok(());
         }
 
         // Bundles are out of date and missing some info now that they
         // survived the recovery filters, which needed the original values.
-        self.processor.refresh_intent_bundles(&mut bundles).await?;
+        self.processor
+            .refresh_intent_bundles(&mut bundles, slot)
+            .await?;
 
         // Schedule  without initial persisitance as bundle already exists in db
         self.process_intent_bundles(bundles, |bundles| {
@@ -390,13 +397,14 @@ where
     async fn retain_recoverable_intents(
         &self,
         recovered: Vec<RecoveredIntent>,
+        min_context_slot: u64,
     ) -> Vec<ScheduledIntentBundle> {
         const JOIN_CHUNK_SIZE: usize = 10;
 
         let mut to_keep = Vec::with_capacity(recovered.len());
         for chunk in recovered.chunks(JOIN_CHUNK_SIZE) {
             let iter = chunk.iter().map(|recovered| async move {
-                self.is_intent_retriable(recovered).await
+                self.is_intent_retriable(recovered, min_context_slot).await
             });
             to_keep.extend(join_all(iter).await);
         }
@@ -411,7 +419,11 @@ where
 
     /// An intent is retriable only if its delegation session is unchanged
     /// and its commit nonce hasn't already landed on chain.
-    async fn is_intent_retriable(&self, recovered: &RecoveredIntent) -> bool {
+    async fn is_intent_retriable(
+        &self,
+        recovered: &RecoveredIntent,
+        min_context_slot: u64,
+    ) -> bool {
         let pubkeys = recovered.bundle.get_all_committed_pubkeys();
         let result = self
             .is_same_delegation_session(&pubkeys, recovered)
@@ -424,7 +436,7 @@ where
         if !result {
             false
         } else {
-            self.is_valid_nonce(&pubkeys, recovered)
+            self.is_valid_nonce(&pubkeys, recovered, min_context_slot)
                 .await
                 .inspect_err(|err| {
                     error!(intent_id = recovered.bundle.id, error = ?err, "Failed to check commit nonce for recovery");
@@ -483,10 +495,11 @@ where
         &self,
         pubkeys: &[Pubkey],
         recovered: &RecoveredIntent,
+        min_context_slot: u64,
     ) -> TaskInfoFetcherResult<bool> {
         let current_nonces = self
             .processor
-            .fetch_current_commit_nonces(pubkeys, 0)
+            .fetch_current_commit_nonces(pubkeys, min_context_slot)
             .await?;
 
         let valid = recovered.commit_ids.iter().all(|(pubkey, commit_id)| {

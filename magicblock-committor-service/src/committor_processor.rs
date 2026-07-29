@@ -6,7 +6,7 @@ use std::{
 };
 
 use futures_util::future::join_all;
-use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_core::{traits::ActionsCallbackScheduler, Slot};
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -181,6 +181,10 @@ impl CommittorProcessor {
         Ok(recovered)
     }
 
+    pub(crate) async fn get_slot(&self) -> CommittorServiceResult<Slot> {
+        Ok(self.magic_rpc_client.get_slot().await?)
+    }
+
     /// Stamps `payer` and `remote_slot` on recovered bundles with current
     /// values so execution (fetching nonces/base accounts) uses a fresh
     /// `min_context_slot`. Must run only on bundles that already survived
@@ -190,9 +194,9 @@ impl CommittorProcessor {
     pub(crate) async fn refresh_intent_bundles(
         &self,
         intent_bundles: &mut [ScheduledIntentBundle],
+        slot: u64,
     ) -> CommittorServiceResult<()> {
         let payer = self.authority.pubkey();
-        let slot = self.magic_rpc_client.get_slot().await?;
 
         macro_rules! set_remote_slot {
             ($field:expr, $slot:expr) => {
