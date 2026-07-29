@@ -166,20 +166,17 @@ impl IntentPersisterImpl {
         .collect()
     }
 
-    /// Loads pending/failed bundles for restart recovery, each paired with
-    /// the `commit_id` (nonce) its committed accounts were persisted with.
-    /// See [`RecoveredIntent`] for why this isn't part of the
-    /// `IntentPersister::pending_intent_bundles` trait method.
+    /// Loads *failed* bundles for restart recovery, paired with the
+    /// `commit_id` each committed account was persisted with.
     pub fn recoverable_intents(
         &self,
         min_created_at: u64,
     ) -> CommitPersistResult<Vec<RecoveredIntent>> {
-        let commits_db = self.commits_db.lock().expect(POISONED_MUTEX_MSG);
-        let mut rows =
-            commits_db.get_pending_commit_statuses(min_created_at)?;
-        rows.extend(commits_db.get_failed_commit_statuses(min_created_at)?);
-        drop(commits_db);
-
+        let rows = self
+            .commits_db
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .get_failed_commit_statuses(min_created_at)?;
         Ok(pending_rows_to_recovered_intents(rows, min_created_at))
     }
 }
@@ -272,7 +269,7 @@ impl IntentPersister for IntentPersisterImpl {
             .get_commit_statuses_by_id(message_id)
     }
 
-    /// Returns pending and failed bundles created at or after `min_created_at`.
+    /// Returns pending bundles created at or after `min_created_at`.
     /// NOTE: this constructs `ScheduleIntentBundle` only from existing information.
     /// As persister doesn't save `ScheduleIntentBundle::payer` info, Pubkey::default is used.
     /// `CommittedAccount` information like slot may also be outdated.
@@ -281,11 +278,11 @@ impl IntentPersister for IntentPersisterImpl {
         &self,
         min_created_at: u64,
     ) -> CommitPersistResult<Vec<ScheduledIntentBundle>> {
-        let commits_db = self.commits_db.lock().expect(POISONED_MUTEX_MSG);
-        let mut rows =
-            commits_db.get_pending_commit_statuses(min_created_at)?;
-        rows.extend(commits_db.get_failed_commit_statuses(min_created_at)?);
-        drop(commits_db);
+        let rows = self
+            .commits_db
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .get_pending_commit_statuses(min_created_at)?;
 
         Ok(pending_rows_to_scheduled_intent_bundles(
             rows,
@@ -818,15 +815,17 @@ mod tests {
         let pubkey_a = Pubkey::new_unique();
         let pubkey_b = Pubkey::new_unique();
 
+        let mut row_a = pending_row(1, pubkey_a, owner, blockhash, false, None);
+        row_a.commit_status = CommitStatus::FailedProcess(None);
+        let mut row_b = pending_row(1, pubkey_b, owner, blockhash, false, None);
+        row_b.commit_status = CommitStatus::FailedProcess(None);
+
         let (persister, _temp_file) = create_test_persister();
         persister
             .commits_db
             .lock()
             .unwrap()
-            .insert_commit_status_rows(&[
-                pending_row(1, pubkey_a, owner, blockhash, false, None),
-                pending_row(1, pubkey_b, owner, blockhash, false, None),
-            ])
+            .insert_commit_status_rows(&[row_a, row_b])
             .unwrap();
         persister.set_commit_id(1, &pubkey_a, 5).unwrap();
         persister.set_commit_id(1, &pubkey_b, 7).unwrap();

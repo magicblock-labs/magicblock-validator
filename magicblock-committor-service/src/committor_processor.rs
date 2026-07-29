@@ -154,17 +154,41 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
-    /// Fetches pending and failed bundles from DB for recovery. No filtering.
+    fn recovery_min_created_at() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_sub(RECOVERY_MAX_AGE_SECS)
+    }
+
+    /// Fetches pending bundles from DB for recovery. No filtering - these
+    /// are the most recent ones, still in-flight, not yet confirmed failed.
+    pub async fn load_pending_intent_bundles(
+        &self,
+    ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
+        let bundles = self
+            .persister
+            .pending_intent_bundles(Self::recovery_min_created_at())?;
+
+        if !bundles.is_empty() {
+            info!(
+                intent_count = bundles.len(),
+                "Loaded pending commit intents from persistence for recovery"
+            );
+        }
+
+        Ok(bundles)
+    }
+
+    /// Fetches failed bundles from DB for recovery, for the caller to filter
+    /// for nonce/delegation-session staleness before replaying.
     pub async fn load_recovery_intent_bundles(
         &self,
     ) -> CommittorServiceResult<Vec<RecoveredIntent>> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
         let recovered = self
             .persister
-            .recoverable_intents(now.saturating_sub(RECOVERY_MAX_AGE_SECS))?;
+            .recoverable_intents(Self::recovery_min_created_at())?;
 
         if !recovered.is_empty() {
             let accounts_count: usize = recovered
@@ -174,7 +198,7 @@ impl CommittorProcessor {
             info!(
                 intent_count = recovered.len(),
                 accounts_count,
-                "Loaded commit intents from persistence for recovery"
+                "Loaded failed commit intents from persistence for recovery"
             );
         }
 

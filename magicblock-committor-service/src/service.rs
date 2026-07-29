@@ -183,26 +183,34 @@ where
         }
     }
 
+    /// Fetches and reschedules intents safe for retry
+    /// Note: this doesn't provide intent durability but is a best effort to retry intents
     async fn reschedule_pending_bundles(&self) -> CommittorServiceResult<()> {
         // Fetch pending and failed bundles from DB, unfiltered
-        let slot = self.processor.get_slot();
-        let recovered = self.processor.load_recovery_intent_bundles();
-        let (slot, recovered) = {
-            let (slot, recovered) = tokio::join!(slot, recovered);
+        let (slot, pending, failed) = {
+            let (slot, pending, failed) = tokio::join!(
+                self.processor.get_slot(),
+                self.processor.load_pending_intent_bundles(),
+                self.processor.load_recovery_intent_bundles(),
+            );
             let slot = slot?;
-            let recovered = recovered
-                .inspect_err(|err| {
-                    error!(error = ?err, "Failed to load pending intent bundles for recovery");
-                })?;
-            (slot, recovered)
+            let pending = pending.inspect_err(|err| {
+                error!(error = ?err, "Failed to load pending intent bundles for recovery");
+            })?;
+            let failed = failed.inspect_err(|err| {
+                error!(error = ?err, "Failed to load failed intent bundles for recovery");
+            })?;
+            (slot, pending, failed)
         };
-        if recovered.is_empty() {
+        if pending.is_empty() && failed.is_empty() {
             return Ok(());
         }
 
-        // Drop bundles that are no longer safe to replay
-        let mut bundles =
-            self.retain_recoverable_intents(recovered, slot).await;
+        // Pending bundles go through as-is; failed ones must prove they're
+        // still safe to replay first. Unite and keep execution order stable.
+        let mut bundles = self.retain_recoverable_intents(failed, slot).await;
+        bundles.extend(pending);
+        bundles.sort_by_key(|b| b.id);
         if bundles.is_empty() {
             return Ok(());
         }
