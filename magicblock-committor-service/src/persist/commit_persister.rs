@@ -818,7 +818,11 @@ mod tests {
         let mut row_a = pending_row(1, pubkey_a, owner, blockhash, false, None);
         row_a.commit_status = CommitStatus::FailedProcess(None);
         let mut row_b = pending_row(1, pubkey_b, owner, blockhash, false, None);
-        row_b.commit_status = CommitStatus::FailedProcess(None);
+        row_b.commit_status =
+            CommitStatus::FailedFinalize(CommitStatusSignatures {
+                commit_stage_signature: Signature::new_unique(),
+                finalize_stage_signature: None,
+            });
 
         let (persister, _temp_file) = create_test_persister();
         persister
