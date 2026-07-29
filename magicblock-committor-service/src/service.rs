@@ -505,7 +505,7 @@ where
         let valid = recovered.commit_ids.iter().all(|(pubkey, commit_id)| {
             current_nonces
                 .get(pubkey)
-                .is_some_and(|current_nonce| commit_id > current_nonce)
+                .is_some_and(|current_nonce| commit_id >= current_nonce)
         });
         Ok(valid)
     }
