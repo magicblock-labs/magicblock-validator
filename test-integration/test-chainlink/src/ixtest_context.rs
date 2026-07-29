@@ -3,7 +3,7 @@ use std::sync::Arc;
 use integration_test_tools::dlp_interface;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
-    cloner::{AccountCloneRequest, Cloner, DelegationActions},
+    cloner::{AccountCloneRequest, ClonePostDelegationMode, Cloner},
     config::ChainlinkConfig,
     fetch_cloner::FetchCloner,
     native_program_accounts,
@@ -101,9 +101,8 @@ impl IxtestContext {
                         pubkey,
                         account: program_stub.clone(),
                         commit_frequency_ms: None,
-                        delegation_actions: DelegationActions::default(),
+                        post_delegation_mode: ClonePostDelegationMode::None,
                         delegated_to_other: None,
-                        needs_undelegation: false,
                     })
                     .await
                     .unwrap();

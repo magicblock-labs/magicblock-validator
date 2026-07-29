@@ -49,19 +49,59 @@ impl Deref for DelegationActions {
     }
 }
 
+/// Mutually exclusive post-delegation behavior for a clone request.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ClonePostDelegationMode {
+    /// Clone without post-delegation actions or rescue undelegation.
+    #[default]
+    None,
+    /// Clone and execute post-delegation actions after activation.
+    ExecuteActions(DelegationActions),
+    /// Clone and schedule undelegation instead of executing actions.
+    ///
+    /// Used for delegated accounts whose post-delegation actions cannot be
+    /// executed safely, for example because they include risky signers.
+    RescueUndelegate,
+}
+
+impl ClonePostDelegationMode {
+    pub fn execute_actions(&self) -> Option<&DelegationActions> {
+        match self {
+            Self::ExecuteActions(actions) => Some(actions),
+            Self::None | Self::RescueUndelegate => None,
+        }
+    }
+
+    pub fn has_actions(&self) -> bool {
+        self.execute_actions()
+            .is_some_and(|actions| !actions.is_empty())
+    }
+
+    pub fn is_rescue_undelegate(&self) -> bool {
+        matches!(self, Self::RescueUndelegate)
+    }
+}
+
+impl From<DelegationActions> for ClonePostDelegationMode {
+    fn from(actions: DelegationActions) -> Self {
+        if actions.is_empty() {
+            Self::None
+        } else {
+            Self::ExecuteActions(actions)
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
     pub account: AccountSharedData,
     pub commit_frequency_ms: Option<u64>,
-    pub delegation_actions: DelegationActions,
+    pub post_delegation_mode: ClonePostDelegationMode,
     /// If the account is delegated to another validator,
     /// this contains that validator's pubkey. None if account is not
     /// delegated to another validator.
     pub delegated_to_other: Option<Pubkey>,
-    /// Account that need to be undelegated (e.g. due to AML risk) after cloning.
-    /// Is only true if there are actions with risky signers.
-    pub needs_undelegation: bool,
 }
 
 #[async_trait]
