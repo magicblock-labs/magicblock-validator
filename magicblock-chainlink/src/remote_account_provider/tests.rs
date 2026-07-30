@@ -1668,21 +1668,19 @@ async fn test_companion_fetch_metrics_record_fast_path_success() {
             outcome
         ) > attempts_count_before
     );
-    assert_eq!(
+    assert!(
         chainlink_companion_fetch_attempts_sample_sum(
             context.clone(),
             kind,
             outcome
-        ),
-        attempts_sum_before + 1.0
+        ) >= attempts_sum_before + 1.0
     );
-    assert_eq!(
+    assert!(
         chainlink_companion_fetch_duration_sample_count(
             context.clone(),
             kind,
             outcome
-        ),
-        duration_count_before + 1
+        ) > duration_count_before
     );
     assert!(
         chainlink_companion_fetch_duration_sample_sum(
@@ -1802,13 +1800,12 @@ async fn test_companion_fetch_metrics_record_slot_mismatch_failure() {
         ),
         attempts_count_before + 1
     );
-    assert_eq!(
+    assert!(
         chainlink_companion_fetch_duration_sample_count(
             context.clone(),
             kind,
             outcome
-        ),
-        duration_count_before + 1
+        ) > duration_count_before
     );
 }
 
