@@ -364,19 +364,6 @@ pub enum MagicBlockInstruction {
     /// | `1` | Account. Account to evict. | WRITE |
     EvictAccount { pubkey: Pubkey },
 
-    /// Executes a crank
-    ///
-    /// # Account references
-    /// | Index | Account | Access |
-    /// | --- | --- | --- |
-    /// | `0` | Validator Authority. Authorizes crank execution. | SIGNER |
-    /// | `1` | Crank signer PDA. PDA signer used by embedded instructions. | - |
-    /// | `2..n` | Instruction accounts. Accounts required by the embedded instructions. | - |
-    ExecuteCrank {
-        authority: Pubkey,
-        instructions: Vec<Instruction>,
-    },
-
     /// Closes a drained Magic ATA previously created via
     /// `CreateMagicAta`. No-op unless the account matches the
     /// Magic ATA marker for the signing wallet owner and holds zero

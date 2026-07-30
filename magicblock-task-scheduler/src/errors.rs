@@ -8,13 +8,7 @@ pub enum TaskSchedulerError {
     InvalidConfiguration(String),
 
     #[error(transparent)]
-    DatabaseConnection(#[from] rusqlite::Error),
-
-    #[error(transparent)]
     Wincode(#[from] wincode::WriteError),
-
-    #[error(transparent)]
-    Rpc(#[from] Box<solana_rpc_client_api::client_error::Error>),
 
     #[error("Transaction execution failed: {0}")]
     TransactionExecution(String),
@@ -33,4 +27,7 @@ pub enum TaskSchedulerError {
 
     #[error("Batch size mismatch: expected {0}, got {1}")]
     SizeMismatch(usize, usize),
+
+    #[error("Faucet not ready")]
+    FaucetNotReady,
 }
