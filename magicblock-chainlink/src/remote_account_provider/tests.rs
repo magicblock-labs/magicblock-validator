@@ -4298,4 +4298,5 @@ async fn test_get_accounts_until_slots_match_reforwards_consumed_update_on_failu
     assert_eq!(reforwarded.account.slot(), CURRENT_SLOT + 1);
     assert!(reforwarded.account.is_found());
     assert_eq!(reforwarded.account.fresh_lamports(), Some(777));
+    assert_eq!(reforwarded.source, SubscriptionSource::Replay);
 }

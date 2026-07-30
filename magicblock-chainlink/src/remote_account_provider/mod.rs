@@ -2621,7 +2621,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let update = ForwardedSubscriptionUpdate {
                 pubkey: *pubkey,
                 account: account.clone(),
-                source: SubscriptionSource::Account,
+                source: SubscriptionSource::Replay,
             };
             if let Err(err) = self.subscription_forwarder.send(update).await {
                 warn!(

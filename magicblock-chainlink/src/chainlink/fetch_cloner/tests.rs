@@ -10466,3 +10466,53 @@ async fn test_repro_redelegation_update_forwarded_when_no_fetch_inflight() {
     assert_eq!(forwarded.pubkey, repro.account_pubkey);
     assert_eq!(forwarded.account.slot(), WEDGE_SLOT_REDELEGATED);
 }
+
+/// Replay-sourced updates bypass the unwatched-account drop: unlike an
+/// Account-sourced update (see
+/// test_subscription_update_for_unwatched_present_account_enqueues_removal),
+/// a replayed recovery update must be processed even when the account is in
+/// no watch tier.
+#[tokio::test]
+async fn test_replay_subscription_update_for_unwatched_account_is_processed() {
+    init_logger();
+    let pubkey = Pubkey::new_unique();
+    let validator_keypair = Keypair::new();
+    let owner = Pubkey::new_unique();
+    let chain_account = Account {
+        lamports: 2_000_000,
+        data: vec![5; 8],
+        owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ctx =
+        setup([(pubkey, chain_account.clone())], 50, validator_keypair).await;
+    let mut stale = AccountSharedData::new(1_000_000, 0, &owner);
+    stale.set_remote_slot(42);
+    ctx.accounts_bank.insert(pubkey, stale);
+
+    assert!(!ctx.remote_account_provider.is_watching(&pubkey));
+
+    ctx.fetch_cloner
+        .process_subscription_update(
+            pubkey,
+            ForwardedSubscriptionUpdate {
+                pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    chain_account.clone(),
+                    50,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+                source: SubscriptionSource::Replay,
+            },
+        )
+        .await;
+
+    let in_bank = ctx
+        .accounts_bank
+        .get_account(&pubkey)
+        .expect("account should be in bank");
+    assert_eq!(in_bank.remote_slot(), 50);
+    assert_eq!(in_bank.lamports(), 2_000_000);
+}
