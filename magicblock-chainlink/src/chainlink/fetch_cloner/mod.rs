@@ -144,6 +144,13 @@ where
     /// Negative cache for derived eATAs confirmed missing on chain.
     known_empty_eatas: Arc<PlMutex<LruCache<Pubkey, ()>>>,
 
+    /// Per-program state from the last successful load, so the per-slot
+    /// notifications providers emit for heavily-invoked program accounts
+    /// resolve without re-pulling full program data. Bounded by the number
+    /// of programs loaded into the bank.
+    program_verify_cache:
+        Arc<PlMutex<hash_map::HashMap<Pubkey, ProgramVerifyState>>>,
+
     /// Recognizes freshly delegated accounts whose app data collides with an
     /// internal DLP discriminator via delegation-record sightings.
     dlp_collision_tracker: Arc<PlMutex<DlpCollisionTracker>>,
@@ -341,6 +348,7 @@ where
             allowed_programs: self.allowed_programs.clone(),
             programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
+            program_verify_cache: self.program_verify_cache.clone(),
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
@@ -353,6 +361,20 @@ where
                 .clone(),
         }
     }
+}
+
+/// State from the last successful program load driving the cheap
+/// executable-update resolution in [program_loader].
+#[derive(Debug, Clone)]
+pub(crate) struct ProgramVerifyState {
+    /// Raw programdata metadata prefix (tag + deploy slot + authority)
+    /// from the last load; `None` for loaders without programdata.
+    pub(crate) programdata_header: Option<Vec<u8>>,
+    /// When the program was last loaded or verified against remote state.
+    pub(crate) verified_at: std::time::Instant,
+    /// A verification is scheduled for when the throttle window expires,
+    /// covering notifications suppressed within the window.
+    pub(crate) deferred_verify: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -446,6 +468,9 @@ where
             known_empty_eatas: Arc::new(PlMutex::new(LruCache::new(
                 KNOWN_EMPTY_EATAS_CAPACITY,
             ))),
+            program_verify_cache: Arc::new(PlMutex::new(
+                hash_map::HashMap::new(),
+            )),
             dlp_collision_tracker: Arc::new(PlMutex::new(
                 DlpCollisionTracker::new(),
             )),
