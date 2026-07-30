@@ -31,18 +31,12 @@ async fn test_unknown_http_and_websocket_methods() {
         .await
         .expect("failed to send unknown HTTP method");
     let body: Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("failed to read HTTP response"),
+        &response.text().await.expect("failed to read HTTP response"),
     )
     .expect("failed to parse HTTP response");
     assert_eq!(body["id"].as_i64(), Some(1));
     assert_eq!(body["error"]["code"].as_i64(), Some(-32601));
-    assert_eq!(
-        body["error"]["message"].as_str(),
-        Some("Method not found")
-    );
+    assert_eq!(body["error"]["message"].as_str(), Some("Method not found"));
 
     let error = match env
         .pubsub
@@ -61,10 +55,7 @@ async fn test_unknown_http_and_websocket_methods() {
         json::from_str(&message).expect("failed to parse WebSocket response");
     assert_eq!(body["id"].as_i64(), Some(1));
     assert_eq!(body["error"]["code"].as_i64(), Some(-32601));
-    assert_eq!(
-        body["error"]["message"].as_str(),
-        Some("Method not found")
-    );
+    assert_eq!(body["error"]["message"].as_str(), Some("Method not found"));
 }
 
 /// Verifies `accountSubscribe` and `accountUnsubscribe` work correctly.
