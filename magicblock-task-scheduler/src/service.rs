@@ -260,10 +260,8 @@ impl TaskSchedulerService {
     }
 
     /// Signs `instructions` with the faucet — the crank sponsor, which the
-    /// engine authority cannot stand in for — and submits them to the engine.
-    ///
-    /// Awaits the committed result so successive cranks (all sponsored by the
-    /// same faucet) don't race on the faucet's delegated account state.
+    /// engine authority cannot stand in for — and submits them.
+    /// Send and forget since the write lock on the faucet prevents races.
     async fn submit(
         &self,
         instructions: &[Instruction],
@@ -277,18 +275,10 @@ impl TaskSchedulerService {
         );
         self.engine
             .transaction(transaction)
-            .map_err(|err| {
-                TaskSchedulerError::TransactionExecution(err.to_string())
-            })?
-            .execute()
+            .map_err(TaskSchedulerError::from)?
+            .schedule()
             .await
-            .map_err(|err| {
-                TaskSchedulerError::TransactionExecution(err.to_string())
-            })?
-            .map_err(|err| {
-                TaskSchedulerError::TransactionExecution(err.to_string())
-            })?;
-        Ok(())
+            .map_err(TaskSchedulerError::from)
     }
 }
 
