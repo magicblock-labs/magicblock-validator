@@ -2420,6 +2420,23 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(remote_accounts);
         }
 
+        // Found results injected by subscription updates were consumed from
+        // the update pipeline to resolve this fetch. If the fetch fails
+        // (e.g. the RPC lags the consumed slot beyond the retry budget)
+        // they must re-enter the pipeline, otherwise the freshest observed
+        // state is silently lost.
+        let consumed_subscription_results: Vec<(Pubkey, RemoteAccount)> =
+            pubkeys
+                .iter()
+                .zip(&remote_accounts)
+                .filter(|(_, account)| {
+                    account.is_found()
+                        && account.source()
+                            == Some(RemoteAccountUpdateSource::Subscription)
+                })
+                .map(|(pubkey, account)| (*pubkey, account.clone()))
+                .collect();
+
         // The fetch start slot honors the strictest floor observed so far:
         // the caller's min_context_slot or any found result consumed above.
         let mut fetch_start_slot = self
@@ -2478,6 +2495,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 companion_fetch_attempts,
                                 companion_fetch_started_at,
                             );
+                            self.reforward_consumed_subscription_results(
+                                &consumed_subscription_results,
+                            )
+                            .await;
                             return Err(err);
                         }
                     }
@@ -2551,6 +2572,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 companion_fetch_attempts,
                                 companion_fetch_started_at,
                             );
+                            self.reforward_consumed_subscription_results(
+                                &consumed_subscription_results,
+                            )
+                            .await;
                             return Err(
                                 RemoteAccountProviderError::SlotsDidNotMatch(
                                     pubkeys_str(pubkeys),
@@ -2567,6 +2592,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 companion_fetch_attempts,
                                 companion_fetch_started_at,
                             );
+                            self.reforward_consumed_subscription_results(
+                                &consumed_subscription_results,
+                            )
+                            .await;
                             return Err(RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
                                 pubkeys_str(pubkeys),
                                 remote_account_slots,
@@ -2576,6 +2605,30 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Re-forwards found results that were consumed from the subscription
+    /// update pipeline to resolve a fetch that is now failing. Without this
+    /// the consumed update is lost: it was never forwarded downstream and no
+    /// further notification arrives until the account changes on chain again.
+    async fn reforward_consumed_subscription_results(
+        &self,
+        consumed: &[(Pubkey, RemoteAccount)],
+    ) {
+        for (pubkey, account) in consumed {
+            let update = ForwardedSubscriptionUpdate {
+                pubkey: *pubkey,
+                account: account.clone(),
+                source: SubscriptionSource::Account,
+            };
+            if let Err(err) = self.subscription_forwarder.send(update).await {
+                warn!(
+                    pubkey = %pubkey,
+                    error = ?err,
+                    "Failed to re-forward consumed subscription update"
+                );
             }
         }
     }
