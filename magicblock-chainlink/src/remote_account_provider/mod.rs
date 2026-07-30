@@ -35,7 +35,7 @@ use solana_rpc_client_api::{
 };
 use solana_sdk_ids::sysvar::clock;
 use tokio::{
-    sync::{mpsc, oneshot, Mutex as AsyncMutex},
+    sync::{mpsc, oneshot, Mutex as AsyncMutex, Semaphore},
     task, time,
 };
 use tracing::*;
@@ -1424,6 +1424,9 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     removed_account_rx: Mutex<Option<mpsc::Receiver<Pubkey>>>,
 
     subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
+    /// Caps detached replay senders spawned when the forwarding channel is
+    /// full; replays beyond the cap are dropped with a warning.
+    pending_replay_sends: Arc<Semaphore>,
 
     /// Task that periodically reconciles subscriptions and updates the
     /// active subscriptions gauge
@@ -1446,6 +1449,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
 // Configs
 // -----------------
 const DEFAULT_MATCH_SLOTS_MAX_RETRIES: u64 = 10;
+/// Maximum concurrently detached replay senders (see
+/// [RemoteAccountProvider::reforward_consumed_subscription_results]).
+const MAX_PENDING_REPLAY_SENDS: usize = 256;
 const DEFAULT_MATCH_SLOTS_RETRY_INTERVAL_MS: u64 = 50;
 
 pub struct MatchSlotsConfig {
@@ -1746,6 +1752,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             confirmed_missing_subscriptions,
             capacity_eviction_protection,
             subscription_forwarder: Arc::new(subscription_forwarder),
+            pending_replay_sends: Arc::new(Semaphore::new(
+                MAX_PENDING_REPLAY_SENDS,
+            )),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
             _active_subscriptions_task_handle: active_subscriptions_updater,
@@ -2609,33 +2618,44 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     /// Re-forwards found results consumed from the update pipeline by a
     /// fetch that is now failing; otherwise the consumed update is lost.
-    /// Detached so a failing resolution never blocks on the update
-    /// pipeline's own input capacity.
+    /// Never blocks on the pipeline's own input capacity: a full channel
+    /// falls back to a bounded detached sender, beyond which replays are
+    /// dropped with a warning.
     fn reforward_consumed_subscription_results(
         &self,
         consumed: &[(Pubkey, RemoteAccount)],
     ) {
-        if consumed.is_empty() {
-            return;
-        }
-        let forwarder = Arc::clone(&self.subscription_forwarder);
-        let consumed = consumed.to_vec();
-        task::spawn(async move {
-            for (pubkey, account) in consumed {
-                let update = ForwardedSubscriptionUpdate {
-                    pubkey,
-                    account,
-                    source: SubscriptionSource::Replay,
-                };
+        for (pubkey, account) in consumed {
+            let update = ForwardedSubscriptionUpdate {
+                pubkey: *pubkey,
+                account: account.clone(),
+                source: SubscriptionSource::Replay,
+            };
+            let update = match self.subscription_forwarder.try_send(update) {
+                Ok(()) => continue,
+                Err(mpsc::error::TrySendError::Closed(_)) => continue,
+                Err(mpsc::error::TrySendError::Full(update)) => update,
+            };
+            let Ok(permit) =
+                Arc::clone(&self.pending_replay_sends).try_acquire_owned()
+            else {
+                warn!(
+                    pubkey = %pubkey,
+                    "Dropping consumed subscription replay: pipeline full and replay cap reached"
+                );
+                continue;
+            };
+            let forwarder = Arc::clone(&self.subscription_forwarder);
+            task::spawn(async move {
+                let _permit = permit;
                 if let Err(err) = forwarder.send(update).await {
                     warn!(
-                        pubkey = %pubkey,
                         error = ?err,
                         "Failed to re-forward consumed subscription update"
                     );
                 }
-            }
-        });
+            });
+        }
     }
 
     /// Gets the accounts for the given pubkeys by fetching from RPC.
