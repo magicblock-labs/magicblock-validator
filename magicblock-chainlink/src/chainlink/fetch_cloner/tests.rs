@@ -10046,27 +10046,11 @@ async fn test_delegated_account_owned_by_token_program_does_not_subscribe_progra
 }
 
 // -----------------
-// Repro: delegated account permanently stuck after a missed re-delegation
-// update (flash-trade wedge, Jul 29-30 2026).
-//
-// Lifecycle of a PDA that is rapidly re-delegated (create -> undelegate ->
-// settle -> re-create on the same address):
-//
-// 1. account is delegated on chain and cloned into the bank
-// 2. undelegation completes: the account and its delegation record are
-//    closed on chain while the bank copy is flagged undelegating
-// 3. a client read during the closed window refreshes the undelegating
-//    account, finds nothing on chain and replaces the bank copy with an
-//    empty placeholder
-// 4. the PDA is re-delegated on chain a few slots later, but the validator
-//    misses the subscription update (see the silent drop gates in the
-//    provider loop / submux dedup)
-//
-// The stuck condition: with the placeholder in the bank every ensure path
-// (getAccountInfo, sendTransaction) hits the bank precheck ("found in bank
-// in valid state, no fetch needed") and never refetches, even though the
-// chain holds the account delegated to this validator. Only a processed
-// subscription update at a newer slot recovers it.
+// Repro: rapid re-delegation of the same PDA (create -> undelegate ->
+// settle -> re-create). A closed-window read leaves an empty placeholder in
+// the bank; if the re-delegation update is then lost, every ensure path
+// skips the remote fetch and only a processed update at a newer slot
+// recovers the account.
 // -----------------
 
 struct WedgeReproCtx {
@@ -10320,22 +10304,11 @@ async fn test_repro_stuck_account_recovers_when_placeholder_absent() {
 // races the re-delegation notification.
 const WEDGE_SLOT_STALE_UPDATE: u64 = 112;
 
-/// Repro of the actual update loss with ALL transports delivering: the
-/// re-delegation notification is received by the provider while a fetch
-/// for an older update of the same account is still in flight. The
-/// provider consumes the notification to resolve that pending fetch
-/// (mod.rs "Using subscription update instead of fetch") instead of
-/// forwarding it to the fetch cloner.
-///
-/// Enforced behavior: the consumed state must not be discarded. The
-/// resolving fetch's companion (the delegation record) resolved at an
-/// older slot, so the slot-matching retry refetches RPC-only; the floor
-/// for an acceptable response is the consumed update's slot, so a lagging
-/// RPC view (still in the closed window) cannot finalize NotFound below
-/// it. Once the RPC view catches up the account is cloned as delegated.
-/// Without the min-context floor the fetch concludes NotFound, the
-/// freshest state is silently swallowed, and the account is permanently
-/// stuck behind the bank placeholder.
+/// The re-delegation notification arrives while a fetch for an older
+/// update of the same account is in flight and is consumed to resolve it,
+/// never forwarded. Enforced: the consumed state must not be discarded —
+/// the slot-matching retry may not finalize a view older than the consumed
+/// slot, and once the RPC catches up the account is cloned as delegated.
 #[tokio::test]
 async fn test_repro_redelegation_update_delivered_but_consumed_by_inflight_fetch(
 ) {
@@ -10398,9 +10371,12 @@ async fn test_repro_redelegation_update_delivered_but_consumed_by_inflight_fetch
     // The provider consumed the notification to resolve the pending fetch
     // instead of forwarding it to the fetch cloner.
     assert!(
-        repro.ctx.forward_rx.try_recv().is_err(),
-        "UPDATE LOST: the delivered notification was consumed by the \
-         in-flight fetch and never forwarded to the fetch cloner"
+        matches!(
+            repro.ctx.forward_rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ),
+        "the delivered notification must be consumed by the in-flight fetch, \
+         not forwarded"
     );
 
     // The stale fetch resumes: its companion record resolved during the
@@ -10416,7 +10392,10 @@ async fn test_repro_redelegation_update_delivered_but_consumed_by_inflight_fetch
 
     // The notification was consumed, never forwarded.
     assert!(
-        repro.ctx.forward_rx.try_recv().is_err(),
+        matches!(
+            repro.ctx.forward_rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ),
         "no update was forwarded to the fetch cloner"
     );
 

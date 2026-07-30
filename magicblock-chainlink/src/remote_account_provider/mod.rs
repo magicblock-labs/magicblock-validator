@@ -2400,11 +2400,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Err(err);
             }
         };
-        // A found result observed at slot S must never be discarded in favor
-        // of an older view: a pending fetch resolved by a subscription update
-        // (e.g. a rapid re-delegation racing the previous incarnation's
-        // fetch) would otherwise be finalized as NotFound by a lagging
-        // RPC-only refetch, silently losing the freshest state.
+        // State observed at slot S must never be superseded by an older
+        // view: raise the floor to any found result already consumed.
         let mut min_context_slot =
             raised_min_context_slot(config.min_context_slot, &remote_accounts);
         if let Match =
@@ -2420,11 +2417,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(remote_accounts);
         }
 
-        // Found results injected by subscription updates were consumed from
-        // the update pipeline to resolve this fetch. If the fetch fails
-        // (e.g. the RPC lags the consumed slot beyond the retry budget)
-        // they must re-enter the pipeline, otherwise the freshest observed
-        // state is silently lost.
+        // Subscription results consumed to resolve this fetch must re-enter
+        // the update pipeline if the fetch fails, or they are lost.
         let consumed_subscription_results: Vec<(Pubkey, RemoteAccount)> =
             pubkeys
                 .iter()
@@ -2609,10 +2603,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
-    /// Re-forwards found results that were consumed from the subscription
-    /// update pipeline to resolve a fetch that is now failing. Without this
-    /// the consumed update is lost: it was never forwarded downstream and no
-    /// further notification arrives until the account changes on chain again.
+    /// Re-forwards found results consumed from the update pipeline by a
+    /// fetch that is now failing; otherwise the consumed update is lost.
     async fn reforward_consumed_subscription_results(
         &self,
         consumed: &[(Pubkey, RemoteAccount)],
