@@ -3036,6 +3036,20 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
     }
     rpc_client.allow_fetches();
 
+    // The subscription resolved pubkey1 at CURRENT_SLOT + 1, which raises
+    // the min-context floor: the RPC-only batch must not regress to the
+    // older CURRENT_SLOT view. The first retry fails on min-context until
+    // the RPC catches up to the observed slot.
+    let start = tokio::time::Instant::now();
+    loop {
+        if rpc_client.multi_account_fetches() >= 2 {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(2));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    rpc_client.set_slot(CURRENT_SLOT + 1);
+
     let remote_accounts =
         tokio::time::timeout(Duration::from_secs(2), task_handle)
             .await
@@ -3052,11 +3066,11 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
         remote_accounts[1].source(),
         Some(RemoteAccountUpdateSource::Fetch)
     );
-    assert_eq!(remote_accounts[0].slot(), CURRENT_SLOT);
-    assert_eq!(remote_accounts[1].slot(), CURRENT_SLOT);
+    assert_eq!(remote_accounts[0].slot(), CURRENT_SLOT + 1);
+    assert_eq!(remote_accounts[1].slot(), CURRENT_SLOT + 1);
     assert_eq!(remote_accounts[0].fresh_lamports(), Some(555));
     assert_eq!(remote_accounts[1].fresh_lamports(), Some(666));
-    assert_eq!(rpc_client.multi_account_fetches(), 2);
+    assert_eq!(rpc_client.multi_account_fetches(), 3);
 }
 
 #[tokio::test]
@@ -4166,4 +4180,123 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         )
         .await
     }
+}
+
+/// A found result consumed from the subscription pipeline to resolve a
+/// pending fetch must not be lost when the fetch fails: if the RPC view
+/// cannot catch up to the consumed slot within the retry budget, the
+/// result is re-forwarded into the update pipeline so downstream
+/// processing retries with the freshest state.
+#[tokio::test]
+async fn test_get_accounts_until_slots_match_reforwards_consumed_update_on_failure(
+) {
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let account1 = Account {
+        lamports: 555,
+        data: vec![],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let account2 = Account {
+        lamports: 666,
+        ..account1.clone()
+    };
+    let subscription_account = Account {
+        lamports: 777,
+        ..account1.clone()
+    };
+    // The RPC view stays at CURRENT_SLOT and never reaches the slot of the
+    // consumed subscription update.
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(CURRENT_SLOT)
+        .account(pubkey1, account1)
+        .account(pubkey2, account2)
+        .build();
+    let (updates_tx, updates_rx) = mpsc::channel(100);
+    let pubsub_client = ChainPubsubClientMock::new(updates_tx, updates_rx);
+    let (forward_tx, mut forward_rx) = mpsc::channel(100);
+    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client.clone(),
+            pubsub_client.clone(),
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(Arc::<AtomicU64>::default()),
+        )
+        .await
+        .unwrap(),
+    );
+
+    rpc_client.block_fetches();
+    let task_handle = tokio::spawn({
+        let provider = provider.clone();
+        async move {
+            provider
+                .try_get_multi_until_slots_match(
+                    &[pubkey1, pubkey2],
+                    Some(MatchSlotsConfig {
+                        max_retries: 3,
+                        retry_interval_ms: 10,
+                        min_context_slot: None,
+                        companion_fetch_kind:
+                            ChainlinkCompanionFetchKind::ProgramData,
+                    }),
+                    AccountFetchContext::rpc_get_account(),
+                )
+                .await
+        }
+    });
+
+    let start = tokio::time::Instant::now();
+    loop {
+        let subscriptions = pubsub_client.subscriptions_union();
+        if subscriptions.contains(&pubkey1) && subscriptions.contains(&pubkey2)
+        {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(2));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // The subscription update resolves pubkey1 ahead of the RPC view and is
+    // consumed by the pending fetch.
+    pubsub_client
+        .send_account_update(pubkey1, CURRENT_SLOT + 1, &subscription_account)
+        .await;
+    let start = tokio::time::Instant::now();
+    loop {
+        if !provider.is_pending(&pubkey1) && provider.is_pending(&pubkey2) {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(2));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    rpc_client.allow_fetches();
+
+    // The retry budget exhausts below the consumed slot and the call fails.
+    let result = tokio::time::timeout(Duration::from_secs(5), task_handle)
+        .await
+        .expect("slot-match task should complete")
+        .expect("slot-match task should not panic");
+    assert!(
+        result.is_err(),
+        "fetch should fail while the RPC lags the consumed slot"
+    );
+
+    // The consumed update re-enters the pipeline instead of being lost.
+    let reforwarded =
+        tokio::time::timeout(Duration::from_secs(2), forward_rx.recv())
+            .await
+            .expect("consumed update should be re-forwarded")
+            .expect("forward channel should be open");
+    assert_eq!(reforwarded.pubkey, pubkey1);
+    assert_eq!(reforwarded.account.slot(), CURRENT_SLOT + 1);
+    assert!(reforwarded.account.is_found());
+    assert_eq!(reforwarded.account.fresh_lamports(), Some(777));
+    assert_eq!(reforwarded.source, SubscriptionSource::Replay);
 }

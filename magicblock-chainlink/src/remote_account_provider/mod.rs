@@ -37,7 +37,7 @@ use solana_rpc_client_api::{
 };
 use solana_sdk_ids::sysvar::clock;
 use tokio::{
-    sync::{mpsc, oneshot, Mutex as AsyncMutex},
+    sync::{mpsc, oneshot, Mutex as AsyncMutex, Notify},
     task, time,
 };
 use tracing::*;
@@ -1429,6 +1429,10 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     removed_account_rx: Mutex<Option<mpsc::Receiver<Pubkey>>>,
 
     subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
+    /// Per-account latest replay of consumed subscription results, drained
+    /// losslessly by a dedicated worker (newest slot wins).
+    replay_outbox: Arc<Mutex<HashMap<Pubkey, ForwardedSubscriptionUpdate>>>,
+    replay_notify: Arc<Notify>,
 
     /// Task that periodically reconciles subscriptions and updates the
     /// active subscriptions gauge
@@ -1751,6 +1755,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             confirmed_missing_subscriptions,
             capacity_eviction_protection,
             subscription_forwarder: Arc::new(subscription_forwarder),
+            replay_outbox: Arc::default(),
+            replay_notify: Arc::new(Notify::new()),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
             _active_subscriptions_task_handle: active_subscriptions_updater,
@@ -1758,6 +1764,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let updates = me.pubsub_client.take_updates();
         me.listen_for_account_updates(updates)?;
+        me.start_replay_outbox_worker();
         let clock_remote_account = me
             .try_get(
                 clock::ID,
@@ -2405,10 +2412,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Err(err);
             }
         };
-        if let Match = slots_match_and_meet_min_context(
-            &remote_accounts,
-            config.min_context_slot,
-        ) {
+        // State observed at slot S must never be superseded by an older
+        // view: raise the floor to any found result already consumed.
+        let mut min_context_slot =
+            raised_min_context_slot(config.min_context_slot, &remote_accounts);
+        if let Match =
+            slots_match_and_meet_min_context(&remote_accounts, min_context_slot)
+        {
             observe_companion_fetch_if_configured(
                 fetch_context,
                 companion_fetch_kind,
@@ -2419,14 +2429,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(remote_accounts);
         }
 
-        // Capture the fetch start slot once and reuse it across retries. When a
-        // caller provides a stricter min_context_slot, the forced refetch must
-        // start from that slot rather than the provider's possibly lagging
-        // chain slot.
-        let fetch_start_slot = self
+        // Subscription results consumed to resolve this fetch must re-enter
+        // the update pipeline if the fetch fails, or they are lost.
+        let consumed_subscription_results: Vec<(Pubkey, RemoteAccount)> =
+            pubkeys
+                .iter()
+                .zip(&remote_accounts)
+                .filter(|(_, account)| {
+                    account.is_found()
+                        && account.source()
+                            == Some(RemoteAccountUpdateSource::Subscription)
+                })
+                .map(|(pubkey, account)| (*pubkey, account.clone()))
+                .collect();
+
+        // The fetch start slot honors the strictest floor observed so far:
+        // the caller's min_context_slot or any found result consumed above.
+        let mut fetch_start_slot = self
             .chain_slot
             .load()
-            .max(config.min_context_slot.unwrap_or_default());
+            .max(min_context_slot.unwrap_or_default());
         // 2. Wait for the slots to match. Once the fast path mixed slots,
         // retry with an RPC-only batch so all accounts share one response slot.
         let start = std::time::Instant::now();
@@ -2460,7 +2482,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     );
                     debug!(
                         pubkeys = %pubkeys_str(pubkeys),
-                        min_context_slot = ?config.min_context_slot,
+                        min_context_slot = ?min_context_slot,
                         retries = retries,
                         elapsed_ms = start.elapsed().as_millis() as u64,
                         error = %err,
@@ -2479,6 +2501,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 companion_fetch_attempts,
                                 companion_fetch_started_at,
                             );
+                            self.reforward_consumed_subscription_results(
+                                &consumed_subscription_results,
+                            );
                             return Err(err);
                         }
                     }
@@ -2492,17 +2517,28 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         *pubkey,
                     )
                     .await;
-                self.subscription_tier_ctx()
+                if let Err(err) = self
+                    .subscription_tier_ctx()
                     .apply_fetch_classification(
                         pubkey,
                         remote_account.slot(),
                         !remote_account.is_found(),
                     )
-                    .await?;
+                    .await
+                {
+                    self.reforward_consumed_subscription_results(
+                        &consumed_subscription_results,
+                    );
+                    return Err(err);
+                }
             }
+            min_context_slot =
+                raised_min_context_slot(min_context_slot, &remote_accounts);
+            fetch_start_slot =
+                fetch_start_slot.max(min_context_slot.unwrap_or_default());
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
-                config.min_context_slot,
+                min_context_slot,
             );
             if let Match = slots_match_result {
                 observe_companion_fetch_if_configured(
@@ -2531,7 +2567,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         pubkeys = %pubkeys_str(pubkeys),
                         slots = ?remote_account_slots,
                         sources = ?remote_account_sources,
-                        min_context_slot = ?config.min_context_slot,
+                        min_context_slot = ?min_context_slot,
                         retries = retries,
                         elapsed_ms = start.elapsed().as_millis() as u64,
                         limit = %limit,
@@ -2547,6 +2583,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 ChainlinkCompanionFetchOutcome::FailedSlotMismatch,
                                 companion_fetch_attempts,
                                 companion_fetch_started_at,
+                            );
+                            self.reforward_consumed_subscription_results(
+                                &consumed_subscription_results,
                             );
                             return Err(
                                 RemoteAccountProviderError::SlotsDidNotMatch(
@@ -2564,6 +2603,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 companion_fetch_attempts,
                                 companion_fetch_started_at,
                             );
+                            self.reforward_consumed_subscription_results(
+                                &consumed_subscription_results,
+                            );
                             return Err(RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
                                 pubkeys_str(pubkeys),
                                 remote_account_slots,
@@ -2575,6 +2617,80 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 }
             }
         }
+    }
+
+    /// Re-forwards found results consumed from the update pipeline by a
+    /// fetch that is now failing; otherwise the consumed update is lost.
+    /// Coalesced per account (newest slot wins) into an outbox drained by
+    /// [Self::start_replay_outbox_worker], so callers never block and the
+    /// backlog is bounded by the number of affected accounts.
+    fn reforward_consumed_subscription_results(
+        &self,
+        consumed: &[(Pubkey, RemoteAccount)],
+    ) {
+        if consumed.is_empty() {
+            return;
+        }
+        {
+            let mut outbox = self
+                .replay_outbox
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            for (pubkey, account) in consumed {
+                let entry = outbox.entry(*pubkey);
+                match entry {
+                    Entry::Occupied(mut existing)
+                        if existing.get().account.slot() < account.slot() =>
+                    {
+                        existing.insert(ForwardedSubscriptionUpdate {
+                            pubkey: *pubkey,
+                            account: account.clone(),
+                            source: SubscriptionSource::Replay,
+                        });
+                    }
+                    Entry::Occupied(_) => {}
+                    Entry::Vacant(vacant) => {
+                        vacant.insert(ForwardedSubscriptionUpdate {
+                            pubkey: *pubkey,
+                            account: account.clone(),
+                            source: SubscriptionSource::Replay,
+                        });
+                    }
+                }
+            }
+        }
+        self.replay_notify.notify_one();
+    }
+
+    /// Drains the replay outbox into the update pipeline. Runs detached so
+    /// replays never block a failing resolution; exits when the pipeline
+    /// closes.
+    fn start_replay_outbox_worker(&self) {
+        let outbox = Arc::clone(&self.replay_outbox);
+        let notify = Arc::clone(&self.replay_notify);
+        let forwarder = Arc::clone(&self.subscription_forwarder);
+        task::spawn(async move {
+            loop {
+                notify.notified().await;
+                loop {
+                    let update = {
+                        let mut outbox = outbox
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner());
+                        let Some(pubkey) = outbox.keys().next().copied() else {
+                            break;
+                        };
+                        outbox.remove(&pubkey)
+                    };
+                    let Some(update) = update else {
+                        break;
+                    };
+                    if forwarder.send(update).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
     }
 
     /// Gets the accounts for the given pubkeys by fetching from RPC.
@@ -4100,6 +4216,24 @@ enum SlotsMatchResult {
     Match,
     Mismatch,
     MatchButBelowMinContextSlot(u64),
+}
+
+/// Raises the min-context floor to the highest slot of any found account:
+/// state observed at slot S must never be superseded by an older view.
+fn raised_min_context_slot(
+    min_context_slot: Option<u64>,
+    accs: &[RemoteAccount],
+) -> Option<u64> {
+    let max_found_slot = accs
+        .iter()
+        .filter(|acc| acc.is_found())
+        .map(|acc| acc.slot())
+        .max();
+    match (min_context_slot, max_found_slot) {
+        (Some(min), Some(found)) => Some(min.max(found)),
+        (None, Some(found)) => Some(found),
+        (min, None) => min,
+    }
 }
 
 fn slots_match_and_meet_min_context(
