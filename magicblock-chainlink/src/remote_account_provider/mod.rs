@@ -2201,7 +2201,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                             1,
                                         );
 
-                                        (None, true, Some((generation, state.waiters)))
+                                        // Also forward: the fetch waiters may
+                                        // not clone the result (e.g. status
+                                        // reads) and dedup already dropped
+                                        // every other copy of this update.
+                                        (
+                                            Some(ForwardedSubscriptionUpdate {
+                                                pubkey: update.pubkey,
+                                                account: remote_account.clone(),
+                                                source: update.source,
+                                            }),
+                                            true,
+                                            Some((generation, state.waiters)),
+                                        )
                                     } else {
                                         // Subscription is stale, put the fetch tracking back
                                         debug!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Received stale subscription update");
