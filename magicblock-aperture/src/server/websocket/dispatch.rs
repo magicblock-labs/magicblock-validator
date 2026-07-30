@@ -87,6 +87,7 @@ impl WsDispatcher {
                 self.unsubscribe(request)
             }
             Ping => Ok(SubResult::Pong("pong")),
+            MethodNotFound => Err(RpcError::method_not_found()),
         }?;
 
         Ok(WsDispatchResult {

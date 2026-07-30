@@ -1,15 +1,71 @@
 use std::time::Duration;
 
 use futures::StreamExt;
+use json::{JsonValueTrait, Value};
 use setup::RpcTestEnv;
+use solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError;
 use solana_rpc_client_api::{
-    config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter},
+    config::{
+        RpcBlockSubscribeFilter, RpcTransactionLogsConfig,
+        RpcTransactionLogsFilter,
+    },
     response::{ProcessedSignatureResult, RpcSignatureResult},
 };
 use test_kit::guinea;
 use tokio::time::timeout;
 
 mod setup;
+
+#[tokio::test]
+async fn test_unknown_http_and_websocket_methods() {
+    let env = RpcTestEnv::new().await;
+
+    let response = reqwest::Client::new()
+        .post(env.rpc.url())
+        .json(&json::json!({
+            "jsonrpc": "2.0",
+            "method": "unknownHttpMethod",
+            "id": 1,
+        }))
+        .send()
+        .await
+        .expect("failed to send unknown HTTP method");
+    let body: Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("failed to read HTTP response"),
+    )
+    .expect("failed to parse HTTP response");
+    assert_eq!(body["id"].as_i64(), Some(1));
+    assert_eq!(body["error"]["code"].as_i64(), Some(-32601));
+    assert_eq!(
+        body["error"]["message"].as_str(),
+        Some("Method not found")
+    );
+
+    let error = match env
+        .pubsub
+        .block_subscribe(RpcBlockSubscribeFilter::All, None)
+        .await
+    {
+        Ok(_) => panic!("unknown WebSocket method unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    let PubsubClientError::SubscribeFailed { reason, message } = error else {
+        panic!("unexpected WebSocket error: {error}");
+    };
+    assert_eq!(reason, "Method not found (-32601)");
+
+    let body: Value =
+        json::from_str(&message).expect("failed to parse WebSocket response");
+    assert_eq!(body["id"].as_i64(), Some(1));
+    assert_eq!(body["error"]["code"].as_i64(), Some(-32601));
+    assert_eq!(
+        body["error"]["message"].as_str(),
+        Some("Method not found")
+    );
+}
 
 /// Verifies `accountSubscribe` and `accountUnsubscribe` work correctly.
 #[tokio::test]
