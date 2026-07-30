@@ -1,3 +1,4 @@
+use engine::EngineError;
 use thiserror::Error;
 
 pub type TaskSchedulerResult<T> = Result<T, TaskSchedulerError>;
@@ -27,4 +28,7 @@ pub enum TaskSchedulerError {
 
     #[error("Faucet not ready")]
     FaucetNotReady,
+
+    #[error(transparent)]
+    Engine(#[from] EngineError),
 }
