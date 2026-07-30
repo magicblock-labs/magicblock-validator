@@ -10456,11 +10456,13 @@ async fn test_repro_redelegation_update_forwarded_when_no_fetch_inflight() {
         )
         .await;
 
-    let forwarded =
-        tokio::time::timeout(Duration::from_secs(2), repro.ctx.forward_rx.recv())
-            .await
-            .expect("provider should forward the update when nothing consumes it")
-            .expect("forward channel should be open");
+    let forwarded = tokio::time::timeout(
+        Duration::from_secs(2),
+        repro.ctx.forward_rx.recv(),
+    )
+    .await
+    .expect("provider should forward the update when nothing consumes it")
+    .expect("forward channel should be open");
     assert_eq!(forwarded.pubkey, repro.account_pubkey);
     assert_eq!(forwarded.account.slot(), WEDGE_SLOT_REDELEGATED);
 }
