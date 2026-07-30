@@ -10739,16 +10739,16 @@ async fn test_repro_redelegation_update_delivered_but_consumed_by_inflight_fetch
         .await;
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    // The provider consumed the notification to resolve the pending fetch
-    // instead of forwarding it to the fetch cloner.
-    assert!(
-        matches!(
-            repro.ctx.forward_rx.try_recv(),
-            Err(mpsc::error::TryRecvError::Empty)
-        ),
-        "the delivered notification must be consumed by the in-flight fetch, \
-         not forwarded"
-    );
+    // The notification resolves the pending fetch AND is forwarded.
+    let forwarded = tokio::time::timeout(
+        Duration::from_secs(2),
+        repro.ctx.forward_rx.recv(),
+    )
+    .await
+    .expect("consumed update must also be forwarded")
+    .expect("forward channel should be open");
+    assert_eq!(forwarded.pubkey, repro.account_pubkey);
+    assert_eq!(forwarded.account.slot(), WEDGE_SLOT_REDELEGATED);
 
     // The stale fetch resumes: its companion record resolved during the
     // closed window, so the slot-matching retry refetches RPC-only. The
@@ -10760,15 +10760,6 @@ async fn test_repro_redelegation_update_delivered_but_consumed_by_inflight_fetch
         .await
         .expect("stale resolve should complete")
         .expect("stale resolve task should not panic");
-
-    // The notification was consumed, never forwarded.
-    assert!(
-        matches!(
-            repro.ctx.forward_rx.try_recv(),
-            Err(mpsc::error::TryRecvError::Empty)
-        ),
-        "no update was forwarded to the fetch cloner"
-    );
 
     // ENFORCED: the consumed re-delegation state must be honored, not
     // discarded — the account ends up cloned as delegated.
