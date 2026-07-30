@@ -2491,8 +2491,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             );
                             self.reforward_consumed_subscription_results(
                                 &consumed_subscription_results,
-                            )
-                            .await;
+                            );
                             return Err(err);
                         }
                     }
@@ -2506,13 +2505,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         *pubkey,
                     )
                     .await;
-                self.subscription_tier_ctx()
+                if let Err(err) = self
+                    .subscription_tier_ctx()
                     .apply_fetch_classification(
                         pubkey,
                         remote_account.slot(),
                         !remote_account.is_found(),
                     )
-                    .await?;
+                    .await
+                {
+                    self.reforward_consumed_subscription_results(
+                        &consumed_subscription_results,
+                    );
+                    return Err(err);
+                }
             }
             min_context_slot =
                 raised_min_context_slot(min_context_slot, &remote_accounts);
@@ -2568,8 +2574,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             );
                             self.reforward_consumed_subscription_results(
                                 &consumed_subscription_results,
-                            )
-                            .await;
+                            );
                             return Err(
                                 RemoteAccountProviderError::SlotsDidNotMatch(
                                     pubkeys_str(pubkeys),
@@ -2588,8 +2593,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             );
                             self.reforward_consumed_subscription_results(
                                 &consumed_subscription_results,
-                            )
-                            .await;
+                            );
                             return Err(RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
                                 pubkeys_str(pubkeys),
                                 remote_account_slots,
@@ -2605,24 +2609,33 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     /// Re-forwards found results consumed from the update pipeline by a
     /// fetch that is now failing; otherwise the consumed update is lost.
-    async fn reforward_consumed_subscription_results(
+    /// Detached so a failing resolution never blocks on the update
+    /// pipeline's own input capacity.
+    fn reforward_consumed_subscription_results(
         &self,
         consumed: &[(Pubkey, RemoteAccount)],
     ) {
-        for (pubkey, account) in consumed {
-            let update = ForwardedSubscriptionUpdate {
-                pubkey: *pubkey,
-                account: account.clone(),
-                source: SubscriptionSource::Replay,
-            };
-            if let Err(err) = self.subscription_forwarder.send(update).await {
-                warn!(
-                    pubkey = %pubkey,
-                    error = ?err,
-                    "Failed to re-forward consumed subscription update"
-                );
-            }
+        if consumed.is_empty() {
+            return;
         }
+        let forwarder = Arc::clone(&self.subscription_forwarder);
+        let consumed = consumed.to_vec();
+        task::spawn(async move {
+            for (pubkey, account) in consumed {
+                let update = ForwardedSubscriptionUpdate {
+                    pubkey,
+                    account,
+                    source: SubscriptionSource::Replay,
+                };
+                if let Err(err) = forwarder.send(update).await {
+                    warn!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Failed to re-forward consumed subscription update"
+                    );
+                }
+            }
+        });
     }
 
     /// Gets the accounts for the given pubkeys by fetching from RPC.
