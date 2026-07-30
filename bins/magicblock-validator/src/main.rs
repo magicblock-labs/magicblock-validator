@@ -1,3 +1,4 @@
+mod crank_faucet;
 mod errors;
 mod leader;
 mod ledger;
