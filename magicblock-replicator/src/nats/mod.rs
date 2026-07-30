@@ -15,6 +15,7 @@ mod producer;
 mod snapshot;
 
 use async_nats::Subject;
+pub(crate) use broker::PendingPublish;
 pub use broker::{Broker, Confirm};
 pub use consumer::{Consumer, MessageStream};
 pub use lock_watcher::LockWatcher;

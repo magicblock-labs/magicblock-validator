@@ -19,7 +19,7 @@ Aperture sits directly on performance-sensitive RPC, PubSub, event-processing, a
 
 ## Update requirement
 
-Update this document in the same change whenever `magicblock-aperture` behavior, public APIs, request/response compatibility, configuration contract, event flow, cache behavior, Geyser integration, metrics, tests, or performance characteristics change. Update it for changes to:
+Queue an update to this document for the weekly documentation-maintenance task whenever `magicblock-aperture` behavior, public APIs, request/response compatibility, configuration contract, event flow, cache behavior, Geyser integration, metrics, tests, or performance characteristics change. Include changes to:
 
 - `initialize_aperture`, `JsonRpcServer`, `SharedState`, `NodeContext`, exported modules, or startup/shutdown ordering;
 - HTTP or WebSocket method inventories in `JsonRpcHttpMethod` / `JsonRpcWsMethod`;
@@ -294,7 +294,7 @@ Subscription grouping depends on encoders implementing stable ordering/equality.
 
 ### JSON and Solana compatibility
 
-The crate intentionally implements a subset of Solana JSON-RPC behavior plus MagicBlock-specific methods. Some methods are mocked for compatibility. Do not silently change method names, response context slots, JSON-RPC error codes, or unsupported-encoding behavior without updating tests and operator/client documentation.
+The crate intentionally implements a subset of Solana JSON-RPC behavior plus MagicBlock-specific methods. Some methods are mocked for compatibility. Do not silently change method names, response context slots, JSON-RPC error codes, or unsupported-encoding behavior without updating tests and queuing the operator/client documentation update for weekly maintenance.
 
 ### Geyser FFI safety
 

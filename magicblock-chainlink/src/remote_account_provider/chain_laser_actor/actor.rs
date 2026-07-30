@@ -152,7 +152,10 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
         let laser_client_config = LaserstreamConfig {
             api_key: api_key.to_string(),
             endpoint: pubsub_url.to_string(),
-            max_reconnect_attempts: Some(4),
+            // None defers to the SDK hard cap (240 attempts / 20 min, counter
+            // resets on every successful connect). A low cap turns a transient
+            // provider flap into permanent stream death until restart.
+            max_reconnect_attempts: None,
             channel_options,
             replay: true,
         };

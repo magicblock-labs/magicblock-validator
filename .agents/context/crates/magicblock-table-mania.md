@@ -19,7 +19,7 @@ End-to-end commit/undelegation semantics live in .agents/specs/validator-specifi
 
 ## Update requirement
 
-Update this guide in the same change whenever behavior or contracts in `magicblock-table-mania` change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-table-mania` change. Include changes to:
 
 - public exports in `src/lib.rs`, `TableMania`, `LookupTableRc`, `GarbageCollectorConfig`, `TableManiaComputeBudgets`, or `TableManiaError`;
 - reservation/release semantics, reference-count behavior, or active/released table lifecycle;

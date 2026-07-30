@@ -5,6 +5,7 @@ use std::time::Duration;
 use async_nats::{
     header::NATS_MESSAGE_ID,
     jetstream::{
+        context::PublishAckFuture,
         kv,
         object_store::{self, GetErrorKind, ObjectMetadata},
         stream::{self, Compression},
@@ -32,13 +33,18 @@ pub struct Broker {
 /// How far a publish waits for the server.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Confirm {
-    /// Don't wait; a rejection goes unobserved.
+    /// Defer confirmation to a later ordering boundary.
     No,
     /// Wait, and fail the publish if the message was not persisted.
     Yes,
     /// As `Yes`, and record the sequence as the resume point for consumers
     /// created with `reset`.
     AndTrackSequence,
+}
+
+pub(crate) struct PendingPublish {
+    ack: PublishAckFuture,
+    msg_id: Option<String>,
 }
 
 impl Broker {
@@ -121,14 +127,12 @@ impl Broker {
         Ok(())
     }
 
-    /// Publishes a serialized message to the stream.
-    pub async fn publish(
+    async fn send_publish(
         &mut self,
         subject: Subject,
         payload: Bytes,
         msg_id: Option<&str>,
-        confirm: Confirm,
-    ) -> Result<()> {
+    ) -> Result<PendingPublish> {
         let f = if let Some(msg_id) = msg_id {
             let mut headers = HeaderMap::new();
             headers.insert(NATS_MESSAGE_ID, msg_id);
@@ -138,21 +142,55 @@ impl Broker {
         } else {
             self.ctx.publish(subject, payload).await?
         };
+        Ok(PendingPublish {
+            ack: f,
+            msg_id: msg_id.map(str::to_owned),
+        })
+    }
+
+    /// Publishes a serialized message to the stream.
+    pub async fn publish(
+        &mut self,
+        subject: Subject,
+        payload: Bytes,
+        msg_id: Option<&str>,
+        confirm: Confirm,
+    ) -> Result<()> {
+        let pending = self.send_publish(subject, payload, msg_id).await?;
         if confirm == Confirm::No {
             return Ok(());
         }
 
-        let ack = f.await?;
+        self.confirm(pending, confirm == Confirm::AndTrackSequence)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn publish_deferred(
+        &mut self,
+        subject: Subject,
+        payload: Bytes,
+        msg_id: Option<&str>,
+    ) -> Result<PendingPublish> {
+        self.send_publish(subject, payload, msg_id).await
+    }
+
+    pub(crate) async fn confirm(
+        &mut self,
+        pending: PendingPublish,
+        track_sequence: bool,
+    ) -> Result<()> {
+        let ack = pending.ack.await?;
         // An identical id landed inside the dedupe window, so the server dropped
         // this one. Ids are "{slot}:{index}": the producer rewound its slot.
         if ack.duplicate {
             error!(
-                msg_id,
+                msg_id = pending.msg_id,
                 sequence = ack.sequence,
                 "message rejected as duplicate and was not persisted"
             );
         }
-        if confirm == Confirm::AndTrackSequence {
+        if track_sequence {
             self.sequence = ack.sequence;
         }
         Ok(())

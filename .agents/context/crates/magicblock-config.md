@@ -16,7 +16,7 @@ This crate sits on the startup/configuration path rather than a per-transaction 
 
 ## Update requirement
 
-Update this document in the same change whenever `magicblock-config` behavior or contracts change.
+Queue an update to this document for the weekly documentation-maintenance task whenever `magicblock-config` behavior or contracts change.
 
 Update it for changes to:
 
@@ -175,7 +175,7 @@ Do not introduce aliases casually. Operator docs, `config.example.toml`, integra
 
 ### Strict unknown-field behavior
 
-Most config structs use `deny_unknown_fields`. This catches typos and stale config but makes renames/removals breaking for operators. If a field is renamed, include migration notes and update tests/example config in the same change.
+Most config structs use `deny_unknown_fields`. This catches typos and stale config but makes renames/removals breaking for operators. If a field is renamed, update tests in the code change and queue migration notes and example-config updates for the weekly documentation-maintenance task.
 
 ### Secrets and debug output
 

@@ -308,12 +308,13 @@ fn log_sent_commit(
 
 #[cfg(test)]
 mod tests {
+    use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
     use solana_account::AccountSharedData;
     use solana_instruction::{error::InstructionError, Instruction};
     use solana_keypair::Keypair;
     use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
     use solana_signer::Signer;
-    use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
+
     use super::*;
     use crate::{
         instruction_utils::InstructionUtils,
