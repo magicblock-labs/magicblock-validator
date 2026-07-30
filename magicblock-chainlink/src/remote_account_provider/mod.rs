@@ -24,7 +24,9 @@ use magicblock_config::config::GrpcConfig;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
 use solana_account::Account;
-use solana_account_decoder_client_types::UiAccountEncoding;
+use solana_account_decoder_client_types::{
+    UiAccountEncoding, UiDataSliceConfig,
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
@@ -1336,6 +1338,9 @@ const HELIUS_CONTEXT_SLOT_NOT_REACHED: i64 = -32603;
 // otherwise one-shot subscription updates (e.g. program upgrades) could be dropped
 const RPC_FETCH_MAX_RETRIES: u64 = 15;
 const RPC_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
+/// Attempts for a `dataSlice` fetch to reach the required context slot
+/// before giving up; callers fall back to a full fetch.
+const DATA_SLICE_FETCH_MAX_ATTEMPTS: usize = 5;
 const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
 
@@ -3622,6 +3627,61 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         Ok(())
+    }
+
+    /// Fetches a byte range of an account via `dataSlice`, retrying until the
+    /// response context reaches `min_context_slot` so the caller never acts on
+    /// pre-notification state. Returns `None` if the account does not exist.
+    pub(crate) async fn get_account_data_slice(
+        &self,
+        pubkey: &Pubkey,
+        offset: usize,
+        length: usize,
+        min_context_slot: u64,
+    ) -> RemoteAccountProviderResult<Option<Vec<u8>>> {
+        let mut last_err = String::new();
+        for attempt in 1..=DATA_SLICE_FETCH_MAX_ATTEMPTS {
+            let config = RpcAccountInfoConfig {
+                commitment: Some(self.rpc_client.commitment()),
+                // The context slot is verified locally below; passing
+                // min_context_slot would surface provider-specific errors
+                // instead of a plain lagging context.
+                min_context_slot: None,
+                encoding: Some(UiAccountEncoding::Base64),
+                data_slice: Some(UiDataSliceConfig { offset, length }),
+            };
+            match tokio::time::timeout(
+                RPC_FETCH_TIMEOUT,
+                self.rpc_client.get_account_with_config(pubkey, config),
+            )
+            .await
+            {
+                Ok(Ok(response)) => {
+                    if response.context.slot >= min_context_slot {
+                        return Ok(response.value.map(|account| account.data));
+                    }
+                    last_err = format!(
+                        "context slot {} below min {}",
+                        response.context.slot, min_context_slot
+                    );
+                }
+                Ok(Err(err)) => last_err = format!("{err:?}"),
+                Err(_) => {
+                    last_err = format!(
+                        "timeout after {}ms",
+                        RPC_FETCH_TIMEOUT.as_millis()
+                    )
+                }
+            }
+            if attempt < DATA_SLICE_FETCH_MAX_ATTEMPTS {
+                tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
+            }
+        }
+        Err(RemoteAccountProviderError::AccountDataSliceFetchFailed(
+            *pubkey,
+            min_context_slot,
+            last_err,
+        ))
     }
 
     /// Tries to fetch the given accounts from RPC.

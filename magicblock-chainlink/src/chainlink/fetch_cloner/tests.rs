@@ -3629,6 +3629,375 @@ async fn test_program_loader_resolver_error_releases_program_data_refs() {
     );
 }
 
+fn loaderv3_program_accounts(
+    program_data_pubkey: &Pubkey,
+    deploy_slot: u64,
+    elf: &[u8],
+) -> (Account, Account) {
+    use solana_loader_v3_interface::state::UpgradeableLoaderState;
+
+    use crate::remote_account_provider::program_account::LOADER_V3;
+
+    let program_account = Account {
+        lamports: 1_000_000,
+        data: bincode::serialize(&UpgradeableLoaderState::Program {
+            programdata_address: *program_data_pubkey,
+        })
+        .unwrap(),
+        owner: LOADER_V3,
+        executable: true,
+        rent_epoch: 0,
+    };
+    let mut program_data =
+        bincode::serialize(&UpgradeableLoaderState::ProgramData {
+            slot: deploy_slot,
+            upgrade_authority_address: Some(random_pubkey()),
+        })
+        .unwrap();
+    program_data.extend_from_slice(elf);
+    let program_data_account = Account {
+        lamports: 1_000_000,
+        data: program_data,
+        owner: LOADER_V3,
+        executable: false,
+        rent_epoch: 0,
+    };
+    (program_account, program_data_account)
+}
+
+/// Per-slot notifications for an unchanged LoaderV3 program must resolve via
+/// a programdata header fetch (or the throttle) instead of re-pulling the
+/// full program data.
+#[tokio::test]
+async fn test_executable_update_noise_resolves_without_program_reload() {
+    use crate::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const DEPLOY_SLOT: u64 = 90;
+    const CURRENT_SLOT: u64 = 100;
+
+    let (program_account, program_data_account) =
+        loaderv3_program_accounts(&program_data_pubkey, DEPLOY_SLOT, &[7; 64]);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        cloner,
+        ..
+    } = setup(
+        [
+            (program_pubkey, program_account.clone()),
+            (program_data_pubkey, program_data_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut update = AccountSharedData::from(program_account);
+    update.set_remote_slot(CURRENT_SLOT);
+
+    // First sighting performs the full load and seeds the verify cache.
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update.clone())
+        .await;
+    assert_eq!(cloner.program_clone_count(), 1);
+    let multi_after_load = rpc_client.multi_account_fetches();
+    let single_after_load = rpc_client.single_account_fetches();
+
+    // Past the throttle, a per-slot notification resolves with a single
+    // header fetch and no program reload.
+    tokio::time::sleep(Duration::from_millis(350)).await;
+    rpc_client.set_current_slot(CURRENT_SLOT + 1);
+    rpc_client.account_override_slot(&program_pubkey, CURRENT_SLOT + 1);
+    rpc_client.account_override_slot(&program_data_pubkey, CURRENT_SLOT + 1);
+    update.set_remote_slot(CURRENT_SLOT + 1);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update.clone())
+        .await;
+    assert_eq!(
+        rpc_client.multi_account_fetches(),
+        multi_after_load,
+        "unchanged program must not be refetched in full"
+    );
+    assert_eq!(
+        rpc_client.single_account_fetches(),
+        single_after_load + 1,
+        "verification must be a single header fetch"
+    );
+    assert_eq!(cloner.program_clone_count(), 1);
+
+    // A notification arriving within the throttle window costs nothing.
+    update.set_remote_slot(CURRENT_SLOT + 2);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update).await;
+    assert_eq!(rpc_client.multi_account_fetches(), multi_after_load);
+    assert_eq!(rpc_client.single_account_fetches(), single_after_load + 1);
+    assert_eq!(cloner.program_clone_count(), 1);
+}
+
+/// A real upgrade (programdata deploy slot advanced) must still be detected
+/// by the header check and trigger a full reload.
+#[tokio::test]
+async fn test_executable_update_detects_program_upgrade() {
+    use crate::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const DEPLOY_SLOT: u64 = 90;
+    const CURRENT_SLOT: u64 = 100;
+    const UPGRADE_SLOT: u64 = 150;
+
+    let (program_account, program_data_account) =
+        loaderv3_program_accounts(&program_data_pubkey, DEPLOY_SLOT, &[7; 64]);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        cloner,
+        ..
+    } = setup(
+        [
+            (program_pubkey, program_account.clone()),
+            (program_data_pubkey, program_data_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut update = AccountSharedData::from(program_account.clone());
+    update.set_remote_slot(CURRENT_SLOT);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update.clone())
+        .await;
+    assert_eq!(cloner.program_clone_count(), 1);
+
+    // Upgrade on chain: new deploy slot and new program data.
+    let upgraded_elf = [9u8; 64];
+    let (_, upgraded_program_data) = loaderv3_program_accounts(
+        &program_data_pubkey,
+        UPGRADE_SLOT,
+        &upgraded_elf,
+    );
+    rpc_client.set_current_slot(UPGRADE_SLOT);
+    rpc_client.account_override_slot(&program_pubkey, UPGRADE_SLOT);
+    rpc_client.add_account(program_data_pubkey, upgraded_program_data);
+
+    tokio::time::sleep(Duration::from_millis(350)).await;
+    update.set_remote_slot(UPGRADE_SLOT);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update.clone())
+        .await;
+    assert_eq!(
+        cloner.program_clone_count(),
+        2,
+        "deploy slot change must trigger a full reload"
+    );
+    let reloaded = cloner
+        .get_cloned_program(&program_pubkey)
+        .expect("program must be cloned");
+    assert_eq!(
+        reloaded.program_data, upgraded_elf,
+        "reload must pick up the upgraded program data"
+    );
+
+    // Subsequent noise verifies against the new deploy slot without reload.
+    tokio::time::sleep(Duration::from_millis(350)).await;
+    rpc_client.set_current_slot(UPGRADE_SLOT + 1);
+    rpc_client.account_override_slot(&program_pubkey, UPGRADE_SLOT + 1);
+    rpc_client.account_override_slot(&program_data_pubkey, UPGRADE_SLOT + 1);
+    update.set_remote_slot(UPGRADE_SLOT + 1);
+    let multi_before = rpc_client.multi_account_fetches();
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update).await;
+    assert_eq!(rpc_client.multi_account_fetches(), multi_before);
+    assert_eq!(cloner.program_clone_count(), 2);
+}
+
+/// Updates for an already-loaded immutable LoaderV2 program carry no
+/// information and must not fetch or clone anything.
+#[tokio::test]
+async fn test_executable_update_immutable_loaderv2_skipped() {
+    use crate::remote_account_provider::program_account::LOADER_V2;
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let program_account = Account {
+        lamports: 1_000_000,
+        data: vec![7; 64],
+        owner: LOADER_V2,
+        executable: true,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        cloner,
+        ..
+    } = setup(
+        [(program_pubkey, program_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut update = AccountSharedData::from(program_account);
+    update.set_remote_slot(CURRENT_SLOT);
+
+    // First sighting loads the program (from the update payload, no fetch).
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update.clone())
+        .await;
+    assert_eq!(cloner.program_clone_count(), 1);
+    let multi_after_load = rpc_client.multi_account_fetches();
+    let single_after_load = rpc_client.single_account_fetches();
+
+    // Any further update for the immutable program is a no-op.
+    update.set_remote_slot(CURRENT_SLOT + 1);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update).await;
+    assert_eq!(rpc_client.multi_account_fetches(), multi_after_load);
+    assert_eq!(rpc_client.single_account_fetches(), single_after_load);
+    assert_eq!(cloner.program_clone_count(), 1);
+}
+
+/// An upgrade whose notification arrives inside the throttle window must
+/// still be picked up by the deferred verification at window expiry —
+/// a rarely-invoked program emits no later notification to re-trigger it.
+#[tokio::test]
+async fn test_executable_update_suppressed_upgrade_verified_deferred() {
+    use crate::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const DEPLOY_SLOT: u64 = 90;
+    const CURRENT_SLOT: u64 = 100;
+    const UPGRADE_SLOT: u64 = 150;
+
+    let (program_account, program_data_account) =
+        loaderv3_program_accounts(&program_data_pubkey, DEPLOY_SLOT, &[7; 64]);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        cloner,
+        ..
+    } = setup(
+        [
+            (program_pubkey, program_account.clone()),
+            (program_data_pubkey, program_data_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut update = AccountSharedData::from(program_account.clone());
+    update.set_remote_slot(CURRENT_SLOT);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update.clone())
+        .await;
+    assert_eq!(cloner.program_clone_count(), 1);
+
+    // Upgrade lands on chain and its notification arrives while still
+    // inside the throttle window: suppressed, but a deferred verification
+    // is scheduled.
+    let upgraded_elf = [9u8; 64];
+    let (_, upgraded_program_data) = loaderv3_program_accounts(
+        &program_data_pubkey,
+        UPGRADE_SLOT,
+        &upgraded_elf,
+    );
+    rpc_client.set_current_slot(UPGRADE_SLOT);
+    rpc_client.account_override_slot(&program_pubkey, UPGRADE_SLOT);
+    rpc_client.add_account(program_data_pubkey, upgraded_program_data);
+    update.set_remote_slot(UPGRADE_SLOT);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update).await;
+    assert_eq!(
+        cloner.program_clone_count(),
+        1,
+        "notification within the window must be suppressed"
+    );
+
+    // The deferred verification fires at window expiry and reloads.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while cloner.program_clone_count() < 2
+        && std::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        cloner.program_clone_count(),
+        2,
+        "deferred verification must detect the suppressed upgrade"
+    );
+    let reloaded = cloner
+        .get_cloned_program(&program_pubkey)
+        .expect("program must be cloned");
+    assert_eq!(reloaded.program_data, upgraded_elf);
+}
+
+/// An authority-only change (deploy slot and program data unchanged) must
+/// be detected by the header fingerprint and trigger a reload.
+#[tokio::test]
+async fn test_executable_update_detects_authority_change() {
+    use crate::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const DEPLOY_SLOT: u64 = 90;
+    const CURRENT_SLOT: u64 = 100;
+
+    let (program_account, program_data_account) =
+        loaderv3_program_accounts(&program_data_pubkey, DEPLOY_SLOT, &[7; 64]);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        cloner,
+        ..
+    } = setup(
+        [
+            (program_pubkey, program_account.clone()),
+            (program_data_pubkey, program_data_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut update = AccountSharedData::from(program_account.clone());
+    update.set_remote_slot(CURRENT_SLOT);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update.clone())
+        .await;
+    assert_eq!(cloner.program_clone_count(), 1);
+
+    // SetAuthority: same deploy slot, same program data, new authority
+    // (the helper randomizes the authority on every call).
+    let (_, program_data_new_authority) =
+        loaderv3_program_accounts(&program_data_pubkey, DEPLOY_SLOT, &[7; 64]);
+    tokio::time::sleep(Duration::from_millis(350)).await;
+    rpc_client.set_current_slot(CURRENT_SLOT + 1);
+    rpc_client.account_override_slot(&program_pubkey, CURRENT_SLOT + 1);
+    rpc_client.add_account(program_data_pubkey, program_data_new_authority);
+    update.set_remote_slot(CURRENT_SLOT + 1);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update).await;
+    assert_eq!(
+        cloner.program_clone_count(),
+        2,
+        "authority change must trigger a reload"
+    );
+}
+
 // -----------------
 // Allowed Programs Tests
 // -----------------
