@@ -35,7 +35,7 @@ use solana_rpc_client_api::{
 };
 use solana_sdk_ids::sysvar::clock;
 use tokio::{
-    sync::{mpsc, oneshot, Mutex as AsyncMutex, Semaphore},
+    sync::{mpsc, oneshot, Mutex as AsyncMutex, Notify},
     task, time,
 };
 use tracing::*;
@@ -1424,9 +1424,10 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     removed_account_rx: Mutex<Option<mpsc::Receiver<Pubkey>>>,
 
     subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
-    /// Caps detached replay senders spawned when the forwarding channel is
-    /// full; replays beyond the cap are dropped with a warning.
-    pending_replay_sends: Arc<Semaphore>,
+    /// Per-account latest replay of consumed subscription results, drained
+    /// losslessly by a dedicated worker (newest slot wins).
+    replay_outbox: Arc<Mutex<HashMap<Pubkey, ForwardedSubscriptionUpdate>>>,
+    replay_notify: Arc<Notify>,
 
     /// Task that periodically reconciles subscriptions and updates the
     /// active subscriptions gauge
@@ -1449,9 +1450,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
 // Configs
 // -----------------
 const DEFAULT_MATCH_SLOTS_MAX_RETRIES: u64 = 10;
-/// Maximum concurrently detached replay senders (see
-/// [RemoteAccountProvider::reforward_consumed_subscription_results]).
-const MAX_PENDING_REPLAY_SENDS: usize = 256;
 const DEFAULT_MATCH_SLOTS_RETRY_INTERVAL_MS: u64 = 50;
 
 pub struct MatchSlotsConfig {
@@ -1752,9 +1750,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             confirmed_missing_subscriptions,
             capacity_eviction_protection,
             subscription_forwarder: Arc::new(subscription_forwarder),
-            pending_replay_sends: Arc::new(Semaphore::new(
-                MAX_PENDING_REPLAY_SENDS,
-            )),
+            replay_outbox: Arc::default(),
+            replay_notify: Arc::new(Notify::new()),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
             _active_subscriptions_task_handle: active_subscriptions_updater,
@@ -1762,6 +1759,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let updates = me.pubsub_client.take_updates();
         me.listen_for_account_updates(updates)?;
+        me.start_replay_outbox_worker();
         let clock_remote_account = me
             .try_get(
                 clock::ID,
@@ -2618,44 +2616,76 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     /// Re-forwards found results consumed from the update pipeline by a
     /// fetch that is now failing; otherwise the consumed update is lost.
-    /// Never blocks on the pipeline's own input capacity: a full channel
-    /// falls back to a bounded detached sender, beyond which replays are
-    /// dropped with a warning.
+    /// Coalesced per account (newest slot wins) into an outbox drained by
+    /// [Self::start_replay_outbox_worker], so callers never block and the
+    /// backlog is bounded by the number of affected accounts.
     fn reforward_consumed_subscription_results(
         &self,
         consumed: &[(Pubkey, RemoteAccount)],
     ) {
-        for (pubkey, account) in consumed {
-            let update = ForwardedSubscriptionUpdate {
-                pubkey: *pubkey,
-                account: account.clone(),
-                source: SubscriptionSource::Replay,
-            };
-            let update = match self.subscription_forwarder.try_send(update) {
-                Ok(()) => continue,
-                Err(mpsc::error::TrySendError::Closed(_)) => continue,
-                Err(mpsc::error::TrySendError::Full(update)) => update,
-            };
-            let Ok(permit) =
-                Arc::clone(&self.pending_replay_sends).try_acquire_owned()
-            else {
-                warn!(
-                    pubkey = %pubkey,
-                    "Dropping consumed subscription replay: pipeline full and replay cap reached"
-                );
-                continue;
-            };
-            let forwarder = Arc::clone(&self.subscription_forwarder);
-            task::spawn(async move {
-                let _permit = permit;
-                if let Err(err) = forwarder.send(update).await {
-                    warn!(
-                        error = ?err,
-                        "Failed to re-forward consumed subscription update"
-                    );
-                }
-            });
+        if consumed.is_empty() {
+            return;
         }
+        {
+            let mut outbox = self
+                .replay_outbox
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            for (pubkey, account) in consumed {
+                let entry = outbox.entry(*pubkey);
+                match entry {
+                    Entry::Occupied(mut existing)
+                        if existing.get().account.slot() < account.slot() =>
+                    {
+                        existing.insert(ForwardedSubscriptionUpdate {
+                            pubkey: *pubkey,
+                            account: account.clone(),
+                            source: SubscriptionSource::Replay,
+                        });
+                    }
+                    Entry::Occupied(_) => {}
+                    Entry::Vacant(vacant) => {
+                        vacant.insert(ForwardedSubscriptionUpdate {
+                            pubkey: *pubkey,
+                            account: account.clone(),
+                            source: SubscriptionSource::Replay,
+                        });
+                    }
+                }
+            }
+        }
+        self.replay_notify.notify_one();
+    }
+
+    /// Drains the replay outbox into the update pipeline. Runs detached so
+    /// replays never block a failing resolution; exits when the pipeline
+    /// closes.
+    fn start_replay_outbox_worker(&self) {
+        let outbox = Arc::clone(&self.replay_outbox);
+        let notify = Arc::clone(&self.replay_notify);
+        let forwarder = Arc::clone(&self.subscription_forwarder);
+        task::spawn(async move {
+            loop {
+                notify.notified().await;
+                loop {
+                    let update = {
+                        let mut outbox = outbox
+                            .lock()
+                            .unwrap_or_else(|poison| poison.into_inner());
+                        let Some(pubkey) = outbox.keys().next().copied() else {
+                            break;
+                        };
+                        outbox.remove(&pubkey)
+                    };
+                    let Some(update) = update else {
+                        break;
+                    };
+                    if forwarder.send(update).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
     }
 
     /// Gets the accounts for the given pubkeys by fetching from RPC.
