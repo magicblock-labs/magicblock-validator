@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use magicblock_magic_program_api::{
-    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY, args::ScheduleTaskArgs,
-    instruction::MagicBlockInstruction, pda::crank_signer_pda,
+    MAGIC_CONTEXT_PUBKEY, args::ScheduleTaskArgs,
+    instruction::MagicBlockInstruction,
 };
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
@@ -181,39 +181,6 @@ impl InstructionUtils {
         Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::CancelTask { task_id },
-            account_metas,
-        )
-    }
-
-    // -----------------
-    // Execute Crank
-    // -----------------
-    pub fn execute_task_instruction(
-        validator_authority: Pubkey,
-        authority: Pubkey,
-        instructions: Vec<Instruction>,
-    ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new_readonly(validator_authority, true),
-            AccountMeta::new_readonly(crank_signer_pda(&authority), false),
-        ];
-        for instruction in &instructions {
-            account_metas
-                .push(AccountMeta::new_readonly(instruction.program_id, false));
-            account_metas.extend(instruction.accounts.iter().map(|account| {
-                AccountMeta {
-                    pubkey: account.pubkey,
-                    is_signer: false,
-                    is_writable: account.is_writable,
-                }
-            }));
-        }
-        Instruction::new_with_wincode(
-            CRANK_PROGRAM_ID,
-            &MagicBlockInstruction::ExecuteCrank {
-                authority,
-                instructions,
-            },
             account_metas,
         )
     }
