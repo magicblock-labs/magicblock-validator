@@ -1,5 +1,10 @@
 use core::str;
-use std::{mem::size_of, ops::Range, time::Duration};
+use std::{
+    mem::size_of,
+    ops::Range,
+    sync::{atomic::AtomicU64, Arc},
+    time::Duration,
+};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use http_body_util::BodyExt;
@@ -13,10 +18,14 @@ use magicblock_core::{
     coordination_mode::CoordinationMode,
     link::transactions::{SanitizeableTransaction, WithEncoded},
 };
-use magicblock_metrics::metrics::{AccountFetchContext, ENSURE_ACCOUNTS_TIME};
+use magicblock_metrics::metrics::{
+    AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason,
+    ENSURE_ACCOUNTS_TIME,
+};
 use prelude::JsonBody;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
 };
@@ -142,12 +151,55 @@ impl HttpDispatcher {
         Ok(())
     }
 
+    fn rpc_get_account_context(
+        remote_account_claims: Arc<AtomicU64>,
+    ) -> AccountFetchContext {
+        AccountFetchContext::new_with_claims_counter(
+            AccountFetchEntrypoint::RpcGetAccount,
+            AccountFetchReason::RequestedAccount,
+            remote_account_claims,
+        )
+    }
+
+    fn rpc_get_multiple_accounts_context(
+        remote_account_claims: Arc<AtomicU64>,
+    ) -> AccountFetchContext {
+        AccountFetchContext::new_with_claims_counter(
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
+            AccountFetchReason::RequestedAccount,
+            remote_account_claims,
+        )
+    }
+
+    fn send_transaction_context(
+        signature: Signature,
+        remote_account_claims: Arc<AtomicU64>,
+    ) -> AccountFetchContext {
+        AccountFetchContext::new_with_claims_counter(
+            AccountFetchEntrypoint::SendTransaction(signature),
+            AccountFetchReason::RequestedAccount,
+            remote_account_claims,
+        )
+    }
+
+    fn simulate_transaction_context(
+        signature: Signature,
+        remote_account_claims: Arc<AtomicU64>,
+    ) -> AccountFetchContext {
+        AccountFetchContext::new_with_claims_counter(
+            AccountFetchEntrypoint::SimulateTransaction(signature),
+            AccountFetchReason::RequestedAccount,
+            remote_account_claims,
+        )
+    }
+
     /// Fetches an account's data from the `AccountsDb` filling it in from chain
     /// as needed.
     #[instrument(skip_all)]
     async fn read_account_with_ensure(
         &self,
         pubkey: &Pubkey,
+        fetch_context: AccountFetchContext,
     ) -> Option<AccountSharedData> {
         if !self.needs_onchain_interactions() {
             return self.accountsdb.get_account(pubkey);
@@ -162,7 +214,7 @@ impl HttpDispatcher {
             .ensure_accounts(
                 &[*pubkey],
                 Some(&mark_empty_if_not_found),
-                AccountFetchContext::rpc_get_account(),
+                fetch_context,
             )
             .await
             .inspect_err(|e| {
@@ -179,6 +231,7 @@ impl HttpDispatcher {
     async fn read_accounts_with_ensure(
         &self,
         pubkeys: &[Pubkey],
+        fetch_context: AccountFetchContext,
     ) -> Vec<Option<AccountSharedData>> {
         if !self.needs_onchain_interactions() {
             return pubkeys
@@ -193,11 +246,7 @@ impl HttpDispatcher {
             .start_timer();
         let _ = self
             .chainlink
-            .ensure_accounts(
-                pubkeys,
-                Some(pubkeys),
-                AccountFetchContext::rpc_get_multiple_accounts(),
-            )
+            .ensure_accounts(pubkeys, Some(pubkeys), fetch_context)
             .await
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the accounts fails
@@ -273,6 +322,7 @@ impl HttpDispatcher {
     async fn ensure_transaction_accounts(
         &self,
         transaction: &SanitizedTransaction,
+        fetch_context: AccountFetchContext,
     ) -> RpcResult<()> {
         // Hard bound on account preparation: if the cloning pipeline is
         // degraded the transaction must fail with an error instead of
@@ -286,7 +336,10 @@ impl HttpDispatcher {
             .start_timer();
         match tokio::time::timeout(
             ENSURE_ACCOUNTS_TIMEOUT,
-            self.chainlink.ensure_transaction_accounts(transaction),
+            self.chainlink.ensure_transaction_accounts_with_context(
+                transaction,
+                fetch_context,
+            ),
         )
         .await
         .unwrap_or_else(|_elapsed| {

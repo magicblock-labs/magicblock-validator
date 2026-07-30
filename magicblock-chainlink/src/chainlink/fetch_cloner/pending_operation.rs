@@ -168,7 +168,7 @@ impl PendingOwner {
             return;
         }
         metrics::observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
-            self.origin,
+            self.origin.clone(),
             self.layer,
             outcome,
             self.started_at.elapsed().as_secs_f64(),
@@ -231,7 +231,7 @@ pub(super) fn claim_or_join_pending(
                 cancel: Arc::clone(&cancel),
             });
             metrics::inc_chainlink_pending_fetch_accounts_with_context(
-                origin,
+                origin.clone(),
                 layer,
                 ChainlinkPendingFetchOutcome::Owned,
                 1,
@@ -263,7 +263,7 @@ pub(super) fn claim_or_join_pending(
             let cancel = Arc::clone(&entry.get().cancel);
             entry.get_mut().waiters.insert(waiter_id, tx);
             metrics::inc_chainlink_pending_fetch_accounts_with_context(
-                origin,
+                origin.clone(),
                 layer,
                 ChainlinkPendingFetchOutcome::JoinedExisting,
                 1,
