@@ -146,10 +146,9 @@ where
 
     /// Per-program state from the last successful load, so the per-slot
     /// notifications providers emit for heavily-invoked program accounts
-    /// resolve without re-pulling full program data. Bounded by the number
-    /// of programs loaded into the bank.
-    program_verify_cache:
-        Arc<PlMutex<hash_map::HashMap<Pubkey, ProgramVerifyState>>>,
+    /// resolve without re-pulling full program data. Entries for programs
+    /// evicted from the bank are pruned on their next notification.
+    program_verify_cache: Arc<PlMutex<LruCache<Pubkey, ProgramVerifyState>>>,
 
     /// Recognizes freshly delegated accounts whose app data collides with an
     /// internal DLP discriminator via delegation-record sightings.
@@ -194,6 +193,14 @@ const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
         Some(n) => n,
         None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
     };
+
+/// Capacity of the program verify cache; far above the number of programs
+/// a validator realistically loads, while bounding it across eviction churn.
+const PROGRAM_VERIFY_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64)
+{
+    Some(n) => n,
+    None => panic!("PROGRAM_VERIFY_CACHE_CAPACITY must be non-zero"),
+};
 
 /// Capacity for recently sighted delegation-record update slots; sized to
 /// outlast DLP firehose churn across the SubMux debounce window.
@@ -468,9 +475,9 @@ where
             known_empty_eatas: Arc::new(PlMutex::new(LruCache::new(
                 KNOWN_EMPTY_EATAS_CAPACITY,
             ))),
-            program_verify_cache: Arc::new(PlMutex::new(
-                hash_map::HashMap::new(),
-            )),
+            program_verify_cache: Arc::new(PlMutex::new(LruCache::new(
+                PROGRAM_VERIFY_CACHE_CAPACITY,
+            ))),
             dlp_collision_tracker: Arc::new(PlMutex::new(
                 DlpCollisionTracker::new(),
             )),

@@ -113,7 +113,8 @@ where
     };
     if this.accounts_bank.get_account(&pubkey).is_none() {
         // The bank copy was evicted since the load that populated the
-        // cache; reload instead of trusting the stale entry.
+        // cache; drop the stale entry and reload.
+        this.program_verify_cache.lock().pop(&pubkey);
         return false;
     }
 
@@ -127,6 +128,8 @@ where
     }
     let elapsed = state.verified_at.elapsed();
     if elapsed < PROGRAM_VERIFY_THROTTLE {
+        // Suppressed, but never lost: a single verification covering the
+        // window's notifications runs at window expiry.
         schedule_deferred_verify(
             this,
             pubkey,
@@ -331,7 +334,7 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U, V, C>(
         // Only successful loads are remembered: a failure leaves the next
         // notification free to retry immediately, as before.
         Ok(_) => {
-            this.program_verify_cache.lock().insert(
+            this.program_verify_cache.lock().put(
                 pubkey,
                 ProgramVerifyState {
                     programdata_header: account_owner
