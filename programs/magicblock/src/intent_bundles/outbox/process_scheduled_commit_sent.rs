@@ -5,7 +5,6 @@ use std::{
 
 use lazy_static::lazy_static;
 use magicblock_core::{coordination_mode, intent::outbox::outbox_intent_pda};
-use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
@@ -314,7 +313,7 @@ mod tests {
     use solana_keypair::Keypair;
     use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
     use solana_signer::Signer;
-
+    use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
     use super::*;
     use crate::{
         instruction_utils::InstructionUtils,

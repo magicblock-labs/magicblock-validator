@@ -61,7 +61,6 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    let meta = ScheduledBaseIntentMeta::new(&intent_bundle);
     let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
 
     let mut single_stage_executor = SingleStageStrategyExecutor::new(
@@ -155,7 +154,6 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    let meta = ScheduledBaseIntentMeta::new(&intent_bundle);
     let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
     let mut executor = TwoStageStrategyExecutor::new(
         state,

@@ -299,9 +299,14 @@ async fn test_pickup_executed_intent() {
     let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_finalize(ctx, &[counter_pda])
     });
+    let intent_id = outbox_bundle.inner.id;
 
-    // Execute intent
-    let outbox_client = Arc::new(test_env.outbox_client());
+    // Execute intent. Force close_intent to fail so the outbox record
+    // survives execution, simulating a validator crash after the commit tx
+    // landed but before the outbox could be closed.
+    let mut outbox_client = test_env.outbox_client();
+    outbox_client.with_fail_close_intent(true);
+    let outbox_client = Arc::new(outbox_client);
     let executor_ctx = test_env
         .executor_ctx_builder()
         .with_outbox_client(outbox_client.clone())
@@ -311,38 +316,37 @@ async fn test_pickup_executed_intent() {
     let (result, cleanup_handle) = Box::new(executor)
         .execute(outbox_bundle.inner.clone())
         .await;
-    assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
+    assert!(
+        result.inner.is_err(),
+        "close_intent failure should surface as overall execution failure"
+    );
     assert_eq!(
         outbox_client.sent_commits.lock().unwrap().as_slice(),
-        [(outbox_bundle.inner.id, true)],
+        [(intent_id, true)],
         "notify_commit_sent should have been called once with success"
     );
 
     cleanup_handle.clean().await.expect("cleanup failed");
 
-    // Simulates shutdown/crash after successful execution
-    // Validator could sent tx and then crash
-    // On restart validator will extract outbox bundles
+    // Simulates shutdown/crash after successful execution but before the
+    // outbox record could be closed. On restart the validator will pick up
+    // this leftover outbox bundle and re-drive it to completion.
     let outbox_bundle = test_env
         .outbox_client()
         .outbox_reader()
-        .fetch_outbox_intent(outbox_bundle.inner.id)
+        .fetch_outbox_intent(intent_id)
         .await
         .expect("fetch failed")
         .expect("outbox bundle not found");
 
-    let ExecutionOutput::SingleStage(signature) = result.inner.unwrap() else {
-        panic!("Unexpected execution strategy");
-    };
-    match outbox_bundle.status() {
+    let signature = match outbox_bundle.status() {
         OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
             pending,
-        )) => {
-            assert_eq!(pending.signature, signature, "Invalid outbox state");
-        }
+        )) => pending.signature,
         other => panic!("Invalid outbox state: {other:?}"),
-    }
-    // Builder executor
+    };
+    // Builder executor, using a normal outbox client this time so the retry
+    // actually closes the outbox record.
     let executor = build_stage_intent_executor(
         test_env.executor_ctx_builder().build(),
         outbox_bundle.status().clone(),
@@ -351,7 +355,8 @@ async fn test_pickup_executed_intent() {
     let (result, cleanup_handle) = Box::new(executor)
         .execute(outbox_bundle.inner.clone())
         .await;
-    let ExecutionOutput::SingleStage(retried_signature) = result.inner.unwrap()
+    let ExecutionOutput::SingleStage(retried_signature) =
+        result.inner.expect("recovery execution succeeded")
     else {
         panic!("Unexpected execution strategy");
     };
@@ -360,6 +365,18 @@ async fn test_pickup_executed_intent() {
         "Execution shouldn't be retried"
     );
     cleanup_handle.clean().await.expect("cleanup failed");
+
+    // Outbox record must be closed now that execution + close both succeeded
+    let closed = test_env
+        .outbox_client()
+        .outbox_reader()
+        .fetch_outbox_intent(intent_id)
+        .await
+        .expect("fetch failed");
+    assert!(
+        closed.is_none(),
+        "outbox intent should be closed after successful execution"
+    );
 
     // Validate on chain state
     let counter = test_env
@@ -437,6 +454,18 @@ async fn test_pickup_failed_intent() {
         panic!("Unexpected execution strategy");
     };
     cleanup_handle.clean().await.expect("cleanup failed");
+
+    // Outbox record must be closed now that execution succeeded
+    let closed = test_env
+        .outbox_client()
+        .outbox_reader()
+        .fetch_outbox_intent(intent_id)
+        .await
+        .expect("fetch succeeds");
+    assert!(
+        closed.is_none(),
+        "outbox intent should be closed after successful execution"
+    );
 
     // Validate on chain state
     let counter = test_env
@@ -728,6 +757,18 @@ async fn test_pickup_after_committing() {
         .await
         .expect("cleanup after recovery");
 
+    // Outbox record must be closed now that execution succeeded
+    let closed = test_env
+        .outbox_client()
+        .outbox_reader()
+        .fetch_outbox_intent(outbox_bundle.inner.id)
+        .await
+        .expect("fetch succeeded");
+    assert!(
+        closed.is_none(),
+        "outbox intent should be closed after successful recovery"
+    );
+
     // Counters should be finalized (undelegated) on chain
     for (_, pda) in &counters {
         let counter = test_env
@@ -760,22 +801,27 @@ async fn test_pickup_after_finalizing() {
     let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_and_undelegate_bundle(ctx, &counter_pdas);
     });
+    let intent_id = outbox_bundle.inner.id;
 
-    // Run to completion with a normal outbox client
-    let executor_ctx = test_env.executor_ctx_builder().build();
+    // Run to completion, but force close_intent to fail so the outbox record
+    // survives execution - simulating a validator crash after both txs
+    // landed but before the outbox could be closed.
+    let mut outbox_client = test_env.outbox_client();
+    outbox_client.with_fail_close_intent(true);
+    let executor_ctx = test_env
+        .executor_ctx_builder()
+        .with_outbox_client(Arc::new(outbox_client))
+        .build();
     let executor = Box::new(AcceptedIntentExecutor::new(
         executor_ctx,
         DEFAULT_ACTIONS_TIMEOUT,
     ));
     let (result, cleanup_handle) =
         executor.execute(outbox_bundle.inner.clone()).await;
-    let ExecutionOutput::TwoStage {
-        commit_signature,
-        finalize_signature,
-    } = result.inner.expect("first execution succeeded")
-    else {
-        panic!("Expected TwoStage output");
-    };
+    assert!(
+        result.inner.is_err(),
+        "close_intent failure should surface as overall execution failure"
+    );
     cleanup_handle
         .clean()
         .await
@@ -785,23 +831,22 @@ async fn test_pickup_after_finalizing() {
     let outbox_bundle = test_env
         .outbox_client()
         .outbox_reader()
-        .fetch_outbox_intent(outbox_bundle.inner.id)
+        .fetch_outbox_intent(intent_id)
         .await
         .expect("fetch succeeded")
         .expect("outbox bundle present");
-    assert!(
-        matches!(
-            outbox_bundle.status(),
-            OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
-                TwoStageProgress::Finalizing { .. }
-            ))
-        ),
-        "Expected TwoStage::Finalizing in outbox, got {:?}",
-        outbox_bundle.status()
-    );
+    let (commit_signature, finalize_signature) = match outbox_bundle.status() {
+        OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
+            TwoStageProgress::Finalizing { commit, finalize },
+        )) => (*commit, finalize.signature),
+        other => {
+            panic!("Expected TwoStage::Finalizing in outbox, got {other:?}")
+        }
+    };
 
-    // Recovery: build_stage_intent_executor detects the finalize sig on chain and
-    // returns the same signatures without re-executing either stage.
+    // Recovery: build_stage_intent_executor detects the finalize sig on chain,
+    // returns the same signatures without re-executing either stage, and this
+    // time (using a normal outbox client) succeeds in closing the outbox record.
     let executor = build_stage_intent_executor(
         test_env.executor_ctx_builder().build(),
         outbox_bundle.status().clone(),
@@ -829,6 +874,18 @@ async fn test_pickup_after_finalizing() {
         .clean()
         .await
         .expect("cleanup after recovery");
+
+    // Outbox record must be closed now that execution + close both succeeded
+    let closed = test_env
+        .outbox_client()
+        .outbox_reader()
+        .fetch_outbox_intent(intent_id)
+        .await
+        .expect("fetch succeeded");
+    assert!(
+        closed.is_none(),
+        "outbox intent should be closed after successful recovery"
+    );
 
     // Counters are finalized and undelegated on chain
     for (_, pda) in &counters {
@@ -897,11 +954,15 @@ struct TestOutboxClient {
     ephem_rpc: Arc<AsyncRpcClient>,
     pub stage_calls: Arc<Mutex<Vec<(u64, ExecutionStage)>>>,
     pub sent_commits: Arc<Mutex<Vec<(u64, bool)>>>,
+    pub close_calls: Arc<Mutex<Vec<u64>>>,
 
     fail_set_execution_stage: bool,
     set_execution_stage_sleep: Option<Duration>,
     fail_committing: bool,
     fail_finalizing: bool,
+    // Simulates a validator crash after the intent's execution result was
+    // determined but before the outbox record could be closed on chain.
+    fail_close_intent: bool,
 }
 
 impl TestOutboxClient {
@@ -910,10 +971,12 @@ impl TestOutboxClient {
             ephem_rpc,
             stage_calls: Default::default(),
             sent_commits: Default::default(),
+            close_calls: Default::default(),
             fail_set_execution_stage: false,
             set_execution_stage_sleep: None,
             fail_committing: false,
             fail_finalizing: false,
+            fail_close_intent: false,
         }
     }
 
@@ -927,6 +990,10 @@ impl TestOutboxClient {
 
     fn with_fail_finalizing(&mut self, value: bool) {
         self.fail_finalizing = value;
+    }
+
+    fn with_fail_close_intent(&mut self, value: bool) {
+        self.fail_close_intent = value;
     }
 }
 
@@ -1005,6 +1072,31 @@ impl OutboxClient for TestOutboxClient {
         };
         let succeeded = result.is_ok();
         self.sent_commits.lock().unwrap().push((meta.id, succeeded));
+        Ok(())
+    }
+
+    async fn close_intent(&self, intent_id: u64) -> Result<(), Self::Error> {
+        if self.fail_close_intent {
+            return Err(Self::Error::RpcClientError(
+                client_error::ErrorKind::Custom(
+                    "close_intent failed".to_string(),
+                )
+                .into(),
+            ));
+        }
+
+        let blockhash = self
+            .ephem_rpc
+            .get_latest_blockhash()
+            .await
+            .map_err(InternalOutboxClientError::RpcClientError)?;
+        let tx = InstructionUtils::close_outbox_intent(intent_id, blockhash);
+        self.ephem_rpc
+            .send_and_confirm_transaction(&tx)
+            .await
+            .map_err(InternalOutboxClientError::RpcClientError)?;
+
+        self.close_calls.lock().unwrap().push(intent_id);
         Ok(())
     }
 
