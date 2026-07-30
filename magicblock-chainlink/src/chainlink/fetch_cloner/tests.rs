@@ -10044,3 +10044,423 @@ async fn test_delegated_account_owned_by_token_program_does_not_subscribe_progra
         subscribed_programs
     );
 }
+
+// -----------------
+// Repro: delegated account permanently stuck after a missed re-delegation
+// update (flash-trade wedge, Jul 29-30 2026).
+//
+// Lifecycle of a PDA that is rapidly re-delegated (create -> undelegate ->
+// settle -> re-create on the same address):
+//
+// 1. account is delegated on chain and cloned into the bank
+// 2. undelegation completes: the account and its delegation record are
+//    closed on chain while the bank copy is flagged undelegating
+// 3. a client read during the closed window refreshes the undelegating
+//    account, finds nothing on chain and replaces the bank copy with an
+//    empty placeholder
+// 4. the PDA is re-delegated on chain a few slots later, but the validator
+//    misses the subscription update (see the silent drop gates in the
+//    provider loop / submux dedup)
+//
+// The stuck condition: with the placeholder in the bank every ensure path
+// (getAccountInfo, sendTransaction) hits the bank precheck ("found in bank
+// in valid state, no fetch needed") and never refetches, even though the
+// chain holds the account delegated to this validator. Only a processed
+// subscription update at a newer slot recovers it.
+// -----------------
+
+struct WedgeReproCtx {
+    ctx: FetcherTestCtx,
+    account_pubkey: Pubkey,
+    chain_account: Account,
+    account_owner: Pubkey,
+}
+
+const WEDGE_SLOT_DELEGATED: u64 = 100;
+const WEDGE_SLOT_CLOSED: u64 = 110;
+const WEDGE_SLOT_REDELEGATED: u64 = 115;
+
+/// Drives phases 1-3 above: the account was delegated and cloned, then
+/// closed on chain, and a closed-window read left an empty placeholder in
+/// the bank. The chain (RPC view) still shows the closed state.
+async fn setup_closed_window_placeholder(
+    validator_keypair: Keypair,
+) -> WedgeReproCtx {
+    init_logger();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+
+    let chain_account = Account {
+        lamports: 1_670_400,
+        data: vec![9; 112],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ctx = setup(
+        [(account_pubkey, chain_account.clone())],
+        WEDGE_SLOT_DELEGATED,
+        validator_keypair,
+    )
+    .await;
+    let deleg_record_pubkey = add_delegation_record_for(
+        &ctx.rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    // 1. initial ensure clones the delegated account
+    ctx.fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[account_pubkey],
+            Some(&[account_pubkey]),
+            None,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("initial ensure should succeed");
+    let in_bank = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned");
+    assert!(in_bank.delegated(), "account should be cloned as delegated");
+
+    // 2. undelegation completes on chain: account + record closed
+    ctx.rpc_client.set_slot(WEDGE_SLOT_CLOSED);
+    ctx.rpc_client.set_clock_sysvar_for_slot(WEDGE_SLOT_CLOSED);
+    ctx.rpc_client.remove_account(&account_pubkey);
+    ctx.rpc_client.remove_account(&deleg_record_pubkey);
+    ctx.accounts_bank.undelegate(&account_pubkey);
+
+    // 3. a client read during the closed window replaces the bank copy with
+    //    an empty placeholder
+    ctx.fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[account_pubkey],
+            Some(&[account_pubkey]),
+            None,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("closed-window ensure should succeed");
+    let placeholder = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("placeholder should be in bank");
+    assert_eq!(placeholder.lamports(), 0);
+    assert!(placeholder.data().is_empty());
+    assert_eq!(*placeholder.owner(), system_program::id());
+    assert!(!placeholder.delegated());
+    assert!(!placeholder.undelegating());
+
+    WedgeReproCtx {
+        ctx,
+        account_pubkey,
+        chain_account,
+        account_owner,
+    }
+}
+
+/// Phase 4: the PDA is re-delegated on chain (RPC view catches up).
+fn redelegate_on_chain(repro: &WedgeReproCtx, validator_pubkey: Pubkey) {
+    repro.ctx.rpc_client.set_slot(WEDGE_SLOT_REDELEGATED);
+    repro
+        .ctx
+        .rpc_client
+        .set_clock_sysvar_for_slot(WEDGE_SLOT_REDELEGATED);
+    repro
+        .ctx
+        .rpc_client
+        .add_account(repro.account_pubkey, repro.chain_account.clone());
+    add_delegation_record_for(
+        &repro.ctx.rpc_client,
+        repro.account_pubkey,
+        validator_pubkey,
+        repro.account_owner,
+    );
+}
+
+/// Drives phases 1-4 above and returns with the account re-delegated on
+/// chain, the bank holding the stale placeholder and no update delivered.
+async fn setup_wedged_account(validator_keypair: Keypair) -> WedgeReproCtx {
+    let validator_pubkey = validator_keypair.pubkey();
+    let repro = setup_closed_window_placeholder(validator_keypair).await;
+    redelegate_on_chain(&repro, validator_pubkey);
+    repro
+}
+
+#[tokio::test]
+async fn test_repro_account_stuck_after_missed_redelegation_update() {
+    let WedgeReproCtx {
+        ctx,
+        account_pubkey,
+        ..
+    } = setup_wedged_account(Keypair::new()).await;
+
+    // The chain now holds the account delegated to us, but every ensure
+    // (getAccountInfo / sendTransaction) hits the placeholder in the bank
+    // and never even attempts a remote fetch: the account is stuck.
+    let single_before = ctx.rpc_client.single_account_fetches();
+    let multi_before = ctx.rpc_client.multi_account_fetches();
+    for _ in 0..3 {
+        ctx.fetch_cloner
+            .fetch_and_clone_accounts_with_dedup(
+                &[account_pubkey],
+                Some(&[account_pubkey]),
+                None,
+                AccountFetchContext::rpc_get_account(),
+            )
+            .await
+            .expect("ensure should succeed");
+    }
+
+    let single_fetches =
+        ctx.rpc_client.single_account_fetches() - single_before;
+    let multi_fetches = ctx.rpc_client.multi_account_fetches() - multi_before;
+    assert_eq!(
+        (multi_fetches, single_fetches),
+        (0, 0),
+        "STUCK CONDITION: the bank placeholder suppresses every remote fetch"
+    );
+
+    let in_bank = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("placeholder should still be in bank");
+    assert!(
+        !in_bank.delegated(),
+        "STUCK CONDITION: the re-delegated account is never cloned"
+    );
+    assert_eq!(
+        in_bank.lamports(),
+        0,
+        "STUCK CONDITION: bank still holds the empty placeholder"
+    );
+}
+
+#[tokio::test]
+async fn test_repro_stuck_account_recovers_when_update_is_delivered() {
+    let WedgeReproCtx {
+        ctx,
+        account_pubkey,
+        chain_account,
+        account_owner,
+        ..
+    } = setup_wedged_account(Keypair::new()).await;
+
+    // Control: delivering the re-delegation update (what the dropped
+    // notification would have done) recovers the account.
+    ctx.fetch_cloner
+        .process_subscription_update(
+            account_pubkey,
+            ForwardedSubscriptionUpdate {
+                pubkey: account_pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    chain_account.clone(),
+                    WEDGE_SLOT_REDELEGATED,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+                source: SubscriptionSource::Program,
+            },
+        )
+        .await;
+
+    let in_bank = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be in bank");
+    assert!(
+        in_bank.delegated(),
+        "a processed update at a newer slot heals the account"
+    );
+    assert_eq!(*in_bank.owner(), account_owner);
+    assert_eq!(in_bank.remote_slot(), WEDGE_SLOT_REDELEGATED);
+}
+
+#[tokio::test]
+async fn test_repro_stuck_account_recovers_when_placeholder_absent() {
+    let WedgeReproCtx {
+        ctx,
+        account_pubkey,
+        account_owner,
+        ..
+    } = setup_wedged_account(Keypair::new()).await;
+
+    // Control: the placeholder is the load-bearing part of the stuck
+    // condition. With the bank entry gone (e.g. evicted by a removal
+    // notification), the very same ensure fetches and clones the
+    // re-delegated account.
+    ctx.accounts_bank.remove_account(&account_pubkey);
+
+    ctx.fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[account_pubkey],
+            Some(&[account_pubkey]),
+            None,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("ensure should succeed");
+
+    let in_bank = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be re-cloned");
+    assert!(
+        in_bank.delegated(),
+        "without the placeholder the pull path recovers on its own"
+    );
+    assert_eq!(*in_bank.owner(), account_owner);
+}
+
+// Slot of a stale (pre-re-delegation) update whose in-flight resolution
+// races the re-delegation notification.
+const WEDGE_SLOT_STALE_UPDATE: u64 = 112;
+
+/// Repro of the actual update loss with ALL transports delivering: the
+/// re-delegation notification is received by the provider while a fetch
+/// for an older update of the same account is still in flight. The
+/// provider consumes the notification to resolve that pending fetch
+/// (mod.rs "Using subscription update instead of fetch") instead of
+/// forwarding it to the fetch cloner.
+///
+/// Enforced behavior: the consumed state must not be discarded. The
+/// resolving fetch's companion (the delegation record) resolved at an
+/// older slot, so the slot-matching retry refetches RPC-only; the floor
+/// for an acceptable response is the consumed update's slot, so a lagging
+/// RPC view (still in the closed window) cannot finalize NotFound below
+/// it. Once the RPC view catches up the account is cloned as delegated.
+/// Without the min-context floor the fetch concludes NotFound, the
+/// freshest state is silently swallowed, and the account is permanently
+/// stuck behind the bank placeholder.
+#[tokio::test]
+async fn test_repro_redelegation_update_delivered_but_consumed_by_inflight_fetch(
+) {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let mut repro = setup_closed_window_placeholder(validator_keypair).await;
+
+    // A stale delegate-shaped update (from the previous incarnation of the
+    // burst) starts resolving while the RPC is slow to respond.
+    repro.ctx.rpc_client.set_slot(WEDGE_SLOT_STALE_UPDATE);
+    repro
+        .ctx
+        .rpc_client
+        .set_clock_sysvar_for_slot(WEDGE_SLOT_STALE_UPDATE);
+    repro.ctx.rpc_client.block_fetches();
+
+    let fetch_count_before = repro.ctx.fetch_cloner.fetch_count();
+    let stale_update = ForwardedSubscriptionUpdate {
+        pubkey: repro.account_pubkey,
+        account: RemoteAccount::from_fresh_account(
+            repro.chain_account.clone(),
+            WEDGE_SLOT_STALE_UPDATE,
+            RemoteAccountUpdateSource::Subscription,
+        ),
+        source: SubscriptionSource::Program,
+    };
+    let resolve_task = {
+        let fetch_cloner = repro.ctx.fetch_cloner.clone();
+        let pubkey = repro.account_pubkey;
+        tokio::spawn(async move {
+            fetch_cloner
+                .process_subscription_update(pubkey, stale_update)
+                .await;
+        })
+    };
+
+    // Wait until the stale resolve registered its (blocked) fetch.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while repro.ctx.fetch_cloner.fetch_count() < fetch_count_before + 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("stale resolve should start its fetch");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // The re-delegation notification IS delivered by the transport while
+    // the stale fetch is still in flight.
+    let pubsub_client = repro.ctx.remote_account_provider.pubsub_client();
+    pubsub_client.insert_subscription(repro.account_pubkey);
+    pubsub_client
+        .send_account_update(
+            repro.account_pubkey,
+            WEDGE_SLOT_REDELEGATED,
+            &repro.chain_account,
+        )
+        .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // The provider consumed the notification to resolve the pending fetch
+    // instead of forwarding it to the fetch cloner.
+    assert!(
+        repro.ctx.forward_rx.try_recv().is_err(),
+        "UPDATE LOST: the delivered notification was consumed by the \
+         in-flight fetch and never forwarded to the fetch cloner"
+    );
+
+    // The stale fetch resumes: its companion record resolved during the
+    // closed window, so the slot-matching retry refetches RPC-only. The
+    // RPC view catches up shortly after (as it did in production).
+    repro.ctx.rpc_client.allow_fetches();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    redelegate_on_chain(&repro, validator_pubkey);
+    tokio::time::timeout(Duration::from_secs(5), resolve_task)
+        .await
+        .expect("stale resolve should complete")
+        .expect("stale resolve task should not panic");
+
+    // The notification was consumed, never forwarded.
+    assert!(
+        repro.ctx.forward_rx.try_recv().is_err(),
+        "no update was forwarded to the fetch cloner"
+    );
+
+    // ENFORCED: the consumed re-delegation state must be honored, not
+    // discarded — the account ends up cloned as delegated.
+    let in_bank = repro
+        .ctx
+        .accounts_bank
+        .get_account(&repro.account_pubkey)
+        .expect("account should be in bank");
+    assert!(
+        in_bank.delegated(),
+        "the delivered re-delegation update must not be lost: the in-flight \
+         fetch that consumed it has to resolve the account as delegated"
+    );
+    assert_eq!(in_bank.remote_slot(), WEDGE_SLOT_REDELEGATED);
+}
+
+/// Positive control for the consumed-update repro: with no fetch in
+/// flight, the very same delivery is forwarded by the provider. This
+/// proves the empty forward channel in the repro above means "consumed by
+/// the pending fetch", not "never delivered".
+#[tokio::test]
+async fn test_repro_redelegation_update_forwarded_when_no_fetch_inflight() {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let mut repro = setup_closed_window_placeholder(validator_keypair).await;
+    redelegate_on_chain(&repro, validator_pubkey);
+
+    let pubsub_client = repro.ctx.remote_account_provider.pubsub_client();
+    pubsub_client.insert_subscription(repro.account_pubkey);
+    pubsub_client
+        .send_account_update(
+            repro.account_pubkey,
+            WEDGE_SLOT_REDELEGATED,
+            &repro.chain_account,
+        )
+        .await;
+
+    let forwarded =
+        tokio::time::timeout(Duration::from_secs(2), repro.ctx.forward_rx.recv())
+            .await
+            .expect("provider should forward the update when nothing consumes it")
+            .expect("forward channel should be open");
+    assert_eq!(forwarded.pubkey, repro.account_pubkey);
+    assert_eq!(forwarded.account.slot(), WEDGE_SLOT_REDELEGATED);
+}
