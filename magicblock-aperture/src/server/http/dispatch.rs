@@ -23,6 +23,7 @@ use magicblock_metrics::metrics::{
 use tokio::sync::Semaphore;
 
 use crate::{
+    error::RpcError,
     requests::{
         http::{extract_bytes, parse_body, HandlerResult},
         payload::ResponseErrorPayload,
@@ -243,6 +244,7 @@ impl HttpDispatcher {
             // Alias for getLatestBlockhash; exists for Magic Router SDK compatibility.
             GetBlockhashForAccounts => self.get_latest_blockhash(request),
             GetDelegationStatus => self.get_delegation_status(request).await,
+            MethodNotFound => Err(RpcError::method_not_found()),
         }
     }
 
