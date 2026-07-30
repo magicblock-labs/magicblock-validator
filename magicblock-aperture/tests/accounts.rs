@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use setup::{RpcTestEnv, TOKEN_PROGRAM_ID};
+use json::JsonValueTrait;
+use setup::{remote_account_claims_header, RpcTestEnv, TOKEN_PROGRAM_ID};
 use solana_account::{accounts_equal, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::request::TokenAccountsFilter;
@@ -64,6 +65,38 @@ async fn test_get_account_info() {
         second_miss.value, None,
         "repeated lookup should still return null"
     );
+}
+
+#[tokio::test]
+async fn test_get_account_info_emits_remote_account_claims_header_zero_for_bank_hit(
+) {
+    let env = RpcTestEnv::new().await;
+    let acc = env.create_account();
+    let client = reqwest::Client::new();
+    let request = json::json!({
+        "jsonrpc": "2.0",
+        "method": "getAccountInfo",
+        "params": [acc.pubkey.to_string()],
+        "id": 1,
+    });
+
+    let response = client
+        .post(env.rpc.url())
+        .json(&request)
+        .send()
+        .await
+        .expect("getAccountInfo HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("getAccountInfo response body should decode"),
+    )
+    .expect("getAccountInfo response body should be valid JSON");
+    assert!(body["result"].is_object(), "response should contain result");
 }
 
 /// Verifies `getMultipleAccounts` for both existing and non-existent accounts.
@@ -135,6 +168,39 @@ async fn test_get_multiple_accounts() {
     );
 }
 
+#[tokio::test]
+async fn test_get_multiple_accounts_emits_remote_account_claims_header_zero_for_bank_hits(
+) {
+    let env = RpcTestEnv::new().await;
+    let acc1 = env.create_account();
+    let acc2 = env.create_account();
+    let client = reqwest::Client::new();
+    let request = json::json!({
+        "jsonrpc": "2.0",
+        "method": "getMultipleAccounts",
+        "params": [[acc1.pubkey.to_string(), acc2.pubkey.to_string()]],
+        "id": 1,
+    });
+
+    let response = client
+        .post(env.rpc.url())
+        .json(&request)
+        .send()
+        .await
+        .expect("getMultipleAccounts HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("getMultipleAccounts response body should decode"),
+    )
+    .expect("getMultipleAccounts response body should be valid JSON");
+    assert!(body["result"].is_object(), "response should contain result");
+}
+
 /// Verifies `getBalance` for both existing and non-existent accounts.
 #[tokio::test]
 async fn test_get_balance() {
@@ -165,6 +231,38 @@ async fn test_get_balance() {
     );
 }
 
+#[tokio::test]
+async fn test_get_balance_emits_remote_account_claims_header_zero_for_bank_hit()
+{
+    let env = RpcTestEnv::new().await;
+    let acc = env.create_account();
+    let client = reqwest::Client::new();
+    let request = json::json!({
+        "jsonrpc": "2.0",
+        "method": "getBalance",
+        "params": [acc.pubkey.to_string()],
+        "id": 1,
+    });
+
+    let response = client
+        .post(env.rpc.url())
+        .json(&request)
+        .send()
+        .await
+        .expect("getBalance HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("getBalance response body should decode"),
+    )
+    .expect("getBalance response body should be valid JSON");
+    assert!(body["result"].is_object(), "response should contain result");
+}
+
 /// Verifies `getTokenAccountBalance` for both existing and non-existent token accounts.
 #[tokio::test]
 async fn test_get_token_account_balance() {
@@ -192,6 +290,71 @@ async fn test_get_token_account_balance() {
         nonexistent_result.is_err(),
         "fetching balance of a non-token account should result in an error"
     );
+}
+
+#[tokio::test]
+async fn test_get_token_account_balance_emits_remote_account_claims_header_zero_for_bank_hit(
+) {
+    let env = RpcTestEnv::new().await;
+    let token_account =
+        env.create_token_account(Pubkey::new_unique(), Pubkey::new_unique());
+    let client = reqwest::Client::new();
+    let request = json::json!({
+        "jsonrpc": "2.0",
+        "method": "getTokenAccountBalance",
+        "params": [token_account.pubkey.to_string()],
+        "id": 1,
+    });
+
+    let response = client
+        .post(env.rpc.url())
+        .json(&request)
+        .send()
+        .await
+        .expect("getTokenAccountBalance HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("getTokenAccountBalance response body should decode"),
+    )
+    .expect("getTokenAccountBalance response body should be valid JSON");
+    assert!(body["result"].is_object(), "response should contain result");
+}
+
+#[tokio::test]
+async fn test_get_delegation_status_emits_remote_account_claims_header_zero_for_bank_hit(
+) {
+    let env = RpcTestEnv::new().await;
+    let acc = env.create_account();
+    let client = reqwest::Client::new();
+    let request = json::json!({
+        "jsonrpc": "2.0",
+        "method": "getDelegationStatus",
+        "params": [acc.pubkey.to_string()],
+        "id": 1,
+    });
+
+    let response = client
+        .post(env.rpc.url())
+        .json(&request)
+        .send()
+        .await
+        .expect("getDelegationStatus HTTP request should succeed");
+
+    assert!(response.status().is_success());
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value = json::from_str(
+        &response
+            .text()
+            .await
+            .expect("getDelegationStatus response body should decode"),
+    )
+    .expect("getDelegationStatus response body should be valid JSON");
+    assert!(body["result"].is_object(), "response should contain result");
 }
 
 /// Verifies `getProgramAccounts` finds all accounts owned by a program.

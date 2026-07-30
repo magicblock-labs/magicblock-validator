@@ -1,3 +1,5 @@
+use std::sync::{atomic::AtomicU64, Arc};
+
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use tracing::*;
 
@@ -13,6 +15,7 @@ impl HttpDispatcher {
     pub(crate) async fn get_account_info(
         &self,
         request: &mut JsonRequest,
+        remote_account_claims: Arc<AtomicU64>,
     ) -> HandlerResult {
         let (pubkey, config) = parse_params!(
             request.params()?,
@@ -30,8 +33,10 @@ impl HttpDispatcher {
         debug!("Getting account info");
 
         // `read_account_with_ensure` guarantees the account is clone from chain if not in database.
+        let fetch_context =
+            Self::rpc_get_account_context(remote_account_claims);
         let account = self
-            .read_account_with_ensure(&pubkey)
+            .read_account_with_ensure(&pubkey, fetch_context)
             .await
             .filter(|acc| !Self::account_should_render_as_null(acc))
             // `LockedAccount` provides a race-free read of the account data before encoding.

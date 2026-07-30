@@ -18,7 +18,7 @@ use magicblock_metrics::metrics::{
     ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
     ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
 };
-use solana_account::Account;
+use solana_account::{Account, AccountSharedData};
 use solana_system_interface::program as system_program;
 use tokio::sync::mpsc;
 
@@ -70,6 +70,47 @@ async fn setup_provider_with_lru_capacity(
     let (subscribed_accounts, config) = create_test_lru_cache(lru_capacity);
     let config = config
         .with_secondary_subscriptions_lru_capacity(lru_capacity)
+        .unwrap();
+    let chain_slot = Arc::<AtomicU64>::default();
+
+    let provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client.clone(),
+            pubsub_client.clone(),
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(chain_slot),
+        )
+        .await
+        .unwrap(),
+    );
+
+    ProviderTestCtx {
+        provider,
+        rpc_client,
+        pubsub_client,
+        _forward_rx: forward_rx,
+    }
+}
+
+async fn setup_provider_multi(
+    accounts: Vec<(Pubkey, Account)>,
+) -> ProviderTestCtx {
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(100)
+        .clock_sysvar_for_slot(100)
+        .accounts(accounts.into_iter().collect())
+        .build();
+
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+
+    let (forward_tx, forward_rx) = mpsc::channel(1_000);
+    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let config = config
+        .with_secondary_subscriptions_lru_capacity(1000)
         .unwrap();
     let chain_slot = Arc::<AtomicU64>::default();
 
@@ -161,7 +202,7 @@ async fn wait_for_direct_subscription(
 }
 
 async fn wait_for_pending_account_delta_at_least(
-    origin: impl Into<AccountFetchContext> + Copy,
+    origin: AccountFetchContext,
     outcome: ChainlinkPendingFetchOutcome,
     baseline: u64,
     minimum_delta: u64,
@@ -169,8 +210,8 @@ async fn wait_for_pending_account_delta_at_least(
     let start = tokio::time::Instant::now();
     let timeout = Duration::from_secs(2);
     loop {
-        let delta =
-            pending_accounts_value(origin, outcome).saturating_sub(baseline);
+        let delta = pending_accounts_value(origin.clone(), outcome)
+            .saturating_sub(baseline);
         if delta >= minimum_delta {
             break;
         }
@@ -1584,14 +1625,26 @@ async fn test_companion_fetch_metrics_record_fast_path_success() {
     );
     let kind = ChainlinkCompanionFetchKind::ProgramData;
     let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
-    let attempts_count_before =
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
-    let attempts_sum_before =
-        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome);
-    let duration_count_before =
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
-    let duration_sum_before =
-        chainlink_companion_fetch_duration_sample_sum(context, kind, outcome);
+    let attempts_count_before = chainlink_companion_fetch_attempts_sample_count(
+        context.clone(),
+        kind,
+        outcome,
+    );
+    let attempts_sum_before = chainlink_companion_fetch_attempts_sample_sum(
+        context.clone(),
+        kind,
+        outcome,
+    );
+    let duration_count_before = chainlink_companion_fetch_duration_sample_count(
+        context.clone(),
+        kind,
+        outcome,
+    );
+    let duration_sum_before = chainlink_companion_fetch_duration_sample_sum(
+        context.clone(),
+        kind,
+        outcome,
+    );
 
     let res = remote_account_provider
         .try_get_multi_until_slots_match(
@@ -1602,26 +1655,41 @@ async fn test_companion_fetch_metrics_record_fast_path_success() {
                 min_context_slot: Some(CURRENT_SLOT),
                 companion_fetch_kind: kind,
             }),
-            context,
+            context.clone(),
         )
         .await;
 
     assert!(res.is_ok());
     assert_eq!(
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        chainlink_companion_fetch_attempts_sample_count(
+            context.clone(),
+            kind,
+            outcome
+        ),
         attempts_count_before + 1
     );
     assert_eq!(
-        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome),
+        chainlink_companion_fetch_attempts_sample_sum(
+            context.clone(),
+            kind,
+            outcome
+        ),
         attempts_sum_before + 1.0
     );
     assert_eq!(
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
+        chainlink_companion_fetch_duration_sample_count(
+            context.clone(),
+            kind,
+            outcome
+        ),
         duration_count_before + 1
     );
     assert!(
-        chainlink_companion_fetch_duration_sample_sum(context, kind, outcome)
-            >= duration_sum_before
+        chainlink_companion_fetch_duration_sample_sum(
+            context.clone(),
+            kind,
+            outcome
+        ) >= duration_sum_before
     );
 }
 
@@ -1652,10 +1720,16 @@ async fn test_companion_fetch_metrics_record_retry_success() {
     );
     let kind = ChainlinkCompanionFetchKind::ProgramData;
     let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
-    let attempts_count_before =
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
-    let attempts_sum_before =
-        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome);
+    let attempts_count_before = chainlink_companion_fetch_attempts_sample_count(
+        context.clone(),
+        kind,
+        outcome,
+    );
+    let attempts_sum_before = chainlink_companion_fetch_attempts_sample_sum(
+        context.clone(),
+        kind,
+        outcome,
+    );
 
     let res = remote_account_provider
         .try_get_multi_until_slots_match(
@@ -1666,19 +1740,26 @@ async fn test_companion_fetch_metrics_record_retry_success() {
                 min_context_slot: Some(CURRENT_SLOT + 1),
                 companion_fetch_kind: kind,
             }),
-            context,
+            context.clone(),
         )
         .await;
     advance_handle.await.unwrap();
 
     assert!(res.is_ok());
     assert_eq!(
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        chainlink_companion_fetch_attempts_sample_count(
+            context.clone(),
+            kind,
+            outcome
+        ),
         attempts_count_before + 1
     );
     assert!(
-        chainlink_companion_fetch_attempts_sample_sum(context, kind, outcome)
-            > attempts_sum_before + 1.0
+        chainlink_companion_fetch_attempts_sample_sum(
+            context.clone(),
+            kind,
+            outcome
+        ) > attempts_sum_before + 1.0
     );
 }
 
@@ -1690,17 +1771,23 @@ async fn test_companion_fetch_metrics_record_slot_mismatch_failure() {
         .with_reason(AccountFetchReason::DelegationRecord);
     let kind = ChainlinkCompanionFetchKind::DelegationRecord;
     let outcome = ChainlinkCompanionFetchOutcome::FailedSlotMismatch;
-    let attempts_count_before =
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
-    let duration_count_before =
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
+    let attempts_count_before = chainlink_companion_fetch_attempts_sample_count(
+        context.clone(),
+        kind,
+        outcome,
+    );
+    let duration_count_before = chainlink_companion_fetch_duration_sample_count(
+        context.clone(),
+        kind,
+        outcome,
+    );
 
     // RPC-only retries in the provider test mock use one batch context slot,
     // which normalizes slots before the terminal mismatch branch. Exercise the
     // private observation helper directly so this test covers the metric path
     // without changing production retry behavior.
     observe_companion_fetch_if_configured(
-        context,
+        context.clone(),
         Some(kind),
         outcome,
         1,
@@ -1708,11 +1795,19 @@ async fn test_companion_fetch_metrics_record_slot_mismatch_failure() {
     );
 
     assert_eq!(
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        chainlink_companion_fetch_attempts_sample_count(
+            context.clone(),
+            kind,
+            outcome
+        ),
         attempts_count_before + 1
     );
     assert_eq!(
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
+        chainlink_companion_fetch_duration_sample_count(
+            context.clone(),
+            kind,
+            outcome
+        ),
         duration_count_before + 1
     );
 }
@@ -1737,22 +1832,40 @@ async fn test_companion_fetch_metrics_not_recorded_without_kind() {
     let context = AccountFetchContext::project_ata();
     let kind = ChainlinkCompanionFetchKind::AtaProjection;
     let outcome = ChainlinkCompanionFetchOutcome::Succeeded;
-    let attempts_count_before =
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome);
-    let duration_count_before =
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome);
+    let attempts_count_before = chainlink_companion_fetch_attempts_sample_count(
+        context.clone(),
+        kind,
+        outcome,
+    );
+    let duration_count_before = chainlink_companion_fetch_duration_sample_count(
+        context.clone(),
+        kind,
+        outcome,
+    );
 
     let res = remote_account_provider
-        .try_get_multi_until_slots_match(&[pubkey1, pubkey2], None, context)
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            None,
+            context.clone(),
+        )
         .await;
 
     assert!(res.is_ok());
     assert_eq!(
-        chainlink_companion_fetch_attempts_sample_count(context, kind, outcome),
+        chainlink_companion_fetch_attempts_sample_count(
+            context.clone(),
+            kind,
+            outcome
+        ),
         attempts_count_before
     );
     assert_eq!(
-        chainlink_companion_fetch_duration_sample_count(context, kind, outcome),
+        chainlink_companion_fetch_duration_sample_count(
+            context.clone(),
+            kind,
+            outcome
+        ),
         duration_count_before
     );
 }
@@ -2599,6 +2712,64 @@ async fn test_try_get_multi_owner_success_cleans_up_pending_entry() {
 }
 
 #[tokio::test]
+async fn test_remote_account_claims_count_owned_unique_requested_pubkeys() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    init_logger();
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let account1 = AccountSharedData::new(1, 0, &Pubkey::new_unique()).into();
+    let account2 = AccountSharedData::new(2, 0, &Pubkey::new_unique()).into();
+    let ctx =
+        setup_provider_multi(vec![(pubkey1, account1), (pubkey2, account2)])
+            .await;
+    let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
+
+    let result = ctx
+        .provider
+        .try_get_multi(
+            &[pubkey1, pubkey1, pubkey2],
+            None,
+            fetch_context.clone(),
+            None,
+        )
+        .await
+        .expect("multi-account fetch should succeed");
+
+    assert_eq!(result.len(), 3);
+    assert_eq!(
+        fetch_context.remote_account_claims_value(),
+        2,
+        "duplicate requested pubkeys should count once per owned direct claim"
+    );
+}
+
+#[tokio::test]
+async fn test_remote_account_claims_ignore_companion_fetch_reason() {
+    let _metrics_guard =
+        crate::testing::pending_metric_test_lock().lock().await;
+    init_logger();
+
+    let pubkey = Pubkey::new_unique();
+    let account = AccountSharedData::new(1, 0, &Pubkey::new_unique()).into();
+    let ctx = setup_provider_multi(vec![(pubkey, account)]).await;
+    let fetch_context = AccountFetchContext::rpc_get_account()
+        .with_reason(AccountFetchReason::DelegationRecord);
+
+    ctx.provider
+        .try_get_multi(&[pubkey], None, fetch_context.clone(), None)
+        .await
+        .expect("companion-like fetch should succeed");
+
+    assert_eq!(
+        fetch_context.remote_account_claims_value(),
+        0,
+        "companion fetch reasons must not contribute to the response-header count"
+    );
+}
+
+#[tokio::test]
 async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
     let _metrics_guard =
         crate::testing::pending_metric_test_lock().lock().await;
@@ -2620,22 +2791,23 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
 
     let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
     let owned_baseline = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::Owned,
     );
     let joined_baseline = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::JoinedExisting,
     );
-    let waiters_baseline = pending_waiters_value(fetch_context);
+    let waiters_baseline = pending_waiters_value(fetch_context.clone());
 
     rpc_client.block_fetches();
 
     let owner_task = tokio::spawn({
         let provider = provider.clone();
+        let fetch_context = fetch_context.clone();
         async move {
             provider
-                .try_get_multi(&[pubkey], None, fetch_context, None)
+                .try_get_multi(&[pubkey], None, fetch_context.clone(), None)
                 .await
         }
     });
@@ -2644,9 +2816,10 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
 
     let waiter_task = tokio::spawn({
         let provider = provider.clone();
+        let fetch_context = fetch_context.clone();
         async move {
             provider
-                .try_get_multi(&[pubkey], None, fetch_context, None)
+                .try_get_multi(&[pubkey], None, fetch_context.clone(), None)
                 .await
         }
     });
@@ -2671,7 +2844,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         .expect("waiter fetch should succeed");
 
     let owned_delta = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::Owned,
     )
     .saturating_sub(owned_baseline);
@@ -2680,7 +2853,7 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         "remote provider owned metric should increase by at least 1; got {owned_delta}"
     );
     let joined_delta = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::JoinedExisting,
     )
     .saturating_sub(joined_baseline);
@@ -2688,8 +2861,8 @@ async fn test_pending_fetch_metrics_count_remote_provider_owner_and_waiter() {
         joined_delta >= 1,
         "remote provider joined-existing metric should increase by at least 1; got {joined_delta}"
     );
-    let waiters_delta =
-        pending_waiters_value(fetch_context).saturating_sub(waiters_baseline);
+    let waiters_delta = pending_waiters_value(fetch_context.clone())
+        .saturating_sub(waiters_baseline);
     assert!(
         waiters_delta >= 1,
         "remote provider waiter metric should increase by at least 1; got {waiters_delta}"
@@ -2739,11 +2912,11 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
 
     let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
     let resolved_baseline = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
     );
     let late_rpc_baseline = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
     );
 
@@ -2751,6 +2924,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
 
     let task_handle = tokio::spawn({
         let provider = provider.clone();
+        let fetch_context = fetch_context.clone();
         async move {
             provider
                 .try_get_multi(&[pubkey], None, fetch_context, None)
@@ -2783,7 +2957,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
         Some(RemoteAccountUpdateSource::Subscription)
     );
     let resolved_delta = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::ResolvedBySubscriptionUpdate,
     )
     .saturating_sub(resolved_baseline);
@@ -2797,7 +2971,7 @@ async fn test_pending_fetch_metrics_count_subscription_update_resolution_and_lat
     rpc_client.set_current_slot(fetch_start_slot + 1);
     rpc_client.allow_fetches();
     wait_for_pending_account_delta_at_least(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::RpcFetchCompletedAfterUpdate,
         late_rpc_baseline,
         1,

@@ -1,3 +1,5 @@
+use std::sync::{atomic::AtomicU64, Arc};
+
 use super::prelude::*;
 
 impl HttpDispatcher {
@@ -12,6 +14,7 @@ impl HttpDispatcher {
     pub(crate) async fn get_delegation_status(
         &self,
         request: &mut JsonRequest,
+        remote_account_claims: Arc<AtomicU64>,
     ) -> HandlerResult {
         // Parse the first positional parameter (account pubkey) using the
         // standard helper macro, mirroring `get_account_info`.
@@ -20,7 +23,10 @@ impl HttpDispatcher {
 
         // Ensure the account is present in the local AccountsDb, cloning it
         // from the reference cluster if necessary.
-        let account = self.read_account_with_ensure(&pubkey).await;
+        let fetch_context =
+            Self::rpc_get_account_context(remote_account_claims);
+        let account =
+            self.read_account_with_ensure(&pubkey, fetch_context).await;
 
         let is_delegated =
             account.as_ref().map(|acc| acc.delegated()).unwrap_or(false);

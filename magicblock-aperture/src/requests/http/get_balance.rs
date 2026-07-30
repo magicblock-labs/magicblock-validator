@@ -1,3 +1,5 @@
+use std::sync::{atomic::AtomicU64, Arc};
+
 use super::prelude::*;
 
 impl HttpDispatcher {
@@ -9,12 +11,15 @@ impl HttpDispatcher {
     pub(crate) async fn get_balance(
         &self,
         request: &mut JsonRequest,
+        remote_account_claims: Arc<AtomicU64>,
     ) -> HandlerResult {
         let pubkey_bytes = parse_params!(request.params()?, Serde32Bytes);
         let pubkey = some_or_err!(pubkey_bytes);
 
+        let fetch_context =
+            Self::rpc_get_account_context(remote_account_claims);
         let balance = self
-            .read_account_with_ensure(&pubkey)
+            .read_account_with_ensure(&pubkey, fetch_context)
             .await
             .map(|a| a.lamports())
             .unwrap_or_default(); // Default to 0 if account not found

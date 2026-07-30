@@ -9652,26 +9652,27 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
 
     let fetch_context = AccountFetchContext::rpc_get_multiple_accounts();
     let owned_baseline = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::Owned,
     );
     let joined_baseline = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::JoinedExisting,
     );
-    let waiters_baseline = pending_waiters_value(fetch_context);
+    let waiters_baseline = pending_waiters_value(fetch_context.clone());
 
     rpc_client.block_fetches();
 
     let owner_task = {
         let fetch_cloner = fetch_cloner.clone();
+        let fetch_context = fetch_context.clone();
         tokio::spawn(async move {
             fetch_cloner
                 .fetch_and_clone_accounts_with_dedup(
                     &[account_pubkey],
                     None,
                     None,
-                    fetch_context,
+                    fetch_context.clone(),
                 )
                 .await
         })
@@ -9682,13 +9683,14 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
 
     let waiter_task = {
         let fetch_cloner = fetch_cloner.clone();
+        let fetch_context = fetch_context.clone();
         tokio::spawn(async move {
             fetch_cloner
                 .fetch_and_clone_accounts_with_dedup(
                     &[account_pubkey],
                     None,
                     None,
-                    fetch_context,
+                    fetch_context.clone(),
                 )
                 .await
         })
@@ -9714,7 +9716,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         .expect("waiter fetch should succeed");
 
     let owned_delta = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::Owned,
     )
     .saturating_sub(owned_baseline);
@@ -9723,7 +9725,7 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         "fetch_cloner owned metric should increase by at least 1; got {owned_delta}"
     );
     let joined_delta = pending_accounts_value(
-        fetch_context,
+        fetch_context.clone(),
         ChainlinkPendingFetchOutcome::JoinedExisting,
     )
     .saturating_sub(joined_baseline);
@@ -9731,8 +9733,8 @@ async fn test_pending_fetch_metrics_count_fetch_cloner_owner_and_waiter() {
         joined_delta >= 1,
         "fetch_cloner joined-existing metric should increase by at least 1; got {joined_delta}"
     );
-    let waiters_delta =
-        pending_waiters_value(fetch_context).saturating_sub(waiters_baseline);
+    let waiters_delta = pending_waiters_value(fetch_context.clone())
+        .saturating_sub(waiters_baseline);
     assert!(
         waiters_delta >= 1,
         "fetch_cloner waiter metric should increase by at least 1; got {waiters_delta}"
