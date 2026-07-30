@@ -3710,7 +3710,7 @@ async fn test_executable_update_noise_resolves_without_program_reload() {
 
     // Past the throttle, a per-slot notification resolves with a single
     // header fetch and no program reload.
-    tokio::time::sleep(Duration::from_millis(70)).await;
+    tokio::time::sleep(Duration::from_millis(350)).await;
     rpc_client.set_current_slot(CURRENT_SLOT + 1);
     rpc_client.account_override_slot(&program_pubkey, CURRENT_SLOT + 1);
     rpc_client.account_override_slot(&program_data_pubkey, CURRENT_SLOT + 1);
@@ -3787,7 +3787,7 @@ async fn test_executable_update_detects_program_upgrade() {
     rpc_client.account_override_slot(&program_pubkey, UPGRADE_SLOT);
     rpc_client.add_account(program_data_pubkey, upgraded_program_data);
 
-    tokio::time::sleep(Duration::from_millis(70)).await;
+    tokio::time::sleep(Duration::from_millis(350)).await;
     update.set_remote_slot(UPGRADE_SLOT);
     handle_executable_sub_update(&fetch_cloner, program_pubkey, update.clone())
         .await;
@@ -3805,7 +3805,7 @@ async fn test_executable_update_detects_program_upgrade() {
     );
 
     // Subsequent noise verifies against the new deploy slot without reload.
-    tokio::time::sleep(Duration::from_millis(70)).await;
+    tokio::time::sleep(Duration::from_millis(350)).await;
     rpc_client.set_current_slot(UPGRADE_SLOT + 1);
     rpc_client.account_override_slot(&program_pubkey, UPGRADE_SLOT + 1);
     rpc_client.account_override_slot(&program_data_pubkey, UPGRADE_SLOT + 1);
@@ -3985,7 +3985,7 @@ async fn test_executable_update_detects_authority_change() {
     // (the helper randomizes the authority on every call).
     let (_, program_data_new_authority) =
         loaderv3_program_accounts(&program_data_pubkey, DEPLOY_SLOT, &[7; 64]);
-    tokio::time::sleep(Duration::from_millis(70)).await;
+    tokio::time::sleep(Duration::from_millis(350)).await;
     rpc_client.set_current_slot(CURRENT_SLOT + 1);
     rpc_client.account_override_slot(&program_pubkey, CURRENT_SLOT + 1);
     rpc_client.add_account(program_data_pubkey, program_data_new_authority);

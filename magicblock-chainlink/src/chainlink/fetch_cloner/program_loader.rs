@@ -28,11 +28,11 @@ use crate::{
 /// LoaderV3 program. Providers emit a notification for heavily-invoked
 /// program accounts on every mainnet slot without anything changing;
 /// this bounds upgrade-detection latency for such programs to roughly
-/// the window.
+/// the window, at a cost of one ~45-byte header fetch per window.
 #[cfg(not(test))]
-const PROGRAM_VERIFY_THROTTLE: Duration = Duration::from_secs(60 * 60);
+const PROGRAM_VERIFY_THROTTLE: Duration = Duration::from_secs(60);
 #[cfg(test)]
-const PROGRAM_VERIFY_THROTTLE: Duration = Duration::from_millis(50);
+const PROGRAM_VERIFY_THROTTLE: Duration = Duration::from_millis(300);
 
 /// Length of the programdata metadata prefix (tag + deploy slot +
 /// authority) the header check compares.
@@ -111,6 +111,11 @@ where
         // Not loaded by this process yet: full load.
         return false;
     };
+    if this.accounts_bank.get_account(&pubkey).is_none() {
+        // The bank copy was evicted since the load that populated the
+        // cache; reload instead of trusting the stale entry.
+        return false;
+    }
 
     if account.owner().eq(&LOADER_V2) {
         // LoaderV2 programs are immutable once deployed.

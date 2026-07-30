@@ -3640,7 +3640,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         min_context_slot: u64,
     ) -> RemoteAccountProviderResult<Option<Vec<u8>>> {
         let mut last_err = String::new();
-        for _ in 0..DATA_SLICE_FETCH_MAX_ATTEMPTS {
+        for attempt in 1..=DATA_SLICE_FETCH_MAX_ATTEMPTS {
             let config = RpcAccountInfoConfig {
                 commitment: Some(self.rpc_client.commitment()),
                 // The context slot is verified locally below; passing
@@ -3673,7 +3673,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     )
                 }
             }
-            tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
+            if attempt < DATA_SLICE_FETCH_MAX_ATTEMPTS {
+                tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
+            }
         }
         Err(RemoteAccountProviderError::AccountDataSliceFetchFailed(
             *pubkey,
