@@ -76,8 +76,8 @@ pub struct LeaderParams {
     pub ledger: LedgerConfig,
     pub chainlink: ChainLinkConfig,
     pub admin: Option<AdminConfig>,
-    pub task_scheduler: TaskSchedulerConfig,
     pub programs: Vec<LoadableProgram>,
+    pub task_scheduler: TaskSchedulerConfig,
 }
 
 impl LeaderParams {

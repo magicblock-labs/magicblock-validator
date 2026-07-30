@@ -23,7 +23,7 @@ use magicblock_services::{
     actions_callback_service::ActionsCallbackService,
     undelegation_request_service::UndelegationRequestService,
 };
-use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
+use magicblock_task_scheduler::TaskSchedulerService;
 use magicblock_validator_admin::claim_fees::{claim_fees, run_claim_fees_loop};
 use nucleus::{
     metrics::EventTimer,
@@ -38,6 +38,7 @@ use solana_signer::Signer;
 use tracing::*;
 
 use crate::{
+    crank_faucet::ensure_faucet_delegated_on_chain,
     errors::{ApiError, ApiResult},
     ledger,
     magic_sys_adapter::MagicSysAdapter,
@@ -166,14 +167,23 @@ impl Leader {
             rpc_shutdown.terminate(reason);
         });
 
-        let task_scheduler_db_path = SchedulerDatabase::path(&engine_ledger);
-        debug!(path = %task_scheduler_db_path.display(), "Initializing task scheduler");
-        let task_scheduler = Some(TaskSchedulerService::new(
-            &task_scheduler_db_path,
-            &config.task_scheduler,
-            engine.clone(),
-            config.engine.blockstore.blocktime,
-        )?);
+        // The task scheduler pays for hydra cranks from a configured faucet
+        // account (delegated on startup) rather than the validator identity,
+        // which is not a delegated account. Without a faucet there is nothing
+        // to sponsor cranks with, so the scheduler is not started at all.
+        debug!("Initializing task scheduler");
+        let task_scheduler = config
+            .task_scheduler
+            .faucet_keypair
+            .as_ref()
+            .map(|faucet| {
+                TaskSchedulerService::new(
+                    faucet.insecure_clone(),
+                    engine.clone(),
+                    config.engine.blockstore.blocktime,
+                )
+            })
+            .transpose()?;
         timer.record("Task scheduler initialized");
 
         Ok(Self {
@@ -457,6 +467,12 @@ impl Leader {
         let rpc_url = self.config.rpc_url().to_owned();
         let identity = self.engine.authority();
         let admin = self.config.admin.clone();
+        let faucet_keypair = self
+            .config
+            .task_scheduler
+            .faucet_keypair
+            .as_ref()
+            .map(|faucet| faucet.insecure_clone());
 
         let mut shutdown = self.shutdown.handle(Service::OnchainSetup);
         // Ephemeral mode does a non-blocking startup balance check.
@@ -486,6 +502,23 @@ impl Leader {
                 )
                 .await?;
                 timer.record("Magic fee vault setup attempt completed");
+
+                if let Some(faucet_keypair) = faucet_keypair {
+                    Self::with_onchain_setup_retries(
+                        "ensure_faucet_delegated_on_chain",
+                        || {
+                            ensure_faucet_delegated_on_chain(
+                                &engine,
+                                rpc_url.clone(),
+                                &faucet_keypair,
+                            )
+                        },
+                    )
+                    .await?;
+                    timer.record(
+                        "Task scheduler faucet setup attempt completed",
+                    );
+                }
 
                 if let Some(ref config) = admin
                     && !config.claim_fees_frequency.is_zero()
