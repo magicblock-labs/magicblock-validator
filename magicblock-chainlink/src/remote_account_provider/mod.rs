@@ -2400,10 +2400,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Err(err);
             }
         };
-        if let Match = slots_match_and_meet_min_context(
-            &remote_accounts,
-            config.min_context_slot,
-        ) {
+        // A found result observed at slot S must never be discarded in favor
+        // of an older view: a pending fetch resolved by a subscription update
+        // (e.g. a rapid re-delegation racing the previous incarnation's
+        // fetch) would otherwise be finalized as NotFound by a lagging
+        // RPC-only refetch, silently losing the freshest state.
+        let mut min_context_slot =
+            raised_min_context_slot(config.min_context_slot, &remote_accounts);
+        if let Match =
+            slots_match_and_meet_min_context(&remote_accounts, min_context_slot)
+        {
             observe_companion_fetch_if_configured(
                 fetch_context,
                 companion_fetch_kind,
@@ -2414,14 +2420,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(remote_accounts);
         }
 
-        // Capture the fetch start slot once and reuse it across retries. When a
-        // caller provides a stricter min_context_slot, the forced refetch must
-        // start from that slot rather than the provider's possibly lagging
-        // chain slot.
-        let fetch_start_slot = self
+        // The fetch start slot honors the strictest floor observed so far:
+        // the caller's min_context_slot or any found result consumed above.
+        let mut fetch_start_slot = self
             .chain_slot
             .load()
-            .max(config.min_context_slot.unwrap_or_default());
+            .max(min_context_slot.unwrap_or_default());
         // 2. Wait for the slots to match. Once the fast path mixed slots,
         // retry with an RPC-only batch so all accounts share one response slot.
         let start = std::time::Instant::now();
@@ -2455,7 +2459,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     );
                     debug!(
                         pubkeys = %pubkeys_str(pubkeys),
-                        min_context_slot = ?config.min_context_slot,
+                        min_context_slot = ?min_context_slot,
                         retries = retries,
                         elapsed_ms = start.elapsed().as_millis() as u64,
                         error = %err,
@@ -2495,9 +2499,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     )
                     .await?;
             }
+            min_context_slot =
+                raised_min_context_slot(min_context_slot, &remote_accounts);
+            fetch_start_slot =
+                fetch_start_slot.max(min_context_slot.unwrap_or_default());
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
-                config.min_context_slot,
+                min_context_slot,
             );
             if let Match = slots_match_result {
                 observe_companion_fetch_if_configured(
@@ -2526,7 +2534,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         pubkeys = %pubkeys_str(pubkeys),
                         slots = ?remote_account_slots,
                         sources = ?remote_account_sources,
-                        min_context_slot = ?config.min_context_slot,
+                        min_context_slot = ?min_context_slot,
                         retries = retries,
                         elapsed_ms = start.elapsed().as_millis() as u64,
                         limit = %limit,
@@ -4040,6 +4048,24 @@ enum SlotsMatchResult {
     Match,
     Mismatch,
     MatchButBelowMinContextSlot(u64),
+}
+
+/// Raises the min-context floor to the highest slot of any found account:
+/// state observed at slot S must never be superseded by an older view.
+fn raised_min_context_slot(
+    min_context_slot: Option<u64>,
+    accs: &[RemoteAccount],
+) -> Option<u64> {
+    let max_found_slot = accs
+        .iter()
+        .filter(|acc| acc.is_found())
+        .map(|acc| acc.slot())
+        .max();
+    match (min_context_slot, max_found_slot) {
+        (Some(min), Some(found)) => Some(min.max(found)),
+        (None, Some(found)) => Some(found),
+        (min, None) => min,
+    }
 }
 
 fn slots_match_and_meet_min_context(

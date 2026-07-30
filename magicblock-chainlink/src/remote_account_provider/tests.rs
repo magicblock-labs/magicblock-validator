@@ -3036,6 +3036,20 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
     }
     rpc_client.allow_fetches();
 
+    // The subscription resolved pubkey1 at CURRENT_SLOT + 1, which raises
+    // the min-context floor: the RPC-only batch must not regress to the
+    // older CURRENT_SLOT view. The first retry fails on min-context until
+    // the RPC catches up to the observed slot.
+    let start = tokio::time::Instant::now();
+    loop {
+        if rpc_client.multi_account_fetches() >= 2 {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(2));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    rpc_client.set_slot(CURRENT_SLOT + 1);
+
     let remote_accounts =
         tokio::time::timeout(Duration::from_secs(2), task_handle)
             .await
@@ -3052,11 +3066,11 @@ async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batc
         remote_accounts[1].source(),
         Some(RemoteAccountUpdateSource::Fetch)
     );
-    assert_eq!(remote_accounts[0].slot(), CURRENT_SLOT);
-    assert_eq!(remote_accounts[1].slot(), CURRENT_SLOT);
+    assert_eq!(remote_accounts[0].slot(), CURRENT_SLOT + 1);
+    assert_eq!(remote_accounts[1].slot(), CURRENT_SLOT + 1);
     assert_eq!(remote_accounts[0].fresh_lamports(), Some(555));
     assert_eq!(remote_accounts[1].fresh_lamports(), Some(666));
-    assert_eq!(rpc_client.multi_account_fetches(), 2);
+    assert_eq!(rpc_client.multi_account_fetches(), 3);
 }
 
 #[tokio::test]
