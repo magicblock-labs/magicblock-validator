@@ -189,16 +189,31 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    pub async fn ensure_transaction_accounts_with_context(
+        &self,
+        tx: &SanitizedTransaction,
+        fetch_context: impl Into<AccountFetchContext>,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
+        let fetch_context = fetch_context.into();
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink
+                    .ensure_transaction_accounts_with_context(tx, fetch_context)
+                    .await
+            }
+            Self::Disabled => Err(ChainlinkError::DisabledForNonPrimaryMode),
+        }
+    }
+
     pub async fn ensure_transaction_accounts(
         &self,
         tx: &SanitizedTransaction,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        match self {
-            Self::Enabled(chainlink) => {
-                chainlink.ensure_transaction_accounts(tx).await
-            }
-            Self::Disabled => Err(ChainlinkError::DisabledForNonPrimaryMode),
-        }
+        self.ensure_transaction_accounts_with_context(
+            tx,
+            AccountFetchContext::send_transaction(*tx.signature()),
+        )
+        .await
     }
 
     pub async fn fetch_accounts(
@@ -521,10 +536,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// is cloned in our validator.
     /// Returns the state of each account (writable and readonly) after the checks
     /// and cloning are done.
-    #[instrument(skip(self, tx))]
-    pub async fn ensure_transaction_accounts(
+    #[instrument(skip(self, tx, fetch_context))]
+    pub async fn ensure_transaction_accounts_with_context(
         &self,
         tx: &SanitizedTransaction,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if is_noop_system_transfer(tx) {
             trace!(
@@ -533,6 +549,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             );
             return Ok(Default::default());
         }
+
+        let fetch_context = fetch_context.into();
 
         let mut pubkeys = tx
             .message()
@@ -563,14 +581,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
         // Ensure accounts
         let res = self
-            .ensure_accounts(
-                &pubkeys,
-                mark_empty_if_not_found,
-                AccountFetchContext::send_transaction(*tx.signature()),
-            )
+            .ensure_accounts(&pubkeys, mark_empty_if_not_found, fetch_context)
             .await?;
 
         Ok(res)
+    }
+
+    pub async fn ensure_transaction_accounts(
+        &self,
+        tx: &SanitizedTransaction,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
+        self.ensure_transaction_accounts_with_context(
+            tx,
+            AccountFetchContext::send_transaction(*tx.signature()),
+        )
+        .await
     }
 
     /// Same as fetch accounts, but does not return the accounts, just

@@ -53,6 +53,10 @@ impl PubsubClientConfig {
 pub enum SubscriptionSource {
     Account,
     Program,
+    /// Provider-initiated replay of a subscription result that was consumed
+    /// to resolve a fetch which subsequently failed. Must be processed
+    /// regardless of the account's watch state.
+    Replay,
 }
 
 #[derive(Debug, Clone)]

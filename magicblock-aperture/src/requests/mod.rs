@@ -83,6 +83,8 @@ pub(crate) enum JsonRpcHttpMethod {
     GetBlockhashForAccounts,
     /// Custom Magic Router-compatible method: exposes simple delegation flag.
     GetDelegationStatus,
+    #[serde(other)]
+    MethodNotFound,
 }
 
 /// All supported JSON-RPC Websocket method names.
@@ -100,6 +102,8 @@ pub(crate) enum JsonRpcWsMethod {
     SignatureUnsubscribe,
     SlotSubscribe,
     SlotUnsubscribe,
+    #[serde(other)]
+    MethodNotFound,
 }
 
 impl JsonRpcHttpMethod {
@@ -150,6 +154,7 @@ impl JsonRpcHttpMethod {
             Self::GetRoutes => "getRoutes",
             Self::GetBlockhashForAccounts => "getBlockhashForAccounts",
             Self::GetDelegationStatus => "getDelegationStatus",
+            Self::MethodNotFound => "methodNotFound",
         }
     }
 }
@@ -168,6 +173,7 @@ impl JsonRpcWsMethod {
             Self::SignatureUnsubscribe => "signatureUnsubscribe",
             Self::SlotSubscribe => "slotSubscribe",
             Self::SlotUnsubscribe => "slotUnsubscribe",
+            Self::MethodNotFound => "methodNotFound",
         }
     }
 }
