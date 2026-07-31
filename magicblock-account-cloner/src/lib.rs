@@ -248,18 +248,15 @@ impl ChainlinkCloner {
         blockhash: Hash,
     ) -> Transaction {
         let fields = Self::clone_fields(request);
-        let clone_actions = match &request.post_delegation_mode {
-            ClonePostDelegationMode::ExecuteActions(actions) => {
-                actions.to_vec()
-            }
-            ClonePostDelegationMode::None
-            | ClonePostDelegationMode::RescueUndelegate => Vec::new(),
-        };
         let clone_ix = Self::clone_ix(
             request.pubkey,
             request.account.data().to_vec(),
             fields,
-            clone_actions,
+            request
+                .post_delegation_mode
+                .execute_actions()
+                .map(|actions| actions.to_vec())
+                .unwrap_or_default(),
         );
 
         // TODO(#625): Re-enable frequency commits when proper limits are in place:

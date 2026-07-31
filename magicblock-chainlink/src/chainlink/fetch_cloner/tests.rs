@@ -437,9 +437,12 @@ fn clone_classification_treats_delegated_account_as_delegation_record() {
 fn clone_classification_treats_action_dependency_as_action_dependency() {
     let mut request = account_clone_request(non_empty_account());
     request.post_delegation_mode =
-        ClonePostDelegationMode::from(DelegationActions::from(vec![
-            Instruction::new_with_bytes(system_program::id(), &[1], vec![]),
-        ]));
+        DelegationActions::from(vec![Instruction::new_with_bytes(
+            system_program::id(),
+            &[1],
+            vec![],
+        )])
+        .into();
 
     assert!(!request.account.delegated());
     assert_eq!(
