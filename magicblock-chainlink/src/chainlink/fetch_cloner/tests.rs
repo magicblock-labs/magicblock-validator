@@ -5697,7 +5697,7 @@ async fn test_raw_eata_greedy_projection_carries_post_delegation_actions() {
         .expect("projected ATA should be cloned");
     assert!(projected_ata_request.account.delegated());
     assert!(
-        !projected_ata_request.delegation_actions.is_empty(),
+        projected_ata_request.post_delegation_mode.has_actions(),
         "post-delegation actions must stay attached to the projected ATA"
     );
 }
@@ -6194,7 +6194,7 @@ async fn test_explicit_clone_executes_post_delegation_actions_after_prefilter_ch
         .iter()
         .find(|request| request.pubkey == account_pubkey)
         .expect("delegated account clone request should be recorded");
-    assert!(!delegated_clone_request.delegation_actions.is_empty());
+    assert!(delegated_clone_request.post_delegation_mode.has_actions());
     let cloned_account = accounts_bank
         .get_account(&account_pubkey)
         .expect("delegated account should be cloned explicitly");
