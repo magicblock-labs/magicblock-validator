@@ -131,13 +131,15 @@ impl IntentExecutorError {
     }
 }
 
-/// Maps a single-stage execution failure to [`IntentExecutorError`], using the
-/// same signature for commit and finalize (one transaction for both stages).
+/// Maps a single-stage execution failure to [`IntentExecutorError`].
+///
+/// `commit_signature` stays `None` so retry semantics remain unchanged for
+/// transient send failures. The failed transaction signature is still exposed
+/// via [`IntentExecutorError::signatures`].
 pub(crate) fn single_stage_finalize_execution_error(
     err: TransactionStrategyExecutionError,
 ) -> IntentExecutorError {
-    let signature = err.signature();
-    IntentExecutorError::from_finalize_execution_error(err, signature)
+    IntentExecutorError::from_finalize_execution_error(err, None)
 }
 
 impl IntentExecutorError {
@@ -179,7 +181,11 @@ impl IntentExecutorError {
                 err: _,
                 commit_signature,
                 finalize_signature,
-            } => commit_signature.map(|el| (el, *finalize_signature)),
+            } => match (*commit_signature, *finalize_signature) {
+                (Some(commit), finalize) => Some((commit, finalize)),
+                (None, Some(finalize)) => Some((finalize, Some(finalize))),
+                _ => None,
+            },
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
             | IntentExecutorError::SignerError(_) => None,
@@ -683,11 +689,25 @@ mod tests {
         );
 
         let wrapped = super::single_stage_finalize_execution_error(err);
-        assert_eq!(
-            wrapped.signatures(),
-            Some((signature, Some(signature)))
-        );
+        assert_eq!(wrapped.signatures(), Some((signature, Some(signature))));
         assert!(!wrapped.is_transient());
+    }
+
+    #[test]
+    fn single_stage_blockhash_not_found_failure_stays_transient() {
+        let signature = solana_signature::Signature::new_unique();
+        let err = TransactionStrategyExecutionError::InternalError(
+            InternalError::MagicBlockRpcClientError(Box::new(
+                MagicBlockRpcClientError::SentTransactionError(
+                    solana_transaction_error::TransactionError::BlockhashNotFound,
+                    signature,
+                ),
+            )),
+        );
+
+        let wrapped = super::single_stage_finalize_execution_error(err);
+        assert_eq!(wrapped.signatures(), Some((signature, Some(signature))));
+        assert!(wrapped.is_transient());
     }
 
     #[test]
