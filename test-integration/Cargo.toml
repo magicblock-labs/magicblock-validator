@@ -74,7 +74,7 @@ schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
 shlex = "1.3.0"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "14cb96c8e8b352ce95c7b84d3ad73a777a4d1195" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "03950095887b011818886b68e06fde6a1a94def1" }
 solana-address-lookup-table-interface = "3.0"
 solana-commitment-config = "3.1.1"
 solana-compute-budget-interface = "3.0"
@@ -114,10 +114,10 @@ url = "2.5.0"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
-rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "50c94dc2" }
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "14cb96c8e8b352ce95c7b84d3ad73a777a4d1195" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "14cb96c8e8b352ce95c7b84d3ad73a777a4d1195" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "14cb96c8e8b352ce95c7b84d3ad73a777a4d1195" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "14cb96c8e8b352ce95c7b84d3ad73a777a4d1195" }
+rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "c6a3f91f" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "03950095887b011818886b68e06fde6a1a94def1" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "03950095887b011818886b68e06fde6a1a94def1" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "03950095887b011818886b68e06fde6a1a94def1" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "03950095887b011818886b68e06fde6a1a94def1" }
 # Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }

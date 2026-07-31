@@ -31,6 +31,14 @@ fn global_sponsor_pda() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[GLOBAL_SPONSOR_SEED], &crate::ID)
 }
 
+/// Seed for the ephemeral account created under program (PDA) authority
+const EPHEMERAL_PDA_SEED: &[u8] = b"ephemeral_pda";
+
+/// Derives the ephemeral PDA account address
+pub fn ephemeral_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[EPHEMERAL_PDA_SEED], &crate::ID)
+}
+
 /// Helper to invoke or invoke_signed depending on sponsor type.
 /// Takes ownership of the instruction and patches the signer flag for PDAs.
 fn invoke_with_sponsor(
@@ -69,6 +77,7 @@ pub enum GuineaInstruction {
     CreateEphemeralAccount { data_len: u32 },
     ResizeEphemeralAccount { new_data_len: u32 },
     CloseEphemeralAccount,
+    CreateEphemeralPdaAccount { data_len: u32 },
 }
 
 fn compute_balances(accounts: slice::Iter<AccountInfo>) {
@@ -264,6 +273,47 @@ fn create_ephemeral_account(
     Ok(())
 }
 
+/// Creates an ephemeral account at a PDA, signing the Magic CPI with its seeds
+/// (mirrors how post-delegation actions materialize accounts without a keypair).
+fn create_ephemeral_pda_account(
+    mut accounts: slice::Iter<AccountInfo>,
+    data_len: u32,
+) -> ProgramResult {
+    let program_info = next_account_info(&mut accounts)?;
+    let sponsor_info = next_account_info(&mut accounts)?;
+    let ephemeral_info = next_account_info(&mut accounts)?;
+    let vault_info = next_account_info(&mut accounts)?;
+
+    validate_ephemeral_accounts(program_info, vault_info)?;
+
+    let (expected_pda, bump) = ephemeral_pda();
+    if ephemeral_info.key != &expected_pda {
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    let account_metas = vec![
+        AccountMeta::new(*sponsor_info.key, sponsor_info.is_signer),
+        AccountMeta::new(*ephemeral_info.key, true),
+        AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+    ];
+    let ix = Instruction::new_with_bincode(
+        magicblock_magic_program_api::ID,
+        &MagicBlockInstruction::CreateEphemeralAccount { data_len },
+        account_metas,
+    );
+    invoke_signed(
+        &ix,
+        &[
+            sponsor_info.clone(),
+            ephemeral_info.clone(),
+            vault_info.clone(),
+        ],
+        &[&[EPHEMERAL_PDA_SEED, &[bump]]],
+    )?;
+
+    Ok(())
+}
+
 fn resize_ephemeral_account(
     mut accounts: slice::Iter<AccountInfo>,
     new_data_len: u32,
@@ -386,6 +436,9 @@ fn process_instruction(
         }
         GuineaInstruction::CloseEphemeralAccount => {
             close_ephemeral_account(accounts)?
+        }
+        GuineaInstruction::CreateEphemeralPdaAccount { data_len } => {
+            create_ephemeral_pda_account(accounts, data_len)?
         }
     }
     Ok(())

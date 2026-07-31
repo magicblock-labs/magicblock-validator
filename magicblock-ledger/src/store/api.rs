@@ -6,6 +6,7 @@ use std::{
         atomic::{AtomicI64, Ordering},
         Arc, RwLock,
     },
+    time::{Duration, Instant},
 };
 
 use bincode::{deserialize, serialize};
@@ -275,7 +276,7 @@ impl Ledger {
     // Block time
     // -----------------
 
-    pub(crate) fn get_block_time(
+    pub fn get_block_time(
         &self,
         slot: Slot,
     ) -> LedgerResult<Option<UnixTimestamp>> {
@@ -410,11 +411,15 @@ impl Ledger {
     // As far as we are concerned these are just the time when we advanced to
     // a specific slot.
     pub fn write_block(&self, block: LatestBlockInner) -> LedgerResult<()> {
-        self.blocktime_cf
-            .put(block.slot, &block.clock.unix_timestamp)?;
-        self.blocktime_cf.try_increase_entry_counter(1);
+        // Blocktime and blockhash must land atomically: readers treat the
+        // pair as one record (e.g. getBlockTime vs getBlock availability),
+        // so a split write must never be observable or partially persisted.
+        let mut batch = self.db.batch();
+        batch.put::<cf::Blocktime>(block.slot, &block.clock.unix_timestamp)?;
+        batch.put::<cf::Blockhash>(block.slot, &block.blockhash)?;
+        self.db.write(batch)?;
 
-        self.blockhash_cf.put(block.slot, &block.blockhash)?;
+        self.blocktime_cf.try_increase_entry_counter(1);
         self.blockhash_cf.try_increase_entry_counter(1);
         self.latest_block.store(block);
         Ok(())
@@ -1397,6 +1402,63 @@ impl Ledger {
         };
         self.db.backend.db.cancel_all_background_work(wait);
 
+        Ok(())
+    }
+
+    /// Lifts the background IO rate limit so shutdown flushes run at disk
+    /// speed; call only after compactions have been stopped.
+    pub fn lift_rate_limit(&self) {
+        self.db.backend.lift_rate_limit();
+    }
+
+    /// Best-effort wait until no compactions are running, so lifting the
+    /// rate limit cannot hand an in-flight compaction full disk bandwidth.
+    /// Bounded: a throttled job mid-run may need minutes, and shutdown must
+    /// not stall on it.
+    pub fn wait_for_quiescent_compactions(&self, timeout: Duration) {
+        const RUNNING_COMPACTIONS: &str = "rocksdb.num-running-compactions";
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.db.backend.db.property_int_value(RUNNING_COMPACTIONS) {
+                Ok(Some(running)) if running > 0 => {
+                    if Instant::now() >= deadline {
+                        warn!(
+                            running,
+                            "Compactions still running after quiesce timeout"
+                        );
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Ok(_) => return,
+                Err(err) => {
+                    warn!(error = ?err, "Failed to query running compactions");
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Disables automatic compactions on all columns; used at shutdown so
+    /// flush-induced L0 growth cannot schedule compactions that would run
+    /// unthrottled once the rate limit is lifted.
+    pub fn disable_auto_compactions(&self) -> LedgerResult<()> {
+        let cfs = [
+            self.transaction_status_cf.handle(),
+            self.address_signatures_cf.handle(),
+            self.slot_signatures_cf.handle(),
+            self.blocktime_cf.handle(),
+            self.blockhash_cf.handle(),
+            self.transaction_cf.handle(),
+            self.transaction_memos_cf.handle(),
+            self.perf_samples_cf.handle(),
+        ];
+        for cf in cfs {
+            self.db
+                .backend
+                .db
+                .set_options_cf(cf, &[("disable_auto_compactions", "true")])?;
+        }
         Ok(())
     }
 

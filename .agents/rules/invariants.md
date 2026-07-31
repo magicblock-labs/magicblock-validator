@@ -85,7 +85,11 @@ It must execute once and only once per delegation.
 
 This depends on delegated state not being overwritten or re-cloned by remote updates.
 
-**Invariant:** Each delegation may trigger at most one post-delegation action, and the intended action must eventually execute.
+If activation cannot execute the action safely, the activation must fail
+atomically and follow the terminal rescue-undelegation path; such a failed
+activation must have no action effects.
+
+**Invariant:** Each successfully activated delegation must execute its intended post-delegation action exactly once; an unsafe activation must instead execute it zero times and terminate through rescue undelegation.
 
 ### 1.7 ATA Projection Must Use Valid Delegated eATA State
 

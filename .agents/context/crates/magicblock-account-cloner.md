@@ -19,7 +19,7 @@ This crate is on the account-availability path for transaction submission, RPC r
 
 ## Update requirement
 
-Update this document in the same change whenever behavior in `magicblock-account-cloner` changes, or whenever another crate changes the clone requests or Magic Program instructions this crate consumes. Update it for changes to:
+Queue an update to this document for the weekly documentation-maintenance task whenever behavior in `magicblock-account-cloner` changes, or whenever another crate changes the clone requests or Magic Program instructions this crate consumes. Include changes to:
 
 - the `ChainlinkCloner` public constructor or its `Cloner` trait implementation,
 - account clone sizing, chunking, cleanup, post-delegation action handling, or transaction-size limits,
@@ -219,7 +219,7 @@ Do not bypass the scheduler or write accounts directly from this crate. The loca
 
 ### Post-delegation actions
 
-Delegation actions originate from DLP delegation records and are parsed/validated in Chainlink. This crate only transports and executes them as part of clone finalization. Actions attached to non-delegated or unresolved DLP-owned accounts should be rejected before they reach this crate; if that boundary changes, inspect `magicblock-chainlink/src/fetch_cloner/mod.rs` and its tests.
+Delegation actions originate from DLP delegation records and are parsed/validated in Chainlink. This crate transports them as part of clone finalization. Immediately before native invocation, the Magic Program executor revalidates every writable action account from the locked transaction context and accepts only delegated, ephemeral, or confined accounts that are not undelegating, plus non-signer accounts that do not exist yet (no lamports, no data) — those can only become writable by being created inside the action under a program (PDA) signature, and post-execution writable validation still governs the result. Absent accounts whose pubkey is a signer anywhere in the action bundle stay rejected (the check uses the whole signer-pubkey set, not the writable meta's own flag, so a duplicate writable/non-signer + read-only/signer meta pair cannot slip through): action signers are synthesized without signatures, so accepting one would allow squatting arbitrary unused pubkeys. A rejection fails the transaction, so the preceding clone and every action mutation roll back atomically. If that boundary changes, inspect `magicblock-chainlink/src/chainlink/fetch_cloner/mod.rs`, `programs/magicblock/src/clone_account/common.rs`, and their processor tests.
 
 ### Program loaders
 
@@ -236,7 +236,7 @@ The cloner treats `RemoteProgramLoader::V1` specially and sends all other non-re
 3. `AccountCloneFields` must faithfully carry lamports, owner, executable, delegated, confined, and remote slot from the resolved account.
 4. Large account clones must be completed with `CloneAccountContinue(is_last=true)` or cleaned up with `CleanupPartialClone` on failure.
 5. Transaction size preflight must remain in place for chunked transactions, especially when post-delegation actions are present.
-6. Post-delegation actions for delegated clones must remain synchronized between clone instructions and post-delegation action executor instructions.
+6. Post-delegation actions for delegated clones must remain synchronized between clone instructions and post-delegation action executor instructions, and writable action accounts must be revalidated under transaction locks before invocation.
 7. Program clone buffer PDAs must remain deterministic and cleanup-compatible.
 8. Program finalization must preserve loader-specific authority and deployment semantics.
 9. Retracted programs must not be deployed locally as usable programs.

@@ -16,7 +16,7 @@ Keep `magicblock-core` dependency-light and protocol-neutral where possible. It 
 
 ## Update requirement
 
-Update this guide in the same change whenever behavior or contracts in `magicblock-core` change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-core` change. Include changes to:
 
 - endpoint/channel topology, channel capacity, backpressure semantics, or scheduler pause behavior in `src/link.rs` and `src/link/transactions.rs`;
 - public transaction modes, replay/block-boundary ordering, replication message layout, or bincode payload compatibility;

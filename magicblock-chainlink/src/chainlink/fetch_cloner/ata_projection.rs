@@ -487,8 +487,9 @@ where
 
     let mut accounts_to_clone = vec![];
     let mut ata_join_set = JoinSet::new();
-    let ata_projection_context =
-        fetch_context.with_reason(metrics::AccountFetchReason::AtaProjection);
+    let ata_projection_context = fetch_context
+        .clone()
+        .with_reason(metrics::AccountFetchReason::AtaProjection);
     let delegation_record_context = fetch_context
         .with_reason(metrics::AccountFetchReason::DelegationRecord);
 
@@ -518,7 +519,7 @@ where
                     ata_pubkey,
                     eata,
                     effective_slot,
-                    ata_projection_context,
+                    ata_projection_context.clone(),
                     ChainlinkCompanionFetchKind::AtaProjection,
                 )
                 .map(move |res| (ata_pubkey, eata, effective_slot, res)),
@@ -536,7 +537,7 @@ where
                     ata_pubkey,
                     companion_pubkey,
                     effective_slot,
-                    ata_projection_context,
+                    ata_projection_context.clone(),
                     ChainlinkCompanionFetchKind::AtaProjection,
                 )
                 .map(move |res| {
@@ -597,7 +598,7 @@ where
             }
             (ata_pubkey, eata_pubkey, effective_slot, Ok(Err(err))) => {
                 let companion_fetch_log_context = CompanionFetchLogContext {
-                    origin: ata_projection_context,
+                    origin: ata_projection_context.clone(),
                     primary_pubkey: ata_pubkey,
                     context_slot: effective_slot,
                 };
@@ -610,7 +611,7 @@ where
             }
             (ata_pubkey, eata_pubkey, effective_slot, Err(join_err)) => {
                 let companion_fetch_log_context = CompanionFetchLogContext {
-                    origin: ata_projection_context,
+                    origin: ata_projection_context.clone(),
                     primary_pubkey: ata_pubkey,
                     context_slot: effective_slot,
                 };
@@ -626,10 +627,11 @@ where
 
     // Phase 2: Fetch delegation records in parallel for all eATAs
     let deleg_futures = ata_inputs.iter().filter_map(|input| {
+        let delegation_record_context = delegation_record_context.clone();
         input.eata_shared.as_ref().map(|_| async move {
             let context_slot = this.remote_account_provider.chain_slot();
             let companion_fetch_log_context = CompanionFetchLogContext {
-                origin: delegation_record_context,
+                origin: delegation_record_context.clone(),
                 primary_pubkey: input.eata_pubkey,
                 context_slot,
             };

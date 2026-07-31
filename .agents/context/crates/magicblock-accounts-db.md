@@ -17,7 +17,7 @@ This crate is on multiple performance-sensitive paths: transaction execution acc
 
 ## Update requirement
 
-Whenever behavior in `magicblock-accounts-db` changes, or another crate changes AccountsDb flows/contracts, update this document in the same change for changes to:
+Whenever behavior in `magicblock-accounts-db` changes, or another crate changes AccountsDb flows or contracts, queue an update to this document for the weekly documentation-maintenance task for changes to:
 
 - storage layout, mmap header fields, block sizing, allocation/recycling, or serialized account representation,
 - LMDB tables, key/value encodings, owner/program indexes, or cursor/iterator lifetime handling,

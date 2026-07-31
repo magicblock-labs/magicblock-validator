@@ -20,7 +20,7 @@ End-to-end commit/undelegation semantics live in .agents/specs/validator-specifi
 
 ## Update requirement
 
-Update this guide in the same change whenever behavior or contracts in `magicblock-committor-service` change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-committor-service` change. Include changes to:
 
 - `CommittorService`, `BaseIntentCommittor`, `CommittorServiceExt`, channel messages, startup/shutdown, or cancellation semantics;
 - `ChainConfig`, `ComputeBudgetConfig`, action timeout behavior, RPC/websocket construction, or configured commitment assumptions;

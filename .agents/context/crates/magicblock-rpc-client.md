@@ -20,7 +20,7 @@ End-to-end commit/undelegation semantics live in .agents/specs/validator-specifi
 
 ## Update requirement
 
-Update this guide in the same change whenever behavior or contracts in `magicblock-rpc-client` change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-rpc-client` change. Include changes to:
 
 - `MagicblockRpcClient` constructors, cached blockhash/slot behavior, commitment handling, or `chain_slot` observation;
 - `SEND_TRANSACTION_CONFIG`, send/confirm defaults, timeout intervals, or `MagicBlockSendTransactionConfig` semantics;
