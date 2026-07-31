@@ -43,7 +43,7 @@ pub(crate) fn collect_delegation_action_dependencies(
 ) -> HashSet<Pubkey> {
     let mut dependencies = HashSet::new();
     for request in accounts_to_clone {
-        if let Some(actions) = request.post_delegation_mode.execute_actions() {
+        if let Some(actions) = request.post_delegation_mode.actions() {
             for instruction in actions.iter() {
                 dependencies.insert(instruction.program_id);
                 for account_meta in &instruction.accounts {

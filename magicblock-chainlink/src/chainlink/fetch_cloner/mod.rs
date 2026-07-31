@@ -1426,8 +1426,7 @@ where
             return Ok(Signature::default());
         }
 
-        let Some(delegation_actions) =
-            request.post_delegation_mode.execute_actions()
+        let Some(delegation_actions) = request.post_delegation_mode.actions()
         else {
             return Ok(self
                 .clone_account_with_ownership(request, fetch_context)

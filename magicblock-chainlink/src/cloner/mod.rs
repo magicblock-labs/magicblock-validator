@@ -65,7 +65,7 @@ pub enum ClonePostDelegationMode {
 }
 
 impl ClonePostDelegationMode {
-    pub fn execute_actions(&self) -> Option<&DelegationActions> {
+    pub fn actions(&self) -> Option<&DelegationActions> {
         match self {
             Self::ExecuteActions(actions) => Some(actions),
             Self::None | Self::RescueUndelegate => None,
@@ -73,8 +73,7 @@ impl ClonePostDelegationMode {
     }
 
     pub fn has_actions(&self) -> bool {
-        self.execute_actions()
-            .is_some_and(|actions| !actions.is_empty())
+        self.actions().is_some_and(|actions| !actions.is_empty())
     }
 
     pub fn is_rescue_undelegate(&self) -> bool {

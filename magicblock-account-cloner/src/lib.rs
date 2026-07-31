@@ -254,7 +254,7 @@ impl ChainlinkCloner {
             fields,
             request
                 .post_delegation_mode
-                .execute_actions()
+                .actions()
                 .map(|actions| actions.to_vec())
                 .unwrap_or_default(),
         );
