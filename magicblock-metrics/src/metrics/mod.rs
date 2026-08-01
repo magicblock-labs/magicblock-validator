@@ -241,17 +241,17 @@ lazy_static::lazy_static! {
             ),
             &["outcome"],
         )
-        .unwrap();
+        .expect("static name and label set are valid metric identifiers");
 
     static ref CHAINLINK_RECORD_MIRROR_LIVE_GAUGE: IntGauge = IntGauge::new(
         "chainlink_record_mirror_live",
         "1 while the delegation-record mirror stream is live (watermark advancing), 0 otherwise",
-    ).unwrap();
+    ).expect("static name is a valid metric identifier");
 
     static ref CHAINLINK_RECORD_MIRROR_WATERMARK_GAUGE: IntGauge = IntGauge::new(
         "chainlink_record_mirror_watermark",
         "Latest confirmed slot the delegation-record mirror is caught up to",
-    ).unwrap();
+    ).expect("static name is a valid metric identifier");
 
     static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(

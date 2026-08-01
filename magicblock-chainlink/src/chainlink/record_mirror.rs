@@ -135,9 +135,10 @@ impl DelegationRecordMirror {
                 let mut inner = self.inner.lock();
                 inner.watermark = inner.watermark.max(slot);
                 inner.live = true;
+                let watermark = inner.watermark;
                 drop(inner);
                 metrics::set_record_mirror_live(true);
-                metrics::set_record_mirror_watermark(slot);
+                metrics::set_record_mirror_watermark(watermark);
             }
             AccountUpdate::SyncInterrupted | AccountUpdate::SyncTerminated => {
                 self.clear();

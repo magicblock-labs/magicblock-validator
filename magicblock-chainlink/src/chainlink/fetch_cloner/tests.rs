@@ -12476,3 +12476,68 @@ async fn test_greedy_discovery_resolves_record_from_mirror() {
     assert!(cloned.delegated());
     assert_eq!(cloned.owner(), &account_owner);
 }
+
+/// Choke-point-1 fallback (`fetch_and_parse_delegation_record` via greedy
+/// discovery): an unprovable mirror entry must fall back to the RPC record
+/// and still greedily clone the account as delegated.
+#[tokio::test]
+async fn test_greedy_discovery_falls_back_to_rpc_on_stale_mirror() {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_account = delegated_dlp_account(vec![4, 5, 6]);
+    let (ctx, mirror) = setup_with_mirror(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    // Mirror entry provable only up to slot 90; the authoritative record
+    // lives in the RPC mock.
+    add_delegation_record_to_mirror(
+        &mirror,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        50,
+    );
+    mirror.test_set_watermark(90);
+    add_delegation_record_for(
+        &ctx.rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    ctx.subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                delegated_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while ctx.accounts_bank.get_account(&account_pubkey).is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for greedy DLP discovery clone");
+
+    let cloned = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned");
+    assert!(cloned.delegated());
+    assert_eq!(cloned.owner(), &account_owner);
+}
