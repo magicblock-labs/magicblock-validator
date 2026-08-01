@@ -21,6 +21,39 @@ use crate::remote_account_provider::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
+/// A live laserstream delivers a slot notification every chain slot
+/// (~400ms); silence past this deadline means the endpoint is not
+/// delivering data.
+const GRPC_LIVENESS_PROBE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(10);
+const GRPC_LIVENESS_PROBE_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(250);
+
+/// Subscribes to slot notifications and waits for the shared chain slot to
+/// advance, proving the endpoint actually delivers data.
+async fn probe_grpc_liveness(
+    client: &ChainLaserClientImpl,
+    chain_slot: &Arc<AtomicU64>,
+) -> RemoteAccountProviderResult<()> {
+    let before = chain_slot.load(Ordering::Relaxed);
+    client
+        .subscribe(solana_sdk_ids::sysvar::clock::ID, None)
+        .await?;
+    let deadline = tokio::time::Instant::now() + GRPC_LIVENESS_PROBE_TIMEOUT;
+    while tokio::time::Instant::now() < deadline {
+        if chain_slot.load(Ordering::Relaxed) > before {
+            return Ok(());
+        }
+        tokio::time::sleep(GRPC_LIVENESS_PROBE_INTERVAL).await;
+    }
+    Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+        format!(
+            "gRPC endpoint delivered no slot updates within \
+             {GRPC_LIVENESS_PROBE_TIMEOUT:?}"
+        ),
+    ))
+}
+
 #[derive(Clone)]
 pub enum ChainUpdatesClient {
     WebSocket(ChainPubsubClientImpl),
@@ -70,20 +103,26 @@ impl ChainUpdatesClient {
                 );
 
                 let slots = Slots {
-                    chain_slot: ChainSlot::new(chain_slot),
+                    chain_slot: ChainSlot::new(chain_slot.clone()),
                 };
-                Ok(ChainUpdatesClient::Laser(
-                    ChainLaserClientImpl::new_from_url(
-                        url,
-                        client_id.to_string(),
-                        api_key,
-                        commitment.commitment,
-                        abort_sender,
-                        slots,
-                        rpc_client,
-                        grpc_config,
-                    ),
-                ))
+                let client = ChainLaserClientImpl::new_from_url(
+                    url,
+                    client_id.to_string(),
+                    api_key,
+                    commitment.commitment,
+                    abort_sender,
+                    slots,
+                    rpc_client,
+                    grpc_config,
+                );
+                // The laserstream subscribe API reports endpoint failures
+                // asynchronously through the stream, so construction alone
+                // cannot detect a dead gRPC remote. Require live slot
+                // delivery before accepting the client; a failure here
+                // surfaces as a connect error, which the endpoint selection
+                // handles by degrading to websockets.
+                probe_grpc_liveness(&client, &chain_slot).await?;
+                Ok(ChainUpdatesClient::Laser(client))
             }
             Rpc { .. } => {
                 Err(RemoteAccountProviderError::InvalidPubsubEndpoint(format!(
