@@ -1,5 +1,4 @@
-use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use lru::LruCache;
 use magicblock_config::config::RecordSyncConfig;
