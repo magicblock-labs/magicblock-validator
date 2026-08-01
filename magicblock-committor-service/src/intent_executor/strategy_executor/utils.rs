@@ -5,6 +5,7 @@ use magicblock_core::traits::{
     ActionError, ActionResult, ActionsCallbackScheduler,
 };
 use magicblock_program::outbox::{ExecutionStage, PendingTransaction};
+use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::SerializableTransaction;
@@ -209,9 +210,10 @@ pub(in crate::intent_executor) async fn check_pending_signature(
         .map_err(IntentExecutorError::GetPendingSignatureStatusError)?;
 
     let statuses = client
-        .get_signature_statuses_with_history(std::slice::from_ref(
-            &pending.signature,
-        ))
+        .get_signature_statuses_with_history(
+            std::slice::from_ref(&pending.signature),
+            CommitmentConfig::finalized(),
+        )
         .await
         .map_err(IntentExecutorError::GetPendingSignatureStatusError)?;
 

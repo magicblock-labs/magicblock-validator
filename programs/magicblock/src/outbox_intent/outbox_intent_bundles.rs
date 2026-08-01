@@ -28,6 +28,19 @@ impl OutboxIntentBundle {
         &self.status
     }
 
+    /// Whether execution has reached its last stage.
+    pub fn is_final_stage(&self) -> bool {
+        matches!(
+            self.status,
+            OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(_))
+                | OutboxIntentBundleStatus::Executing(
+                    ExecutionStage::TwoStage(
+                        TwoStageProgress::Finalizing { .. }
+                    )
+                )
+        )
+    }
+
     pub(crate) fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,

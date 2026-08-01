@@ -1,4 +1,11 @@
-use std::{ops::Deref, sync::Arc, time::Duration};
+use std::{
+    ops::Deref,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use arc_swap::ArcSwapAny;
 use magicblock_core::{
@@ -25,6 +32,8 @@ pub(crate) struct BlocksCache {
     block_validity: u64,
     /// Latest observed block (updated whenever the ledger transitions to new slot)
     latest: ArcSwapAny<Arc<LastCachedBlock>>,
+    /// Whether RPC observed a block after event processing started.
+    ready: AtomicBool,
     /// An underlying time-based cache for storing `BlockHash` to `BlockMeta` mappings.
     cache: ExpiringCache<BlockHash, Slot>,
 }
@@ -61,10 +70,9 @@ impl BlocksCache {
         let blocktime_ratio = SOLANA_BLOCK_TIME / blocktime as f64;
         let block_validity = blocktime_ratio * MAX_VALID_BLOCKHASH_SLOTS;
         let cache = ExpiringCache::new(BLOCK_CACHE_TTL);
-        // Add the initial blockhash to the cache so it's recognized as valid
-        cache.push(latest.blockhash, latest.slot);
         Self {
             latest: ArcSwapAny::new(latest.into()),
+            ready: AtomicBool::new(false),
             block_validity: block_validity as u64,
             cache,
         }
@@ -81,6 +89,12 @@ impl BlocksCache {
         self.cache.push(latest.blockhash, latest.slot);
         // And mark it as latest observed
         self.latest.swap(last.into());
+        self.ready.store(true, Ordering::Release);
+    }
+
+    /// Returns whether a post-recovery block is available to RPC clients.
+    pub(crate) fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::Acquire)
     }
 
     /// Retrieves information about the latest block, including its calculated validity period.

@@ -22,6 +22,7 @@ use crate::{
     },
     mutate_accounts::process_mutate_accounts,
     outbox_intent::{
+        process_close_outbox_intent::process_close_outbox_intent,
         process_create_outbox_intent::process_create_outbox_intent,
         process_scheduled_commit_sent::process_scheduled_commit_sent,
         process_set_intent_execution_stage::process_set_intent_execution_stage,
@@ -369,6 +370,9 @@ declare_process_instruction!(
         match instruction {
             OutboxIntentInstruction::CreateOutboxIntent { data } => {
                 process_create_outbox_intent(signers, invoke_context, data)
+            }
+            OutboxIntentInstruction::CloseOutboxIntent(id) => {
+                process_close_outbox_intent(signers, invoke_context, id)
             }
             OutboxIntentInstruction::SetIntentExecutionStage {
                 intent_id,

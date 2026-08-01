@@ -17,7 +17,7 @@ This crate sits on the `magicblock-chainlink` account synchronization path for a
 
 ## Update requirement
 
-Update this document in the same change whenever `magicblock-aml` behavior, public APIs, configuration contract, persistence layout, error semantics, or Chainlink integration changes. Update it for changes to:
+Queue an update to this document for the weekly documentation-maintenance task whenever `magicblock-aml` behavior, public APIs, configuration contract, persistence layout, error semantics, or Chainlink integration changes. Include changes to:
 
 - `RiskService`, `RiskError`, `RiskResult`, cache aliases, or other exported API shape;
 - Range endpoint path, query parameters, auth scheme, response parsing, or expected JSON fields;
@@ -213,7 +213,7 @@ The Range response parser accepts any JSON document with top-level unsigned inte
 
 1. Disabled risk config must return `Ok(None)` and must not require an API key, open SQLite, or spawn background tasks.
 2. Enabled risk config must fail fast without an API key and when `risk_score_threshold > 10`.
-3. The cache file must remain under the validator ledger path as `risk-cache.db` unless a migration and documentation update are included.
+3. The cache file must remain under the validator ledger path as `risk-cache.db` unless a migration is included and the documentation update is queued for weekly maintenance.
 4. SQLite reads/writes must not run directly on async runtime worker threads; keep them behind `spawn_blocking` or an equivalent non-hot-path boundary.
 5. Cached scores and fetched scores must use the same high-risk comparison: `score >= risk_score_threshold`.
 6. Concurrent requests for the same uncached address must remain deduplicated to avoid avoidable Range API amplification.

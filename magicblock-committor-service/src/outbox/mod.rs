@@ -49,6 +49,10 @@ pub trait OutboxClient: Send + Sync + 'static {
         execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error>;
 
+    /// Closes outbox intent, symbolizing that it was successfully executed
+    /// NOTE: should be called after intent succeeded
+    async fn close_intent(&self, intent_id: u64) -> Result<(), Self::Error>;
+
     /// Returns reader capable of reading IntentBundles from Outbox
     fn outbox_reader(&self) -> Self::OutboxReader;
 }

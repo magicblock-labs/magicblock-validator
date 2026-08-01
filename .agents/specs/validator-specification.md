@@ -121,6 +121,13 @@ The transaction scheduler runs on a dedicated OS thread and uses a pool of execu
 
 In replica mode, the scheduler compares each replicated blockhash with its local streaming hash. The first replicated block after scheduler startup is exempt from divergence logging because its predecessor may not be reconstructible after a restart. This exemption is consumed even when the hashes match and is not reset by later primary/replica mode transitions; every subsequent mismatch remains an error.
 
+Replication preserves Transaction, Block, and SuperBlock ordering. Transaction
+publish acknowledgements may be pipelined, but the primary confirms them before
+publishing the following Block. At a checkpoint boundary it drains already
+accepted transactions before finalizing the Block and holds execution paused
+through snapshot creation. The replica drains its ordered scheduler command
+queue and then holds exclusive scheduler access while computing the checksum.
+
 This path is also security-critical. Atomic, all-or-nothing account lock acquisition (step 3 below) is what prevents concurrent transactions from racing on the same accounts; it must never be relaxed into partial or non-atomic locking. Because untrusted clients drive this loop, also guard against attacker-triggerable stalls and resource exhaustion: keep work bounded, never let one transaction block the scheduler indefinitely, and never let lock release/queueing leave the scheduler deadlocked.
 
 Required behavior:

@@ -10,6 +10,7 @@ use magicblock_rpc_client::{
     MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
     MagicblockRpcClient,
 };
+use solana_commitment_config::CommitmentConfig;
 use solana_hash::Hash;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
@@ -109,12 +110,16 @@ impl IntentExecutionClient {
     }
 
     /// Queries the full transaction history for the given signatures.
-    /// Each entry is `None` if the signature was never included in a block.
+    /// Each entry is `None` if the signature was never included in a block,
+    /// or if it landed but hasn't yet reached the configured commitment
+    /// level - callers must not treat such an entry as final, since a
+    /// merely-processed transaction can still be dropped by a fork.
     /// Use this for restart recovery where txs may be older than the RPC
     /// node's recent signature cache.
     pub(in crate::intent_executor) async fn get_signature_statuses_with_history(
         &self,
         signatures: &[Signature],
+        commitment_config: CommitmentConfig,
     ) -> MagicBlockRpcClientResult<Vec<Option<Result<(), TransactionError>>>>
     {
         let _timer = metrics::start_rpc_client_signature_history_timer();
@@ -127,7 +132,13 @@ impl IntentExecutionClient {
         Ok(response
             .value
             .into_iter()
-            .map(|s| s.map(|s| s.err.map_or(Ok(()), Err)))
+            .map(|status| {
+                status.and_then(|status| {
+                    status
+                        .satisfies_commitment(commitment_config)
+                        .then(|| status.err.map_or(Ok(()), Err))
+                })
+            })
             .collect())
     }
 

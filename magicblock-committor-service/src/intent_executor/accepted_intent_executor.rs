@@ -19,12 +19,12 @@ use crate::{
         },
         utils::{
             build_commit_finalize_tasks, execute_single_stage_flow,
-            execute_two_stage_flow,
+            execute_two_stage_flow, report_and_close_intent,
         },
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorCtx,
     },
-    outbox::OutboxClient,
+    outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
         task_builder::TasksBuilder,
         task_info_fetcher::{ResetType, TaskInfoFetcher},
@@ -202,12 +202,22 @@ where
         base_intent: ScheduledIntentBundle,
     ) -> (IntentExecutionResult, CleanupHandle<T>) {
         self.started_at = Instant::now();
+        let meta = ScheduledBaseIntentMeta::new(&base_intent);
         let pubkeys = base_intent.get_all_committed_pubkeys();
         let undelegated_pubkeys = base_intent.get_undelegated_pubkeys();
 
         let mut execution_report = IntentExecutionReport::default();
-        let result =
-            self.execute_inner(base_intent, &mut execution_report).await;
+        let result = {
+            let result =
+                self.execute_inner(base_intent, &mut execution_report).await;
+            report_and_close_intent(
+                result,
+                meta,
+                &mut execution_report,
+                self.ctx.outbox_client.as_ref(),
+            )
+            .await
+        };
         if !pubkeys.is_empty() {
             if result.is_err() {
                 // We can't know what landed on chain, resync everything

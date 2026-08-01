@@ -2501,10 +2501,10 @@ dependencies = [
 
 [[package]]
 name = "guinea"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "bincode",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "serde",
  "solana-program 3.0.0",
 ]
@@ -3269,7 +3269,7 @@ dependencies = [
 [[package]]
 name = "librocksdb-sys"
 version = "0.18.0+10.7.5"
-source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=50c94dc2#50c94dc2c29cc27d8e1214eb56b6bc2d1cd73857"
+source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=c6a3f91f#c6a3f91fbf9d89c718e223cb1ea856589738b8e1"
 dependencies = [
  "bindgen",
  "bzip2-sys",
@@ -3494,14 +3494,14 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "async-trait",
  "bincode",
  "magicblock-chainlink",
  "magicblock-core",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "magicblock-program",
  "rand 0.9.4",
  "solana-account 3.4.0",
@@ -3521,12 +3521,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "flate2",
  "lmdb-rkv",
  "magicblock-config",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "memmap2 0.9.10",
  "parking_lot",
  "reflink-copy",
@@ -3541,7 +3541,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3557,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "agave-feature-set",
  "agave-geyser-plugin-interface",
@@ -3603,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "agave-feature-set",
  "anyhow",
@@ -3619,7 +3619,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0",
  "magicblock-ledger",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
@@ -3665,7 +3665,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -3680,7 +3680,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "magicblock-metrics",
  "parking_lot",
  "scc",
@@ -3721,7 +3721,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "borsh 1.7.0",
  "paste",
@@ -3736,7 +3736,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "async-trait",
  "backoff",
@@ -3783,7 +3783,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "clap",
  "derive_more",
@@ -3801,12 +3801,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "bincode",
  "bytes",
  "flume",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "serde",
  "solana-account 3.4.0",
  "solana-account-decoder",
@@ -3895,7 +3895,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -3947,7 +3947,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "bincode",
  "const-crypto",
@@ -3959,7 +3959,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -3974,7 +3974,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -4020,13 +4020,13 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "bincode",
  "lazy_static",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -4056,7 +4056,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "async-nats",
  "bincode",
@@ -4082,7 +4082,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "futures-util",
  "magicblock-metrics",
@@ -4108,7 +4108,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "bincode",
  "futures-util",
@@ -4116,7 +4116,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "magicblock-metrics",
  "magicblock-program",
  "solana-hash 4.2.0",
@@ -4137,7 +4137,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -4164,7 +4164,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "bincode",
  "chrono",
@@ -4190,7 +4190,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "magicblock-delegation-program-api 3.1.0",
  "magicblock-program",
@@ -4207,7 +4207,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "agave-feature-set",
  "git-version",
@@ -5020,7 +5020,7 @@ dependencies = [
  "bincode",
  "borsh 1.7.0",
  "ephemeral-rollups-sdk",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "serde",
  "solana-program 3.0.0",
  "solana-system-interface 3.1.0",
@@ -5042,7 +5042,7 @@ dependencies = [
  "borsh 1.7.0",
  "ephemeral-rollups-sdk",
  "magicblock-delegation-program-api 3.1.0",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "rkyv 0.7.46",
  "solana-program 3.0.0",
  "solana-system-interface 3.1.0",
@@ -5743,7 +5743,7 @@ checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
 [[package]]
 name = "rocksdb"
 version = "0.24.0"
-source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=50c94dc2#50c94dc2c29cc27d8e1214eb56b6bc2d1cd73857"
+source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=c6a3f91f#c6a3f91fbf9d89c718e223cb1ea856589738b8e1"
 dependencies = [
  "libc",
  "librocksdb-sys",
@@ -5980,7 +5980,7 @@ dependencies = [
  "integration-test-tools",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "magicblock-program",
  "program-schedulecommit",
  "rand 0.8.6",
@@ -6001,7 +6001,7 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "magicblock-delegation-program-api 3.1.0",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
@@ -6441,7 +6441,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "3.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=ffbe5ab#ffbe5abfe2988692ed78c376c8d68167a272d076"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=30711208dd2554dd02d02f11730bfacab678fef3#30711208dd2554dd02d02f11730bfacab678fef3"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -8021,7 +8021,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "4.0.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=ffbe5ab#ffbe5abfe2988692ed78c376c8d68167a272d076"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=30711208dd2554dd02d02f11730bfacab678fef3#30711208dd2554dd02d02f11730bfacab678fef3"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -8683,7 +8683,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "bincode",
  "bs58",
@@ -8705,7 +8705,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "4.0.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=ffbe5ab#ffbe5abfe2988692ed78c376c8d68167a272d076"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=30711208dd2554dd02d02f11730bfacab678fef3#30711208dd2554dd02d02f11730bfacab678fef3"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -9021,7 +9021,7 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "4.0.0"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=ffbe5ab#ffbe5abfe2988692ed78c376c8d68167a272d076"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=30711208dd2554dd02d02f11730bfacab678fef3#30711208dd2554dd02d02f11730bfacab678fef3"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -9868,7 +9868,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.13.11"
+version = "0.13.17"
 dependencies = [
  "guinea",
  "magicblock-accounts-db",
@@ -9976,7 +9976,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0",
- "magicblock-magic-program-api 0.13.11",
+ "magicblock-magic-program-api 0.13.17",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
@@ -11550,8 +11550,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "rocksdb"
-version = "0.22.0"
-source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=6d975197#6d975197a647996a6f616dccdfd129ae06a7959c"

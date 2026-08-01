@@ -19,7 +19,7 @@ This crate sits on startup and shutdown paths, not on per-transaction execution 
 
 ## Update requirement
 
-Update this guide in the same change whenever `magicblock-validator` behavior or contracts change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever `magicblock-validator` behavior or contracts change. Include changes to:
 
 - CLI invocation, feature flags, `--no-tui` semantics, or logging behavior;
 - main Tokio runtime construction, worker-thread sizing, or runtime/thread names;
@@ -181,7 +181,7 @@ The binary obtains the lock after `MagicValidator` is constructed because it nee
 
 ### Operator-facing output is compatibility-sensitive
 
-Startup output in `run_no_tui` is useful for local development, automation, and debugging. If changing labels, hiding fields, or routing output differently, update operator docs and consider tests or manual validation of both `RUST_LOG` modes.
+Startup output in `run_no_tui` is useful for local development, automation, and debugging. If changing labels, hiding fields, or routing output differently, queue the operator-doc update for weekly maintenance and consider tests or manual validation of both `RUST_LOG` modes.
 
 ## Important invariants
 

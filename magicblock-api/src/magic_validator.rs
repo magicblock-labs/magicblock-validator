@@ -11,8 +11,9 @@ use std::{
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
-    initialize_aperture,
+    prepare_aperture,
     state::{NodeContext, SharedState},
+    EventProcessors,
 };
 use magicblock_chainlink::{
     config::ChainlinkConfig, remote_account_provider::Endpoints, ProdChainlink,
@@ -122,6 +123,7 @@ pub struct MagicValidator {
     intent_execution_service: IntentExecutionServiceImpl,
     replication_service: Option<ReplicationService>,
     undelegation_request_service: Option<Arc<UndelegationRequestService>>,
+    aperture_events: Option<EventProcessors>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -232,10 +234,8 @@ impl MagicValidator {
         let accountsdb = Arc::new(accountsdb);
         let (mut dispatch, validator_channels) = link(!is_standalone);
         let shared_chain_slot =
-            (!Self::replication_mode_uses_disabled_chainlink(
-                &config.validator.replication_mode,
-            ))
-            .then(Arc::<AtomicU64>::default);
+            (!Self::is_replica_mode(&config.validator.replication_mode))
+                .then(Arc::<AtomicU64>::default);
 
         let step_start = Instant::now();
         let chainlink = Arc::new(
@@ -270,13 +270,20 @@ impl MagicValidator {
             );
             Arc::new(processor)
         };
-        let intent_execution_service = IntentExecutionServiceImpl::new(
-            chainlink.clone(),
-            outbox_client.clone(),
-            committor_processor.clone(),
-            config.ledger.block_time,
-            token.clone(),
-        );
+        let intent_execution_service =
+            if Self::is_replica_mode(&config.validator.replication_mode) {
+                // Replica mode is documented as having no side effects - the
+                // accept/schedule loop must never run.
+                IntentExecutionServiceImpl::disabled()
+            } else {
+                IntentExecutionServiceImpl::new(
+                    chainlink.clone(),
+                    outbox_client.clone(),
+                    committor_processor.clone(),
+                    config.ledger.block_time,
+                    token.clone(),
+                )
+            };
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             tokio::runtime::Handle::current(),
@@ -426,7 +433,7 @@ impl MagicValidator {
             chainlink.clone(),
         );
         let step_start = Instant::now();
-        let rpc = initialize_aperture(
+        let (rpc, aperture_events) = prepare_aperture(
             &config.aperture,
             shared_state,
             &dispatch,
@@ -478,6 +485,7 @@ impl MagicValidator {
             intent_execution_service,
             replication_service,
             undelegation_request_service,
+            aperture_events: Some(aperture_events),
             token,
             ledger,
             ledger_truncator,
@@ -556,9 +564,7 @@ impl MagicValidator {
         accountsdb: &Arc<AccountsDb>,
         chain_slot: Option<Arc<AtomicU64>>,
     ) -> ApiResult<ChainlinkImpl> {
-        if Self::replication_mode_uses_disabled_chainlink(
-            &config.validator.replication_mode,
-        ) {
+        if Self::is_replica_mode(&config.validator.replication_mode) {
             return ChainlinkImpl::disabled().map_err(ApiError::from);
         }
 
@@ -621,9 +627,7 @@ impl MagicValidator {
         Ok(ChainlinkImpl::enabled(chainlink))
     }
 
-    fn replication_mode_uses_disabled_chainlink(
-        replication_mode: &ReplicationMode,
-    ) -> bool {
+    fn is_replica_mode(replication_mode: &ReplicationMode) -> bool {
         matches!(replication_mode, ReplicationMode::Replica { .. })
     }
 
@@ -1054,6 +1058,14 @@ impl MagicValidator {
             }
         }
 
+        // Subscribe Aperture only after ledger replay and local bank cleanup.
+        // Executors still receive replay-time block broadcasts, while RPC starts
+        // with no valid blockhash and waits for the next live block.
+        self.aperture_events
+            .take()
+            .expect("Aperture event processors should only start once")
+            .start();
+
         // Notify the scheduler that ledger replay and bank cleanup is complete.
         if self.is_standalone {
             self.mode_tx
@@ -1233,12 +1245,6 @@ impl MagicValidator {
         log_timing("shutdown", "accountsdb_flush", step_start);
 
         let step_start = Instant::now();
-        if let Err(err) = self.ledger.flush() {
-            error!(error = ?err, "Failed to flush ledger");
-        }
-        log_timing("shutdown", "ledger_flush", step_start);
-
-        let step_start = Instant::now();
         if let Err(err) = self.ledger.shutdown(true) {
             error!(error = ?err, "Failed to shutdown ledger");
         }
@@ -1272,6 +1278,31 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
+        // Stop auto compactions too: with the throttle lifted, a
+        // flush-triggered compaction would otherwise run at full disk speed
+        // while the RPC still serves.
+        match self.ledger.disable_auto_compactions() {
+            Ok(()) => {
+                // Disabling does not cancel a compaction already mid-run;
+                // give it a bounded window to finish before handing it full
+                // disk bandwidth.
+                self.ledger
+                    .wait_for_quiescent_compactions(Duration::from_secs(2));
+                // Compactions are stopped; unthrottled flushes only compete
+                // with foreground work for the few seconds before exit.
+                self.ledger.lift_rate_limit();
+            }
+            Err(err) => {
+                // Some column may still schedule compactions: keep the
+                // throttle and accept a slower flush over disk saturation.
+                error!(error = ?err, "Failed to disable auto compactions; keeping IO throttle for shutdown flush");
+            }
+        }
+        if let Err(err) = self.ledger.flush() {
+            error!(error = ?err, "Failed to flush during shutdown preparation");
+        }
+        // Second pass drains auto-flushes started while the first one ran, so
+        // the rate-limited waiting happens here, while the RPC still serves.
         if let Err(err) = self.ledger.flush() {
             error!(error = ?err, "Failed to flush during shutdown preparation");
         }
@@ -1308,26 +1339,24 @@ mod tests {
 
     #[test]
     fn standalone_replication_mode_uses_enabled_chainlink() {
-        assert!(!MagicValidator::replication_mode_uses_disabled_chainlink(
+        assert!(!MagicValidator::is_replica_mode(
             &ReplicationMode::Standalone,
         ));
     }
 
     #[test]
     fn primary_replication_mode_uses_enabled_chainlink() {
-        assert!(!MagicValidator::replication_mode_uses_disabled_chainlink(
-            &ReplicationMode::Primary(replication_config()),
-        ));
+        assert!(!MagicValidator::is_replica_mode(&ReplicationMode::Primary(
+            replication_config()
+        ),));
     }
 
     #[test]
-    fn replica_replication_mode_uses_disabled_chainlink() {
-        assert!(MagicValidator::replication_mode_uses_disabled_chainlink(
-            &ReplicationMode::Replica {
-                config: replication_config(),
-                authority_override: SerdePubkey(Pubkey::new_unique()),
-            },
-        ));
+    fn replica_is_replica_mode() {
+        assert!(MagicValidator::is_replica_mode(&ReplicationMode::Replica {
+            config: replication_config(),
+            authority_override: SerdePubkey(Pubkey::new_unique()),
+        },));
     }
 
     #[test]

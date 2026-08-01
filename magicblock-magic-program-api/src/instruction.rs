@@ -428,8 +428,16 @@ pub enum OutboxIntentInstruction {
     /// - 3. []              Ephemeral System Program (CPI target)
     CreateOutboxIntent { data: Vec<u8> },
 
+    /// Closes the outbox intent PDA on successful execution of the intent.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
+    /// - **1.** `[]`              Magic Program
+    /// - **2.** `[WRITE]`         Ephemeral Vault
+    /// - **3.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    CloseOutboxIntent(u64),
+    
     /// Records the attempt to realize a scheduled commit on chain.
-    /// Closes the associated outbox intent PDA account.
     ///
     /// # Account references
     /// - 0. [WRITE, SIGNER] Validator Authority (receives rent refund from close)

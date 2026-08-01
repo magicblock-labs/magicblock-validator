@@ -12,10 +12,6 @@ window small.
 1. Read this index to learn what exists and where it lives.
 2. Identify what your task touches (behavior, protocol, wiring, a crate, tests, docs).
 3. Open only the matching document(s) from the tables below.
-4. If a change adds/removes/renames knowledge, update the relevant doc and, if
-   the layout changes, update this index and `../AGENTS.md`.
-5. If you discover missing or stale durable repository knowledge, follow
-   `memory/agent-memory-and-docs.md` before finishing.
 
 ## Non-negotiable (always applies)
 

@@ -617,7 +617,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             accounts,
             slots: Self::slot_updates_filter(),
             commitment: Some((*commitment).into()),
-            from_slot: Some(from_slot),
+            from_slot: (from_slot > 0).then_some(from_slot),
             ..Default::default()
         }
     }
@@ -724,7 +724,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             accounts,
             slots: Self::slot_updates_filter(),
             commitment: Some((*commitment).into()),
-            from_slot: Some(from_slot),
+            from_slot: (from_slot > 0).then_some(from_slot),
             ..Default::default()
         }
     }
@@ -1734,7 +1734,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_optimize_sets_from_slot_zero_when_chain_slot_zero() {
+    async fn test_optimize_skips_from_slot_when_chain_slot_zero() {
         use std::sync::{atomic::AtomicU64, Arc};
 
         use crate::remote_account_provider::chain_slot::ChainSlot;
@@ -1763,10 +1763,9 @@ mod tests {
         assert!(!optimize_reqs.is_empty());
         for req in &optimize_reqs {
             assert_eq!(
-                req.from_slot,
-                Some(0),
-                "optimized streams should use saturated from_slot=0 \
-                 when chain_slot is still 0",
+                req.from_slot, None,
+                "optimized streams should skip backfill when chain_slot \
+                 is still 0; providers reject from_slot=0 with OutOfRange",
             );
         }
     }

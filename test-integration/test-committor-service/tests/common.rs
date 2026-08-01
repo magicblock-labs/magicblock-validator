@@ -209,6 +209,10 @@ impl OutboxClient for MockOutboxClient {
         Ok(())
     }
 
+    async fn close_intent(&self, _intent_id: u64) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
     fn outbox_reader(&self) -> Self::OutboxReader {
         MockOutboxReader
     }
