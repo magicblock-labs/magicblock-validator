@@ -18,6 +18,7 @@ magicblock-core = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
+magicblock-sync = { workspace = true }
 parking_lot = { workspace = true }
 scc = { workspace = true }
 solana-account = { workspace = true }

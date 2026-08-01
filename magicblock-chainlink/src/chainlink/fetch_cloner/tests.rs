@@ -52,7 +52,8 @@ use crate::{
         },
         cloner_stub::ClonerStub,
         deleg::{
-            add_delegation_record_for, add_delegation_record_with_actions_for,
+            add_delegation_record_for, add_delegation_record_to_mirror,
+            add_delegation_record_with_actions_for,
             add_invalid_delegation_record_for, delegation_record_to_vec,
         },
         eatas::{
@@ -12111,4 +12112,367 @@ async fn test_replay_subscription_update_for_unwatched_account_is_processed() {
         .expect("account should be in bank");
     assert_eq!(in_bank.remote_slot(), 50);
     assert_eq!(in_bank.lamports(), 2_000_000);
+}
+
+// -----------------
+// Delegation-record mirror
+// -----------------
+
+/// Like [`setup`], but with a record mirror wired into the FetchCloner.
+async fn setup_with_mirror<I>(
+    accounts: I,
+    current_slot: u64,
+    validator_keypair: Keypair,
+) -> (
+    FetcherTestCtx,
+    Arc<crate::chainlink::record_mirror::DelegationRecordMirror>,
+)
+where
+    I: IntoIterator<Item = (Pubkey, Account)>,
+{
+    init_logger();
+
+    let accounts_map: HashMap<Pubkey, Account> = accounts.into_iter().collect();
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(current_slot)
+        .clock_sysvar_for_slot(current_slot)
+        .accounts(accounts_map)
+        .build();
+
+    let (updates_sender, updates_receiver) = mpsc::channel(1_000);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+    let accounts_bank = Arc::new(AccountsBankStub::default());
+    let rpc_client_clone = rpc_client.clone();
+
+    let (forward_tx, forward_rx) = mpsc::channel(1_000);
+    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let chain_slot = Arc::<AtomicU64>::default();
+
+    let remote_account_provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client,
+            pubsub_client,
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(chain_slot),
+        )
+        .await
+        .unwrap(),
+    );
+
+    let mirror =
+        crate::chainlink::record_mirror::DelegationRecordMirror::new_for_tests(
+        );
+    let (subscription_tx, subscription_rx) = mpsc::channel(100);
+    let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    let (undelegation_request_sender, _) =
+        tokio::sync::broadcast::channel(1024);
+    let fetch_cloner = FetchCloner::new_with_undelegation_request_sender(
+        &remote_account_provider,
+        &accounts_bank,
+        &cloner,
+        validator_keypair,
+        subscription_rx,
+        None,
+        None,
+        Some(mirror.clone()),
+        undelegation_request_sender,
+    );
+
+    (
+        FetcherTestCtx {
+            remote_account_provider,
+            accounts_bank,
+            rpc_client: rpc_client_clone,
+            forward_rx,
+            fetch_cloner,
+            subscription_tx,
+            cloner,
+        },
+        mirror,
+    )
+}
+
+fn delegated_dlp_account(data: Vec<u8>) -> Account {
+    Account {
+        lamports: 1_234,
+        data,
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    }
+}
+
+/// The record lives ONLY in the mirror: resolving the account as delegated
+/// proves the record was served from memory, since an RPC fetch would have
+/// found nothing and cloned the account as-is.
+#[tokio::test]
+async fn test_delegated_account_resolves_from_mirror_without_record_rpc() {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account = delegated_dlp_account(vec![1, 2, 3, 4]);
+    let (ctx, mirror) = setup_with_mirror(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let deleg_record_pubkey = add_delegation_record_to_mirror(
+        &mirror,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        50,
+    );
+    mirror.test_set_watermark(CURRENT_SLOT);
+
+    let calls_before = ctx.rpc_client.single_account_fetches()
+        + ctx.rpc_client.multi_account_fetches();
+
+    ctx.fetch_cloner
+        .fetch_and_clone_accounts(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("fetch and clone should succeed");
+
+    let cloned = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned");
+    let mut expected =
+        delegated_account_shared_with_owner(&account, account_owner);
+    expected.set_remote_slot(CURRENT_SLOT);
+    assert_eq!(
+        cloned, expected,
+        "record authority/owner must come from the mirror"
+    );
+
+    // Same call count as the RPC-record path (initial fetch + resolution
+    // fetch), but the resolution fetch carries only the account: the record
+    // is not in the RPC mock at all, so any record fetch would have changed
+    // the delegated outcome asserted above.
+    let calls = ctx.rpc_client.single_account_fetches()
+        + ctx.rpc_client.multi_account_fetches()
+        - calls_before;
+    assert_eq!(calls, 2, "no extra RPC calls beyond the account fetches");
+    assert!(ctx
+        .accounts_bank
+        .get_account(&deleg_record_pubkey)
+        .is_none());
+}
+
+/// An entry the mirror cannot prove fresh (entry slot and watermark both
+/// behind the requested slot) must fall back to the RPC record.
+#[tokio::test]
+async fn test_stale_mirror_entry_falls_back_to_rpc_record() {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account = delegated_dlp_account(vec![5, 6]);
+    let (ctx, mirror) = setup_with_mirror(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    // Mirror entry provable only up to slot 90 -- lookups at CURRENT_SLOT
+    // must not use it. The RPC mock carries the authoritative record.
+    add_delegation_record_to_mirror(
+        &mirror,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        50,
+    );
+    mirror.test_set_watermark(90);
+    add_delegation_record_for(
+        &ctx.rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    ctx.fetch_cloner
+        .fetch_and_clone_accounts(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("fetch and clone should succeed");
+
+    let cloned = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned");
+    assert!(
+        cloned.delegated(),
+        "RPC fallback must still resolve the record"
+    );
+}
+
+/// Unparsable mirror bytes must fall back to the RPC record.
+#[tokio::test]
+async fn test_invalid_mirror_record_falls_back_to_rpc_record() {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account = delegated_dlp_account(vec![7]);
+    let (ctx, mirror) = setup_with_mirror(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let deleg_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    mirror.test_insert_record(deleg_record_pubkey, vec![255; 4], CURRENT_SLOT);
+    mirror.test_set_watermark(CURRENT_SLOT);
+    add_delegation_record_for(
+        &ctx.rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    ctx.fetch_cloner
+        .fetch_and_clone_accounts(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("fetch and clone should succeed");
+
+    let cloned = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned");
+    assert!(
+        cloned.delegated(),
+        "parse fallback must still resolve via RPC"
+    );
+}
+
+/// A tombstone never skips RPC: with no RPC record either, the account is
+/// cloned as-is (not delegated), exactly like today's no-record path.
+#[tokio::test]
+async fn test_mirror_tombstone_still_confirms_via_rpc() {
+    let validator_keypair = Keypair::new();
+    let account_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account = delegated_dlp_account(vec![8, 9]);
+    let (ctx, mirror) = setup_with_mirror(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let deleg_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(
+            &account_pubkey,
+        );
+    mirror.test_insert_tombstone(deleg_record_pubkey, CURRENT_SLOT);
+    mirror.test_set_watermark(CURRENT_SLOT);
+
+    ctx.fetch_cloner
+        .fetch_and_clone_accounts(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("fetch and clone should succeed");
+
+    let cloned = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned");
+    assert!(
+        !cloned.delegated(),
+        "tombstone must behave exactly like the no-record RPC result"
+    );
+}
+
+/// The dominant prod path: a program-source update for an unknown DLP-owned
+/// account is greedily cloned with the record served from the mirror -- the
+/// record is absent from the RPC mock, so delegation state proves the source.
+#[tokio::test]
+async fn test_greedy_discovery_resolves_record_from_mirror() {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_account = delegated_dlp_account(vec![1, 2, 3, 4]);
+    let (ctx, mirror) = setup_with_mirror(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_to_mirror(
+        &mirror,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        CURRENT_SLOT,
+    );
+    mirror.test_set_watermark(CURRENT_SLOT);
+
+    ctx.subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                delegated_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while ctx.accounts_bank.get_account(&account_pubkey).is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for greedy DLP discovery clone");
+
+    let cloned = ctx
+        .accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned");
+    assert!(cloned.delegated());
+    assert_eq!(cloned.owner(), &account_owner);
 }

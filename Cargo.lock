@@ -3661,6 +3661,7 @@ dependencies = [
  "magicblock-delegation-program-api",
  "magicblock-magic-program-api",
  "magicblock-metrics",
+ "magicblock-sync",
  "parking_lot",
  "scc",
  "solana-account 3.4.0",
@@ -4087,6 +4088,17 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "magicblock-sync"
+version = "0.1.0"
+source = "git+https://github.com/magicblock-labs/magicblock-sync.git?rev=f8932e36fb86e8121fef557ddb4cf5210db6482d#f8932e36fb86e8121fef557ddb4cf5210db6482d"
+dependencies = [
+ "futures",
+ "helius-laserstream",
+ "tokio",
  "tracing",
 ]
 

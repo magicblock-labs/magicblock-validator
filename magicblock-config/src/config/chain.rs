@@ -77,6 +77,9 @@ pub struct ChainLinkConfig {
 
     /// AML/Risk checks for post-delegation actions via Range API.
     pub risk: RiskConfig,
+
+    /// Delegation-record mirror fed from the magicblock-sync record firehose.
+    pub record_sync: RecordSyncConfig,
 }
 
 impl Default for ChainLinkConfig {
@@ -94,6 +97,35 @@ impl Default for ChainLinkConfig {
                 consts::DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS,
             ),
             risk: RiskConfig::default(),
+            record_sync: RecordSyncConfig::default(),
+        }
+    }
+}
+
+/// Configuration for the in-memory delegation-record mirror streamed from
+/// the magicblock-sync record firehose. On any mirror miss the validator
+/// falls back to fetching the record via RPC, so disabling this only costs
+/// upstream RPC traffic, never correctness.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RecordSyncConfig {
+    /// Enables the delegation-record mirror.
+    pub enabled: bool,
+    /// Laserstream gRPC endpoint. Defaults to the first gRPC remote.
+    pub endpoint: Option<Url>,
+    /// API key for the endpoint. Defaults to the first gRPC remote's key.
+    pub api_key: Option<String>,
+    /// Maximum number of record entries retained in the mirror.
+    pub capacity: usize,
+}
+
+impl Default for RecordSyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            endpoint: None,
+            api_key: None,
+            capacity: consts::DEFAULT_RECORD_SYNC_CAPACITY,
         }
     }
 }
