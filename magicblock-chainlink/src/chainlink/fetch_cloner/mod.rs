@@ -2471,11 +2471,17 @@ where
                 break;
             }
         }
+        // The RPC kept serving pre-delegation (or still-undelegating) state.
+        // Requeue for strictly newer evidence — a fresh record update or the
+        // mirror watermark passing the failed generation — so a later record
+        // state re-triggers discovery instead of waiting for on-demand
+        // access, as the replaced re-parking did.
         warn!(
             pubkey = %pubkey,
             slot,
-            "Colliding delegated account did not settle at the update slot; on-demand cloning remains the backstop"
+            "Colliding delegated account did not settle at the update slot; requeueing for newer record evidence"
         );
+        self.schedule_collision_recheck(pubkey, slot + 1);
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(
