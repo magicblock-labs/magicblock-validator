@@ -245,6 +245,14 @@ reset = false
 # Chainlink (cloning pipeline)
 # ==============================================================================
 [chainlink]
+# Transport for base-chain account subscriptions. "grpc" is the only
+# supported production transport; "ws" exists for local/dev validators
+# without a geyser gRPC endpoint. With "grpc" configured but no gRPC remote
+# available, the validator logs an error and runs degraded on websockets.
+# Default: "grpc"
+# Env: MBV_CHAINLINK__SUBSCRIPTION_TRANSPORT
+subscription-transport = "grpc"
+
 # Maximum number of accounts to monitor for price updates.
 # Default: 5000
 # Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS

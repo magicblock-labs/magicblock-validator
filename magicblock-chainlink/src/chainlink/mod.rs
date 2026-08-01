@@ -406,13 +406,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             endpoints,
         )
         .await;
+        let rap_config = config
+            .remote_account_provider
+            .clone()
+            .with_subscription_transport(
+                chainlink_config.subscription_transport,
+            );
         let rap_config = if record_mirror.is_some() {
-            config
-                .remote_account_provider
-                .clone()
-                .with_program_subs(Default::default())
+            rap_config.with_program_subs(Default::default())
         } else {
-            config.remote_account_provider.clone()
+            rap_config
         };
 
         // Extract accounts provider and create fetch cloner while connecting

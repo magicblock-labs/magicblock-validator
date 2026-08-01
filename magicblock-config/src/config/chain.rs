@@ -80,6 +80,13 @@ pub struct ChainLinkConfig {
 
     /// Delegation-record mirror fed from the magicblock-sync record firehose.
     pub record_sync: RecordSyncConfig,
+
+    /// Subscription transport for base-chain account updates. `grpc` is the
+    /// only supported production transport; `ws` exists for local/dev
+    /// validators without a geyser gRPC endpoint. With `grpc` configured but
+    /// no gRPC remote available, the validator logs an error and runs
+    /// degraded on websockets.
+    pub subscription_transport: SubscriptionTransport,
 }
 
 impl Default for ChainLinkConfig {
@@ -98,8 +105,24 @@ impl Default for ChainLinkConfig {
             ),
             risk: RiskConfig::default(),
             record_sync: RecordSyncConfig::default(),
+            subscription_transport: SubscriptionTransport::default(),
         }
     }
+}
+
+/// Transport used for base-chain account subscriptions.
+#[derive(
+    Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum SubscriptionTransport {
+    /// Yellowstone gRPC (laserstream): the production transport, with
+    /// confirmed filtering and from-slot replay.
+    #[default]
+    Grpc,
+    /// WebSocket pubsub: local/dev only (solana-test-validator has no
+    /// geyser gRPC plugin).
+    Ws,
 }
 
 /// Configuration for the in-memory delegation-record mirror streamed from

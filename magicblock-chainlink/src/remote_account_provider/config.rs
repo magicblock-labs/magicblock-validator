@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use magicblock_config::{
-    config::{GrpcConfig, LifecycleMode},
+    config::{GrpcConfig, LifecycleMode, SubscriptionTransport},
     consts::{
         DEFAULT_MAX_MONITORED_ACCOUNTS, DEFAULT_RESUBSCRIPTION_DELAY_MS,
         DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS,
@@ -24,6 +24,8 @@ pub struct RemoteAccountProviderConfig {
     /// Set of program accounts to always subscribe to as backup
     /// for direct account subs
     program_subs: HashSet<Pubkey>,
+    /// Transport used for base-chain account subscriptions.
+    subscription_transport: SubscriptionTransport,
     /// Delay between resubscribing to accounts after a pubsub
     /// reconnection
     resubscription_delay: Duration,
@@ -122,6 +124,18 @@ impl RemoteAccountProviderConfig {
         &self.program_subs
     }
 
+    pub fn subscription_transport(&self) -> SubscriptionTransport {
+        self.subscription_transport
+    }
+
+    pub fn with_subscription_transport(
+        mut self,
+        transport: SubscriptionTransport,
+    ) -> Self {
+        self.subscription_transport = transport;
+        self
+    }
+
     /// Replaces the startup program subscriptions.
     pub fn with_program_subs(mut self, program_subs: HashSet<Pubkey>) -> Self {
         self.program_subs = program_subs;
@@ -151,6 +165,7 @@ impl Default for RemoteAccountProviderConfig {
             lifecycle_mode: LifecycleMode::default(),
             enable_subscription_metrics: true,
             program_subs: vec![dlp_api::id()].into_iter().collect(),
+            subscription_transport: SubscriptionTransport::default(),
             resubscription_delay: std::time::Duration::from_millis(
                 DEFAULT_RESUBSCRIPTION_DELAY_MS,
             ),
