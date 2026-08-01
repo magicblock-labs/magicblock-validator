@@ -506,6 +506,10 @@ impl ExecutionTestEnv {
 impl Drop for ExecutionTestEnv {
     fn drop(&mut self) {
         self.shutdown.cancel();
+        // A deferred scheduler still owns detached executor threads holding
+        // ledger references; run its (already cancelled) shutdown path so
+        // RocksDB closes before the temp dir is removed and the process exits.
+        self.run_scheduler();
         if let Some(handle) = self.scheduler_thread.take() {
             let _ = handle.join();
         }
