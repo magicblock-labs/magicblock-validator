@@ -2778,6 +2778,8 @@ where
                 match self
                     .task_to_fetch_with_delegation_record(
                         pubkey,
+                        ResolvedAccountSharedData::Fresh(account.clone()),
+                        account.remote_slot(),
                         account.remote_slot(),
                         AccountFetchContext::subscription_update(
                             AccountFetchReason::DelegationRecord,
@@ -3981,33 +3983,64 @@ where
         Ok(final_result)
     }
 
+    /// Resolves an account with its delegation record, pairing the account
+    /// copy the caller already holds (at `account_slot`) with a mirrored
+    /// record when the pair is snapshot-consistent: the record must be
+    /// proven through `slot` AND unchanged since at or before
+    /// `account_slot`, so both sides describe the same chain state. That
+    /// path performs no RPC at all. Every other outcome runs the batched
+    /// two-account fetch, byte-for-byte the prior path.
     fn task_to_fetch_with_delegation_record(
         &self,
         pubkey: Pubkey,
+        account: ResolvedAccountSharedData,
+        account_slot: u64,
         slot: u64,
         fetch_context: AccountFetchContext,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&pubkey);
 
-        // A mirror hit is the record's state proven at `slot`, so only the
-        // account itself needs fetching. Any other outcome — including bytes
-        // that do not look like a record — keeps the batched two-account
-        // fetch, byte-for-byte the prior path.
-        if let Some(MirrorLookup::Hit { data, .. }) = self
+        if let Some(MirrorLookup::Hit {
+            data,
+            slot: record_slot,
+        }) = self
             .record_mirror
             .as_ref()
             .map(|mirror| mirror.get(&delegation_record_pubkey, slot))
         {
-            if is_delegation_record_data(&data) {
-                return self.task_to_fetch_with_mirrored_delegation_record(
-                    pubkey,
-                    delegation_record_pubkey,
-                    data,
+            use metrics::RecordMirrorLookupOutcome as Outcome;
+            if record_slot > account_slot {
+                // The record changed after the held account copy was taken;
+                // only the batched fetch can produce a consistent pair.
+                metrics::inc_record_mirror_lookup(Outcome::Stale);
+            } else if !is_delegation_record_data(&data) {
+                metrics::inc_record_mirror_lookup(Outcome::ParseFallback);
+            } else {
+                metrics::inc_record_mirror_lookup(Outcome::Hit);
+                trace!(
+                    pubkey = %pubkey,
+                    companion = %delegation_record_pubkey,
                     slot,
-                    fetch_context
-                        .with_reason(AccountFetchReason::DelegationRecord),
+                    "Pairing held account with mirrored delegation record"
                 );
+                let companion_account = ResolvedAccountSharedData::Fresh(
+                    AccountSharedData::from(Account {
+                        lamports: MIRRORED_RECORD_LAMPORTS,
+                        data,
+                        owner: dlp_api::id(),
+                        executable: false,
+                        rent_epoch: 0,
+                    }),
+                );
+                return task::spawn(async move {
+                    Ok(AccountWithCompanion {
+                        pubkey,
+                        account,
+                        companion_pubkey: delegation_record_pubkey,
+                        companion_account: Some(companion_account),
+                    })
+                });
             }
         }
 
@@ -4018,76 +4051,6 @@ where
             fetch_context.with_reason(AccountFetchReason::DelegationRecord),
             ChainlinkCompanionFetchKind::DelegationRecord,
         )
-    }
-
-    /// Companion-fetch variant for a delegation record already served by the
-    /// mirror: fetches only the primary account and synthesizes the record
-    /// companion from the mirrored bytes (downstream consumers only read the
-    /// companion's data).
-    fn task_to_fetch_with_mirrored_delegation_record(
-        &self,
-        pubkey: Pubkey,
-        delegation_record_pubkey: Pubkey,
-        record_data: Vec<u8>,
-        slot: u64,
-        fetch_context: AccountFetchContext,
-    ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let provider = self.remote_account_provider.clone();
-        let bank = self.accounts_bank.clone();
-        let fetch_count = self.fetch_count.clone();
-        task::spawn(async move {
-            trace!(
-                pubkey = %pubkey,
-                companion = %delegation_record_pubkey,
-                slot,
-                "Fetching account with mirrored delegation record"
-            );
-
-            fetch_count.fetch_add(1, Ordering::Relaxed);
-
-            let mut accs = provider
-                .try_get_multi_until_slots_match(
-                    &[pubkey],
-                    Some(MatchSlotsConfig {
-                        min_context_slot: Some(slot),
-                        ..MatchSlotsConfig::new(
-                            ChainlinkCompanionFetchKind::DelegationRecord,
-                        )
-                    }),
-                    fetch_context,
-                )
-                .await
-                .map_err(ChainlinkError::from)?;
-
-            let account = accs
-                .pop()
-                .and_then(|acc| match acc {
-                    RemoteAccount::Found(acc) => {
-                        acc.account.resolved_account_shared_data(bank.as_ref())
-                    }
-                    RemoteAccount::NotFound(_) => None,
-                })
-                .ok_or(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                    pubkey,
-                ))?;
-
-            let companion_account = ResolvedAccountSharedData::Fresh(
-                AccountSharedData::from(Account {
-                    lamports: MIRRORED_RECORD_LAMPORTS,
-                    data: record_data,
-                    owner: dlp_api::id(),
-                    executable: false,
-                    rent_epoch: 0,
-                }),
-            );
-
-            Ok(AccountWithCompanion {
-                pubkey,
-                account,
-                companion_pubkey: delegation_record_pubkey,
-                companion_account: Some(companion_account),
-            })
-        })
     }
 
     fn task_to_fetch_with_program_data(

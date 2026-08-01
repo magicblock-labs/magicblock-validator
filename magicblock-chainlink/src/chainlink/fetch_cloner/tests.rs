@@ -12258,14 +12258,14 @@ async fn test_delegated_account_resolves_from_mirror_without_record_rpc() {
         "record authority/owner must come from the mirror"
     );
 
-    // Same call count as the RPC-record path (initial fetch + resolution
-    // fetch), but the resolution fetch carries only the account: the record
-    // is not in the RPC mock at all, so any record fetch would have changed
-    // the delegated outcome asserted above.
+    // Only the initial classification fetch touches RPC: the mirrored
+    // record is paired with the already-held account copy, so resolution
+    // itself performs no fetch at all (the record is not in the RPC mock,
+    // so any record fetch would also have changed the outcome above).
     let calls = ctx.rpc_client.single_account_fetches()
         + ctx.rpc_client.multi_account_fetches()
         - calls_before;
-    assert_eq!(calls, 2, "no extra RPC calls beyond the account fetches");
+    assert_eq!(calls, 1, "resolution must not fetch when the mirror pairs");
     assert!(ctx
         .accounts_bank
         .get_account(&deleg_record_pubkey)

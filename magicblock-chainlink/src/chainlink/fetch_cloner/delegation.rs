@@ -209,9 +209,18 @@ where
     let mirrored = this.record_mirror.as_ref().and_then(|mirror| match mirror
         .get(&delegation_record_pubkey, min_context_slot)
     {
-        MirrorLookup::Hit { data, .. } => this
-            .parse_delegation_record(&data, delegation_record_pubkey)
-            .ok(),
+        MirrorLookup::Hit { data, .. } => {
+            use metrics::RecordMirrorLookupOutcome as Outcome;
+            let parsed = this
+                .parse_delegation_record(&data, delegation_record_pubkey)
+                .ok();
+            metrics::inc_record_mirror_lookup(if parsed.is_some() {
+                Outcome::Hit
+            } else {
+                Outcome::ParseFallback
+            });
+            parsed
+        }
         MirrorLookup::Tombstone { .. } | MirrorLookup::Miss => None,
     });
 

@@ -209,16 +209,15 @@ DLP-owned accounts must be resolved with their delegation record before cloning:
 
 1. Derive `delegation_record_pda_from_delegated_account(account_pubkey)`.
 2. Acquire a `DelegationRecord` subscription reason for the record PDA.
-3. Consult the optional `DelegationRecordMirror` (`chainlink/record_mirror.rs`), an in-memory mirror of all on-chain delegation records streamed via the magicblock-sync firehose. A hit proven at the requested slot (entry slot or live watermark past it) supplies the record bytes without RPC; the account is then fetched alone and the record companion is synthesized from mirror bytes. Every other outcome — miss, undelegation tombstone, stale entry, non-record bytes — falls through unchanged to the RPC path below. Absence in the mirror is never treated as "not delegated"; the mirror clears itself on stream interruption.
-4. Otherwise fetch account and delegation record with slot matching via `try_get_multi_until_slots_match`.
-5. Parse `DelegationRecord` and optional post-delegation actions.
-6. Apply local metadata:
+3. Fetch account and delegation record with slot matching via `try_get_multi_until_slots_match`.
+4. Parse `DelegationRecord` and optional post-delegation actions.
+5. Apply local metadata:
    - owner is set to `delegation_record.owner`,
    - `confined` is set when `authority == Pubkey::default()`,
    - `delegated` is set when authority is this validator or confined, except raw eATA PDAs are not marked delegated directly,
    - `commit_frequency_ms` is included only for accounts delegated/confined to this validator.
-7. If authority belongs to another validator, `delegated_to_other` is set on the clone request.
-8. Missing non-internal delegation records are reported in `FetchAndCloneResult::missing_delegation_record`.
+6. If authority belongs to another validator, `delegated_to_other` is set on the clone request.
+7. Missing non-internal delegation records are reported in `FetchAndCloneResult::missing_delegation_record`.
 
 Important caveats:
 

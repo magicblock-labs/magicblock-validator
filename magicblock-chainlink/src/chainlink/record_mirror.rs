@@ -185,15 +185,13 @@ impl DelegationRecordMirror {
         }
 
         match &entry.data {
-            Some(data) => {
-                metrics::inc_record_mirror_lookup(
-                    RecordMirrorLookupOutcome::Hit,
-                );
-                MirrorLookup::Hit {
-                    data: data.clone(),
-                    slot: entry.slot,
-                }
-            }
+            // Not counted as a hit here: callers validate the bytes (and the
+            // pairing slot) first and count Hit/ParseFallback/Stale so the
+            // hit metric only reports lookups that actually skipped an RPC.
+            Some(data) => MirrorLookup::Hit {
+                data: data.clone(),
+                slot: entry.slot,
+            },
             None => {
                 metrics::inc_record_mirror_lookup(
                     RecordMirrorLookupOutcome::Tombstone,
@@ -209,23 +207,31 @@ impl DelegationRecordMirror {
     }
 }
 
-/// Resolves the firehose endpoint: explicit config wins, otherwise the
-/// first gRPC remote (which always carries an api key).
+/// Resolves the firehose endpoint. Each field independently prefers the
+/// explicit config value and falls back to the first gRPC remote (which
+/// always carries an api key), so partial overrides take effect.
 fn resolve_endpoint(
     config: &RecordSyncConfig,
     endpoints: &Endpoints,
 ) -> Option<(String, String)> {
-    if let (Some(endpoint), Some(api_key)) = (&config.endpoint, &config.api_key)
-    {
-        return Some((endpoint.to_string(), api_key.clone()));
-    }
-
-    endpoints.iter().find_map(|ep| match ep {
+    let grpc_remote = endpoints.iter().find_map(|ep| match ep {
         Endpoint::Grpc { url, api_key, .. } => {
             Some((url.clone(), api_key.clone()))
         }
         _ => None,
-    })
+    });
+
+    let endpoint = config
+        .endpoint
+        .as_ref()
+        .map(ToString::to_string)
+        .or_else(|| grpc_remote.as_ref().map(|(url, _)| url.clone()))?;
+    let api_key = config
+        .api_key
+        .clone()
+        .or_else(|| grpc_remote.map(|(_, key)| key))?;
+
+    Some((endpoint, api_key))
 }
 
 #[cfg(any(test, feature = "dev-context"))]
