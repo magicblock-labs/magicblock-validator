@@ -179,7 +179,9 @@ mod tests {
     use crate::{
         instruction_utils::InstructionUtils,
         magic_scheduled_base_intent::ScheduledIntentBundle,
-        test_utils::{ensure_started_validator, process_outbox_intent_instruction},
+        test_utils::{
+            ensure_started_validator, process_outbox_intent_instruction,
+        },
     };
 
     fn transaction_accounts_from_map(

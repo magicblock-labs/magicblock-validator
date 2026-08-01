@@ -436,7 +436,7 @@ pub enum OutboxIntentInstruction {
     /// - **2.** `[WRITE]`         Ephemeral Vault
     /// - **3.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     CloseOutboxIntent(u64),
-    
+
     /// Records the attempt to realize a scheduled commit on chain.
     ///
     /// # Account references
