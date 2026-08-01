@@ -2215,10 +2215,13 @@ where
         }
     }
 
-    /// Parks a collision candidate for one delayed mirror recheck. Dedup is
-    /// keyed by the derived record PDA with a monotonic slot; capacity
-    /// eviction silently drops the oldest candidate, matching the bounded
-    /// parking behavior this replaces.
+    /// Parks a collision candidate for delayed mirror rechecks. Dedup is
+    /// keyed by the derived record PDA with a monotonic slot. Admitted
+    /// candidates are never displaced: at capacity, newcomers are dropped
+    /// instead — parity with the parking this replaces, so genuine internal
+    /// firehose churn cannot evict a real collision candidate. Exactly one
+    /// worker owns each admitted entry, and only that worker removes it, so
+    /// entries and worker tasks stay 1:1 bounded by the map capacity.
     fn schedule_collision_recheck(&self, pubkey: Pubkey, slot: u64) {
         let record_pda = delegation_record_pda_from_delegated_account(&pubkey);
         {
@@ -2228,15 +2231,31 @@ where
                 pending.1 = pending.1.max(slot);
                 return;
             }
+            if rechecks.len() >= PENDING_COLLISION_RECHECKS_CAPACITY.get() {
+                trace!(
+                    pubkey = %pubkey,
+                    slot,
+                    "Dropping collision candidate; recheck queue is full"
+                );
+                return;
+            }
             rechecks.put(record_pda, (pubkey, slot));
         }
 
         let this = self.clone();
         task::spawn(async move {
-            for delay in COLLISION_RECHECK_DELAYS {
-                tokio::time::sleep(delay).await;
-                // Peek so replayed updates keep bumping the slot between
-                // attempts; evicted by capacity pressure -> dropped.
+            // Probes for the current generation, i.e. consecutive attempts
+            // that observed the same slot. A newer update bumps the slot in
+            // place and restarts the budget; every bump is driven by a real
+            // firehose update, which rate-limits the loop externally.
+            let mut generation_probes = 0usize;
+            let mut probed_slot = None;
+            loop {
+                let delay_idx =
+                    generation_probes.min(COLLISION_RECHECK_DELAYS.len() - 1);
+                tokio::time::sleep(COLLISION_RECHECK_DELAYS[delay_idx]).await;
+
+                // Read fresh each attempt: later updates bump the slot.
                 let candidate = this
                     .pending_collision_rechecks
                     .lock()
@@ -2245,6 +2264,7 @@ where
                 let Some((pubkey, slot)) = candidate else {
                     return;
                 };
+
                 let hit = this.record_mirror.as_ref().is_some_and(|mirror| {
                     matches!(
                         mirror.probe(&record_pda, slot),
@@ -2252,19 +2272,60 @@ where
                     )
                 });
                 if hit {
-                    this.pending_collision_rechecks.lock().pop(&record_pda);
-                    this.clone_colliding_delegated_account(pubkey, slot).await;
-                    return;
+                    // Remove only the generation that was probed: a newer
+                    // update racing in keeps the entry for the next attempt.
+                    let owned = {
+                        let mut rechecks =
+                            this.pending_collision_rechecks.lock();
+                        let matches_probed = rechecks
+                            .peek(&record_pda)
+                            .is_some_and(|&(_, s)| s == slot);
+                        if matches_probed {
+                            rechecks.pop(&record_pda);
+                        }
+                        matches_probed
+                    };
+                    if owned {
+                        this.clone_colliding_delegated_account(pubkey, slot)
+                            .await;
+                        return;
+                    }
+                    generation_probes = 0;
+                    probed_slot = None;
+                    continue;
                 }
-            }
-            if let Some((pubkey, slot)) =
-                this.pending_collision_rechecks.lock().pop(&record_pda)
-            {
-                trace!(
-                    pubkey = %pubkey,
-                    slot,
-                    "Dropping internal DLP program subscription update (no record after rechecks)"
-                );
+
+                if probed_slot == Some(slot) {
+                    generation_probes += 1;
+                } else {
+                    generation_probes = 1;
+                    probed_slot = Some(slot);
+                }
+                if generation_probes >= COLLISION_RECHECK_DELAYS.len() {
+                    // Give up only on the generation that exhausted its
+                    // probes; a newer one racing in keeps the worker going.
+                    let dropped = {
+                        let mut rechecks =
+                            this.pending_collision_rechecks.lock();
+                        let matches_probed = rechecks
+                            .peek(&record_pda)
+                            .is_some_and(|&(_, s)| s == slot);
+                        if matches_probed {
+                            rechecks.pop(&record_pda);
+                        }
+                        matches_probed
+                    };
+                    if dropped {
+                        trace!(
+                            pubkey = %pubkey,
+                            slot,
+                            "Dropping internal DLP program subscription update (no record after rechecks)"
+                        );
+                        return;
+                    }
+                    generation_probes = 0;
+                    probed_slot = None;
+                }
             }
         });
     }
