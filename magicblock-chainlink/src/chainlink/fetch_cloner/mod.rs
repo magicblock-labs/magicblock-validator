@@ -222,10 +222,15 @@ const PENDING_COLLISION_RECHECKS_CAPACITY: NonZeroUsize =
         }
     };
 
-/// Delay before re-consulting the record mirror for a collision candidate:
-/// the account update and its delegation record arrive on different
-/// streams, so the record may lag the account by a moment.
-const COLLISION_RECHECK_DELAY: Duration = Duration::from_secs(2);
+/// Backoff schedule for re-consulting the record mirror on a collision
+/// candidate: the account update and its delegation record arrive on
+/// different streams, so the record may lag the account — briefly in
+/// steady state, longer across a mirror reconnect that replays the stream.
+const COLLISION_RECHECK_DELAYS: [Duration; 3] = [
+    Duration::from_secs(2),
+    Duration::from_secs(8),
+    Duration::from_secs(30),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DlpProgramUpdateInterest {
@@ -2228,26 +2233,37 @@ where
 
         let this = self.clone();
         task::spawn(async move {
-            tokio::time::sleep(COLLISION_RECHECK_DELAY).await;
-            let candidate =
-                this.pending_collision_rechecks.lock().pop(&record_pda);
-            // Evicted by capacity pressure in the meantime -> dropped.
-            let Some((pubkey, slot)) = candidate else {
-                return;
-            };
-            let hit = this.record_mirror.as_ref().is_some_and(|mirror| {
-                matches!(
-                    mirror.probe(&record_pda, slot),
-                    MirrorLookup::Hit { .. }
-                )
-            });
-            if hit {
-                this.clone_colliding_delegated_account(pubkey, slot).await;
-            } else {
+            for delay in COLLISION_RECHECK_DELAYS {
+                tokio::time::sleep(delay).await;
+                // Peek so replayed updates keep bumping the slot between
+                // attempts; evicted by capacity pressure -> dropped.
+                let candidate = this
+                    .pending_collision_rechecks
+                    .lock()
+                    .peek(&record_pda)
+                    .copied();
+                let Some((pubkey, slot)) = candidate else {
+                    return;
+                };
+                let hit = this.record_mirror.as_ref().is_some_and(|mirror| {
+                    matches!(
+                        mirror.probe(&record_pda, slot),
+                        MirrorLookup::Hit { .. }
+                    )
+                });
+                if hit {
+                    this.pending_collision_rechecks.lock().pop(&record_pda);
+                    this.clone_colliding_delegated_account(pubkey, slot).await;
+                    return;
+                }
+            }
+            if let Some((pubkey, slot)) =
+                this.pending_collision_rechecks.lock().pop(&record_pda)
+            {
                 trace!(
                     pubkey = %pubkey,
                     slot,
-                    "Dropping internal DLP program subscription update (no record after recheck)"
+                    "Dropping internal DLP program subscription update (no record after rechecks)"
                 );
             }
         });

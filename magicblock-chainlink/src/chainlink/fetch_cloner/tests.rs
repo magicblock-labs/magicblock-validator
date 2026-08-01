@@ -6390,9 +6390,11 @@ async fn test_colliding_clone_keeps_pending_undelegation_locked() {
 
     drain_subscription_update_tasks(&fetch_cloner, Duration::from_secs(1))
         .await;
-    // Let the delayed mirror recheck fire and run the undelegation guard.
-    tokio::time::sleep(COLLISION_RECHECK_DELAY + Duration::from_millis(500))
-        .await;
+    // Let the first delayed mirror recheck fire and run the guard.
+    tokio::time::sleep(
+        COLLISION_RECHECK_DELAYS[0] + Duration::from_millis(500),
+    )
+    .await;
 
     let account_after = accounts_bank
         .get_account(&account_pubkey)
