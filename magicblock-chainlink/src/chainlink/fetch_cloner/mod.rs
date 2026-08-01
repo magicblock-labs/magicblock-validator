@@ -33,7 +33,9 @@ use magicblock_metrics::metrics::{
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
 use solana_account::{Account, AccountSharedData, ReadableAccount};
-use solana_account_decoder_client_types::UiAccountEncoding;
+use solana_account_decoder_client_types::{
+    UiAccountEncoding, UiDataSliceConfig,
+};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
@@ -85,7 +87,9 @@ use crate::{
         blacklisted_accounts::{
             blacklisted_accounts, programs_not_to_subscribe,
         },
-        record_mirror::{DelegationRecordMirror, MirrorLookup},
+        record_mirror::{
+            DelegationRecordMirror, DiscoveredDelegation, MirrorLookup,
+        },
         ObservedUndelegationRequest,
     },
     cloner::{
@@ -221,6 +225,11 @@ const PENDING_COLLISION_RECHECKS_CAPACITY: NonZeroUsize =
             panic!("PENDING_COLLISION_RECHECKS_CAPACITY must be non-zero")
         }
     };
+
+/// Interval between authority-record sweeps: an observational gPA counting
+/// on-chain records delegated to this validator, used to detect drift
+/// against locally delegated state once the DLP firehose is gone.
+const AUTHORITY_RECORD_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Backoff schedule for re-consulting the record mirror on a collision
 /// candidate: the account update and its delegation record arrive on
@@ -433,7 +442,96 @@ where
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
 
+        // Discovery from the record stream: delegations observed on chain
+        // (naming the delegated account) resolve through the same probe/
+        // recheck path as colliding firehose updates — mirror-proven
+        // authority, forced-refresh clone, no per-event RPC.
+        if let Some(discoveries) = me
+            .record_mirror
+            .as_ref()
+            .and_then(|mirror| mirror.take_discoveries())
+        {
+            me.clone().start_discovery_listener(discoveries);
+            me.clone().start_authority_record_sweep();
+        }
+
         me
+    }
+
+    /// Periodically counts on-chain delegation records naming this
+    /// validator as authority. Purely observational: with the DLP account
+    /// firehose gone, this gauge (compared against locally delegated
+    /// accounts) is the drift detector for missed record-stream events.
+    ///
+    /// Holds only a weak reference so the task ends with the FetchCloner.
+    fn start_authority_record_sweep(self: Arc<Self>) {
+        let weak = Arc::downgrade(&self);
+        drop(self);
+        task::spawn(async move {
+            loop {
+                tokio::time::sleep(AUTHORITY_RECORD_SWEEP_INTERVAL).await;
+                let Some(this) = weak.upgrade() else { return };
+                let config = RpcProgramAccountsConfig {
+                    filters: Some(vec![
+                        RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                            0,
+                            AccountDiscriminator::DelegationRecord
+                                .to_bytes()
+                                .to_vec(),
+                        )),
+                        // DelegationRecord.authority sits right after the
+                        // 8-byte discriminator.
+                        RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                            8,
+                            this.validator_pubkey.to_bytes().to_vec(),
+                        )),
+                    ]),
+                    account_config: RpcAccountInfoConfig {
+                        encoding: Some(UiAccountEncoding::Base64Zstd),
+                        data_slice: Some(UiDataSliceConfig {
+                            offset: 0,
+                            length: 0,
+                        }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                match this
+                    .remote_account_provider
+                    .get_program_accounts_with_config(&dlp_api::id(), config)
+                    .await
+                {
+                    Ok(records) => {
+                        metrics::set_authority_records_on_chain(
+                            records.len() as i64
+                        );
+                    }
+                    Err(error) => warn!(
+                        ?error,
+                        "authority record sweep failed; retrying next interval"
+                    ),
+                }
+            }
+        });
+    }
+
+    /// Holds only a weak reference so the task ends with the FetchCloner.
+    fn start_discovery_listener(
+        self: Arc<Self>,
+        mut discoveries: mpsc::Receiver<DiscoveredDelegation>,
+    ) {
+        let weak = Arc::downgrade(&self);
+        drop(self);
+        task::spawn(async move {
+            while let Some(discovered) = discoveries.recv().await {
+                let Some(this) = weak.upgrade() else { return };
+                this.resolve_internal_dlp_collision(
+                    discovered.delegated_account,
+                    discovered.slot,
+                )
+                .await;
+            }
+        });
     }
 
     /// Get the current fetch count

@@ -253,6 +253,16 @@ lazy_static::lazy_static! {
         "Latest confirmed slot the delegation-record mirror is caught up to",
     ).expect("static name is a valid metric identifier");
 
+    static ref CHAINLINK_AUTHORITY_RECORDS_ON_CHAIN_GAUGE: IntGauge = IntGauge::new(
+        "chainlink_authority_records_on_chain",
+        "On-chain delegation records naming this validator as authority, from the periodic sweep",
+    ).expect("static name is a valid metric identifier");
+
+    static ref GRPC_ACCOUNT_FILTER_UPDATES_COUNT: IntCounter = IntCounter::new(
+        "grpc_account_filter_updates_count",
+        "Subscription filter updates written to gRPC account streams (churn indicator)",
+    ).expect("static name is a valid metric identifier");
+
     static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
@@ -810,6 +820,8 @@ pub(crate) fn register() {
         register!(CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL);
         register!(PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT);
         register!(CHAINLINK_RECORD_MIRROR_LOOKUPS_TOTAL);
+        register!(CHAINLINK_AUTHORITY_RECORDS_ON_CHAIN_GAUGE);
+        register!(GRPC_ACCOUNT_FILTER_UPDATES_COUNT);
         register!(CHAINLINK_RECORD_MIRROR_LIVE_GAUGE);
         register!(CHAINLINK_RECORD_MIRROR_WATERMARK_GAUGE);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
@@ -1126,6 +1138,14 @@ pub fn inc_record_mirror_lookup(outcome: RecordMirrorLookupOutcome) {
     CHAINLINK_RECORD_MIRROR_LOOKUPS_TOTAL
         .with_label_values(&[outcome.as_str()])
         .inc();
+}
+
+pub fn set_authority_records_on_chain(count: i64) {
+    CHAINLINK_AUTHORITY_RECORDS_ON_CHAIN_GAUGE.set(count);
+}
+
+pub fn inc_grpc_account_filter_updates() {
+    GRPC_ACCOUNT_FILTER_UPDATES_COUNT.inc();
 }
 
 pub fn set_record_mirror_live(live: bool) {

@@ -122,6 +122,12 @@ impl RemoteAccountProviderConfig {
         &self.program_subs
     }
 
+    /// Replaces the startup program subscriptions.
+    pub fn with_program_subs(mut self, program_subs: HashSet<Pubkey>) -> Self {
+        self.program_subs = program_subs;
+        self
+    }
+
     pub fn resubscription_delay(&self) -> Duration {
         self.resubscription_delay
     }
