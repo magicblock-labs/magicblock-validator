@@ -152,7 +152,9 @@ where
 
     /// Recognizes freshly delegated accounts whose app data collides with an
     /// internal DLP discriminator via delegation-record sightings.
-    dlp_collision_tracker: Arc<PlMutex<DlpCollisionTracker>>,
+    /// Internal-looking DLP updates awaiting one delayed mirror recheck,
+    /// keyed by derived delegation-record PDA -> (pubkey, max update slot).
+    pending_collision_rechecks: Arc<PlMutex<LruCache<Pubkey, (Pubkey, u64)>>>,
 
     /// Tracks in-flight clone operations.
     /// The first caller to claim a key becomes the owner and performs
@@ -210,28 +212,20 @@ const PROGRAM_VERIFY_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64)
     None => panic!("PROGRAM_VERIFY_CACHE_CAPACITY must be non-zero"),
 };
 
-/// Capacity for recently sighted delegation-record update slots; sized to
-/// outlast DLP firehose churn across the SubMux debounce window.
-const SEEN_DELEGATION_RECORD_SLOTS_CAPACITY: NonZeroUsize =
-    match NonZeroUsize::new(65_536) {
-        Some(n) => n,
-        None => {
-            panic!("SEEN_DELEGATION_RECORD_SLOTS_CAPACITY must be non-zero")
-        }
-    };
-
-/// Capacity for internal-looking account updates parked until their
-/// delegation record is sighted. Once full, new unsighted candidates are
-/// dropped instead of evicting already parked candidates; this preserves
-/// account-first collision candidates across record-heavy firehose bursts
-/// while keeping memory bounded.
-const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
+/// Capacity for internal-looking account updates awaiting one delayed
+/// mirror recheck; bounds memory across record-heavy firehose bursts.
+const PENDING_COLLISION_RECHECKS_CAPACITY: NonZeroUsize =
     match NonZeroUsize::new(16_384) {
         Some(n) => n,
         None => {
-            panic!("PARKED_COLLISION_UPDATES_CAPACITY must be non-zero")
+            panic!("PENDING_COLLISION_RECHECKS_CAPACITY must be non-zero")
         }
     };
+
+/// Delay before re-consulting the record mirror for a collision candidate:
+/// the account update and its delegation record arrive on different
+/// streams, so the record may lag the account by a moment.
+const COLLISION_RECHECK_DELAY: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DlpProgramUpdateInterest {
@@ -240,101 +234,6 @@ enum DlpProgramUpdateInterest {
     ProcessAtaProjection,
     ProcessDirectlyWatched,
     DiscoverDelegatedAccount,
-}
-
-/// A parked internal-looking account update, reduced to pubkey + slot so
-/// the firehose cannot pin account payloads in memory.
-#[derive(Debug, Clone, Copy)]
-struct ParkedCollisionCandidate {
-    pubkey: Pubkey,
-    slot: u64,
-}
-
-/// Tracks delegation-record sightings from the DLP program subscription and
-/// internal-looking account updates parked until their record is sighted.
-/// A single lock keeps check-then-park atomic against sight-then-release, so
-/// an update can never be parked after its record sighting already passed.
-struct DlpCollisionTracker {
-    record_slots: LruCache<Pubkey, u64>,
-    /// Keyed by the derived delegation-record PDA of the parked account.
-    parked: LruCache<Pubkey, ParkedCollisionCandidate>,
-}
-
-impl DlpCollisionTracker {
-    fn new() -> Self {
-        Self {
-            record_slots: LruCache::new(SEEN_DELEGATION_RECORD_SLOTS_CAPACITY),
-            parked: LruCache::new(PARKED_COLLISION_UPDATES_CAPACITY),
-        }
-    }
-
-    /// Records a delegation-record sighting and releases a parked candidate
-    /// it covers. Monotonic: a stale replayed record can neither lower the
-    /// sighted slot nor consume a candidate parked at a newer slot.
-    fn sight_record(
-        &mut self,
-        record_pubkey: Pubkey,
-        slot: u64,
-    ) -> Option<ParkedCollisionCandidate> {
-        let sighted_slot =
-            self.record_slots.get_or_insert_mut(record_pubkey, || slot);
-        *sighted_slot = (*sighted_slot).max(slot);
-        let sighted_slot = *sighted_slot;
-        self.parked
-            .peek(&record_pubkey)
-            .is_some_and(|candidate| sighted_slot >= candidate.slot)
-            .then(|| self.parked.pop(&record_pubkey))
-            .flatten()
-    }
-
-    fn preserve_released_candidate(
-        &mut self,
-        candidate: ParkedCollisionCandidate,
-    ) -> bool {
-        let record_pubkey =
-            delegation_record_pda_from_delegated_account(&candidate.pubkey);
-        if !self.parked.contains(&record_pubkey)
-            && self.parked.len() >= PARKED_COLLISION_UPDATES_CAPACITY.get()
-        {
-            return false;
-        }
-
-        let parked = self.parked.get_or_insert_mut(record_pubkey, || candidate);
-        parked.slot = parked.slot.max(candidate.slot);
-        true
-    }
-
-    /// True when the pubkey's delegation record was sighted at or after the
-    /// update slot: a fresh delegation writes both accounts in one slot, so
-    /// the sighting marks a delegated account whose app data collides with an
-    /// internal DLP discriminator. Otherwise the update is parked so a late
-    /// (e.g. debounced) record sighting can release it.
-    fn check_or_park(&mut self, update: &ForwardedSubscriptionUpdate) -> bool {
-        let record_pubkey =
-            delegation_record_pda_from_delegated_account(&update.pubkey);
-        let sighted = self
-            .record_slots
-            .get(&record_pubkey)
-            .is_some_and(|&record_slot| record_slot >= update.account.slot());
-        if !sighted {
-            if !self.parked.contains(&record_pubkey)
-                && self.parked.len() >= PARKED_COLLISION_UPDATES_CAPACITY.get()
-            {
-                return false;
-            }
-
-            // Monotonic like sightings: a replayed older update must not
-            // downgrade the parked slot.
-            let parked = self.parked.get_or_insert_mut(record_pubkey, || {
-                ParkedCollisionCandidate {
-                    pubkey: update.pubkey,
-                    slot: update.account.slot(),
-                }
-            });
-            parked.slot = parked.slot.max(update.account.slot());
-        }
-        sighted
-    }
 }
 
 /// A pending fetch+clone operation claimed by one dedup call, resolved by
@@ -373,7 +272,7 @@ where
             programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
             program_verify_cache: self.program_verify_cache.clone(),
-            dlp_collision_tracker: self.dlp_collision_tracker.clone(),
+            pending_collision_rechecks: self.pending_collision_rechecks.clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
             pending_operation_timeout_ms: self
@@ -498,9 +397,9 @@ where
             program_verify_cache: Arc::new(PlMutex::new(LruCache::new(
                 PROGRAM_VERIFY_CACHE_CAPACITY,
             ))),
-            dlp_collision_tracker: Arc::new(PlMutex::new(
-                DlpCollisionTracker::new(),
-            )),
+            pending_collision_rechecks: Arc::new(PlMutex::new(LruCache::new(
+                PENDING_COLLISION_RECHECKS_CAPACITY,
+            ))),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
             pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
@@ -1823,44 +1722,26 @@ where
         // greedily cloned, so drop them before discovery issues remote
         // fetches. The exception is an account whose app data collides with
         // an internal discriminator: its delegation also writes the
-        // delegation record, whose sighting routes the account update to
-        // discovery — immediately when the record arrived first, or by
-        // releasing the parked update once the record arrives later.
+        // delegation record, which the mirror observes on its own stream —
+        // resolve via the mirror now, or after one short recheck covering
+        // the skew between the account and record streams. Only the program
+        // firehose is handled here; account-sourced internal payloads (e.g.
+        // directly watched records) proceed to normal processing.
         if !matches!(
             dlp_program_interest,
             Some(DlpProgramUpdateInterest::ProcessUndelegating)
                 | Some(DlpProgramUpdateInterest::ProcessAtaProjection)
         ) && is_dlp_owned_update
+            && is_internal_dlp_update
+            && matches!(update.source, SubscriptionSource::Program)
         {
-            if let Some(account) = fresh_update_account.as_ref() {
-                if is_internal_dlp_update {
-                    // Sight records from either source: SubMux dedup can
-                    // deliver a directly watched record account-sourced.
-                    let released = is_delegation_record_data(account.data())
-                        .then(|| {
-                            self.dlp_collision_tracker
-                                .lock()
-                                .sight_record(pubkey, update.account.slot())
-                        })
-                        .flatten();
-                    if let Some(released) = released {
-                        self.clone_released_collision_candidate(released).await;
-                    }
-                    // Only the program firehose is dropped/parked.
-                    if matches!(update.source, SubscriptionSource::Program)
-                        && !self
-                            .dlp_collision_tracker
-                            .lock()
-                            .check_or_park(&update)
-                    {
-                        trace!(
-                            pubkey = %pubkey,
-                            "Dropping internal DLP program subscription update"
-                        );
-                        return;
-                    }
-                }
-            }
+            // Internal-shaped bytes cannot be told apart from a colliding
+            // user account (record-shaped app data included), so every
+            // payload is probed; genuine internal accounts have no record
+            // at their derived PDA and drop after the recheck.
+            self.resolve_internal_dlp_collision(pubkey, update.account.slot())
+                .await;
+            return;
         }
 
         if self
@@ -2304,20 +2185,90 @@ where
         .await
     }
 
-    /// Deferred discovery for a parked candidate whose record was just
-    /// sighted: authority-gated like discovery, then cloned through the
-    /// deduped on-demand path. Only genuine collisions release.
-    async fn clone_released_collision_candidate(
+    /// A program-source internal-looking update is either genuine internal
+    /// DLP state or a delegated account whose app data collides with an
+    /// internal discriminator. Its delegation writes the record in the same
+    /// slot, so the mirror proves the collision: resolve immediately on a
+    /// mirror hit, or once more after a short delay covering record-stream
+    /// skew. A final miss drops the update — the on-demand ensure path
+    /// remains the backstop, exactly as unsighted parked candidates were
+    /// dropped before. Without a live mirror there is no proactive
+    /// collision discovery.
+    async fn resolve_internal_dlp_collision(&self, pubkey: Pubkey, slot: u64) {
+        let Some(mirror) = &self.record_mirror else {
+            trace!(
+                pubkey = %pubkey,
+                "Dropping internal DLP program subscription update (no record mirror)"
+            );
+            return;
+        };
+        let record_pda = delegation_record_pda_from_delegated_account(&pubkey);
+        if matches!(mirror.probe(&record_pda, slot), MirrorLookup::Hit { .. }) {
+            self.clone_colliding_delegated_account(pubkey, slot).await;
+        } else {
+            self.schedule_collision_recheck(pubkey, slot);
+        }
+    }
+
+    /// Parks a collision candidate for one delayed mirror recheck. Dedup is
+    /// keyed by the derived record PDA with a monotonic slot; capacity
+    /// eviction silently drops the oldest candidate, matching the bounded
+    /// parking behavior this replaces.
+    fn schedule_collision_recheck(&self, pubkey: Pubkey, slot: u64) {
+        let record_pda = delegation_record_pda_from_delegated_account(&pubkey);
+        {
+            let mut rechecks = self.pending_collision_rechecks.lock();
+            if let Some(pending) = rechecks.get_mut(&record_pda) {
+                // A replayed older update must not downgrade the slot.
+                pending.1 = pending.1.max(slot);
+                return;
+            }
+            rechecks.put(record_pda, (pubkey, slot));
+        }
+
+        let this = self.clone();
+        task::spawn(async move {
+            tokio::time::sleep(COLLISION_RECHECK_DELAY).await;
+            let candidate =
+                this.pending_collision_rechecks.lock().pop(&record_pda);
+            // Evicted by capacity pressure in the meantime -> dropped.
+            let Some((pubkey, slot)) = candidate else {
+                return;
+            };
+            let hit = this.record_mirror.as_ref().is_some_and(|mirror| {
+                matches!(
+                    mirror.probe(&record_pda, slot),
+                    MirrorLookup::Hit { .. }
+                )
+            });
+            if hit {
+                this.clone_colliding_delegated_account(pubkey, slot).await;
+            } else {
+                trace!(
+                    pubkey = %pubkey,
+                    slot,
+                    "Dropping internal DLP program subscription update (no record after recheck)"
+                );
+            }
+        });
+    }
+
+    /// Discovery for an account whose app data collides with an internal
+    /// DLP discriminator, proven delegated by its mirrored record:
+    /// authority-gated like discovery, then cloned through the deduped
+    /// on-demand path with a forced refresh.
+    async fn clone_colliding_delegated_account(
         &self,
-        candidate: ParkedCollisionCandidate,
+        pubkey: Pubkey,
+        slot: u64,
     ) {
         // A pre-delegation bank copy must be force-refreshed; only a
-        // delegated copy at the sighted slot or newer settles the candidate.
+        // delegated copy at the update slot or newer settles the candidate.
         let fresh_delegated_in_bank = self
             .accounts_bank
-            .get_account(&candidate.pubkey)
+            .get_account(&pubkey)
             .is_some_and(|in_bank| {
-                in_bank.delegated() && in_bank.remote_slot() >= candidate.slot
+                in_bank.delegated() && in_bank.remote_slot() >= slot
             });
         if fresh_delegated_in_bank {
             return;
@@ -2332,22 +2283,22 @@ where
             .with_reason(AccountFetchReason::DelegationRecord);
         let companion_fetch_log_context = CompanionFetchLogContext {
             origin: record_context.clone(),
-            primary_pubkey: candidate.pubkey,
-            context_slot: candidate.slot,
+            primary_pubkey: pubkey,
+            context_slot: slot,
         };
         let Some((deleg_record, _)) = self
             .fetch_and_parse_delegation_record(
-                candidate.pubkey,
-                candidate.slot,
+                pubkey,
+                slot,
                 record_context,
                 companion_fetch_log_context,
             )
             .await
         else {
             trace!(
-                pubkey = %candidate.pubkey,
-                slot = candidate.slot,
-                "Released collision candidate has no resolvable delegation record; falling back to on-demand cloning"
+                pubkey = %pubkey,
+                slot = slot,
+                "Colliding delegated account has no resolvable delegation record; falling back to on-demand cloning"
             );
             return;
         };
@@ -2357,27 +2308,27 @@ where
         if !is_delegated_to_us {
             metrics::inc_discovered_dlp_update_delegated_elsewhere();
             trace!(
-                pubkey = %candidate.pubkey,
+                pubkey = %pubkey,
                 authority = %deleg_record.authority,
-                "Ignoring released collision candidate delegated elsewhere"
+                "Ignoring colliding delegated account delegated elsewhere"
             );
             return;
         }
         // The deduped fetch can join an in-flight pre-delegation owner and
-        // settle stale; retry until the bank reflects the sighted delegation
-        // (at the sighted slot itself only a delegated copy settles).
+        // settle stale; retry until the bank reflects the mirrored delegation
+        // (at the update slot itself only a delegated copy settles).
         const MAX_RELEASE_CLONE_ATTEMPTS: usize = 3;
         for _ in 0..MAX_RELEASE_CLONE_ATTEMPTS {
-            // The candidate may have been parked before local undelegation
-            // started. Do not let its later record sighting bypass the normal
+            // The update may predate a local undelegation that started in
+            // the meantime. Do not let the mirrored record bypass the normal
             // confirmation check and overwrite protected local state.
             if self
                 .accounts_bank
-                .get_account(&candidate.pubkey)
+                .get_account(&pubkey)
                 .is_some_and(|in_bank| {
                     in_bank.undelegating()
                         && account_still_undelegating_on_chain(
-                            &candidate.pubkey,
+                            &pubkey,
                             true,
                             in_bank.remote_slot(),
                             Some(deleg_record),
@@ -2386,30 +2337,30 @@ where
                 })
             {
                 trace!(
-                    pubkey = %candidate.pubkey,
-                    slot = candidate.slot,
-                    "Ignoring released collision candidate while local undelegation remains pending"
+                    pubkey = %pubkey,
+                    slot = slot,
+                    "Ignoring colliding delegated account while local undelegation remains pending"
                 );
                 return;
             }
 
             let result = match self
                 .fetch_and_clone_accounts_with_dedup_forced_refresh(
-                    &[candidate.pubkey],
+                    &[pubkey],
                     None,
-                    Some(candidate.slot),
+                    Some(slot),
                     fetch_context.clone(),
-                    &HashSet::from([candidate.pubkey]),
-                    Some((candidate.pubkey, deleg_record.delegation_slot)),
+                    &HashSet::from([pubkey]),
+                    Some((pubkey, deleg_record.delegation_slot)),
                 )
                 .await
             {
                 Ok(result) => result,
                 Err(err) => {
                     warn!(
-                        pubkey = %candidate.pubkey,
+                        pubkey = %pubkey,
                         error = %err,
-                        "Failed to clone released colliding delegated account"
+                        "Failed to clone colliding delegated account"
                     );
                     return;
                 }
@@ -2418,21 +2369,20 @@ where
                 .not_found_on_chain
                 .iter()
                 .chain(result.missing_delegation_record.iter())
-                .any(|(missing_pubkey, _)| missing_pubkey == &candidate.pubkey);
+                .any(|(missing_pubkey, _)| missing_pubkey == &pubkey);
             if unresolvable {
                 trace!(
-                    pubkey = %candidate.pubkey,
-                    slot = candidate.slot,
+                    pubkey = %pubkey,
+                    slot = slot,
                     ?result,
-                    "Released collision candidate no longer resolvable on chain"
+                    "Colliding delegated account no longer resolvable on chain"
                 );
                 return;
             }
-            let in_bank = self.accounts_bank.get_account(&candidate.pubkey);
+            let in_bank = self.accounts_bank.get_account(&pubkey);
             let settled = in_bank.as_ref().is_some_and(|in_bank| {
-                in_bank.remote_slot() > candidate.slot
-                    || (in_bank.remote_slot() == candidate.slot
-                        && in_bank.delegated())
+                in_bank.remote_slot() > slot
+                    || (in_bank.remote_slot() == slot && in_bank.delegated())
             });
             if settled {
                 return;
@@ -2444,15 +2394,10 @@ where
                 break;
             }
         }
-        let preserved = self
-            .dlp_collision_tracker
-            .lock()
-            .preserve_released_candidate(candidate);
         warn!(
-            pubkey = %candidate.pubkey,
-            slot = candidate.slot,
-            preserved,
-            "Released collision candidate did not settle at the sighted slot; preserving it for a later delegation-record sighting"
+            pubkey = %pubkey,
+            slot,
+            "Colliding delegated account did not settle at the update slot; on-demand cloning remains the backstop"
         );
     }
 

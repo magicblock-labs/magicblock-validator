@@ -173,32 +173,57 @@ impl DelegationRecordMirror {
     /// update, so an entry unchanged while the watermark advanced past the
     /// requested slot is that record's current state.
     pub fn get(&self, record: &Pubkey, min_context_slot: u64) -> MirrorLookup {
+        let (lookup, non_hit_outcome) = self.lookup(record, min_context_slot);
+        // A hit is not counted here: callers validate the bytes (and the
+        // pairing slot) first and count Hit/ParseFallback/Stale so the hit
+        // metric only reports lookups that actually skipped an RPC.
+        if let Some(outcome) = non_hit_outcome {
+            metrics::inc_record_mirror_lookup(outcome);
+        }
+        lookup
+    }
+
+    /// Like [`Self::get`] but without lookup metrics: for discovery probes
+    /// where a miss is the expected common case and would drown the
+    /// RPC-fallback-rate signal the metrics exist to expose.
+    pub fn probe(
+        &self,
+        record: &Pubkey,
+        min_context_slot: u64,
+    ) -> MirrorLookup {
+        self.lookup(record, min_context_slot).0
+    }
+
+    fn lookup(
+        &self,
+        record: &Pubkey,
+        min_context_slot: u64,
+    ) -> (MirrorLookup, Option<RecordMirrorLookupOutcome>) {
         let mut inner = self.inner.lock();
         let fresh_watermark = inner.live && inner.watermark >= min_context_slot;
         let Some(entry) = inner.entries.get(record) else {
-            metrics::inc_record_mirror_lookup(RecordMirrorLookupOutcome::Miss);
-            return MirrorLookup::Miss;
+            return (MirrorLookup::Miss, Some(RecordMirrorLookupOutcome::Miss));
         };
 
         if entry.slot < min_context_slot && !fresh_watermark {
-            metrics::inc_record_mirror_lookup(RecordMirrorLookupOutcome::Stale);
-            return MirrorLookup::Miss;
+            return (
+                MirrorLookup::Miss,
+                Some(RecordMirrorLookupOutcome::Stale),
+            );
         }
 
         match &entry.data {
-            // Not counted as a hit here: callers validate the bytes (and the
-            // pairing slot) first and count Hit/ParseFallback/Stale so the
-            // hit metric only reports lookups that actually skipped an RPC.
-            Some(data) => MirrorLookup::Hit {
-                data: data.clone(),
-                slot: entry.slot,
-            },
-            None => {
-                metrics::inc_record_mirror_lookup(
-                    RecordMirrorLookupOutcome::Tombstone,
-                );
-                MirrorLookup::Tombstone { slot: entry.slot }
-            }
+            Some(data) => (
+                MirrorLookup::Hit {
+                    data: data.clone(),
+                    slot: entry.slot,
+                },
+                None,
+            ),
+            None => (
+                MirrorLookup::Tombstone { slot: entry.slot },
+                Some(RecordMirrorLookupOutcome::Tombstone),
+            ),
         }
     }
 
