@@ -15,7 +15,7 @@ pub use accounts::{AccountsDbConfig, BlockSize};
 pub use aperture::ApertureConfig;
 pub use chain::{
     AllowedProgram, ChainLinkConfig, ChainOperationConfig, CommittorConfig,
-    RecordSyncConfig, RiskConfig,
+    RecordSyncConfig, RiskConfig, SubscriptionTransport,
 };
 pub use grpc::GrpcConfig;
 pub use ledger::LedgerConfig;

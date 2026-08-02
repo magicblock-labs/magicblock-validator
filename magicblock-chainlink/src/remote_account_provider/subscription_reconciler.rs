@@ -395,16 +395,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             continue;
         }
 
-        let grpc_preferred = confirmed_missing_subscriptions
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .contains(&pubkey);
-        let has_grpc = grpc_snapshot.is_some();
-        let preferred_result = if grpc_preferred && has_grpc {
-            pubsub_client.prefer_grpc_subscription(pubkey).await
-        } else {
-            pubsub_client.subscribe(pubkey, None).await
-        };
+        let preferred_result = pubsub_client.subscribe(pubkey, None).await;
         if let Err(err) = &preferred_result {
             debug!(pubkey = %pubkey, error = ?err, "Secondary repair failed; restoring full coverage");
         }

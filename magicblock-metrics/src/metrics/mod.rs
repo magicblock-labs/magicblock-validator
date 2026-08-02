@@ -258,6 +258,11 @@ lazy_static::lazy_static! {
         "On-chain delegation records naming this validator as authority, from the periodic sweep",
     ).expect("static name is a valid metric identifier");
 
+    static ref SUBSCRIPTION_TRANSPORT_GRPC_GAUGE: IntGauge = IntGauge::new(
+        "chainlink_subscription_transport_grpc",
+        "1 while base-chain subscriptions run on gRPC (the supported production transport), 0 when degraded to or configured for websockets",
+    ).expect("static name is a valid metric identifier");
+
     static ref GRPC_ACCOUNT_FILTER_UPDATES_COUNT: IntCounter = IntCounter::new(
         "grpc_account_filter_updates_count",
         "Subscription filter updates written to gRPC account streams (churn indicator)",
@@ -822,6 +827,7 @@ pub(crate) fn register() {
         register!(CHAINLINK_RECORD_MIRROR_LOOKUPS_TOTAL);
         register!(CHAINLINK_AUTHORITY_RECORDS_ON_CHAIN_GAUGE);
         register!(GRPC_ACCOUNT_FILTER_UPDATES_COUNT);
+        register!(SUBSCRIPTION_TRANSPORT_GRPC_GAUGE);
         register!(CHAINLINK_RECORD_MIRROR_LIVE_GAUGE);
         register!(CHAINLINK_RECORD_MIRROR_WATERMARK_GAUGE);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
@@ -1142,6 +1148,10 @@ pub fn inc_record_mirror_lookup(outcome: RecordMirrorLookupOutcome) {
 
 pub fn set_authority_records_on_chain(count: i64) {
     CHAINLINK_AUTHORITY_RECORDS_ON_CHAIN_GAUGE.set(count);
+}
+
+pub fn set_subscription_transport_grpc(grpc: bool) {
+    SUBSCRIPTION_TRANSPORT_GRPC_GAUGE.set(grpc as i64);
 }
 
 pub fn inc_grpc_account_filter_updates() {
