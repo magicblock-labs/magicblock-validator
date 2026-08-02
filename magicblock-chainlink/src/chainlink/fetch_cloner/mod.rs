@@ -502,9 +502,17 @@ where
                     .await
                 {
                     Ok(records) => {
-                        metrics::set_authority_records_on_chain(
-                            records.len() as i64
-                        );
+                        // A delegated application account can mimic the
+                        // record layout (discriminator + authority bytes);
+                        // genuine records are never bank-resident, so
+                        // in-bank matches are collisions, not records.
+                        let count = records
+                            .iter()
+                            .filter(|(pubkey, _)| {
+                                this.accounts_bank.get_account(pubkey).is_none()
+                            })
+                            .count();
+                        metrics::set_authority_records_on_chain(count as i64);
                     }
                     Err(error) => warn!(
                         ?error,
