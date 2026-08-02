@@ -17,6 +17,7 @@ use magicblock_metrics::metrics::{
     chainlink_subscription_release_accounts_value, AccountFetchReason,
     ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
     ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
+    SubscriptionReleaseOutcome,
 };
 use solana_account::{Account, AccountSharedData};
 use solana_system_interface::program as system_program;

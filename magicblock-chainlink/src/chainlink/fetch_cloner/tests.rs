@@ -9,8 +9,8 @@ use magicblock_metrics::metrics::{
     chainlink_pending_fetch_accounts_value,
     chainlink_pending_fetch_waiters_gauge_value,
     chainlink_pending_fetch_waiters_value, AccountFetchContext,
-    AccountFetchReason, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome,
+    AccountFetchReason, ChainlinkCloneIntent, ChainlinkCloneRemoteResult,
+    ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
 };
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
