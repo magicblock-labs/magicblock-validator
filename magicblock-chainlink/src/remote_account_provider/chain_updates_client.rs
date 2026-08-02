@@ -29,19 +29,20 @@ const GRPC_LIVENESS_PROBE_TIMEOUT: std::time::Duration =
 const GRPC_LIVENESS_PROBE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(250);
 
-/// Subscribes to slot notifications and waits for the shared chain slot to
-/// advance, proving the endpoint actually delivers data.
+/// Subscribes to slot notifications and waits for one to arrive on THIS
+/// client's stream, proving the endpoint itself delivers data. The counter
+/// is endpoint-local, so a healthy sibling remote cannot satisfy the probe
+/// for a dead one.
 async fn probe_grpc_liveness(
     client: &ChainLaserClientImpl,
-    chain_slot: &Arc<AtomicU64>,
+    slot_updates_seen: &Arc<AtomicU64>,
 ) -> RemoteAccountProviderResult<()> {
-    let before = chain_slot.load(Ordering::Relaxed);
     client
         .subscribe(solana_sdk_ids::sysvar::clock::ID, None)
         .await?;
     let deadline = tokio::time::Instant::now() + GRPC_LIVENESS_PROBE_TIMEOUT;
     while tokio::time::Instant::now() < deadline {
-        if chain_slot.load(Ordering::Relaxed) > before {
+        if slot_updates_seen.load(Ordering::Relaxed) > 0 {
             return Ok(());
         }
         tokio::time::sleep(GRPC_LIVENESS_PROBE_INTERVAL).await;
@@ -102,8 +103,10 @@ impl ChainUpdatesClient {
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
                 );
 
+                let slot_updates_seen = Arc::new(AtomicU64::new(0));
                 let slots = Slots {
-                    chain_slot: ChainSlot::new(chain_slot.clone()),
+                    chain_slot: ChainSlot::new(chain_slot),
+                    slot_updates_seen: slot_updates_seen.clone(),
                 };
                 let client = ChainLaserClientImpl::new_from_url(
                     url,
@@ -121,7 +124,7 @@ impl ChainUpdatesClient {
                 // delivery before accepting the client; a failure here
                 // surfaces as a connect error, which the endpoint selection
                 // handles by degrading to websockets.
-                probe_grpc_liveness(&client, &chain_slot).await?;
+                probe_grpc_liveness(&client, &slot_updates_seen).await?;
                 Ok(ChainUpdatesClient::Laser(client))
             }
             Rpc { .. } => {
