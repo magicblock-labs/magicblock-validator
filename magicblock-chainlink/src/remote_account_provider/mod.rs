@@ -1701,6 +1701,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .into_iter()
             .cloned()
             .partition(|ep| matches!(ep, Endpoint::Grpc { .. }));
+        let grpc_selected = !grpc.is_empty();
         let selected = match config.subscription_transport() {
             SubscriptionTransport::Grpc if !grpc.is_empty() => {
                 metrics::set_subscription_transport_grpc(true);
@@ -1740,7 +1741,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 if matches!(
                     config.subscription_transport(),
                     SubscriptionTransport::Grpc
-                ) && !ws.is_empty() =>
+                ) && grpc_selected
+                    && !ws.is_empty() =>
             {
                 error!(
                     error = %err,
