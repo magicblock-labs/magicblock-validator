@@ -341,7 +341,9 @@ pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 // Stay below the kernel's ephemeral source-port range (32768+ on Linux,
 // 49152+ on macOS): the probed port is released before the validator binds
 // it, and an outbound connection grabbing it as source port in that window
-// fails the validator with EADDRINUSE.
+// fails the validator with EADDRINUSE. The remaining ~31k candidate ports
+// are far more than concurrent test validators ever need, so the narrower
+// range does not meaningfully increase probe collisions.
 const MIN_RANDOM_PORT: u16 = 1024;
 const MAX_RANDOM_PORT: u16 = 32767;
 const RANDOM_PORT_ATTEMPTS: usize = 128;
