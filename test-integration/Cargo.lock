@@ -4111,8 +4111,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-sync"
-version = "0.2.0"
-source = "git+https://github.com/magicblock-labs/magicblock-sync.git?rev=3c71985#3c719851767544d1ae003bbf53d74c82c14acb01"
+version = "0.3.0"
+source = "git+https://github.com/magicblock-labs/magicblock-sync.git?rev=24814f6#24814f6a389e53d0c7d2c04367de93e025d02b93"
 dependencies = [
  "futures",
  "helius-laserstream",

@@ -12314,3 +12314,118 @@ async fn test_greedy_discovery_falls_back_to_rpc_on_stale_mirror() {
     assert!(cloned.delegated());
     assert_eq!(cloned.owner(), &account_owner);
 }
+
+// -----------------
+// Record-stream-driven discovery
+// -----------------
+
+/// A delegation observed on the record stream clones the named account with
+/// zero record RPC: the record exists only in the mirror, so the delegated
+/// outcome proves the whole path (event -> probe -> forced-refresh clone).
+#[tokio::test]
+async fn test_record_stream_discovery_clones_new_delegation() {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_account = delegated_dlp_account(vec![1, 2, 3]);
+    let (ctx, mirror) = setup_with_mirror(
+        [(account_pubkey, delegated_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let record_pda = add_delegation_record_to_mirror(
+        &mirror,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        CURRENT_SLOT,
+    );
+
+    mirror.test_apply(magicblock_sync::AccountUpdate::DelegationObserved {
+        delegated_account: account_pubkey.to_bytes(),
+        record: record_pda.to_bytes(),
+        slot: CURRENT_SLOT,
+    });
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !ctx.accounts_bank.get_account(&account_pubkey).is_some_and(
+            |account| account.delegated() && account.owner() == &account_owner,
+        ) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for record-stream discovery clone");
+}
+
+/// A delegation observed for another validator is dropped by the authority
+/// gate without cloning.
+#[tokio::test]
+async fn test_record_stream_discovery_ignores_foreign_delegation() {
+    let validator_keypair = Keypair::new();
+    let other_validator = random_pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_account = delegated_dlp_account(vec![4, 5]);
+    let (ctx, mirror) = setup_with_mirror(
+        [(account_pubkey, delegated_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let record_pda = add_delegation_record_to_mirror(
+        &mirror,
+        account_pubkey,
+        other_validator,
+        account_owner,
+        CURRENT_SLOT,
+    );
+
+    mirror.test_apply(magicblock_sync::AccountUpdate::DelegationObserved {
+        delegated_account: account_pubkey.to_bytes(),
+        record: record_pda.to_bytes(),
+        slot: CURRENT_SLOT,
+    });
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(ctx.accounts_bank.get_account(&account_pubkey).is_none());
+    assert_eq!(ctx.cloner.clone_request_count(), 0);
+}
+
+/// An undelegation request observed on the record stream reaches the
+/// broadcast consumed by the undelegation-request service.
+#[tokio::test]
+async fn test_record_stream_forwards_undelegation_requests() {
+    use crate::chainlink::ObservedUndelegationRequest;
+
+    let mirror =
+        crate::chainlink::record_mirror::DelegationRecordMirror::new_for_tests(
+        );
+    let mut requests = mirror
+        .take_undelegation_requests()
+        .expect("first take yields the stream");
+
+    let delegated_account = random_pubkey();
+    let request_pda = random_pubkey();
+    mirror.test_apply(magicblock_sync::AccountUpdate::UndelegationRequested {
+        request_pda: request_pda.to_bytes(),
+        delegated_account: delegated_account.to_bytes(),
+        expires_at_slot: 250,
+        slot: 99,
+    });
+
+    let observed: ObservedUndelegationRequest =
+        requests.try_recv().expect("request must be forwarded");
+    assert_eq!(observed.request_pda, request_pda);
+    assert_eq!(observed.delegated_account, delegated_account);
+    assert_eq!(observed.expires_at_slot, 250);
+    assert_eq!(observed.observed_slot, 99);
+}

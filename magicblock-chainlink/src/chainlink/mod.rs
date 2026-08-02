@@ -396,6 +396,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             C,
         >,
     > {
+        // The mirror is constructed first: with its record stream live,
+        // delegation discovery is record-driven and the DLP account
+        // firehose (program subscription) is not established at all.
+        // Without a mirror (dev/test, or record-sync disabled) the program
+        // subscription and firehose-driven discovery remain the fallback.
+        let record_mirror = DelegationRecordMirror::try_from_config(
+            &chainlink_config.record_sync,
+            endpoints,
+        )
+        .await;
+        let rap_config = if record_mirror.is_some() {
+            config
+                .remote_account_provider
+                .clone()
+                .with_program_subs(Default::default())
+        } else {
+            config.remote_account_provider.clone()
+        };
+
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
         let (tx, rx) = tokio::sync::mpsc::channel(SUBSCRIPTION_UPDATE_LIMIT);
@@ -403,7 +422,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             endpoints,
             commitment,
             tx,
-            &config.remote_account_provider,
+            &rap_config,
             Some(chain_slot),
         )
         .await?;
@@ -415,11 +434,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 ledger_path,
             )?
             .map(Arc::new);
-            let record_mirror = DelegationRecordMirror::try_from_config(
-                &chainlink_config.record_sync,
-                endpoints,
-            )
-            .await;
+            // Undelegation requests observed on the record stream feed the
+            // same broadcast the firehose path used; the gPA poll remains
+            // the backstop either way.
+            if let Some(requests) = record_mirror
+                .as_ref()
+                .and_then(|mirror| mirror.take_undelegation_requests())
+            {
+                Self::forward_undelegation_requests(
+                    requests,
+                    undelegation_request_sender.clone(),
+                );
+            }
             let fetch_cloner =
                 FetchCloner::new_with_undelegation_request_sender(
                     &provider,
@@ -442,6 +468,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             fetch_cloner,
             undelegation_request_sender,
         )
+    }
+
+    /// Forwards undelegation requests observed on the record stream to the
+    /// broadcast consumed by the undelegation-request service.
+    fn forward_undelegation_requests(
+        mut requests: mpsc::Receiver<ObservedUndelegationRequest>,
+        sender: broadcast::Sender<ObservedUndelegationRequest>,
+    ) {
+        task::spawn(async move {
+            while let Some(request) = requests.recv().await {
+                // Send fails only when no service is listening; the gPA
+                // poll backstop covers that configuration.
+                let _ = sender.send(request);
+            }
+        });
     }
 
     fn subscribe_account_removals(

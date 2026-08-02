@@ -6,10 +6,26 @@ use magicblock_metrics::metrics::{self, RecordMirrorLookupOutcome};
 use magicblock_sync::{AccountUpdate, DlpSyncer};
 use parking_lot::Mutex as PlMutex;
 use solana_pubkey::Pubkey;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{info, warn};
 
-use crate::remote_account_provider::{Endpoint, Endpoints};
+use crate::{
+    chainlink::ObservedUndelegationRequest,
+    remote_account_provider::{Endpoint, Endpoints},
+};
+
+/// Capacity for pending discovery / undelegation-request events awaiting
+/// their chainlink consumers.
+const MIRROR_EVENT_CHANNEL_CAPACITY: usize = 4096;
+
+/// A delegation observed on chain, naming the delegated account (which the
+/// record PDA alone cannot reveal).
+#[derive(Debug, Clone, Copy)]
+pub struct DiscoveredDelegation {
+    pub delegated_account: Pubkey,
+    pub record: Pubkey,
+    pub slot: u64,
+}
 
 /// In-memory mirror of on-chain delegation records, fed by the
 /// magicblock-sync record firehose.
@@ -23,6 +39,13 @@ use crate::remote_account_provider::{Endpoint, Endpoints};
 /// falls back to an RPC fetch. Absence here is never "not delegated".
 pub struct DelegationRecordMirror {
     inner: PlMutex<MirrorState>,
+    /// Delegations observed in the tx stream, consumed by discovery.
+    discoveries_tx: Sender<DiscoveredDelegation>,
+    discoveries_rx: PlMutex<Option<Receiver<DiscoveredDelegation>>>,
+    /// Undelegation requests observed on chain.
+    undelegation_requests_tx: Sender<ObservedUndelegationRequest>,
+    undelegation_requests_rx:
+        PlMutex<Option<Receiver<ObservedUndelegationRequest>>>,
 }
 
 struct MirrorState {
@@ -114,13 +137,36 @@ impl DelegationRecordMirror {
     fn with_capacity(capacity: usize) -> Self {
         let capacity = NonZeroUsize::new(capacity)
             .unwrap_or(NonZeroUsize::new(1).expect("1 is non-zero"));
+        let (discoveries_tx, discoveries_rx) =
+            mpsc::channel(MIRROR_EVENT_CHANNEL_CAPACITY);
+        let (undelegation_requests_tx, undelegation_requests_rx) =
+            mpsc::channel(MIRROR_EVENT_CHANNEL_CAPACITY);
         Self {
             inner: PlMutex::new(MirrorState {
                 entries: LruCache::new(capacity),
                 watermark: 0,
                 live: false,
             }),
+            discoveries_tx,
+            discoveries_rx: PlMutex::new(Some(discoveries_rx)),
+            undelegation_requests_tx,
+            undelegation_requests_rx: PlMutex::new(Some(
+                undelegation_requests_rx,
+            )),
         }
+    }
+
+    /// Takes the discovery event stream; `None` after the first call.
+    pub fn take_discoveries(&self) -> Option<Receiver<DiscoveredDelegation>> {
+        self.discoveries_rx.lock().take()
+    }
+
+    /// Takes the undelegation-request event stream; `None` after the first
+    /// call.
+    pub fn take_undelegation_requests(
+        &self,
+    ) -> Option<Receiver<ObservedUndelegationRequest>> {
+        self.undelegation_requests_rx.lock().take()
     }
 
     fn apply(&self, update: AccountUpdate) {
@@ -130,6 +176,49 @@ impl DelegationRecordMirror {
             }
             AccountUpdate::Undelegated { record, slot } => {
                 self.insert(Pubkey::new_from_array(record), slot, None);
+            }
+            AccountUpdate::DelegationObserved {
+                delegated_account,
+                record,
+                slot,
+            } => {
+                let discovered = DiscoveredDelegation {
+                    delegated_account: Pubkey::new_from_array(
+                        delegated_account,
+                    ),
+                    record: Pubkey::new_from_array(record),
+                    slot,
+                };
+                // Lossy under extreme backpressure by design: a dropped
+                // discovery is healed by the on-demand ensure path.
+                if self.discoveries_tx.try_send(discovered).is_err() {
+                    warn!(
+                        delegated_account = %discovered.delegated_account,
+                        "discovery channel full; dropping observed delegation"
+                    );
+                }
+            }
+            AccountUpdate::UndelegationRequested {
+                request_pda,
+                delegated_account,
+                expires_at_slot,
+                slot,
+            } => {
+                let request = ObservedUndelegationRequest {
+                    request_pda: Pubkey::new_from_array(request_pda),
+                    delegated_account: Pubkey::new_from_array(
+                        delegated_account,
+                    ),
+                    expires_at_slot,
+                    observed_slot: slot,
+                };
+                let delegated = request.delegated_account;
+                if self.undelegation_requests_tx.try_send(request).is_err() {
+                    warn!(
+                        delegated_account = %delegated,
+                        "undelegation-request channel full; dropping (poll backstop covers it)"
+                    );
+                }
             }
             AccountUpdate::SlotAdvanced(slot) => {
                 let mut inner = self.inner.lock();
@@ -280,6 +369,11 @@ impl DelegationRecordMirror {
 
     pub fn test_clear(&self) {
         self.clear();
+    }
+
+    /// Drives a raw sync event through the consumer path.
+    pub fn test_apply(&self, update: AccountUpdate) {
+        self.apply(update);
     }
 }
 
