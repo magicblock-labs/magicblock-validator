@@ -37,6 +37,25 @@ use solana_sdk::{
     signer::Signer,
 };
 
+// Poll until an airdrop is reflected in the account's balance. On a freshly
+// started validator the first airdrop can take a few slots to land.
+async fn wait_for_funding(rpc_client: &MagicblockRpcClient, pubkey: &Pubkey) {
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+    const POLL_INTERVAL: std::time::Duration =
+        std::time::Duration::from_millis(50);
+
+    let start = std::time::Instant::now();
+    loop {
+        match rpc_client.get_account(pubkey).await {
+            Ok(Some(account)) if account.lamports > 0 => return,
+            _ if start.elapsed() > TIMEOUT => {
+                panic!("airdrop to {pubkey} not visible after {TIMEOUT:?}")
+            }
+            _ => tokio::time::sleep(POLL_INTERVAL).await,
+        }
+    }
+}
+
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
     let url = "http://localhost:7799".to_string();
@@ -78,6 +97,10 @@ impl TestFixture {
             )
             .await
             .unwrap();
+        // request_airdrop only submits the transfer; wait until the funds are
+        // visible or the first transaction a test sends may fail to debit the
+        // authority ("no record of a prior credit").
+        wait_for_funding(&rpc_client, &authority.pubkey()).await;
 
         let compute_budget_config = ComputeBudgetConfig::new(1_000_000);
         Self {
