@@ -125,6 +125,9 @@ pub enum RemoteAccountProviderError {
         "Failed to update gRPC subscription to {0} after {1} retries: {2}"
     )]
     GrpcSubscriptionUpdateFailed(String, usize, String),
+
+    #[error("Failed to fetch data slice for {0} at min context slot {1}: {2}")]
+    AccountDataSliceFetchFailed(Pubkey, u64, String),
 }
 impl From<solana_pubsub_client::pubsub_client::PubsubClientError>
     for RemoteAccountProviderError

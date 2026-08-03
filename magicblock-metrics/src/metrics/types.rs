@@ -1,4 +1,10 @@
-use std::fmt;
+use std::{
+    fmt,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use solana_signature::Signature;
 
@@ -82,6 +88,7 @@ pub enum AccountFetchEntrypoint {
     RpcGetAccount,
     RpcGetMultipleAccounts,
     SendTransaction(Signature),
+    SimulateTransaction(Signature),
     SubscriptionUpdate,
     ProjectAta,
     Internal,
@@ -93,6 +100,7 @@ impl AccountFetchEntrypoint {
             Self::RpcGetAccount => "rpc_get_account",
             Self::RpcGetMultipleAccounts => "rpc_get_multiple_accounts",
             Self::SendTransaction(_) => "send_transaction",
+            Self::SimulateTransaction(_) => "simulate_transaction",
             Self::SubscriptionUpdate => "subscription_update",
             Self::ProjectAta => "project_ata",
             Self::Internal => "internal",
@@ -101,7 +109,9 @@ impl AccountFetchEntrypoint {
 
     pub fn signature(&self) -> Option<&Signature> {
         match self {
-            Self::SendTransaction(sig) => Some(sig),
+            Self::SendTransaction(sig) | Self::SimulateTransaction(sig) => {
+                Some(sig)
+            }
             _ => None,
         }
     }
@@ -168,10 +178,11 @@ impl LabelValue for AccountFetchReason {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct AccountFetchContext {
     entrypoint: AccountFetchEntrypoint,
     reason: AccountFetchReason,
+    remote_account_claims: Arc<AtomicU64>,
 }
 
 impl AccountFetchContext {
@@ -179,7 +190,23 @@ impl AccountFetchContext {
         entrypoint: AccountFetchEntrypoint,
         reason: AccountFetchReason,
     ) -> Self {
-        Self { entrypoint, reason }
+        Self::new_with_claims_counter(
+            entrypoint,
+            reason,
+            Arc::new(AtomicU64::new(0)),
+        )
+    }
+
+    pub fn new_with_claims_counter(
+        entrypoint: AccountFetchEntrypoint,
+        reason: AccountFetchReason,
+        remote_account_claims: Arc<AtomicU64>,
+    ) -> Self {
+        Self {
+            entrypoint,
+            reason,
+            remote_account_claims,
+        }
     }
 
     pub fn rpc_get_account() -> Self {
@@ -199,6 +226,13 @@ impl AccountFetchContext {
     pub fn send_transaction(signature: Signature) -> Self {
         Self::new(
             AccountFetchEntrypoint::SendTransaction(signature),
+            AccountFetchReason::RequestedAccount,
+        )
+    }
+
+    pub fn simulate_transaction(signature: Signature) -> Self {
+        Self::new(
+            AccountFetchEntrypoint::SimulateTransaction(signature),
             AccountFetchReason::RequestedAccount,
         )
     }
@@ -228,6 +262,30 @@ impl AccountFetchContext {
 
     pub fn with_reason(self, reason: AccountFetchReason) -> Self {
         Self { reason, ..self }
+    }
+
+    pub fn should_count_remote_account_claims(&self) -> bool {
+        // We only count fetches due to direct user requests, not due to internal
+        // fetches, i.e. to get a companion account
+        if self.reason != AccountFetchReason::RequestedAccount {
+            return false;
+        }
+        matches!(
+            self.entrypoint,
+            AccountFetchEntrypoint::RpcGetAccount
+                | AccountFetchEntrypoint::RpcGetMultipleAccounts
+                | AccountFetchEntrypoint::SendTransaction(_)
+                | AccountFetchEntrypoint::SimulateTransaction(_)
+        )
+    }
+
+    pub fn add_remote_account_claims(&self, count: usize) {
+        self.remote_account_claims
+            .fetch_add(count as u64, Ordering::Relaxed);
+    }
+
+    pub fn remote_account_claims_value(&self) -> u64 {
+        self.remote_account_claims.load(Ordering::Relaxed)
     }
 
     pub fn signature(&self) -> Option<&Signature> {
@@ -601,7 +659,7 @@ impl LabelValue for ChainlinkEmptyPlaceholderStage {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum SubscriptionRegistrationOrigin {
     Fetch(AccountFetchContext),
     Internal,
@@ -843,6 +901,10 @@ mod tests {
                 "send_transaction",
             ),
             (
+                AccountFetchEntrypoint::SimulateTransaction(signature),
+                "simulate_transaction",
+            ),
+            (
                 AccountFetchEntrypoint::SubscriptionUpdate,
                 "subscription_update",
             ),
@@ -896,11 +958,15 @@ mod tests {
     }
 
     #[test]
-    fn account_fetch_context_signature_is_only_for_send_transaction() {
+    fn account_fetch_context_signature_is_for_transaction_entrypoints() {
         let signature = Signature::from([1u8; 64]);
         let send_context = AccountFetchContext::send_transaction(signature);
-        assert_eq!(send_context.signature(), Some(&signature));
-        assert_eq!(send_context.entrypoint().signature(), Some(&signature));
+        let simulate_context =
+            AccountFetchContext::simulate_transaction(signature);
+        for context in [&send_context, &simulate_context] {
+            assert_eq!(context.signature(), Some(&signature));
+            assert_eq!(context.entrypoint().signature(), Some(&signature));
+        }
 
         let contexts = [
             AccountFetchContext::rpc_get_account(),
@@ -916,5 +982,16 @@ mod tests {
             assert_eq!(context.signature(), None);
             assert_eq!(context.entrypoint().signature(), None);
         }
+    }
+
+    #[test]
+    fn simulation_requested_accounts_count_remote_account_claims() {
+        let context = AccountFetchContext::simulate_transaction(
+            Signature::from([1u8; 64]),
+        );
+        assert!(context.should_count_remote_account_claims());
+        assert!(!context
+            .with_reason(AccountFetchReason::ProgramData)
+            .should_count_remote_account_claims());
     }
 }

@@ -29,10 +29,12 @@ pub async fn setup_lookup_table(
         );
         MagicblockRpcClient::from(client)
     };
-    rpc_client
-        .request_airdrop(&validator_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
-        .await
-        .unwrap();
+    utils::airdrop_and_wait(
+        &rpc_client,
+        validator_auth,
+        777 * LAMPORTS_PER_SOL,
+    )
+    .await;
 
     let latest_slot = rpc_client.get_slot().await.unwrap();
     let sub_slot = 0;

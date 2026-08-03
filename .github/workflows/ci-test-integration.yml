@@ -548,6 +548,3 @@ jobs:
           INTEGRATION_TEST_BIN_DIR: ${{ github.workspace }}/magicblock-validator/_integration_test_bins
           CARGO_PROFILE_DEV_DEBUG: "0"
           CARGO_PROFILE_TEST_DEBUG: "0"
-          # A few integration tests have validator-timing races; allow up to
-          # 3 retries before failing the shard.
-          RUN_TEST_RETRIES: "3"
