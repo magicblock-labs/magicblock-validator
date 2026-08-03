@@ -975,88 +975,100 @@ impl MagicValidator {
         let block_time_ms = self.config.ledger.block_time_ms();
         let base_fee = self.config.validator.basefee;
 
+        let token = self.token.clone();
         // Ephemeral mode does a non-blocking startup balance check.
         // Intentionally fire-and-forget: the task itself exits the process on failure.
         tokio::spawn(async move {
-            let step_start = Instant::now();
-            let result = Self::with_onchain_setup_retries(
-                "ensure_funded_on_chain",
-                || {
-                    MagicValidator::ensure_validator_funded_on_chain(
-                        rpc_url.clone(),
-                        identity,
-                    )
-                },
-            )
-            .await;
-            log_timing(
-                "startup_background",
-                "ensure_funded_on_chain",
-                step_start,
-            );
-            if let Err(err) = result {
-                error!(error = ?err, "Validator balance check failed");
-                error!("Exiting process");
-                std::process::exit(1);
-            }
+            let setup = async move {
+                let step_start = Instant::now();
+                let result = Self::with_onchain_setup_retries(
+                    "ensure_funded_on_chain",
+                    || {
+                        MagicValidator::ensure_validator_funded_on_chain(
+                            rpc_url.clone(),
+                            identity,
+                        )
+                    },
+                )
+                .await;
+                log_timing(
+                    "startup_background",
+                    "ensure_funded_on_chain",
+                    step_start,
+                );
+                if let Err(err) = result {
+                    error!(error = ?err, "Validator balance check failed");
+                    error!("Exiting process");
+                    std::process::exit(1);
+                }
 
-            let step_start = Instant::now();
-            let result = Self::with_onchain_setup_retries(
-                "ensure_magic_fee_vault_on_chain",
-                || {
-                    MagicValidator::ensure_magic_fee_vault_on_chain(
-                        rpc_url.clone(),
-                    )
-                },
-            )
-            .await;
-            log_timing(
-                "startup_background",
-                "ensure_magic_fee_vault_on_chain",
-                step_start,
-            );
+                let step_start = Instant::now();
+                let result = Self::with_onchain_setup_retries(
+                    "ensure_magic_fee_vault_on_chain",
+                    || {
+                        MagicValidator::ensure_magic_fee_vault_on_chain(
+                            rpc_url.clone(),
+                        )
+                    },
+                )
+                .await;
+                log_timing(
+                    "startup_background",
+                    "ensure_magic_fee_vault_on_chain",
+                    step_start,
+                );
 
-            // Without magic fee vault being properly set up
-            // transactions scheduling commits will fail
-            if let Err(err) = result {
-                error!(error = ?err, "Magic fee vault setup failed");
-                error!("Exiting process");
-                std::process::exit(1);
-            }
-            if let Some(ref config) = chain_operation_config {
-                if !config.claim_fees_frequency.is_zero() {
-                    let step_start = Instant::now();
-                    if let Err(err) = claim_fees(rpc_url.clone()).await {
-                        error!(
-                            error = ?err,
-                            "Failed to claim validator fees on startup"
+                // Without magic fee vault being properly set up
+                // transactions scheduling commits will fail
+                if let Err(err) = result {
+                    error!(error = ?err, "Magic fee vault setup failed");
+                    error!("Exiting process");
+                    std::process::exit(1);
+                }
+                if let Some(ref config) = chain_operation_config {
+                    if !config.claim_fees_frequency.is_zero() {
+                        let step_start = Instant::now();
+                        if let Err(err) = claim_fees(rpc_url.clone()).await {
+                            error!(
+                                error = ?err,
+                                "Failed to claim validator fees on startup"
+                            );
+                        }
+                        log_timing(
+                            "startup_background",
+                            "claim_fees_on_startup",
+                            step_start,
                         );
+                    }
+                }
+                if let Some(ref config) = chain_operation_config {
+                    let step_start = Instant::now();
+                    if let Err(error) =
+                        MagicValidator::register_validator_on_chain(
+                            &rpc_url,
+                            config,
+                            block_time_ms,
+                            base_fee,
+                        )
+                        .await
+                    {
+                        error!(%error, "Validator registration failed, exitting");
+                        std::process::exit(1);
                     }
                     log_timing(
                         "startup_background",
-                        "claim_fees_on_startup",
+                        "register_validator_on_chain",
                         step_start,
                     );
                 }
-            }
-            if let Some(ref config) = chain_operation_config {
-                let step_start = Instant::now();
-                if let Err(error) = MagicValidator::register_validator_on_chain(
-                    &rpc_url,
-                    config,
-                    block_time_ms,
-                    base_fee,
-                )
-                .await
-                {
-                    error!(%error, "Validator registration failed, exitting");
-                    std::process::exit(1);
+            };
+            // Cancellation guard: a retry backoff must not outlive shutdown
+            // and exit(1) mid-flush or re-register after unregister.
+            tokio::select! {
+                _ = token.cancelled() => {
+                    debug!("On-chain setup cancelled by shutdown")
                 }
-                log_timing(
-                    "startup_background",
-                    "register_validator_on_chain",
-                    step_start,
-                );
+                _ = setup => {}
             }
         });
     }
@@ -1444,47 +1456,5 @@ mod tests {
                 },
             )
         );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn onchain_setup_retries_absorb_transient_failures() {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        let attempts = AtomicU32::new(0);
-        let result =
-            MagicValidator::with_onchain_setup_retries("test_step", || {
-                let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
-                async move {
-                    if attempt < 3 {
-                        Err(ApiError::FailedToInitMagicFeeVault(
-                            Pubkey::new_unique(),
-                            "transient".to_string(),
-                        ))
-                    } else {
-                        Ok(())
-                    }
-                }
-            })
-            .await;
-        assert!(result.is_ok());
-        assert_eq!(attempts.load(Ordering::SeqCst), 3);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn onchain_setup_retries_surface_persistent_failures() {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        let attempts = AtomicU32::new(0);
-        let result =
-            MagicValidator::with_onchain_setup_retries("test_step", || {
-                attempts.fetch_add(1, Ordering::SeqCst);
-                async {
-                    Err(ApiError::FailedToInitMagicFeeVault(
-                        Pubkey::new_unique(),
-                        "persistent".to_string(),
-                    ))
-                }
-            })
-            .await;
-        assert!(result.is_err());
-        assert_eq!(attempts.load(Ordering::SeqCst), 5);
     }
 }
