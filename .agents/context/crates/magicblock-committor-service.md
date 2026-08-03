@@ -24,7 +24,7 @@ End-to-end commit/undelegation semantics live in .agents/specs/validator-specifi
 
 Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-committor-service` change. Include changes to:
 
-- `CommittorService`, `BaseIntentCommittor`, `CommittorServiceExt`, channel messages, startup/shutdown, or cancellation semantics;
+- `CommittorProcessor`, `IntentExecutionService`, scheduling/result-dispatch semantics, startup/shutdown, or cancellation;
 - `ChainConfig`, `ComputeBudgetConfig`, action timeout behavior, RPC/websocket construction, or configured commitment assumptions;
 - intent scheduling, conflict detection, executor concurrency, backlog capacity, result broadcasting, or metrics;
 - `TaskInfoFetcher` commit nonce caching, `min_context_slot` behavior, retry policy, or cache reset rules;
@@ -41,11 +41,9 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 
 | Path | Role |
 |---|---|
-| `magicblock-committor-service/Cargo.toml` | Package metadata and dependencies on committor program, core, Magic Program, metrics, RPC client, TableMania, SQLite, and Solana crates. |
+| `magicblock-committor-service/Cargo.toml` | Package metadata and dependencies on committor program, core, Magic Program, metrics, RPC client, TableMania, AccountsDb, and Solana crates. |
 | `magicblock-committor-service/README.md` | High-level architecture notes for intent execution, schedulers, task builders, strategist, and delivery preparation. |
-| `src/lib.rs` | Public crate surface. Re-exports `ComputeBudgetConfig`, `DEFAULT_ACTIONS_TIMEOUT`, committor-program changeset types, `BaseIntentCommittor`, and `CommittorService`. |
-| `src/service.rs` | Actor-style service handle, `CommittorMessage`, `CommittorService::try_start`, `BaseIntentCommittor` trait, oneshot request API, and cancellation token. |
-| `src/service_ext.rs` | `CommittorServiceExt` wrapper that waits for broadcasted execution results by intent id. Used in tests and synchronous-style callers. |
+| `src/lib.rs` | Public crate surface. Re-exports `ComputeBudgetConfig`, `DEFAULT_ACTIONS_TIMEOUT`, and committor-program changeset types. |
 | `src/config.rs` and `src/compute_budget.rs` | Chain/RPC configuration, default action timeout, and per-task compute-budget helpers. |
 | `src/committor_processor.rs` | Constructs `MagicblockRpcClient`, `TableMania`, `IntentEngineHandle`, and `CacheTaskInfoFetcher`. `CommittorProcessor<D: BacklogDB>` exposes `schedule_intent_bundles`, `execute_intent_bundles`, `subscribe_for_results`, and `fetch_current_commit_nonces` directly as async methods. |
 | `src/intent_engine.rs` and `src/intent_engine/intent_channel.rs` | `IntentEngineHandle` wraps the executor factory and spawns `IntentExecutionEngine`. `IntentScheduleHandle`/`IntentStream` form the scheduling channel: bundles go to an mpsc channel when it has room, otherwise to the `BacklogDB` backlog, which is drained before the channel is polled again to preserve arrival order. |
@@ -58,7 +56,6 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `src/outbox/` | `OutboxClient` trait and `ScheduledBaseIntentMeta`/`IntentSentTransaction` (`mod.rs`); `InternalOutboxClient` production implementation that submits `set_intent_execution_stage`/`notify_commit_sent`/`close_intent` transactions and runs `accept_scheduled_intents` (`outbox_client.rs`); `InternalOutboxIntentBundlesReader`, which scans `AccountsDb` for outbox intent PDAs owned by the outbox intent program (`outbox_intent_bundles_reader.rs`). |
 | `magicblock-api/src/magic_validator.rs` | Starts the service at validator initialization: builds `InternalOutboxClient` and `CommittorProcessor<DummyIntentBacklog>`, then either `IntentExecutionService::disabled()` in replica mode or `IntentExecutionService::new(...)` otherwise, wires `MagicSysAdapter` to the processor for commit-nonce syscalls. |
 | `src/service.rs` | `IntentExecutionService<O, D>` (`Created`/`Started`/`Stopped`/`Disabled`/`Error` states) and `ServiceInner`: on start, recovers pending intents by scanning the outbox before accepting new ones, then periodically calls `OutboxClient::accept_scheduled_intents` and schedules the result with `CommittorProcessor`. |
-| `magicblock-account-cloner/src/account_cloner.rs` | Uses `BaseIntentCommittor` for lookup-table reservation around account cloning and diagnostic mapping of committor errors. |
 | `magicblock-api/src/magic_sys_adapter.rs` | Fetches current commit nonces through the committor service for Magic syscalls. |
 | `test-integration/test-committor-service/` | Integration coverage for delivery preparators, transaction preparators, intent executor flows, and local commit execution. |
 
@@ -69,6 +66,7 @@ Main upstream dependencies:
 - `magicblock-delegation-program-api` for delegation metadata PDA derivation and commit nonce/rent reimbursement reads;
 - `magicblock-rpc-client` for base-layer sends, confirmations, account reads, transaction diagnostics, slot/blockhash caching, and `min_context_slot` RPC calls;
 - `magicblock-table-mania` for ALT reservation, finalized table fetch, release, and GC;
+- `magicblock-accounts-db` for scanning/reading outbox intent PDAs during recovery and backlog pop;
 - `magicblock-core` for committed-account types and `ActionsCallbackScheduler`.
 
 ## Public API shape / Main public types and APIs
@@ -236,7 +234,7 @@ Cleanup closes prepared buffers and releases TableMania pubkeys. `IntentExecutio
 
 `CacheTaskInfoFetcher` caches commit nonces in a 10,000-entry LRU. It uses per-pubkey async mutexes acquired in sorted order to avoid A->B / B->A deadlocks, and a `retiring` map to keep evicted locks alive while in-flight requests still hold them. `fetch_next_commit_nonces` increments cached values and reserves the next nonce; `fetch_current_commit_nonces` reads/stores the current value without incrementing.
 
-`IntentExecutorImpl` resets cached nonces according to execution certainty. On any execution error, it resets all committed pubkeys because it cannot know what landed on chain. On successful undelegation paths, it resets only the pubkeys returned by `get_undelegate_intent_pubkeys()` and `get_commit_finalize_and_undelegate_intent_pubkeys()`. Other successfully committed pubkeys keep their incremented cached nonce, which avoids a chain re-fetch racing the just-landed finalize and reusing a stale nonce/buffer PDA.
+Each intent executor resets cached nonces according to execution certainty. On any execution error, it resets all committed pubkeys because it cannot know what landed on chain. On successful undelegation paths, it resets only the pubkeys returned by `get_undelegate_intent_pubkeys()` and `get_commit_finalize_and_undelegate_intent_pubkeys()`. Other successfully committed pubkeys keep their incremented cached nonce, which avoids a chain re-fetch racing the just-landed finalize and reusing a stale nonce/buffer PDA.
 
 Do not remove sorted lock acquisition or the retiring map without replacing the deadlock/race prevention. Commit nonce races can cause base-layer commit failures and stuck undelegations.
 
@@ -244,9 +242,9 @@ Do not remove sorted lock acquisition or the retiring map without replacing the 
 
 Task-info RPC reads use the maximum `remote_slot` across committed accounts as `min_context_slot` when fetching delegation metadata and diffable base accounts. This helps avoid building commits or standalone undelegate tasks against base-layer state older than the ER account snapshot, including stale rent-payer or owner-program requester metadata. The fetcher retries `Minimum context slot not reached` up to five times with short sleeps. Preserve this freshness check unless the broader account-sync/settlement contract changes.
 
-### Persistence is both status API and recovery state
+### The outbox intent PDA is both the status record and the recovery source
 
-SQLite rows are used by operator/status APIs and by restart recovery. Updating status mapping is not a cosmetic change: it affects which intents are recoverable, which accounts look failed/stuck, and which signatures are returned. Keep persisted enum string conversions compatible with existing rows.
+An outbox intent's `OutboxIntentBundleStatus` is read for diagnostics and is exactly what restart recovery scans for. Changing when or how that status advances is not a cosmetic change: it affects which intents are recoverable, which accounts look failed/stuck, and which signatures are returned. Keep `ExecutionStage`/`OutboxIntentBundleStatus` transitions backward compatible with PDAs already on-chain.
 
 ### Buffers, ALTs, and transaction fit
 
@@ -254,7 +252,7 @@ SQLite rows are used by operator/status APIs and by restart recovery. Updating s
 
 ### Per-intent uniqueness noop
 
-Intent transactions are otherwise built from fully deterministic inputs. After an undelegate/re-delegate cycle the delegation metadata nonce restarts, so a first commit (nonce 1) can be byte-identical to a prior instance's landed transaction: identical bytes yield the identical signature, the skip-preflight send is deduped by the network, and the status-based confirmer matches the old transaction — the intent reports success without executing. `IntentExecutorImpl::execute_inner` therefore passes `Some(intent_id)` as `uniqueness_nonce` to `TaskStrategist` for intents whose commit uses nonce <= 1 (and always for standalone actions). The strategist renders it as a constant-size spl-noop instruction carrying the intent id on every produced stage — the finalize stage needs the same protection, since without the noop its bytes contain nothing per-instance — and includes it in all fit checks. Retries of the same intent keep the same id, preserving intentional dedup. Commit-id recovery (`handle_commit_id_error`) re-tags the strategy when a stale-cache retry lands back on nonce 1. The noop program must exist on the base layer (deployed on mainnet/devnet; loaded from `test-integration/schedulecommit/elfs/noop.so` in integration configs).
+Intent transactions are otherwise built from fully deterministic inputs. After an undelegate/re-delegate cycle the delegation metadata nonce restarts, so a first commit (nonce 1) can be byte-identical to a prior instance's landed transaction: identical bytes yield the identical signature, the skip-preflight send is deduped by the network, and the status-based confirmer matches the old transaction — the intent reports success without executing. Each intent executor's `execute_inner` therefore passes `Some(intent_id)` as `uniqueness_nonce` to `TaskStrategist` for intents whose commit uses nonce <= 1 (and always for standalone actions). The strategist renders it as a constant-size spl-noop instruction carrying the intent id on every produced stage — the finalize stage needs the same protection, since without the noop its bytes contain nothing per-instance — and includes it in all fit checks. Retries of the same intent keep the same id, preserving intentional dedup. Commit-id recovery (`handle_commit_id_error`) re-tags the strategy when a stale-cache retry lands back on nonce 1. The noop program must exist on the base layer (deployed on mainnet/devnet; loaded from `test-integration/schedulecommit/elfs/noop.so` in integration configs).
 
 The same uniqueness nonce is appended to every independently signed buffer init, realloc, write, and cleanup transaction sent by `DeliveryPreparator`. Buffer PDAs are keyed by authority, account pubkey, and commit id; because the commit id restarts at 1 after re-delegation, those transactions could otherwise alias a prior delegation instance under the same cached base-layer blockhash. Reusing the intent id keeps retries of one intent idempotent while ensuring a later delegation instance produces distinct signatures. Keep the noop in every buffer lifecycle stage: protecting only initialization still allows an old resize, chunk write, or close status to be mistaken for the current operation.
 
@@ -288,15 +286,15 @@ Standalone actions are currently built through commit-task paths even when there
 
 ### Changing service API, startup, or shutdown
 
-Start with `src/service.rs`, `src/service/intent_client.rs`, `src/committor_processor.rs`, and `magicblock-api/src/magic_validator.rs`. Then inspect `magicblock-account-cloner/src/account_cloner.rs` and `magicblock-api/src/magic_sys_adapter.rs`. Check oneshot behavior, channel capacity/backpressure, cancellation, and whether consumers need errors instead of logged-only failures.
+Start with `src/service.rs`, `src/committor_processor.rs`, and `magicblock-api/src/magic_validator.rs`. Then inspect `magicblock-api/src/magic_sys_adapter.rs`. Check oneshot dispatcher behavior, channel/backlog capacity, the replica-mode `Disabled` state, cancellation, and whether consumers need errors instead of logged-only failures.
 
 ### Changing scheduling or concurrency
 
-Start with `src/intent_execution_manager/intent_scheduler.rs`, `intent_execution_engine.rs`, and tests in those files. Verify conflict sets include all committed accounts in mixed bundles, scheduler capacity remains bounded, semaphore permits are always released, and completion cannot corrupt blocked queues.
+Start with `src/intent_engine/intent_scheduler.rs`, `src/intent_engine/intent_execution_engine.rs`, and tests in those files. Verify conflict sets include all committed accounts in mixed bundles, scheduler capacity remains bounded, semaphore permits are always released, and completion cannot corrupt blocked queues.
 
 ### Changing commit nonce or metadata fetching
 
-Start with `src/intent_executor/task_info_fetcher.rs` and `src/tasks/task_builder.rs`. Inspect `magicblock-api/src/magic_sys_adapter.rs` for current nonce queries. Preserve sorted lock acquisition, cache reset behavior, `min_context_slot`, Delegation Program PDA derivation, and retry/error classification.
+Start with `src/tasks/task_info_fetcher.rs` and `src/tasks/task_builder.rs`. Inspect `magicblock-api/src/magic_sys_adapter.rs` for current nonce queries. Preserve sorted lock acquisition, cache reset behavior, `min_context_slot`, Delegation Program PDA derivation, and retry/error classification.
 
 ### Changing task construction or strategy selection
 
@@ -306,9 +304,9 @@ Start with `src/tasks/task_builder.rs`, `src/tasks/task_strategist.rs`, `src/tas
 
 Start with `src/transaction_preparator/mod.rs` and `delivery_preparator.rs`, then inspect `.agents/context/crates/magicblock-committor-program.md`, `.agents/context/crates/magicblock-table-mania.md`, and `.agents/context/crates/magicblock-rpc-client.md`. Check buffer init/realloc/write chunking, retry handling for already-initialized buffers, cached blockhash invalidation, ALT finalized waits, cleanup-on-success only, and release of TableMania refs.
 
-### Changing persistence or recovery
+### Changing the outbox intent lifecycle or recovery
 
-Start with `src/persist/db.rs`, `src/persist/commit_persister.rs`, `src/persist/types/`, `src/committor_processor.rs` recovery helpers, and `src/service.rs` recovery filtering. Preserve schema compatibility, enum string values, `u64`/`i64` conversions, row grouping by `message_id`, 14-day recovery window, and no-repersist recovery scheduling.
+Start with `src/outbox/mod.rs`, `src/outbox/outbox_client.rs`, `src/outbox/outbox_intent_bundles_reader.rs`, and `src/service.rs`'s `reschedule_intents`. Also check `programs/magicblock/src/intent_bundles/outbox/` for the on-chain PDA seeds, discriminator, and status-transition validation, and `magicblock-core/src/intent/outbox.rs` for `outbox_intent_pda`/`OUTBOX_INTENT_DISCRIMINATOR`. Preserve PDA seed/discriminator compatibility, `OutboxIntentBundleStatus` transition validity, and the invariant that closing an outbox intent PDA must not be gated on `CoordinationMode` — replicas replaying a primary's close have to reach the same state, or the PDA leaks and the intent can be re-executed.
 
 ### Changing metrics or observability
 
@@ -320,7 +318,7 @@ Start with metric calls in `intent_execution_engine.rs`, `delivery_preparator.rs
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-committor-service`.
 - Relevant integration suites: `test-committor`, including preparators, ix-order, ix-multi, commit-finalize, intent-executor, and recovery targets; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Related suite intent: when TableMania or RPC-client behavior is touched, include the TableMania suite or focused committor preparation/delivery coverage.
-- Performance/security validation intent: report effects on executor parallelism, RPC calls, transaction count, ALT waits, buffer writes/chunks, SQLite writes, and cleanup latency; confirm signer/authority requirements, `min_context_slot` freshness, nonce sequencing, scheduler conflict blocking, and recovery durability remain intact.
+- Performance/security validation intent: report effects on executor parallelism, RPC calls, transaction count, ALT waits, buffer writes/chunks, outbox intent PDA writes/closes, and cleanup latency; confirm signer/authority requirements, `min_context_slot` freshness, nonce sequencing, scheduler conflict blocking, and recovery durability remain intact.
 
 
 ## Adjacent implementation references
