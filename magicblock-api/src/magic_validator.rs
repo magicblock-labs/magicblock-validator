@@ -11,8 +11,9 @@ use std::{
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
-    initialize_aperture,
+    prepare_aperture,
     state::{NodeContext, SharedState},
+    EventProcessors,
 };
 use magicblock_chainlink::{
     config::ChainlinkConfig, remote_account_provider::Endpoints, ProdChainlink,
@@ -117,6 +118,7 @@ pub struct MagicValidator {
     intent_execution_service: IntentExecutionServiceImpl,
     replication_service: Option<ReplicationService>,
     undelegation_request_service: Option<Arc<UndelegationRequestService>>,
+    aperture_events: Option<EventProcessors>,
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -412,7 +414,7 @@ impl MagicValidator {
             chainlink.clone(),
         );
         let step_start = Instant::now();
-        let rpc = initialize_aperture(
+        let (rpc, aperture_events) = prepare_aperture(
             &config.aperture,
             shared_state,
             &dispatch,
@@ -464,6 +466,7 @@ impl MagicValidator {
             intent_execution_service,
             replication_service,
             undelegation_request_service,
+            aperture_events: Some(aperture_events),
             token,
             ledger,
             ledger_truncator,
@@ -1048,6 +1051,14 @@ impl MagicValidator {
             }
         }
 
+        // Subscribe Aperture only after ledger replay and local bank cleanup.
+        // Executors still receive replay-time block broadcasts, while RPC starts
+        // with no valid blockhash and waits for the next live block.
+        self.aperture_events
+            .take()
+            .expect("Aperture event processors should only start once")
+            .start();
+
         // Notify the scheduler that ledger replay and bank cleanup is complete.
         if self.is_standalone {
             self.mode_tx
@@ -1260,6 +1271,26 @@ impl MagicValidator {
         self.ledger_truncator.stop();
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
+        // Stop auto compactions too: with the throttle lifted, a
+        // flush-triggered compaction would otherwise run at full disk speed
+        // while the RPC still serves.
+        match self.ledger.disable_auto_compactions() {
+            Ok(()) => {
+                // Disabling does not cancel a compaction already mid-run;
+                // give it a bounded window to finish before handing it full
+                // disk bandwidth.
+                self.ledger
+                    .wait_for_quiescent_compactions(Duration::from_secs(2));
+                // Compactions are stopped; unthrottled flushes only compete
+                // with foreground work for the few seconds before exit.
+                self.ledger.lift_rate_limit();
+            }
+            Err(err) => {
+                // Some column may still schedule compactions: keep the
+                // throttle and accept a slower flush over disk saturation.
+                error!(error = ?err, "Failed to disable auto compactions; keeping IO throttle for shutdown flush");
+            }
+        }
         if let Err(err) = self.ledger.flush() {
             error!(error = ?err, "Failed to flush during shutdown preparation");
         }

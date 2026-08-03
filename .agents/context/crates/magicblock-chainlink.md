@@ -19,7 +19,7 @@ Chainlink is on the account-availability hot path for RPC reads and transaction 
 
 ## Update requirement
 
-Whenever behavior in `magicblock-chainlink` changes, or another crate changes Chainlink flows, update this document in the same change for changes to:
+Whenever behavior in `magicblock-chainlink` changes, or another crate changes Chainlink flows, queue an update to this document for the weekly documentation-maintenance task for changes to:
 
 - account fetch/clone classification,
 - delegation-record resolution or local delegated/confined/undelegating flags,
@@ -132,7 +132,7 @@ Before fetching remotely:
 
 1. Blacklisted accounts are filtered out.
 2. Existing non-undelegating accounts in `AccountsDb` are treated as ready.
-3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed.
+3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed. Locally undelegating post-delegation action dependencies remain local bank hits and are not remotely force-refreshed.
 4. Remaining pubkeys enter `pending_requests` ownership coordination.
 
 Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. The upper dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="fetch_cloner"`. Owner-side internal waiters are not counted in the active waiter gauge; only callers that join existing work are counted. Metric labels remain bounded enum/static values and do not include pubkeys, signatures, errors, endpoint URLs, or raw messages.
@@ -236,9 +236,10 @@ Delegation records may carry encrypted or cleartext post-delegation actions. Cha
 - validates signer addresses through `RiskService` when configured,
 - collects action dependencies from instruction program IDs and account metas,
 - force-refreshes writable dependencies that are absent or not currently delegated,
+- leaves locally undelegating writable dependencies as bank hits instead of remotely force-refreshing and overwriting their lock,
 - errors with `MissingDelegationActionAccounts` if required delegated writable dependencies cannot be resolved.
 
-Do not execute or ignore these actions blindly. They are part of clone-time invariants for post-delegation behavior.
+Chainlink's dependency fetch is an availability preflight. The Magic Program executor authoritatively revalidates every writable action account from the locked transaction context and rejects plain or undelegating accounts (not-yet-created non-signer accounts pass, since actions legitimately create ephemeral accounts such as receipts and rent-pending ATAs under program (PDA) signatures; absent accounts whose pubkey is a signer anywhere in the action bundle stay rejected (gated on the whole signer-pubkey set, defeating duplicate-meta squats) to prevent pubkey squatting via synthesized signers, and post-execution writable validation still rejects the transaction if a created account ends up without a mutability flag), rolling back the clone and action transaction atomically. The target then follows the established rescue-undelegation path; no action-bearing activation commits, so there is no deferred retry state. Do not execute or ignore these actions blindly.
 
 ### Program account resolution
 
@@ -264,8 +265,9 @@ Chainlink has special handling for associated token accounts and ephemeral ATAs:
 - Base ATAs are recognized via `magicblock_core::token_programs::is_ata`.
 - For each ATA, Chainlink derives the companion eATA PDA with `try_derive_eata_address_and_bump`.
 - It subscribes to both ATA and eATA using `SubscriptionReason::AtaProjection`.
-- If the eATA exists, has a delegation record for this validator, and can be projected, Chainlink clones a projected delegated ATA into the local bank.
-- Raw eATA program-subscription updates are projection candidates only when there is local projection interest: a watched ATA/eATA projection subscription, a watched raw eATA, or a supported base ATA already present locally. Without that interest, Chainlink drops the update without fetching the eATA's delegation record or companion base ATA state.
+- Projection requires a valid, slot-matched delegation record whose authority is this validator and whose owner is `EATA_PROGRAM_ID`. When those checks pass and the eATA can be projected, Chainlink clones a projected delegated ATA into the local bank.
+- Raw eATA program-subscription updates without existing local projection interest are routed through greedy discovery rather than dropped. Greedy discovery can validate the eATA delegation record, fetch the remote base ATA, project the local ATA, and preserve post-delegation actions on the projected clone request.
+- The non-greedy projection helper may still avoid companion fetches for a program-source raw eATA update when no delegation record is already supplied and no local projection interest exists (a watched ATA/eATA projection subscription, a watched raw eATA, or a supported base ATA already present locally). This local-interest gate does not disable the separate greedy-discovery path.
 - Projection preserves the base ATA's owner and data length, which is important for Token-2022 extensions.
 - Missing eATAs can be remembered in `known_empty_eatas`, but only after confirmed `NotFound` while an eATA subscription is live.
 - Raw eATA PDAs are not marked delegated directly; their state is projected into the corresponding base ATA.
@@ -299,8 +301,8 @@ Key behavior:
 - Non-clock updates become `ForwardedSubscriptionUpdate` with a `SubscriptionSource` (`Account` or program source).
 - If a subscription update arrives while an RPC fetch is pending, it resolves the pending fetch waiters only when its slot is at least the fetch start slot and does not regress the retained per-account classification.
 - Account-subscription updates for pubkeys no longer watched are dropped and can enqueue a removal update if stale local state exists.
-- Program-subscription updates are allowed even if the pubkey is not in the direct-account LRU, but DLP-owned program updates are first classified for local interest before any delegation-record companion fetch.
-- Absent and unwatched DLP-owned program updates are not dropped solely for lacking local interest. Ordinary non-internal DLP-owned user-account updates still reach greedy discovery so Chainlink can resolve a valid delegation record and execute post-delegation actions. Only updates that are provably irrelevant without delegation-record resolution, such as true internal DLP payloads or raw eATA projection updates without local ATA/eATA projection interest, are dropped before discovery.
+- Program-subscription updates are allowed even if the pubkey is not in the direct-account LRU, but DLP-owned program updates are preclassified before any delegation-record or other companion fetch.
+- Greedy discovery is always enabled for absent or unwatched delegated accounts discovered through DLP program-subscription updates. Ordinary non-internal DLP-owned user-account updates and raw eATA updates without local projection interest therefore reach greedy discovery so Chainlink can resolve delegation authority and preserve post-delegation actions.
 - Existing local delegated non-undelegating accounts are authoritative. DLP program updates for them clean up direct subscriptions and must not fetch a delegation record, clone, or overwrite local state.
 - Existing local undelegating accounts bypass the internal-DLP early drop and continue undelegation completion/redelegation processing so completion remains observable.
 - Non-advancing updates are ignored unless they represent a same-slot delegated refresh needed for undelegate/redelegate recovery.
@@ -319,7 +321,9 @@ The scan uses Base64Zstd account encoding and gets a nearby base-chain slot for 
 
 For DLP-owned program-subscription firehose updates, Chainlink first classifies the pubkey using local bank state, direct-watch state, and ATA/eATA projection interest.
 
-Greedy discovery remains enabled for ordinary non-internal DLP-owned user-account updates, even when the account is absent locally and not directly watched. This preserves clone-time post-delegation action execution for new delegations discovered from the DLP program subscription. The prefilter may only skip delegation-record resolution for updates that are provably irrelevant from local state and payload shape, including internal DLP records/metadata/commit state and raw eATA updates with no local projection interest.
+Greedy discovery is always enabled for absent or unwatched delegated accounts discovered through DLP program-subscription updates. This preserves clone-time post-delegation action execution for new delegations discovered from the DLP program subscription. The prefilter may skip delegation-record resolution only for updates already resolved as locally authoritative or for genuine internal DLP records/metadata/commit state; it must not reject an absent account merely for lacking local interest.
+
+Raw eATA updates with no existing local projection interest also enter greedy discovery. That path validates a slot-matched delegation record with this validator as authority and `EATA_PROGRAM_ID` as owner, fetches the remote base ATA, projects the delegated local ATA, and carries any post-delegation actions. Separately, the non-greedy projection helper retains its local-interest gate and may avoid companion fetches for a program-source raw eATA when no delegation record was supplied and no ATA/eATA projection interest exists.
 
 Updates for directly watched accounts or locally relevant ATA/eATA projection state may still greedily fetch and clone if the delegation record says the account belongs to this validator (or is confined). Explicit RPC/transaction ensure paths are not narrowed by this prefilter: they still fetch delegation records and clone delegated accounts normally.
 
@@ -337,8 +341,7 @@ The exception is a delegated account whose app data byte-collides with an intern
 
 - Every delegation-record-shaped update records a monotonic sighting (`record pubkey -> max slot`), from either subscription source. Only program-subscription updates are dropped/parked; account-subscription updates always continue into normal processing.
 - An internal-looking account update whose derived delegation-record PDA was sighted at or after its own slot proceeds to greedy discovery (a fresh delegation writes both accounts in one slot).
-- Otherwise the update is parked (pubkey + slot, keyed by its derived record PDA); a later record sighting releases it into an authority-gated, deduped fetch+clone that retries until the bank reflects the sighted delegation.
-- Before each released-candidate clone attempt, Chainlink rechecks local undelegating state against the sighted delegation record. A still-pending undelegation remains locked and retains its tracking subscription rather than being overwritten by the deferred collision update.
+- Otherwise the update is parked (pubkey + slot, keyed by its derived record PDA); a later record sighting releases it into an authority-gated, deduped fetch+clone that replaces an undelegating bank copy only when the record proves a newer delegation generation.
 - Genuine internal PDAs always miss the sighting cache and are dropped. A missed sighting degrades to lazy on-demand cloning via the normal getAccount/send-transaction paths — never to incorrect state.
 
 ## RemoteAccountProvider internals
@@ -523,7 +526,7 @@ Preserve these invariants when editing this crate:
 7. **Pending request and pending clone deduplication must clean up by generation/key** to avoid stale owners unblocking or deleting newer work.
 8. **Program-data subscriptions for LoaderV3 must be cleaned up on all paths.**
 9. **ATA/eATA projection must preserve base ATA layout and token-program ownership.**
-10. **Post-delegation action dependencies must be available before clone-time action handling.**
+10. **Post-delegation action dependencies must be available before clone-time action handling, and every writable dependency must be revalidated under transaction locks before native invocation.**
 11. **Disabled/non-primary mode must not perform remote fetches or transaction account ensures.**
 12. **This crate must not weaken processor/SVM access validation.** It only prepares local account state.
 13. **Fetch/clone and subscription paths must remain performance-conscious.** Preserve deduplication, bounded waiting, LRU protections, low subscription churn, and non-blocking behavior unless a documented correctness requirement forces a tradeoff.

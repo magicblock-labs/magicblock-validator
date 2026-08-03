@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use error::{ApertureError, RpcError};
 use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_core::link::DispatchEndpoints;
-use processor::EventProcessor;
+pub use processor::EventProcessors;
 use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
 use tokio::net::TcpListener;
@@ -19,13 +19,27 @@ pub async fn initialize_aperture(
     dispatch: &DispatchEndpoints,
     cancel: CancellationToken,
 ) -> ApertureResult<JsonRpcServer> {
+    let (server, events) =
+        prepare_aperture(config, state, dispatch, cancel).await?;
+    events.start();
+    Ok(server)
+}
+
+/// Initializes Aperture without subscribing its event processors.
+///
+/// Validator startup uses this form so ledger-replay block broadcasts are not
+/// admitted into the RPC blockhash cache.
+pub async fn prepare_aperture(
+    config: &ApertureConfig,
+    state: SharedState,
+    dispatch: &DispatchEndpoints,
+    cancel: CancellationToken,
+) -> ApertureResult<(JsonRpcServer, EventProcessors)> {
     let server =
         JsonRpcServer::new(config, state.clone(), dispatch, cancel.clone())
             .await?;
-    // Start event processors only after the server has bound its sockets so a
-    // bind failure cannot leak background tasks during retries in tests/startup.
-    EventProcessor::start(config, &state, dispatch, cancel)?;
-    Ok(server)
+    let events = EventProcessors::try_new(config, state, dispatch, cancel)?;
+    Ok((server, events))
 }
 
 /// An entrypoint to startup JSON-RPC server, for both HTTP and WS requests

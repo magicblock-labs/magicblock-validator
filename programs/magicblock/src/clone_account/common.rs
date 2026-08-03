@@ -21,7 +21,7 @@ use solana_transaction_context::{
 
 use crate::{
     errors::MagicBlockProgramError,
-    utils::instruction_sysvar,
+    utils::{accounts::find_instruction_account, instruction_sysvar},
     validator::{effective_validator_authority_id, validator_authority_id},
 };
 
@@ -294,6 +294,53 @@ pub fn execute_post_delegation_actions(
         delegated_target,
         &actions,
     )?;
+    // Signer authority in `native_invoke` is keyed by pubkey across the whole
+    // action bundle, so the carve-out below is gated on the full signer set,
+    // not on any single meta's signer flag.
+    let signer_pubkeys: HashSet<Pubkey> = actions
+        .iter()
+        .flat_map(|action| action.accounts.iter())
+        .filter_map(|account| account.is_signer.then_some(account.pubkey))
+        .collect();
+    for account_meta in actions
+        .iter()
+        .flat_map(|action| action.accounts.iter())
+        .filter(|account_meta| account_meta.is_writable)
+    {
+        let instruction_account = find_instruction_account(
+            invoke_context,
+            invoke_context.transaction_context,
+            "Post-delegation action account not found",
+            &account_meta.pubkey,
+        )?;
+        let locally_writable = {
+            let account = instruction_account.borrow()?;
+            // An empty account can be created inside the action itself (e.g. an
+            // ephemeral receipt or rent-pending ATA via a Magic CPI); allow it
+            // as writable, since post-execution validation still rejects it if
+            // the action leaves it without a mutability flag. Excluded: signer
+            // pubkeys (synthesized without signatures, so an absent signer could
+            // squat any unused pubkey) and undelegating accounts (stay locked
+            // until base-layer undelegation completes, even when drained empty).
+            let not_created_yet = !account.undelegating()
+                && !signer_pubkeys.contains(&account_meta.pubkey)
+                && account.lamports() == 0
+                && account.data().is_empty();
+            not_created_yet
+                || (!account.undelegating()
+                    && (account.delegated()
+                        || account.ephemeral()
+                        || account.confined()))
+        };
+        if !locally_writable {
+            ic_msg!(
+                invoke_context,
+                "Post-delegation action account {} is not locally writable",
+                account_meta.pubkey
+            );
+            return Err(InstructionError::IllegalOwner);
+        }
+    }
     for action in actions {
         let signers = post_delegation_action_signers(&action);
         invoke_context.native_invoke(action, &signers)?;

@@ -8,6 +8,7 @@ pub(crate) const TRANSACTION_SIMULATION: i16 = -32002;
 pub(crate) const TRANSACTION_VERIFICATION: i16 = -32003;
 pub(crate) const BLOCK_NOT_FOUND: i16 = -32009;
 pub(crate) const INVALID_REQUEST: i16 = -32600;
+pub(crate) const METHOD_NOT_FOUND: i16 = -32601;
 pub(crate) const INVALID_PARAMS: i16 = -32602;
 pub(crate) const INTERNAL_ERROR: i16 = -32603;
 pub(crate) const PARSE_ERROR: i16 = -32700;
@@ -153,6 +154,14 @@ impl RpcError {
         }
     }
 
+    pub(crate) fn method_not_found() -> Self {
+        Self {
+            code: METHOD_NOT_FOUND,
+            message: "Method not found".to_owned(),
+            http_status: 200,
+        }
+    }
+
     pub(crate) fn parse_error<E: Error>(error: E) -> Self {
         Self {
             code: PARSE_ERROR,
@@ -166,6 +175,14 @@ impl RpcError {
             code: INTERNAL_ERROR,
             message: format!("internal server error: {error}"),
             http_status: 200,
+        }
+    }
+
+    pub(crate) fn unavailable<E: Display>(error: E) -> Self {
+        Self {
+            code: INTERNAL_ERROR,
+            message: error.to_string(),
+            http_status: 503,
         }
     }
 
