@@ -7,7 +7,7 @@ use magicblock_magic_program_api::{
         ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
     },
     instruction::MagicBlockInstruction,
-    MAGIC_CONTEXT_PUBKEY,
+    MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
 };
 use solana_account::{
     create_account_shared_data_for_test, AccountSharedData, ReadableAccount,
@@ -21,10 +21,10 @@ use solana_sdk_ids::{system_program, sysvar::clock};
 use solana_signer::Signer;
 
 use crate::{
-    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
     magic_context::MagicContext,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     magic_sys::COMMIT_LIMIT,
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     schedule_transactions::magic_fee_vault_pubkey,
     test_utils::{
         ensure_started_validator, process_instruction,
@@ -196,7 +196,9 @@ fn assert_accepted_actions(
         let expected = OutboxIntentBundle::accepted(intent.clone());
         let actual = processed_accepted
             .iter()
-            .filter(|acc| acc.owner() == &crate::id() && acc.ephemeral())
+            .filter(|acc| {
+                acc.owner() == &OUTBOX_INTENT_PROGRAM_ID && acc.ephemeral()
+            })
             .filter_map(|acc| {
                 OutboxIntentBundle::try_from_bytes(acc.data()).ok()
             })
@@ -214,16 +216,16 @@ fn assert_accepted_actions(
 }
 
 /// Pre-populates uninitialized outbox intent PDA accounts into `account_data`.
-/// The accept instruction creates these accounts via CPI (`CreateEphemeralAccount`),
+/// The accept instruction creates these accounts via CPI (`CreateOutboxIntent`),
 /// which requires them to be present in the transaction context as uninitialized
 /// system-owned entries — exactly what `validate_new_ephemeral` expects.
-/// The first 4 accounts (validator, program, magic_context, vault) are already
-/// in `account_data`, so we skip them.
+/// The first 5 accounts (validator, outbox program, magic_context, vault,
+/// ephemeral system program) are already in `account_data`, so we skip them.
 fn ensure_outbox_pda_accounts_exist(
     account_data: &mut HashMap<Pubkey, AccountSharedData>,
     accept_ix: &Instruction,
 ) {
-    for acc_meta in accept_ix.accounts.iter().skip(4) {
+    for acc_meta in accept_ix.accounts.iter().skip(5) {
         account_data.entry(acc_meta.pubkey).or_insert_with(|| {
             AccountSharedData::new(0, 0, &system_program::id())
         });

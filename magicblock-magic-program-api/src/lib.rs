@@ -22,6 +22,10 @@ pub const POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID: Pubkey =
 pub const EPHEMERAL_SYSTEM_PROGRAM_ID: Pubkey =
     pubkey!("EphSystem1111111111111111111111111111111111");
 
+/// Program ID for the outbox intent builtin-program.
+pub const OUTBOX_INTENT_PROGRAM_ID: Pubkey =
+    pubkey!("outboxintent1111111111111111111111111111111");
+
 pub const MAGIC_CONTEXT_PUBKEY: Pubkey =
     pubkey!("MagicContext1111111111111111111111111111111");
 
