@@ -35,7 +35,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
+    transaction::{Transaction, TransactionError},
 };
 use test_kit::init_logger;
 use tracing::*;
@@ -589,6 +589,11 @@ fn assert_cannot_increase_committee_count(
         );
     let (tx_result_err, tx_err) = extract_transaction_error(tx_res);
     if let Some(tx_err) = tx_err {
+        // The account may become undelegated between the simulation above and
+        // this send; the same InvalidWritableAccount signal then surfaces here.
+        if matches!(tx_err, TransactionError::InvalidWritableAccount) {
+            return;
+        }
         assert_is_one_of_instruction_errors(
             tx_err,
             &tx_result_err,
