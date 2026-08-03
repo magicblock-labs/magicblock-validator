@@ -873,10 +873,18 @@ impl MagicValidator {
                 blockhash,
             );
             rpc.send_and_confirm_transaction(&tx).await.map_err(|err| {
-                ApiError::FailedToInitMagicFeeVault(
-                    validator_pubkey,
-                    err.to_string(),
-                )
+                // A rejected transaction is deterministic; only transport
+                // failures are worth retrying.
+                match err.get_transaction_error() {
+                    Some(tx_err) => ApiError::OnchainSetupTransactionRejected(
+                        validator_pubkey,
+                        tx_err.to_string(),
+                    ),
+                    None => ApiError::FailedToInitMagicFeeVault(
+                        validator_pubkey,
+                        err.to_string(),
+                    ),
+                }
             })?;
             info!(%validator_pubkey, "Magic fee vault initialized");
         } else {
@@ -902,12 +910,18 @@ impl MagicValidator {
                 &[&validator_keypair],
                 blockhash,
             );
-            rpc.send_and_confirm_transaction(&tx).await.map_err(|err| {
-                ApiError::FailedToDelegateMagicFeeVault(
-                    validator_pubkey,
-                    err.to_string(),
-                )
-            })?;
+            rpc.send_and_confirm_transaction(&tx).await.map_err(
+                |err| match err.get_transaction_error() {
+                    Some(tx_err) => ApiError::OnchainSetupTransactionRejected(
+                        validator_pubkey,
+                        tx_err.to_string(),
+                    ),
+                    None => ApiError::FailedToDelegateMagicFeeVault(
+                        validator_pubkey,
+                        err.to_string(),
+                    ),
+                },
+            )?;
             info!(%validator_pubkey, "Magic fee vault delegated");
         } else {
             info!(%validator_pubkey, "Magic fee vault already delegated, skipping");
@@ -933,9 +947,10 @@ impl MagicValidator {
             attempt += 1;
             match op().await {
                 Ok(()) => return Ok(()),
-                Err(err @ ApiError::ValidatorInsufficientlyFunded(..)) => {
-                    return Err(err)
-                }
+                Err(
+                    err @ (ApiError::ValidatorInsufficientlyFunded(..)
+                    | ApiError::OnchainSetupTransactionRejected(..)),
+                ) => return Err(err),
                 Err(err) if attempt < MAX_ATTEMPTS => {
                     warn!(
                         step,
