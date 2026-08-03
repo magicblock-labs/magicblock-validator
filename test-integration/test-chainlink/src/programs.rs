@@ -77,10 +77,24 @@ pub async fn airdrop_sol(
         .await
         .expect("Failed to request airdrop");
 
-    rpc_client
-        .confirm_transaction(&airdrop_signature)
-        .await
-        .expect("Failed to confirm airdrop");
+    // confirm_transaction returns Ok(false) while the airdrop is still in
+    // flight; poll until it actually confirms.
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let confirmed = rpc_client
+            .confirm_transaction(&airdrop_signature)
+            .await
+            .expect("Failed to confirm airdrop");
+        if confirmed {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "airdrop to {pubkey} not confirmed after 30s"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 
     debug!("Airdropped {sol} SOL to account {pubkey}");
 }
