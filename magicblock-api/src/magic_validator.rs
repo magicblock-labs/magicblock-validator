@@ -916,6 +916,43 @@ impl MagicValidator {
         Ok(())
     }
 
+    /// Retries a transient on-chain setup failure with backoff; definitive
+    /// outcomes like insufficient funds surface immediately.
+    async fn with_onchain_setup_retries<F, Fut>(
+        step: &str,
+        op: F,
+    ) -> ApiResult<()>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = ApiResult<()>>,
+    {
+        const MAX_ATTEMPTS: u32 = 5;
+        let mut delay = Duration::from_secs(2);
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            match op().await {
+                Ok(()) => return Ok(()),
+                Err(err @ ApiError::ValidatorInsufficientlyFunded(..)) => {
+                    return Err(err)
+                }
+                Err(err) if attempt < MAX_ATTEMPTS => {
+                    warn!(
+                        step,
+                        attempt,
+                        max_attempts = MAX_ATTEMPTS,
+                        retry_in_secs = delay.as_secs(),
+                        error = ?err,
+                        "On-chain setup step failed; retrying"
+                    );
+                    tokio::time::sleep(delay).await;
+                    delay *= 2;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
     fn spawn_primary_onchain_setup(&self) {
         let rpc_url = self.config.rpc_url().to_owned();
         let identity = self.identity;
@@ -927,9 +964,14 @@ impl MagicValidator {
         // Intentionally fire-and-forget: the task itself exits the process on failure.
         tokio::spawn(async move {
             let step_start = Instant::now();
-            let result = MagicValidator::ensure_validator_funded_on_chain(
-                rpc_url.clone(),
-                identity,
+            let result = Self::with_onchain_setup_retries(
+                "ensure_funded_on_chain",
+                || {
+                    MagicValidator::ensure_validator_funded_on_chain(
+                        rpc_url.clone(),
+                        identity,
+                    )
+                },
             )
             .await;
             log_timing(
@@ -944,8 +986,13 @@ impl MagicValidator {
             }
 
             let step_start = Instant::now();
-            let result = MagicValidator::ensure_magic_fee_vault_on_chain(
-                rpc_url.clone(),
+            let result = Self::with_onchain_setup_retries(
+                "ensure_magic_fee_vault_on_chain",
+                || {
+                    MagicValidator::ensure_magic_fee_vault_on_chain(
+                        rpc_url.clone(),
+                    )
+                },
             )
             .await;
             log_timing(
@@ -1382,5 +1429,47 @@ mod tests {
                 },
             )
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn onchain_setup_retries_absorb_transient_failures() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let attempts = AtomicU32::new(0);
+        let result =
+            MagicValidator::with_onchain_setup_retries("test_step", || {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                async move {
+                    if attempt < 3 {
+                        Err(ApiError::FailedToInitMagicFeeVault(
+                            Pubkey::new_unique(),
+                            "transient".to_string(),
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                }
+            })
+            .await;
+        assert!(result.is_ok());
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn onchain_setup_retries_surface_persistent_failures() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let attempts = AtomicU32::new(0);
+        let result =
+            MagicValidator::with_onchain_setup_retries("test_step", || {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                async {
+                    Err(ApiError::FailedToInitMagicFeeVault(
+                        Pubkey::new_unique(),
+                        "persistent".to_string(),
+                    ))
+                }
+            })
+            .await;
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 5);
     }
 }
