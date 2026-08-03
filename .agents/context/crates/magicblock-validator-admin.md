@@ -16,7 +16,7 @@ This crate sits on validator startup, background administration, and base-layer 
 
 ## Update requirement
 
-Update this guide in the same change whenever behavior or contracts in `magicblock-validator-admin` change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-validator-admin` change. Include changes to:
 
 - public exports in `src/lib.rs` or `src/claim_fees.rs`;
 - `ClaimFeesTask` lifecycle, cancellation, tick scheduling, duplicate-start behavior, or shutdown timeout;
@@ -129,8 +129,8 @@ The periodic task uses the validator's configured RPC URL. Do not move it onto t
 
 ```text
 MagicValidator::stop
-  -> stop scheduled-commit processor
-  -> stop committor service
+  -> stop undelegation request service
+  -> stop intent execution service
   -> claim_fees_task.stop().await
   -> join RPC thread and remaining validator services
 ```

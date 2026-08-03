@@ -9,33 +9,42 @@ use std::{
 };
 
 use dlp_api::{
-    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+    pda::delegation_record_pda_from_delegated_account,
+    state::{
+        discriminator::AccountDiscriminator, DelegationRecord,
+        UndelegationRequest,
+    },
 };
 use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
-    is_ata, normalize_native_token_account_for_local_clone,
-    try_derive_supported_ata_pubkeys, EATA_PROGRAM_ID,
+    is_ata, normalize_native_token_account_for_local_clone, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{
-    self, AccountFetchOrigin, BankPrecheckOutcome, BankPrecheckReason,
-    ChainlinkCloneIntent, ChainlinkCloneMaterializationOutcome,
-    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
+    self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
+    BankPrecheckReason, ChainlinkCloneIntent,
+    ChainlinkCloneMaterializationOutcome, ChainlinkCloneOutcome,
+    ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
     ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
     ChainlinkPendingFetchOutcome, Outcome,
 };
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
 use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::{
+    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    filter::{Memcmp, RpcFilterType},
+};
 use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
-    sync::{mpsc, oneshot, Semaphore},
+    sync::{broadcast, mpsc, oneshot, Semaphore},
     task,
     task::JoinSet,
 };
@@ -76,6 +85,7 @@ use crate::{
         blacklisted_accounts::{
             blacklisted_accounts, programs_not_to_subscribe,
         },
+        ObservedUndelegationRequest,
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
@@ -85,7 +95,10 @@ use crate::{
         program_account::{
             get_loaderv3_get_program_data_address, LoadedProgram,
         },
-        pubsub_common::{is_internal_dlp_account_data, SubscriptionSource},
+        pubsub_common::{
+            is_delegation_record_data, is_internal_dlp_account_data,
+            SubscriptionSource,
+        },
         CapacityEvictionProtection, ChainPubsubClient, ChainRpcClient,
         ForwardedSubscriptionUpdate, MatchSlotsConfig, RemoteAccount,
         RemoteAccountProvider, ResolvedAccountSharedData, SubscriptionReason,
@@ -130,6 +143,16 @@ where
     /// Negative cache for derived eATAs confirmed missing on chain.
     known_empty_eatas: Arc<PlMutex<LruCache<Pubkey, ()>>>,
 
+    /// Per-program state from the last successful load, so the per-slot
+    /// notifications providers emit for heavily-invoked program accounts
+    /// resolve without re-pulling full program data. Entries for programs
+    /// evicted from the bank are pruned on their next notification.
+    program_verify_cache: Arc<PlMutex<LruCache<Pubkey, ProgramVerifyState>>>,
+
+    /// Recognizes freshly delegated accounts whose app data collides with an
+    /// internal DLP discriminator via delegation-record sightings.
+    dlp_collision_tracker: Arc<PlMutex<DlpCollisionTracker>>,
+
     /// Tracks in-flight clone operations.
     /// The first caller to claim a key becomes the owner and performs
     /// the actual clone. Subsequent callers become waiters and receive
@@ -145,6 +168,8 @@ where
 
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
+
+    undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
 }
 
 struct PendingUndelegationGuard {
@@ -167,6 +192,141 @@ const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
         Some(n) => n,
         None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
     };
+
+/// Capacity of the program verify cache; far above the number of programs
+/// a validator realistically loads, while bounding it across eviction churn.
+const PROGRAM_VERIFY_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64)
+{
+    Some(n) => n,
+    None => panic!("PROGRAM_VERIFY_CACHE_CAPACITY must be non-zero"),
+};
+
+/// Capacity for recently sighted delegation-record update slots; sized to
+/// outlast DLP firehose churn across the SubMux debounce window.
+const SEEN_DELEGATION_RECORD_SLOTS_CAPACITY: NonZeroUsize =
+    match NonZeroUsize::new(65_536) {
+        Some(n) => n,
+        None => {
+            panic!("SEEN_DELEGATION_RECORD_SLOTS_CAPACITY must be non-zero")
+        }
+    };
+
+/// Capacity for internal-looking account updates parked until their
+/// delegation record is sighted. Once full, new unsighted candidates are
+/// dropped instead of evicting already parked candidates; this preserves
+/// account-first collision candidates across record-heavy firehose bursts
+/// while keeping memory bounded.
+const PARKED_COLLISION_UPDATES_CAPACITY: NonZeroUsize =
+    match NonZeroUsize::new(16_384) {
+        Some(n) => n,
+        None => {
+            panic!("PARKED_COLLISION_UPDATES_CAPACITY must be non-zero")
+        }
+    };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DlpProgramUpdateInterest {
+    DropLocalDelegatedAuthoritative,
+    ProcessUndelegating,
+    ProcessAtaProjection,
+    ProcessDirectlyWatched,
+    DiscoverDelegatedAccount,
+}
+
+/// A parked internal-looking account update, reduced to pubkey + slot so
+/// the firehose cannot pin account payloads in memory.
+#[derive(Debug, Clone, Copy)]
+struct ParkedCollisionCandidate {
+    pubkey: Pubkey,
+    slot: u64,
+}
+
+/// Tracks delegation-record sightings from the DLP program subscription and
+/// internal-looking account updates parked until their record is sighted.
+/// A single lock keeps check-then-park atomic against sight-then-release, so
+/// an update can never be parked after its record sighting already passed.
+struct DlpCollisionTracker {
+    record_slots: LruCache<Pubkey, u64>,
+    /// Keyed by the derived delegation-record PDA of the parked account.
+    parked: LruCache<Pubkey, ParkedCollisionCandidate>,
+}
+
+impl DlpCollisionTracker {
+    fn new() -> Self {
+        Self {
+            record_slots: LruCache::new(SEEN_DELEGATION_RECORD_SLOTS_CAPACITY),
+            parked: LruCache::new(PARKED_COLLISION_UPDATES_CAPACITY),
+        }
+    }
+
+    /// Records a delegation-record sighting and releases a parked candidate
+    /// it covers. Monotonic: a stale replayed record can neither lower the
+    /// sighted slot nor consume a candidate parked at a newer slot.
+    fn sight_record(
+        &mut self,
+        record_pubkey: Pubkey,
+        slot: u64,
+    ) -> Option<ParkedCollisionCandidate> {
+        let sighted_slot =
+            self.record_slots.get_or_insert_mut(record_pubkey, || slot);
+        *sighted_slot = (*sighted_slot).max(slot);
+        let sighted_slot = *sighted_slot;
+        self.parked
+            .peek(&record_pubkey)
+            .is_some_and(|candidate| sighted_slot >= candidate.slot)
+            .then(|| self.parked.pop(&record_pubkey))
+            .flatten()
+    }
+
+    fn preserve_released_candidate(
+        &mut self,
+        candidate: ParkedCollisionCandidate,
+    ) -> bool {
+        let record_pubkey =
+            delegation_record_pda_from_delegated_account(&candidate.pubkey);
+        if !self.parked.contains(&record_pubkey)
+            && self.parked.len() >= PARKED_COLLISION_UPDATES_CAPACITY.get()
+        {
+            return false;
+        }
+
+        let parked = self.parked.get_or_insert_mut(record_pubkey, || candidate);
+        parked.slot = parked.slot.max(candidate.slot);
+        true
+    }
+
+    /// True when the pubkey's delegation record was sighted at or after the
+    /// update slot: a fresh delegation writes both accounts in one slot, so
+    /// the sighting marks a delegated account whose app data collides with an
+    /// internal DLP discriminator. Otherwise the update is parked so a late
+    /// (e.g. debounced) record sighting can release it.
+    fn check_or_park(&mut self, update: &ForwardedSubscriptionUpdate) -> bool {
+        let record_pubkey =
+            delegation_record_pda_from_delegated_account(&update.pubkey);
+        let sighted = self
+            .record_slots
+            .get(&record_pubkey)
+            .is_some_and(|&record_slot| record_slot >= update.account.slot());
+        if !sighted {
+            if !self.parked.contains(&record_pubkey)
+                && self.parked.len() >= PARKED_COLLISION_UPDATES_CAPACITY.get()
+            {
+                return false;
+            }
+
+            // Monotonic like sightings: a replayed older update must not
+            // downgrade the parked slot.
+            let parked = self.parked.get_or_insert_mut(record_pubkey, || {
+                ParkedCollisionCandidate {
+                    pubkey: update.pubkey,
+                    slot: update.account.slot(),
+                }
+            });
+            parked.slot = parked.slot.max(update.account.slot());
+        }
+        sighted
+    }
+}
 
 /// A pending fetch+clone operation claimed by one dedup call, resolved by
 /// the batch worker spawned for that call.
@@ -203,14 +363,58 @@ where
             allowed_programs: self.allowed_programs.clone(),
             programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
+            program_verify_cache: self.program_verify_cache.clone(),
+            dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
             pending_operation_timeout_ms: self
                 .pending_operation_timeout_ms
                 .clone(),
             risk_service: self.risk_service.clone(),
+            undelegation_request_sender: self
+                .undelegation_request_sender
+                .clone(),
         }
     }
+}
+
+/// State from the last successful program load driving the cheap
+/// executable-update resolution in [program_loader].
+#[derive(Debug, Clone)]
+pub(crate) struct ProgramVerifyState {
+    /// Raw programdata metadata prefix (tag + deploy slot + authority)
+    /// from the last load; `None` for loaders without programdata.
+    pub(crate) programdata_header: Option<Vec<u8>>,
+    /// When the program was last loaded or verified against remote state.
+    pub(crate) verified_at: std::time::Instant,
+    /// A verification is scheduled for when the throttle window expires,
+    /// covering notifications suppressed within the window.
+    pub(crate) deferred_verify: bool,
+}
+
+#[derive(Debug, Clone)]
+struct CompanionFetchLogContext {
+    origin: AccountFetchContext,
+    primary_pubkey: Pubkey,
+    context_slot: u64,
+}
+
+fn log_companion_fetch_failure<E: std::fmt::Display + ?Sized>(
+    ctx: &CompanionFetchLogContext,
+    companion_pubkey: Pubkey,
+    companion_kind: ChainlinkCompanionFetchKind,
+    error: &E,
+) {
+    error!(
+        primary_pubkey = %ctx.primary_pubkey,
+        companion_pubkey = %companion_pubkey,
+        companion_kind = %companion_kind,
+        origin_entrypoint = %ctx.origin.entrypoint(),
+        origin_reason = %ctx.origin.reason(),
+        context_slot = ctx.context_slot,
+        error = %error,
+        "Failed to fetch companion account"
+    );
 }
 
 impl<T, U, V, C> FetchCloner<T, U, V, C>
@@ -230,6 +434,33 @@ where
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
+    ) -> Arc<Self> {
+        let (undelegation_request_sender, _) = broadcast::channel(1024);
+        Self::new_with_undelegation_request_sender(
+            remote_account_provider,
+            accounts_bank,
+            cloner,
+            validator_keypair,
+            subscription_updates_rx,
+            allowed_programs,
+            risk_service,
+            undelegation_request_sender,
+        )
+    }
+
+    /// Create FetchCloner with subscription updates and request notifications connected.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_undelegation_request_sender(
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        accounts_bank: &Arc<V>,
+        cloner: &Arc<C>,
+        validator_keypair: Keypair,
+        subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
+        allowed_programs: Option<Vec<AllowedProgram>>,
+        risk_service: Option<Arc<RiskService>>,
+        undelegation_request_sender: broadcast::Sender<
+            ObservedUndelegationRequest,
+        >,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts = blacklisted_accounts(&validator_pubkey);
@@ -252,12 +483,19 @@ where
             known_empty_eatas: Arc::new(PlMutex::new(LruCache::new(
                 KNOWN_EMPTY_EATAS_CAPACITY,
             ))),
+            program_verify_cache: Arc::new(PlMutex::new(LruCache::new(
+                PROGRAM_VERIFY_CACHE_CAPACITY,
+            ))),
+            dlp_collision_tracker: Arc::new(PlMutex::new(
+                DlpCollisionTracker::new(),
+            )),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
             pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
             risk_service,
+            undelegation_request_sender,
         });
 
         let accounts_bank_for_eviction = accounts_bank.clone();
@@ -275,7 +513,6 @@ where
                     })
             },
         );
-
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
 
@@ -287,16 +524,152 @@ where
         self.fetch_count.load(Ordering::Relaxed)
     }
 
+    async fn classify_dlp_program_update_interest(
+        &self,
+        pubkey: Pubkey,
+        account: &AccountSharedData,
+    ) -> DlpProgramUpdateInterest {
+        if let Some(local_account) = self.accounts_bank.get_account(&pubkey) {
+            if local_account.undelegating() {
+                return DlpProgramUpdateInterest::ProcessUndelegating;
+            }
+            if local_account.delegated() {
+                return DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative;
+            }
+        }
+
+        if self.remote_account_provider.is_watching(&pubkey) {
+            return DlpProgramUpdateInterest::ProcessDirectlyWatched;
+        }
+
+        if let Some(ata_pubkeys) =
+            ata_projection::derive_supported_ata_pubkeys_from_raw_eata(
+                &pubkey, account,
+            )
+        {
+            let has_projection_interest = self
+                .raw_eata_has_local_projection_interest(&pubkey, &ata_pubkeys)
+                .await;
+            return if has_projection_interest {
+                DlpProgramUpdateInterest::ProcessAtaProjection
+            } else {
+                DlpProgramUpdateInterest::DiscoverDelegatedAccount
+            };
+        }
+
+        if self.base_ata_has_projection_interest(pubkey, account).await {
+            return DlpProgramUpdateInterest::ProcessAtaProjection;
+        }
+
+        DlpProgramUpdateInterest::DiscoverDelegatedAccount
+    }
+
+    async fn raw_eata_has_local_projection_interest(
+        &self,
+        pubkey: &Pubkey,
+        ata_pubkeys: &[Pubkey],
+    ) -> bool {
+        if ata_pubkeys.iter().any(|ata_pubkey| {
+            self.accounts_bank.get_account(ata_pubkey).is_some()
+        }) {
+            return true;
+        }
+
+        self.remote_account_provider
+            .has_any_subscription_reason(
+                ata_pubkeys.iter().chain(std::iter::once(pubkey)),
+                SubscriptionReason::AtaProjection,
+            )
+            .await
+    }
+
+    async fn base_ata_has_projection_interest(
+        &self,
+        pubkey: Pubkey,
+        account: &AccountSharedData,
+    ) -> bool {
+        let Some(eata_pubkey) =
+            ata_projection::derive_eata_pubkey_from_ata_account(
+                &pubkey, account,
+            )
+        else {
+            return false;
+        };
+
+        self.remote_account_provider
+            .has_subscription_reason(&pubkey, SubscriptionReason::AtaProjection)
+            .await
+            || self
+                .remote_account_provider
+                .has_subscription_reason(
+                    &eata_pubkey,
+                    SubscriptionReason::AtaProjection,
+                )
+                .await
+    }
+
     #[instrument(skip(self, pubkeys))]
     pub async fn fetch_remote_accounts(
         &self,
         pubkeys: &[Pubkey],
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<Vec<RemoteAccount>> {
         Ok(self
             .remote_account_provider
-            .try_get_multi(pubkeys, None, fetch_origin, None)
+            .try_get_multi(pubkeys, None, fetch_context, None)
             .await?)
+    }
+
+    pub async fn fetch_undelegation_requests(
+        &self,
+    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
+        let observed_slot = self.remote_account_provider.get_slot().await?;
+        let config = RpcProgramAccountsConfig {
+            filters: Some(vec![
+                RpcFilterType::DataSize(
+                    UndelegationRequest::size_with_discriminator() as u64,
+                ),
+                RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                    0,
+                    AccountDiscriminator::UndelegationRequest
+                        .to_bytes()
+                        .to_vec(),
+                )),
+            ]),
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(UiAccountEncoding::Base64Zstd),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let accounts = self
+            .remote_account_provider
+            .get_program_accounts_with_config(&dlp_api::id(), config)
+            .await?;
+
+        let mut requests = Vec::with_capacity(accounts.len());
+        for (request_pda, account) in accounts {
+            let Ok(request) =
+                UndelegationRequest::try_from_bytes_with_discriminator(
+                    &account.data,
+                )
+            else {
+                warn!(
+                    request_pda = %request_pda,
+                    data_len = account.data.len(),
+                    "Skipping malformed DLP undelegation request account"
+                );
+                continue;
+            };
+            requests.push(ObservedUndelegationRequest {
+                request_pda,
+                delegated_account: request.delegated_account,
+                expires_at_slot: request.expires_at_slot,
+                observed_slot,
+            });
+        }
+
+        Ok(requests)
     }
 
     pub fn cloner(&self) -> &Arc<C> {
@@ -414,7 +787,7 @@ where
     fn claim_or_join_owned_operation(
         &self,
         pubkey: Pubkey,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> PendingClaim {
         let generation = self.next_pending_request_generation();
         let waiter_id = self.next_pending_waiter_id();
@@ -426,7 +799,7 @@ where
             Duration::from_millis(
                 self.pending_operation_timeout_ms.load(Ordering::Relaxed),
             ),
-            fetch_origin,
+            fetch_context,
             ChainlinkPendingFetchLayer::FetchCloner,
         )
     }
@@ -438,7 +811,7 @@ where
         claimed: Vec<ClaimedOperation>,
         mark_empty_set: &HashSet<Pubkey>,
         slot: Option<u64>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) {
         if claimed.is_empty() {
             return;
@@ -472,7 +845,7 @@ where
                     &pubkeys,
                     mark_empty_ref,
                     slot,
-                    fetch_origin,
+                    fetch_context.clone(),
                 ),
             )
             .await
@@ -518,7 +891,7 @@ where
                     account,
                     mark_empty_if_not_found,
                     slot,
-                    fetch_origin,
+                    fetch_context.clone(),
                 );
             }
         });
@@ -546,7 +919,7 @@ where
         account: RemoteAccount,
         mark_empty_if_not_found: bool,
         slot: Option<u64>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) {
         let this = self.clone();
         let pending = self.pending_requests.clone();
@@ -566,7 +939,7 @@ where
                 vec![account],
                 mark_empty_ref,
                 slot,
-                fetch_origin,
+                fetch_context,
             );
             let terminal = tokio::select! {
                 biased;
@@ -600,19 +973,28 @@ where
             .fetch_add(1, Ordering::Relaxed)
     }
 
+    fn account_is_actively_delegated(account: &AccountSharedData) -> bool {
+        account.delegated() && !account.undelegating()
+    }
+
     fn local_account_satisfies_clone_request(
         &self,
-        pubkey: &Pubkey,
-        request_account: &AccountSharedData,
+        request: &AccountCloneRequest,
     ) -> bool {
+        let active_delegation_satisfies_request =
+            request.delegation_actions.is_empty()
+                && request.delegated_to_other.is_none()
+                && !request.needs_undelegation;
         self.accounts_bank
-            .get_account(pubkey)
+            .get_account(&request.pubkey)
             .is_some_and(|account| {
                 let local_slot = account.remote_slot();
-                let request_slot = request_account.remote_slot();
-                local_slot > request_slot
+                let request_slot = request.account.remote_slot();
+                (active_delegation_satisfies_request
+                    && Self::account_is_actively_delegated(&account))
+                    || local_slot > request_slot
                     || (local_slot == request_slot
-                        && account == *request_account)
+                        && account.eq(&request.account))
             })
     }
 
@@ -652,7 +1034,7 @@ where
         pubkey: &Pubkey,
         request_slot: u64,
         remote_result: ChainlinkCloneRemoteResult,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkCloneMaterializationOutcome {
         let outcome = if self
             .accounts_bank
@@ -663,8 +1045,8 @@ where
         } else {
             ChainlinkCloneMaterializationOutcome::StillMissingAfterEnsure
         };
-        metrics::inc_chainlink_clone_materialization_accounts_total(
-            fetch_origin,
+        metrics::inc_chainlink_clone_materialization_accounts_total_with_context(
+            fetch_context,
             remote_result,
             outcome,
         );
@@ -673,13 +1055,13 @@ where
 
     fn record_empty_placeholder_stage(
         is_empty_placeholder: bool,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
         stage: ChainlinkEmptyPlaceholderStage,
         outcome: Outcome,
     ) {
         if is_empty_placeholder {
-            metrics::inc_chainlink_empty_placeholder_accounts_total(
-                fetch_origin,
+            metrics::inc_chainlink_empty_placeholder_accounts_total_with_context(
+                fetch_context,
                 stage,
                 outcome,
             );
@@ -688,7 +1070,7 @@ where
 
     fn record_empty_placeholder_materialization_stage(
         is_empty_placeholder: bool,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
         materialization_outcome: ChainlinkCloneMaterializationOutcome,
     ) {
         let (stage, outcome) = match materialization_outcome {
@@ -704,7 +1086,7 @@ where
         };
         Self::record_empty_placeholder_stage(
             is_empty_placeholder,
-            fetch_origin,
+            fetch_context,
             stage,
             outcome,
         );
@@ -714,7 +1096,7 @@ where
         &self,
         program_id: &Pubkey,
         remote_slot: u64,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) {
         let outcome = if self
             .accounts_bank
@@ -725,8 +1107,8 @@ where
         } else {
             ChainlinkCloneMaterializationOutcome::StillMissingAfterEnsure
         };
-        metrics::inc_chainlink_clone_materialization_accounts_total(
-            fetch_origin,
+        metrics::inc_chainlink_clone_materialization_accounts_total_with_context(
+            fetch_context,
             ChainlinkCloneRemoteResult::Found,
             outcome,
         );
@@ -739,7 +1121,7 @@ where
     async fn clone_account_with_ownership(
         &self,
         request: AccountCloneRequest,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ClonerResult<Signature> {
         let pubkey = request.pubkey;
         let remote_result = Self::clone_remote_result_for_request(&request);
@@ -747,15 +1129,19 @@ where
         let mut request = Some(request);
 
         loop {
-            if self.local_account_satisfies_clone_request(
-                &pubkey,
-                &request
-                    .as_ref()
-                    .expect("request must be present before ownership claim")
-                    .account,
-            ) {
-                metrics::inc_chainlink_clone_accounts_total(
-                    fetch_origin,
+            let Some(request_ref) = request.as_ref() else {
+                return Err(ClonerError::FailedToCloneRegularAccount(
+                    pubkey,
+                    Box::new(ClonerError::CommittorServiceError(
+                        "missing clone request before ownership claim"
+                            .to_string(),
+                    )),
+                ));
+            };
+
+            if self.local_account_satisfies_clone_request(request_ref) {
+                metrics::inc_chainlink_clone_accounts_total_with_context(
+                    fetch_context.clone(),
                     remote_result,
                     clone_intent,
                     ChainlinkCloneOutcome::Skipped,
@@ -769,8 +1155,8 @@ where
                         Arc::clone(&self.pending_clones),
                         pubkey,
                     );
-                    metrics::inc_chainlink_clone_accounts_total(
-                        fetch_origin,
+                    metrics::inc_chainlink_clone_accounts_total_with_context(
+                        fetch_context.clone(),
                         remote_result,
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
@@ -789,6 +1175,10 @@ where
                             Box::new(err),
                         ));
                     };
+                    let active_delegation_satisfies_request =
+                        owned_request.delegation_actions.is_empty()
+                            && owned_request.delegated_to_other.is_none()
+                            && !owned_request.needs_undelegation;
                     let is_empty_placeholder =
                         Self::is_empty_placeholder_account(
                             &owned_request.account,
@@ -796,14 +1186,33 @@ where
                     let request_slot = owned_request.account.remote_slot();
                     Self::record_empty_placeholder_stage(
                         is_empty_placeholder,
-                        fetch_origin,
+                        fetch_context.clone(),
                         ChainlinkEmptyPlaceholderStage::CloneSubmitted,
                         Outcome::Success,
                     );
                     let result = self.cloner.clone_account(owned_request).await;
-                    if result.is_ok() {
-                        metrics::inc_chainlink_clone_accounts_total(
-                            fetch_origin,
+                    let reconciled_active_delegation = result.is_err()
+                        && active_delegation_satisfies_request
+                        && self.accounts_bank.get_account(&pubkey).is_some_and(
+                            |account| {
+                                Self::account_is_actively_delegated(&account)
+                            },
+                        );
+                    if reconciled_active_delegation {
+                        debug!(
+                            pubkey = %pubkey,
+                            error = ?result,
+                            "Clone request satisfied by concurrently active local delegation"
+                        );
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context.clone(),
+                            remote_result,
+                            clone_intent,
+                            ChainlinkCloneOutcome::Skipped,
+                        );
+                    } else if result.is_ok() {
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context.clone(),
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::CloneSucceeded,
@@ -813,41 +1222,46 @@ where
                                 &pubkey,
                                 request_slot,
                                 remote_result,
-                                fetch_origin,
+                                fetch_context.clone(),
                             );
                         Self::record_empty_placeholder_materialization_stage(
                             is_empty_placeholder,
-                            fetch_origin,
+                            fetch_context.clone(),
                             materialization_outcome,
                         );
                     } else {
-                        metrics::inc_chainlink_clone_accounts_total(
-                            fetch_origin,
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context.clone(),
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::CloneFailed,
                         );
-                        metrics::inc_chainlink_clone_accounts_total(
-                            fetch_origin,
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context.clone(),
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::SubmitFailed,
                         );
                         Self::record_empty_placeholder_stage(
                             is_empty_placeholder,
-                            fetch_origin,
+                            fetch_context.clone(),
                             ChainlinkEmptyPlaceholderStage::CloneSubmitFailed,
                             Outcome::Error,
                         );
                     }
-                    let completion = if result.is_ok() {
-                        CloneCompletion::Success
-                    } else {
-                        CloneCompletion::Failed
-                    };
+                    let completion =
+                        if result.is_ok() || reconciled_active_delegation {
+                            CloneCompletion::Success
+                        } else {
+                            CloneCompletion::Failed
+                        };
                     self.finish_pending_clone(pubkey, completion);
                     guard.dismiss();
-                    return result;
+                    return if reconciled_active_delegation {
+                        Ok(Signature::default())
+                    } else {
+                        result
+                    };
                 }
                 CloneClaim::Waiter(rx) => match rx.await {
                     Ok(CloneCompletion::Success) => continue,
@@ -875,7 +1289,7 @@ where
     async fn clone_program_with_ownership(
         &self,
         program: LoadedProgram,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ClonerResult<Signature> {
         let program_id = program.program_id;
         let remote_slot = program.remote_slot;
@@ -888,8 +1302,8 @@ where
                 .get_account(&program_id)
                 .is_some_and(|account| account.remote_slot() >= remote_slot)
             {
-                metrics::inc_chainlink_clone_accounts_total(
-                    fetch_origin,
+                metrics::inc_chainlink_clone_accounts_total_with_context(
+                    fetch_context.clone(),
                     remote_result,
                     clone_intent,
                     ChainlinkCloneOutcome::Skipped,
@@ -910,24 +1324,24 @@ where
                         .is_some_and(|account| {
                             account.remote_slot() >= remote_slot
                         }) {
-                        metrics::inc_chainlink_clone_accounts_total(
-                            fetch_origin,
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context.clone(),
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::Skipped,
                         );
                         Ok(Signature::default())
                     } else {
-                        metrics::inc_chainlink_clone_accounts_total(
-                            fetch_origin,
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context.clone(),
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::Submitted,
                         );
                         let result = self.cloner.clone_program(program).await;
                         if result.is_ok() {
-                            metrics::inc_chainlink_clone_accounts_total(
-                                fetch_origin,
+                            metrics::inc_chainlink_clone_accounts_total_with_context(
+                                fetch_context.clone(),
                                 remote_result,
                                 clone_intent,
                                 ChainlinkCloneOutcome::CloneSucceeded,
@@ -935,17 +1349,17 @@ where
                             self.record_program_materialization(
                                 &program_id,
                                 remote_slot,
-                                fetch_origin,
+                                fetch_context,
                             );
                         } else {
-                            metrics::inc_chainlink_clone_accounts_total(
-                                fetch_origin,
+                            metrics::inc_chainlink_clone_accounts_total_with_context(
+                                fetch_context.clone(),
                                 remote_result,
                                 clone_intent,
                                 ChainlinkCloneOutcome::CloneFailed,
                             );
-                            metrics::inc_chainlink_clone_accounts_total(
-                                fetch_origin,
+                            metrics::inc_chainlink_clone_accounts_total_with_context(
+                                fetch_context.clone(),
                                 remote_result,
                                 clone_intent,
                                 ChainlinkCloneOutcome::SubmitFailed,
@@ -988,7 +1402,7 @@ where
     async fn clone_account_with_post_delegation_action_invariants(
         &self,
         mut request: AccountCloneRequest,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<Signature> {
         if request.account.delegated()
             && is_ata(&request.pubkey, &request.account).is_some()
@@ -1011,7 +1425,7 @@ where
 
         if request.delegation_actions.is_empty() {
             return Ok(self
-                .clone_account_with_ownership(request, fetch_origin)
+                .clone_account_with_ownership(request, fetch_context)
                 .await?);
         }
 
@@ -1028,11 +1442,15 @@ where
                 request.pubkey,
                 request.account.remote_slot(),
                 &request.delegation_actions,
+                fetch_context.clone(),
             )
             .await?;
 
             Ok(self
-                .clone_account_with_ownership(request.clone(), fetch_origin)
+                .clone_account_with_ownership(
+                    request.clone(),
+                    fetch_context.clone(),
+                )
                 .await?)
         }
         .await;
@@ -1060,7 +1478,7 @@ where
                 match self
                     .clone_account_and_schedule_undelegation_with_ownership(
                         request,
-                        fetch_origin,
+                        fetch_context.clone(),
                     )
                     .await
                 {
@@ -1082,7 +1500,7 @@ where
     async fn clone_account_and_schedule_undelegation_with_ownership(
         &self,
         mut request: AccountCloneRequest,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ClonerResult<Signature> {
         let pubkey = request.pubkey;
         request.needs_undelegation = true;
@@ -1096,8 +1514,8 @@ where
                 .get_account(&pubkey)
                 .is_some_and(|account| account.undelegating())
             {
-                metrics::inc_chainlink_clone_accounts_total(
-                    fetch_origin,
+                metrics::inc_chainlink_clone_accounts_total_with_context(
+                    fetch_context.clone(),
                     remote_result,
                     clone_intent,
                     ChainlinkCloneOutcome::Skipped,
@@ -1128,8 +1546,8 @@ where
                             ),
                         );
                     };
-                    metrics::inc_chainlink_clone_accounts_total(
-                        fetch_origin,
+                    metrics::inc_chainlink_clone_accounts_total_with_context(
+                        fetch_context.clone(),
                         remote_result,
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
@@ -1141,14 +1559,14 @@ where
                     let request_slot = owned_request.account.remote_slot();
                     Self::record_empty_placeholder_stage(
                         is_empty_placeholder,
-                        fetch_origin,
+                        fetch_context.clone(),
                         ChainlinkEmptyPlaceholderStage::CloneSubmitted,
                         Outcome::Success,
                     );
                     let result = self.cloner.clone_account(owned_request).await;
                     if result.is_ok() {
-                        metrics::inc_chainlink_clone_accounts_total(
-                            fetch_origin,
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context.clone(),
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::CloneSucceeded,
@@ -1158,29 +1576,29 @@ where
                                 &pubkey,
                                 request_slot,
                                 remote_result,
-                                fetch_origin,
+                                fetch_context.clone(),
                             );
                         Self::record_empty_placeholder_materialization_stage(
                             is_empty_placeholder,
-                            fetch_origin,
+                            fetch_context.clone(),
                             materialization_outcome,
                         );
                     } else {
-                        metrics::inc_chainlink_clone_accounts_total(
-                            fetch_origin,
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context.clone(),
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::CloneFailed,
                         );
-                        metrics::inc_chainlink_clone_accounts_total(
-                            fetch_origin,
+                        metrics::inc_chainlink_clone_accounts_total_with_context(
+                            fetch_context.clone(),
                             remote_result,
                             clone_intent,
                             ChainlinkCloneOutcome::SubmitFailed,
                         );
                         Self::record_empty_placeholder_stage(
                             is_empty_placeholder,
-                            fetch_origin,
+                            fetch_context.clone(),
                             ChainlinkEmptyPlaceholderStage::CloneSubmitFailed,
                             Outcome::Error,
                         );
@@ -1334,26 +1752,99 @@ where
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
+        let fresh_update_account = update.account.fresh_account();
+        let is_dlp_owned_update = fresh_update_account
+            .as_ref()
+            .is_some_and(|account| account.owner() == &dlp_api::id());
+        let is_internal_dlp_update =
+            fresh_update_account.as_ref().is_some_and(|account| {
+                is_internal_dlp_account_data(account.data())
+            });
+
+        let dlp_program_interest =
+            if matches!(update.source, SubscriptionSource::Program)
+                && is_dlp_owned_update
+            {
+                match fresh_update_account.as_ref() {
+                    Some(account) => Some(
+                        self.classify_dlp_program_update_interest(
+                            pubkey, account,
+                        )
+                        .await,
+                    ),
+                    None => None,
+                }
+            } else {
+                None
+            };
+
+        match dlp_program_interest {
+            Some(DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative) => {
+                self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                    .await;
+                trace!(
+                    pubkey = %pubkey,
+                    "Dropping DLP program update for locally authoritative delegated account"
+                );
+                return;
+            }
+            Some(DlpProgramUpdateInterest::ProcessUndelegating)
+            | Some(DlpProgramUpdateInterest::ProcessAtaProjection)
+            | Some(DlpProgramUpdateInterest::ProcessDirectlyWatched)
+            | Some(DlpProgramUpdateInterest::DiscoverDelegatedAccount)
+            | None => {}
+        }
+
+        // Internal DLP payloads (records/metadata/commit state) can never be
+        // greedily cloned, so drop them before discovery issues remote
+        // fetches. The exception is an account whose app data collides with
+        // an internal discriminator: its delegation also writes the
+        // delegation record, whose sighting routes the account update to
+        // discovery — immediately when the record arrived first, or by
+        // releasing the parked update once the record arrives later.
+        if !matches!(
+            dlp_program_interest,
+            Some(DlpProgramUpdateInterest::ProcessUndelegating)
+                | Some(DlpProgramUpdateInterest::ProcessAtaProjection)
+        ) && is_dlp_owned_update
+        {
+            if let Some(account) = fresh_update_account.as_ref() {
+                if is_internal_dlp_update {
+                    // Sight records from either source: SubMux dedup can
+                    // deliver a directly watched record account-sourced.
+                    let released = is_delegation_record_data(account.data())
+                        .then(|| {
+                            self.dlp_collision_tracker
+                                .lock()
+                                .sight_record(pubkey, update.account.slot())
+                        })
+                        .flatten();
+                    if let Some(released) = released {
+                        self.clone_released_collision_candidate(released).await;
+                    }
+                    // Only the program firehose is dropped/parked.
+                    if matches!(update.source, SubscriptionSource::Program)
+                        && !self
+                            .dlp_collision_tracker
+                            .lock()
+                            .check_or_park(&update)
+                    {
+                        trace!(
+                            pubkey = %pubkey,
+                            "Dropping internal DLP program subscription update"
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+
         if self
             .maybe_greedily_clone_discovered_delegated_account(pubkey, &update)
             .await
         {
             return;
         }
-
-        if matches!(update.source, SubscriptionSource::Program)
-            && update.account.is_owned_by_delegation_program()
-            && update.account.fresh_account().is_some_and(|account| {
-                is_internal_dlp_account_data(account.data())
-            })
-        {
-            trace!(
-                pubkey = %pubkey,
-                "Dropping internal DLP program subscription update after discovery miss"
-            );
-            return;
-        }
-
         // A late forwarded update can arrive after an account was removed from
         // the provider watch set. If a new subscription already won the race,
         // is_watching is true and this update can be processed normally. If this
@@ -1395,20 +1886,36 @@ where
             return;
         }
 
+        let companion_fetch_log_context = CompanionFetchLogContext {
+            origin: AccountFetchContext::subscription_update(
+                AccountFetchReason::SubscriptionUpdateClone,
+            ),
+            primary_pubkey: pubkey,
+            context_slot: update_slot,
+        };
+
+        let update_source = update.source;
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
+                &companion_fetch_log_context,
             )
             .await;
         let Some(account) = resolved_account else {
             return;
         };
+        let subscription_clone_context =
+            AccountFetchContext::subscription_update(
+                AccountFetchReason::SubscriptionUpdateClone,
+            );
         let projected_ata_clone_request = self
-            .maybe_build_projected_ata_clone_request_from_subscription_update(
+            .maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
                 pubkey,
                 &account,
+                update_source,
                 deleg_record.as_ref(),
                 &delegation_actions,
+                &companion_fetch_log_context,
             )
             .await;
 
@@ -1451,6 +1958,7 @@ where
                     if let Err(err) = self
                         .clone_projected_ata_request(
                             projected_ata_clone_request,
+                            subscription_clone_context,
                         )
                         .await
                     {
@@ -1565,7 +2073,12 @@ where
         }
 
         if account.executable() {
-            self.handle_executable_sub_update(pubkey, account).await;
+            self.handle_executable_sub_update(
+                pubkey,
+                account,
+                &companion_fetch_log_context,
+            )
+            .await;
         } else {
             let commit_frequency_ms = deleg_record.as_ref().and_then(|dr| {
                 dr.authority
@@ -1589,7 +2102,7 @@ where
                         delegated_to_other,
                         needs_undelegation: false,
                     },
-                    AccountFetchOrigin::GetAccount,
+                    subscription_clone_context.clone(),
                 )
                 .await
             {
@@ -1602,7 +2115,10 @@ where
                 projected_ata_clone_request
             {
                 if let Err(err) = self
-                    .clone_projected_ata_request(projected_ata_clone_request)
+                    .clone_projected_ata_request(
+                        projected_ata_clone_request,
+                        subscription_clone_context.clone(),
+                    )
                     .await
                 {
                     error!(
@@ -1620,6 +2136,7 @@ where
         pubkey: Pubkey,
         remote_slot: u64,
         delegation_actions: &DelegationActions,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<()> {
         if delegation_actions.is_empty() {
             return Ok(());
@@ -1655,8 +2172,11 @@ where
                 &dependencies_to_fetch,
                 None,
                 Some(remote_slot),
-                AccountFetchOrigin::GetAccount,
+                fetch_context.with_reason(
+                    AccountFetchReason::ActionDependencyForcedRefresh,
+                ),
                 &writable_dependencies,
+                None,
             )
             .await?;
         if result.missing_delegation_record.is_empty() {
@@ -1743,6 +2263,7 @@ where
     async fn clone_projected_ata_request(
         &self,
         request: AccountCloneRequest,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<Signature> {
         if self
             .accounts_bank
@@ -1754,9 +2275,161 @@ where
 
         self.clone_account_with_post_delegation_action_invariants(
             request,
-            AccountFetchOrigin::ProjectAta,
+            fetch_context.with_reason(AccountFetchReason::AtaProjection),
         )
         .await
+    }
+
+    /// Deferred discovery for a parked candidate whose record was just
+    /// sighted: authority-gated like discovery, then cloned through the
+    /// deduped on-demand path. Only genuine collisions release.
+    async fn clone_released_collision_candidate(
+        &self,
+        candidate: ParkedCollisionCandidate,
+    ) {
+        // A pre-delegation bank copy must be force-refreshed; only a
+        // delegated copy at the sighted slot or newer settles the candidate.
+        let fresh_delegated_in_bank = self
+            .accounts_bank
+            .get_account(&candidate.pubkey)
+            .is_some_and(|in_bank| {
+                in_bank.delegated() && in_bank.remote_slot() >= candidate.slot
+            });
+        if fresh_delegated_in_bank {
+            return;
+        }
+        let fetch_context = AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateGreedyDiscovery,
+        );
+        // Same authority gate as discovery: accounts delegated to another
+        // validator must not be cloned from the firehose.
+        let record_context = fetch_context
+            .clone()
+            .with_reason(AccountFetchReason::DelegationRecord);
+        let companion_fetch_log_context = CompanionFetchLogContext {
+            origin: record_context.clone(),
+            primary_pubkey: candidate.pubkey,
+            context_slot: candidate.slot,
+        };
+        let Some((deleg_record, _)) = self
+            .fetch_and_parse_delegation_record(
+                candidate.pubkey,
+                candidate.slot,
+                record_context,
+                companion_fetch_log_context,
+            )
+            .await
+        else {
+            trace!(
+                pubkey = %candidate.pubkey,
+                slot = candidate.slot,
+                "Released collision candidate has no resolvable delegation record; falling back to on-demand cloning"
+            );
+            return;
+        };
+        let is_delegated_to_us = deleg_record.authority
+            == self.validator_pubkey
+            || deleg_record.authority == Pubkey::default();
+        if !is_delegated_to_us {
+            metrics::inc_discovered_dlp_update_delegated_elsewhere();
+            trace!(
+                pubkey = %candidate.pubkey,
+                authority = %deleg_record.authority,
+                "Ignoring released collision candidate delegated elsewhere"
+            );
+            return;
+        }
+        // The deduped fetch can join an in-flight pre-delegation owner and
+        // settle stale; retry until the bank reflects the sighted delegation
+        // (at the sighted slot itself only a delegated copy settles).
+        const MAX_RELEASE_CLONE_ATTEMPTS: usize = 3;
+        for _ in 0..MAX_RELEASE_CLONE_ATTEMPTS {
+            // The candidate may have been parked before local undelegation
+            // started. Do not let its later record sighting bypass the normal
+            // confirmation check and overwrite protected local state.
+            if self
+                .accounts_bank
+                .get_account(&candidate.pubkey)
+                .is_some_and(|in_bank| {
+                    in_bank.undelegating()
+                        && account_still_undelegating_on_chain(
+                            &candidate.pubkey,
+                            true,
+                            in_bank.remote_slot(),
+                            Some(deleg_record),
+                            &self.validator_pubkey,
+                        )
+                })
+            {
+                trace!(
+                    pubkey = %candidate.pubkey,
+                    slot = candidate.slot,
+                    "Ignoring released collision candidate while local undelegation remains pending"
+                );
+                return;
+            }
+
+            let result = match self
+                .fetch_and_clone_accounts_with_dedup_forced_refresh(
+                    &[candidate.pubkey],
+                    None,
+                    Some(candidate.slot),
+                    fetch_context.clone(),
+                    &HashSet::from([candidate.pubkey]),
+                    Some((candidate.pubkey, deleg_record.delegation_slot)),
+                )
+                .await
+            {
+                Ok(result) => result,
+                Err(err) => {
+                    warn!(
+                        pubkey = %candidate.pubkey,
+                        error = %err,
+                        "Failed to clone released colliding delegated account"
+                    );
+                    return;
+                }
+            };
+            let unresolvable = result
+                .not_found_on_chain
+                .iter()
+                .chain(result.missing_delegation_record.iter())
+                .any(|(missing_pubkey, _)| missing_pubkey == &candidate.pubkey);
+            if unresolvable {
+                trace!(
+                    pubkey = %candidate.pubkey,
+                    slot = candidate.slot,
+                    ?result,
+                    "Released collision candidate no longer resolvable on chain"
+                );
+                return;
+            }
+            let in_bank = self.accounts_bank.get_account(&candidate.pubkey);
+            let settled = in_bank.as_ref().is_some_and(|in_bank| {
+                in_bank.remote_slot() > candidate.slot
+                    || (in_bank.remote_slot() == candidate.slot
+                        && in_bank.delegated())
+            });
+            if settled {
+                return;
+            }
+            if in_bank.is_some_and(|in_bank| {
+                in_bank.undelegating()
+                    && deleg_record.delegation_slot <= in_bank.remote_slot()
+            }) {
+                break;
+            }
+        }
+        let preserved = self
+            .dlp_collision_tracker
+            .lock()
+            .preserve_released_candidate(candidate);
+        warn!(
+            pubkey = %candidate.pubkey,
+            slot = candidate.slot,
+            preserved,
+            "Released collision candidate did not settle at the sighted slot; preserving it for a later delegation-record sighting"
+        );
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(
@@ -1776,11 +2449,24 @@ where
             return false;
         }
 
+        let discovery_context = AccountFetchContext::subscription_update(
+            AccountFetchReason::SubscriptionUpdateGreedyDiscovery,
+        );
+        let record_context = discovery_context
+            .clone()
+            .with_reason(AccountFetchReason::DelegationRecord);
+        let companion_fetch_log_context = CompanionFetchLogContext {
+            origin: record_context.clone(),
+            primary_pubkey: pubkey,
+            context_slot: account.remote_slot(),
+        };
+
         let Some((deleg_record, delegation_actions)) = self
             .fetch_and_parse_delegation_record(
                 pubkey,
                 account.remote_slot(),
-                AccountFetchOrigin::GetAccount,
+                record_context,
+                companion_fetch_log_context,
             )
             .await
         else {
@@ -1812,11 +2498,7 @@ where
             deleg_record.owner,
         )
         .map(|(wallet_owner, mint)| {
-            try_derive_supported_ata_pubkeys(&wallet_owner, &mint)
-                .token_2022_first()
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
+            ata_projection::derive_supported_ata_pubkeys(&wallet_owner, &mint)
         })
         .unwrap_or_default();
         let mut pubkeys_to_clone =
@@ -1833,7 +2515,7 @@ where
                 &pubkeys_to_clone,
                 None,
                 Some(account.remote_slot()),
-                AccountFetchOrigin::GetAccount,
+                discovery_context.clone(),
             )
             .await
         } else {
@@ -1841,7 +2523,7 @@ where
                 &pubkeys_to_clone,
                 None,
                 Some(account.remote_slot()),
-                AccountFetchOrigin::GetAccount,
+                discovery_context.clone(),
             )
             .await
         };
@@ -1870,11 +2552,17 @@ where
                     );
                     false
                 } else if let Some(projected_ata_clone_request) = self
-                    .maybe_build_projected_ata_clone_request_from_subscription_update(
+                    .maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
                         pubkey,
                         &account,
+                        update.source,
                         Some(&deleg_record),
                         &delegation_actions,
+                        &CompanionFetchLogContext {
+                            origin: discovery_context.clone(),
+                            primary_pubkey: pubkey,
+                            context_slot: account.remote_slot(),
+                        },
                     )
                     .await
                 {
@@ -1883,6 +2571,7 @@ where
                     if let Err(err) = self
                         .clone_projected_ata_request(
                             projected_ata_clone_request,
+                            discovery_context.clone(),
                         )
                         .await
                     {
@@ -1953,10 +2642,16 @@ where
         &self,
         pubkey: Pubkey,
         account: AccountSharedData,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) {
         // moved to program_loader module
-        program_loader::handle_executable_sub_update(self, pubkey, account)
-            .await;
+        program_loader::handle_executable_sub_update_with_context(
+            self,
+            pubkey,
+            account,
+            companion_fetch_log_context,
+        )
+        .await;
     }
 
     async fn cleanup_direct_subscription_for_delegated_account(
@@ -2019,6 +2714,7 @@ where
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
         &self,
         update: ForwardedSubscriptionUpdate,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> (
         Option<AccountSharedData>,
         Option<DelegationRecord>,
@@ -2060,7 +2756,10 @@ where
                         pubkey,
                         delegation_record_pubkey,
                         account.remote_slot(),
-                        AccountFetchOrigin::GetAccount,
+                        AccountFetchContext::subscription_update(
+                            AccountFetchReason::DelegationRecord,
+                        ),
+                        ChainlinkCompanionFetchKind::DelegationRecord,
                     )
                     .await
                 {
@@ -2164,6 +2863,40 @@ where
                                 // use, etc.
                                 (None, None, DelegationActions::default())
                             }
+                        } else if let Ok(request) =
+                            UndelegationRequest::try_from_bytes_with_discriminator(
+                                account.data(),
+                            )
+                        {
+                            let observed = ObservedUndelegationRequest {
+                                request_pda: pubkey,
+                                delegated_account: request.delegated_account,
+                                expires_at_slot: request.expires_at_slot,
+                                observed_slot: account.remote_slot(),
+                            };
+                            trace!(
+                                request_pda = %observed.request_pda,
+                                delegated_account = %observed.delegated_account,
+                                expires_at_slot = observed.expires_at_slot,
+                                "Observed DLP undelegation request"
+                            );
+                            if let Err(broadcast::error::SendError(observed)) =
+                                self.undelegation_request_sender.send(observed)
+                            {
+                                warn!(
+                                    request_pda = %observed.request_pda,
+                                    delegated_account = %observed.delegated_account,
+                                    observed_slot = observed.observed_slot,
+                                    expires_at_slot = observed.expires_at_slot,
+                                    drop_reason = "no_active_subscribers",
+                                    "Dropped observed DLP undelegation request because no subscribers are active"
+                                );
+                            }
+                            (
+                                Some(account.into_account_shared_data()),
+                                None,
+                                DelegationActions::default(),
+                            )
                         } else if is_internal_dlp_account_data(account.data()) {
                             (
                                 Some(account.into_account_shared_data()),
@@ -2189,10 +2922,11 @@ where
                     }
                     // In case of errors fetching the delegation record we cannot clone the account
                     Ok(Err(err)) => {
-                        warn!(
-                            pubkey = %pubkey,
-                            error = ?err,
-                            "Failed to fetch delegation record"
+                        log_companion_fetch_failure(
+                            companion_fetch_log_context,
+                            delegation_record_pubkey,
+                            ChainlinkCompanionFetchKind::DelegationRecord,
+                            &err,
                         );
                         if acquired_delegation_record_reason {
                             release_subs(
@@ -2208,10 +2942,11 @@ where
                         (None, None, DelegationActions::default())
                     }
                     Err(err) => {
-                        warn!(
-                            pubkey = %pubkey,
-                            error = ?err,
-                            "Failed to fetch delegation record"
+                        log_companion_fetch_failure(
+                            companion_fetch_log_context,
+                            delegation_record_pubkey,
+                            ChainlinkCompanionFetchKind::DelegationRecord,
+                            &err,
                         );
                         if acquired_delegation_record_reason {
                             release_subs(
@@ -2229,7 +2964,11 @@ where
                 }
             } else {
                 let (account, deleg_record) = self
-                    .maybe_project_ata_from_subscription_update(pubkey, account)
+                    .maybe_project_ata_from_subscription_update(
+                        pubkey,
+                        account,
+                        companion_fetch_log_context,
+                    )
                     .await;
                 if let Some((deleg_record, actions)) = deleg_record {
                     (
@@ -2249,19 +2988,23 @@ where
         }
     }
 
-    async fn maybe_build_projected_ata_clone_request_from_subscription_update(
+    async fn maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
         &self,
         eata_pubkey: Pubkey,
         eata_account: &AccountSharedData,
+        update_source: SubscriptionSource,
         deleg_record: Option<&DelegationRecord>,
         delegation_actions: &DelegationActions,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> Option<AccountCloneRequest> {
         ata_projection::maybe_build_projected_ata_clone_request_from_subscription_update(
             self,
             eata_pubkey,
             eata_account,
+            update_source,
             deleg_record,
             delegation_actions,
+            companion_fetch_log_context,
         )
         .await
     }
@@ -2275,6 +3018,7 @@ where
         &self,
         ata_pubkey: Pubkey,
         ata_account: AccountSharedData,
+        companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> (
         AccountSharedData,
         Option<(DelegationRecord, Option<DelegationActions>)>,
@@ -2283,6 +3027,7 @@ where
             self,
             ata_pubkey,
             ata_account,
+            companion_fetch_log_context,
         )
         .await
     }
@@ -2335,13 +3080,15 @@ where
         &self,
         account_pubkey: Pubkey,
         min_context_slot: u64,
-        fetch_origin: metrics::AccountFetchOrigin,
+        fetch_context: metrics::AccountFetchContext,
+        companion_fetch_log_context: CompanionFetchLogContext,
     ) -> Option<(DelegationRecord, Option<DelegationActions>)> {
         delegation::fetch_and_parse_delegation_record(
             self,
             account_pubkey,
             min_context_slot,
-            fetch_origin,
+            fetch_context,
+            &companion_fetch_log_context,
         )
         .await
     }
@@ -2361,22 +3108,22 @@ where
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         let accs = match self
             .fetch_accounts(
                 pubkeys,
                 mark_empty_if_not_found,
                 slot,
-                fetch_origin,
+                fetch_context.clone(),
             )
             .await
         {
             Ok(accs) => accs,
             Err(err) => {
                 for _ in pubkeys {
-                    metrics::inc_chainlink_clone_accounts_total(
-                        fetch_origin,
+                    metrics::inc_chainlink_clone_accounts_total_with_context(
+                        fetch_context.clone(),
                         ChainlinkCloneRemoteResult::Failed,
                         ChainlinkCloneIntent::Unknown,
                         ChainlinkCloneOutcome::Skipped,
@@ -2390,7 +3137,7 @@ where
             accs,
             mark_empty_if_not_found,
             slot,
-            fetch_origin,
+            fetch_context,
         )
         .await
     }
@@ -2401,9 +3148,9 @@ where
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<Vec<RemoteAccount>> {
-        if let Some(sig) = fetch_origin.signature() {
+        if let Some(sig) = fetch_context.signature() {
             tracing::Span::current().record("tx_sig", sig.to_string());
         }
         if tracing::enabled!(tracing::Level::TRACE) {
@@ -2425,7 +3172,7 @@ where
             .try_get_multi(
                 pubkeys,
                 mark_empty_if_not_found,
-                fetch_origin,
+                fetch_context,
                 min_context_slot,
             )
             .await?;
@@ -2444,9 +3191,9 @@ where
         accs: Vec<RemoteAccount>,
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        if let Some(sig) = fetch_origin.signature() {
+        if let Some(sig) = fetch_context.signature() {
             tracing::Span::current().record("tx_sig", sig.to_string());
         }
 
@@ -2529,7 +3276,7 @@ where
             owned_by_deleg,
             plain,
             min_context_slot,
-            fetch_origin,
+            fetch_context.clone(),
         )
         .await
         {
@@ -2556,7 +3303,7 @@ where
             self,
             programs,
             min_context_slot,
-            fetch_origin,
+            fetch_context.clone(),
         )
         .await
         {
@@ -2602,7 +3349,7 @@ where
             self,
             atas,
             min_context_slot,
-            fetch_origin,
+            fetch_context.clone(),
         )
         .await;
         accounts_to_clone.extend(ata_accounts);
@@ -2638,12 +3385,15 @@ where
                 action_dependencies_to_fetch.len() as u64,
                 Ordering::Relaxed,
             );
+            let action_dependency_context = fetch_context
+                .clone()
+                .with_reason(AccountFetchReason::ActionDependencyMissing);
             let action_dep_accs = self
                 .remote_account_provider
                 .try_get_multi(
                     &action_dependencies_to_fetch,
                     None,
-                    fetch_origin,
+                    action_dependency_context.clone(),
                     min_context_slot,
                 )
                 .await?;
@@ -2678,7 +3428,7 @@ where
                 owned_by_deleg,
                 plain,
                 min_context_slot,
-                fetch_origin,
+                action_dependency_context.clone(),
             )
             .await
             {
@@ -2728,7 +3478,7 @@ where
                 self,
                 programs,
                 min_context_slot,
-                fetch_origin,
+                action_dependency_context.clone(),
             )
             .await
             {
@@ -2759,7 +3509,7 @@ where
                     self,
                     atas,
                     min_context_slot,
-                    fetch_origin,
+                    action_dependency_context,
                 )
                 .await;
 
@@ -2780,7 +3530,7 @@ where
             self,
             accounts_to_clone,
             loaded_programs,
-            fetch_origin,
+            fetch_context,
         )
         .await?;
 
@@ -2802,7 +3552,7 @@ where
         &self,
         pubkey: &Pubkey,
         in_bank: &AccountSharedData,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> RefreshDecision {
         if in_bank.undelegating() {
             debug!(
@@ -2817,11 +3567,20 @@ where
                     pubkey, in_bank,
                 )
             {
+                let undelegating_refresh_context = fetch_context
+                    .clone()
+                    .with_reason(AccountFetchReason::UndelegatingRefresh);
+                let companion_fetch_log_context = CompanionFetchLogContext {
+                    origin: undelegating_refresh_context.clone(),
+                    primary_pubkey: eata_pubkey,
+                    context_slot: self.remote_account_provider.chain_slot(),
+                };
                 let projected_deleg_record = self
                     .fetch_and_parse_delegation_record(
                         eata_pubkey,
                         self.remote_account_provider.chain_slot(),
-                        fetch_origin,
+                        undelegating_refresh_context,
+                        companion_fetch_log_context,
                     )
                     .await;
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
@@ -2837,11 +3596,20 @@ where
                 }
             }
 
+            let undelegating_refresh_context = fetch_context
+                .clone()
+                .with_reason(AccountFetchReason::UndelegatingRefresh);
+            let companion_fetch_log_context = CompanionFetchLogContext {
+                origin: undelegating_refresh_context.clone(),
+                primary_pubkey: *pubkey,
+                context_slot: self.remote_account_provider.chain_slot(),
+            };
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,
                     self.remote_account_provider.chain_slot(),
-                    fetch_origin,
+                    undelegating_refresh_context,
+                    companion_fetch_log_context,
                 )
                 .await;
 
@@ -2894,14 +3662,15 @@ where
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         self.fetch_and_clone_accounts_with_dedup_forced_refresh(
             pubkeys,
             mark_empty_if_not_found,
             slot,
-            fetch_origin,
+            fetch_context,
             &HashSet::new(),
+            None,
         )
         .await
     }
@@ -2911,8 +3680,9 @@ where
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
         force_refresh_pubkeys: &HashSet<Pubkey>,
+        confirmed_redelegation: Option<(Pubkey, u64)>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         // We cannot clone blacklisted accounts, thus either they are already
         // in the bank (e.g. native programs) or they don't exist and the transaction
@@ -2937,10 +3707,33 @@ where
 
         // Phase 1: Sync bank check — separate undelegating accounts
         // (which need async RPC) from non-undelegating (handled
-        // synchronously)
+        // synchronously). A forced refresh may replace a locally undelegating
+        // account only when its caller supplies a matching newer delegation
+        // generation. Action dependencies never do; the locked runtime guard
+        // rejects the action if that dependency remains unsafe.
         let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
         for pubkey in pubkeys.iter() {
             if force_refresh_pubkeys.contains(*pubkey) {
+                if let Some(account_in_bank) =
+                    self.accounts_bank.get_account(pubkey)
+                {
+                    if account_in_bank.undelegating() {
+                        let can_replace_undelegating = confirmed_redelegation
+                            .is_some_and(
+                                |(confirmed_pubkey, delegation_slot)| {
+                                    confirmed_pubkey == **pubkey
+                                        && delegation_slot
+                                            > account_in_bank.remote_slot()
+                                },
+                            );
+                        if !can_replace_undelegating {
+                            bank_hit_no_fetch_undelegating_still_valid_count +=
+                                1;
+                            in_bank.insert(**pubkey);
+                            continue;
+                        }
+                    }
+                }
                 forced_refresh_remote_required_count += 1;
                 continue;
             }
@@ -2980,13 +3773,14 @@ where
             let mut join_set = JoinSet::new();
             for (pubkey, account_in_bank) in undelegating_checks {
                 let this = self.clone();
+                let fetch_context = fetch_context.clone();
                 join_set.spawn(async move {
                     let decision = match tokio::time::timeout(
                         Duration::from_secs(5),
                         this.should_refresh_undelegating_in_bank_account(
                             &pubkey,
                             &account_in_bank,
-                            fetch_origin,
+                            fetch_context,
                         ),
                     )
                     .await
@@ -3039,38 +3833,40 @@ where
                 }
             }
         }
-        metrics::inc_chainlink_bank_precheck_accounts(
-            fetch_origin,
+        metrics::inc_chainlink_bank_precheck_accounts_with_context(
+            fetch_context.clone(),
             BankPrecheckOutcome::BankHitNoFetch,
             BankPrecheckReason::NonUndelegatingPresent,
             bank_hit_no_fetch_non_undelegating_count,
         );
-        metrics::inc_chainlink_bank_precheck_accounts(
-            fetch_origin,
+        metrics::inc_chainlink_bank_precheck_accounts_with_context(
+            fetch_context.clone(),
             BankPrecheckOutcome::BankHitNoFetch,
             BankPrecheckReason::UndelegatingStillValid,
             bank_hit_no_fetch_undelegating_still_valid_count,
         );
-        metrics::inc_chainlink_bank_precheck_accounts(
-            fetch_origin,
+        metrics::inc_chainlink_bank_precheck_accounts_with_context(
+            fetch_context.clone(),
             BankPrecheckOutcome::BankHitNoFetch,
             BankPrecheckReason::UndelegatingCheckTimeout,
             bank_hit_no_fetch_undelegating_timeout_count,
         );
-        metrics::inc_chainlink_bank_precheck_accounts(
-            fetch_origin,
+        metrics::inc_chainlink_bank_precheck_accounts_with_context(
+            fetch_context
+                .clone()
+                .with_reason(AccountFetchReason::UndelegatingRefresh),
             BankPrecheckOutcome::BankHitUndelegatingRefreshRequired,
             BankPrecheckReason::UndelegatingRefresh,
             bank_hit_undelegating_refresh_required_count,
         );
-        metrics::inc_chainlink_bank_precheck_accounts(
-            fetch_origin,
+        metrics::inc_chainlink_bank_precheck_accounts_with_context(
+            fetch_context.clone(),
             BankPrecheckOutcome::BankMissRemoteRequired,
             BankPrecheckReason::Absent,
             bank_miss_remote_required_count,
         );
-        metrics::inc_chainlink_bank_precheck_accounts(
-            fetch_origin,
+        metrics::inc_chainlink_bank_precheck_accounts_with_context(
+            fetch_context.clone(),
             BankPrecheckOutcome::ForcedRefreshRemoteRequired,
             BankPrecheckReason::ForcedRefresh,
             forced_refresh_remote_required_count,
@@ -3087,7 +3883,9 @@ where
         let mut waiters: Vec<PendingWaiter> = vec![];
         let mut claimed_ops: Vec<ClaimedOperation> = vec![];
         for pubkey in pubkeys {
-            match self.claim_or_join_owned_operation(*pubkey, fetch_origin) {
+            match self
+                .claim_or_join_owned_operation(*pubkey, fetch_context.clone())
+            {
                 PendingClaim::Created(handles) => {
                     let PendingHandles {
                         waiter,
@@ -3127,7 +3925,7 @@ where
                 claimed_ops,
                 &mark_empty_set,
                 slot,
-                fetch_origin,
+                fetch_context.clone(),
             );
         }
 
@@ -3163,7 +3961,7 @@ where
         &self,
         pubkey: Pubkey,
         slot: u64,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&pubkey);
@@ -3171,7 +3969,8 @@ where
             pubkey,
             delegation_record_pubkey,
             slot,
-            fetch_origin,
+            fetch_context.with_reason(AccountFetchReason::DelegationRecord),
+            ChainlinkCompanionFetchKind::DelegationRecord,
         )
     }
 
@@ -3179,7 +3978,7 @@ where
         &self,
         pubkey: Pubkey,
         slot: u64,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let program_data_pubkey =
             get_loaderv3_get_program_data_address(&pubkey);
@@ -3187,7 +3986,8 @@ where
             pubkey,
             program_data_pubkey,
             slot,
-            fetch_origin,
+            fetch_context.with_reason(AccountFetchReason::ProgramData),
+            ChainlinkCompanionFetchKind::ProgramData,
         )
     }
 
@@ -3196,7 +3996,8 @@ where
         pubkey: Pubkey,
         companion_pubkey: Pubkey,
         slot: u64,
-        fetch_origin: AccountFetchOrigin,
+        fetch_context: AccountFetchContext,
+        companion_fetch_kind: ChainlinkCompanionFetchKind,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let provider = self.remote_account_provider.clone();
         let bank = self.accounts_bank.clone();
@@ -3217,9 +4018,9 @@ where
                     &[pubkey, companion_pubkey],
                     Some(MatchSlotsConfig {
                         min_context_slot: Some(slot),
-                        ..Default::default()
+                        ..MatchSlotsConfig::new(companion_fetch_kind)
                     }),
-                    fetch_origin,
+                    fetch_context,
                 )
                 .await
                 .map_err(ChainlinkError::from)

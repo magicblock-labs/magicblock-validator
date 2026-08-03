@@ -46,12 +46,12 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
-    /// Fetches rent reimbursement address for pubkeys
-    async fn fetch_rent_reimbursements(
+    /// Fetches delegation metadata keyed by delegated account pubkey.
+    async fn fetch_delegation_metadata(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>;
 
     async fn get_base_accounts(
         &self,
@@ -241,7 +241,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         )
         .await?
         .into_iter()
-        .map(|m| m.last_update_nonce + 1);
+        .map(|m| m.last_commit_id + 1);
         Ok(pubkeys.iter().copied().zip(nonces).collect())
     }
 
@@ -261,25 +261,28 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         )
         .await?
         .into_iter()
-        .map(|m| m.last_update_nonce);
+        .map(|m| m.last_commit_id);
         Ok(pubkeys.iter().copied().zip(nonces).collect())
     }
 
-    async fn fetch_rent_reimbursements(
+    async fn fetch_delegation_metadata(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        Ok(Self::fetch_metadata_with_retries(
-            &self.rpc_client,
-            pubkeys,
-            min_context_slot,
-            NUM_FETCH_RETRIES,
-        )
-        .await?
-        .into_iter()
-        .map(|m| m.rent_payer)
-        .collect())
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        Ok(pubkeys
+            .iter()
+            .copied()
+            .zip(
+                Self::fetch_metadata_with_retries(
+                    &self.rpc_client,
+                    pubkeys,
+                    min_context_slot,
+                    NUM_FETCH_RETRIES,
+                )
+                .await?,
+            )
+            .collect())
     }
 
     async fn get_base_accounts(
@@ -613,13 +616,13 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         Ok(result)
     }
 
-    async fn fetch_rent_reimbursements(
+    async fn fetch_delegation_metadata(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
         self.inner
-            .fetch_rent_reimbursements(pubkeys, min_context_slot)
+            .fetch_delegation_metadata(pubkeys, min_context_slot)
             .await
     }
 
@@ -652,12 +655,27 @@ pub enum TaskInfoFetcherError {
 }
 
 impl TaskInfoFetcherError {
+    /// RPC-side fetch failures are transient; malformed or absent
+    /// delegation accounts are deterministic.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::MinContextSlotNotReachedError(_, _) => true,
+            Self::MagicBlockRpcClientError(err) => err.is_transient(),
+            _ => false,
+        }
+    }
+
     pub fn map_client_error(
         min_context_slot: u64,
         e: MagicBlockRpcClientError,
     ) -> Self {
         const MIN_CONTEXT_SLOT_MSG1: &str =
             "Minimum context slot has not been reached";
+        const MIN_CONTEXT_SLOT_MSG2: &str = "Min context slot not reached";
+        fn is_min_context_slot_msg(msg: &str) -> bool {
+            msg.contains(MIN_CONTEXT_SLOT_MSG1)
+                || msg.contains(MIN_CONTEXT_SLOT_MSG2)
+        }
 
         let orig = e;
         let err = match &orig {
@@ -671,13 +689,26 @@ impl TaskInfoFetcherError {
 
         match &*err.kind {
             ErrorKind::RpcError(rpc_err) => match rpc_err {
-                RpcError::ForUser(msg)
-                if msg.contains(MIN_CONTEXT_SLOT_MSG1) => {
-                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
-                },
-                RpcError::RpcResponseError { code, .. }
-                if *code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED => {
-                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
+                RpcError::ForUser(msg) if is_min_context_slot_msg(msg) => {
+                    Self::MinContextSlotNotReachedError(
+                        min_context_slot,
+                        Box::new(orig),
+                    )
+                }
+                RpcError::RpcResponseError {
+                    code: JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+                    ..
+                } => Self::MinContextSlotNotReachedError(
+                    min_context_slot,
+                    Box::new(orig),
+                ),
+                RpcError::RpcResponseError { message, .. }
+                    if is_min_context_slot_msg(message) =>
+                {
+                    Self::MinContextSlotNotReachedError(
+                        min_context_slot,
+                        Box::new(orig),
+                    )
                 }
                 _ => Self::MagicBlockRpcClientError(Box::new(orig)),
             },
@@ -1007,12 +1038,27 @@ mod tests {
                 .collect())
         }
 
-        async fn fetch_rent_reimbursements(
+        async fn fetch_delegation_metadata(
             &self,
-            _: &[Pubkey],
+            pubkeys: &[Pubkey],
             _: u64,
-        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-            unimplemented!()
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
+        {
+            Ok(pubkeys
+                .iter()
+                .map(|pubkey| {
+                    (
+                        *pubkey,
+                        DelegationMetadata {
+                            last_commit_id: 0,
+                            undelegation_requester:
+                                dlp_api::state::UndelegationRequester::None,
+                            seeds: vec![],
+                            rent_payer: *pubkey,
+                        },
+                    )
+                })
+                .collect())
         }
 
         async fn get_base_accounts(

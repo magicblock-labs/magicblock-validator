@@ -5,7 +5,7 @@ use magicblock_chainlink::{
     assert_subscribed_without_loaderv3_program_data_account,
     remote_account_provider::program_account::RemoteProgramLoader,
     testing::{init_logger, utils::random_pubkey},
-    AccountFetchOrigin,
+    AccountFetchContext,
 };
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_pubkey::Pubkey;
@@ -165,7 +165,10 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
         let (fetched_pubkeys, fetched_strs) = {
             let fetched_accounts = ctx
                 .chainlink
-                .fetch_accounts(&all_pubkeys, AccountFetchOrigin::GetAccount)
+                .fetch_accounts(
+                    &all_pubkeys,
+                    AccountFetchContext::rpc_get_account(),
+                )
                 .await
                 .unwrap();
             let mut fetched_pubkeys = all_pubkeys
@@ -213,7 +216,10 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
         let (fetched_pubkeys, fetched_strs) = {
             let fetched_accounts = ctx
                 .chainlink
-                .fetch_accounts(&all_pubkeys, AccountFetchOrigin::GetAccount)
+                .fetch_accounts(
+                    &all_pubkeys,
+                    AccountFetchContext::rpc_get_account(),
+                )
                 .await
                 .unwrap();
             let mut fetched_pubkeys = all_pubkeys

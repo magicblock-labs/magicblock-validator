@@ -38,8 +38,7 @@ impl<T: TransactionPreparator> CleanupHandle<T> {
         let cleanup_futs = self.junk.iter().map(|to_cleanup| {
             self.transaction_preparator.cleanup_for_strategy(
                 &self.authority,
-                &to_cleanup.optimized_tasks,
-                &to_cleanup.lookup_tables_keys,
+                to_cleanup,
                 close_buffers,
             )
         });

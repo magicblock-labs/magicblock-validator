@@ -153,6 +153,7 @@ where
         };
         let commit_stage_patcher = CommitStagePatcher {
             authority: &self.authority,
+            intent_id: self.intent_id,
             intent_client: &self.intent_client,
             callback_scheduler: &self.callback_scheduler,
             task_info_fetcher,
@@ -176,7 +177,13 @@ where
             IntentExecutorError::FailedCommitPreparationError,
             execution_state,
         )
-        .await?;
+        .await
+        .inspect_err(|_| self.dispose_commit_strategies())?;
+        // A commit-id retry may have re-tagged the commit stage as a first
+        // commit; the finalize stage aliases the same way and must carry
+        // the same uniqueness noop.
+        self.state.finalize_strategy.uniqueness_nonce =
+            self.state.commit_strategy.uniqueness_nonce;
         self.execute_callbacks(
             commit_result.as_ref().ok().copied(),
             commit_result.as_ref().map(|_| ()),
@@ -190,6 +197,17 @@ where
         commit_result.map_err(|err| {
             IntentExecutorError::from_commit_execution_error(err)
         })
+    }
+
+    /// Preparation/outbox/patch failure before a strategy-level result was
+    /// reached - surrender both strategies for cleanup since ALT
+    /// reservations or buffer accounts may have been partially set up
+    /// already.
+    fn dispose_commit_strategies(&mut self) {
+        self.execution_report
+            .dispose(mem::take(&mut self.state.commit_strategy));
+        self.execution_report
+            .dispose(mem::take(&mut self.state.finalize_strategy));
     }
 
     pub fn has_callbacks(&self) -> bool {
@@ -324,7 +342,11 @@ where
             IntentExecutorError::FailedFinalizePreparationError,
             execution_state,
         )
-        .await?;
+        .await
+        .inspect_err(|_| {
+            self.execution_report
+                .dispose(mem::take(&mut self.state.finalize_strategy))
+        })?;
         // Even if failed - dump finalize into junk
         self.execute_callbacks(
             finalize_result.as_ref().ok().copied(),

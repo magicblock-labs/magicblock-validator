@@ -35,6 +35,7 @@ pub struct DispatchEndpoints {
     /// Receives scheduled (crank) tasks from transactions executor.
     pub tasks_service: Option<ScheduledTasksRx>,
     /// Receives replication events from the transaction scheduler.
+    /// `None` when replication is disabled, i.e. the validator runs standalone.
     pub replication_messages: Option<Receiver<Message>>,
 }
 
@@ -53,7 +54,8 @@ pub struct ValidatorChannelEndpoints {
     /// Sends scheduled (crank) tasks to tasks service from transactions executor.
     pub tasks_service: ScheduledTasksTx,
     /// Sends replication events to the replication service.
-    pub replication_messages: Sender<Message>,
+    /// `None` when replication is disabled, i.e. the validator runs standalone.
+    pub replication_messages: Option<Sender<Message>>,
     /// Semaphore used to pause scheduling for exclusive DB access (e.g., checksums).
     pub pause_permit: Arc<Semaphore>,
 }
@@ -61,18 +63,28 @@ pub struct ValidatorChannelEndpoints {
 /// Creates and connects the full set of communication channels between the dispatch
 /// layer and the validator core.
 ///
+/// The replication channel is only created when `replication_enabled` is set: both
+/// halves exist, or neither does. A standalone validator has no replication service
+/// to drain the stream, so handing out a sender would only produce failing sends.
+///
 /// # Returns
 ///
 /// A tuple containing:
 /// 1.  `DispatchEndpoints` for the "client" side (e.g., RPC servers).
 /// 2.  `ValidatorChannelEndpoints` for the "server" side (e.g., the transaction executor).
-pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
+pub fn link(
+    replication_enabled: bool,
+) -> (DispatchEndpoints, ValidatorChannelEndpoints) {
     let (tasks_tx, tasks_rx) = mpsc::unbounded_channel();
 
     // Bounded channels for command queues where applying backpressure is important.
     let (txn_to_process_tx, txn_to_process_rx) = mpsc::channel(LINK_CAPACITY);
     let (account_update_tx, account_update_rx) = flume::bounded(LINK_CAPACITY);
-    let (replication_tx, replication_rx) = mpsc::channel(LINK_CAPACITY);
+    let (replication_tx, replication_rx) =
+        match replication_enabled.then(|| mpsc::channel(LINK_CAPACITY)) {
+            Some((tx, rx)) => (Some(tx), Some(rx)),
+            None => (None, None),
+        };
     let (transaction_status_tx, transaction_status_rx) =
         flume::bounded(LINK_CAPACITY);
     // Semaphore(1) coordinates exclusive access: scheduler holds permit during
@@ -89,7 +101,7 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
         transaction_status: transaction_status_rx,
         account_update: account_update_rx,
         tasks_service: Some(tasks_rx),
-        replication_messages: Some(replication_rx),
+        replication_messages: replication_rx,
     };
 
     // Bundle the corresponding channel ends for the validator's internal core.
@@ -103,4 +115,20 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
     };
 
     (dispatch, validator)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replication_endpoints_are_paired() {
+        let (dispatch, validator) = link(true);
+        assert!(dispatch.replication_messages.is_some());
+        assert!(validator.replication_messages.is_some());
+
+        let (dispatch, validator) = link(false);
+        assert!(dispatch.replication_messages.is_none());
+        assert!(validator.replication_messages.is_none());
+    }
 }

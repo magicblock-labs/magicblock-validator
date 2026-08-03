@@ -6,15 +6,16 @@ use std::{
         atomic::{AtomicI64, Ordering},
         Arc, RwLock,
     },
+    time::{Duration, Instant},
 };
 
 use bincode::{deserialize, serialize};
-use magicblock_core::link::blocks::BlockHash;
+use magicblock_core::link::blocks::{BlockHash, LatestBlockInner};
 use magicblock_metrics::metrics::{
     start_ledger_disable_compactions_timer, start_ledger_shutdown_timer,
     HistogramTimer,
 };
-use rocksdb::{Direction as IteratorDirection, FlushOptions};
+use rocksdb::{AsRawPtr, Direction as IteratorDirection, FlushOptions};
 use solana_clock::{Slot, UnixTimestamp};
 use solana_hash::{Hash, HASH_BYTES};
 use solana_measure::measure::Measure;
@@ -42,7 +43,7 @@ use crate::{
     errors::{LedgerError, LedgerResult},
     metrics::LedgerRpcApiMetrics,
     store::utils::adjust_ulimit_nofile,
-    LatestBlock, LatestBlockInner,
+    LatestBlock,
 };
 
 #[derive(Default, Debug)]
@@ -275,7 +276,7 @@ impl Ledger {
     // Block time
     // -----------------
 
-    pub(crate) fn get_block_time(
+    pub fn get_block_time(
         &self,
         slot: Slot,
     ) -> LedgerResult<Option<UnixTimestamp>> {
@@ -360,6 +361,48 @@ impl Ledger {
         }
     }
 
+    /// Returns the position `(slot, index)` of the highest key persisted in
+    /// `slot_signatures_cf`, regardless of whether that slot has a finalized
+    /// block header.
+    ///
+    /// Unlike [`Self::get_latest_transaction_position`], which prefers the
+    /// latest *finalized* (blockhash) slot, this returns the true maximum key.
+    /// This is what a restarting replica needs to resume deduplication from the
+    /// last transaction of an in-progress (not-yet-finalized) slot.
+    ///
+    /// Returns `None` if no transactions exist in the ledger.
+    pub fn get_last_persisted_transaction_position(
+        &self,
+    ) -> LedgerResult<Option<(Slot, u32)>> {
+        let mut iter = self.slot_signatures_cf.iter(IteratorMode::End)?;
+        Ok(iter.next().map(|((slot, index), _)| (slot, index)))
+    }
+
+    /// Returns the signatures of all transactions persisted for `slot`, in
+    /// ascending transaction-index order (the same order in which the primary
+    /// scheduled and hashed them).
+    ///
+    /// Works for in-progress slots that have no finalized block header yet,
+    /// unlike [`Self::get_block`]. Used to rebuild the streaming-blockhash
+    /// accumulator after a mid-slot replica restart.
+    pub fn get_transaction_signatures_for_slot(
+        &self,
+        slot: Slot,
+    ) -> LedgerResult<Vec<Signature>> {
+        let iter = self
+            .slot_signatures_cf
+            .iter(IteratorMode::From((slot, 0), IteratorDirection::Forward))?;
+
+        let mut signatures = Vec::new();
+        for ((tx_slot, _tx_index), tx_signature) in iter {
+            if tx_slot != slot {
+                break;
+            }
+            signatures.push(Signature::try_from(&*tx_signature)?);
+        }
+        Ok(signatures)
+    }
+
     // -----------------
     // Block
     // -----------------
@@ -368,11 +411,15 @@ impl Ledger {
     // As far as we are concerned these are just the time when we advanced to
     // a specific slot.
     pub fn write_block(&self, block: LatestBlockInner) -> LedgerResult<()> {
-        self.blocktime_cf
-            .put(block.slot, &block.clock.unix_timestamp)?;
-        self.blocktime_cf.try_increase_entry_counter(1);
+        // Blocktime and blockhash must land atomically: readers treat the
+        // pair as one record (e.g. getBlockTime vs getBlock availability),
+        // so a split write must never be observable or partially persisted.
+        let mut batch = self.db.batch();
+        batch.put::<cf::Blocktime>(block.slot, &block.clock.unix_timestamp)?;
+        batch.put::<cf::Blockhash>(block.slot, &block.blockhash)?;
+        self.db.write(batch)?;
 
-        self.blockhash_cf.put(block.slot, &block.blockhash)?;
+        self.blocktime_cf.try_increase_entry_counter(1);
         self.blockhash_cf.try_increase_entry_counter(1);
         self.latest_block.store(block);
         Ok(())
@@ -1358,6 +1405,63 @@ impl Ledger {
         Ok(())
     }
 
+    /// Lifts the background IO rate limit so shutdown flushes run at disk
+    /// speed; call only after compactions have been stopped.
+    pub fn lift_rate_limit(&self) {
+        self.db.backend.lift_rate_limit();
+    }
+
+    /// Best-effort wait until no compactions are running, so lifting the
+    /// rate limit cannot hand an in-flight compaction full disk bandwidth.
+    /// Bounded: a throttled job mid-run may need minutes, and shutdown must
+    /// not stall on it.
+    pub fn wait_for_quiescent_compactions(&self, timeout: Duration) {
+        const RUNNING_COMPACTIONS: &str = "rocksdb.num-running-compactions";
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.db.backend.db.property_int_value(RUNNING_COMPACTIONS) {
+                Ok(Some(running)) if running > 0 => {
+                    if Instant::now() >= deadline {
+                        warn!(
+                            running,
+                            "Compactions still running after quiesce timeout"
+                        );
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Ok(_) => return,
+                Err(err) => {
+                    warn!(error = ?err, "Failed to query running compactions");
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Disables automatic compactions on all columns; used at shutdown so
+    /// flush-induced L0 growth cannot schedule compactions that would run
+    /// unthrottled once the rate limit is lifted.
+    pub fn disable_auto_compactions(&self) -> LedgerResult<()> {
+        let cfs = [
+            self.transaction_status_cf.handle(),
+            self.address_signatures_cf.handle(),
+            self.slot_signatures_cf.handle(),
+            self.blocktime_cf.handle(),
+            self.blockhash_cf.handle(),
+            self.transaction_cf.handle(),
+            self.transaction_memos_cf.handle(),
+            self.perf_samples_cf.handle(),
+        ];
+        for cf in cfs {
+            self.db
+                .backend
+                .db
+                .set_options_cf(cf, &[("disable_auto_compactions", "true")])?;
+        }
+        Ok(())
+    }
+
     /// Cancels manual compaction
     /// Here we utilize the internal of `disable_manual_compaction`
     /// Which not only disables future manual compaction,
@@ -1367,7 +1471,12 @@ impl Ledger {
             measure: Measure::start("Compaction cancellation"),
             _timer: start_ledger_disable_compactions_timer(),
         };
-        self.db.backend.db.disable_manual_compaction();
+        // Not exposed by the safe wrapper, reach through the C API
+        unsafe {
+            librocksdb_sys::rocksdb_disable_manual_compaction(
+                self.db.backend.db.as_raw_ptr(),
+            );
+        }
     }
 
     /// Cached latest block data
@@ -2783,5 +2892,105 @@ mod tests {
         // The original valid signature is not in the ledger
         let result = store.verify_transaction_signature(&real_sig).unwrap();
         assert_eq!(result, None);
+    }
+
+    /// Records a bare `(slot, index) -> signature` mapping in
+    /// `slot_signatures_cf`, the way replayed transactions do via
+    /// `record_transaction`. Keeps these focused tests independent of full
+    /// transaction encoding.
+    fn record_signature(
+        store: &Ledger,
+        slot: Slot,
+        index: u32,
+        sig: Signature,
+    ) {
+        let (meta, _writable, _readonly) = create_transaction_status_meta(5);
+        store
+            .write_transaction_status(slot, index, sig, vec![], vec![], meta)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_get_transaction_signatures_for_slot_ascending() {
+        init_logger!();
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        let slot = 10;
+        let sig0 = Signature::from([0u8; 64]);
+        let sig1 = Signature::from([1u8; 64]);
+        let sig2 = Signature::from([2u8; 64]);
+        // Insert out of index order to prove sorting is by key, not insertion.
+        record_signature(&store, slot, 2, sig2);
+        record_signature(&store, slot, 0, sig0);
+        record_signature(&store, slot, 1, sig1);
+        // A signature in a neighbouring slot must not leak in.
+        record_signature(&store, slot + 1, 0, Signature::from([9u8; 64]));
+
+        let sigs = store.get_transaction_signatures_for_slot(slot).unwrap();
+        assert_eq!(sigs, vec![sig0, sig1, sig2]);
+
+        // A slot with no transactions yields an empty vector.
+        let empty = store.get_transaction_signatures_for_slot(999).unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_get_last_persisted_transaction_position() {
+        init_logger!();
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        // Empty ledger has no position.
+        assert_eq!(
+            store.get_last_persisted_transaction_position().unwrap(),
+            None
+        );
+
+        // Finalized slot 10 (with a block header) and its transactions.
+        let finalized_slot = 10;
+        record_signature(&store, finalized_slot, 0, Signature::from([1u8; 64]));
+        record_signature(&store, finalized_slot, 1, Signature::from([2u8; 64]));
+        store
+            .write_block(LatestBlockInner::new(
+                finalized_slot,
+                Hash::new_unique(),
+                100,
+            ))
+            .unwrap();
+
+        // In-progress slot 11 has loose transactions but NO block header, so it
+        // is ahead of the latest finalized (blockhash) slot.
+        let inprogress_slot = 11;
+        record_signature(
+            &store,
+            inprogress_slot,
+            0,
+            Signature::from([3u8; 64]),
+        );
+        record_signature(
+            &store,
+            inprogress_slot,
+            1,
+            Signature::from([4u8; 64]),
+        );
+        record_signature(
+            &store,
+            inprogress_slot,
+            2,
+            Signature::from([5u8; 64]),
+        );
+
+        // The true maximum key is the in-progress slot's last transaction.
+        assert_eq!(
+            store.get_last_persisted_transaction_position().unwrap(),
+            Some((inprogress_slot, 2))
+        );
+        // Contrast: the block-header-anchored variant stops at the finalized
+        // slot and would resume dedup from the wrong position.
+        assert_eq!(
+            store.get_latest_transaction_position().unwrap(),
+            Some((finalized_slot, 1))
+        );
     }
 }

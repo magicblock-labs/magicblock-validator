@@ -78,6 +78,12 @@ fn test_defaults_are_sane() {
     assert_eq!(config.grpc.max_old_unoptimized, 5);
     assert_eq!(config.grpc.max_subs_in_new, 400);
     assert_eq!(config.grpc.max_time_without_optimization_secs, 60);
+    assert_eq!(
+        config.chainlink.undelegation_request_poll_interval,
+        Duration::from_secs(
+            consts::DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS
+        )
+    );
 }
 
 #[test]
@@ -293,7 +299,9 @@ fn test_chainlink_config() {
         r#"
         [chainlink]
         max-monitored-accounts = 5000
+        secondary-max-monitored-accounts = 20000
         resubscription-delay = "50ms"
+        undelegation-request-poll-interval = "5m"
 
         [chainlink.risk]
         enabled = true
@@ -307,9 +315,14 @@ fn test_chainlink_config() {
     let config = run_cli(vec![config_path.to_str().unwrap()]);
 
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
+    assert_eq!(config.chainlink.secondary_max_monitored_accounts, 20000);
     assert_eq!(
         config.chainlink.resubscription_delay,
         std::time::Duration::from_millis(50)
+    );
+    assert_eq!(
+        config.chainlink.undelegation_request_poll_interval,
+        std::time::Duration::from_secs(5 * 60)
     );
     assert!(config.chainlink.risk.enabled);
     assert_eq!(
@@ -492,6 +505,7 @@ fn test_example_config_full_coverage() {
     // 9. Chainlink (Cloning)
     // ========================================================================
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
+    assert_eq!(config.chainlink.secondary_max_monitored_accounts, 20_000);
     assert!(!config.chainlink.risk.enabled);
 
     // ========================================================================
@@ -591,7 +605,15 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_LEDGER__RESET", "true"),
         // --- Chainlink ---
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
+        EnvVarGuard::new(
+            "MBV_CHAINLINK__SECONDARY_MAX_MONITORED_ACCOUNTS",
+            "456",
+        ),
         EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
+        EnvVarGuard::new(
+            "MBV_CHAINLINK__UNDELEGATION_REQUEST_POLL_INTERVAL",
+            "2m",
+        ),
         EnvVarGuard::new("MBV_CHAINLINK__RISK__ENABLED", "true"),
         EnvVarGuard::new("MBV_CHAINLINK__RISK__API_KEY", "env-range-token"),
         EnvVarGuard::new("MBV_CHAINLINK__RISK__CACHE_TTL", "45m"),
@@ -662,9 +684,14 @@ fn test_env_vars_full_coverage() {
 
     // Chainlink
     assert_eq!(config.chainlink.max_monitored_accounts, 123);
+    assert_eq!(config.chainlink.secondary_max_monitored_accounts, 456);
     assert_eq!(
         config.chainlink.resubscription_delay,
         Duration::from_millis(150)
+    );
+    assert_eq!(
+        config.chainlink.undelegation_request_poll_interval,
+        Duration::from_secs(2 * 60)
     );
     assert!(config.chainlink.risk.enabled);
     assert_eq!(

@@ -53,6 +53,10 @@ pub struct ChainLinkConfig {
     /// updates.
     pub max_monitored_accounts: usize,
 
+    /// The maximum number of accounts to retain in the secondary subscription
+    /// cache.
+    pub secondary_max_monitored_accounts: usize,
+
     /// When true, confined accounts are removed during accounts bank reset.
     pub remove_confined_accounts: bool,
 
@@ -66,6 +70,11 @@ pub struct ChainLinkConfig {
     #[serde(with = "humantime")]
     pub resubscription_delay: Duration,
 
+    /// Period for polling DLP-owned UndelegationRequest accounts.
+    /// Set to 0s to disable the polling backfill loop.
+    #[serde(with = "humantime")]
+    pub undelegation_request_poll_interval: Duration,
+
     /// AML/Risk checks for post-delegation actions via Range API.
     pub risk: RiskConfig,
 }
@@ -74,10 +83,15 @@ impl Default for ChainLinkConfig {
     fn default() -> Self {
         Self {
             max_monitored_accounts: consts::DEFAULT_MAX_MONITORED_ACCOUNTS,
+            secondary_max_monitored_accounts:
+                consts::DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS,
             remove_confined_accounts: false,
             allowed_programs: None,
             resubscription_delay: Duration::from_millis(
                 consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,
+            ),
+            undelegation_request_poll_interval: Duration::from_secs(
+                consts::DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS,
             ),
             risk: RiskConfig::default(),
         }

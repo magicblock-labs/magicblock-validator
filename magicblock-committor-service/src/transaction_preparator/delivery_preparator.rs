@@ -29,8 +29,10 @@ use tracing::{error, info};
 
 use crate::{
     tasks::{
-        commit_task::CommitBufferStage, task_strategist::TransactionStrategy,
-        BaseTaskImpl, CleanupTask, PreparationTask,
+        commit_stage_task::{CleanupTask, PreparationTask},
+        task_strategist::TransactionStrategy,
+        utils::TransactionUtils,
+        BaseTaskImpl,
     },
     ComputeBudgetConfig,
 };
@@ -62,13 +64,19 @@ impl DeliveryPreparator {
         authority: &Keypair,
         strategy: &mut TransactionStrategy,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
+        let uniqueness_nonce = strategy.uniqueness_nonce;
         let preparation_futures =
             strategy.optimized_tasks.iter_mut().map(|task| async move {
                 let _timer =
                     metrics::observe_committor_intent_task_preparation_time(
                         &*task,
                     );
-                self.prepare_task_handling_errors(authority, task).await
+                self.prepare_task_handling_errors(
+                    authority,
+                    task,
+                    uniqueness_nonce,
+                )
+                .await
             });
 
         let task_preparations = join_all(preparation_futures);
@@ -94,31 +102,38 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         task: &mut BaseTaskImpl,
+        uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let stage = match task {
-            BaseTaskImpl::Commit(commit_task) => commit_task.stage_mut(),
+        let preparation_task = match task {
+            BaseTaskImpl::Commit(commit_task) => {
+                PreparationTask::from_commit(commit_task)
+            }
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                commit_finalize_task.stage_mut()
+                PreparationTask::from_commit_finalize(commit_finalize_task)
             }
             _ => None,
         };
-        let Some(stage) = stage else {
-            return Ok(());
-        };
-        let CommitBufferStage::Preparation(preparation_task) = stage else {
+        let Some(preparation_task) = preparation_task else {
             return Ok(());
         };
 
         // Initialize buffer account. Init + reallocs
-        self.initialize_buffer_account(authority, preparation_task)
-            .await?;
+        self.initialize_buffer_account(
+            authority,
+            &preparation_task,
+            uniqueness_nonce,
+        )
+        .await?;
 
         // Writing chunks with some retries
-        self.write_buffer_with_retries(authority, preparation_task)
-            .await?;
+        self.write_buffer_with_retries(
+            authority,
+            &preparation_task,
+            uniqueness_nonce,
+        )
+        .await?;
 
-        let cleanup_task = preparation_task.cleanup_task();
-        *stage = CommitBufferStage::Cleanup(cleanup_task);
+        preparation_task.done();
         Ok(())
     }
 
@@ -128,8 +143,9 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         task: &mut BaseTaskImpl,
+        uniqueness_nonce: Option<u64>,
     ) -> Result<(), InternalError> {
-        let res = self.prepare_task(authority, task).await;
+        let res = self.prepare_task(authority, task, uniqueness_nonce).await;
         match res {
             Err(InternalError::BufferExecutionError(
                 BufferExecutionError::AccountAlreadyInitializedError(
@@ -143,30 +159,28 @@ impl DeliveryPreparator {
             res => return res,
         }
 
-        // Prepare cleanup task - set stage to Cleanup before calling cleanup
-        let stage = match task {
-            BaseTaskImpl::Commit(commit_task) => commit_task.stage_mut(),
+        // Preparation failed due to buffer existing - cleanup and retry
+        let preparation_task = match task {
+            BaseTaskImpl::Commit(commit_task) => {
+                PreparationTask::from_commit(commit_task)
+            }
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                commit_finalize_task.stage_mut()
+                PreparationTask::from_commit_finalize(commit_finalize_task)
             }
             _ => None,
         };
-        let Some(stage) = stage else {
+        let Some(preparation_task) = preparation_task else {
             return Ok(());
         };
-        let CommitBufferStage::Preparation(preparation_task) = stage else {
-            return Ok(());
-        };
-        let preparation_task = preparation_task.clone();
-        let cleanup_task = preparation_task.cleanup_task();
 
-        self.cleanup_buffers(authority, &[cleanup_task]).await?;
+        // Cleanup
+        let cleanup_task = preparation_task.cleanup_task();
+        self.cleanup_buffers(authority, &[cleanup_task], uniqueness_nonce)
+            .await?;
         self.rpc_client.invalidate_cached_blockhash().await;
 
-        // Restore preparation stage for retry
-        *stage = CommitBufferStage::Preparation(preparation_task);
-
-        self.prepare_task(authority, task).await
+        // Retry preparation
+        self.prepare_task(authority, task, uniqueness_nonce).await
     }
 
     /// Initializes buffer account for future writes
@@ -174,7 +188,8 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask,
+        preparation_task: &PreparationTask<'_>,
+        uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let authority_pubkey = authority.pubkey();
         let init_instruction =
@@ -184,7 +199,7 @@ impl DeliveryPreparator {
 
         let preparation_instructions =
             chunk_realloc_ixs(realloc_instructions, Some(init_instruction));
-        let preparation_instructions = preparation_instructions
+        let mut preparation_instructions = preparation_instructions
             .into_iter()
             .enumerate()
             .map(|(i, ixs)| {
@@ -207,15 +222,25 @@ impl DeliveryPreparator {
             .collect::<Vec<_>>();
 
         // Initialization
-        self.send_ixs_with_retry(&preparation_instructions[0], authority, 5)
-            .await?;
+        self.send_ixs_with_retry(
+            &mut preparation_instructions[0],
+            authority,
+            5,
+            uniqueness_nonce,
+        )
+        .await?;
 
         // Reallocs can be performed in parallel
         for batch in
-            preparation_instructions[1..].chunks(MAX_PARALLEL_BUFFER_SENDS)
+            preparation_instructions[1..].chunks_mut(MAX_PARALLEL_BUFFER_SENDS)
         {
-            let preparation_futs = batch.iter().map(|instructions| {
-                self.send_ixs_with_retry(instructions, authority, 5)
+            let preparation_futs = batch.iter_mut().map(|instructions| {
+                self.send_ixs_with_retry(
+                    instructions,
+                    authority,
+                    5,
+                    uniqueness_nonce,
+                )
             });
             try_join_all(preparation_futs).await?;
         }
@@ -227,7 +252,8 @@ impl DeliveryPreparator {
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask,
+        preparation_task: &PreparationTask<'_>,
+        uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
         let write_instructions =
@@ -237,6 +263,7 @@ impl DeliveryPreparator {
             authority,
             &preparation_task.chunks,
             &write_instructions,
+            uniqueness_nonce,
         )
         .await
     }
@@ -247,9 +274,10 @@ impl DeliveryPreparator {
         authority: &Keypair,
         chunks: &Chunks,
         write_instructions: &[Instruction],
+        uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let missing_chunks = chunks.get_missing_chunks();
-        let chunks_write_instructions = missing_chunks
+        let mut chunks_write_instructions = missing_chunks
             .into_iter()
             .map(|missing_index| {
                 let instruction = write_instructions[missing_index].clone();
@@ -262,10 +290,16 @@ impl DeliveryPreparator {
             })
             .collect::<Vec<_>>();
 
-        for batch in chunks_write_instructions.chunks(MAX_PARALLEL_BUFFER_SENDS)
+        for batch in
+            chunks_write_instructions.chunks_mut(MAX_PARALLEL_BUFFER_SENDS)
         {
-            let fut_iter = batch.iter().map(|instructions| {
-                self.send_ixs_with_retry(instructions.as_slice(), authority, 5)
+            let fut_iter = batch.iter_mut().map(|instructions| {
+                self.send_ixs_with_retry(
+                    instructions,
+                    authority,
+                    5,
+                    uniqueness_nonce,
+                )
             });
             try_join_all(fut_iter).await?;
         }
@@ -276,10 +310,16 @@ impl DeliveryPreparator {
     // CommitProcessor::init_accounts analog
     async fn send_ixs_with_retry(
         &self,
-        instructions: &[Instruction],
+        instructions: &mut Vec<Instruction>,
         authority: &Keypair,
         max_attempts: usize,
+        uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
+        if let Some(nonce) = uniqueness_nonce {
+            instructions
+                .push(TransactionUtils::uniqueness_noop_instruction(nonce));
+        }
+
         /// Error mappers
         struct IntentTransactionErrorMapper;
         impl TransactionErrorMapper for IntentTransactionErrorMapper {
@@ -325,6 +365,7 @@ impl DeliveryPreparator {
             }
 
             fn decide_flow(
+                &self,
                 err: &Self::ExecutionError,
             ) -> ControlFlow<(), Duration> {
                 match err {
@@ -422,15 +463,22 @@ impl DeliveryPreparator {
         authority: &Keypair,
         cleanup_tasks: &[CleanupTask],
         lookup_table_keys: &[Pubkey],
+        uniqueness_nonce: Option<u64>,
         close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let alt_set = HashSet::from_iter(lookup_table_keys.iter().cloned());
         let fut2 = self.table_mania.release_pubkeys(&alt_set);
 
         if close_buffers {
-            let (res, ()) =
-                join(self.cleanup_buffers(authority, cleanup_tasks), fut2)
-                    .await;
+            let (res, ()) = join(
+                self.cleanup_buffers(
+                    authority,
+                    cleanup_tasks,
+                    uniqueness_nonce,
+                ),
+                fut2,
+            )
+            .await;
             res
         } else {
             fut2.await;
@@ -442,6 +490,7 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         cleanup_tasks: &[CleanupTask],
+        uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         if cleanup_tasks.is_empty() {
             return Ok(());
@@ -469,8 +518,13 @@ impl DeliveryPreparator {
                 async move {
                     (
                         cleanup_tasks,
-                        self.send_ixs_with_retry(&instructions, authority, 1)
-                            .await,
+                        self.send_ixs_with_retry(
+                            &mut instructions,
+                            authority,
+                            1,
+                            uniqueness_nonce,
+                        )
+                        .await,
                     )
                 }
             });
@@ -513,6 +567,13 @@ impl TransactionSendError {
             _ => None,
         }
     }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::CompileError(_) | Self::SignerError(_) => false,
+            Self::MagicBlockRpcClientError(err) => err.is_transient(),
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -531,6 +592,15 @@ impl BufferExecutionError {
         match self {
             Self::AccountAlreadyInitializedError(_, signature) => *signature,
             Self::TransactionSendError(err) => err.signature(),
+        }
+    }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            // Leftover buffer from a prior attempt: the cleanup-and-retry in
+            // `prepare_task_handling_errors` failed, a fresh attempt can heal
+            Self::AccountAlreadyInitializedError(_, _) => true,
+            Self::TransactionSendError(err) => err.is_transient(),
         }
     }
 }
@@ -557,6 +627,20 @@ pub enum InternalError {
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
     #[error("BufferExecutionError: {0}")]
     BufferExecutionError(#[from] BufferExecutionError),
+}
+
+impl InternalError {
+    /// A from-scratch re-preparation recreates missing chunk PDAs, so those
+    /// count as transient alongside RPC and table-sync failures.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::ZeroRetriesRequestedError | Self::BorshError(_) => false,
+            Self::ChunksPDAMissingError(_) => true,
+            Self::TableManiaError(err) => err.is_transient(),
+            Self::MagicBlockRpcClientError(err) => err.is_transient(),
+            Self::BufferExecutionError(err) => err.is_transient(),
+        }
+    }
 }
 
 impl From<MagicBlockRpcClientError> for InternalError {
@@ -588,6 +672,13 @@ impl DeliveryPreparatorError {
         match self {
             Self::FailedToCreateALTError(err)
             | Self::FailedToPrepareBufferAccounts(err) => err.signature(),
+        }
+    }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::FailedToCreateALTError(err)
+            | Self::FailedToPrepareBufferAccounts(err) => err.is_transient(),
         }
     }
 }

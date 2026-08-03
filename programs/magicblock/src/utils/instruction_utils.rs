@@ -87,6 +87,39 @@ impl InstructionUtils {
         )
     }
 
+    /// Builds a top-level validator-authorized commit-and-undelegate request.
+    ///
+    /// This is structurally similar to
+    /// `schedule_commit_and_undelegate_instruction`, but with important
+    /// authorization differences: the validator authority is the signer, and
+    /// delegated accounts are writable non-signers.
+    ///
+    /// In `schedule_commit_and_undelegate_instruction`, each delegated account
+    /// is marked as a signer because that builder is used by the owner-program
+    /// CPI path, where the owner program authorizes the PDA through CPI. The
+    /// undelegation request service observes a DLP request and submits a
+    /// validator-internal transaction instead, so the delegated account PDA
+    /// cannot sign. The Magic Program accepts the validator authority signer as
+    /// authorization, while each delegated account still has to be writable so
+    /// the processor can mark it as undelegating.
+    pub fn validator_schedule_commit_and_undelegate_instruction(
+        validator_authority: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(*validator_authority, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new(*pubkey, false));
+        }
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCommitAndUndelegate,
+            account_metas,
+        )
+    }
+
     #[cfg(test)]
     pub(crate) fn schedule_commit_with_delegated_payer_instruction(
         payer: &Pubkey,
@@ -131,6 +164,33 @@ impl InstructionUtils {
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
+            account_metas,
+        )
+    }
+
+    // -----------------
+    // Close Outbox Intent
+    // -----------------
+    pub fn close_outbox_intent(
+        intent_id: u64,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::close_outbox_intent_instruction(intent_id);
+        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
+    }
+
+    pub(crate) fn close_outbox_intent_instruction(
+        intent_id: u64,
+    ) -> Instruction {
+        let account_metas = vec![
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new_readonly(crate::id(), false),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+            AccountMeta::new(outbox_intent_pda(intent_id), false),
+        ];
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CloseOutboxIntent(intent_id),
             account_metas,
         )
     }

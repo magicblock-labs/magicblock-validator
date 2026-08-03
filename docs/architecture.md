@@ -179,9 +179,9 @@ loader-specific paths (V1→V3 conversion, V4 buffer + deploy).
    in the 5 MB `MagicContext` account. A second validator-signed instruction
    (`AcceptScheduleCommits`) moves staged intents to a global map — a deliberate
    two-stage flow across slot boundaries.
-2. [`magicblock-accounts`](../magicblock-accounts)
-   (`ScheduledCommitsProcessorImpl`) picks intents up each slot (driven by the slot
-   ticker) and feeds [`magicblock-committor-service`](../magicblock-committor-service).
+2. [`magicblock-committor-service`](../magicblock-committor-service) runs the
+   intent execution service, which periodically accepts staged intents from
+   `MagicContext`, schedules them, and reports `ScheduledCommitSent` locally.
 3. The committor service builds base-chain transactions:
    [`tasks/task_strategist.rs`](../magicblock-committor-service/src/tasks/task_strategist.rs)
    packs commit tasks under CPI-depth limits (falling back to a two-stage

@@ -1,11 +1,17 @@
 use core::str;
-use std::{convert::Infallible, sync::Arc};
+use std::{
+    convert::Infallible,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use futures::{stream::FuturesOrdered, StreamExt};
 use hyper::{
     body::Incoming,
     header::{
-        HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderName, HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS,
         ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
         ACCESS_CONTROL_MAX_AGE,
     },
@@ -20,8 +26,10 @@ use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics::{
     RPC_REQUESTS_COUNT, RPC_REQUEST_HANDLING_TIME,
 };
+use tokio::sync::Semaphore;
 
 use crate::{
+    error::RpcError,
     requests::{
         http::{extract_bytes, parse_body, HandlerResult},
         payload::ResponseErrorPayload,
@@ -58,6 +66,9 @@ pub(crate) struct HttpDispatcher {
     /// A handle to the transaction scheduler for processing
     /// `sendTransaction` and `simulateTransaction`.
     pub(crate) transactions_scheduler: TransactionSchedulerHandle,
+    /// Bounds concurrent iterator-based ledger scans so a burst of degraded
+    /// (e.g. tombstone-scanning) queries cannot exhaust threads or the DB.
+    blocking_reads: Semaphore,
 }
 
 impl HttpDispatcher {
@@ -69,6 +80,12 @@ impl HttpDispatcher {
         state: SharedState,
         channels: &DispatchEndpoints,
     ) -> Arc<Self> {
+        // Mirror the runtime's worker count: the same ledger-scan concurrency
+        // the workers previously allowed implicitly, now without starving them.
+        let permits = std::thread::available_parallelism()
+            .map(|n| (n.get() / 2).saturating_sub(1))
+            .unwrap_or(1)
+            .max(2);
         Arc::new(Self {
             context: state.context,
             accountsdb: state.accountsdb.clone(),
@@ -77,6 +94,7 @@ impl HttpDispatcher {
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             transactions_scheduler: channels.transaction_scheduler.clone(),
+            blocking_reads: Semaphore::new(permits),
         })
     }
 
@@ -96,9 +114,12 @@ impl HttpDispatcher {
         self: Arc<Self>,
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
-        if let Some(response) = Self::handle_special_request(&request) {
+        if let Some(response) = self.handle_special_request(&request) {
             return Ok(response);
         }
+
+        let remote_account_claims = Arc::new(AtomicU64::new(0));
+
         // A local macro to simplify error handling. If a Result is an Err,
         // it immediately formats it into a JSON-RPC error response and returns.
         macro_rules! unwrap {
@@ -108,6 +129,10 @@ impl HttpDispatcher {
                     Err(error) => {
                         let mut resp = ResponseErrorPayload::encode($id, error);
                         Self::set_access_control_headers(&mut resp);
+                        Self::set_remote_account_claims_header(
+                            &mut resp,
+                            &remote_account_claims,
+                        );
                         return Ok(resp);
                     }
                 }
@@ -118,6 +143,10 @@ impl HttpDispatcher {
                     Err(error) => {
                         let mut resp = ResponseErrorPayload::encode($id, error);
                         Self::set_access_control_headers(&mut resp);
+                        Self::set_remote_account_claims_header(
+                            &mut resp,
+                            &remote_account_claims,
+                        );
                         resp
                     }
                 }
@@ -131,7 +160,8 @@ impl HttpDispatcher {
         // Resolve the handler for request and process it
         let (response, id) = match request {
             RpcRequest::Single(mut r) => {
-                let response = self.process(&mut r).await;
+                let response =
+                    self.process(&mut r, remote_account_claims.clone()).await;
                 (response, Some(r.id))
             }
             RpcRequest::Multi(requests) => {
@@ -140,8 +170,10 @@ impl HttpDispatcher {
                 const CLOSE_BR: u8 = b']';
                 let mut jobs = FuturesOrdered::new();
                 for mut r in requests {
-                    let j = async {
-                        let response = self.process(&mut r).await;
+                    let claims = remote_account_claims.clone();
+                    let dispatcher = self.clone();
+                    let j = async move {
+                        let response = dispatcher.process(&mut r, claims).await;
                         (response, r)
                     };
                     jobs.push_back(j);
@@ -162,10 +194,18 @@ impl HttpDispatcher {
         // Handle any errors from the handling stage
         let mut response = unwrap!(response, id.as_ref());
         Self::set_access_control_headers(&mut response);
+        Self::set_remote_account_claims_header(
+            &mut response,
+            &remote_account_claims,
+        );
         Ok(response)
     }
 
-    async fn process(&self, request: &mut JsonHttpRequest) -> HandlerResult {
+    async fn process(
+        &self,
+        request: &mut JsonHttpRequest,
+        remote_account_claims: Arc<AtomicU64>,
+    ) -> HandlerResult {
         // Route the request to the correct handler based on the method name.
         use crate::requests::JsonRpcHttpMethod::*;
         let method = request.method.as_str();
@@ -175,9 +215,15 @@ impl HttpDispatcher {
             .start_timer();
 
         match request.method {
-            GetAccountInfo => self.get_account_info(request).await,
-            GetBalance => self.get_balance(request).await,
-            GetBlock => self.get_block(request),
+            GetAccountInfo => {
+                self.get_account_info(request, remote_account_claims.clone())
+                    .await
+            }
+            GetBalance => {
+                self.get_balance(request, remote_account_claims.clone())
+                    .await
+            }
+            GetBlock => self.run_blocking(|| self.get_block(request)).await,
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_block_height(request),
             GetBlockTime => self.get_block_time(request),
@@ -194,19 +240,32 @@ impl HttpDispatcher {
             GetIdentity => self.get_identity(request),
             GetLargestAccounts => self.get_largest_accounts(request),
             GetLatestBlockhash => self.get_latest_blockhash(request),
-            GetMultipleAccounts => self.get_multiple_accounts(request).await,
+            GetMultipleAccounts => {
+                self.get_multiple_accounts(
+                    request,
+                    remote_account_claims.clone(),
+                )
+                .await
+            }
             GetProgramAccounts => self.get_program_accounts(request),
             GetRecentPerformanceSamples => {
                 self.get_recent_performance_samples(request)
             }
             GetSignatureStatuses => self.get_signature_statuses(request),
-            GetSignaturesForAddress => self.get_signatures_for_address(request),
+            GetSignaturesForAddress => {
+                self.run_blocking(|| self.get_signatures_for_address(request))
+                    .await
+            }
             GetSlot => self.get_slot(request),
             GetSlotLeader => self.get_slot_leader(request),
             GetSlotLeaders => self.get_slot_leaders(request),
             GetSupply => self.get_supply(request),
             GetTokenAccountBalance => {
-                self.get_token_account_balance(request).await
+                self.get_token_account_balance(
+                    request,
+                    remote_account_claims.clone(),
+                )
+                .await
             }
             GetTokenAccountsByDelegate => {
                 self.get_token_accounts_by_delegate(request)
@@ -223,16 +282,33 @@ impl HttpDispatcher {
             IsBlockhashValid => self.is_blockhash_valid(request),
             MinimumLedgerSlot => self.get_first_available_block(request),
             RequestAirdrop => self.request_airdrop(request).await,
-            SendTransaction => self.send_transaction(request).await,
-            SimulateTransaction => self.simulate_transaction(request).await,
+            SendTransaction => {
+                self.send_transaction(request, remote_account_claims.clone())
+                    .await
+            }
+            SimulateTransaction => {
+                self.simulate_transaction(
+                    request,
+                    remote_account_claims.clone(),
+                )
+                .await
+            }
             GetRoutes => self.get_routes(request),
             // Alias for getLatestBlockhash; exists for Magic Router SDK compatibility.
             GetBlockhashForAccounts => self.get_latest_blockhash(request),
-            GetDelegationStatus => self.get_delegation_status(request).await,
+            GetDelegationStatus => {
+                self.get_delegation_status(
+                    request,
+                    remote_account_claims.clone(),
+                )
+                .await
+            }
+            MethodNotFound => Err(RpcError::method_not_found()),
         }
     }
 
     fn handle_special_request(
+        &self,
         request: &Request<Incoming>,
     ) -> Option<Response<JsonBody>> {
         if request.method() == Method::OPTIONS {
@@ -242,12 +318,30 @@ impl HttpDispatcher {
         } else if request.uri() == "/health/primary" {
             let mut response = Response::new(JsonBody::from(""));
             Self::set_access_control_headers(&mut response);
-            if CoordinationMode::current() != CoordinationMode::Primary {
+            if CoordinationMode::current() != CoordinationMode::Primary
+                || !self.blocks.is_ready()
+            {
                 *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE
             }
             return Some(response);
         }
         None
+    }
+
+    const REMOTE_ACCOUNT_CLAIMS_HEADER: HeaderName =
+        HeaderName::from_static("x-mb-remote-account-claims");
+
+    fn set_remote_account_claims_header(
+        response: &mut Response<JsonBody>,
+        remote_account_claims: &AtomicU64,
+    ) {
+        let claims = remote_account_claims.load(Ordering::Relaxed).to_string();
+        let value = HeaderValue::from_str(&claims)
+            // SAFETY: a stringified u64 is always a valid header value
+            .expect("u64 remote account claims header value should be valid");
+        response
+            .headers_mut()
+            .insert(Self::REMOTE_ACCOUNT_CLAIMS_HEADER, value);
     }
 
     /// Set CORS/Access control related headers (required by explorers/web apps)
@@ -262,5 +356,34 @@ impl HttpDispatcher {
         headers.insert(ACCESS_CONTROL_ALLOW_METHODS, hv("POST, OPTIONS, GET"));
         headers.insert(ACCESS_CONTROL_ALLOW_HEADERS, hv("*"));
         headers.insert(ACCESS_CONTROL_MAX_AGE, hv("86400"));
+    }
+}
+
+impl HttpDispatcher {
+    /// Runs an iterator-based ledger scan (`getBlock`,
+    /// `getSignaturesForAddress`) via `block_in_place`: such scans crawl the
+    /// range tombstones left behind by the ledger truncator and must never
+    /// pin an RPC runtime worker and starve every other request. The
+    /// `blocking_reads` semaphore bounds how many run at once; waiters queue
+    /// in async land without occupying any thread.
+    ///
+    /// Single-key ledger gets stay inline: they remain cheap under tombstones
+    /// (signature-keyed columns are never range-deleted), and the per-call
+    /// `block_in_place` core handoff is too costly for hot point lookups.
+    ///
+    /// Falls back to running inline on current-thread runtimes (tests), where
+    /// `block_in_place` would panic.
+    async fn run_blocking<T>(&self, f: impl FnOnce() -> T) -> T {
+        use tokio::runtime::{Handle, RuntimeFlavor};
+        // The semaphore is never closed, so acquisition cannot fail.
+        let _permit = self.blocking_reads.acquire().await.ok();
+        let multi_threaded = Handle::try_current()
+            .map(|h| h.runtime_flavor() == RuntimeFlavor::MultiThread)
+            .unwrap_or_default();
+        if multi_threaded {
+            tokio::task::block_in_place(f)
+        } else {
+            f()
+        }
     }
 }

@@ -53,10 +53,6 @@ impl Message {
             Self::Reset(slot) => (*slot, RESET_INDEX),
         }
     }
-
-    pub fn requires_ack(&self) -> bool {
-        matches!(self, Self::SuperBlock(_) | Self::Reset(_))
-    }
 }
 
 /// Transaction with slot context for ordered replay.

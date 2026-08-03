@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::intent::{
+    calculate_commit_fee, types::CommittedAccount, CommitAndUndelegate,
+    CommitType, MagicBaseIntent, UndelegateType,
+};
 // no direct token remap helpers needed here; handled in CommittedAccount builder
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
@@ -10,11 +13,9 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
-        calculate_commit_fee, validate_commit_schedule_permissions,
-        CommitAndUndelegate, CommitType, MagicBaseIntent,
-        ScheduledIntentBundle, UndelegateType,
+        validate_commit_schedule_permissions, ScheduledIntentBundle,
     },
-    magic_sys::fetch_current_commit_nonces,
+    magic_sys::{fetch_current_commit_nonces, validate_intent_size},
     schedule_transactions::{self, check_commit_limits, try_get_fee_vault},
     utils::{
         account_actions::{
@@ -306,6 +307,12 @@ pub(crate) fn process_schedule_commit(
         ))
     }
     .into();
+    validate_intent_size(&base_intent).inspect_err(|_| {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit ERR: intent is too large to ever fit into transaction",
+        );
+    })?;
 
     let scheduled_base_intent = ScheduledIntentBundle {
         id: intent_id,

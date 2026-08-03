@@ -310,7 +310,7 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
         None,
         players,
         pdas,
-        ScheduleCommitType::Commit,
+        ScheduleCommitType::CommitFinalize,
     );
 
     let nested_cpi_ix =

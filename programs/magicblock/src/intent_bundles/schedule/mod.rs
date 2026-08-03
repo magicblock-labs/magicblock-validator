@@ -8,7 +8,7 @@ pub(crate) mod transaction_scheduler;
 
 use std::sync::Arc;
 
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::intent::types::CommittedAccount;
 use magicblock_magic_program_api::{
     pda::CALLBACK_SIGNER, MAGIC_CONTEXT_PUBKEY,
 };
@@ -29,6 +29,7 @@ pub use crate::intent_bundles::outbox::process_scheduled_commit_sent::{
 pub(crate) use crate::intent_bundles::{
     outbox::{
         process_accept_scheduled_commits::*,
+        process_close_outbox_intent::process_close_outbox_intent,
         process_set_intent_execution_stage::process_set_intent_execution_stage,
     },
     process_execute_callback::*,

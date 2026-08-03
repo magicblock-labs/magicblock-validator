@@ -1,0 +1,185 @@
+name: Prepare release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example 0.13.11); defaults to the next patch version"
+        required: false
+        type: string
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare-release:
+    name: Prepare release PR
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    env:
+      HOST_CARGO_JOBS: "8"
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-prepare-release-v001"
+          rust_toolchain_release: "1.94.1"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine release version
+        working-directory: magicblock-validator
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          current_version="$(
+            awk '
+              $0 == "[workspace.package]" { in_section = 1; next }
+              in_section && /^\[/ { exit }
+              in_section && /^version = "/ {
+                value = $0
+                sub(/^version = "/, "", value)
+                sub(/"$/, "", value)
+                print value
+                exit
+              }
+            ' Cargo.toml
+          )"
+
+          if [[ ! "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Invalid current workspace version: $current_version" >&2
+            exit 1
+          fi
+
+          current_major=$((10#${BASH_REMATCH[1]}))
+          current_minor=$((10#${BASH_REMATCH[2]}))
+          current_patch=$((10#${BASH_REMATCH[3]}))
+
+          if [[ -z "$INPUT_VERSION" ]]; then
+            version="${current_major}.${current_minor}.$((current_patch + 1))"
+          else
+            requested_version="${INPUT_VERSION#v}"
+            if [[ ! "$requested_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "Version must have the form X.Y.Z or vX.Y.Z" >&2
+              exit 1
+            fi
+
+            new_major=$((10#${BASH_REMATCH[1]}))
+            new_minor=$((10#${BASH_REMATCH[2]}))
+            new_patch=$((10#${BASH_REMATCH[3]}))
+
+            if (( new_major < current_major ||
+                  (new_major == current_major && new_minor < current_minor) ||
+                  (new_major == current_major && new_minor == current_minor && new_patch <= current_patch) )); then
+              echo "Version must be newer than $current_version" >&2
+              exit 1
+            fi
+
+            version="${new_major}.${new_minor}.${new_patch}"
+          fi
+
+          release_branch="release/v${version}"
+          remote_branch="$(git ls-remote --heads origin "refs/heads/${release_branch}")"
+          if [[ -n "$remote_branch" ]]; then
+            echo "Branch $release_branch already exists" >&2
+            exit 1
+          fi
+          remote_tag="$(git ls-remote --tags origin "refs/tags/v${version}")"
+          if [[ -n "$remote_tag" ]]; then
+            echo "Tag v${version} already exists" >&2
+            exit 1
+          fi
+
+          git switch --create "$release_branch"
+          {
+            echo "CURRENT_VERSION=$current_version"
+            echo "VERSION=$version"
+            echo "RELEASE_BRANCH=$release_branch"
+          } >> "$GITHUB_ENV"
+
+          echo "Preparing v${version} from v${current_version}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set workspace version
+        working-directory: magicblock-validator
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          awk -v version="$VERSION" '
+            BEGIN { in_section = 0; updated = 0 }
+            $0 == "[workspace.package]" {
+              in_section = 1
+              print
+              next
+            }
+            in_section && /^\[/ { in_section = 0 }
+            in_section && /^version = "/ {
+              print "version = \"" version "\""
+              updated++
+              next
+            }
+            { print }
+            END { if (updated != 1) exit 1 }
+          ' Cargo.toml > Cargo.toml.tmp
+          mv Cargo.toml.tmp Cargo.toml
+
+      - name: Align package versions
+        working-directory: magicblock-validator/.github
+        shell: bash
+        run: ./version-align.sh
+
+      - name: Build project and integration tests
+        working-directory: magicblock-validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --workspace --jobs "$HOST_CARGO_JOBS"
+          cargo build --workspace --manifest-path test-integration/Cargo.toml --jobs "$HOST_CARGO_JOBS"
+          cargo metadata --locked --no-deps --format-version 1 >/dev/null
+          cargo metadata --manifest-path test-integration/Cargo.toml --locked --no-deps --format-version 1 >/dev/null
+
+      - name: Commit and push release branch
+        working-directory: magicblock-validator
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          if git diff --cached --quiet; then
+            echo "No release changes were generated" >&2
+            exit 1
+          fi
+          git commit -m "release: v${VERSION}"
+          gh auth setup-git
+          git push --set-upstream origin "$RELEASE_BRANCH"
+
+      - name: Create pull request
+        working-directory: magicblock-validator
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$RELEASE_BRANCH" \
+            --title "release v${VERSION}" \
+            --body ""

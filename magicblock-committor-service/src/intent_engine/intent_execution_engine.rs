@@ -13,6 +13,7 @@ use solana_signature::Signature;
 use tokio::{
     sync::{broadcast, OwnedSemaphorePermit, Semaphore},
     task::JoinHandle,
+    time::sleep,
 };
 use tokio_stream::StreamExt;
 use tracing::{error, info, instrument, trace, warn};
@@ -29,7 +30,7 @@ use crate::{
         error::{IntentExecutorError, IntentExecutorResult},
         intent_executor_factory::IntentExecutorBuilder,
         strategy_executor::error::TransactionStrategyExecutionError,
-        ExecutionOutput, IntentExecutionResult, IntentExecutor,
+        ExecutionOutput, IntentExecutionResult,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -37,6 +38,20 @@ use crate::{
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 /// Max number of executors that can send messages in parallel to Base layer
 const MAX_EXECUTORS: u8 = 50;
+/// Max intents concurrently sleeping in retry backoff. Retries release their
+/// executor slot while sleeping; this cap keeps the total task population
+/// bounded when many intents fail together
+const MAX_SLEEPING_RETRIERS: usize = 5_000;
+/// Max executions of an intent whose failures were transient
+const MAX_INTENT_ATTEMPTS: u32 = 3;
+/// Backoff between intent attempts, scaled linearly by attempt number
+const INTENT_RETRY_BACKOFF: Duration = Duration::from_secs(1);
+
+/// Concurrency limits shared between the engine and its executor tasks
+struct ExecutionLimits {
+    executors: Arc<Semaphore>,
+    retries: Arc<Semaphore>,
+}
 
 pub type PatchedErrors = Vec<TransactionStrategyExecutionError>;
 
@@ -94,11 +109,12 @@ impl ResultSubscriber {
 
 pub(crate) struct IntentExecutionEngine<D, F, T> {
     intent_stream: IntentStream<D>,
-    executor_builder: F,
+    executor_builder: Arc<F>,
 
     inner: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
+    retries_semaphore: Arc<Semaphore>,
     _phantom_data: PhantomData<T>,
 }
 
@@ -108,14 +124,15 @@ where
     T: TransactionPreparator,
     F: IntentExecutorBuilder<T> + Send + Sync + 'static,
 {
-    pub fn new(intent_stream: IntentStream<D>, executor_factory: F) -> Self {
+    pub fn new(intent_stream: IntentStream<D>, executor_builder: F) -> Self {
         Self {
             intent_stream,
-            executor_builder: executor_factory,
+            executor_builder: Arc::new(executor_builder),
             running_executors: FuturesUnordered::new(),
             executors_semaphore: Arc::new(Semaphore::new(
                 MAX_EXECUTORS as usize,
             )),
+            retries_semaphore: Arc::new(Semaphore::new(MAX_SLEEPING_RETRIERS)),
             inner: Arc::new(Mutex::new(IntentScheduler::new())),
             _phantom_data: PhantomData,
         }
@@ -168,15 +185,18 @@ where
                 .expect(SEMAPHORE_CLOSED_MSG);
 
             // Spawn executor
-            let executor = self
-                .executor_builder
-                .create_instance(intent.status().clone());
+            let executor_factory = self.executor_builder.clone();
             let inner = self.inner.clone();
+            let limits = ExecutionLimits {
+                executors: self.executors_semaphore.clone(),
+                retries: self.retries_semaphore.clone(),
+            };
 
             let handle = tokio::spawn(Self::execute(
-                executor,
+                executor_factory,
                 intent,
                 inner,
+                limits,
                 permit,
                 result_sender.clone(),
             ));
@@ -250,35 +270,46 @@ where
             .map_err(IntentScheduleError::DBError)
     }
 
-    /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
-    #[instrument(skip(executor, intent, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
+    /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit.
+    /// Transient failures are retried with a fresh executor while the scheduler
+    /// keeps conflicting intents blocked, preserving per-account commit order.
+    #[instrument(skip(executor_factory, intent, inner_scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
-        executor: Box<dyn IntentExecutor<T>>,
+        executor_factory: Arc<F>,
         intent: OutboxIntentBundle,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,
+        limits: ExecutionLimits,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
         let instant = Instant::now();
 
-        // Execute an Intent
-        let (result, cleanup_handle) =
-            executor.execute(intent.inner.clone()).await;
-        let _ = result.inner.as_ref().inspect_err(|err| {
+        let (result, execution_permit) = Self::execute_with_retries(
+            executor_factory,
+            &intent,
+            limits,
+            execution_permit,
+        )
+        .await;
+
+        // Report
+        let is_err = result.inner.as_ref().inspect_err(|err| {
             error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
-        });
-
-        // Record metrics after execution
+        }).is_err();
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
-
-        // Broadcast result to subscribers
         let broadcasted_result =
             BroadcastedIntentExecutionResult::new(intent.id, result);
         if let Err(err) = result_sender.send(broadcasted_result) {
             warn!(error = ?err, "No result listeners");
         }
 
-        // TODO(edwin): if intent is Err(T) we need to "lock" pubkeys somehow
+        // Lock intent's pubkeys. This will prevent future intents from execution
+        // if future intent overlaps with failed one(current)
+        if is_err {
+            let pubkeys = intent.get_all_committed_pubkeys();
+            warn!(pubkeys = ?pubkeys, "Intents for following pubkeys are now blocked.");
+            return;
+        }
         // That would
         // Remove executed task from Scheduler to unblock other intents
         // SAFETY: Self::execute is called ONLY after IntentScheduler
@@ -290,14 +321,79 @@ where
             .complete(&intent)
             .expect("Valid completion of previously scheduled message");
 
-        tokio::spawn(async move {
-            if let Err(err) = cleanup_handle.clean().await {
-                error!(error = ?err, "Failed to cleanup after intent");
-            }
-        });
-
         // Free worker
         drop(execution_permit);
+    }
+
+    /// Executes an intent, retrying plausibly-transient failures with a
+    /// fresh executor. Returns the final result together with whichever
+    /// execution permit is still held (`None` only if the executors
+    /// semaphore closed mid-retry).
+    async fn execute_with_retries(
+        executor_factory: Arc<F>,
+        intent: &OutboxIntentBundle,
+        limits: ExecutionLimits,
+        execution_permit: OwnedSemaphorePermit,
+    ) -> (IntentExecutionResult, Option<OwnedSemaphorePermit>) {
+        // Commit tasks give on-chain dedup (commit nonce) to re-executed
+        // sends; action-only intents can double-execute if their transaction
+        // landed unobserved, so they only retry pre-send failures
+        let has_dedup_guard = !intent.get_all_committed_pubkeys().is_empty();
+
+        let mut attempt = 0;
+        let mut execution_permit = Some(execution_permit);
+        let result = loop {
+            attempt += 1;
+            // TODO(edwin): reconcile intent on retry in the future
+            let executor =
+                executor_factory.create_instance(intent.status().clone());
+            let (result, cleanup_handle) =
+                executor.execute(intent.inner.clone()).await;
+
+            tokio::spawn(async move {
+                if let Err(err) = cleanup_handle.clean().await {
+                    error!(error = ?err, "Failed to cleanup after intent");
+                }
+            });
+
+            // break early if we can't retry anymore
+            if attempt >= MAX_INTENT_ATTEMPTS
+                || !result.is_retriable(has_dedup_guard)
+            {
+                break result;
+            }
+
+            // Sleeping retries release their executor slot but must stay
+            // bounded; without a free retry slot the failure is terminal
+            let Ok(retry_permit) = limits.retries.clone().try_acquire_owned()
+            else {
+                warn!(intent_id = intent.id, "Retry capacity exhausted");
+                break result;
+            };
+
+            if let Err(err) = &result.inner {
+                warn!(intent_id = intent.id, attempt, error = ?err, "Transient intent failure, retrying");
+            }
+
+            // Release the executor slot during backoff so unrelated intents
+            // keep executing while this one waits out the outage.
+            // Per-intent jitter decorrelates synchronized retry bursts when
+            // many intents fail together during an outage
+            let jitter = Duration::from_millis((intent.id % 8) * 125);
+            drop(execution_permit.take());
+            sleep(INTENT_RETRY_BACKOFF * attempt + jitter).await;
+            execution_permit =
+                match limits.executors.clone().acquire_owned().await {
+                    Ok(permit) => Some(permit),
+                    Err(_) => {
+                        error!(SEMAPHORE_CLOSED_MSG);
+                        break result;
+                    }
+                };
+            drop(retry_permit);
+        };
+
+        (result, execution_permit)
     }
 
     /// Records metrics related to intent execution
@@ -349,6 +445,7 @@ mod tests {
     };
 
     use async_trait::async_trait;
+    use magicblock_rpc_client::MagicBlockRpcClientError;
     use solana_keypair::Keypair;
     use solana_message::VersionedMessage;
     use solana_pubkey::{pubkey, Pubkey};
@@ -368,7 +465,7 @@ mod tests {
             cleanup_handle::CleanupHandle,
             error::{IntentExecutorError as ExecutorError, InternalError},
             intent_executor_factory::IntentExecutorBuilder,
-            IntentExecutionResult,
+            IntentExecutionResult, IntentExecutor,
         },
         tasks::task_strategist::TransactionStrategy,
         test_utils,
@@ -396,8 +493,7 @@ mod tests {
         async fn cleanup_for_strategy(
             &self,
             _authority: &Keypair,
-            _tasks: &[crate::tasks::BaseTaskImpl],
-            _lookup_table_keys: &[Pubkey],
+            _transaction_strategy: &TransactionStrategy,
             _close_buffers: bool,
         ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
             Ok(())
@@ -416,15 +512,25 @@ mod tests {
         MockIntentExecutionEngine,
         Arc<Mutex<DummyDB>>,
     ) {
-        test_utils::init_test_logger();
-
-        let db = Arc::new(Mutex::new(DummyDB::new()));
-        let (handle, intent_stream) = channel(&db, 1000);
         let executor_factory = if !should_fail {
             MockIntentExecutorFactory::new()
         } else {
             MockIntentExecutorFactory::new_failing()
         };
+        setup_engine_with_factory(executor_factory)
+    }
+
+    fn setup_engine_with_factory(
+        executor_factory: MockIntentExecutorFactory,
+    ) -> (
+        IntentScheduleHandle<DummyDB>,
+        MockIntentExecutionEngine,
+        Arc<Mutex<DummyDB>>,
+    ) {
+        test_utils::init_test_logger();
+
+        let db = Arc::new(Mutex::new(DummyDB::new()));
+        let (handle, intent_stream) = channel(&db, 1000);
         let worker =
             IntentExecutionEngine::new(intent_stream, executor_factory);
 
@@ -561,8 +667,8 @@ mod tests {
 
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
-        worker
-            .executor_builder
+        Arc::get_mut(&mut worker.executor_builder)
+            .expect("factory not shared before spawn")
             .with_concurrency_tracking(&active_tasks, &max_concurrent);
 
         let result_subscriber = worker.spawn();
@@ -621,6 +727,94 @@ mod tests {
         }
     }
 
+    /// Transient failures are retried with a fresh executor until success
+    #[tokio::test(start_paused = true)]
+    async fn test_transient_failure_retried_until_success() {
+        let factory = MockIntentExecutorFactory::new_transient(2);
+        let created_instances = factory.created_instances.clone();
+        let (sender, worker, _db) = setup_engine_with_factory(factory);
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        let msg = create_test_intent(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
+        );
+        sender.schedule(vec![msg]).unwrap();
+
+        let result = result_receiver.recv().await.unwrap();
+        assert!(result.is_ok());
+        assert_eq!(created_instances.load(Ordering::SeqCst), 3);
+    }
+
+    /// Transient failures stop being retried once attempts are exhausted
+    #[tokio::test(start_paused = true)]
+    async fn test_transient_failure_exhausts_attempts() {
+        let factory = MockIntentExecutorFactory::new_transient(usize::MAX);
+        let created_instances = factory.created_instances.clone();
+        let (sender, worker, _db) = setup_engine_with_factory(factory);
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        let msg = create_test_intent(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
+        );
+        sender.schedule(vec![msg]).unwrap();
+
+        let result = result_receiver.recv().await.unwrap();
+        assert!(result.is_err());
+        assert_eq!(
+            created_instances.load(Ordering::SeqCst),
+            MAX_INTENT_ATTEMPTS as usize
+        );
+    }
+
+    /// Non-transient failures are terminal on the first attempt
+    #[tokio::test]
+    async fn test_non_transient_failure_not_retried() {
+        let factory = MockIntentExecutorFactory::new_failing();
+        let created_instances = factory.created_instances.clone();
+        let (sender, worker, _db) = setup_engine_with_factory(factory);
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        let msg = create_test_intent(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
+        );
+        sender.schedule(vec![msg]).unwrap();
+
+        let result = result_receiver.recv().await.unwrap();
+        assert!(result.is_err());
+        assert_eq!(created_instances.load(Ordering::SeqCst), 1);
+    }
+
+    /// Once action callbacks fired, even a transient failure must not retry
+    #[tokio::test]
+    async fn test_transient_failure_with_callbacks_not_retried() {
+        let mut factory = MockIntentExecutorFactory::new_transient(usize::MAX);
+        factory.report_callbacks_on_failure = true;
+        let created_instances = factory.created_instances.clone();
+        let (sender, worker, _db) = setup_engine_with_factory(factory);
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        let msg = create_test_intent(
+            1,
+            &[pubkey!("1111111111111111111111111111111111111111111")],
+            false,
+        );
+        sender.schedule(vec![msg]).unwrap();
+
+        let result = result_receiver.recv().await.unwrap();
+        assert!(result.is_err());
+        assert_eq!(created_instances.load(Ordering::SeqCst), 1);
+    }
+
     #[tokio::test]
     async fn test_non_blocking_messages() {
         const NUM_MESSAGES: u64 = 200;
@@ -629,8 +823,8 @@ mod tests {
 
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
-        worker
-            .executor_builder
+        Arc::get_mut(&mut worker.executor_builder)
+            .expect("factory not shared before spawn")
             .with_concurrency_tracking(&active_tasks, &max_concurrent);
 
         let result_subscriber = worker.spawn();
@@ -687,8 +881,8 @@ mod tests {
 
         let active_tasks = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
-        worker
-            .executor_builder
+        Arc::get_mut(&mut worker.executor_builder)
+            .expect("factory not shared before spawn")
             .with_concurrency_tracking(&active_tasks, &max_concurrent);
 
         let result_subscriber = worker.spawn();
@@ -728,27 +922,46 @@ mod tests {
     }
 
     // Mock implementations for testing
+    #[derive(Clone)]
+    enum MockFailureMode {
+        None,
+        /// Deterministic (non-transient) failure on every attempt
+        Persistent,
+        /// Transient failure while the counter is above zero
+        Transient(Arc<AtomicUsize>),
+    }
+
     pub struct MockIntentExecutorFactory {
-        should_fail: bool,
+        failure_mode: MockFailureMode,
+        report_callbacks_on_failure: bool,
+        created_instances: Arc<AtomicUsize>,
         active_tasks: Option<Arc<AtomicUsize>>,
         max_concurrent: Option<Arc<AtomicUsize>>,
     }
 
     impl MockIntentExecutorFactory {
-        pub fn new() -> Self {
+        fn with_mode(failure_mode: MockFailureMode) -> Self {
             Self {
-                should_fail: false,
+                failure_mode,
+                report_callbacks_on_failure: false,
+                created_instances: Arc::new(AtomicUsize::new(0)),
                 active_tasks: None,
                 max_concurrent: None,
             }
         }
 
+        pub fn new() -> Self {
+            Self::with_mode(MockFailureMode::None)
+        }
+
         pub fn new_failing() -> Self {
-            Self {
-                should_fail: true,
-                active_tasks: None,
-                max_concurrent: None,
-            }
+            Self::with_mode(MockFailureMode::Persistent)
+        }
+
+        pub fn new_transient(failures: usize) -> Self {
+            Self::with_mode(MockFailureMode::Transient(Arc::new(
+                AtomicUsize::new(failures),
+            )))
         }
 
         pub fn with_concurrency_tracking(
@@ -768,8 +981,10 @@ mod tests {
             &self,
             _status: magicblock_program::outbox_intent_bundles::OutboxIntentBundleStatus,
         ) -> Box<dyn IntentExecutor<MockTransactionPreparator>> {
+            self.created_instances.fetch_add(1, Ordering::SeqCst);
             Box::new(MockIntentExecutor {
-                should_fail: self.should_fail,
+                failure_mode: self.failure_mode.clone(),
+                report_callbacks_on_failure: self.report_callbacks_on_failure,
                 active_tasks: self.active_tasks.clone(),
                 max_concurrent: self.max_concurrent.clone(),
             })
@@ -777,7 +992,8 @@ mod tests {
     }
 
     pub struct MockIntentExecutor {
-        should_fail: bool,
+        failure_mode: MockFailureMode,
+        report_callbacks_on_failure: bool,
         active_tasks: Option<Arc<AtomicUsize>>,
         max_concurrent: Option<Arc<AtomicUsize>>,
     }
@@ -827,8 +1043,19 @@ mod tests {
             // Simulate some work
             sleep(Duration::from_millis(50)).await;
 
-            let result = if self.should_fail {
-                IntentExecutionResult {
+            let success = IntentExecutionResult {
+                inner: Ok(ExecutionOutput::TwoStage {
+                    commit_signature: Signature::default(),
+                    finalize_signature: Signature::default(),
+                }),
+                patched_errors: vec![],
+                callbacks_report: vec![],
+                #[cfg(feature = "dev-context-only-utils")]
+                successful_transaction_strategies: vec![],
+            };
+            let result = match &self.failure_mode {
+                MockFailureMode::None => success,
+                MockFailureMode::Persistent => IntentExecutionResult {
                     inner: Err(ExecutorError::FailedToCommitError {
                         err: TransactionStrategyExecutionError::InternalError(
                             InternalError::SignerError(SignerError::Custom(
@@ -844,15 +1071,44 @@ mod tests {
                         ),
                     ],
                     callbacks_report: vec![],
-                }
-            } else {
-                IntentExecutionResult {
-                    inner: Ok(ExecutionOutput::TwoStage {
-                        commit_signature: Signature::default(),
-                        finalize_signature: Signature::default(),
-                    }),
-                    patched_errors: vec![],
-                    callbacks_report: vec![],
+                    #[cfg(feature = "dev-context-only-utils")]
+                    successful_transaction_strategies: vec![],
+                },
+                MockFailureMode::Transient(remaining) => {
+                    let should_fail = remaining
+                        .fetch_update(
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                            |value| value.checked_sub(1),
+                        )
+                        .is_ok();
+                    if should_fail {
+                        let callbacks_report =
+                            if self.report_callbacks_on_failure {
+                                vec![Ok(Signature::default())]
+                            } else {
+                                vec![]
+                            };
+                        IntentExecutionResult {
+                            inner: Err(ExecutorError::FailedToCommitError {
+                                err: TransactionStrategyExecutionError::InternalError(
+                                    InternalError::from(
+                                        MagicBlockRpcClientError::SentTransactionError(
+                                            TransactionError::BlockhashNotFound,
+                                            Signature::default(),
+                                        ),
+                                    ),
+                                ),
+                                signature: None,
+                            }),
+                            patched_errors: vec![],
+                            callbacks_report,
+                            #[cfg(feature = "dev-context-only-utils")]
+                            successful_transaction_strategies: vec![],
+                        }
+                    } else {
+                        success
+                    }
                 }
             };
 

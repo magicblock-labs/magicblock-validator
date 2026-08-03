@@ -1,7 +1,7 @@
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_not_subscribed,
     testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchOrigin,
+    AccountFetchContext,
 };
 use solana_account::Account;
 use solana_program::clock::Slot;
@@ -95,7 +95,7 @@ async fn test_owned_pending_operation_dedups_concurrent_delegated_fetches() {
             .ensure_accounts(
                 &[account_pubkey],
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
     });
@@ -106,7 +106,7 @@ async fn test_owned_pending_operation_dedups_concurrent_delegated_fetches() {
             .ensure_accounts(
                 &[account_pubkey],
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
     });
@@ -117,7 +117,7 @@ async fn test_owned_pending_operation_dedups_concurrent_delegated_fetches() {
             .ensure_accounts(
                 &[account_pubkey],
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
     });
@@ -189,7 +189,7 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
             .ensure_accounts(
                 &[account_pubkey],
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
     });
@@ -199,7 +199,7 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
             .ensure_accounts(
                 &[account_pubkey],
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
     });
@@ -209,7 +209,7 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
             .ensure_accounts(
                 &[account_pubkey],
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
     });

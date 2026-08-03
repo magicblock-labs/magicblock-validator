@@ -5,7 +5,7 @@ use magicblock_chainlink::{
     assert_not_cloned, assert_not_found, assert_not_subscribed,
     assert_not_undelegating, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
-    testing::deleg::add_delegation_record_for, AccountFetchOrigin,
+    testing::deleg::add_delegation_record_for, AccountFetchContext,
 };
 use solana_account::{Account, AccountSharedData};
 use solana_program::clock::Slot;
@@ -40,7 +40,7 @@ async fn test_write_non_existing_account() {
         .ensure_accounts(
             &pubkeys,
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -71,7 +71,7 @@ async fn test_existing_account_undelegated() {
         .ensure_accounts(
             &pubkeys,
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -107,7 +107,7 @@ async fn test_existing_account_missing_delegation_record() {
         .ensure_accounts(
             &pubkeys,
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -148,7 +148,7 @@ async fn test_write_existing_account_valid_delegation_record() {
         .ensure_accounts(
             &pubkeys,
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -193,7 +193,7 @@ async fn test_write_existing_account_other_authority() {
         .ensure_accounts(
             &pubkeys,
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -248,7 +248,7 @@ async fn test_write_undelegating_account_undelegated_to_other_validator() {
         .ensure_accounts(
             &pubkeys,
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -296,7 +296,7 @@ async fn test_write_undelegating_account_still_being_undelegated() {
         .ensure_accounts(
             &pubkeys,
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
@@ -339,7 +339,7 @@ async fn test_write_existing_account_invalid_delegation_record() {
         .ensure_accounts(
             &[pubkey],
             None,
-            AccountFetchOrigin::GetMultipleAccounts,
+            AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await;
     debug!(result = ?res, "Ensure accounts completed");

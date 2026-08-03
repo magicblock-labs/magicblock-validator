@@ -20,7 +20,8 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::client_error;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_rpc_client_api::{
-    config::RpcAccountInfoConfig,
+    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    filter::RpcFilterType,
     response::{Response, RpcResponseContext, RpcResult},
 };
 #[cfg(any(test, feature = "dev-context"))]
@@ -124,6 +125,7 @@ impl ChainRpcClientMockBuilder {
             current_slot: Arc::new(AtomicU64::new(self.current_slot)),
             single_account_fetches: Arc::<AtomicU64>::default(),
             multi_account_fetches: Arc::<AtomicU64>::default(),
+            program_account_fetches: Arc::<AtomicU64>::default(),
             block_fetches: Arc::new(AtomicBool::new(false)),
             fetch_block_notify: Arc::new(Notify::new()),
             multi_account_response_truncate: self
@@ -151,6 +153,7 @@ pub struct ChainRpcClientMock {
     current_slot: Arc<AtomicU64>,
     single_account_fetches: Arc<AtomicU64>,
     multi_account_fetches: Arc<AtomicU64>,
+    program_account_fetches: Arc<AtomicU64>,
     block_fetches: Arc<AtomicBool>,
     fetch_block_notify: Arc<Notify>,
     multi_account_response_truncate: Option<usize>,
@@ -165,6 +168,7 @@ impl ChainRpcClientMock {
             current_slot: Arc::<AtomicU64>::default(),
             single_account_fetches: Arc::<AtomicU64>::default(),
             multi_account_fetches: Arc::<AtomicU64>::default(),
+            program_account_fetches: Arc::<AtomicU64>::default(),
             block_fetches: Arc::new(AtomicBool::new(false)),
             fetch_block_notify: Arc::new(Notify::new()),
             multi_account_response_truncate: None,
@@ -279,6 +283,10 @@ impl ChainRpcClientMock {
         self.multi_account_fetches.load(Ordering::Relaxed)
     }
 
+    pub fn program_account_fetches(&self) -> u64 {
+        self.program_account_fetches.load(Ordering::Relaxed)
+    }
+
     /// Account lookup shared by both fetch methods of the
     /// [ChainRpcClient] impl; does not touch the per-method call
     /// counters.
@@ -316,6 +324,31 @@ impl ChainRpcClientMock {
             }
             notified.await;
         }
+    }
+
+    fn matches_program_account_filters(
+        account: &Account,
+        config: &RpcProgramAccountsConfig,
+    ) -> bool {
+        let Some(filters) = config.filters.as_ref() else {
+            return true;
+        };
+
+        filters.iter().all(|filter| match filter {
+            RpcFilterType::DataSize(size) => account.data.len() as u64 == *size,
+            RpcFilterType::Memcmp(memcmp) => {
+                let offset = memcmp.offset();
+                let Some(bytes) = memcmp.bytes() else {
+                    return false;
+                };
+                let end = offset.saturating_add(bytes.len());
+                account
+                    .data
+                    .get(offset..end)
+                    .is_some_and(|data| data == bytes.as_slice())
+            }
+            RpcFilterType::TokenAccountState => true,
+        })
     }
 }
 
@@ -401,5 +434,31 @@ impl ChainRpcClient for ChainRpcClientMock {
             value: accounts,
         };
         Ok(res)
+    }
+
+    async fn get_program_accounts_with_config(
+        &self,
+        pubkey: &Pubkey,
+        config: RpcProgramAccountsConfig,
+    ) -> client_error::Result<Vec<(Pubkey, Account)>> {
+        self.program_account_fetches.fetch_add(1, Ordering::Relaxed);
+        self.wait_if_fetches_blocked().await;
+
+        let mut accounts = vec![];
+        for (account_pubkey, AccountAtSlot { account, slot }) in
+            self.accounts.lock().unwrap().iter()
+        {
+            if account.owner != *pubkey {
+                continue;
+            }
+            if *slot < self.current_slot.load(Ordering::Relaxed) {
+                continue;
+            }
+            if !Self::matches_program_account_filters(account, &config) {
+                continue;
+            }
+            accounts.push((*account_pubkey, account.clone()));
+        }
+        Ok(accounts)
     }
 }

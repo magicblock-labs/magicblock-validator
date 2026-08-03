@@ -33,6 +33,14 @@ impl TransactionPreparatorError {
             _ => None,
         }
     }
+
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::FailedToFitError | Self::SignerError(_) => false,
+            Self::GetLatestBlockhashError(err) => err.is_transient(),
+            Self::DeliveryPreparationError(err) => err.is_transient(),
+        }
+    }
 }
 
 impl From<TaskStrategistError> for TransactionPreparatorError {

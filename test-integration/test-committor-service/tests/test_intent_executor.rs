@@ -4,8 +4,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    thread::sleep,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use borsh::to_vec;
@@ -39,15 +38,15 @@ use magicblock_committor_service::{
     DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
-    intent::{BaseActionCallback, CommittedAccount},
+    intent::{
+        types::CommittedAccount, BaseAction, BaseActionCallback,
+        CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
+        ProgramArgs, UndelegateType,
+    },
     traits::ActionError,
 };
 use magicblock_program::{
-    args::ShortAccountMeta,
-    magic_scheduled_base_intent::{
-        BaseAction, CommitAndUndelegate, CommitType, MagicBaseIntent,
-        MagicIntentBundle, ProgramArgs, ScheduledIntentBundle, UndelegateType,
-    },
+    args::ShortAccountMeta, magic_scheduled_base_intent::ScheduledIntentBundle,
     validator::validator_authority_id,
 };
 use magicblock_rpc_client::MagicBlockSendTransactionConfig;
@@ -57,7 +56,6 @@ use program_flexi_counter::{
     state::{FlexiCounter, FAIL_UNDELEGATION_LABEL},
 };
 use solana_account::Account;
-use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
@@ -831,8 +829,7 @@ async fn test_cpi_limits_error_recovery() {
     let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
         transaction_preparator.cleanup_for_strategy(
             &fixture.authority,
-            &to_cleanup.optimized_tasks,
-            &to_cleanup.lookup_tables_keys,
+            to_cleanup,
             true,
         )
     });
@@ -978,8 +975,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
         transaction_preparator.cleanup_for_strategy(
             &fixture.authority,
-            &to_cleanup.optimized_tasks,
-            &to_cleanup.lookup_tables_keys,
+            to_cleanup,
             true,
         )
     });
@@ -1432,9 +1428,10 @@ async fn create_two_stage_executor<'a>(
             .await
             .unwrap();
     let commit_strategy =
-        TaskStrategist::build_strategy(commit_tasks, authority).unwrap();
+        TaskStrategist::build_strategy(commit_tasks, authority, None).unwrap();
     let finalize_strategy =
-        TaskStrategist::build_strategy(finalize_tasks, authority).unwrap();
+        TaskStrategist::build_strategy(finalize_tasks, authority, None)
+            .unwrap();
     let state = Initialized::new(commit_strategy, finalize_strategy);
     TwoStageStrategyExecutor::new(
         state,
@@ -1470,6 +1467,7 @@ fn succeeding_commit_action(
         },
     ];
     BaseAction {
+        id: 0,
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
@@ -1513,6 +1511,7 @@ fn succeeding_undelegate_action(
     ];
 
     UndelegateType::WithBaseActions(vec![BaseAction {
+        id: 0,
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
@@ -1556,6 +1555,7 @@ fn failing_undelegate_action(
     ];
 
     UndelegateType::WithBaseActions(vec![BaseAction {
+        id: 0,
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
         source_program: Some(program_flexi_counter::id()),
@@ -1590,19 +1590,26 @@ async fn setup_payer_with_keypair(
     payer: &Keypair,
     rpc_client: &Arc<RpcClient>,
 ) {
-    let sig = rpc_client
+    rpc_client
         .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL)
         .await
         .unwrap();
-    rpc_client
-        .confirm_transaction_with_commitment(
-            &sig,
-            CommitmentConfig::finalized(),
-        )
-        .await
-        .unwrap();
-
-    sleep(Duration::from_secs(1));
+    // confirm_transaction_with_commitment returns Ok(false) while the airdrop
+    // is still in flight, so poll the balance until the funds are spendable.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if rpc_client.get_balance(&payer.pubkey()).await.unwrap()
+            >= LAMPORTS_PER_SOL
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "airdrop to {} not visible after 30s",
+            payer.pubkey()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     // Create actor escrow
     let ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
@@ -1692,7 +1699,7 @@ async fn single_flow_transaction_strategy(
             .unwrap();
     tasks.extend(finalize_tasks);
 
-    TaskStrategist::build_strategy(tasks, authority).unwrap()
+    TaskStrategist::build_strategy(tasks, authority, None).unwrap()
 }
 
 async fn verify_committed_accounts_state(

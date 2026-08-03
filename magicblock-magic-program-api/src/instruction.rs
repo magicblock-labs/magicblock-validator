@@ -73,19 +73,17 @@ pub enum MagicBlockInstruction {
     /// - **4..n** `[WRITE]`         Outbox intent PDAs, one per accepted intent, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     AcceptScheduleCommits,
 
-    /// Records the attempt to realize a scheduled commit on chain.
-    /// Closes the associated outbox intent PDA account.
-    ///
-    /// The signature of this transaction can be pre-calculated since we pass the
-    /// ID of the scheduled commit and retrieve the signature from a globally
-    /// stored hashmap. Transaction uniqueness is guaranteed by the per-intent PDA.
+    /// Closes the outbox intent PDA on successful execution of the intent.
+    /// Deterministic and mode-independent: runs identically on replicas
+    /// replaying the same transaction, unlike `ScheduledCommitSent` which
+    /// only logs on the validator that actually executed the intent.
     ///
     /// # Account references
     /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
     /// - **1.** `[]`              Magic Program
     /// - **2.** `[WRITE]`         Ephemeral Vault
     /// - **3.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
-    ScheduledCommitSent(u64),
+    CloseOutboxIntent(u64),
 
     /// Schedules execution of a single *base intent*.
     ///
@@ -330,6 +328,19 @@ pub enum MagicBlockInstruction {
         intent_id: u64,
         stage: ExecutionStage,
     },
+
+    /// Records the attempt to realize a scheduled commit on chain.
+    /// Closes the associated outbox intent PDA account.
+    ///
+    /// The signature of this transaction can be pre-calculated since we pass the
+    /// ID of the scheduled commit and retrieve the signature from a globally
+    /// stored hashmap. Transaction uniqueness is guaranteed by the per-intent PDA.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
+    /// - **1.** `[]`              Magic Program
+    /// - **2.** `[WRITE]`         Ephemeral Vault
+    ScheduledCommitSent(u64),
 }
 
 impl MagicBlockInstruction {
@@ -403,4 +414,25 @@ pub enum PostDelegationActionExecutorInstruction {
     /// - **2.**   `[]`        Instructions sysvar
     /// - **3.**   `[WRITE]`   Magic Context account
     ScheduleUndelegation { cloned_account_pubkey: Pubkey },
+}
+
+/// Instruction(s) for the ephemeral system builtin-program: creates,
+/// resizes, and closes ephemeral accounts.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum EphemeralSystemInstruction {
+    /// # Account references
+    /// - 0. [WRITE] Sponsor account (pays rent, can be PDA or oncurve)
+    /// - 1. [WRITE] Ephemeral account to create (must have 0 lamports)
+    /// - 2. [WRITE] Vault account (receives rent payment)
+    CreateEphemeralAccount { data_len: u32 },
+
+    /// - 0. [WRITE] Sponsor account (pays/receives rent difference)
+    /// - 1. [WRITE] Ephemeral account to resize
+    /// - 2. [WRITE] Vault account (holds/receives lamports for rent transfer)
+    ResizeEphemeralAccount { new_data_len: u32 },
+
+    /// - 0. [WRITE] Sponsor account (receives rent refund)
+    /// - 1. [WRITE] Ephemeral account to close
+    /// - 2. [WRITE] Vault account (source of rent refund)
+    CloseEphemeralAccount,
 }

@@ -45,6 +45,15 @@ impl TransactionStrategyExecutionError {
     /// Used to map instruction indices back to task indices.
     const TASK_OFFSET: u8 = 2;
 
+    /// On-chain domain errors are deterministic (and already have dedicated
+    /// recovery paths); only internal transport failures are transient.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::InternalError(err) => err.is_transient(),
+            _ => false,
+        }
+    }
+
     pub fn is_cpi_limit_error(&self) -> bool {
         matches!(
             self,

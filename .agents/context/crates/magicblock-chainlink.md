@@ -19,7 +19,7 @@ Chainlink is on the account-availability hot path for RPC reads and transaction 
 
 ## Update requirement
 
-Whenever behavior in `magicblock-chainlink` changes, or another crate changes Chainlink flows, update this document in the same change for changes to:
+Whenever behavior in `magicblock-chainlink` changes, or another crate changes Chainlink flows, queue an update to this document for the weekly documentation-maintenance task for changes to:
 
 - account fetch/clone classification,
 - delegation-record resolution or local delegated/confined/undelegating flags,
@@ -40,7 +40,7 @@ Primary source files:
 
 | Path | Role |
 |---|---|
-| `magicblock-chainlink/src/lib.rs` | Crate exports. Re-exports Chainlink types and `AccountFetchOrigin`. |
+| `magicblock-chainlink/src/lib.rs` | Crate exports. Re-exports Chainlink types and `AccountFetchContext`. |
 | `magicblock-chainlink/src/chainlink/mod.rs` | Public Chainlink facade, replication-mode wrapper, transaction/account ensure entrypoints, removed-account eviction listener. |
 | `magicblock-chainlink/src/chainlink/fetch_cloner/` | Main fetch/clone pipeline, delegation handling, subscription-update processing, ATA/eATA projection, pending operation deduplication. |
 | `magicblock-chainlink/src/remote_account_provider/` | RPC/pubsub provider, subscription ownership, LRU capacity, websocket/gRPC clients, program-account resolution. |
@@ -72,10 +72,12 @@ Important methods:
 
 - `try_new_from_endpoints(...)`: builds `RemoteAccountProvider`, `FetchCloner`, risk service, and subscription update channel from configured base-layer endpoints.
 - `ensure_transaction_accounts(tx)`: ensures all transaction account keys, plus a possible fee-payer ephemeral balance PDA, are present locally. No-op system transfers are skipped.
-- `ensure_accounts(pubkeys, mark_empty_if_not_found, fetch_origin)`: fetches/clones accounts but returns only fetch/clone status.
-- `fetch_accounts(pubkeys, fetch_origin)`: ensures accounts and then reads them from the local bank.
-- `accounts_delegated_on_base_and_er(pubkeys, fetch_origin)`: checks that each account is DLP-owned on base and represented as delegated/DLP-owned locally.
+- `ensure_accounts(pubkeys, mark_empty_if_not_found, fetch_context)`: fetches/clones accounts but returns only fetch/clone status.
+- `fetch_accounts(pubkeys, fetch_context)`: ensures accounts and then reads them from the local bank.
+- `accounts_delegated_on_base_and_er(pubkeys, fetch_context)`: checks that each account is DLP-owned on base and represented as delegated/DLP-owned locally.
+- `account_delegation_statuses(pubkeys, fetch_context)`: returns base-layer delegation plus explicit account-on-ER status (`missing`, `delegated`, or `not_delegated`) for owner-program undelegation request logs.
 - `undelegation_requested(pubkey)`: called by committor/account flows before an account is undelegated so Chainlink keeps watching for base-layer completion.
+- `fetch_undelegation_requests()`: scans base-layer Delegation Program accounts for active `UndelegationRequest` PDAs using filtered `getProgramAccounts` and returns decoded `ObservedUndelegationRequest`s for `magicblock-accounts`.
 - `fetch_count()` / `is_watching()`: mainly observability/testing helpers.
 
 Disabled replication mode is intentionally conservative:
@@ -106,7 +108,7 @@ Chainlink should build accurate clone requests; the cloner owns how those reques
 2. Collect all account keys from the sanitized transaction.
 3. Derive `ephemeral_balance_pda_from_payer(fee_payer, 0)` and add it if absent locally.
 4. Mark all collected pubkeys as `mark_empty_if_not_found`; missing transaction accounts are cloned as empty placeholders when appropriate.
-5. Call `ensure_accounts` with `AccountFetchOrigin::SendTransaction(signature)`.
+5. Call `ensure_accounts` with `AccountFetchContext::send_transaction(signature)`.
 6. `ensure_accounts` promotes accounts in the subscription LRU and calls `FetchCloner::fetch_and_clone_accounts_with_dedup`.
 
 Pitfalls:
@@ -119,13 +121,18 @@ Pitfalls:
 
 The central implementation is `FetchCloner::fetch_and_clone_accounts_with_dedup` and its inner `fetch_and_clone_accounts`.
 
+
+### Fetch attribution
+
+Chainlink must preserve parent entrypoint while replacing `fetch_reason` for internal follow-up work such as delegation records, program data, post-delegation action dependencies, undelegating refreshes, subscription-update clones, and ATA projection.
+
 ### Deduplication and bank fast path
 
 Before fetching remotely:
 
 1. Blacklisted accounts are filtered out.
 2. Existing non-undelegating accounts in `AccountsDb` are treated as ready.
-3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed.
+3. Existing undelegating accounts are checked asynchronously by `should_refresh_undelegating_in_bank_account` to see whether base-layer undelegation completed. Locally undelegating post-delegation action dependencies remain local bank hits and are not remotely force-refreshed.
 4. Remaining pubkeys enter `pending_requests` ownership coordination.
 
 Only the first caller for a pubkey owns the fetch/clone operation. Later callers become waiters and receive the owner's result. Preserve this behavior for both correctness and performance; regressions here can amplify RPC traffic, clone transactions, and transaction-submission latency. The upper dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="fetch_cloner"`. Owner-side internal waiters are not counted in the active waiter gauge; only callers that join existing work are counted. Metric labels remain bounded enum/static values and do not include pubkeys, signatures, errors, endpoint URLs, or raw messages.
@@ -155,9 +162,29 @@ Empty placeholders are created in `RemoteAccountProvider::try_get_multi` when RP
 4. Waits for either RPC results or a subscription update that is at least as new as the fetch start slot.
 5. Returns results in input order.
 
-The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="remote_account_provider"`. Claimed pubkeys record `owned`; calls that join existing `fetching_accounts` work record `joined_existing`, waiter total, and active waiter gauge. Subscription-update wins record `resolved_by_subscription_update`, while late RPC completions after such a win or replacement record `rpc_fetch_completed_after_update`. `FetchingAccountState` stores bounded metric metadata (`AccountFetchOrigin` and owner start time) so subscription-update completion uses the original origin without adding pubkey/signature labels.
+Fetch-owned unknown accounts enter a bounded secondary subscription LRU rather
+than the primary working-set LRU. They retain full websocket and gRPC coverage
+while the fetch is pending. A winning not-found result switches to gRPC-only
+coverage promptly when gRPC is available (the reconciler repairs the policy on
+later passes if the switch fails); a winning found result moves the account to
+the primary LRU. If protected primary entries leave no promotion capacity, the
+found fetch fails and its secondary subscription is rolled back. Refetching a
+confirmed miss restores full coverage for the duration of the new pending
+fetch. Results discarded by fetch/subscription generation arbitration
+must not change tiers. Per-account classification retains the winning slot and
+source while the subscription is owned: older updates are ignored for tier
+movement, and subscription data wins an equal-slot tie over RPC data.
+Classification-only ownership created before subscription acquisition is tagged
+with the fetch generation and removed on setup failure or cancellation, so stale
+cleanup cannot delete a newer generation's state.
+
+The lower pending-fetch dedup layer records `chainlink_pending_fetch_accounts_total`, `chainlink_pending_fetch_waiters_total`, `chainlink_pending_fetch_waiters_gauge`, and `chainlink_pending_fetch_owner_duration_seconds` with `layer="remote_account_provider"`. Claimed pubkeys record `owned`; calls that join existing `fetching_accounts` work record `joined_existing`, waiter total, and active waiter gauge. Subscription-update wins record `resolved_by_subscription_update`, while late RPC completions after such a win or replacement record `rpc_fetch_completed_after_update`. `FetchingAccountState` stores bounded metric metadata (`AccountFetchContext` and owner start time) so subscription-update completion preserves the original entrypoint/fetch reason without adding pubkey/signature labels.
 
 This pending-fetch instrumentation does not change fetch/clone behavior, dedup ownership, subscription ordering, or remote-fetch retry behavior; it only records counters, gauges, and histograms on existing control-flow edges.
+
+Companion-account slot-match fetches are instrumented by `chainlink_companion_fetch_attempts` and `chainlink_companion_fetch_duration_seconds` with labels `entrypoint`, `fetch_reason`, `companion_kind`, and `outcome`. `companion_kind` is a bounded label (`program_data`, `delegation_record`, `ata_projection`) that describes the slot-consistent relationship being resolved and is distinct from `fetch_reason`. These metrics are emitted from `RemoteAccountProvider::try_get_multi_until_slots_match` and must not change retry behavior, `min_context_slot`, slot matching, or subscription cleanup behavior. Labels must never include pubkeys, signatures, raw errors, endpoints, owners, or program IDs.
+
+Companion-account fetch failures emit a standardized `error!` log with the message `Failed to fetch companion account`. The structured log includes the primary account pubkey, companion account pubkey, companion kind, origin entrypoint and reason from `AccountFetchContext`, context slot, and error. This applies to both subscription-update and non-subscription companion fetch origins. Expected optional companion absence, such as an eATA fetch that succeeds as `NotFound`, must not be logged as an error. This logging must not change retry behavior, slot matching, `min_context_slot`, clone/drop decisions, or subscription cleanup behavior.
 
 RPC fetches use Base64Zstd encoding, commitment from the RPC client, `min_context_slot`, timeout/retry handling, and metrics for success/found/not-found/failure.
 
@@ -209,9 +236,10 @@ Delegation records may carry encrypted or cleartext post-delegation actions. Cha
 - validates signer addresses through `RiskService` when configured,
 - collects action dependencies from instruction program IDs and account metas,
 - force-refreshes writable dependencies that are absent or not currently delegated,
+- leaves locally undelegating writable dependencies as bank hits instead of remotely force-refreshing and overwriting their lock,
 - errors with `MissingDelegationActionAccounts` if required delegated writable dependencies cannot be resolved.
 
-Do not execute or ignore these actions blindly. They are part of clone-time invariants for post-delegation behavior.
+Chainlink's dependency fetch is an availability preflight. The Magic Program executor authoritatively revalidates every writable action account from the locked transaction context and rejects plain or undelegating accounts (not-yet-created non-signer accounts pass, since actions legitimately create ephemeral accounts such as receipts and rent-pending ATAs under program (PDA) signatures; absent accounts whose pubkey is a signer anywhere in the action bundle stay rejected (gated on the whole signer-pubkey set, defeating duplicate-meta squats) to prevent pubkey squatting via synthesized signers, and post-execution writable validation still rejects the transaction if a created account ends up without a mutability flag), rolling back the clone and action transaction atomically. The target then follows the established rescue-undelegation path; no action-bearing activation commits, so there is no deferred retry state. Do not execute or ignore these actions blindly.
 
 ### Program account resolution
 
@@ -237,10 +265,13 @@ Chainlink has special handling for associated token accounts and ephemeral ATAs:
 - Base ATAs are recognized via `magicblock_core::token_programs::is_ata`.
 - For each ATA, Chainlink derives the companion eATA PDA with `try_derive_eata_address_and_bump`.
 - It subscribes to both ATA and eATA using `SubscriptionReason::AtaProjection`.
-- If the eATA exists, has a delegation record for this validator, and can be projected, Chainlink clones a projected delegated ATA into the local bank.
+- Projection requires a valid, slot-matched delegation record whose authority is this validator and whose owner is `EATA_PROGRAM_ID`. When those checks pass and the eATA can be projected, Chainlink clones a projected delegated ATA into the local bank.
+- Raw eATA program-subscription updates without existing local projection interest are routed through greedy discovery rather than dropped. Greedy discovery can validate the eATA delegation record, fetch the remote base ATA, project the local ATA, and preserve post-delegation actions on the projected clone request.
+- The non-greedy projection helper may still avoid companion fetches for a program-source raw eATA update when no delegation record is already supplied and no local projection interest exists (a watched ATA/eATA projection subscription, a watched raw eATA, or a supported base ATA already present locally). This local-interest gate does not disable the separate greedy-discovery path.
 - Projection preserves the base ATA's owner and data length, which is important for Token-2022 extensions.
 - Missing eATAs can be remembered in `known_empty_eatas`, but only after confirmed `NotFound` while an eATA subscription is live.
 - Raw eATA PDAs are not marked delegated directly; their state is projected into the corresponding base ATA.
+- Explicit RPC/transaction ensure paths still resolve eATA delegation records and project delegated ATAs normally when the requested account requires it; the local-interest narrowing applies to program-subscription firehose updates.
 
 Pitfalls:
 
@@ -268,17 +299,50 @@ Key behavior:
 
 - Clock sysvar updates update `chain_slot` and are not forwarded to the fetch cloner.
 - Non-clock updates become `ForwardedSubscriptionUpdate` with a `SubscriptionSource` (`Account` or program source).
-- If a subscription update arrives while an RPC fetch is pending and its slot is at least the fetch start slot, it resolves the pending fetch waiters instead of being forwarded as a separate update.
+- If a subscription update arrives while an RPC fetch is pending, it resolves the pending fetch waiters only when its slot is at least the fetch start slot and does not regress the retained per-account classification.
 - Account-subscription updates for pubkeys no longer watched are dropped and can enqueue a removal update if stale local state exists.
-- Program-subscription updates are allowed even if the pubkey is not in the direct-account LRU; delegated accounts may be tracked only by owner-program subscriptions.
+- Program-subscription updates are allowed even if the pubkey is not in the direct-account LRU, but DLP-owned program updates are preclassified before any delegation-record or other companion fetch.
+- Greedy discovery is always enabled for absent or unwatched delegated accounts discovered through DLP program-subscription updates. Ordinary non-internal DLP-owned user-account updates and raw eATA updates without local projection interest therefore reach greedy discovery so Chainlink can resolve delegation authority and preserve post-delegation actions.
+- Existing local delegated non-undelegating accounts are authoritative. DLP program updates for them clean up direct subscriptions and must not fetch a delegation record, clone, or overwrite local state.
+- Existing local undelegating accounts bypass the internal-DLP early drop and continue undelegation completion/redelegation processing so completion remains observable.
 - Non-advancing updates are ignored unless they represent a same-slot delegated refresh needed for undelegate/redelegate recovery.
 - Delegated updates cause direct subscription cleanup; undelegation-completion updates retain/directly ensure subscriptions as appropriate and release `UndelegationTracking` ownership.
 
+### DLP undelegation request scanning
+
+Owner-program undelegation requests are discovered in two ways:
+
+- Live updates: DLP-owned `UndelegationRequest` account subscription/program-subscription updates are decoded in `FetchCloner::process_subscription_update` and broadcast as `ObservedUndelegationRequest`.
+- Backfill scans: `FetchCloner::fetch_undelegation_requests` calls `getProgramAccounts` for `dlp_api::id()` with a `DataSize(UndelegationRequest::size_with_discriminator())` filter and a discriminator `memcmp` at offset `0`, then decodes each returned account with `UndelegationRequest::try_from_bytes_with_discriminator`.
+
+The scan uses Base64Zstd account encoding and gets a nearby base-chain slot for `observed_slot`. Malformed matching accounts are logged and skipped; a bad account must not abort the whole scan. Polling cadence is controlled by `chainlink.undelegation-request-poll-interval` in `magicblock-config` and consumed by `magicblock-accounts`.
+
 ### Greedy discovery
 
-If a subscription update discovers a DLP-owned account absent from the bank, Chainlink may greedily fetch and clone it if the delegation record says it belongs to this validator (or is confined). This is especially important for delegated eATA discovery and owner-program subscriptions.
+For DLP-owned program-subscription firehose updates, Chainlink first classifies the pubkey using local bank state, direct-watch state, and ATA/eATA projection interest.
+
+Greedy discovery is always enabled for absent or unwatched delegated accounts discovered through DLP program-subscription updates. This preserves clone-time post-delegation action execution for new delegations discovered from the DLP program subscription. The prefilter may skip delegation-record resolution only for updates already resolved as locally authoritative or for genuine internal DLP records/metadata/commit state; it must not reject an absent account merely for lacking local interest.
+
+Raw eATA updates with no existing local projection interest also enter greedy discovery. That path validates a slot-matched delegation record with this validator as authority and `EATA_PROGRAM_ID` as owner, fetches the remote base ATA, projects the delegated local ATA, and carries any post-delegation actions. Separately, the non-greedy projection helper retains its local-interest gate and may avoid companion fetches for a program-source raw eATA when no delegation record was supplied and no ATA/eATA projection interest exists.
+
+Updates for directly watched accounts or locally relevant ATA/eATA projection state may still greedily fetch and clone if the delegation record says the account belongs to this validator (or is confined). Explicit RPC/transaction ensure paths are not narrowed by this prefilter: they still fetch delegation records and clone delegated accounts normally.
 
 Updates delegated to other validators are ignored after discovery so this validator does not clone state it cannot execute against.
+
+### Internal DLP update filtering and collision sighting
+
+DLP-owned program-subscription updates are classified before internal-DLP payload filtering or collision handling. Updates for existing local delegated non-undelegating accounts clean up direct subscriptions and return without overwriting locally authoritative state. Updates for existing local undelegating accounts and locally relevant ATA/eATA projections continue past the internal-DLP early drop so undelegation completion and projection processing can run.
+
+Program-subscription updates whose payload parses as an internal DLP account (delegation record, delegation metadata, commit record, program config) are then dropped in `FetchCloner::process_subscription_update` **before** greedy discovery, with zero remote fetches — their derived "record of a record" PDA never exists, and these updates dominate the DLP program-subscription firehose.
+
+The internal-DLP fast path must not classify ordinary non-internal user-account updates as irrelevant merely because they are absent locally; those updates must fall through to greedy discovery so valid same-slot delegation records can trigger clone and post-delegation action handling.
+
+The exception is a delegated account whose app data byte-collides with an internal DLP discriminator (LE u64 100–103). Such accounts must still reach greedy discovery so their post-delegation actions execute. `DlpCollisionTracker` (single lock, so check-then-park is atomic against sight-then-release) resolves this without a fetch:
+
+- Every delegation-record-shaped update records a monotonic sighting (`record pubkey -> max slot`), from either subscription source. Only program-subscription updates are dropped/parked; account-subscription updates always continue into normal processing.
+- An internal-looking account update whose derived delegation-record PDA was sighted at or after its own slot proceeds to greedy discovery (a fresh delegation writes both accounts in one slot).
+- Otherwise the update is parked (pubkey + slot, keyed by its derived record PDA); a later record sighting releases it into an authority-gated, deduped fetch+clone that replaces an undelegating bank copy only when the record proves a newer delegation generation.
+- Genuine internal PDAs always miss the sighting cache and are dropped. A missed sighting degrades to lazy on-demand cloning via the normal getAccount/send-transaction paths — never to incorrect state.
 
 ## RemoteAccountProvider internals
 
@@ -319,7 +383,10 @@ Ownership is reference-counted per reason. Releasing one reason does not unsubsc
 
 `ensure_subscription` differs from `acquire_subscription`: it does not increment an already-held reason. This is used by eATA projection to keep an LRU entry warm without unbounded refcount growth.
 
-Registration outcome metrics (`chainlink_subscription_registration_accounts_total`, exported as `mbv_chainlink_subscription_registration_accounts_total`) are emitted once per claimed subscription attempt by origin, subscription reason, and terminal registration outcome. Waiter-only fetch callers do not independently set up subscriptions and are not counted separately; direct `try_get_multi` owners preserve their `AccountFetchOrigin`, while callers without a fetch origin use `internal`.
+Registration outcome metrics (`chainlink_subscription_registration_accounts_total`, exported as `mbv_chainlink_subscription_registration_accounts_total`) are emitted once per claimed subscription attempt by entrypoint, fetch reason, subscription reason, and terminal registration outcome. Waiter-only fetch callers do not independently set up subscriptions and are not counted separately; direct `try_get_multi` owners preserve their `AccountFetchContext`, while callers without a fetch context use `entrypoint="internal", fetch_reason="requested_account"`.
+
+Capacity that is known to be exhausted before an upstream subscribe is reported
+as `rejected_no_capacity`; no compensating unsubscribe is issued in that case.
 
 Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_total{reason,outcome}` and `chainlink_subscription_cleanup_accounts_total{cleanup_source,outcome}`, exported with the `mbv_` prefix) are emitted only on cold subscription release/cleanup transition paths, never on per-update hot loops. Release metrics classify each explicit `release_subscription_with_mode` / silent delegated-account release result (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `retained_intentionally`, `retained_other_reasons`). Cleanup metrics classify the actual unsubscribe/removal action by `cleanup_source` (`normal_release`, `manual_unsubscribe`, `capacity_eviction`, `rejected_new_subscription`, `delegated_account_silent`, `reconciler`) and `outcome` (`unsubscribed`, `already_absent`, `unsubscribe_failed`, `removal_update_failed`, `retained_intentionally`). All labels are static/enum values only; no pubkey, signature, raw error, or endpoint labels are used.
 
@@ -332,6 +399,48 @@ Release and cleanup outcome metrics (`chainlink_subscription_release_accounts_to
 - accounts with `UndelegationTracking` ownership are protected,
 - if no candidate can be evicted, the new subscription is unsubscribed and `NoEvictableSubscriptionCapacity` is returned.
 
+A found RPC result or subscription update for an account in the secondary tier
+is rejected when it cannot be promoted into the primary tier; it must not be
+returned to fetch waiters or forwarded as a successful update. A rejected
+promotion drops the key's last watch, so it also enqueues a removal
+notification to evict any stale bank entry (e.g. an empty placeholder).
+The rejection is finalized even when its unsubscribe fails — tier state,
+ownership, and the recorded classification are dropped and only the stray
+pubsub subscription is left for the reconciler — because keeping the state
+would let the classification win arbitration against a later fetch and leak
+the account without primary admission.
+When a subscription update wins fetch arbitration before the fetch's
+subscription setup has created any tier state, the update pump admits the
+found account directly into the primary tier (subscribe + admission) before
+resolving the waiters; without capacity the waiters fail with the same
+rejection, the classification recorded for the winning update is dropped (so
+a later fetch re-runs the full tier classification instead of losing
+arbitration to it), and the pending setup registers the key as a fresh
+fetch-owned secondary entry. If the claiming fetch is cancelled before setup
+adopts the placeholder, the placeholder cleanup keeps the ownership entry for
+keys that already hold tier state, so the pump-admitted primary membership is
+adopted by a later acquire instead of being orphaned.
+RPC-only slot-match retries apply the same tier classification before returning
+their results.
+
+Primary and secondary LRU membership is exclusive and both tiers use the same
+delegated, undelegating, in-flight-fetch, never-evict, and
+`UndelegationTracking` protections. Tier changes acquire the per-pubkey lock
+first; the global subscription transition lock is taken after it, only for
+short in-memory critical sections over the composite tier state (both LRUs,
+ownership map, confirmed-missing set), and is never held across pubsub
+subscribe/unsubscribe network calls. Per-pubkey locks may be held across
+network calls for their own key. Cleanup of a key evicted by another key's
+admission (unsubscribe plus removal notification) runs as a detached task that
+takes the evicted key's lock itself and skips keys re-admitted in the
+meantime; if its unsubscribe fails, the reconciler removes the stray
+subscription on a later pass. Secondary capacity is bounded
+independently at the configured primary LRU capacity, so the total direct-watch
+bound is twice that setting. Pending fetches briefly retain websocket coverage;
+confirmed misses do not use websocket subscriptions while gRPC is healthy.
+The confirmed-missing set is a bounded subset of the secondary tier; pending or
+failed fetches remain secondary but retain full transport coverage.
+
 When an account is evicted from subscription capacity, the provider sends a removal update. `InnerChainlink::subscribe_account_removals` listens for these and may submit `Cloner::evict_account` to remove stale local state, but only if the bank account is neither delegated nor undelegating.
 
 Removal handling is serialized with same-pubkey subscription transitions via `evict_unwatched_with_subscription_lock`, preventing an evict transaction from being submitted after a fresh subscription re-watches the same pubkey.
@@ -341,6 +450,23 @@ Removal handling is serialized with same-pubkey subscription transitions via `ev
 If subscription metrics are enabled, a background task periodically runs `subscription_reconciler::reconcile_subscriptions` to compare the LRU with actual pubsub-client subscriptions, update metrics, and notify removal for subscriptions that vanished.
 
 When the pubsub client is `SubMuxClient`, reconciliation snapshots are intentionally based only on currently connected inner clients. Disconnected/reconnecting clients are ignored by `subscriptions_union()` and `subscriptions_intersection()` until the reconnect path has reconnected them, resubscribed programs/accounts from the authoritative trackers, performed its catch-up pass, and marked them connected again. Reconciler-triggered SubMux subscribe/unsubscribe repair operations also fan out only to connected clients; reconnecting clients catch up through the reconnect path instead. If no inner pubsub client is connected, reconciliation skips repair/noisy LRU-vs-pubsub mismatch reporting for that tick because there is no live client to inspect or repair.
+
+SubMux persists the desired gRPC-only policy for confirmed misses. Reconnects
+restore those keys on gRPC clients and exclude them from websocket
+clients; reconciliation compares transports separately so a lingering
+websocket leg cannot mask missing gRPC coverage. If every gRPC client is down,
+reconciliation restores full fallback coverage until gRPC returns.
+Repair is verified against a fresh subscription snapshot; a secondary entry
+without protected ownership, live delegated/undelegating state, or an in-flight
+fetch is evicted if neither preferred nor fallback subscription establishes
+coverage.
+
+Laserstream `Status` items are left to the pinned SDK's replaying reconnect
+path. The SDK retains write-updated account/program filters and its internal
+slot tracker across reconnects, and resets its retry budget only after stream
+progress. Exhausted retries, terminal stream errors, and fallen-behind errors
+still trigger a full actor rebuild. This avoids bulk resubscription churn on
+routine provider resets without silently losing dynamic subscriptions.
 
 ## SubMuxClient internals
 
@@ -368,7 +494,7 @@ Changing SubMux behavior can affect ordering, duplicate clone submissions, and p
 
 ## Lifecycle mode and configuration
 
-`ChainlinkConfig` wraps `RemoteAccountProviderConfig` and currently includes `remove_confined_accounts`.
+`ChainlinkConfig` wraps `RemoteAccountProviderConfig` and includes settings such as `remove_confined_accounts`, allowed program filters, resubscription delay, Range risk checks, and `undelegation_request_poll_interval` for the DLP request backfill consumer in `magicblock-accounts`.
 
 `RemoteAccountProviderConfig` includes:
 
@@ -400,7 +526,7 @@ Preserve these invariants when editing this crate:
 7. **Pending request and pending clone deduplication must clean up by generation/key** to avoid stale owners unblocking or deleting newer work.
 8. **Program-data subscriptions for LoaderV3 must be cleaned up on all paths.**
 9. **ATA/eATA projection must preserve base ATA layout and token-program ownership.**
-10. **Post-delegation action dependencies must be available before clone-time action handling.**
+10. **Post-delegation action dependencies must be available before clone-time action handling, and every writable dependency must be revalidated under transaction locks before native invocation.**
 11. **Disabled/non-primary mode must not perform remote fetches or transaction account ensures.**
 12. **This crate must not weaken processor/SVM access validation.** It only prepares local account state.
 13. **Fetch/clone and subscription paths must remain performance-conscious.** Preserve deduplication, bounded waiting, LRU protections, low subscription churn, and non-blocking behavior unless a documented correctness requirement forces a tradeoff.

@@ -88,6 +88,7 @@ where
     {
         let patcher = SingleStagePatcher {
             authority: &self.authority,
+            intent_id: self.intent_id,
             intent_client: &self.intent_client,
             callback_scheduler: &self.callback_scheduler,
             task_info_fetcher: &self.task_info_fetcher,

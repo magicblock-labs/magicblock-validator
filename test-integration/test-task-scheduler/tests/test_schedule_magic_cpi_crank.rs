@@ -94,7 +94,7 @@ fn test_crank_can_execute_program_that_cpis_into_magic() {
         None,
         &[player.pubkey()],
         &[committee],
-        ScheduleCommitType::Commit,
+        ScheduleCommitType::CommitFinalize,
     );
     crank_ix.accounts[0].is_writable = false;
 

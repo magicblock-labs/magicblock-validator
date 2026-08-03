@@ -5,7 +5,7 @@ use std::sync::Arc;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::{
-        replication::{Block, Message, SuperBlock},
+        replication::{Block, Message, SuperBlock, BLOCK_INDEX},
         transactions::{SchedulerMode, TransactionSchedulerHandle},
     },
     Slot, TransactionIndex,
@@ -52,6 +52,19 @@ pub struct ReplicationContext {
     validator_identity: Pubkey,
 }
 
+/// Where a restarting replica resumes deduplicating the stream: whichever of the
+/// last applied block or the last persisted transaction is further ahead.
+pub(crate) fn resume_position(
+    accountsdb: &AccountsDb,
+    ledger: &Ledger,
+) -> Result<(Slot, TransactionIndex)> {
+    let applied = accountsdb.slot().max(ledger.latest_block().load().slot);
+    Ok(ledger
+        .get_last_persisted_transaction_position()?
+        .filter(|(txn_slot, _)| *txn_slot > applied)
+        .unwrap_or((applied, BLOCK_INDEX)))
+}
+
 impl ReplicationContext {
     /// Creates context from ledger state.
     #[allow(clippy::too_many_arguments)]
@@ -68,12 +81,9 @@ impl ReplicationContext {
         let producer_id = format!("{node_id}-producer");
         let consumer_id = format!("{node_id}-consumer");
 
-        let slot = accountsdb.slot();
-        let index = ledger
-            .get_highest_transaction_index_for_slot(slot)?
-            .unwrap_or_default();
+        let (slot, index) = resume_position(&accountsdb, &ledger)?;
 
-        info!(%node_id, %producer_id, %consumer_id, slot, "context initialized");
+        info!(%node_id, %producer_id, %consumer_id, slot, index, "context initialized");
         Ok(Self {
             producer_id,
             consumer_id,
@@ -105,6 +115,10 @@ impl ReplicationContext {
 
     /// Verifies superblock checksum.
     pub async fn verify_checksum(&self, sb: &SuperBlock) -> Result<()> {
+        self.scheduler
+            .wait_for_replay_drain()
+            .await
+            .map_err(Error::Internal)?;
         let _guard = self.scheduler.wait_for_idle().await;
         // SAFETY: Scheduler is paused, no concurrent modifications during checksum.
         let checksum = unsafe { self.accountsdb.checksum() };

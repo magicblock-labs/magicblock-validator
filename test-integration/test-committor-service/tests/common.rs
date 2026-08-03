@@ -7,6 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use dlp_api::state::{DelegationMetadata, UndelegationRequester};
 use magicblock_committor_service::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
@@ -32,7 +33,7 @@ use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
-    intent::{BaseActionCallback, CommittedAccount},
+    intent::{types::CommittedAccount, BaseActionCallback},
     traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use magicblock_program::{
@@ -49,6 +50,29 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
+
+// Poll until the account holds at least `min_lamports`. On a freshly
+// started validator the first airdrop can take a few slots to land.
+async fn wait_for_funding(
+    rpc_client: &MagicblockRpcClient,
+    pubkey: &Pubkey,
+    min_lamports: u64,
+) {
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+    const POLL_INTERVAL: std::time::Duration =
+        std::time::Duration::from_millis(50);
+
+    let start = std::time::Instant::now();
+    loop {
+        match rpc_client.get_account(pubkey).await {
+            Ok(Some(account)) if account.lamports >= min_lamports => return,
+            _ if start.elapsed() > TIMEOUT => {
+                panic!("airdrop to {pubkey} not visible after {TIMEOUT:?}")
+            }
+            _ => tokio::time::sleep(POLL_INTERVAL).await,
+        }
+    }
+}
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
@@ -84,13 +108,16 @@ impl TestFixture {
             TableMania::new(rpc_client.clone(), &authority, Some(gc_config));
 
         // Airdrop some SOL to the authority for testing
+        const AIRDROP_LAMPORTS: u64 = 100_000_000_000; // 100 SOL
         rpc_client
-            .request_airdrop(
-                &authority.pubkey(),
-                100_000_000_000, // 100 SOL
-            )
+            .request_airdrop(&authority.pubkey(), AIRDROP_LAMPORTS)
             .await
             .unwrap();
+        // request_airdrop only submits the transfer; wait until the funds are
+        // visible or the first transaction a test sends may fail to debit the
+        // authority ("no record of a prior credit").
+        wait_for_funding(&rpc_client, &authority.pubkey(), AIRDROP_LAMPORTS)
+            .await;
 
         let compute_budget_config = ComputeBudgetConfig::new(1_000_000);
         Self {
@@ -208,6 +235,10 @@ impl OutboxClient for MockOutboxClient {
         Ok(())
     }
 
+    async fn close_intent(&self, _intent_id: u64) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
     fn outbox_reader(&self) -> Self::OutboxReader {
         MockOutboxReader
     }
@@ -263,12 +294,25 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }
 
-    async fn fetch_rent_reimbursements(
+    async fn fetch_delegation_metadata(
         &self,
         pubkeys: &[Pubkey],
         _: u64,
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        Ok(pubkeys.to_vec())
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        Ok(pubkeys
+            .iter()
+            .map(|pubkey| {
+                (
+                    *pubkey,
+                    DelegationMetadata {
+                        last_commit_id: 0,
+                        undelegation_requester: UndelegationRequester::None,
+                        seeds: vec![],
+                        rent_payer: *pubkey,
+                    },
+                )
+            })
+            .collect())
     }
 
     async fn get_base_accounts(
@@ -324,9 +368,8 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
 #[allow(dead_code)]
 pub fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
     let task = create_commit_task(data);
-    let stage = task.state_preparation_stage();
     CommitTask {
-        delivery_details: CommitDelivery::StateInBuffer { stage },
+        delivery_details: CommitDelivery::StateInBuffer { prepared: false },
         ..task
     }
 }

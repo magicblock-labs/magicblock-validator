@@ -16,6 +16,7 @@ magicblock-accounts-db = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
+magicblock-metrics = { workspace = true }
 notify = { version = "8.0", features = ["macos_kqueue"] }
 serde = { workspace = true, features = ["derive"] }
 solana-hash = { workspace = true, features = ["serde"] }

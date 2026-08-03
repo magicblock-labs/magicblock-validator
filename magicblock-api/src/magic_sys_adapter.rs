@@ -3,10 +3,17 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
     intent_engine::db::DummyIntentBacklog,
-    tasks::task_info_fetcher::TaskInfoFetcherResult,
+    tasks::{
+        intent_size_validator::IntentSizeValidator,
+        task_info_fetcher::TaskInfoFetcherResult,
+    },
 };
-use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
+use magicblock_core::{
+    intent::{types::CommittedAccount, MagicIntentBundle},
+    traits::MagicSys,
+};
 use magicblock_metrics::metrics;
+use magicblock_program::magic_sys::INTENT_TOO_LARGE_ERR;
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 use tracing::error;
@@ -98,5 +105,16 @@ impl MagicSys for MagicSysAdapter {
                 error!(error = ?err, "Failed to fetch current commit nonces")
             })
             .map_err(|_| InstructionError::Custom(Self::FETCH_ERR))
+    }
+
+    fn validate_intent_size(
+        &self,
+        intent: &MagicIntentBundle,
+    ) -> Result<(), InstructionError> {
+        if IntentSizeValidator::fits(intent) {
+            Ok(())
+        } else {
+            Err(InstructionError::Custom(INTENT_TOO_LARGE_ERR))
+        }
     }
 }

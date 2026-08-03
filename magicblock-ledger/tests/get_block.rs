@@ -1,6 +1,6 @@
 mod common;
 
-use magicblock_ledger::LatestBlockInner;
+use magicblock_core::link::blocks::LatestBlockInner;
 use solana_hash::Hash;
 use test_kit::init_logger;
 

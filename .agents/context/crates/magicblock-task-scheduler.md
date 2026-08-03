@@ -18,7 +18,7 @@ This crate sits on the scheduled-task/crank path and can affect transaction exec
 
 ## Update requirement
 
-Update this guide in the same change whenever behavior or contracts in `magicblock-task-scheduler` change. In particular, update it for changes to:
+Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-task-scheduler` change. Include changes to:
 
 - public exports in `src/lib.rs`, `SchedulerDatabase`, `TaskSchedulerService`, or `TaskSchedulerError`;
 - SQLite schema, database path, WAL/PRAGMA settings, retention behavior, optimistic `updated_at` concurrency, or restart recovery semantics;

@@ -32,6 +32,7 @@ pub fn blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     blacklisted_accounts.insert(magic_program::CALLBACK_PROGRAM_ID);
     blacklisted_accounts
         .insert(magic_program::POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID);
+    blacklisted_accounts.insert(magic_program::EPHEMERAL_SYSTEM_PROGRAM_ID);
     blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(magic_program::EPHEMERAL_VAULT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);

@@ -368,10 +368,19 @@ impl super::TransactionExecutor {
                 }
 
                 if !succeeded {
-                    &executed.loaded_transaction.accounts[..1]
-                } else {
-                    &executed.loaded_transaction.accounts
+                    return match &executed.loaded_transaction.rollback_accounts
+                    {
+                        RollbackAccounts::FeePayerOnly {
+                            fee_payer: account,
+                        } => self.insert_and_notify(
+                            &[(fee_payer, account.1.clone())],
+                            txn,
+                            false,
+                        ),
+                        _ => Ok(()),
+                    };
                 }
+                &executed.loaded_transaction.accounts
             }
             ProcessedTransaction::FeesOnly(fo) => {
                 if let RollbackAccounts::FeePayerOnly { fee_payer: account } =

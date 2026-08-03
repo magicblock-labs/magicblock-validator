@@ -1,5 +1,5 @@
 use magicblock_magic_program_api::instruction::{
-    CallbackInstruction, MagicBlockInstruction,
+    CallbackInstruction, EphemeralSystemInstruction, MagicBlockInstruction,
     PostDelegationActionExecutorInstruction,
 };
 use solana_instruction::error::InstructionError;
@@ -26,9 +26,10 @@ use crate::{
     },
     schedule_transactions::{
         process_accept_scheduled_commits, process_add_action_callback,
-        process_execute_callback, process_schedule_cloned_account_undelegation,
-        process_schedule_commit, process_schedule_intent_bundle,
-        process_set_intent_execution_stage, ProcessScheduleCommitOptions,
+        process_close_outbox_intent, process_execute_callback,
+        process_schedule_cloned_account_undelegation, process_schedule_commit,
+        process_schedule_intent_bundle, process_set_intent_execution_stage,
+        ProcessScheduleCommitOptions,
     },
 };
 
@@ -106,6 +107,9 @@ declare_process_instruction!(
             }
             ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(signers, invoke_context, id)
+            }
+            CloseOutboxIntent(id) => {
+                process_close_outbox_intent(signers, invoke_context, id)
             }
             ScheduleBaseIntent(args) => process_schedule_intent_bundle(
                 signers,
@@ -316,6 +320,39 @@ declare_process_instruction!(
                 invoke_context,
                 cloned_account_pubkey,
             ),
+        }
+    }
+);
+
+declare_process_instruction!(
+    EphemeralSystemEntrypoint,
+    DEFAULT_COMPUTE_UNITS,
+    |invoke_context| {
+        let instruction: EphemeralSystemInstruction =
+            deserialize_instruction(invoke_context)?;
+        let transaction_context = &invoke_context.transaction_context;
+
+        match instruction {
+            EphemeralSystemInstruction::CreateEphemeralAccount { data_len } => {
+                process_create_ephemeral_account(
+                    invoke_context,
+                    transaction_context,
+                    data_len,
+                )
+            }
+            EphemeralSystemInstruction::ResizeEphemeralAccount {
+                new_data_len,
+            } => process_resize_ephemeral_account(
+                invoke_context,
+                transaction_context,
+                new_data_len,
+            ),
+            EphemeralSystemInstruction::CloseEphemeralAccount => {
+                process_close_ephemeral_account(
+                    invoke_context,
+                    transaction_context,
+                )
+            }
         }
     }
 );

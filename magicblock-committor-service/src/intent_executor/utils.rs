@@ -61,7 +61,6 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    let meta = ScheduledBaseIntentMeta::new(&intent_bundle);
     let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
 
     let mut single_stage_executor = SingleStageStrategyExecutor::new(
@@ -108,12 +107,7 @@ where
                 transaction_strategy.clone(),
             );
             execution_report.dispose(transaction_strategy);
-            let output = res.map(ExecutionOutput::SingleStage);
-            ctx.outbox_client
-                .notify_commit_sent(meta, &output, execution_report)
-                .await
-                .map_err(Into::into)?;
-            return output;
+            return res.map(ExecutionOutput::SingleStage);
         }
     };
 
@@ -141,6 +135,10 @@ where
     .await
 }
 
+/// Executes Intent in Two Stage manner
+/// Note: this just returns execution result on Base chain + drives outbox stages
+/// caller still needs to close outbox on success and notify that commit was sent
+/// see: `report_and_close_intent`
 pub(in crate::intent_executor) async fn execute_two_stage_flow<T, F, A, O>(
     ctx: &IntentExecutorCtx<T, F, A, O>,
     state: two_stage::Initialized,
@@ -156,7 +154,6 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    let meta = ScheduledBaseIntentMeta::new(&intent_bundle);
     let committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
     let mut executor = TwoStageStrategyExecutor::new(
         state,
@@ -190,13 +187,38 @@ where
     .await?;
 
     let finalized_stage = finalize_executor.done(finalize_signature);
-    let output = ExecutionOutput::TwoStage {
+    Ok(ExecutionOutput::TwoStage {
         commit_signature: finalized_stage.commit_signature,
         finalize_signature: finalized_stage.finalize_signature,
-    };
-    ctx.outbox_client
-        .notify_commit_sent(meta, &Ok(output), execution_report)
+    })
+}
+
+/// Reports the outcome of an intent execution attempt and, only if it
+/// succeeded, closes its outbox record.
+/// Note: we consider failed reporting to Outbox as overall intent failure
+/// as it is part of intent execution lifecycle.
+pub(in crate::intent_executor) async fn report_and_close_intent<O>(
+    result: IntentExecutorResult<ExecutionOutput>,
+    meta: ScheduledBaseIntentMeta,
+    execution_report: &mut IntentExecutionReport,
+    outbox_client: &O,
+) -> IntentExecutorResult<ExecutionOutput>
+where
+    O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
+{
+    let intent_id = meta.id;
+    outbox_client
+        .notify_commit_sent(meta, &result, execution_report)
         .await
         .map_err(Into::into)?;
-    Ok(output)
+
+    if result.is_ok() {
+        outbox_client
+            .close_intent(intent_id)
+            .await
+            .map_err(Into::into)?;
+    }
+
+    result
 }

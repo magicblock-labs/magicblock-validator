@@ -1,4 +1,11 @@
-use std::{collections::HashSet, num::NonZeroUsize};
+use std::{
+    collections::HashSet,
+    num::NonZeroUsize,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use lru::LruCache;
 use magicblock_metrics::metrics::inc_evicted_accounts_count;
@@ -29,6 +36,10 @@ pub struct AccountsLruCache {
     /// explicit subscription cleanup removes them.
     subscribed_accounts: Mutex<LruCache<Pubkey, ()>>,
     accounts_to_never_evict: HashSet<Pubkey>,
+    /// Lock-free mirror of the LRU entry count, refreshed at the end of every
+    /// mutating critical section. Lets hot paths skip the mutex entirely when
+    /// the cache is empty.
+    occupancy: AtomicUsize,
 }
 
 fn accounts_to_never_evict() -> HashSet<Pubkey> {
@@ -46,7 +57,15 @@ impl AccountsLruCache {
             // capacity > 0 thus the capacity here is guaranteed to be non-zero.
             subscribed_accounts: Mutex::new(LruCache::new(capacity)),
             accounts_to_never_evict,
+            occupancy: AtomicUsize::new(0),
         }
+    }
+
+    /// Lock-free emptiness hint. Exact whenever no mutation is mid-flight;
+    /// callers use it to skip the mutex on hot paths where a missed
+    /// concurrent insert is harmless (e.g. skipping an LRU promote).
+    pub fn is_vacant(&self) -> bool {
+        self.occupancy.load(Ordering::Relaxed) == 0
     }
 
     pub fn promote_multi(&self, pubkeys: &[&Pubkey]) {
@@ -91,6 +110,20 @@ impl AccountsLruCache {
         }
 
         let mut subs = self.subscribed_accounts.lock();
+        let outcome =
+            Self::add_with_evict_filter_inner(&mut subs, pubkey, is_evictable);
+        self.occupancy.store(subs.len(), Ordering::Relaxed);
+        outcome
+    }
+
+    fn add_with_evict_filter_inner<F>(
+        subs: &mut LruCache<Pubkey, ()>,
+        pubkey: Pubkey,
+        is_evictable: F,
+    ) -> AddAccountOutcome
+    where
+        F: Fn(&Pubkey) -> bool,
+    {
         // If the pubkey is already in the cache, we just promote it
         if subs.promote(&pubkey) {
             trace!(pubkey = %pubkey, "Account promoted");
@@ -134,11 +167,11 @@ impl AccountsLruCache {
         let mut candidate = evicted_pubkey;
         loop {
             if candidate == pubkey {
-                return reject_new_account(&mut subs, skipped, &pubkey);
+                return reject_new_account(subs, skipped, &pubkey);
             }
 
             if is_evictable(&candidate) {
-                restore_skipped(&mut subs, skipped);
+                restore_skipped(subs, skipped);
                 inc_evicted_accounts_count();
                 trace!(evicted_pubkey = %candidate, "Evict candidate");
                 return AddAccountOutcome::Evicted(candidate);
@@ -154,10 +187,30 @@ impl AccountsLruCache {
             skipped.push(candidate);
 
             let Some((next_candidate, ())) = subs.pop_lru() else {
-                return reject_new_account(&mut subs, skipped, &pubkey);
+                return reject_new_account(subs, skipped, &pubkey);
             };
             candidate = next_candidate;
         }
+    }
+
+    pub fn can_add_with_evict_filter<F>(
+        &self,
+        pubkey: &Pubkey,
+        is_evictable: F,
+    ) -> bool
+    where
+        F: Fn(&Pubkey) -> bool,
+    {
+        if self.accounts_to_never_evict.contains(pubkey) {
+            return true;
+        }
+
+        let subs = self.subscribed_accounts.lock();
+        subs.contains(pubkey)
+            || subs.len() < subs.cap().get()
+            // Scan LRU-first to match the eviction order used by
+            // add_with_evict_filter, so the common case stays O(1).
+            || subs.iter().rev().any(|(candidate, _)| is_evictable(candidate))
     }
 
     pub fn contains(&self, pubkey: &Pubkey) -> bool {
@@ -171,12 +224,12 @@ impl AccountsLruCache {
             "Cannot remove an account that is not supposed to be evicted: {pubkey}"
         );
         let mut subs = self.subscribed_accounts.lock();
-        if subs.pop(pubkey).is_some() {
+        let removed = subs.pop(pubkey).is_some();
+        self.occupancy.store(subs.len(), Ordering::Relaxed);
+        if removed {
             trace!(pubkey = %pubkey, "Removed account");
-            true
-        } else {
-            false
         }
+        removed
     }
 
     pub fn len(&self) -> usize {
@@ -206,6 +259,31 @@ impl SubscribedAccountsTracker for AccountsLruCache {
     fn subscribed_accounts(&self) -> HashSet<Pubkey> {
         let subs = self.subscribed_accounts.lock();
         subs.iter().map(|(k, _)| *k).collect()
+    }
+}
+
+/// Authoritative account set used by SubMux reconnects. Transport policy is
+/// applied by SubMux; this tracker only exposes every account that must retain
+/// some subscription coverage.
+pub(crate) struct TieredSubscribedAccountsTracker {
+    primary: Arc<AccountsLruCache>,
+    secondary: Arc<AccountsLruCache>,
+}
+
+impl TieredSubscribedAccountsTracker {
+    pub(crate) fn new(
+        primary: Arc<AccountsLruCache>,
+        secondary: Arc<AccountsLruCache>,
+    ) -> Self {
+        Self { primary, secondary }
+    }
+}
+
+impl SubscribedAccountsTracker for TieredSubscribedAccountsTracker {
+    fn subscribed_accounts(&self) -> HashSet<Pubkey> {
+        let mut subscriptions = self.primary.pubkeys();
+        subscriptions.extend(self.secondary.pubkeys());
+        subscriptions
     }
 }
 

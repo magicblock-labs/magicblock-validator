@@ -250,6 +250,11 @@ reset = false
 # Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
 max-monitored-accounts = 5000
 
+# Maximum number of accounts retained in the secondary subscription cache.
+# Default: 20000
+# Env: MBV_CHAINLINK__SECONDARY_MAX_MONITORED_ACCOUNTS
+secondary-max-monitored-accounts = 20000
+
 # When true, confined accounts are removed during accounts bank reset.
 # Default: false
 # Env: MBV_CHAINLINK__REMOVE_CONFINED_ACCOUNTS
@@ -262,6 +267,12 @@ remove-confined-accounts = false
 # Default: "50ms"
 # Env: MBV_CHAINLINK__RESUBSCRIPTION_DELAY
 # resubscription-delay = "50ms"
+
+# Period for polling DLP-owned UndelegationRequest accounts as a backfill for
+# missed subscription updates. Set to "0s" to disable polling.
+# Default: "5m"
+# Env: MBV_CHAINLINK__UNDELEGATION_REQUEST_POLL_INTERVAL
+# undelegation-request-poll-interval = "5m"
 
 # ------------------------------------------------------------------------------
 # Optional: Range Risk API validation for post-delegation actions signers

@@ -120,7 +120,7 @@ pub(crate) fn process_add_action_callback(
 
     let action = latest_intent
         .intent_bundle
-        .get_action_mut(args.action_index as usize)
+        .get_action_mut(args.action_index as u64)
         .ok_or_else(|| {
             ic_msg!(
                 invoke_context,

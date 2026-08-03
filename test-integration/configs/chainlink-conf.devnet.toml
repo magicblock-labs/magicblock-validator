@@ -49,3 +49,7 @@ auth = "MiniV3AUTH111111111111111111111111111111111"
 
 [metrics]
 address = "0.0.0.0:9000" # Default if not specified, was disabled before but struct requires address
+
+[[programs]]
+id = "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+path = "../schedulecommit/elfs/noop.so"
