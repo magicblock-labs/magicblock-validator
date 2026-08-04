@@ -22,6 +22,7 @@ use tokio::{
 use tracing::*;
 
 use crate::{
+    chainlink::record_mirror::DelegationRecordMirror,
     cloner::Cloner,
     config::ChainlinkConfig,
     fetch_cloner::FetchAndCloneResult,
@@ -38,6 +39,7 @@ mod blacklisted_accounts;
 pub mod config;
 pub mod errors;
 pub mod fetch_cloner;
+pub mod record_mirror;
 
 pub use blacklisted_accounts::*;
 
@@ -413,6 +415,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 ledger_path,
             )?
             .map(Arc::new);
+            let record_mirror = DelegationRecordMirror::try_from_config(
+                &chainlink_config.record_sync,
+                endpoints,
+            )
+            .await;
             let fetch_cloner =
                 FetchCloner::new_with_undelegation_request_sender(
                     &provider,
@@ -422,6 +429,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                     rx,
                     chainlink_config.allowed_programs.clone(),
                     risk_service,
+                    record_mirror,
                     undelegation_request_sender.clone(),
                 );
             Some(fetch_cloner)

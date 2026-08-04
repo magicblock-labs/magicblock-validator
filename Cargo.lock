@@ -280,7 +280,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -291,7 +291,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3661,6 +3661,7 @@ dependencies = [
  "magicblock-delegation-program-api",
  "magicblock-magic-program-api",
  "magicblock-metrics",
+ "magicblock-sync",
  "parking_lot",
  "scc",
  "solana-account 3.4.0",
@@ -3839,7 +3840,7 @@ dependencies = [
  "solana-system-interface 2.0.0",
  "static_assertions",
  "strum 0.28.0",
- "thiserror 2.0.18",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -4087,6 +4088,17 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "magicblock-sync"
+version = "0.2.0"
+source = "git+https://github.com/magicblock-labs/magicblock-sync.git?rev=3c71985#3c719851767544d1ae003bbf53d74c82c14acb01"
+dependencies = [
+ "futures",
+ "helius-laserstream",
+ "tokio",
  "tracing",
 ]
 
@@ -4432,7 +4444,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6286,7 +6298,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

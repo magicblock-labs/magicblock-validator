@@ -233,6 +233,26 @@ lazy_static::lazy_static! {
         "program_subscription_discovered_dlp_update_delegated_elsewhere_count", "DLP-owned subscription updates that, after fetching the delegation record, were found delegated to another validator and dropped",
     ).unwrap();
 
+    static ref CHAINLINK_RECORD_MIRROR_LOOKUPS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_record_mirror_lookups_total",
+                "Delegation-record mirror lookups by outcome; every non-hit outcome falls back to an RPC fetch",
+            ),
+            &["outcome"],
+        )
+        .expect("static name and label set are valid metric identifiers");
+
+    static ref CHAINLINK_RECORD_MIRROR_LIVE_GAUGE: IntGauge = IntGauge::new(
+        "chainlink_record_mirror_live",
+        "1 while the delegation-record mirror stream is live (watermark advancing), 0 otherwise",
+    ).expect("static name is a valid metric identifier");
+
+    static ref CHAINLINK_RECORD_MIRROR_WATERMARK_GAUGE: IntGauge = IntGauge::new(
+        "chainlink_record_mirror_watermark",
+        "Latest confirmed slot the delegation-record mirror is caught up to",
+    ).expect("static name is a valid metric identifier");
+
     static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
@@ -789,6 +809,9 @@ pub(crate) fn register() {
         register!(CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL);
         register!(PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT);
+        register!(CHAINLINK_RECORD_MIRROR_LOOKUPS_TOTAL);
+        register!(CHAINLINK_RECORD_MIRROR_LIVE_GAUGE);
+        register!(CHAINLINK_RECORD_MIRROR_WATERMARK_GAUGE);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT);
@@ -1068,6 +1091,49 @@ pub fn chainlink_subscription_cleanup_accounts_value(
 
 pub fn inc_discovered_dlp_update_delegated_elsewhere() {
     PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT.inc();
+}
+
+/// Outcome of a delegation-record mirror lookup. Every non-`Hit` outcome
+/// falls back to an RPC fetch.
+#[derive(Debug, Clone, Copy)]
+pub enum RecordMirrorLookupOutcome {
+    /// Record served from the mirror; RPC fetch skipped.
+    Hit,
+    /// Record not in the mirror.
+    Miss,
+    /// Entry present but freshness could not be proven for the requested slot.
+    Stale,
+    /// Entry present as an undelegation tombstone.
+    Tombstone,
+    /// Mirror bytes failed to parse as a delegation record.
+    ParseFallback,
+}
+
+impl RecordMirrorLookupOutcome {
+    fn as_str(&self) -> &'static str {
+        use RecordMirrorLookupOutcome::*;
+        match self {
+            Hit => "hit",
+            Miss => "miss",
+            Stale => "stale",
+            Tombstone => "tombstone",
+            ParseFallback => "parse_fallback",
+        }
+    }
+}
+
+pub fn inc_record_mirror_lookup(outcome: RecordMirrorLookupOutcome) {
+    CHAINLINK_RECORD_MIRROR_LOOKUPS_TOTAL
+        .with_label_values(&[outcome.as_str()])
+        .inc();
+}
+
+pub fn set_record_mirror_live(live: bool) {
+    CHAINLINK_RECORD_MIRROR_LIVE_GAUGE.set(live as i64);
+}
+
+pub fn set_record_mirror_watermark(slot: u64) {
+    CHAINLINK_RECORD_MIRROR_WATERMARK_GAUGE.set(slot as i64);
 }
 
 pub fn inc_committor_intents_count() {

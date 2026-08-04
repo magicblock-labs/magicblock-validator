@@ -99,3 +99,6 @@ pub const DEFAULT_RISK_REQUEST_TIMEOUT_SEC: u64 = 5;
 
 /// Default risk score threshold for Range risk service
 pub const DEFAULT_RISK_SCORE_THRESHOLD: u64 = 5;
+
+/// Default capacity of the delegation-record mirror (~40 MB of records)
+pub const DEFAULT_RECORD_SYNC_CAPACITY: usize = 262_144;

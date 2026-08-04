@@ -32,7 +32,7 @@ use magicblock_metrics::metrics::{
 };
 use parking_lot::Mutex as PlMutex;
 use scc::HashMap;
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{Account, AccountSharedData, ReadableAccount};
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -85,6 +85,7 @@ use crate::{
         blacklisted_accounts::{
             blacklisted_accounts, programs_not_to_subscribe,
         },
+        record_mirror::{DelegationRecordMirror, MirrorLookup},
         ObservedUndelegationRequest,
     },
     cloner::{
@@ -169,6 +170,10 @@ where
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
 
+    /// In-memory delegation-record mirror consulted before RPC record
+    /// fetches; any miss falls back to the RPC path.
+    record_mirror: Option<Arc<DelegationRecordMirror>>,
+
     undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
 }
 
@@ -185,6 +190,10 @@ impl Drop for PendingUndelegationGuard {
         }
     }
 }
+
+/// Lamports for a record companion synthesized from mirrored bytes.
+/// Downstream consumers only read the companion's data, never its lamports.
+const MIRRORED_RECORD_LAMPORTS: u64 = 1_000_000;
 
 /// Negative-cache capacity for known-empty eATAs.
 const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
@@ -371,6 +380,7 @@ where
                 .pending_operation_timeout_ms
                 .clone(),
             risk_service: self.risk_service.clone(),
+            record_mirror: self.record_mirror.clone(),
             undelegation_request_sender: self
                 .undelegation_request_sender
                 .clone(),
@@ -444,6 +454,7 @@ where
             subscription_updates_rx,
             allowed_programs,
             risk_service,
+            None,
             undelegation_request_sender,
         )
     }
@@ -458,6 +469,7 @@ where
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
+        record_mirror: Option<Arc<DelegationRecordMirror>>,
         undelegation_request_sender: broadcast::Sender<
             ObservedUndelegationRequest,
         >,
@@ -495,6 +507,7 @@ where
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
             risk_service,
+            record_mirror,
             undelegation_request_sender,
         });
 
@@ -522,6 +535,17 @@ where
     /// Get the current fetch count
     pub fn fetch_count(&self) -> u64 {
         self.fetch_count.load(Ordering::Relaxed)
+    }
+
+    /// Drops the mirror entry for an account's delegation record when local
+    /// state observed its undelegation completing — insurance against a
+    /// missed tombstone leaving a stale delegated entry behind.
+    fn invalidate_mirrored_record(&self, pubkey: &Pubkey) {
+        if let Some(mirror) = &self.record_mirror {
+            mirror.invalidate(&delegation_record_pda_from_delegated_account(
+                pubkey,
+            ));
+        }
     }
 
     async fn classify_dlp_program_update_interest(
@@ -2752,14 +2776,14 @@ where
                     });
 
                 match self
-                    .task_to_fetch_with_companion(
+                    .task_to_fetch_with_delegation_record(
                         pubkey,
-                        delegation_record_pubkey,
+                        ResolvedAccountSharedData::Fresh(account.clone()),
+                        account.remote_slot(),
                         account.remote_slot(),
                         AccountFetchContext::subscription_update(
                             AccountFetchReason::DelegationRecord,
                         ),
-                        ChainlinkCompanionFetchKind::DelegationRecord,
                     )
                     .await
                 {
@@ -3617,6 +3641,7 @@ where
                 // If there is no delegation record then it is possible that the account itself
                 // does not exist either.
                 // In that case we need to refresh it as empty to clear the undelegation state.
+                self.invalidate_mirrored_record(pubkey);
                 return RefreshDecision::YesAndMarkEmptyIfNotFound;
             }
 
@@ -3636,6 +3661,7 @@ where
                 debug!(
                     "Account {pubkey} marked as undelegating will be overridden since undelegation completed"
                 );
+                self.invalidate_mirrored_record(pubkey);
                 return RefreshDecision::Yes;
             }
         } else if in_bank.owner().eq(&dlp_api::id()) {
@@ -3957,14 +3983,67 @@ where
         Ok(final_result)
     }
 
+    /// Resolves an account with its delegation record, pairing the account
+    /// copy the caller already holds (at `account_slot`) with a mirrored
+    /// record when the pair is snapshot-consistent: the record must be
+    /// proven through `slot` AND unchanged since at or before
+    /// `account_slot`, so both sides describe the same chain state. That
+    /// path performs no RPC at all. Every other outcome runs the batched
+    /// two-account fetch, byte-for-byte the prior path.
     fn task_to_fetch_with_delegation_record(
         &self,
         pubkey: Pubkey,
+        account: ResolvedAccountSharedData,
+        account_slot: u64,
         slot: u64,
         fetch_context: AccountFetchContext,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(&pubkey);
+
+        if let Some(MirrorLookup::Hit {
+            data,
+            slot: record_slot,
+        }) = self
+            .record_mirror
+            .as_ref()
+            .map(|mirror| mirror.get(&delegation_record_pubkey, slot))
+        {
+            use metrics::RecordMirrorLookupOutcome as Outcome;
+            if record_slot > account_slot {
+                // The record changed after the held account copy was taken;
+                // only the batched fetch can produce a consistent pair.
+                metrics::inc_record_mirror_lookup(Outcome::Stale);
+            } else if !is_delegation_record_data(&data) {
+                metrics::inc_record_mirror_lookup(Outcome::ParseFallback);
+            } else {
+                metrics::inc_record_mirror_lookup(Outcome::Hit);
+                trace!(
+                    pubkey = %pubkey,
+                    companion = %delegation_record_pubkey,
+                    slot,
+                    "Pairing held account with mirrored delegation record"
+                );
+                let companion_account = ResolvedAccountSharedData::Fresh(
+                    AccountSharedData::from(Account {
+                        lamports: MIRRORED_RECORD_LAMPORTS,
+                        data,
+                        owner: dlp_api::id(),
+                        executable: false,
+                        rent_epoch: 0,
+                    }),
+                );
+                return task::spawn(async move {
+                    Ok(AccountWithCompanion {
+                        pubkey,
+                        account,
+                        companion_pubkey: delegation_record_pubkey,
+                        companion_account: Some(companion_account),
+                    })
+                });
+            }
+        }
+
         self.task_to_fetch_with_companion(
             pubkey,
             delegation_record_pubkey,

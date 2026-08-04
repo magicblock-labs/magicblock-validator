@@ -310,6 +310,28 @@ request-timeout = "5s"
 # Env: MBV_CHAINLINK__RISK__RISK_SCORE_THRESHOLD
 # risk-score-threshold = 5
 
+[chainlink.record-sync]
+# In-memory delegation-record mirror streamed from the record firehose.
+# Any mirror miss falls back to an RPC record fetch, so disabling this only
+# costs upstream RPC traffic, never correctness.
+# Default: true
+# Env: MBV_CHAINLINK__RECORD_SYNC__ENABLED
+enabled = true
+
+# Laserstream gRPC endpoint for the record firehose.
+# Default: the first gRPC remote (with its api key)
+# Env: MBV_CHAINLINK__RECORD_SYNC__ENDPOINT
+# endpoint = "https://laserstream-mainnet-ewr.helius-rpc.com"
+
+# API key for the endpoint above.
+# Env: MBV_CHAINLINK__RECORD_SYNC__API_KEY
+# api-key = "YOUR_API_KEY"
+
+# Maximum number of record entries retained in the mirror.
+# Default: 262144
+# Env: MBV_CHAINLINK__RECORD_SYNC__CAPACITY
+# capacity = 262144
+
 # ==============================================================================
 # On-Chain Registration (Optional)
 # ==============================================================================

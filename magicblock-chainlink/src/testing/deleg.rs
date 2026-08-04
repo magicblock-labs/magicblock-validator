@@ -94,6 +94,33 @@ pub fn add_delegation_record_with_actions_for(
     deleg_record_pubkey
 }
 
+/// Registers a delegation record in the record mirror (instead of the RPC
+/// mock), proving it at `slot`. Returns the record PDA.
+#[cfg(any(test, feature = "dev-context"))]
+pub fn add_delegation_record_to_mirror(
+    mirror: &crate::chainlink::record_mirror::DelegationRecordMirror,
+    pubkey: Pubkey,
+    authority: Pubkey,
+    owner: Pubkey,
+    slot: u64,
+) -> Pubkey {
+    let deleg_record_pubkey =
+        delegation_record_pda_from_delegated_account(&pubkey);
+    let deleg_record = DelegationRecord {
+        authority,
+        owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    mirror.test_insert_record(
+        deleg_record_pubkey,
+        delegation_record_to_vec(&deleg_record),
+        slot,
+    );
+    deleg_record_pubkey
+}
+
 #[cfg(any(test, feature = "dev-context"))]
 pub fn add_invalid_delegation_record_for(
     rpc_client: &ChainRpcClientMock,
