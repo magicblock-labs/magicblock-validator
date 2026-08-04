@@ -1,9 +1,9 @@
-use std::collections::{hash_map::Entry, HashMap, VecDeque};
+use std::collections::{hash_map::Entry, HashMap, HashSet, VecDeque};
 
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
-use tracing::error;
+use tracing::{error, warn};
 
 pub(crate) const POISONED_INNER_MSG: &str =
     "Mutex on CommitSchedulerInner is poisoned.";
@@ -25,6 +25,9 @@ struct IntentMeta {
 /// 2. `blocked_intents`: Stores metadata for all blocked intents
 ///    - Key: IntentID
 ///    - Value: Intent metadata including original intent
+///
+/// 3. `poisoned_keys`: Poisoned pubkeys from failed intent
+///    - Key: Pubkey
 ///
 /// # Scheduling Logic
 ///
@@ -64,57 +67,62 @@ struct IntentMeta {
 pub(crate) struct IntentScheduler {
     blocked_keys: HashMap<Pubkey, VecDeque<IntentID>>,
     blocked_intents: HashMap<IntentID, IntentMeta>,
+    poisoned_keys: HashSet<Pubkey>,
 }
 
+/// TODO(edwin):
+/// New intent comes in:
+/// 1. Is it duplicate - already executing/scheduled?
+/// 2. Are pubkeys in that intent poisoned?
+/// 3.
+///     a. Yes - consume intent and add it to Poisoned pubkeys set. Meybe return some error and warning
+///     b. No - regular execution
 impl IntentScheduler {
     pub fn new() -> Self {
         Self {
             blocked_keys: HashMap::new(),
             blocked_intents: HashMap::new(),
+            poisoned_keys: HashSet::new(),
         }
     }
 
     /// Returns [`ScheduledIntentBundle`] if intent can be executed,
     /// otherwise consumes it and enqueues
+    // TODO(edwin): tweak return type to reflect Poisoned, ScheduleResult
     pub fn schedule(
         &mut self,
         intent_bundle: OutboxIntentBundle,
     ) -> Option<OutboxIntentBundle> {
         let intent_id = intent_bundle.id;
-
-        // To check duplicate scheduling its enough to check:
-        // 1. currently blocked
-        // 2. currently executing
-        if self.blocked_intents.contains_key(&intent_id) {
-            // This is critical error as we shouldn't schedule duplicate Intents!
-            // this requires investigation
-            error!(
-                intent_id,
-                "CRITICAL! Attempt to schedule already scheduled intent"
-            );
-            return None;
-        }
-        let duplicate_executing = self.blocked_keys.iter().any(|(_, queue)| {
-            if let Some(executing_id) = queue.front() {
-                &intent_id == executing_id
-            } else {
-                false
-            }
-        });
-        if duplicate_executing {
-            // This is critical error as we shouldn't schedule duplicate Intents!
-            // this requires investigation
-            error!(
-                intent_id,
-                "CRITICAL! Attempt to schedule already scheduled intent"
-            );
-            return None;
-        }
-
         let pubkeys = intent_bundle.get_all_committed_pubkeys();
         if pubkeys.is_empty() {
             return Some(intent_bundle);
         };
+
+        // Check that id is not duplicated
+        if self.is_duplicate(intent_id) {
+            // This is critical error as we shouldn't schedule duplicate Intents!
+            // this requires investigation
+            error!(
+                intent_id,
+                "CRITICAL! Attempt to schedule already scheduled intent"
+            );
+            return None;
+        }
+
+        // Check if intent is poisoned by existing poisonous keys
+        let is_poisoned =
+            pubkeys.iter().any(|el| self.poisoned_keys.contains(el));
+        if is_poisoned {
+            // Intent got poisoned by others
+            warn!(
+                intent_id,
+                pubkeys = ?pubkeys,
+                "Intent got poisoned"
+            );
+            self.poisoned_keys.extend(pubkeys);
+            return None;
+        }
 
         // Check if there are any conflicting keys
         let is_conflicting = pubkeys
@@ -143,21 +151,30 @@ impl IntentScheduler {
         }
     }
 
-    /// Completes Intent, cleaning up data after itself and allowing Intents to move forward
-    /// NOTE: This doesn't unblock intent, hence Self::intents_blocked will return old value.
-    /// NOTE: this shall be called on executing intents to finilize their execution.
-    pub fn complete(
-        &mut self,
-        intent_bundle: &OutboxIntentBundle,
-    ) -> IntentSchedulerResult<()> {
-        // Release data for completed intent
-        let intent_id = intent_bundle.id;
-        let pubkeys = intent_bundle.get_all_committed_pubkeys();
-        if pubkeys.is_empty() {
-            // This means BaseAction, it doesn't have to be scheduled
-            return Ok(());
-        };
+    /// Returns if same IntentId is scheduled
+    /// To check duplicate scheduling its enough to check:
+    /// 1. currently blocked
+    /// 2. currently executing
+    /// NOTE: under assumption that outer system doesn't schedule duplcates
+    /// this can be ommitted to reduce execution time
+    fn is_duplicate(&self, intent_id: IntentID) -> bool {
+        if self.blocked_intents.contains_key(&intent_id) {
+            true
+        } else {
+            let duplicate_executing =
+                self.blocked_keys.iter().any(|(_, queue)| {
+                    if let Some(executing_id) = queue.front() {
+                        &intent_id == executing_id
+                    } else {
+                        false
+                    }
+                });
 
+            duplicate_executing
+        }
+    }
+
+    fn validate_executing(&self, intent_id: IntentID, pubkeys: &[Pubkey]) -> IntentSchedulerResult<()> {
         if self.blocked_intents.contains_key(&intent_id) {
             return Err(IntentSchedulerError::CompletingBlockedIntentError);
         }
@@ -166,7 +183,7 @@ impl IntentScheduler {
         let mut all_front = true;
         // Some of front queues contain intent id
         let mut some_front = false;
-        for pubkey in &pubkeys {
+        for pubkey in pubkeys {
             if let Some(blocked_intents) = self.blocked_keys.get(pubkey) {
                 // SAFETY: if entry exists it means that queue not empty
                 // This is ensured during scheduling as we always insert el-t in the queue
@@ -206,8 +223,29 @@ impl IntentScheduler {
             .filter(|(_, queue)| queue.front() == Some(&intent_id))
             .count();
         if found_in_front != pubkeys.len() {
-            return Err(IntentSchedulerError::CorruptedIntentError);
+            Err(IntentSchedulerError::CorruptedIntentError)
+        } else {
+            Ok(())
         }
+    }
+
+    /// Completes Intent, cleaning up data after itself and allowing Intents to move forward
+    /// NOTE: This doesn't unblock intent, hence Self::intents_blocked will return old value.
+    /// NOTE: this shall be called on executing intents to finalize their execution.
+    pub fn complete(
+        &mut self,
+        intent_bundle: &OutboxIntentBundle,
+    ) -> IntentSchedulerResult<()> {
+        // Release data for completed intent
+        let intent_id = intent_bundle.id;
+        let pubkeys = intent_bundle.get_all_committed_pubkeys();
+        if pubkeys.is_empty() {
+            // This means BaseAction, it doesn't have to be scheduled
+            return Ok(());
+        };
+
+        // Validate that requested intent is executing indeed
+        self.validate_executing(intent_id, &pubkeys)?;
 
         // After all the checks we may safely complete
         pubkeys.iter().for_each(|pubkey| {
@@ -230,6 +268,69 @@ impl IntentScheduler {
         });
 
         Ok(())
+    }
+
+    /// Processes failed intent. This leads to poison spreading over scheduled overlapping intents.
+    /// Returns poisoned intents by failed intent.
+    /// NOTE: this shall be called on executing intents to finalize their execution.
+    pub fn failed(
+        &mut self,
+        intent_bundle: &OutboxIntentBundle,
+    ) -> IntentSchedulerResult<Vec<OutboxIntentBundle>> {
+        // Release data for completed intent
+        let intent_id = intent_bundle.id;
+        let pubkeys = intent_bundle.get_all_committed_pubkeys();
+        if pubkeys.is_empty() {
+            // This means Action only intent, it can't poisone anything
+            return Ok(vec![]);
+        };
+
+        // Validate that requested intent is executing indeed
+        self.validate_executing(intent_id, &pubkeys)?;
+
+        let mut worklist = std::collections::BTreeSet::new();
+        worklist.insert(intent_id);
+
+        for pubkey in pubkeys {
+            self.poisoned_keys.insert(pubkey);
+            let queue = self.blocked_keys.remove(&pubkey).expect("front-checked");
+            worklist.extend(queue.into_iter().skip(1));
+        }
+
+        let mut poisoned = Vec::new();
+        while let Some(intent_id) = worklist.pop_first() {
+            let Some(meta) = self.blocked_intents.remove(&intent_id) else {
+                continue;
+            };
+
+            let pubkeys = meta.intent.get_all_committed_pubkeys();
+            for pubkey in &pubkeys {
+                // if self.poisoned_keys.contains(&pubkey) {
+                //     // Key already handled
+                //     continue;
+                // }
+
+                let Entry::Occupied(mut val) = self.blocked_keys.entry(*pubkey) else {
+                    continue;
+                };
+                let Ok(pos) = val.get_mut().binary_search(&intent_id) else {
+                    // Queue was already drained
+                    continue;
+                };
+
+                // Remove items in queue starting with intent_id. All following intens are poisoned
+                let poisoned_iter = val.get_mut().drain(pos..).skip(1);
+                worklist.extend(poisoned_iter);
+                if val.get().is_empty() {
+                    val.remove();
+                }
+            }
+
+            self.poisoned_keys.extend(pubkeys);
+            poisoned.push(meta.intent);
+        }
+
+        Ok(poisoned)
     }
 
     // Returns [`ScheduledBaseIntent`] that can be executed
@@ -291,6 +392,8 @@ pub enum IntentSchedulerError {
     CorruptedIntentError,
     #[error("Attempt to complete blocked message")]
     CompletingBlockedIntentError,
+    #[error("Intent touched poisoned pubkeys")]
+    IntentPoisonedError(Vec<Pubkey>),
 }
 
 pub type IntentSchedulerResult<T, E = IntentSchedulerError> = Result<T, E>;
@@ -844,6 +947,79 @@ mod intent_bundle_test {
         assert_ne!(next1, next2);
         assert_eq!(scheduler.intents_blocked(), 0);
     }
+}
+
+mod poisoned_test {
+    /// Case 1:
+    /// (1) Assume `t1`:
+    /// executing: `[a1, a2] [b1, b2]`
+    /// blocked:   `[a2. b1]`
+    ///            `[a1, a2]`
+    ///
+    /// `t2`: intent `[b1, b2]` fails
+    /// poisoned key `b1` in turn poisons `[a2, b1]`
+    /// `[a2, b1]` in turn poisons `[a1, a2]`
+    /// But we need to be careful with already executing keys/intents]
+    ///
+    /// TODO(edwin): implementation considerations
+    /// If intent is in the front it doesn't mean it ID is yonger than
+    /// intent that is not in the front, say
+    /// `[a1, a2]` `[b1, b2]`
+    /// `[a1, a2]`
+    /// `[a1, a2]` *
+    /// `[b1, b2]` could be 4, but ID of * could be 3
+    ///
+    /// Statement: above is true for 2 completely isolated intents
+    /// Isolated - 2 intents are called isolated if there's no way from 1 intent to other
+    /// via other blocked intents
+    /// Way from one intent to another - todo(definition)
+    /// Case 2:
+    /// `[a1, a2]` `I1 [b1, b2]`
+    ///     `[a2, b1]`
+    /// `I2 [a1, a2]`
+    /// `I1` and `I2` aren't isolated
+    /// Statement: if 2 intents aren't **not** isolated they're ordered with respect to their IDs
+    /// Example: in case 2 `I1.id` < `I2.id`
+    ///
+    /// Handwaving Proof: assume this isn't true. That would mean coudl be I1.id > I2.id.
+    /// But that would `I2` would be scheduled first and per `schedule` would block `I1`
+    ///
+    /// ## Which intents to exclude
+    /// Imagine case like 2:
+    /// Case 3:
+    /// `[a1, a2]` `I1 [b1, b2]`
+    /// `I2 [a1, a2]`
+    /// `I3 [a2, b1]`
+    /// `I4 [a1, a2]`
+    /// `I1` fails, hence `[a1, a2, b1, b2]` keys become poisoned.
+    /// `I3`, `I4` gets dropped.
+    /// What should we do with `I2`? It doesn't directly overlap with `I1`
+    /// Those are isolated as `I3` is next after `I2`. That`I1` <> `I2`.
+    /// We can't tell unless using `id`, with `I3` we know it is higher.
+    /// Should we fail only such In, In.id > I1.id? I think so,
+    /// otherwise isolated we fail isolated intents which could be critical to users
+    ///
+    fn test() {}
+
+
+    /// Case:
+    /// blocked_keys represented as matrix
+    /// topmost are about to execute
+    /// Numbers represent intent id
+    ///  a1, a2, b1, b2
+    /// [[1, 1, 0, 0]
+    ///  [2, 2, 1, 3]
+    ///
+    ///Failed 0, fails 1, where poison spreads on a1, a2
+    /// flushin b1 we populate worklist with id1
+    ///we find a1,a2 and also populate worklist with 2s
+    /// also 3 will be added
+    fn test_poison_spreading() {
+
+    }
+
+
+    fn test_docs() {}
 }
 
 // Helper function to create test intents
