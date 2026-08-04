@@ -230,8 +230,9 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
         cleanup_both(&mut validator, &mut server),
         "shuttle setup + delegation transaction failed"
     );
+    let record_created = delegation_record_exists(&ctx, &shuttle_ata);
     assert!(
-        delegation_record_exists(&ctx, &shuttle_ata),
+        record_created,
         cleanup_both(&mut validator, &mut server),
         "shuttle ATA delegation record was not created on base chain"
     );
@@ -262,16 +263,19 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
     if expect_allowed {
         // Low-risk owner: the merge is allowed, so the shuttle ATA keeps its
         // delegation and is never undelegated back to chain.
+        let stayed_delegated = delegation_record_persists(&ctx, &shuttle_ata);
         assert!(
-            delegation_record_persists(&ctx, &shuttle_ata),
+            stayed_delegated,
             cleanup_both(&mut validator, &mut server),
             "low-risk shuttle ATA was unexpectedly undelegated on base chain"
         );
     } else {
         // Risky owner: the merge is blocked, so the shuttle ATA is undelegated
         // back to the base chain instead.
+        let was_undelegated =
+            wait_for_delegation_record_absent(&ctx, &shuttle_ata);
         assert!(
-            wait_for_delegation_record_absent(&ctx, &shuttle_ata),
+            was_undelegated,
             cleanup_both(&mut validator, &mut server),
             "high-risk shuttle ATA was not undelegated on base chain"
         );

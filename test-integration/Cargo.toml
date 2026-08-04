@@ -47,6 +47,7 @@ light-client = "0.23"
 light-hasher = "5"
 light-sdk = "0.23"
 light-sdk-types = "0.23"
+
 magicblock-aml = { path = "../magicblock-aml" }
 magicblock-chainlink = { path = "../magicblock-chainlink", features = ["dev-context"] }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
