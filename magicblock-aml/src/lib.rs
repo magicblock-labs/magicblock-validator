@@ -7,9 +7,10 @@
 
 use futures_util::future::try_join_all;
 use magicblock_config::config::RiskConfig;
-use reqwest::Client;
+use reqwest::{Client, redirect};
 use serde::Deserialize;
 use thiserror::Error;
+use url::{Host, Url};
 
 pub type RiskResult<T> = Result<T, RiskError>;
 
@@ -33,6 +34,36 @@ struct RiskAssessment {
     is_risky: bool,
 }
 
+/// Risk verdicts gate undelegation, so they may never travel in the clear.
+/// Plain `http://` is accepted only for a loopback host, where the traffic never
+/// leaves the machine; every other endpoint must be `https://`.
+fn validate_base_url(base_url: &str) -> RiskResult<()> {
+    let invalid = |reason: &str| {
+        RiskError::InvalidConfig(format!("risk_server_url {reason}"))
+    };
+
+    let url = Url::parse(base_url)
+        .map_err(|err| invalid(&format!("is not a valid URL: {err}")))?;
+
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            let is_loopback = match url.host() {
+                Some(Host::Ipv4(ip)) => ip.is_loopback(),
+                Some(Host::Ipv6(ip)) => ip.is_loopback(),
+                Some(Host::Domain(domain)) => {
+                    domain.eq_ignore_ascii_case("localhost")
+                }
+                None => false,
+            };
+            is_loopback.then_some(()).ok_or_else(|| {
+                invalid("must use https:// unless it points at a loopback host")
+            })
+        }
+        _ => Err(invalid("must be an http(s) URL")),
+    }
+}
+
 /// Thin client over the risk server's `GET /risk?pubkey=<addr>` endpoint.
 pub struct RiskService {
     client: Client,
@@ -48,17 +79,14 @@ impl RiskService {
         }
 
         let base_url = config.risk_server_url.trim_end_matches('/').to_string();
-        if base_url.is_empty()
-            || !base_url.starts_with("http://")
-                && !base_url.starts_with("https://")
-        {
-            return Err(RiskError::InvalidConfig(
-                "risk_server_url must be a valid http(s) URL".to_string(),
-            ));
-        }
+        validate_base_url(&base_url)?;
 
+        // Risk verdicts must not be rewritten in transit: the server is a local
+        // service and never redirects, so any 3xx is treated as a failure
+        // rather than followed to another (possibly plaintext) origin.
         let client = Client::builder()
             .timeout(config.request_timeout)
+            .redirect(redirect::Policy::none())
             .build()
             .map_err(RiskError::ClientBuild)?;
 
@@ -250,6 +278,42 @@ mod tests {
         ));
 
         server.join().await;
+    }
+
+    #[tokio::test]
+    async fn accepts_loopback_http_and_remote_https() {
+        for url in [
+            "http://127.0.0.1:3001",
+            "http://localhost:3001",
+            "http://[::1]:3001",
+            "https://risk.example:3001",
+        ] {
+            let config = make_risk_config(url.to_string());
+            assert!(
+                RiskService::try_from_config(&config).is_ok(),
+                "{url} should be accepted"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_unauthenticated_or_malformed_urls() {
+        for url in [
+            "",
+            "risk.example:3001",
+            "ftp://127.0.0.1:3001",
+            "http://risk.example:3001",
+            "http://10.0.0.5:3001",
+        ] {
+            let config = make_risk_config(url.to_string());
+            assert!(
+                matches!(
+                    RiskService::try_from_config(&config),
+                    Err(RiskError::InvalidConfig(_))
+                ),
+                "{url} should be rejected"
+            );
+        }
     }
 
     #[tokio::test]
