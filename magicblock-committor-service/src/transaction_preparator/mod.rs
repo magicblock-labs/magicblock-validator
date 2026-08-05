@@ -101,14 +101,15 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .await?;
         metrics::observe_committor_intent_alt_count(lookup_tables.len());
 
-        let message = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
-            authority,
-            &tx_strategy.optimized_tasks,
-            self.compute_budget_config.compute_unit_price,
-            &lookup_tables,
-            tx_strategy.uniqueness_nonce,
-        )?
-        .message;
+        let message =
+            TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
+                authority,
+                &tx_strategy.optimized_tasks,
+                self.compute_budget_config.compute_unit_price,
+                &lookup_tables,
+                tx_strategy.uniqueness_nonce,
+            )?
+            .message;
 
         Ok(message)
     }
