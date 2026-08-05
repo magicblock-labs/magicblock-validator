@@ -165,6 +165,7 @@ impl IntentScheduler {
     /// To check duplicate scheduling its enough to check:
     /// 1. currently blocked
     /// 2. currently executing
+    ///
     /// NOTE: under assumption that outer system doesn't schedule duplcates
     /// this can be ommitted to reduce execution time
     fn is_duplicate(&self, intent_id: IntentID) -> bool {
@@ -1449,20 +1450,6 @@ mod poisoned_test {
              already landed"
         );
     }
-
-    /// Case:
-    /// blocked_keys represented as matrix
-    /// topmost are about to execute
-    /// Numbers represent intent id
-    ///  a1, a2, b1, b2
-    /// [[1, 1, 0, 0]
-    ///  [2, 2, 1, 3]
-    ///
-    ///Failed 0, fails 1, where poison spreads on a1, a2
-    /// flushin b1 we populate worklist with id1
-    ///we find a1,a2 and also populate worklist with 2s
-    /// also 3 will be added
-    fn test_poison_spreading() {}
 }
 
 // Helper function to create test intents
