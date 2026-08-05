@@ -1,5 +1,4 @@
 use std::{
-    path::Path,
     sync::{Arc, atomic::AtomicU64},
     thread,
     time::Duration,
@@ -29,7 +28,6 @@ use magicblock_validator_admin::claim_fees::{ClaimFeesTask, claim_fees};
 use nucleus::{metrics::EventTimer, shutdown::ShutdownManager};
 use replicator::ReplicationDispatcher;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
-use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -40,10 +38,7 @@ use tracing::*;
 
 use crate::{
     errors::{ApiError, ApiResult},
-    ledger::{
-        self, read_validator_keypair_from_ledger, validator_keypair_path,
-        write_validator_keypair_to_ledger,
-    },
+    ledger,
     magic_sys_adapter::MagicSysAdapter,
 };
 
@@ -63,7 +58,6 @@ pub struct Leader {
     intent_execution_service: IntentExecutionServiceImpl,
     undelegation_request_service: Arc<UndelegationRequestService>,
     rpc_handle: thread::JoinHandle<()>,
-    identity: Pubkey,
     _metrics: MetricsService,
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
@@ -77,22 +71,12 @@ impl Leader {
     pub async fn try_from_config(config: LeaderParams) -> ApiResult<Self> {
         let mut timer = EventTimer::new("init");
         let token = CancellationToken::new();
-        let identity_keypair = config.engine.authority.local.insecure_clone();
-        let validator_pubkey = identity_keypair.pubkey();
 
         let engine_ledger = config.engine.ledger.directory.clone();
 
         let (ledger, _) = ledger::init(&engine_ledger, &config.ledger)?;
         let ledger = Arc::new(ledger);
         timer.record("Deprecated ledger initialized");
-        let ledger_path = ledger.ledger_path();
-
-        Self::sync_validator_keypair_with_ledger(
-            ledger_path,
-            &identity_keypair,
-            config.ledger.verify_keypair,
-        )?;
-        timer.record("Validator keypair synchronized");
 
         let mut shutdown = ShutdownManager::default();
         let builder = keeper_builder(&config.engine, &config.programs)?;
@@ -209,7 +193,6 @@ impl Leader {
             token,
             claim_fees_task: ClaimFeesTask::new(),
             rpc_handle,
-            identity: validator_pubkey,
             task_scheduler,
         })
     }
@@ -312,32 +295,6 @@ impl Leader {
         )
         .await
         .map_err(ApiError::from)
-    }
-
-    fn sync_validator_keypair_with_ledger(
-        ledger_path: &Path,
-        validator_keypair: &Keypair,
-        verify_keypair: bool,
-    ) -> ApiResult<()> {
-        if !validator_keypair_path(ledger_path)?.exists() {
-            write_validator_keypair_to_ledger(ledger_path, validator_keypair)?;
-            return Ok(());
-        };
-        if !verify_keypair {
-            warn!("Skipping ledger keypair verification");
-            return Ok(());
-        }
-        let existing_keypair = read_validator_keypair_from_ledger(ledger_path)?;
-        if existing_keypair.ne(validator_keypair) {
-            return Err(
-                ApiError::LedgerValidatorKeypairNotMatchingProvidedKeypair(
-                    ledger_path.display().to_string(),
-                    existing_keypair.pubkey().to_string(),
-                ),
-            );
-        }
-
-        Ok(())
     }
 
     // -----------------
@@ -519,7 +476,7 @@ impl Leader {
     fn spawn_primary_onchain_setup(&self) {
         let engine = self.engine.clone();
         let rpc_url = self.config.rpc_url().to_owned();
-        let identity = self.identity;
+        let identity = self.engine.authority();
         let admin = self.config.admin.clone();
         let token = self.token.clone();
 
