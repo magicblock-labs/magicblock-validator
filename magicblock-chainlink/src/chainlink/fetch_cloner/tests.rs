@@ -372,9 +372,8 @@ fn account_clone_request(account: AccountSharedData) -> AccountCloneRequest {
         pubkey: random_pubkey(),
         account,
         commit_frequency_ms: None,
-        delegation_actions: DelegationActions::default(),
+        post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
-        needs_undelegation: false,
     }
 }
 
@@ -437,12 +436,13 @@ fn clone_classification_treats_delegated_account_as_delegation_record() {
 #[test]
 fn clone_classification_treats_action_dependency_as_action_dependency() {
     let mut request = account_clone_request(non_empty_account());
-    request.delegation_actions =
+    request.post_delegation_mode =
         DelegationActions::from(vec![Instruction::new_with_bytes(
             system_program::id(),
             &[1],
             vec![],
-        )]);
+        )])
+        .into();
 
     assert!(!request.account.delegated());
     assert_eq!(
@@ -5697,7 +5697,7 @@ async fn test_raw_eata_greedy_projection_carries_post_delegation_actions() {
         .expect("projected ATA should be cloned");
     assert!(projected_ata_request.account.delegated());
     assert!(
-        !projected_ata_request.delegation_actions.is_empty(),
+        projected_ata_request.post_delegation_mode.has_actions(),
         "post-delegation actions must stay attached to the projected ATA"
     );
 }
@@ -6194,7 +6194,7 @@ async fn test_explicit_clone_executes_post_delegation_actions_after_prefilter_ch
         .iter()
         .find(|request| request.pubkey == account_pubkey)
         .expect("delegated account clone request should be recorded");
-    assert!(!delegated_clone_request.delegation_actions.is_empty());
+    assert!(delegated_clone_request.post_delegation_mode.has_actions());
     let cloned_account = accounts_bank
         .get_account(&account_pubkey)
         .expect("delegated account should be cloned explicitly");
@@ -7537,7 +7537,7 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
         .expect("delegated account should be cloned");
     assert!(action_request.account.delegated());
     assert!(
-        !action_request.delegation_actions.is_empty(),
+        action_request.post_delegation_mode.has_actions(),
         "post-delegation actions must stay attached to the delegated target"
     );
 }
@@ -7887,7 +7887,7 @@ async fn test_delegated_eata_subscription_update_projects_remote_ata() {
         .expect("projected ATA should be cloned");
     assert!(projected_ata_request.account.delegated());
     assert!(
-        !projected_ata_request.delegation_actions.is_empty(),
+        projected_ata_request.post_delegation_mode.has_actions(),
         "post-delegation actions must stay attached to the projected ATA"
     );
 }
@@ -8107,7 +8107,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
         .expect("raw eATA should be cloned");
     assert!(!raw_eata_request.account.delegated());
     assert!(
-        raw_eata_request.delegation_actions.is_empty(),
+        !raw_eata_request.post_delegation_mode.has_actions(),
         "raw eATA must never carry post-delegation actions"
     );
 
@@ -8117,7 +8117,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
         .expect("projected ATA should be cloned");
     assert!(projected_ata_request.account.delegated());
     assert!(
-        !projected_ata_request.delegation_actions.is_empty(),
+        projected_ata_request.post_delegation_mode.has_actions(),
         "projected delegated ATA must be the action-bearing clone target"
     );
 
@@ -8138,7 +8138,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
     let action_request_count = cloner
         .clone_requests()
         .iter()
-        .filter(|request| !request.delegation_actions.is_empty())
+        .filter(|request| request.post_delegation_mode.has_actions())
         .count();
     assert_eq!(
         action_request_count, 1,
@@ -8186,9 +8186,8 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 pubkey: account_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: actions,
+                post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8239,9 +8238,8 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 pubkey: account_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8292,9 +8290,8 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 pubkey: account_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8341,9 +8338,8 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 pubkey: ata_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8404,9 +8400,8 @@ async fn test_delegated_malformed_ata_clone_is_rejected() {
                 pubkey: ata_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8461,9 +8456,8 @@ async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
                 pubkey: account_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8513,9 +8507,8 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 pubkey: ata_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8606,9 +8599,8 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 pubkey: target_pubkey,
                 account: target_account,
                 commit_frequency_ms: None,
-                delegation_actions: actions,
+                post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8637,7 +8629,9 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
         "writable dependency must be cloned before the action target"
     );
     assert!(
-        !clone_requests[target_idx].delegation_actions.is_empty(),
+        clone_requests[target_idx]
+            .post_delegation_mode
+            .has_actions(),
         "actions must stay attached to the delegated target"
     );
 }
@@ -8726,9 +8720,8 @@ async fn test_undelegating_action_dependency_stays_locked_and_target_is_rescued(
                 pubkey: target_pubkey,
                 account: target_account,
                 commit_frequency_ms: None,
-                delegation_actions: actions,
+                post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8757,8 +8750,14 @@ async fn test_undelegating_action_dependency_stays_locked_and_target_is_rescued(
     assert!(clone_requests
         .iter()
         .all(|request| request.pubkey == target_pubkey));
-    assert!(!clone_requests[0].needs_undelegation);
-    assert!(clone_requests[1].needs_undelegation);
+    assert!(matches!(
+        clone_requests[0].post_delegation_mode,
+        ClonePostDelegationMode::ExecuteActions(_)
+    ));
+    assert!(matches!(
+        clone_requests[1].post_delegation_mode,
+        ClonePostDelegationMode::RescueUndelegate
+    ));
 }
 
 #[tokio::test]
@@ -8802,9 +8801,10 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                     pubkey: target_pubkey,
                     account: target_account,
                     commit_frequency_ms: None,
-                    delegation_actions: actions.clone(),
+                    post_delegation_mode: ClonePostDelegationMode::from(
+                        actions.clone(),
+                    ),
                     delegated_to_other: None,
-                    needs_undelegation: false,
                 },
                 AccountFetchContext::rpc_get_account(),
             )
@@ -8823,7 +8823,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
         "newer remote-slot updates must not reclone an already delegated action target"
     );
     assert!(
-        !target_requests[0].delegation_actions.is_empty(),
+        target_requests[0].post_delegation_mode.has_actions(),
         "the first clone remains the only action-bearing clone"
     );
 }
@@ -8870,9 +8870,8 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
                 pubkey: target_pubkey,
                 account: target_account,
                 commit_frequency_ms: None,
-                delegation_actions: actions,
+                post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8932,9 +8931,8 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 pubkey: target_pubkey,
                 account: newer_remote_target,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -9139,7 +9137,7 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
 
     assert_eq!(projected_ata_request.pubkey, ata_pubkey);
     assert!(
-        !projected_ata_request.delegation_actions.is_empty(),
+        projected_ata_request.post_delegation_mode.has_actions(),
         "projected ATA clone request must preserve post-delegation actions",
     );
 }
