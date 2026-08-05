@@ -82,12 +82,16 @@ async fn ixtest_existing_account_for_future_slot() {
     await_next_slot(rpc_client).await;
 
     let cs = current_slot(rpc_client).await;
+    // Use a slot far enough ahead that the validator cannot reach it between
+    // reading the current slot and issuing the fetch; `cs + 1` raced with
+    // slot production.
+    let future_slot = cs + 1_000;
     let res = rpc_client
         .get_ui_account_with_config(
             &pubkey,
             RpcAccountInfoConfig {
                 commitment: Some(CommitmentConfig::processed()),
-                min_context_slot: Some(cs + 1),
+                min_context_slot: Some(future_slot),
                 ..Default::default()
             },
         )

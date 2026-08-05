@@ -16,6 +16,30 @@ pub async fn sleep_millis(millis: u64) {
     tokio::time::sleep(tokio::time::Duration::from_millis(millis)).await;
 }
 
+// request_airdrop only submits the transfer; wait until the funds are visible
+// so the first transaction a test sends can debit the authority.
+#[allow(unused)] // used in tests
+pub async fn airdrop_and_wait(
+    rpc_client: &MagicblockRpcClient,
+    auth: &Keypair,
+    lamports: u64,
+) {
+    rpc_client
+        .request_airdrop(&auth.pubkey(), lamports)
+        .await
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match rpc_client.get_account(&auth.pubkey()).await {
+            Ok(Some(account)) if account.lamports >= lamports => return,
+            _ if Instant::now() > deadline => {
+                panic!("airdrop to {} not visible after 30s", auth.pubkey())
+            }
+            _ => sleep_millis(50).await,
+        }
+    }
+}
+
 #[allow(unused)] // used in tests
 pub async fn setup_table_mania(validator_auth: &Keypair) -> TableMania {
     let rpc_client = {
@@ -25,10 +49,7 @@ pub async fn setup_table_mania(validator_auth: &Keypair) -> TableMania {
         );
         MagicblockRpcClient::from(client)
     };
-    rpc_client
-        .request_airdrop(&validator_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
-        .await
-        .unwrap();
+    airdrop_and_wait(&rpc_client, validator_auth, 777 * LAMPORTS_PER_SOL).await;
 
     if TEST_TABLE_CLOSE {
         TableMania::new(
