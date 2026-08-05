@@ -177,6 +177,22 @@ impl IxtestContext {
             .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
             .await
             .unwrap();
+        // Wait for the airdrop to land before the init tx tries to debit it.
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while self
+            .rpc_client
+            .get_balance(&counter_auth.pubkey())
+            .await
+            .unwrap_or(0)
+            < 777 * LAMPORTS_PER_SOL
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "airdrop to counter auth not visible after 30s"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
         debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
 
         let init_counter_ix =
