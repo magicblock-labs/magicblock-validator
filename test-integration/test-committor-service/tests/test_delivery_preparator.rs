@@ -371,7 +371,12 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
         fixture.compute_budget_config.buffer_init.instructions(1);
     init_instructions
         .push(preparation_task.init_instruction(&fixture.authority.pubkey()));
-    send_with_blockhash(&fixture, &init_instructions, cached_blockhash).await;
+    let init_signature =
+        send_with_blockhash(&fixture, &init_instructions, cached_blockhash)
+            .await;
+    // The write below touches the buffer the init creates; without this wait
+    // the two transactions can execute in either order within a slot.
+    wait_for_processed(&fixture, &init_signature, &cached_blockhash).await;
 
     let write_instruction = preparation_task
         .write_instructions(&fixture.authority.pubkey())

@@ -31,6 +31,11 @@ pub enum ApiError {
     #[error("Failed to delegate magic fee vault for validator '{0}': {1}")]
     FailedToDelegateMagicFeeVault(Pubkey, String),
 
+    #[error(
+        "On-chain setup transaction for validator '{0}' was rejected: {1}"
+    )]
+    OnchainSetupTransactionRejected(Pubkey, String),
+
     #[error("CommittorServiceError")]
     CommittorServiceError(
         Box<magicblock_committor_service::error::CommittorServiceError>,
