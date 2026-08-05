@@ -6,7 +6,6 @@ use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 
 use crate::{
-    persist::IntentPersister,
     tasks::{
         commit_stage_task::CleanupTask, task_strategist::TransactionStrategy,
         utils::TransactionUtils, BaseTaskImpl,
@@ -27,11 +26,10 @@ pub mod error;
 pub trait TransactionPreparator: Send + Sync + 'static {
     /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
     /// Handles all necessary preparation needed for successful [`BaseTask`] execution
-    async fn prepare_for_strategy<P: IntentPersister>(
+    async fn prepare_for_strategy(
         &self,
         authority: &Keypair,
         transaction_strategy: &mut TransactionStrategy,
-        intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 
     /// Cleans up after strategy.
@@ -73,11 +71,10 @@ impl TransactionPreparatorImpl {
 
 #[async_trait]
 impl TransactionPreparator for TransactionPreparatorImpl {
-    async fn prepare_for_strategy<P: IntentPersister>(
+    async fn prepare_for_strategy(
         &self,
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
-        intent_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
         // Fail early
@@ -97,7 +94,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
-            .prepare_for_delivery(authority, tx_strategy, intent_persister)
+            .prepare_for_delivery(authority, tx_strategy)
             .await?;
         metrics::observe_committor_intent_alt_count(lookup_tables.len());
 

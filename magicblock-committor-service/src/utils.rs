@@ -1,40 +1,25 @@
-use solana_pubkey::Pubkey;
-use tracing::error;
+// https://solana.com/docs/core/transactions#transaction-size
 
-use crate::persist::{CommitStatus, IntentPersister};
+use magicblock_committor_program::{
+    consts::MAX_INSTRUCTION_DATA_SIZE,
+    instruction::IX_WRITE_SIZE_WITHOUT_CHUNKS,
+};
+use solana_packet::PACKET_DATA_SIZE;
+use solana_rpc_client::rpc_client::SerializableTransaction;
 
-pub(crate) fn persist_status_update<P: IntentPersister>(
-    persister: &Option<P>,
-    pubkey: &Pubkey,
-    commit_id: u64,
-    update_status: CommitStatus,
-) {
-    let Some(persister) = persister else {
-        return;
-    };
-    if let Err(err) = persister.update_status_by_message(
-        commit_id,
-        pubkey,
-        update_status.clone(),
-    ) {
-        error!(pubkey = %pubkey, error = ?err, "Failed to persist status");
-    }
-}
+const BUDGET_SET_COMPUTE_UNIT_PRICE_BYTES: u16 = (1 + 8) * 8;
+const BUDGET_SET_COMPUTE_UNIT_LIMIT_BYTES: u16 = (1 + 4) * 8;
+/// The maximum size of a chunk that can be written as part of a single transaction
+pub(crate) const MAX_WRITE_CHUNK_SIZE: u16 = MAX_INSTRUCTION_DATA_SIZE
+    - IX_WRITE_SIZE_WITHOUT_CHUNKS
+    - BUDGET_SET_COMPUTE_UNIT_PRICE_BYTES
+    - BUDGET_SET_COMPUTE_UNIT_LIMIT_BYTES;
+/// Maximum serialized transaction size that can be sent over the wire.
+pub(crate) const MAX_TRANSACTION_WIRE_SIZE: usize = PACKET_DATA_SIZE;
 
-/// Persists update by message/intent id
-pub(crate) fn persist_status_update_by_message_set<P: IntentPersister>(
-    persister: &P,
-    message_id: u64,
-    pubkeys: &[Pubkey],
-    update_status: CommitStatus,
-) {
-    pubkeys.iter().for_each(|pubkey| {
-        if let Err(err) = persister.update_status_by_message(
-            message_id,
-            pubkey,
-            update_status.clone(),
-        ) {
-            error!(pubkey = %pubkey, error = ?err, "Failed to persist status");
-        }
-    });
+pub fn serialized_transaction_size(
+    transaction: &impl SerializableTransaction,
+) -> usize {
+    // SAFETY: runs on transactions we already serialize before sending.
+    usize::try_from(bincode::serialized_size(transaction).unwrap()).unwrap()
 }
