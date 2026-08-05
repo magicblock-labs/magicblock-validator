@@ -284,10 +284,160 @@ impl IntentScheduler {
         Ok(())
     }
 
-    /// Processes failed intent. This leads to poison spreading over scheduled overlapping intents.
-    /// Returns poisoned intents by failed intent.
-    /// NOTE: this shall be called on executing intents to finalize their execution.
-    /// NOTE: this shall be called only after multiple retries as it permanently poisons other intents as well
+    /// Marks `intent_bundle` as failed: poisons its pubkeys, voids every
+    /// intent reachable from it, and returns the voided intents.
+    ///
+    /// For curious below is AI generated slop from my notes and thoughts
+    /// # Poisoning: how a failed intent's dependents are found and voided
+    ///
+    /// ## Why
+    ///
+    /// When an executing intent fails, everything queued behind it may be
+    /// relying on effects that never happened. If we leave those successors
+    /// sitting in `blocked_intents` forever, [`Self::pop_next_scheduled_intent`]
+    /// can never make progress on the pubkeys they hold, `intents_blocked()`
+    /// never shrinks, and (upstream, in the engine) the scheduler eventually
+    /// panics once capacity is exhausted and no executor remains to drain it.
+    /// This exists to unstick that: it finds every intent that can no longer
+    /// safely run, removes it from the scheduler, and reports it so a fresh
+    /// attempt can be made later (nothing is discarded — the intent's outbox
+    /// record is untouched and gets picked up again by the normal recovery
+    /// scan, e.g. on restart).
+    ///
+    /// ## Definitions
+    ///
+    /// - **Dependency.** Intent `B` depends on intent `A` if `B` was queued
+    ///   behind `A` because they share a pubkey. The FIFO blocking scheme
+    ///   exists precisely because `B` may assume `A`'s effects on that
+    ///   pubkey already landed — e.g. `A` transfers funds *into* an account,
+    ///   `B` spends *from* it.
+    /// - **Reachable.** `B` is reachable from `A` if there is a chain of
+    ///   dependencies `A -> X1 -> X2 -> ... -> B`, where each arrow is one
+    ///   "queued directly behind, on a shared pubkey" edge. Sharing a pubkey
+    ///   alone is not enough — the edge only exists in the successor
+    ///   direction (see the worked example below, where `I1` shares `a2`
+    ///   with the chain but is *not* reachable from it).
+    /// - **Isolated.** Two intents are isolated from each other if neither
+    ///   is reachable from the other. Isolated intents may still share a
+    ///   pubkey; they just never depend on one another through it.
+    /// - **Voided intent.** An intent reachable from a failed intent. It
+    ///   will never execute, is removed from `blocked_intents`, and is
+    ///   returned by `failed()`.
+    /// - **Poisoned key.** A pubkey no longer eligible for *new* scheduling
+    ///   (`schedule()` rejects any incoming intent that touches it). A key
+    ///   is poisoned either because an intent that actually executed
+    ///   failed on it, or because a voided intent touched it — see
+    ///   "Why poisoning is unconditional" below for why the latter applies
+    ///   even when the key still has isolated, healthy intents on it.
+    ///   `poisoned_keys` lives only in this `IntentScheduler` instance and
+    ///   is cleared by process restart, not by anything within `failed()`
+    ///   or `complete()`.
+    ///
+    /// ## "Lemma": reachable intents are ID-ordered
+    ///
+    /// *If `B` is reachable from `A`, then `A.id < B.id`.*
+    ///
+    /// **Handwaving Proof.** It's enough to show this for one dependency edge
+    /// (`A -> B` directly); the general case follows by chaining edges,
+    /// since `<` is transitive. `schedule()` only ever appends to the back
+    /// of a pubkey's queue, in call order, so a queue's contents are always
+    /// sorted ascending by id. `B` depends on `A` means `B` was scheduled
+    /// while `A` already occupied their shared pubkey's queue — i.e. `B`
+    /// arrived, and therefore was assigned its id, *after* `A` did. Were it
+    /// the other way around (`B.id < A.id`), `B` would have been admitted
+    /// to that queue first, and `A` — arriving later — would have had to
+    /// queue behind `B` instead, contradicting `B` depending on `A`. So
+    /// `A.id < B.id`. ∎
+    ///
+    /// This is what makes the worklist walk in `failed()` well-founded: it
+    /// only ever looks *forward* (`drain(pos..)`, never backward) through a
+    /// queue, so it can never re-visit or accidentally cross into something
+    /// isolated — anything positioned before a reachable intent is, by this
+    /// lemma, not reachable itself.
+    ///
+    /// ## Algorithm
+    ///
+    /// Given a failed intent `F` (validated to be at the front of every one
+    /// of its own pubkey queues):
+    ///
+    /// 1. **Seed.** For each of `F`'s own pubkeys: mark it poisoned, and
+    ///    remove its queue entirely. Everything behind `F` in that queue
+    ///    (i.e. everything except `F` itself) is reachable from `F` by
+    ///    definition — add it to the worklist.
+    /// 2. **Propagate.** Pop an intent `V` from the worklist and remove it
+    ///    from `blocked_intents` (skip if already removed — reachable via
+    ///    another edge already processed). For each of `V`'s *other*
+    ///    pubkeys: find `V`'s position in that queue (binary search — the
+    ///    queue is sorted, per the lemma) and drain from that position to
+    ///    the end. Everything drained besides `V` itself is newly
+    ///    discovered as reachable — add it to the worklist. Mark the
+    ///    pubkey poisoned. Record `V` as voided.
+    /// 3. Repeat step 2 until the worklist is empty.
+    ///
+    /// Termination is immediate: each intent id is removed from
+    /// `blocked_intents` at most once, so the worklist strictly shrinks.
+    ///
+    /// ## Why poisoning is unconditional
+    ///
+    /// A pubkey is marked poisoned as soon as a reachable intent touches
+    /// it — even if, after the drain, isolated intents are still sitting
+    /// in its queue and will go on to `complete()` successfully. This can
+    /// look surprising (see the worked example: `a2` gets poisoned while
+    /// `I0`/`I1` are still healthily using it), but the two things it's
+    /// protecting are different:
+    ///
+    /// - Intents *already in the queue* are protected by voiding, which is
+    ///   precise (isolated intents like `I1` are never touched, per the
+    ///   lemma above).
+    /// - Poisoning the key protects intents *not yet submitted*. A future
+    ///   caller may construct a new intent on `a2` assuming the un-landed
+    ///   chain's effects already happened (e.g. assuming `I3`'s deposit
+    ///   landed before spending from `a2`). A simple balance check would
+    ///   just fail cleanly on-chain if that assumption is wrong — but
+    ///   intents can carry arbitrary actions/callbacks, and there's no
+    ///   general guarantee that arbitrary program logic fails safely
+    ///   against unexpected state. The scheduler can't tell in advance
+    ///   which future intents are safe, so every key touched by a voided
+    ///   intent is treated as unsafe until a human clears it (or the
+    ///   process restarts).
+    ///
+    /// ## Worked example
+    ///
+    /// ```text
+    /// I0 = [a1, a2]        executing, front of a1 and a2
+    /// I2 = [b1, b2]        executing, front of b1 and b2  <- this one fails
+    /// I1 = [a1, a2]        queued behind I0
+    /// I3 = [a2, b1]        queued behind I1 on a2, behind I2 on b1
+    /// I4 = [a1, a2]        queued behind I3 on a2, behind I1 on a1
+    ///
+    ///               a1   a2   b1   b2
+    ///         pos0: I0   I0   I2   I2
+    ///         pos1: I1   I1   I3    .
+    ///         pos2: I4   I3    .    .
+    ///         pos3:  .   I4    .    .
+    /// ```
+    ///
+    /// `I2` fails. Seed: `poisoned_keys = {b1, b2}`, worklist = `{I3}`
+    /// (`I2` itself is discarded, not voided — it already executed).
+    ///
+    /// Processing `I3` (`[a2, b1]`): `b1` is already poisoned, its queue is
+    /// already gone. `a2`: `I3` is at position 2 in `[I0, I1, I3, I4]`;
+    /// draining from there removes `I3, I4`, leaving `[I0, I1]`; `I4` goes
+    /// to the worklist; `a2` is marked poisoned (even though `I0, I1`
+    /// remain).
+    ///
+    /// Processing `I4` (`[a1, a2]`): `a2` already poisoned/drained, `I4` no
+    /// longer there, skip. `a1`: `I4` is at position 2 in `[I0, I1, I4]`;
+    /// draining removes just `I4`, leaving `[I0, I1]`; `a1` marked
+    /// poisoned.
+    ///
+    /// Result: `poisoned_keys = {a1, a2, b1, b2}`, `poisoned = [I3, I4]`.
+    /// `I0` and `I1` are never touched, remain in `blocked_keys`, and
+    /// `complete()` normally — but `a1`/`a2` reject any *new* intent from
+    /// here on, per "why poisoning is unconditional" above. `I1` is
+    /// isolated from `I2`'s failure (no dependency chain reaches it — it's
+    /// positioned *before* `I3` on `a2`, not after), which the lemma
+    /// guarantees the drain-from-position walk can never touch.
     pub fn failed(
         &mut self,
         intent_bundle: &OutboxIntentBundle,
@@ -1313,158 +1463,6 @@ mod poisoned_test {
     ///we find a1,a2 and also populate worklist with 2s
     /// also 3 will be added
     fn test_poison_spreading() {}
-
-    /// # Poisoning: how a failed intent's dependents are found and voided
-    ///
-    /// ## Why
-    ///
-    /// When an executing intent fails, everything queued behind it may be
-    /// relying on effects that never happened. If we leave those successors
-    /// sitting in `blocked_intents` forever, [`super::IntentScheduler::pop_next_scheduled_intent`]
-    /// can never make progress on the pubkeys they hold, `intents_blocked()`
-    /// never shrinks, and (upstream, in the engine) the scheduler eventually
-    /// panics once capacity is exhausted and no executor remains to drain it.
-    /// [`super::IntentScheduler::failed`] exists to unstick this: it finds
-    /// every intent that can no longer safely run, removes it from the
-    /// scheduler, and reports it so a fresh attempt can be made later
-    /// (nothing is discarded — the intent's outbox record is untouched and
-    /// gets picked up again by the normal recovery scan, e.g. on restart).
-    ///
-    /// ## Definitions
-    ///
-    /// - **Dependency.** Intent `B` depends on intent `A` if `B` was queued
-    ///   behind `A` because they share a pubkey. The FIFO blocking scheme
-    ///   exists precisely because `B` may assume `A`'s effects on that
-    ///   pubkey already landed — e.g. `A` transfers funds *into* an account,
-    ///   `B` spends *from* it.
-    /// - **Reachable.** `B` is reachable from `A` if there is a chain of
-    ///   dependencies `A -> X1 -> X2 -> ... -> B`, where each arrow is one
-    ///   "queued directly behind, on a shared pubkey" edge. Sharing a pubkey
-    ///   alone is not enough — the edge only exists in the successor
-    ///   direction (see the worked example below, where `I1` shares `a2`
-    ///   with the chain but is *not* reachable from it).
-    /// - **Isolated.** Two intents are isolated from each other if neither
-    ///   is reachable from the other. Isolated intents may still share a
-    ///   pubkey; they just never depend on one another through it.
-    /// - **Voided intent.** An intent reachable from a failed intent. It
-    ///   will never execute, is removed from `blocked_intents`, and is
-    ///   returned by `failed()`.
-    /// - **Poisoned key.** A pubkey no longer eligible for *new* scheduling
-    ///   (`schedule()` rejects any incoming intent that touches it). A key
-    ///   is poisoned either because an intent that actually executed
-    ///   failed on it, or because a voided intent touched it — see
-    ///   "Why poisoning is unconditional" below for why the latter applies
-    ///   even when the key still has isolated, healthy intents on it.
-    ///   `poisoned_keys` lives only in this `IntentScheduler` instance and
-    ///   is cleared by process restart, not by anything within `failed()`
-    ///   or `complete()`.
-    ///
-    /// ## Lemma: reachable intents are ID-ordered
-    ///
-    /// *If `B` is reachable from `A`, then `A.id < B.id`.*
-    ///
-    /// **Proof.** It's enough to show this for one dependency edge
-    /// (`A -> B` directly); the general case follows by chaining edges,
-    /// since `<` is transitive. `schedule()` only ever appends to the back
-    /// of a pubkey's queue, in call order, so a queue's contents are always
-    /// sorted ascending by id. `B` depends on `A` means `B` was scheduled
-    /// while `A` already occupied their shared pubkey's queue — i.e. `B`
-    /// arrived, and therefore was assigned its id, *after* `A` did. Were it
-    /// the other way around (`B.id < A.id`), `B` would have been admitted
-    /// to that queue first, and `A` — arriving later — would have had to
-    /// queue behind `B` instead, contradicting `B` depending on `A`. So
-    /// `A.id < B.id`. ∎
-    ///
-    /// This is what makes the worklist walk in `failed()` well-founded: it
-    /// only ever looks *forward* (`drain(pos..)`, never backward) through a
-    /// queue, so it can never re-visit or accidentally cross into something
-    /// isolated — anything positioned before a reachable intent is, by this
-    /// lemma, not reachable itself.
-    ///
-    /// ## Algorithm
-    ///
-    /// Given a failed intent `F` (validated to be at the front of every one
-    /// of its own pubkey queues):
-    ///
-    /// 1. **Seed.** For each of `F`'s own pubkeys: mark it poisoned, and
-    ///    remove its queue entirely. Everything behind `F` in that queue
-    ///    (i.e. everything except `F` itself) is reachable from `F` by
-    ///    definition — add it to the worklist.
-    /// 2. **Propagate.** Pop an intent `V` from the worklist and remove it
-    ///    from `blocked_intents` (skip if already removed — reachable via
-    ///    another edge already processed). For each of `V`'s *other*
-    ///    pubkeys: find `V`'s position in that queue (binary search — the
-    ///    queue is sorted, per the lemma) and drain from that position to
-    ///    the end. Everything drained besides `V` itself is newly
-    ///    discovered as reachable — add it to the worklist. Mark the
-    ///    pubkey poisoned. Record `V` as voided.
-    /// 3. Repeat step 2 until the worklist is empty.
-    ///
-    /// Termination is immediate: each intent id is removed from
-    /// `blocked_intents` at most once, so the worklist strictly shrinks.
-    ///
-    /// ## Why poisoning is unconditional
-    ///
-    /// A pubkey is marked poisoned as soon as a reachable intent touches
-    /// it — even if, after the drain, isolated intents are still sitting
-    /// in its queue and will go on to `complete()` successfully. This can
-    /// look surprising (see the worked example: `a2` gets poisoned while
-    /// `I0`/`I1` are still healthily using it), but the two things it's
-    /// protecting are different:
-    ///
-    /// - Intents *already in the queue* are protected by voiding, which is
-    ///   precise (isolated intents like `I1` are never touched, per the
-    ///   lemma above).
-    /// - Poisoning the key protects intents *not yet submitted*. A future
-    ///   caller may construct a new intent on `a2` assuming the un-landed
-    ///   chain's effects already happened (e.g. assuming `I3`'s deposit
-    ///   landed before spending from `a2`). A simple balance check would
-    ///   just fail cleanly on-chain if that assumption is wrong — but
-    ///   intents can carry arbitrary actions/callbacks, and there's no
-    ///   general guarantee that arbitrary program logic fails safely
-    ///   against unexpected state. The scheduler can't tell in advance
-    ///   which future intents are safe, so every key touched by a voided
-    ///   intent is treated as unsafe until a human clears it (or the
-    ///   process restarts).
-    ///
-    /// ## Worked example
-    ///
-    /// ```text
-    /// I0 = [a1, a2]        executing, front of a1 and a2
-    /// I2 = [b1, b2]        executing, front of b1 and b2  <- this one fails
-    /// I1 = [a1, a2]        queued behind I0
-    /// I3 = [a2, b1]        queued behind I1 on a2, behind I2 on b1
-    /// I4 = [a1, a2]        queued behind I3 on a2, behind I1 on a1
-    ///
-    ///               a1   a2   b1   b2
-    ///         pos0: I0   I0   I2   I2
-    ///         pos1: I1   I1   I3    .
-    ///         pos2: I4   I3    .    .
-    ///         pos3:  .   I4    .    .
-    /// ```
-    ///
-    /// `I2` fails. Seed: `poisoned_keys = {b1, b2}`, worklist = `{I3}`
-    /// (`I2` itself is discarded, not voided — it already executed).
-    ///
-    /// Processing `I3` (`[a2, b1]`): `b1` is already poisoned, its queue is
-    /// already gone. `a2`: `I3` is at position 2 in `[I0, I1, I3, I4]`;
-    /// draining from there removes `I3, I4`, leaving `[I0, I1]`; `I4` goes
-    /// to the worklist; `a2` is marked poisoned (even though `I0, I1`
-    /// remain).
-    ///
-    /// Processing `I4` (`[a1, a2]`): `a2` already poisoned/drained, `I4` no
-    /// longer there, skip. `a1`: `I4` is at position 2 in `[I0, I1, I4]`;
-    /// draining removes just `I4`, leaving `[I0, I1]`; `a1` marked
-    /// poisoned.
-    ///
-    /// Result: `poisoned_keys = {a1, a2, b1, b2}`, `poisoned = [I3, I4]`.
-    /// `I0` and `I1` are never touched, remain in `blocked_keys`, and
-    /// `complete()` normally — but `a1`/`a2` reject any *new* intent from
-    /// here on, per "why poisoning is unconditional" above. `I1` is
-    /// isolated from `I2`'s failure (no dependency chain reaches it — it's
-    /// positioned *before* `I3` on `a2`, not after), which the lemma
-    /// guarantees the drain-from-position walk can never touch.
-    fn test_docs() {}
 }
 
 // Helper function to create test intents
