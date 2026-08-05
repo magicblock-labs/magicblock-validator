@@ -162,7 +162,7 @@ impl RpcTestEnv {
     }
 
     pub fn create_token_account(&self, mint: Pubkey, owner: Pubkey) -> Pubkey {
-        if self.engine.account(mint).is_none() {
+        if self.engine.get_account(mint).is_none() {
             let mut data = vec![0; Mint::LEN];
             Mint::pack(
                 Mint {

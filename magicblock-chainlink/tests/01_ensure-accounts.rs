@@ -21,16 +21,12 @@ async fn seed_undelegating_account(ctx: &TestContext, pubkey: Pubkey) {
     .slot(CURRENT_SLOT);
     ctx.bank
         .account(pubkey)
-        .create(delegated.clone().build(), None)
+        .create(delegated.clone(), None)
         .await
         .unwrap();
 
     let transient = delegated.mode(AccountMode::Transient);
-    ctx.bank
-        .account(pubkey)
-        .update(transient.build())
-        .await
-        .unwrap();
+    ctx.bank.account(pubkey).update(transient).await.unwrap();
 }
 
 #[tokio::test]
