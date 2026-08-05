@@ -85,6 +85,17 @@ impl BroadcastedIntentExecutionResult {
                 .successful_transaction_strategies,
         }
     }
+
+    fn poisoned(id: u64) -> Self {
+        Self {
+            inner: Err(IntentExecutorError::PoisonedIntentError.into()),
+            id,
+            patched_errors: Arc::default(),
+            callbacks_report: Vec::new(),
+            #[cfg(feature = "dev-context-only-utils")]
+            successful_transaction_strategies: vec![],
+        }
+    }
 }
 
 impl Deref for BroadcastedIntentExecutionResult {
@@ -248,10 +259,19 @@ where
             },
             else => {
                 // Shouldn't be possible:
-                // 1. If no executors spawned -> we can receive
-                // 2. If can't receive ->  there are MAX_EXECUTORS running executors
-                // We can't receive new message as there's no available Executor
-                // that could pick up the task.
+                // 1. If no executors spawned -> nothing occupies any
+                //    pubkey's front -> blocked_intents is empty -> we can receive
+                // 2. If can't receive -> blocked_intents is non-empty ->
+                //    something occupies a front -> an executor is running
+                //
+                // running_executors isn't 1-1 with the executors semaphore:
+                // Self::execute drops its permit while sleeping between
+                // retries, so a retrying intent still holds a slot here
+                // without holding a permit. That's fine for (2) - it still
+                // counts as "an executor is running" for as long as it
+                // hasn't given up. And if it does give up, failed() evicts
+                // the whole poisoned cascade from blocked_intents instead
+                // of leaving it stuck, so capacity always frees up.
                 unreachable!("next_scheduled_intent")
             }
         };
@@ -297,32 +317,67 @@ where
             error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
         }).is_err();
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
-        let broadcasted_result =
-            BroadcastedIntentExecutionResult::new(intent.id, result);
-        if let Err(err) = result_sender.send(broadcasted_result) {
-            warn!(error = ?err, "No result listeners");
-        }
 
-        // Lock intent's pubkeys. This will prevent future intents from execution
-        // if future intent overlaps with failed one(current)
+        let mut scheduler = inner_scheduler.lock().expect(POISONED_INNER_MSG);
         if is_err {
+            // Poison this intent's pubkeys and evict any successor that's
+            // reachable from them, so a terminal failure can't leave the
+            // scheduler permanently stuck on dead accounts.
             let pubkeys = intent.get_all_committed_pubkeys();
             warn!(pubkeys = ?pubkeys, "Intents for following pubkeys are now blocked.");
-            return;
+            // SAFETY: Self::execute is called ONLY after IntentScheduler
+            // successfully is able to schedule execution of some Intent
+            // that means that the same Intent is SAFE to mark as failed
+            let poisoned_intents = scheduler
+                .failed(&intent)
+                .expect("Valid completion of previously scheduled message");
+            drop(scheduler);
+            Self::broadcast_result(intent.id, result, &result_sender);
+            Self::report_poisoned_intents(poisoned_intents, result_sender);
+        } else {
+            // Remove executed task from Scheduler to unblock other intents
+            // SAFETY: Self::execute is called ONLY after IntentScheduler
+            // successfully is able to schedule execution of some Intent
+            // that means that the same Intent is SAFE to complete
+            scheduler
+                .complete(&intent)
+                .expect("Valid completion of previously scheduled message");
+            drop(scheduler);
+            Self::broadcast_result(intent.id, result, &result_sender);
         }
-        // That would
-        // Remove executed task from Scheduler to unblock other intents
-        // SAFETY: Self::execute is called ONLY after IntentScheduler
-        // successfully is able to schedule execution of some Intent
-        // that means that the same Intent is SAFE to complete
-        inner_scheduler
-            .lock()
-            .expect(POISONED_INNER_MSG)
-            .complete(&intent)
-            .expect("Valid completion of previously scheduled message");
 
         // Free worker
         drop(execution_permit);
+    }
+
+    fn broadcast_result(
+        id: u64,
+        result: IntentExecutionResult,
+        result_sender: &broadcast::Sender<BroadcastedIntentExecutionResult>,
+    ) {
+        if result_sender.receiver_count() != 0 {
+            let broadcasted_result =
+                BroadcastedIntentExecutionResult::new(id, result);
+            if let Err(err) = result_sender.send(broadcasted_result) {
+                warn!(error = ?err, "No result listeners");
+            }
+        }
+    }
+
+    fn report_poisoned_intents(
+        poisoned_intents: Vec<OutboxIntentBundle>,
+        result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
+    ) {
+        for intent in poisoned_intents {
+            warn!(poisoned_intent = ?intent.id, "Intent poisoned");
+            if result_sender.receiver_count() != 0 {
+                let broadcasted_result =
+                    BroadcastedIntentExecutionResult::poisoned(intent.id);
+                if let Err(err) = result_sender.send(broadcasted_result) {
+                    warn!(error = ?err, "No result listeners");
+                }
+            }
+        }
     }
 
     /// Executes an intent, retrying plausibly-transient failures with a
@@ -335,11 +390,6 @@ where
         limits: ExecutionLimits,
         execution_permit: OwnedSemaphorePermit,
     ) -> (IntentExecutionResult, Option<OwnedSemaphorePermit>) {
-        // Commit tasks give on-chain dedup (commit nonce) to re-executed
-        // sends; action-only intents can double-execute if their transaction
-        // landed unobserved, so they only retry pre-send failures
-        let has_dedup_guard = !intent.get_all_committed_pubkeys().is_empty();
-
         let mut attempt = 0;
         let mut execution_permit = Some(execution_permit);
         let result = loop {
@@ -357,9 +407,7 @@ where
             });
 
             // break early if we can't retry anymore
-            if attempt >= MAX_INTENT_ATTEMPTS
-                || !result.is_retriable(has_dedup_guard)
-            {
+            if attempt >= MAX_INTENT_ATTEMPTS || !result.is_retriable() {
                 break result;
             }
 
@@ -452,7 +500,7 @@ mod tests {
     use solana_signature::Signature;
     use solana_signer::SignerError;
     use solana_transaction_error::TransactionError;
-    use tokio::time::sleep;
+    use tokio::time::{sleep, timeout};
 
     use super::*;
     use crate::{
@@ -702,29 +750,126 @@ mod tests {
         );
     }
 
-    /// Tests that errors from executor propagated gracefully
+    /// A failed head reports its own real error, and every successor
+    /// voided by the poisoning cascade gets its own `PoisonedIntentError`
+    /// report - not silence. Previously the cascaded successors were left
+    /// in `blocked_intents` forever with no report at all, which hung this
+    /// exact test (10 intents sharing one pubkey, waiting for 10 results)
+    /// indefinitely. The bounded `timeout` here turns any regression back
+    /// into a fast failure instead of another indefinite hang.
     #[tokio::test]
     async fn test_multiple_failures() {
         let (sender, worker, _db) = setup_engine(true); // Worker that always fails
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        // Send several messages that will fail
+        // All intents share one pubkey: the head executes and fails, and
+        // the cascade voids every successor queued behind it.
         const NUM_FAILURES: usize = 10;
+        let pubkey = pubkey!("1111111111111111111111111111111111111111111");
         for i in 0..NUM_FAILURES {
-            let msg = create_test_intent(
-                i as u64,
-                &[pubkey!("1111111111111111111111111111111111111111111")],
-                false,
-            );
+            let msg = create_test_intent(i as u64, &[pubkey], false);
             sender.schedule(vec![msg]).unwrap();
         }
 
-        // Verify all failures are processed and semaphore slots released
+        let mut results = Vec::with_capacity(NUM_FAILURES);
         for _ in 0..NUM_FAILURES {
-            let result = result_receiver.recv().await.unwrap();
+            let result = timeout(
+                Duration::from_secs(5),
+                result_receiver.recv(),
+            )
+            .await
+            .expect(
+                "must not hang waiting for poisoned successors to be reported",
+            )
+            .unwrap();
+            results.push(result);
+        }
+
+        // The head (id 0) executed and reports its own real error.
+        let head = results.iter().find(|r| r.id == 0).unwrap();
+        assert!(
+            matches!(
+                head.inner.as_ref().unwrap_err().as_ref(),
+                ExecutorError::FailedToCommitError { .. }
+            ),
+            "head should report the real executor error, got {:?}",
+            head.inner
+        );
+
+        // Every other intent was queued behind the head, never executed,
+        // and was voided by the cascade instead.
+        for id in 1..NUM_FAILURES as u64 {
+            let voided = results.iter().find(|r| r.id == id).unwrap();
+            assert!(
+                matches!(
+                    voided.inner.as_ref().unwrap_err().as_ref(),
+                    ExecutorError::PoisonedIntentError
+                ),
+                "intent {id} should be reported as poisoned, got {:?}",
+                voided.inner
+            );
+        }
+    }
+
+    /// A poisoned pubkey rejects future intents silently (no broadcast -
+    /// they never entered the scheduler), while unrelated pubkeys keep
+    /// executing and reporting normally, proving poisoning doesn't leak
+    /// across unrelated accounts.
+    #[tokio::test]
+    async fn test_poisoned_pubkey_rejects_future_intents_silently() {
+        let (sender, worker, _db) = setup_engine(true); // Worker that always fails
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        let poisoned_pubkey =
+            pubkey!("1111111111111111111111111111111111111111111");
+        let head = create_test_intent(0, &[poisoned_pubkey], false);
+        let successor = create_test_intent(1, &[poisoned_pubkey], false);
+        sender.schedule(vec![head]).unwrap();
+        sender.schedule(vec![successor]).unwrap();
+
+        // Head fails for real, successor is voided by the cascade.
+        for _ in 0..2 {
+            let result =
+                timeout(Duration::from_secs(5), result_receiver.recv())
+                    .await
+                    .expect("must not hang")
+                    .unwrap();
             assert!(result.is_err());
         }
+
+        // A brand new intent on the now-poisoned pubkey is rejected at
+        // admission - it never reaches an executor, so no broadcast for
+        // it ever arrives.
+        let rejected = create_test_intent(2, &[poisoned_pubkey], false);
+        sender.schedule(vec![rejected]).unwrap();
+        let silence =
+            timeout(Duration::from_millis(300), result_receiver.recv()).await;
+        assert!(
+            silence.is_err(),
+            "poisoned pubkey must not produce a broadcast for a rejected intent"
+        );
+
+        // An intent on an unrelated pubkey is unaffected by the poisoning
+        // and still executes (and fails for real, not as poisoned).
+        let unrelated_pubkey =
+            pubkey!("21111111111111111111111111111111111111111111");
+        let unrelated = create_test_intent(3, &[unrelated_pubkey], false);
+        sender.schedule(vec![unrelated]).unwrap();
+        let result = timeout(Duration::from_secs(5), result_receiver.recv())
+            .await
+            .expect("must not hang")
+            .unwrap();
+        assert_eq!(result.id, 3);
+        assert!(
+            matches!(
+                result.inner.as_ref().unwrap_err().as_ref(),
+                ExecutorError::FailedToCommitError { .. }
+            ),
+            "unrelated pubkey should fail for real, not as poisoned: {:?}",
+            result.inner
+        );
     }
 
     /// Transient failures are retried with a fresh executor until success
