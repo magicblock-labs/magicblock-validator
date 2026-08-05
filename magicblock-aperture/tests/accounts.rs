@@ -18,7 +18,7 @@ async fn test_get_account_info() {
 
     // Test for an existing account
     let key = store_v42(&env.engine, 0, AccountMode::Ephemeral);
-    let expected = env.engine.account(key).expect("stored account");
+    let expected = env.engine.get_account(key).expect("stored account");
     let account = env
         .rpc
         .get_account(&key)
@@ -152,7 +152,10 @@ async fn test_get_multiple_accounts() {
             mixed[0]
                 .as_ref()
                 .expect("existing first account should be returned"),
-            env.engine.account(acc1).as_ref().expect("stored account")
+            env.engine
+                .get_account(acc1)
+                .as_ref()
+                .expect("stored account")
         ),
         "first result should match the first requested account"
     );
@@ -165,7 +168,10 @@ async fn test_get_multiple_accounts() {
             mixed[2]
                 .as_ref()
                 .expect("existing last account should be returned"),
-            env.engine.account(acc2).as_ref().expect("stored account")
+            env.engine
+                .get_account(acc2)
+                .as_ref()
+                .expect("stored account")
         ),
         "last result should match the last requested account"
     );

@@ -10,7 +10,7 @@ use magicblock_magic_program_api::{
     },
     instruction::MagicBlockInstruction,
 };
-use solana_account::{AccountBuilder, AccountMode, OwnedAccount};
+use solana_account::{AccountBuilder, AccountMode};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_pubkey::Pubkey;
@@ -127,7 +127,7 @@ pub(crate) async fn clone_account(
     } else {
         request.delegation_actions.into()
     };
-    let account: OwnedAccount = request.account.build();
+    let account = request.account;
     let result = match materialization {
         AccountMaterialization::Create => {
             let actions = (!actions.is_empty()).then_some(actions);
@@ -166,14 +166,13 @@ pub(crate) async fn clone_program(
         | RemoteProgramLoader::V3
         | RemoteProgramLoader::V4 => LOADER_V4,
     };
-    let account: OwnedAccount = AccountBuilder::default()
+    let account = AccountBuilder::default()
         .lamports(program.lamports())
         .data(program.program_data)
         .owner(owner)
         .mode(AccountMode::ReadOnly)
         .executable(true)
-        .slot(program.remote_slot)
-        .build();
+        .slot(program.remote_slot);
 
     let result = match materialization {
         AccountMaterialization::Create => {

@@ -306,7 +306,7 @@ impl TestContext {
             .mode(AccountMode::Transient);
         self.bank
             .account(*pubkey)
-            .update(account.build())
+            .update(account)
             .await
             .expect("mark account undelegating through engine");
     }

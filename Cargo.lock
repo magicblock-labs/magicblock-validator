@@ -126,7 +126,7 @@ dependencies = [
 [[package]]
 name = "agave-transaction-view"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "solana-hash 4.4.0",
  "solana-message 4.2.4",
@@ -3589,7 +3589,7 @@ dependencies = [
 [[package]]
 name = "magic-root-interface"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "solana-account 4.3.1",
  "solana-instruction 3.4.0",
@@ -3600,7 +3600,7 @@ dependencies = [
 [[package]]
 name = "magic-root-program"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "magic-root-interface",
  "magicblock-engine-nucleus",
@@ -3639,7 +3639,7 @@ dependencies = [
 [[package]]
 name = "magicblock-accountsdb"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "ahash 0.8.12",
  "bincode",
@@ -3932,7 +3932,7 @@ dependencies = [
 [[package]]
 name = "magicblock-engine"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "agave-transaction-view",
  "derive_more",
@@ -3962,7 +3962,7 @@ dependencies = [
 [[package]]
 name = "magicblock-engine-nucleus"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "agave-transaction-view",
  "derive_more",
@@ -3995,7 +3995,7 @@ dependencies = [
 [[package]]
 name = "magicblock-keeper"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "agave-feature-set",
  "ahash 0.8.12",
@@ -4033,7 +4033,7 @@ dependencies = [
 [[package]]
 name = "magicblock-ledger"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "agave-transaction-view",
  "bitcode",
@@ -4117,7 +4117,7 @@ dependencies = [
 [[package]]
 name = "magicblock-processor"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -4189,7 +4189,7 @@ dependencies = [
 [[package]]
 name = "magicblock-replicator"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "derive_more",
  "magicblock-engine",
@@ -6590,7 +6590,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "4.3.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "bincode",
  "bitflags 2.13.0",
@@ -8194,7 +8194,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -8918,7 +8918,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "ahash 0.8.12",
  "magic-root-interface",
@@ -9305,7 +9305,7 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "bincode",
  "serde",
@@ -10746,7 +10746,7 @@ dependencies = [
 [[package]]
 name = "v42-calculator-interface"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=a5e9f#a5e9f2d1c93399d459a1e65b4e6e76b1750ccf17"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?rev=c4876#c4876693ebc3acd75c5c062409bfedebeab96d66"
 dependencies = [
  "solana-instruction 3.4.0",
  "solana-pubkey 4.2.0",
