@@ -36,8 +36,7 @@ pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 
 /// Absolute path to the ephemeral hydra program the ER preloads.
 fn hydra_program_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../programs/hydra/hydra.so")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../programs/hydra/hydra.so")
 }
 
 fn airdrop_faucet(faucet: &Keypair) {
@@ -119,8 +118,7 @@ pub fn send_ephem_tx(
     assert!(
         confirmed,
         cleanup(validator),
-        "ephemeral transaction {} was not confirmed",
-        signature
+        "ephemeral transaction {} was not confirmed", signature
     );
 }
 
