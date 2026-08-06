@@ -89,7 +89,8 @@ use crate::{
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
-        AccountCloneRequest, Cloner, DelegationActions,
+        AccountCloneRequest, ClonePostDelegationMode, Cloner,
+        DelegationActions,
     },
     remote_account_provider::{
         program_account::{
@@ -982,9 +983,9 @@ where
         request: &AccountCloneRequest,
     ) -> bool {
         let active_delegation_satisfies_request =
-            request.delegation_actions.is_empty()
+            !request.post_delegation_mode.has_actions()
                 && request.delegated_to_other.is_none()
-                && !request.needs_undelegation;
+                && !request.post_delegation_mode.is_rescue_undelegate();
         self.accounts_bank
             .get_account(&request.pubkey)
             .is_some_and(|account| {
@@ -1022,7 +1023,7 @@ where
             ChainlinkCloneIntent::EmptyPlaceholder
         } else if request.account.delegated() {
             ChainlinkCloneIntent::DelegationRecord
-        } else if !request.delegation_actions.is_empty() {
+        } else if request.post_delegation_mode.has_actions() {
             ChainlinkCloneIntent::ActionDependency
         } else {
             ChainlinkCloneIntent::NormalAccount
@@ -1176,9 +1177,11 @@ where
                         ));
                     };
                     let active_delegation_satisfies_request =
-                        owned_request.delegation_actions.is_empty()
+                        !owned_request.post_delegation_mode.has_actions()
                             && owned_request.delegated_to_other.is_none()
-                            && !owned_request.needs_undelegation;
+                            && !owned_request
+                                .post_delegation_mode
+                                .is_rescue_undelegate();
                     let is_empty_placeholder =
                         Self::is_empty_placeholder_account(
                             &owned_request.account,
@@ -1423,11 +1426,12 @@ where
             return Ok(Signature::default());
         }
 
-        if request.delegation_actions.is_empty() {
+        let Some(delegation_actions) = request.post_delegation_mode.actions()
+        else {
             return Ok(self
                 .clone_account_with_ownership(request, fetch_context)
                 .await?);
-        }
+        };
 
         if !request.account.delegated() {
             return Err(ChainlinkError::InvalidDelegationActions(
@@ -1441,7 +1445,7 @@ where
             self.ensure_delegation_action_dependencies(
                 request.pubkey,
                 request.account.remote_slot(),
-                &request.delegation_actions,
+                delegation_actions,
                 fetch_context.clone(),
             )
             .await?;
@@ -1503,7 +1507,8 @@ where
         fetch_context: AccountFetchContext,
     ) -> ClonerResult<Signature> {
         let pubkey = request.pubkey;
-        request.needs_undelegation = true;
+        request.post_delegation_mode =
+            ClonePostDelegationMode::RescueUndelegate;
         let remote_result = Self::clone_remote_result_for_request(&request);
         let clone_intent = Self::clone_intent_for_request(&request);
         let mut request = Some(request);
@@ -1668,7 +1673,7 @@ where
             return Ok(());
         }
 
-        if !request.delegation_actions.is_empty() {
+        if request.post_delegation_mode.has_actions() {
             return Err(ChainlinkError::InvalidDelegationActions(
                 request.pubkey,
                 "post-delegation actions attached to unresolved DLP-owned clone target"
@@ -2098,9 +2103,10 @@ where
                         pubkey,
                         account,
                         commit_frequency_ms,
-                        delegation_actions: raw_delegation_actions,
+                        post_delegation_mode: ClonePostDelegationMode::from(
+                            raw_delegation_actions,
+                        ),
                         delegated_to_other,
-                        needs_undelegation: false,
                     },
                     subscription_clone_context.clone(),
                 )
@@ -4225,9 +4231,8 @@ where
                 pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             })
             .await?;
         Ok(())

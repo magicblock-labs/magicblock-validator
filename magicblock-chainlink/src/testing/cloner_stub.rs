@@ -199,7 +199,7 @@ impl Cloner for ClonerStub {
         self.account_clone_count.fetch_add(1, Ordering::SeqCst);
         self.account_clone_notify.notify_waiters();
 
-        if request.needs_undelegation {
+        if request.post_delegation_mode.is_rescue_undelegate() {
             self.undelegation_requests
                 .lock()
                 .unwrap()
