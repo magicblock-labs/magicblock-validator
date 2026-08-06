@@ -29,7 +29,7 @@ pub struct ExecutorConfig {
     pub actions_timeout: Duration,
 }
 
-/// Dummy struct to simplify signature of CommitSchedulerWorker
+/// Dummy struct to simplify signature of IntentExecutionEngine
 pub struct IntentExecutorBuilderImpl<A, O> {
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
