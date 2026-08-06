@@ -335,7 +335,10 @@ where
                 scheduler.poisoned_keys_count() as i64,
             );
             drop(scheduler);
-            Self::broadcast_result(intent.id, result, &result_sender);
+            Self::broadcast_result(
+                BroadcastedIntentExecutionResult::new(intent.id, result),
+                &result_sender,
+            );
             Self::report_poisoned_intents(poisoned_intents, &result_sender);
         } else {
             // Remove executed task from Scheduler to unblock other intents
@@ -346,32 +349,24 @@ where
                 .complete(&intent)
                 .expect("Valid completion of previously scheduled message");
             drop(scheduler);
-            Self::broadcast_result(intent.id, result, &result_sender);
+            Self::broadcast_result(
+                BroadcastedIntentExecutionResult::new(intent.id, result),
+                &result_sender,
+            );
         }
 
         // Free worker
         drop(execution_permit);
     }
 
-    fn send_broadcast(
+    fn broadcast_result(
         broadcasted_result: BroadcastedIntentExecutionResult,
         result_sender: &broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
-        if let Err(err) = result_sender.send(broadcasted_result) {
-            warn!(error = ?err, "No result listeners");
-        }
-    }
-
-    fn broadcast_result(
-        id: u64,
-        result: IntentExecutionResult,
-        result_sender: &broadcast::Sender<BroadcastedIntentExecutionResult>,
-    ) {
         if result_sender.receiver_count() != 0 {
-            Self::send_broadcast(
-                BroadcastedIntentExecutionResult::new(id, result),
-                result_sender,
-            );
+            if let Err(err) = result_sender.send(broadcasted_result) {
+                warn!(error = ?err, "No result listeners");
+            }
         }
     }
 
@@ -384,12 +379,10 @@ where
         );
         for intent in poisoned_intents {
             warn!(poisoned_intent = ?intent.id, "Intent poisoned");
-            if result_sender.receiver_count() != 0 {
-                Self::send_broadcast(
-                    BroadcastedIntentExecutionResult::poisoned(intent.id),
-                    result_sender,
-                );
-            }
+            Self::broadcast_result(
+                BroadcastedIntentExecutionResult::poisoned(intent.id),
+                result_sender,
+            );
         }
     }
 
