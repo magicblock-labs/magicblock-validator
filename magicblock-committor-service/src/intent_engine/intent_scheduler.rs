@@ -546,6 +546,10 @@ impl IntentScheduler {
     pub fn intents_blocked(&self) -> usize {
         self.blocked_intents.len()
     }
+
+    pub fn poisoned_keys_count(&self) -> usize {
+        self.poisoned_keys.len()
+    }
 }
 
 #[derive(Error, Debug)]

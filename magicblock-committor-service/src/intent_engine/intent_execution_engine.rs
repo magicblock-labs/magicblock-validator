@@ -324,16 +324,19 @@ where
             // reachable from them, so a terminal failure can't leave the
             // scheduler permanently stuck on dead accounts.
             let pubkeys = intent.get_all_committed_pubkeys();
-            warn!(pubkeys = ?pubkeys, "Intents for following pubkeys are now blocked.");
+            warn!(pubkeys = ?pubkeys, "Intents for following pubkeys are now permanently poisoned for the life of this process.");
             // SAFETY: Self::execute is called ONLY after IntentScheduler
             // successfully is able to schedule execution of some Intent
             // that means that the same Intent is SAFE to mark as failed
             let poisoned_intents = scheduler
                 .failed(&intent)
                 .expect("Valid completion of previously scheduled message");
+            metrics::set_committor_poisoned_keys_count(
+                scheduler.poisoned_keys_count() as i64,
+            );
             drop(scheduler);
             Self::broadcast_result(intent.id, result, &result_sender);
-            Self::report_poisoned_intents(poisoned_intents, result_sender);
+            Self::report_poisoned_intents(poisoned_intents, &result_sender);
         } else {
             // Remove executed task from Scheduler to unblock other intents
             // SAFETY: Self::execute is called ONLY after IntentScheduler
@@ -350,32 +353,42 @@ where
         drop(execution_permit);
     }
 
+    fn send_broadcast(
+        broadcasted_result: BroadcastedIntentExecutionResult,
+        result_sender: &broadcast::Sender<BroadcastedIntentExecutionResult>,
+    ) {
+        if let Err(err) = result_sender.send(broadcasted_result) {
+            warn!(error = ?err, "No result listeners");
+        }
+    }
+
     fn broadcast_result(
         id: u64,
         result: IntentExecutionResult,
         result_sender: &broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
         if result_sender.receiver_count() != 0 {
-            let broadcasted_result =
-                BroadcastedIntentExecutionResult::new(id, result);
-            if let Err(err) = result_sender.send(broadcasted_result) {
-                warn!(error = ?err, "No result listeners");
-            }
+            Self::send_broadcast(
+                BroadcastedIntentExecutionResult::new(id, result),
+                result_sender,
+            );
         }
     }
 
     fn report_poisoned_intents(
         poisoned_intents: Vec<OutboxIntentBundle>,
-        result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
+        result_sender: &broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
+        metrics::inc_committor_cascade_voided_intents_count_by(
+            poisoned_intents.len() as u64,
+        );
         for intent in poisoned_intents {
             warn!(poisoned_intent = ?intent.id, "Intent poisoned");
             if result_sender.receiver_count() != 0 {
-                let broadcasted_result =
-                    BroadcastedIntentExecutionResult::poisoned(intent.id);
-                if let Err(err) = result_sender.send(broadcasted_result) {
-                    warn!(error = ?err, "No result listeners");
-                }
+                Self::send_broadcast(
+                    BroadcastedIntentExecutionResult::poisoned(intent.id),
+                    result_sender,
+                );
             }
         }
     }

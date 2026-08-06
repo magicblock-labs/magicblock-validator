@@ -531,6 +531,16 @@ lazy_static::lazy_static! {
         "committor_executors_busy_count", "Number of busy intent executors"
     ).unwrap();
 
+    static ref COMMITTOR_POISONED_KEYS_COUNT: IntGauge = IntGauge::new(
+        "committor_poisoned_keys_count",
+        "Number of pubkeys currently poisoned in the intent scheduler (only cleared by a process restart)"
+    ).unwrap();
+
+    static ref COMMITTOR_CASCADE_VOIDED_INTENTS_COUNT: IntCounter = IntCounter::new(
+        "committor_cascade_voided_intents_count",
+        "Total number of intents voided by a poisoning cascade after a dependency failed"
+    ).unwrap();
+
     static ref COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM: HistogramVec = HistogramVec::new(
         HistogramOpts::new(
             "committor_intent_execution_time_histogram_v2",
@@ -810,6 +820,8 @@ pub(crate) fn register() {
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
         register!(COMMITTOR_EXECUTORS_BUSY_COUNT);
+        register!(COMMITTOR_POISONED_KEYS_COUNT);
+        register!(COMMITTOR_CASCADE_VOIDED_INTENTS_COUNT);
         register!(COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM);
         register!(COMMITTOR_INTENT_CU_USAGE);
         register!(COMMITTOR_INTENT_TASK_PREPARATION_TIME);
@@ -1102,6 +1114,14 @@ pub fn inc_committor_failed_intents_count(
 
 pub fn set_committor_executors_busy_count(value: i64) {
     COMMITTOR_EXECUTORS_BUSY_COUNT.set(value)
+}
+
+pub fn set_committor_poisoned_keys_count(value: i64) {
+    COMMITTOR_POISONED_KEYS_COUNT.set(value)
+}
+
+pub fn inc_committor_cascade_voided_intents_count_by(by: u64) {
+    COMMITTOR_CASCADE_VOIDED_INTENTS_COUNT.inc_by(by)
 }
 
 pub fn observe_committor_intent_execution_time_histogram(
