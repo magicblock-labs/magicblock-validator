@@ -447,7 +447,7 @@ impl IntentScheduler {
         let intent_id = intent_bundle.id;
         let pubkeys = intent_bundle.get_all_committed_pubkeys();
         if pubkeys.is_empty() {
-            // This means Action only intent, it can't poisone anything
+            // This means Action only intent, it can't poison anything
             return Ok(vec![]);
         };
 
@@ -456,10 +456,11 @@ impl IntentScheduler {
 
         // Poison intents
         let mut worklist = BTreeSet::new();
-        worklist.insert(intent_id);
-
         for pubkey in pubkeys {
             self.poisoned_keys.insert(pubkey);
+            // SAFETY: validate_executing just confirmed intent_id is at the
+            // front of every one of these pubkeys' queues, so each queue
+            // is non-empty and must exist in blocked_keys.
             let queue =
                 self.blocked_keys.remove(&pubkey).expect("front-checked");
             worklist.extend(queue.into_iter().skip(1));
