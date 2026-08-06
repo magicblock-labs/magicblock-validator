@@ -30,7 +30,7 @@ use async_trait::async_trait;
 use magicblock_chainlink::{
     cloner::{
         errors::{ClonerError, ClonerResult},
-        AccountCloneRequest, Cloner,
+        AccountCloneRequest, ClonePostDelegationMode, Cloner,
     },
     remote_account_provider::program_account::{
         LoadedProgram, RemoteProgramLoader,
@@ -248,18 +248,15 @@ impl ChainlinkCloner {
         blockhash: Hash,
     ) -> Transaction {
         let fields = Self::clone_fields(request);
-        let actions: Vec<Instruction> =
-            request.delegation_actions.clone().into();
-        let clone_actions = if request.needs_undelegation {
-            Vec::new()
-        } else {
-            actions.clone()
-        };
         let clone_ix = Self::clone_ix(
             request.pubkey,
             request.account.data().to_vec(),
             fields,
-            clone_actions,
+            request
+                .post_delegation_mode
+                .actions()
+                .map(|actions| actions.to_vec())
+                .unwrap_or_default(),
         );
 
         // TODO(#625): Re-enable frequency commits when proper limits are in place:
@@ -270,10 +267,20 @@ impl ChainlinkCloner {
         // To re-enable, uncomment the following and use `ixs` instead of `[clone_ix]`:
         // let ixs = self.maybe_add_crank_commits_ix(request, clone_ix);
         let mut ixs = vec![clone_ix];
-        if request.needs_undelegation {
-            ixs.push(Self::schedule_undelegation_ix(request.pubkey));
-        } else if !actions.is_empty() {
-            ixs.push(Self::post_delegation_action_ix(request.pubkey, actions));
+        match &request.post_delegation_mode {
+            ClonePostDelegationMode::ExecuteActions(actions)
+                if !actions.is_empty() =>
+            {
+                ixs.push(Self::post_delegation_action_ix(
+                    request.pubkey,
+                    actions.to_vec(),
+                ));
+            }
+            ClonePostDelegationMode::RescueUndelegate => {
+                ixs.push(Self::schedule_undelegation_ix(request.pubkey));
+            }
+            ClonePostDelegationMode::None
+            | ClonePostDelegationMode::ExecuteActions(_) => {}
         }
 
         self.create_signed_tx(&ixs, blockhash)
@@ -329,17 +336,28 @@ impl ChainlinkCloner {
         );
         txs.push(self.create_signed_tx(&[init_ix], blockhash));
 
-        let actions: Vec<Instruction> =
-            request.delegation_actions.clone().into();
-        let clone_actions = if request.needs_undelegation {
-            Vec::new()
-        } else {
-            actions.clone()
+        let post_delegation = match &request.post_delegation_mode {
+            ClonePostDelegationMode::ExecuteActions(actions)
+                if !actions.is_empty() =>
+            {
+                let actions = actions.to_vec();
+                Some((
+                    actions.clone(),
+                    false,
+                    Self::post_delegation_action_ix(request.pubkey, actions),
+                ))
+            }
+            ClonePostDelegationMode::RescueUndelegate => Some((
+                Vec::new(),
+                true,
+                Self::schedule_undelegation_ix(request.pubkey),
+            )),
+            ClonePostDelegationMode::None
+            | ClonePostDelegationMode::ExecuteActions(_) => None,
         };
 
         // Continue txs for remaining chunks
-        let has_post_delegation_action =
-            !clone_actions.is_empty() || request.needs_undelegation;
+        let has_post_delegation_action = post_delegation.is_some();
         let mut offset = MAX_INLINE_DATA_SIZE;
         while offset < data.len() {
             let end = (offset + MAX_INLINE_DATA_SIZE).min(data.len());
@@ -359,20 +377,15 @@ impl ChainlinkCloner {
             offset = end;
         }
 
-        if request.needs_undelegation || !actions.is_empty() {
+        if let Some((clone_actions, needs_undelegation, ix)) = post_delegation {
             let continue_ix = Self::clone_continue_ix(
                 request.pubkey,
                 data.len() as u32,
                 Vec::new(),
                 true,
                 clone_actions,
-                request.needs_undelegation,
+                needs_undelegation,
             );
-            let ix = if request.needs_undelegation {
-                Self::schedule_undelegation_ix(request.pubkey)
-            } else {
-                Self::post_delegation_action_ix(request.pubkey, actions)
-            };
             txs.push(self.create_signed_tx(&[continue_ix, ix], blockhash));
         }
 
@@ -637,7 +650,7 @@ impl Cloner for ChainlinkCloner {
             let tx = self.build_small_account_tx(&request, blockhash);
             let tx_size = Self::transaction_size(&tx)?;
             if tx_size > MAX_INLINE_TRANSACTION_SIZE
-                && !request.delegation_actions.is_empty()
+                && request.post_delegation_mode.has_actions()
             {
                 debug!(
                     pubkey = %request.pubkey,
@@ -732,7 +745,9 @@ impl Cloner for ChainlinkCloner {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_chainlink::cloner::DelegationActions;
+    use magicblock_chainlink::cloner::{
+        ClonePostDelegationMode, DelegationActions,
+    };
     use magicblock_core::link::link;
     use magicblock_magic_program_api::{
         instruction::{
@@ -767,9 +782,10 @@ mod tests {
             pubkey,
             account,
             commit_frequency_ms: None,
-            delegation_actions: DelegationActions::from(actions),
+            post_delegation_mode: ClonePostDelegationMode::from(
+                DelegationActions::from(actions),
+            ),
             delegated_to_other: None,
-            needs_undelegation: false,
         }
     }
 
@@ -878,7 +894,8 @@ mod tests {
     fn small_undelegation_clone_schedules_in_same_tx_without_actions() {
         let pubkey = Pubkey::new_unique();
         let mut request = request(pubkey, vec![1, 2, 3], vec![action()]);
-        request.needs_undelegation = true;
+        request.post_delegation_mode =
+            ClonePostDelegationMode::RescueUndelegate;
         let tx = cloner().build_small_account_tx(&request, Hash::default());
 
         assert_eq!(tx.message().instructions.len(), 2);
@@ -914,7 +931,8 @@ mod tests {
         let pubkey = Pubkey::new_unique();
         let mut request =
             request(pubkey, vec![7; MAX_INLINE_DATA_SIZE + 1], vec![action()]);
-        request.needs_undelegation = true;
+        request.post_delegation_mode =
+            ClonePostDelegationMode::RescueUndelegate;
         let txs = cloner().build_large_account_txs(&request, Hash::default());
 
         assert_eq!(txs.len(), 3);
@@ -989,7 +1007,8 @@ mod tests {
         let pubkey = Pubkey::new_unique();
         let mut request =
             request(pubkey, vec![7; MAX_INLINE_DATA_SIZE * 2], vec![]);
-        request.needs_undelegation = true;
+        request.post_delegation_mode =
+            ClonePostDelegationMode::RescueUndelegate;
         let txs = cloner().build_large_account_txs(&request, Hash::default());
 
         ChainlinkCloner::ensure_transactions_fit(pubkey, &txs).unwrap();
@@ -1000,7 +1019,8 @@ mod tests {
         let pubkey = Pubkey::new_unique();
         let data = vec![1, 2, 3];
         let mut request = request(pubkey, data.clone(), vec![action()]);
-        request.needs_undelegation = true;
+        request.post_delegation_mode =
+            ClonePostDelegationMode::RescueUndelegate;
         let txs = cloner().build_large_account_txs(&request, Hash::default());
 
         assert_eq!(txs.len(), 2);
