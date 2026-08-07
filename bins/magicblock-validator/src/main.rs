@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 
-mod crank_faucet;
 mod errors;
 mod leader;
 mod ledger;
