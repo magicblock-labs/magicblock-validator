@@ -22,10 +22,10 @@ use engine::Engine;
 use keeper::MissingAccount;
 use lru::LruCache;
 use magicblock_aml::RiskService;
-use magicblock_config::config::AllowedProgram;
+use magicblock_config::config::{AllowedProgram, AmlCheckStrategy};
 use magicblock_core::token_programs::{
-    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_PROGRAM_ID, is_ata,
-    normalize_native_token_account_for_local_clone,
+    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+    TOKEN_PROGRAM_ID, is_ata, normalize_native_token_account_for_local_clone,
 };
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
@@ -331,6 +331,42 @@ fn log_companion_fetch_failure<E: std::fmt::Display + ?Sized>(
         error = %error,
         "Failed to fetch companion account"
     );
+}
+
+/// Programs whose presence in a post-delegation action triggers a risk check
+/// under [`AmlCheckStrategy::RelevantPrograms`]: SPL Token (legacy and 2022),
+/// the ephemeral SPL / eATA program (ESPL), and the Magic program.
+const RISK_RELEVANT_PROGRAMS: [Pubkey; 4] = [
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
+    EATA_PROGRAM_ID,
+    magicblock_magic_program_api::ID,
+];
+
+/// Decides whether the configured [`AmlCheckStrategy`] requires risk checking
+/// the signers of these post-delegation actions.
+fn delegation_actions_require_risk_check(
+    strategy: AmlCheckStrategy,
+    delegation_actions: &DelegationActions,
+) -> bool {
+    match strategy {
+        AmlCheckStrategy::AllSigners => true,
+        AmlCheckStrategy::RelevantPrograms => delegation_actions
+            .iter()
+            .any(instruction_involves_risk_relevant_program),
+    }
+}
+
+/// Returns true when a risk-relevant program is invoked by the instruction or
+/// referenced by any of its accounts (e.g. as the target of a CPI).
+fn instruction_involves_risk_relevant_program(
+    instruction: &solana_instruction::Instruction,
+) -> bool {
+    RISK_RELEVANT_PROGRAMS.contains(&instruction.program_id)
+        || instruction
+            .accounts
+            .iter()
+            .any(|meta| RISK_RELEVANT_PROGRAMS.contains(&meta.pubkey))
 }
 
 impl<T, U> FetchCloner<T, U>
@@ -1568,6 +1604,13 @@ where
         let Some(risk_service) = self.risk_service.as_ref() else {
             return Ok(());
         };
+
+        if !delegation_actions_require_risk_check(
+            risk_service.check_strategy(),
+            delegation_actions,
+        ) {
+            return Ok(());
+        }
 
         let mut signers = delegation_actions
             .iter()

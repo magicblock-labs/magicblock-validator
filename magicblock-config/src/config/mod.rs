@@ -10,7 +10,8 @@ pub mod program;
 
 pub use aperture::ApertureConfig;
 pub use chain::{
-    AdminConfig, AllowedProgram, ChainLinkConfig, CommittorConfig, RiskConfig,
+    AdminConfig, AllowedProgram, AmlCheckStrategy, ChainLinkConfig,
+    CommittorConfig, RiskConfig,
 };
 pub use engine::{EngineConfig, FollowerReplication, LeaderReplication};
 pub use grpc::GrpcConfig;
