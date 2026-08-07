@@ -1,12 +1,13 @@
 //! Resize ephemeral account instruction processor
 
+use magicblock_magic_program_api::ephemeral;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_transaction_context::transaction::TransactionContext;
 
 use super::{
-    MAX_DATA_LEN, get_ephemeral_data_len, rent_for, transfer_rent,
+    MAX_DATA_LEN, get_ephemeral_data_len, transfer_rent,
     validation::{validate_common, validate_existing_ephemeral},
 };
 
@@ -25,8 +26,8 @@ pub(crate) fn process_resize_ephemeral_account(
         validate_existing_ephemeral(transaction_context, &caller_program_id)?;
 
     let old_len = get_ephemeral_data_len(&ephemeral)?;
-    let new_rent = rent_for(new_data_len)?;
-    let old_rent = rent_for(old_len)?;
+    let new_rent = ephemeral::rent_for(new_data_len)?;
+    let old_rent = ephemeral::rent_for(old_len)?;
     let delta = new_rent as i64 - old_rent as i64;
 
     transfer_rent(transaction_context, delta)?;

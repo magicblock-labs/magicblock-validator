@@ -1,5 +1,6 @@
 pub mod args;
 pub mod compat;
+pub mod ephemeral;
 pub mod instruction;
 pub mod pda;
 pub mod response;
