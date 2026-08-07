@@ -8,17 +8,16 @@ use solana_sdk::{
 };
 use test_task_scheduler::{
     cancel_task, noop_task_instructions, schedule_noop_task, setup_validator,
-    wait_for_funded_faucet, wait_for_hydra_crank, wait_for_hydra_crank_closed,
+    wait_for_funded_sponsor, wait_for_hydra_crank, wait_for_hydra_crank_closed,
 };
 
-/// Hydra cranks are sponsored by a dedicated, delegated faucet — not the
-/// validator identity. Scheduling moves lamports out of the faucet to fund a
-/// crank, and cancelling must return them, so a validator that schedules and
-/// cancels tasks does not bleed its faucet dry over time.
+/// Hydra cranks are sponsored by the validator identity. Scheduling moves
+/// lamports out of it to fund a crank, and cancelling must return them, so a
+/// validator that schedules and cancels tasks does not bleed itself dry over
+/// time.
 #[test]
-fn test_faucet_is_refunded_when_a_task_is_cancelled() {
-    let (_temp_dir, mut validator, ctx, faucet) = setup_validator();
-    let faucet_pk = faucet.pubkey();
+fn test_sponsor_is_refunded_when_a_task_is_cancelled() {
+    let (_temp_dir, mut validator, ctx, sponsor) = setup_validator();
 
     let payer = Keypair::new();
     expect!(
@@ -26,11 +25,11 @@ fn test_faucet_is_refunded_when_a_task_is_cancelled() {
         validator
     );
 
-    // Sample the faucet only once it is delegated into the ER, otherwise the
-    // baseline races the validator's background delegation.
-    let faucet_before = wait_for_funded_faucet(
+    // Sample the sponsor only once it carries a balance in the ER, otherwise
+    // the baseline races validator startup.
+    let sponsor_before = wait_for_funded_sponsor(
         &ctx,
-        &faucet_pk,
+        &sponsor,
         Duration::from_secs(30),
         &mut validator,
     );
@@ -55,19 +54,20 @@ fn test_faucet_is_refunded_when_a_task_is_cancelled() {
         expect!(ctx.fetch_ephem_account_balance(&crank_pda), validator);
     let reward_pool = (iterations as u64).saturating_mul(CRANKER_REWARD);
     let min_funding =
-        crank_rent_floor(&noop_task_instructions()).saturating_add(reward_pool);
+        expect!(crank_rent_floor(&noop_task_instructions()), validator)
+            .saturating_add(reward_pool);
     assert!(
         crank_lamports >= min_funding,
-        "crank underfunded by faucet: {crank_lamports} < {min_funding}"
+        "crank underfunded by sponsor: {crank_lamports} < {min_funding}"
     );
 
-    // That funding came out of the faucet, so the refund asserted below is a
+    // That funding came out of the sponsor, so the refund asserted below is a
     // real recovery rather than a vacuous no-op.
-    let faucet_while_scheduled =
-        expect!(ctx.fetch_ephem_account_balance(&faucet_pk), validator);
+    let sponsor_while_scheduled =
+        expect!(ctx.fetch_ephem_account_balance(&sponsor), validator);
     assert!(
-        faucet_while_scheduled < faucet_before,
-        "faucet did not pay for the crank: {faucet_while_scheduled} >= {faucet_before}"
+        sponsor_while_scheduled < sponsor_before,
+        "sponsor did not pay for the crank: {sponsor_while_scheduled} >= {sponsor_before}"
     );
 
     cancel_task(&ctx, &mut validator, &payer, task_id);
@@ -78,17 +78,17 @@ fn test_faucet_is_refunded_when_a_task_is_cancelled() {
         &mut validator,
     );
 
-    // Cancelling drains the crank back to the faucet and refunds its rent, so
-    // the faucet ends up whole again apart from transaction fees.
-    let faucet_after =
-        expect!(ctx.fetch_ephem_account_balance(&faucet_pk), validator);
+    // Cancelling drains the crank back to the sponsor and refunds its rent, so
+    // the sponsor ends up whole again apart from transaction fees.
+    let sponsor_after =
+        expect!(ctx.fetch_ephem_account_balance(&sponsor), validator);
     assert!(
-        faucet_after > faucet_while_scheduled,
-        "cancelling did not refund the crank budget: {faucet_after} <= {faucet_while_scheduled}"
+        sponsor_after > sponsor_while_scheduled,
+        "cancelling did not refund the crank budget: {sponsor_after} <= {sponsor_while_scheduled}"
     );
     assert!(
-        faucet_after + reward_pool >= faucet_before,
-        "faucet was drained across a schedule/cancel cycle: {faucet_after} vs {faucet_before}"
+        sponsor_after + reward_pool >= sponsor_before,
+        "sponsor was drained across a schedule/cancel cycle: {sponsor_after} vs {sponsor_before}"
     );
 
     cleanup(&mut validator);

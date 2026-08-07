@@ -1,7 +1,6 @@
 use engine::Engine;
 use hydra_api::{
-    consts::ephemeral::CRANKER_REWARD, ephemeral::ID as EPHEMERAL_PROGRAM_ID,
-    instruction::ephemeral,
+    ephemeral::ID as EPHEMERAL_PROGRAM_ID, instruction::ephemeral,
 };
 use magicblock_program::args::{
     CancelTaskRequest, ScheduleTaskRequest, TaskRequest,
@@ -9,8 +8,8 @@ use magicblock_program::args::{
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use solana_account::ReadableAccount;
 use solana_instruction::Instruction;
-use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use tokio::{select, sync::mpsc};
@@ -18,10 +17,9 @@ use tracing::*;
 
 use crate::{
     crank::{
-        build_create_ix, crank_pubkey, crank_rent_floor, interval_slots,
-        is_valid_task_interval,
+        build_create_ix, crank_pubkey, interval_slots, is_valid_task_interval,
     },
-    errors::{TaskSchedulerError, TaskSchedulerResult},
+    errors::TaskSchedulerResult,
 };
 
 /// Serves runtime schedule/cancel requests by sending hydra transactions.
@@ -29,16 +27,15 @@ use crate::{
 /// from `(authority, task_id)`, so cancel and reschedule need no persisted
 /// lookup.
 pub struct TaskSchedulerService {
-    /// Delegated faucet keypair used to pay for (sponsor, fund, sign, and
-    /// cancel) hydra cranks. Used instead of the validator identity, which is
-    /// not a delegated account.
-    faucet: Keypair,
     /// Receives service messages the engine publishes once a transaction
     /// commits; task requests arrive on this stream.
     service_messages: mpsc::Receiver<Vec<u8>>,
-    /// Reads account state and the latest blockhash/slot, and submits the
-    /// faucet-signed crank transactions.
+    /// Reads account state and the latest blockhash/slot, and provides the
+    /// validator identity that sponsors and signs crank transactions.
     engine: Engine,
+    /// RPC client used to send transactions.
+    /// Otherwise, accounts are not ensured.
+    rpc_client: RpcClient,
     /// Slot interval of the validator, used to convert millisecond intervals
     /// into the slot-based cadence hydra expects.
     slot_interval: tokio::time::Duration,
@@ -51,16 +48,16 @@ unsafe impl Sync for TaskSchedulerService {}
 impl TaskSchedulerService {
     /// Creates a new `TaskSchedulerService`.
     pub fn new(
-        faucet: Keypair,
         engine: Engine,
+        self_rpc_url: String,
         slot_interval: tokio::time::Duration,
     ) -> TaskSchedulerResult<Self> {
         Ok(Self {
-            faucet,
             service_messages: engine
                 .transactions()
                 .subscribe_service_messages()?,
             engine,
+            rpc_client: RpcClient::new(self_rpc_url),
             slot_interval,
         })
     }
@@ -215,11 +212,19 @@ impl TaskSchedulerService {
 
         let interval_slots =
             interval_slots(interval_millis, self.slot_interval);
-        let iterations = iterations as u64;
+        // `i64::MAX` iterations is how the magic API spells "run forever". Hydra
+        // has its own sentinel for that — wire-level `0`, which `Create` stores
+        // as `REMAINING_INFINITE` — and passing the raw count instead produces a
+        // *finite* crank of ~9.2e18 executions.
+        let iterations = if iterations == i64::MAX {
+            0
+        } else {
+            iterations as u64
+        };
 
-        let faucet_pubkey = self.faucet.pubkey();
+        let sponsor = self.engine.signer().pubkey();
         let create_ix = build_create_ix(
-            &faucet_pubkey,
+            &sponsor,
             authority,
             task_id,
             crank,
@@ -228,54 +233,41 @@ impl TaskSchedulerService {
             iterations,
             instructions,
         );
-        let reward_pool = iterations.saturating_mul(CRANKER_REWARD);
-        let funding =
-            reward_pool.saturating_add(crank_rent_floor(instructions));
-        let fund_ix = solana_system_interface::instruction::transfer(
-            &faucet_pubkey,
-            &crank,
-            funding,
-        );
 
         let ixs = if crank_exists {
-            let cancel_ix =
-                ephemeral::cancel(faucet_pubkey, crank, faucet_pubkey);
-            vec![cancel_ix, create_ix, fund_ix]
+            let cancel_ix = ephemeral::cancel(sponsor, crank, sponsor);
+            vec![cancel_ix, create_ix]
         } else {
-            vec![create_ix, fund_ix]
+            vec![create_ix]
         };
 
         self.submit(&ixs).await
     }
 
     /// Sends a crank cancellation. The crank's remaining lamports are returned
-    /// to the faucet (the cancel recipient).
+    /// to the validator identity (the cancel recipient).
     async fn send_cancel(&self, crank: Pubkey) -> TaskSchedulerResult<()> {
-        let faucet_pubkey = self.faucet.pubkey();
-        let cancel_ix = ephemeral::cancel(faucet_pubkey, crank, faucet_pubkey);
+        let sponsor = self.engine.signer().pubkey();
+        let cancel_ix = ephemeral::cancel(sponsor, crank, sponsor);
         self.submit(&[cancel_ix]).await
     }
 
-    /// Signs `instructions` with the faucet — the crank sponsor, which the
-    /// engine authority cannot stand in for — and submits them.
-    /// Send and forget since the write lock on the faucet prevents races.
+    /// Signs `instructions` with the validator identity — the crank sponsor —
+    /// and submits them. Send and forget since the write lock on the identity
+    /// account prevents races.
     async fn submit(
         &self,
         instructions: &[Instruction],
     ) -> TaskSchedulerResult<()> {
-        let faucet_pubkey = self.faucet.pubkey();
+        let validator = self.engine.signer();
         let transaction = Transaction::new_signed_with_payer(
             instructions,
-            Some(&faucet_pubkey),
-            &[&self.faucet],
+            Some(&validator.pubkey()),
+            &[validator],
             self.engine.blockhash(),
         );
-        self.engine
-            .transaction(transaction)
-            .map_err(TaskSchedulerError::from)?
-            .schedule()
-            .await
-            .map_err(TaskSchedulerError::from)
+        self.rpc_client.send_transaction(&transaction).await?;
+        Ok(())
     }
 }
 
@@ -291,12 +283,12 @@ mod tests {
     async fn test_service() -> (TestEngine, TaskSchedulerService) {
         let engine = TestEngine::new().await;
         let service = TaskSchedulerService {
-            faucet: Keypair::new(),
             service_messages: engine
                 .transactions()
                 .subscribe_service_messages()
                 .unwrap(),
             engine: engine.clone(),
+            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
             slot_interval: tokio::time::Duration::from_millis(1000),
         };
         (engine, service)
