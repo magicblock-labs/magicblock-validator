@@ -14,7 +14,7 @@ use test_task_scheduler::{
 /// run it, and cancelling the task makes it close that crank again.
 #[test]
 fn test_schedule_task_creates_and_cancels_hydra_crank() {
-    let (_temp_dir, mut validator, ctx, _faucet) = setup_validator();
+    let (_temp_dir, mut validator, ctx, _sponsor) = setup_validator();
 
     let payer = Keypair::new();
     expect!(
@@ -51,7 +51,7 @@ fn test_schedule_task_creates_and_cancels_hydra_crank() {
 /// cancelling its task leaves another authority's task with the same id alone.
 #[test]
 fn test_tasks_are_namespaced_per_authority() {
-    let (_temp_dir, mut validator, ctx, _faucet) = setup_validator();
+    let (_temp_dir, mut validator, ctx, _sponsor) = setup_validator();
 
     let payer = Keypair::new();
     let other = Keypair::new();
