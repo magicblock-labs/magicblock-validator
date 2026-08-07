@@ -1,5 +1,6 @@
 //! Create ephemeral account instruction processor
 
+use magicblock_magic_program_api::ephemeral;
 use solana_account::{AccountMode, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -7,7 +8,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_transaction_context::transaction::TransactionContext;
 
 use super::{
-    MAX_DATA_LEN, rent_for, transfer_rent,
+    MAX_DATA_LEN, transfer_rent,
     validation::{
         validate_common, validate_ephemeral_signer, validate_new_ephemeral,
     },
@@ -29,7 +30,7 @@ pub(crate) fn process_create_ephemeral_account(
     validate_ephemeral_signer(transaction_context)?;
     let ephemeral = validate_new_ephemeral(transaction_context)?;
 
-    let rent = rent_for(data_len)?;
+    let rent = ephemeral::rent_for(data_len)?;
     transfer_rent(transaction_context, rent as i64)?;
 
     // Initialize ephemeral account
