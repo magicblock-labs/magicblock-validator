@@ -20,6 +20,7 @@ solana-sha256-hasher = { workspace = true }
 solana-signer = { workspace = true }
 solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-transaction = { workspace = true }
+solana-rpc-client = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

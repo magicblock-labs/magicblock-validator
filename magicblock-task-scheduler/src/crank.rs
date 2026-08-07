@@ -1,12 +1,6 @@
 use std::time::Duration as StdDuration;
 
-use hydra_api::{
-    consts::{CRANK_HEADER_SIZE, SERIALIZED_META_SIZE},
-    instruction::{CreateArgs, SchedMeta, ScheduledIx, ephemeral},
-};
-use magicblock_program::{
-    EPHEMERAL_ACCOUNT_STATIC_SIZE, EPHEMERAL_RENT_PER_BYTE,
-};
+use hydra_api::instruction::{CreateArgs, SchedMeta, ScheduledIx, ephemeral};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
@@ -24,31 +18,12 @@ pub fn crank_pubkey(authority: &Pubkey, task_id: i64) -> Pubkey {
     ephemeral::find_crank_pda(&seed).0
 }
 
-/// Rent-exempt minimum for the crank account hydra will allocate for these
-/// scheduled instructions. Mirrors hydra's on-chain size accounting
-/// (`CRANK_HEADER_SIZE + region_len`, where each scheduled ix serializes to
-/// `2 + metas + program_id + 2 + data`).
-pub fn crank_rent_floor(instructions: &[Instruction]) -> u64 {
-    let region_len: usize = instructions
-        .iter()
-        .map(|ix| {
-            2 + ix.accounts.len() * SERIALIZED_META_SIZE
-                + 32
-                + 2
-                + ix.data.len()
-        })
-        .sum::<usize>()
-        + CRANK_HEADER_SIZE;
-    let total_size = region_len as u64 + EPHEMERAL_ACCOUNT_STATIC_SIZE;
-    total_size * EPHEMERAL_RENT_PER_BYTE
-}
-
 /// Builds the hydra `Create` instruction embedding the task's instructions as
 /// the scheduled crank payload. Account signer flags are intentionally dropped:
 /// hydra rejects scheduled instructions that declare signers.
 #[allow(clippy::too_many_arguments)]
 pub fn build_create_ix(
-    faucet: &Pubkey,
+    sponsor: &Pubkey,
     authority: &Pubkey,
     task_id: i64,
     crank: Pubkey,
@@ -88,8 +63,8 @@ pub fn build_create_ix(
 
     let args = CreateArgs {
         seed,
-        // The faucet is the sponsor and the cancel authority for the crank.
-        authority: faucet.to_bytes(),
+        // The sponsor is also the cancel authority for the crank.
+        authority: sponsor.to_bytes(),
         start_slot,
         interval_slots,
         remaining: iterations,
@@ -98,7 +73,7 @@ pub fn build_create_ix(
         scheduled: scheduled.as_slice(),
     };
 
-    ephemeral::create(*faucet, crank, &args)
+    ephemeral::create(*sponsor, crank, &args)
 }
 
 pub fn is_valid_task_interval(interval: i64) -> bool {

@@ -4041,6 +4041,7 @@ dependencies = [
  "solana-instruction 3.4.0",
  "solana-keypair",
  "solana-pubkey 4.2.0",
+ "solana-rpc-client",
  "solana-sha256-hasher 3.1.0",
  "solana-signer",
  "solana-system-interface 3.2.0",

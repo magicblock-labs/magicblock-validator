@@ -1,10 +1,13 @@
-use engine::EngineError;
+use solana_transaction::InstructionError;
 use thiserror::Error;
 
 pub type TaskSchedulerResult<T> = Result<T, TaskSchedulerError>;
 
 #[derive(Error, Debug)]
 pub enum TaskSchedulerError {
+    #[error(transparent)]
+    Instruction(#[from] InstructionError),
+
     #[error("Invalid configuration: {0}")]
     InvalidConfiguration(String),
 
@@ -26,9 +29,6 @@ pub enum TaskSchedulerError {
     #[error("Batch size mismatch: expected {0}, got {1}")]
     SizeMismatch(usize, usize),
 
-    #[error("Faucet not ready")]
-    FaucetNotReady,
-
     #[error(transparent)]
-    Engine(#[from] EngineError),
+    RpcClient(#[from] solana_rpc_client::api::client_error::Error),
 }
