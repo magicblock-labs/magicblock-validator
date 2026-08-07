@@ -33,6 +33,8 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 
+const RETRY_COUNT: usize = 60;
+
 /// Threshold the mock risk server uses to decide `isRisky`. The test owner
 /// risk scores (1 and 9) sit either side of it.
 const MOCK_RISK_THRESHOLD: u64 = 5;
@@ -305,13 +307,26 @@ pub fn delegation_record_exists(
     ctx.fetch_chain_account(record_pubkey).is_ok()
 }
 
+pub fn wait_for_delegation_record_present(
+    ctx: &IntegrationTestContext,
+    delegated_account: &Pubkey,
+) -> bool {
+    for _ in 0..RETRY_COUNT {
+        if delegation_record_exists(ctx, delegated_account) {
+            return true;
+        }
+        sleep(Duration::from_millis(200));
+    }
+    false
+}
+
 /// Polls until the delegation record for `delegated_account` disappears,
 /// returning `true` if it did within the window.
 pub fn wait_for_delegation_record_absent(
     ctx: &IntegrationTestContext,
     delegated_account: &Pubkey,
 ) -> bool {
-    for _ in 0..60 {
+    for _ in 0..RETRY_COUNT {
         if !delegation_record_exists(ctx, delegated_account) {
             return true;
         }
@@ -326,7 +341,7 @@ pub fn delegation_record_persists(
     ctx: &IntegrationTestContext,
     delegated_account: &Pubkey,
 ) -> bool {
-    for _ in 0..30 {
+    for _ in 0..RETRY_COUNT {
         if !delegation_record_exists(ctx, delegated_account) {
             return false;
         }
