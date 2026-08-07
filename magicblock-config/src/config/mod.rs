@@ -7,7 +7,6 @@ pub mod ledger;
 pub mod lifecycle;
 pub mod metrics;
 pub mod program;
-pub mod scheduler;
 
 pub use aperture::ApertureConfig;
 pub use chain::{
@@ -19,4 +18,3 @@ pub use grpc::GrpcConfig;
 pub use ledger::LedgerConfig;
 pub use lifecycle::LifecycleMode;
 pub use program::LoadableProgram;
-pub use scheduler::TaskSchedulerConfig;
