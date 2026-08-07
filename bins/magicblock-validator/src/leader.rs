@@ -37,7 +37,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::{
-    crank_faucet::ensure_faucet_delegated_on_chain,
     errors::{ApiError, ApiResult},
     ledger,
     magic_sys_adapter::MagicSysAdapter,
@@ -173,24 +172,13 @@ impl Leader {
             info!("RPC runtime shutdown");
         });
 
-        // The task scheduler pays for hydra cranks from a configured faucet
-        // account (delegated on startup) rather than the validator identity,
-        // which is not a delegated account. Without a faucet there is nothing
-        // to sponsor cranks with, so the scheduler is not started at all.
         debug!("Initializing task scheduler");
-        let task_scheduler = config
-            .task_scheduler
-            .faucet_keypair
-            .as_ref()
-            .map(|faucet| {
-                TaskSchedulerService::new(
-                    faucet.insecure_clone(),
-                    engine.clone(),
-                    config.engine.blockstore.blocktime,
-                    token.clone(),
-                )
-            })
-            .transpose()?;
+        let task_scheduler = Some(TaskSchedulerService::new(
+            engine.clone(),
+            config.aperture.listen.http(),
+            config.engine.blockstore.blocktime,
+            token.clone(),
+        )?);
         timer.record("Task scheduler initialized");
 
         Ok(Self {
@@ -488,12 +476,6 @@ impl Leader {
         let identity = self.engine.authority();
         let admin = self.config.admin.clone();
         let token = self.token.clone();
-        let faucet_keypair = self
-            .config
-            .task_scheduler
-            .faucet_keypair
-            .as_ref()
-            .map(|faucet| faucet.insecure_clone());
 
         // Ephemeral mode does a non-blocking startup balance check.
         // Intentionally fire-and-forget: the task itself exits the process on failure.
@@ -535,34 +517,6 @@ impl Leader {
                     error!(error = ?err, "Magic fee vault setup failed");
                     error!("Exiting process");
                     std::process::exit(1);
-                }
-
-                if let Some(faucet_keypair) = faucet_keypair {
-                    let result = Self::with_onchain_setup_retries(
-                        "ensure_faucet_delegated_on_chain",
-                        || {
-                            ensure_faucet_delegated_on_chain(
-                                &engine,
-                                rpc_url.clone(),
-                                &faucet_keypair,
-                            )
-                        },
-                    )
-                    .await;
-                    timer.record(
-                        "Task scheduler faucet setup attempt completed",
-                    );
-
-                    // Without the faucet being funded and delegated the task
-                    // scheduler cannot pay for hydra cranks.
-                    if let Err(err) = result {
-                        error!(
-                            error = ?err,
-                            "Task scheduler faucet setup failed"
-                        );
-                        error!("Exiting process");
-                        std::process::exit(1);
-                    }
                 }
 
                 if let Some(ref config) = admin

@@ -18,8 +18,8 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    config::{LifecycleMode, LoadableProgram, TaskSchedulerConfig},
-    types::{crypto::SerdeKeypair, network::Remote, SerdePubkey},
+    config::{LifecycleMode, LoadableProgram},
+    types::{network::Remote, SerdePubkey},
     LeaderParams,
 };
 use magicblock_program::{
@@ -27,8 +27,8 @@ use magicblock_program::{
 };
 use program_schedulecommit::MainAccount;
 use solana_sdk::{
-    instruction::Instruction, native_token::LAMPORTS_PER_SOL,
-    signature::Keypair, signer::Signer, transaction::Transaction,
+    instruction::Instruction, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use tempfile::TempDir;
 
@@ -39,22 +39,14 @@ fn hydra_program_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../programs/hydra/hydra.so")
 }
 
-fn airdrop_faucet(faucet: &Keypair) {
-    let chain_ctx = IntegrationTestContext::try_new_chain_only()
-        .expect("failed to connect to base chain to fund faucet");
-    chain_ctx
-        .airdrop_chain(&faucet.pubkey(), 100 * LAMPORTS_PER_SOL)
-        .expect("failed to airdrop to task scheduler faucet");
-}
-
-/// Starts a validator whose task scheduler sponsors hydra cranks from a freshly
-/// funded faucet. The faucet must be funded before startup, because the
-/// validator delegates it (but never funds it) while coming up.
-pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext, Keypair) {
+/// Starts a validator whose task scheduler sponsors hydra cranks from the
+/// validator identity, and returns that identity alongside the usual handles.
+pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext, Pubkey) {
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
 
-    let faucet = Keypair::new();
-    airdrop_faucet(&faucet);
+    let loaded_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+    let sponsor = loaded_accounts.validator_authority();
 
     let config = LeaderParams {
         lifecycle: LifecycleMode::Ephemeral,
@@ -62,11 +54,6 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext, Keypair) {
             Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
             Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
-        task_scheduler: TaskSchedulerConfig {
-            faucet_keypair: Some(
-                SerdeKeypair::from_str(&faucet.to_base58_string()).unwrap(),
-            ),
-        },
         // `eHyd5…` is the *ephemeral* hydra program: it executes cranks inside
         // the ER, so it is preloaded here rather than cloned from the base
         // chain (which only hosts hydra's base-chain counterpart).
@@ -79,7 +66,7 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext, Keypair) {
     let (default_tmpdir_config, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct_and_temp_dir(
             config,
-            &LoadedAccounts::with_delegation_program_test_authority(),
+            &loaded_accounts,
             default_tmpdir,
             temp_dir,
         )
@@ -90,7 +77,7 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext, Keypair) {
         IntegrationTestContext::try_new_with_ephem_port(port),
         validator
     );
-    (default_tmpdir_config, validator, ctx, faucet)
+    (default_tmpdir_config, validator, ctx, sponsor)
 }
 
 /// Sends an ephemeral transaction and asserts it committed successfully.
@@ -176,33 +163,6 @@ pub fn cancel_task(
         )],
         payer,
     );
-}
-
-/// Waits until the crank faucet is delegated and visible inside the ER.
-///
-/// The validator delegates the faucet in a background startup task, so a test
-/// that samples the faucet balance must not race that delegation.
-pub fn wait_for_funded_faucet(
-    ctx: &IntegrationTestContext,
-    faucet: &Pubkey,
-    max_timeout: Duration,
-    validator: &mut Child,
-) -> u64 {
-    let now = Instant::now();
-    while now.elapsed() < max_timeout {
-        if let Ok(balance) = ctx.fetch_ephem_account_balance(faucet) {
-            if balance > 0 {
-                return balance;
-            }
-        }
-        expect!(ctx.wait_for_next_slot_ephem(), validator);
-    }
-    assert!(
-        false,
-        cleanup(validator),
-        "crank faucet {} was not funded in the ER before timeout", faucet
-    );
-    unreachable!()
 }
 
 /// Waits until the hydra crank account for a task exists and is hydra-owned.

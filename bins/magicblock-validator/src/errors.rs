@@ -44,9 +44,6 @@ pub enum ApiError {
     #[error("On-chain setup transaction for validator '{0}' was rejected: {1}")]
     OnchainSetupTransactionRejected(Pubkey, String),
 
-    #[error("Failed to delegate task scheduler faucet '{0}': {1}")]
-    FailedToDelegateFaucet(Pubkey, String),
-
     #[error("CommittorServiceError")]
     CommittorServiceError(
         Box<magicblock_committor_service::error::CommittorServiceError>,
