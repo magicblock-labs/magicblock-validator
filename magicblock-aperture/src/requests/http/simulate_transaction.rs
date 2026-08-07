@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use magicblock_metrics::metrics::AccountFetchContext;
+use solana_account::AccountSharedData;
 use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
 use solana_message::inner_instruction::InnerInstructions;
 use solana_pubkey::Pubkey;
@@ -117,10 +118,20 @@ impl HttpDispatcher {
                             .map_err(RpcError::invalid_params)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+                let reader = |pubkey: &Pubkey, account: &AccountSharedData| {
+                    encode_ui_account(
+                        pubkey,
+                        account,
+                        accounts_encoding,
+                        None,
+                        None,
+                    )
+                };
                 let (current_accounts, remote_account_claims) = self
                     .read_accounts_with_ensure(
                         &pubkeys,
                         AccountFetchContext::rpc_get_multiple_accounts(),
+                        reader,
                     )
                     .await;
                 *claims += remote_account_claims;
@@ -135,7 +146,6 @@ impl HttpDispatcher {
                             post_simulation_accounts
                                 .get(&pubkey)
                                 .cloned()
-                                .or(account)
                                 .map(|account| {
                                     encode_ui_account(
                                         &pubkey,
@@ -145,6 +155,7 @@ impl HttpDispatcher {
                                         None,
                                     )
                                 })
+                                .or(account)
                         })
                         .collect(),
                 )

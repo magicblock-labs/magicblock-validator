@@ -53,7 +53,8 @@ async fn test_subs_receive_out_of_order_updates() {
 
     let acc = bank
         .accounts()
-        .get(&pubkey)
+        .loader()
+        .read(&pubkey, |account| account.clone())
         .unwrap()
         .expect("Account should be cloned");
     assert_eq!(acc.lamports(), 1_000_000);
@@ -91,7 +92,8 @@ async fn test_subs_receive_out_of_order_updates() {
 
     let acc = bank
         .accounts()
-        .get(&pubkey)
+        .loader()
+        .read(&pubkey, |account| account.clone())
         .unwrap()
         .expect("Account should be cloned");
     assert_eq!(acc, expected_state_3);

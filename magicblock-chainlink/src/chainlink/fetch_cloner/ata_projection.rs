@@ -216,14 +216,16 @@ where
         let loader = accessor.loader();
         let mut base_ata = None;
         for candidate_pubkey in ata_pubkeys.iter().copied() {
-            if let Some(candidate_account) =
-                loader.load(&candidate_pubkey).ok().flatten()
-                && is_ata(
-                    &candidate_pubkey,
-                    *candidate_account.owner(),
-                    candidate_account.data(),
-                )
-                .is_some()
+            let reader = |account: &AccountSharedData| {
+                is_ata(&candidate_pubkey, *account.owner(), account.data())
+                    .is_some()
+                    .then(|| account.clone())
+            };
+            if let Some(candidate_account) = loader
+                .read(&candidate_pubkey, reader)
+                .ok()
+                .flatten()
+                .flatten()
             {
                 base_ata = Some((candidate_pubkey, candidate_account));
                 break;

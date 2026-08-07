@@ -257,8 +257,11 @@ impl TestContext {
             loop {
                 // The snapshot is authoritative and also covers updates that
                 // commit before the subscription receiver is polled.
-                let account =
-                    bank.accounts().get(pubkey).expect("load local account");
+                let account = bank
+                    .accounts()
+                    .loader()
+                    .read(pubkey, AccountSharedData::clone)
+                    .expect("load local account");
                 if account.as_ref() == Some(expected) {
                     break;
                 }
@@ -295,15 +298,18 @@ impl TestContext {
         // We modify the account direclty in the bank
         // normally this would happen as part of a transaction
         // Magicblock program marks account as undelegated in the Ephem
+        let reader = |account: &AccountSharedData| {
+            AccountBuilder::from(account.clone())
+                .owner(dlp_api::id())
+                .mode(AccountMode::Transient)
+        };
         let account = self
             .bank
             .accounts()
-            .get(pubkey)
+            .loader()
+            .read(pubkey, reader)
             .expect("load local account")
             .expect("account exists before undelegation");
-        let account = AccountBuilder::from(account)
-            .owner(dlp_api::id())
-            .mode(AccountMode::Transient);
         self.bank
             .account(*pubkey)
             .update(account)

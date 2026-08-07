@@ -19,11 +19,12 @@ impl HttpDispatcher {
         !account.is(AccountMode::Placeholder)
     }
 
-    pub(super) async fn read_account_with_ensure(
+    pub(super) async fn read_account_with_ensure<R>(
         &self,
         pubkey: &Pubkey,
         fetch_context: AccountFetchContext,
-    ) -> (Option<AccountSharedData>, u64) {
+        reader: impl Fn(&AccountSharedData) -> R,
+    ) -> (Option<R>, u64) {
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["account"])
             .start_timer();
@@ -32,14 +33,22 @@ impl HttpDispatcher {
             .ensure_accounts(&[*pubkey], fetch_context)
             .await
             .unwrap_or_default();
-        (self.engine.accounts().get(pubkey).ok().flatten(), claims)
+        let account = self
+            .engine
+            .accounts()
+            .loader()
+            .read(pubkey, reader)
+            .ok()
+            .flatten();
+        (account, claims)
     }
 
-    pub(super) async fn read_accounts_with_ensure(
+    pub(super) async fn read_accounts_with_ensure<R>(
         &self,
         pubkeys: &[Pubkey],
         fetch_context: AccountFetchContext,
-    ) -> (Vec<Option<AccountSharedData>>, u64) {
+        reader: impl Fn(&Pubkey, &AccountSharedData) -> R,
+    ) -> (Vec<Option<R>>, u64) {
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["multi-account"])
             .start_timer();
@@ -54,7 +63,12 @@ impl HttpDispatcher {
             let loader = accessor.loader();
             pubkeys
                 .iter()
-                .map(|pubkey| loader.load(pubkey).ok().flatten())
+                .map(|pubkey| {
+                    loader
+                        .read(pubkey, |account| reader(pubkey, account))
+                        .ok()
+                        .flatten()
+                })
                 .collect()
         };
         (accounts, claims)
@@ -72,17 +86,21 @@ impl HttpDispatcher {
                 .unwrap_or_default();
             let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
             let slice = config.data_slice;
+            let reader = |account: &AccountSharedData| {
+                Self::account_is_visible(account).then(|| {
+                    encode_ui_account(&pubkey, account, encoding, None, slice)
+                })
+            };
 
             let (account, remote_account_claims) = self
                 .read_account_with_ensure(
                     &pubkey,
                     AccountFetchContext::rpc_get_account(),
+                    reader,
                 )
                 .await;
             claims += remote_account_claims;
-            let account = account.filter(Self::account_is_visible).map(|acc| {
-                encode_ui_account(&pubkey, &acc, encoding, None, slice)
-            });
+            let account = account.flatten();
 
             let slot = self.engine.blocks().latest().slot;
             Ok(ResponsePayload::encode(&request.id, account, slot))

@@ -62,8 +62,13 @@ async fn write_non_existing_account(ctx: &TestContext) {
         .unwrap();
 
     assert_cloned_as_empty_placeholder!(bank, &pubkeys);
-    let account = bank.accounts().get(&pubkey).unwrap().unwrap();
-    assert_eq!(account.mode(), AccountMode::Placeholder);
+    let mode = bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| account.mode())
+        .unwrap()
+        .unwrap();
+    assert_eq!(mode, AccountMode::Placeholder);
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }
 
@@ -118,8 +123,13 @@ async fn existing_account_missing_delegation_record(ctx: &TestContext) {
         .unwrap();
 
     assert_cloned_as_undelegated!(bank, &pubkeys, CURRENT_SLOT);
-    let account = bank.accounts().get(&pubkey).unwrap().unwrap();
-    assert_eq!(account.mode(), AccountMode::Placeholder);
+    let mode = bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| account.mode())
+        .unwrap()
+        .unwrap();
+    assert_eq!(mode, AccountMode::Placeholder);
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }
 
@@ -195,8 +205,13 @@ async fn write_existing_account_other_authority(ctx: &TestContext) {
 
     // The account is cloned into the bank as undelegated, the delegation record isn't
     assert_cloned_as_undelegated!(bank, &pubkeys, CURRENT_SLOT, owner);
-    let account = bank.accounts().get(&pubkey).unwrap().unwrap();
-    assert_eq!(account.mode(), AccountMode::Placeholder);
+    let mode = bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| account.mode())
+        .unwrap()
+        .unwrap();
+    assert_eq!(mode, AccountMode::Placeholder);
     assert_not_cloned!(bank, &[deleg_record_pubkey]);
 
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
@@ -309,7 +324,7 @@ async fn write_existing_account_invalid_delegation_record(ctx: &TestContext) {
         .await;
 
     assert_matches!(res, Err(_));
-    assert!(bank.accounts().get(&pubkey).unwrap().is_none());
+    assert!(!bank.accounts().loader().contains(&pubkey).unwrap());
 
     assert_not_subscribed!(chainlink, &[&deleg_record_pubkey, &pubkey]);
 }

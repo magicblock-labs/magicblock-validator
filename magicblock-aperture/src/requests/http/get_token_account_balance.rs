@@ -28,63 +28,71 @@ impl HttpDispatcher {
         let mut claims = 0;
         let result = async {
             let pubkey: Pubkey = request.required::<Serde32Bytes>(0)?.into();
+            let reader = |account: &AccountSharedData| {
+                if !is_known_spl_token_id(account.owner()) {
+                    return Err(RpcError::invalid_params(
+                        "account is not a token account",
+                    ));
+                }
+                let token =
+                    StateWithExtensions::<TokenAccount>::unpack(account.data())
+                        .map_err(|_| {
+                            RpcError::invalid_params(
+                                "invalid token account data",
+                            )
+                        })?;
+                if token.base.state == AccountState::Uninitialized {
+                    return Err(RpcError::invalid_params(
+                        "token account is not initialized",
+                    ));
+                }
+                Ok((*account.owner(), token.base.mint, token.base.amount))
+            };
 
             let (token_account, remote_account_claims) = self
                 .read_account_with_ensure(
                     &pubkey,
                     AccountFetchContext::rpc_get_account(),
+                    reader,
                 )
                 .await;
             claims += remote_account_claims;
-            let token_account: AccountSharedData =
+            let (token_owner, mint, amount) =
                 token_account.ok_or_else(|| {
                     RpcError::invalid_params("token account not found")
-                })?;
-            if !is_known_spl_token_id(token_account.owner()) {
-                return Err(RpcError::invalid_params(
-                    "account is not a token account",
-                ));
-            }
-            let token = StateWithExtensions::<TokenAccount>::unpack(
-                token_account.data(),
-            )
-            .map_err(|_| {
-                RpcError::invalid_params("invalid token account data")
-            })?;
-            if token.base.state == AccountState::Uninitialized {
-                return Err(RpcError::invalid_params(
-                    "token account is not initialized",
-                ));
-            }
+                })??;
+            let reader = |account: &AccountSharedData| {
+                if account.owner() != &token_owner {
+                    return Err(RpcError::invalid_params("invalid mint owner"));
+                }
+                let mint = StateWithExtensions::<Mint>::unpack(account.data())
+                    .map_err(|_| {
+                        RpcError::invalid_params("invalid mint account data")
+                    })?;
+                if !mint.base.is_initialized {
+                    return Err(RpcError::invalid_params(
+                        "mint is not initialized",
+                    ));
+                }
+                Ok(mint.base.decimals)
+            };
 
             let (mint_account, remote_account_claims) = self
                 .read_account_with_ensure(
-                    &token.base.mint,
+                    &mint,
                     AccountFetchContext::rpc_get_account(),
+                    reader,
                 )
                 .await;
             claims += remote_account_claims;
-            let mint_account: AccountSharedData =
-                mint_account.ok_or_else(|| {
-                    RpcError::invalid_params("mint account not found")
-                })?;
-            if mint_account.owner() != token_account.owner() {
-                return Err(RpcError::invalid_params("invalid mint owner"));
-            }
-            let mint = StateWithExtensions::<Mint>::unpack(mint_account.data())
-                .map_err(|_| {
-                    RpcError::invalid_params("invalid mint account data")
-                })?;
-            if !mint.base.is_initialized {
-                return Err(RpcError::invalid_params(
-                    "mint is not initialized",
-                ));
-            }
+            let decimals = mint_account.ok_or_else(|| {
+                RpcError::invalid_params("mint account not found")
+            })??;
 
             let ui_token_amount = token_amount_to_ui_amount_v3(
-                token.base.amount,
+                amount,
                 &SplTokenAdditionalDataV2 {
-                    decimals: mint.base.decimals,
+                    decimals,
                     interest_bearing_config: None,
                     scaled_ui_amount_config: None,
                 },

@@ -72,10 +72,10 @@ impl RemoteAccount {
                 ..
             }) => engine
                 .accounts()
-                .get(pubkey)
+                .loader()
+                .read(pubkey, |account| AccountBuilder::from(account.clone()))
                 .ok()
-                .flatten()
-                .map(AccountBuilder::from),
+                .flatten(),
             // Account not fetched/subbed nor in the bank
             RemoteAccount::NotFound(_) => None,
         }

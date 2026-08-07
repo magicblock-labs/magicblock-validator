@@ -229,9 +229,12 @@ async fn post_delegation_aml_accepts_low_risk_signer() {
     assert!(
         ctx.bank
             .accounts()
-            .get(&delegated_pubkey)
+            .loader()
+            .read(&delegated_pubkey, |account| {
+                account.is(AccountMode::Delegated)
+            })
             .unwrap()
-            .is_some_and(|account| account.is(AccountMode::Delegated)),
+            .unwrap_or(false),
         "AML-accepted action should clone the delegated account"
     );
 

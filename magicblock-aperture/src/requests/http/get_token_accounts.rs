@@ -1,4 +1,4 @@
-use solana_account::ReadableAccount;
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_account_decoder::{
     UiAccountEncoding, parse_token::is_known_spl_token_id,
 };
@@ -43,23 +43,32 @@ impl HttpDispatcher {
             RpcTokenAccountsFilter::Mint(mint) => {
                 let mint: Pubkey =
                     mint.parse().map_err(RpcError::invalid_params)?;
+                let reader = |account: &AccountSharedData| {
+                    (
+                        *account.owner(),
+                        is_known_spl_token_id(account.owner())
+                            && StateWithExtensions::<Mint>::unpack(
+                                account.data(),
+                            )
+                            .is_ok(),
+                    )
+                };
                 let account = self
                     .engine
                     .accounts()
-                    .get(&mint)
+                    .loader()
+                    .read(&mint, reader)
                     .map_err(RpcError::internal)?
                     .ok_or_else(|| {
                         RpcError::invalid_params("mint account not found")
                     })?;
-                if !is_known_spl_token_id(account.owner())
-                    || StateWithExtensions::<Mint>::unpack(account.data())
-                        .is_err()
-                {
+                let (owner, valid) = account;
+                if !valid {
                     return Err(RpcError::invalid_params(
                         "invalid mint account",
                     ));
                 }
-                (*account.owner(), Some(mint))
+                (owner, Some(mint))
             }
             RpcTokenAccountsFilter::ProgramId(program) => {
                 let program: Pubkey =

@@ -415,11 +415,18 @@ where
         pubkey: Pubkey,
         account: &AccountSharedData,
     ) -> DlpProgramUpdateInterest {
-        if let Some(local_account) = self.get_account(&pubkey) {
-            if local_account.is(AccountMode::Transient) {
+        if let Some((undelegating, delegated)) =
+            self.read_account(&pubkey, |account| {
+                (
+                    account.is(AccountMode::Transient),
+                    account.is(AccountMode::Delegated),
+                )
+            })
+        {
+            if undelegating {
                 return DlpProgramUpdateInterest::ProcessUndelegating;
             }
-            if local_account.is(AccountMode::Delegated) {
+            if delegated {
                 return DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative;
             }
         }
@@ -457,7 +464,7 @@ where
     ) -> bool {
         if ata_pubkeys
             .iter()
-            .any(|ata_pubkey| self.get_account(ata_pubkey).is_some())
+            .any(|ata_pubkey| self.contains_account(ata_pubkey))
         {
             return true;
         }
@@ -568,11 +575,25 @@ where
         &self.engine
     }
 
-    pub(crate) fn get_account(
+    pub(crate) fn read_account<R>(
         &self,
         pubkey: &Pubkey,
-    ) -> Option<AccountSharedData> {
-        self.engine.accounts().get(pubkey).ok().flatten()
+        reader: impl Fn(&AccountSharedData) -> R,
+    ) -> Option<R> {
+        self.engine
+            .accounts()
+            .loader()
+            .read(pubkey, reader)
+            .ok()
+            .flatten()
+    }
+
+    pub(crate) fn contains_account(&self, pubkey: &Pubkey) -> bool {
+        self.engine
+            .accounts()
+            .loader()
+            .contains(pubkey)
+            .unwrap_or(false)
     }
 
     pub(crate) fn remote_account_provider(
@@ -715,8 +736,8 @@ where
         let clone_intent = ChainlinkCloneIntent::ProgramData;
 
         if self
-            .get_account(&program_id)
-            .is_some_and(|account| account.slot() >= remote_slot)
+            .read_account(&program_id, |account| account.slot() >= remote_slot)
+            .unwrap_or(false)
         {
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context,
@@ -846,8 +867,10 @@ where
             Err(err) => {
                 let pubkey = request.pubkey;
                 if self
-                    .get_account(&pubkey)
-                    .is_some_and(|account| account.is(AccountMode::Transient))
+                    .read_account(&pubkey, |account| {
+                        account.is(AccountMode::Transient)
+                    })
+                    .unwrap_or(false)
                 {
                     return Err(err);
                 }
@@ -893,8 +916,8 @@ where
         let clone_intent = Self::clone_intent_for_request(&request);
 
         if self
-            .get_account(&pubkey)
-            .is_some_and(|account| account.is(AccountMode::Transient))
+            .read_account(&pubkey, |account| account.is(AccountMode::Transient))
+            .unwrap_or(false)
         {
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context,
@@ -978,7 +1001,7 @@ where
         // Placeholder is reserved for a zero-lamport account absent locally;
         // existing lifecycle transitions resolve through ReadOnly.
         let mode = if mode == AccountMode::Placeholder
-            && self.get_account(&request.pubkey).is_none()
+            && !self.contains_account(&request.pubkey)
         {
             AccountMode::Placeholder
         } else {
@@ -992,8 +1015,8 @@ where
     }
 
     fn local_delegated_clone_target_active(&self, pubkey: Pubkey) -> bool {
-        self.get_account(&pubkey)
-            .is_some_and(|account| account.is(AccountMode::Delegated))
+        self.read_account(&pubkey, |account| account.is(AccountMode::Delegated))
+            .unwrap_or(false)
     }
 
     pub fn start_subscription_listener(
@@ -1176,7 +1199,7 @@ where
                 update_slot,
                 "Dropping subscription update for account that is no longer watched"
             );
-            if self.get_account(&pubkey).is_some()
+            if self.contains_account(&pubkey)
                 && let Err(err) = self
                     .remote_account_provider
                     .send_stale_account(pubkey)
@@ -1237,23 +1260,22 @@ where
         //    or undelegating version while the subscription update carries the delegated state
         //    at the same slot, so we must allow that update.
         //
-        let non_advancing_slot =
-            self.get_account(&pubkey).and_then(|in_bank| {
-                let bank_slot = in_bank.slot();
-                let update_slot = account.read().slot();
-                let same_slot_delegated_refresh = bank_slot == update_slot
-                    && account.read().is(AccountMode::Delegated)
-                    && (!in_bank.is(AccountMode::Delegated)
-                        || in_bank.is(AccountMode::Transient));
-                if bank_slot > update_slot
-                    || (bank_slot == update_slot
-                        && !same_slot_delegated_refresh)
-                {
-                    Some(bank_slot)
-                } else {
-                    None
-                }
-            });
+        let reader = |in_bank: &AccountSharedData| {
+            let bank_slot = in_bank.slot();
+            let update_slot = account.read().slot();
+            let same_slot_delegated_refresh = bank_slot == update_slot
+                && account.read().is(AccountMode::Delegated)
+                && (!in_bank.is(AccountMode::Delegated)
+                    || in_bank.is(AccountMode::Transient));
+            if bank_slot > update_slot
+                || (bank_slot == update_slot && !same_slot_delegated_refresh)
+            {
+                Some(bank_slot)
+            } else {
+                None
+            }
+        };
+        let non_advancing_slot = self.read_account(&pubkey, reader).flatten();
 
         if let Some(in_bank_slot) = non_advancing_slot {
             let update_slot = account.read().slot();
@@ -1284,21 +1306,29 @@ where
         }
 
         let mut undelegation_completed_on_chain = false;
-        if let Some(in_bank) = self.get_account(&pubkey) {
-            if in_bank.is(AccountMode::Delegated)
-                && !in_bank.is(AccountMode::Transient)
-            {
+        let reader = |in_bank: &AccountSharedData| {
+            (
+                in_bank.is(AccountMode::Delegated),
+                in_bank.is(AccountMode::Transient),
+                *in_bank.owner(),
+                in_bank.slot(),
+            )
+        };
+        if let Some((delegated, transient, owner, slot)) =
+            self.read_account(&pubkey, reader)
+        {
+            if delegated && !transient {
                 self.cleanup_direct_subscription_for_delegated_account(pubkey)
                     .await;
                 return;
             }
 
-            if in_bank.is(AccountMode::Transient) {
+            if transient {
                 debug!(
                     pubkey = %pubkey,
-                    in_bank_delegated = in_bank.is(AccountMode::Delegated),
-                    in_bank_owner = %in_bank.owner(),
-                    in_bank_slot = in_bank.slot(),
+                    in_bank_delegated = delegated,
+                    in_bank_owner = %owner,
+                    in_bank_slot = slot,
                     chain_delegated = account.read().is(AccountMode::Delegated),
                     chain_owner = %account.read().owner(),
                     chain_slot = account.read().slot(),
@@ -1332,18 +1362,16 @@ where
                 if account_still_undelegating_on_chain(
                     &pubkey,
                     account.read().is(AccountMode::Delegated),
-                    in_bank.slot(),
+                    slot,
                     deleg_record,
                     &self.validator_pubkey,
                 ) {
                     return;
                 }
                 undelegation_completed_on_chain = true;
-            } else if !in_bank.is(AccountMode::Delegated)
-                && account.read().is(AccountMode::Delegated)
-            {
+            } else if !delegated && account.read().is(AccountMode::Delegated) {
                 undelegation_completed_on_chain = true;
-            } else if in_bank.owner().eq(&dlp_api::id()) {
+            } else if owner == dlp_api::id() {
                 debug!(
                     pubkey = %pubkey,
                     "Received update for account owned by delegation program but not marked as undelegating"
@@ -1459,14 +1487,17 @@ where
                 dependencies
                     .into_iter()
                     .filter(|dependency| {
-                        let Some(account) =
-                            loader.load(dependency).ok().flatten()
+                        let reader = |account: &AccountSharedData| {
+                            writable_dependencies.contains(dependency)
+                                && (!account.is(AccountMode::Delegated)
+                                    || account.is(AccountMode::Transient))
+                        };
+                        let Some(needs_refresh) =
+                            loader.read(dependency, reader).ok().flatten()
                         else {
                             return true;
                         };
-                        writable_dependencies.contains(dependency)
-                            && (!account.is(AccountMode::Delegated)
-                                || account.is(AccountMode::Transient))
+                        needs_refresh
                     })
                     .collect::<HashSet<_>>()
                     .into_iter()
@@ -1565,8 +1596,10 @@ where
         fetch_context: AccountFetchContext,
         materialization: AccountMaterialization,
     ) -> ChainlinkResult<()> {
-        match self.get_account(&request.pubkey) {
-            Some(account) if account.is(AccountMode::Transient) => {
+        match self.read_account(&request.pubkey, |account| {
+            account.is(AccountMode::Transient)
+        }) {
+            Some(true) => {
                 return Ok(());
             }
             None if materialization == AccountMaterialization::Update => {
@@ -1592,11 +1625,12 @@ where
         &self,
         candidate: ParkedCollisionCandidate,
     ) {
-        let fresh_delegated =
-            self.get_account(&candidate.pubkey).is_some_and(|account| {
+        let fresh_delegated = self
+            .read_account(&candidate.pubkey, |account| {
                 account.is(AccountMode::Delegated)
                     && account.slot() >= candidate.slot
-            });
+            })
+            .unwrap_or(false);
         if fresh_delegated {
             return;
         }
@@ -1644,7 +1678,7 @@ where
             // The candidate may have been parked before local undelegation
             // started. Do not let its later record sighting bypass the normal
             // confirmation check and overwrite protected local state.
-            if self.get_account(&candidate.pubkey).is_some_and(|in_bank| {
+            let reader = |in_bank: &AccountSharedData| {
                 in_bank.is(AccountMode::Transient)
                     && account_still_undelegating_on_chain(
                         &candidate.pubkey,
@@ -1653,7 +1687,11 @@ where
                         Some(deleg_record),
                         &self.validator_pubkey,
                     )
-            }) {
+            };
+            if self
+                .read_account(&candidate.pubkey, reader)
+                .unwrap_or(false)
+            {
                 trace!(
                     pubkey = %candidate.pubkey,
                     slot = candidate.slot,
@@ -1691,19 +1729,20 @@ where
             if unresolvable {
                 return;
             }
-            let in_bank = self.get_account(&candidate.pubkey);
-            let settled = in_bank.as_ref().is_some_and(|account| {
-                account.slot() > candidate.slot
+            let reader = |account: &AccountSharedData| {
+                let settled = account.slot() > candidate.slot
                     || (account.slot() == candidate.slot
-                        && account.is(AccountMode::Delegated))
-            });
+                        && account.is(AccountMode::Delegated));
+                let stale_transient = account.is(AccountMode::Transient)
+                    && deleg_record.delegation_slot <= account.slot();
+                (settled, stale_transient)
+            };
+            let in_bank = self.read_account(&candidate.pubkey, reader);
+            let settled = in_bank.is_some_and(|(settled, _)| settled);
             if settled {
                 return;
             }
-            if in_bank.is_some_and(|account| {
-                account.is(AccountMode::Transient)
-                    && deleg_record.delegation_slot <= account.slot()
-            }) {
+            if in_bank.is_some_and(|(_, stale_transient)| stale_transient) {
                 break;
             }
         }
@@ -1725,7 +1764,7 @@ where
         pubkey: Pubkey,
         update: &ForwardedSubscriptionUpdate,
     ) -> bool {
-        if self.get_account(&pubkey).is_some() {
+        if self.contains_account(&pubkey) {
             return false;
         }
 
@@ -1795,7 +1834,7 @@ where
             let accessor = self.engine.accounts();
             let loader = accessor.loader();
             pubkeys_to_clone.extend(greedy_ata_pubkeys.iter().copied().filter(
-                |ata_pubkey| loader.load(ata_pubkey).ok().flatten().is_none(),
+                |ata_pubkey| !loader.contains(ata_pubkey).unwrap_or(false),
             ));
         }
 
@@ -1833,7 +1872,7 @@ where
                     ) =>
             {
                 let bank_slot =
-                    self.get_account(&pubkey).map(|in_bank| in_bank.slot());
+                    self.read_account(&pubkey, |in_bank| in_bank.slot());
                 if bank_slot.is_none_or(|slot| slot < account.slot()) {
                     trace!(
                         pubkey = %pubkey,
@@ -1889,12 +1928,12 @@ where
                         let loader = accessor.loader();
                         greedy_ata_pubkeys.iter().copied().find(|ata_pubkey| {
                             loader
-                                .load(ata_pubkey)
-                                .ok()
-                                .flatten()
-                                .is_some_and(|account_in_bank| {
+                                .read(ata_pubkey, |account_in_bank| {
                                     account_in_bank.slot() >= account.slot()
                                 })
+                                .ok()
+                                .flatten()
+                                .unwrap_or(false)
                         })
                     };
                     if let Some(ata_pubkey) = cloned_ata_pubkey {
@@ -2640,7 +2679,7 @@ where
             action_dependencies
                 .into_iter()
                 .filter(|dependency| {
-                    loader.load(dependency).ok().flatten().is_none()
+                    !loader.contains(dependency).unwrap_or(false)
                         && !accounts_to_clone
                             .iter()
                             .any(|request| request.pubkey.eq(dependency))
@@ -2832,22 +2871,20 @@ where
     async fn should_refresh_undelegating_in_bank_account(
         &self,
         pubkey: &Pubkey,
-        in_bank: &AccountSharedData,
+        in_bank_slot: u64,
+        delegated: bool,
+        eata_pubkey: Option<Pubkey>,
         fetch_context: AccountFetchContext,
     ) -> RefreshDecision {
-        if in_bank.is(AccountMode::Transient) {
+        {
             debug!(
                 pubkey = %pubkey,
-                delegated = in_bank.is(AccountMode::Delegated),
-                undelegating = in_bank.is(AccountMode::Transient),
+                delegated,
+                undelegating = true,
                 "Fetching undelegating account"
             );
 
-            if let Some(eata_pubkey) =
-                ata_projection::derive_eata_pubkey_from_ata_layout(
-                    pubkey, in_bank,
-                )
-            {
+            if let Some(eata_pubkey) = eata_pubkey {
                 let undelegating_refresh_context = fetch_context
                     .clone()
                     .with_reason(AccountFetchReason::UndelegatingRefresh);
@@ -2910,7 +2947,7 @@ where
             if !account_still_undelegating_on_chain(
                 pubkey,
                 delegated_on_chain,
-                in_bank.slot(),
+                in_bank_slot,
                 deleg_record,
                 &self.validator_pubkey,
             ) {
@@ -2919,10 +2956,6 @@ where
                 );
                 return RefreshDecision::Yes;
             }
-        } else if in_bank.owner().eq(&dlp_api::id()) {
-            debug!(
-                "Account {pubkey} owned by deleg program not marked as undelegating"
-            );
         }
         RefreshDecision::No
     }
@@ -2990,19 +3023,26 @@ where
         // Phase 1: Sync bank check — separate undelegating accounts
         // (which need async RPC) from non-undelegating (handled
         // synchronously)
-        let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
+        let mut undelegating_checks = vec![];
         {
             let accessor = self.engine.accounts();
             let loader = accessor.loader();
             for pubkey in pubkeys.iter() {
                 if force_refresh_pubkeys.contains(*pubkey) {
-                    if let Some(account) = loader.load(pubkey).ok().flatten()
-                        && account.is(AccountMode::Transient)
+                    if let Some(slot) = loader
+                        .read(pubkey, |account| {
+                            account
+                                .is(AccountMode::Transient)
+                                .then(|| account.slot())
+                        })
+                        .ok()
+                        .flatten()
+                        .flatten()
                     {
                         let can_replace = confirmed_redelegation.is_some_and(
                             |(confirmed_pubkey, delegation_slot)| {
                                 confirmed_pubkey == **pubkey
-                                    && delegation_slot > account.slot()
+                                    && delegation_slot > slot
                             },
                         );
                         if !can_replace {
@@ -3016,32 +3056,50 @@ where
                     refresh.insert(**pubkey);
                     continue;
                 }
-                if let Some(account_in_bank) =
-                    loader.load(pubkey).ok().flatten()
-                {
-                    if account_in_bank.is(AccountMode::Transient) {
-                        undelegating_checks.push((**pubkey, account_in_bank));
+                let reader = |account: &AccountSharedData| {
+                    if account.is(AccountMode::Transient) {
+                        Err((
+                            account.slot(),
+                            account.is(AccountMode::Delegated),
+                            ata_projection::derive_eata_pubkey_from_ata_layout(
+                                pubkey, account,
+                            ),
+                        ))
                     } else {
-                        if account_in_bank.owner().eq(&dlp_api::id()) {
-                            debug!(
-                                pubkey = %pubkey,
-                                "Account owned by deleg program not marked as undelegating"
-                            );
+                        Ok((
+                            account.owner().eq(&dlp_api::id()),
+                            account.is(AccountMode::Delegated),
+                            *account.owner(),
+                        ))
+                    }
+                };
+                if let Some(account_in_bank) =
+                    loader.read(pubkey, reader).ok().flatten()
+                {
+                    match account_in_bank {
+                        Err(account_in_bank) => {
+                            undelegating_checks
+                                .push((**pubkey, account_in_bank));
                         }
-                        if tracing::enabled!(tracing::Level::TRACE) {
-                            let delegated =
-                                account_in_bank.is(AccountMode::Delegated);
-                            let owner = account_in_bank.owner();
-                            trace!(
-                                pubkey = %pubkey,
-                                undelegating = false,
-                                delegated,
-                                owner = %owner,
-                                "Account found in bank in valid state, no fetch needed"
-                            );
+                        Ok((owned_by_dlp, delegated, owner)) => {
+                            if owned_by_dlp {
+                                debug!(
+                                    pubkey = %pubkey,
+                                    "Account owned by deleg program not marked as undelegating"
+                                );
+                            }
+                            if tracing::enabled!(tracing::Level::TRACE) {
+                                trace!(
+                                    pubkey = %pubkey,
+                                    undelegating = false,
+                                    delegated,
+                                    owner = %owner,
+                                    "Account found in bank in valid state, no fetch needed"
+                                );
+                            }
+                            bank_hit_no_fetch_non_undelegating_count += 1;
+                            in_bank.insert(**pubkey);
                         }
-                        bank_hit_no_fetch_non_undelegating_count += 1;
-                        in_bank.insert(**pubkey);
                     }
                 } else {
                     bank_miss_remote_required_count += 1;
@@ -3052,7 +3110,8 @@ where
         // Phase 2: Parallel undelegation checks via JoinSet
         if !undelegating_checks.is_empty() {
             let mut join_set = JoinSet::new();
-            for (pubkey, account_in_bank) in undelegating_checks {
+            for (pubkey, (slot, delegated, eata_pubkey)) in undelegating_checks
+            {
                 let this = self.clone();
                 let fetch_context = fetch_context.clone();
                 join_set.spawn(async move {
@@ -3060,7 +3119,9 @@ where
                         Duration::from_secs(5),
                         this.should_refresh_undelegating_in_bank_account(
                             &pubkey,
-                            &account_in_bank,
+                            slot,
+                            delegated,
+                            eata_pubkey,
                             fetch_context,
                         ),
                     )
@@ -3329,9 +3390,10 @@ where
             ResolvedAccount::Fresh(account) => {
                 Some(AccountBuilder::from(account.clone()))
             }
-            ResolvedAccount::Bank((pubkey, _)) => {
-                loader.load(pubkey).ok().flatten().map(AccountBuilder::from)
-            }
+            ResolvedAccount::Bank((pubkey, _)) => loader
+                .read(pubkey, |account| AccountBuilder::from(account.clone()))
+                .ok()
+                .flatten(),
         };
         match (acc, companion) {
             // Account not found even though we found it previously - this is invalid,

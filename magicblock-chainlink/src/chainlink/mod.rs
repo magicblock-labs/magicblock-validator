@@ -128,8 +128,12 @@ pub struct InnerChainlink<T: ChainRpcClient, U: ChainPubsubClient> {
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
-    fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-        self.engine.accounts().get(pubkey).ok().flatten()
+    fn contains_account(&self, pubkey: &Pubkey) -> bool {
+        self.engine
+            .accounts()
+            .loader()
+            .contains(pubkey)
+            .unwrap_or(false)
     }
 
     pub fn try_new(
@@ -345,7 +349,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
 
         // Determine if we need to clone the escrow account for the feepayer
-        let clone_escrow = self.get_account(&balance_pda).is_none();
+        let clone_escrow = !self.contains_account(&balance_pda);
 
         // If cloning escrow, add the balance PDA
         if clone_escrow {
@@ -409,7 +413,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             let loader = accessor.loader();
             return Ok(pubkeys
                 .iter()
-                .map(|pubkey| loader.load(pubkey).ok().flatten())
+                .map(|pubkey| {
+                    loader.read(pubkey, AccountSharedData::clone).ok().flatten()
+                })
                 .collect());
         };
         self.fetch_accounts_common(fetch_cloner, pubkeys, fetch_context)
@@ -419,7 +425,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         let loader = accessor.loader();
         let accounts = pubkeys
             .iter()
-            .map(|pubkey| loader.load(pubkey).ok().flatten())
+            .map(|pubkey| {
+                loader.read(pubkey, AccountSharedData::clone).ok().flatten()
+            })
             .collect();
         Ok(accounts)
     }
@@ -475,18 +483,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             .map(|(pubkey, remote_account)| {
                 let delegated_on_base =
                     remote_account.is_owned_by_delegation_program();
-                let account_on_er = match loader.load(pubkey).ok().flatten() {
-                    None => AccountStatusOnEr::Missing,
-                    Some(account) => {
-                        // Q: do we need to compare the owner? isn't delegated() alone enough?
-                        if account.is(AccountMode::Delegated)
+                let account_on_er = match loader
+                    .read(pubkey, |account| {
+                        account.is(AccountMode::Delegated)
                             || account.owner().eq(&dlp_api::id())
-                        {
-                            AccountStatusOnEr::Delegated
-                        } else {
-                            AccountStatusOnEr::NotDelegated
-                        }
-                    }
+                    })
+                    .ok()
+                    .flatten()
+                {
+                    None => AccountStatusOnEr::Missing,
+                    Some(true) => AccountStatusOnEr::Delegated,
+                    Some(false) => AccountStatusOnEr::NotDelegated,
                 };
                 AccountDelegationStatus {
                     delegated_on_base,

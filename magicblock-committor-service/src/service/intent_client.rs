@@ -112,16 +112,19 @@ impl ERIntentClient for InternalIntentRpcClient {
     ) -> Result<Vec<ScheduledIntentBundle>, Self::Error> {
         // If accounts were scheduled to be committed, we accept them here
         // and processs the commits
-        let magic_context_acc = self
+        let has_scheduled_commits = self
             .engine
             .accounts()
-            .get(&MAGIC_CONTEXT_PUBKEY)
+            .loader()
+            .read(&MAGIC_CONTEXT_PUBKEY, |account| {
+                MagicContext::has_scheduled_commits(account.data())
+            })
             .ok()
             .flatten()
             .expect(
                 "Validator found to be running without MagicContext account!",
             );
-        if !MagicContext::has_scheduled_commits(magic_context_acc.data()) {
+        if !has_scheduled_commits {
             return Ok(vec![]);
         }
         self.send_accept_tx().await?;

@@ -245,7 +245,7 @@ where
     // Handle edge case where it was cloned in the meantime.
     // The small possibility of a fetch + clone of this delegation record being in process
     // still exists, but it's negligible.
-    if this.get_account(&delegation_record_pubkey).is_none() {
+    if !this.contains_account(&delegation_record_pubkey) {
         releases.push(SubscriptionRelease::Pubkey {
             pubkey: delegation_record_pubkey,
             reason: SubscriptionReason::DirectAccount,

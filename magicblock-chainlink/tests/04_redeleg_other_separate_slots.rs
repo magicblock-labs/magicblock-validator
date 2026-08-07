@@ -83,7 +83,11 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
 
         // Account should be cloned as undelegated
         assert_eq!(
-            bank.accounts().get(&pubkey).unwrap().unwrap(),
+            bank.accounts()
+                .loader()
+                .read(&pubkey, AccountSharedData::clone)
+                .unwrap()
+                .unwrap(),
             undelegated_acc
         );
 
@@ -122,7 +126,11 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
             .mode(AccountMode::ReadOnly)
             .build();
         assert_eq!(
-            bank.accounts().get(&pubkey).unwrap().unwrap(),
+            bank.accounts()
+                .loader()
+                .read(&pubkey, AccountSharedData::clone)
+                .unwrap()
+                .unwrap(),
             acc_redeleg_expected
         );
 
