@@ -1,7 +1,7 @@
 name: Good First Issue
 description: Small, well-scoped task for new contributors
 title: ""
-labels: ["good first issue"]
+labels: ["priority:low", "good first issue"]
 body:
   - type: textarea
     id: task
@@ -12,12 +12,12 @@ body:
       required: true
 
   - type: textarea
-    id: context
+    id: starting_points
     attributes:
-      label: Context
-      description: Background, relevant files, or pointers to get started
+      label: Starting Points
+      description: Provide relevant files, existing behavior, and enough context for a new contributor to begin.
     validations:
-      required: false
+      required: true
 
   - type: textarea
     id: acceptance
@@ -27,4 +27,4 @@ body:
       placeholder: |
         - [ ]
     validations:
-      required: false
+      required: true

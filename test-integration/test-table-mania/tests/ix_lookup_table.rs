@@ -1,3 +1,4 @@
+use integration_test_tools::init_logger;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{
     find_open_tables, LookupTableRc, TableManiaComputeBudgets,
@@ -12,7 +13,6 @@ use solana_sdk::{
     clock::Slot, native_token::LAMPORTS_PER_SOL, signature::Keypair,
     signer::Signer,
 };
-use test_kit::init_logger;
 use tracing::*;
 
 mod utils;

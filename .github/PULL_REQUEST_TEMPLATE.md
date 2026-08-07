@@ -6,15 +6,13 @@ Examples:
   feat(rpc): add getFoo endpoint
 -->
 
-## Summary
-<!-- One sentence. Link to issue if applicable. -->
+## What changed
+<!-- Explain why this is needed and what this PR changes. Include exactly one `Closes #<issue>`. -->
 
 
-## Breaking Changes
-- [ ] None
-- [ ] Yes — migration path described below
+## Compatibility
+<!-- Write `None`, or describe operator-visible behavior, config/API/protocol/storage changes, and migration steps. -->
 
 
-## Test Plan
-<!-- How you verified this works. e.g., "unit tests", "ran locally against testnet", "existing tests pass" -->
-
+## Validation
+<!-- List exact commands or scenarios and their results. If validation was not run, explain why. -->

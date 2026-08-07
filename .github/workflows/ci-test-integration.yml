@@ -41,9 +41,9 @@ jobs:
   # shards never invoke `cargo build` / `cargo build-sbf`. Keep the two host
   # Rust builds on extra-large runners because the slowest producer gates the
   # whole matrix.
-  build_validator:
+  build_leader:
     runs-on: blacksmith-32vcpu-ubuntu-2404
-    name: Build Validator Artifact
+    name: Build Leader Artifact
     env:
       HOST_CARGO_JOBS: "8"
     steps:
@@ -54,8 +54,8 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: "1.94.1"
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
+          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       # lld typically halves the link step on large rust workspaces.
@@ -63,7 +63,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lld
         shell: bash
 
-      - name: Build validator binary
+      - name: Build leader binary
         run: |
           RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
             cargo build --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
@@ -71,7 +71,7 @@ jobs:
         shell: bash
         working-directory: magicblock-validator
 
-      - name: Upload validator binary
+      - name: Upload leader binary
         uses: actions/upload-artifact@v4
         with:
           name: magicblock-validator-bin
@@ -84,7 +84,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     name: Build SBF Artifacts
     env:
-      SOLANA_VERSION: v4.0.3
+      SOLANA_VERSION: v4.1.1
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -93,8 +93,8 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: "1.94.1"
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
+          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
@@ -114,7 +114,7 @@ jobs:
           # source dirs alone don't capture. Also include rustc + solana
           # versions in the key so a toolchain bump invalidates stale .so
           # artifacts produced by the previous compiler.
-          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solana${{ env.SOLANA_VERSION }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
+          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.96.1-solana${{ env.SOLANA_VERSION }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
 
       - name: Build SBF programs
         run: make -C test-integration programs
@@ -145,36 +145,29 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: "1.94.1"
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
+          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      # lld typically halves the link step on large rust workspaces.
-      - name: Install lld linker
-        run: sudo apt-get update && sudo apt-get install -y lld
-        shell: bash
+      - uses: ./magicblock-validator/.github/actions/setup-solana
 
       - name: Build integration test binaries
         run: |
           set -euxo pipefail
           mkdir -p _integration_test_bins/test-runner
-          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
           CARGO_PROFILE_TEST_DEBUG=0 \
             cargo test --manifest-path test-integration/Cargo.toml --locked --no-run --message-format=json -j "$HOST_CARGO_JOBS" \
               -p schedulecommit-test-security \
               -p schedulecommit-test-scenarios \
-              -p test-chainlink \
+              -p test-aml \
               -p test-cloning \
-              -p test-ledger-restore \
-              -p test-magicblock-api \
+              -p test-validator-services \
               -p test-config \
               -p test-table-mania \
               -p schedulecommit-committor-service \
-              -p test-pubsub \
               -p test-schedule-intent \
               -p test-task-scheduler \
               > _integration_test_bins/no-run.jsonl
-          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
           CARGO_PROFILE_DEV_DEBUG=0 \
             cargo build --manifest-path test-integration/Cargo.toml --locked -p test-runner --bin run-tests -j "$HOST_CARGO_JOBS"
           cp test-integration/target/debug/run-tests _integration_test_bins/test-runner/run-tests
@@ -219,17 +212,15 @@ jobs:
 
           copy_package_tests test-integration/schedulecommit/test-security schedulecommit
           copy_package_tests test-integration/schedulecommit/test-scenarios schedulecommit
-          copy_package_tests test-integration/test-chainlink chainlink
+          copy_package_tests test-integration/test-aml aml
           copy_package_tests test-integration/test-cloning cloning
-          copy_package_tests test-integration/test-ledger-restore restore_ledger
-          copy_package_tests test-integration/test-magicblock-api magicblock_api
+          copy_package_tests test-integration/test-validator-services validator_services
           copy_package_tests test-integration/test-config config
           copy_package_tests test-integration/test-table-mania table_mania
           copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor-ix
           copy_test_bin test-integration/test-committor-service/tests/test_delivery_preparator.rs committor-preparators
           copy_test_bin test-integration/test-committor-service/tests/test_transaction_preparator.rs committor-preparators
           copy_test_bin test-integration/test-committor-service/tests/test_intent_executor.rs committor-intent-executor
-          copy_package_tests test-integration/test-pubsub pubsub
           copy_package_tests test-integration/test-schedule-intent schedule_intents
           copy_package_tests test-integration/test-task-scheduler task-scheduler
 
@@ -266,11 +257,11 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-      - name: Upload integration test binaries - chainlink
+      - name: Upload integration test binaries - aml
         uses: actions/upload-artifact@v4
         with:
-          name: integration-test-bins-chainlink
-          path: magicblock-validator/_integration_test_bins/artifact-archives/chainlink.tar.zst
+          name: integration-test-bins-aml
+          path: magicblock-validator/_integration_test_bins/artifact-archives/aml.tar.zst
           retention-days: 1
           if-no-files-found: error
           compression-level: 0
@@ -284,20 +275,12 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-      - name: Upload integration test binaries - restore_ledger
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-bins-restore_ledger
-          path: magicblock-validator/_integration_test_bins/artifact-archives/restore_ledger.tar.zst
-          retention-days: 1
-          if-no-files-found: error
-          compression-level: 0
 
-      - name: Upload integration test binaries - magicblock_api
+      - name: Upload integration test binaries - validator_services
         uses: actions/upload-artifact@v4
         with:
-          name: integration-test-bins-magicblock_api
-          path: magicblock-validator/_integration_test_bins/artifact-archives/magicblock_api.tar.zst
+          name: integration-test-bins-validator_services
+          path: magicblock-validator/_integration_test_bins/artifact-archives/validator_services.tar.zst
           retention-days: 1
           if-no-files-found: error
           compression-level: 0
@@ -347,15 +330,6 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-      - name: Upload integration test binaries - pubsub
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-bins-pubsub
-          path: magicblock-validator/_integration_test_bins/artifact-archives/pubsub.tar.zst
-          retention-days: 1
-          if-no-files-found: error
-          compression-level: 0
-
       - name: Upload integration test binaries - schedule_intents
         uses: actions/upload-artifact@v4
         with:
@@ -375,10 +349,10 @@ jobs:
           compression-level: 0
 
   run_integration_tests:
-    needs: [build_validator, build_sbf, build_integration_tests]
+    needs: [build_leader, build_sbf, build_integration_tests]
     runs-on: ${{ matrix.runner || 'blacksmith-8vcpu-ubuntu-2404' }}
     env:
-      SOLANA_VERSION: v4.0.3
+      SOLANA_VERSION: v4.1.1
     strategy:
       matrix:
         include:
@@ -412,10 +386,8 @@ jobs:
             test_bins_artifact: "committor-ix"
           - batch_tests: "schedulecommit"
             test_bins_artifact: "schedulecommit"
-          - batch_tests: "restore_ledger"
-            test_bins_artifact: "restore_ledger"
-          - batch_tests: "chainlink"
-            test_bins_artifact: "chainlink"
+          - batch_tests: "aml"
+            test_bins_artifact: "aml"
             needs_build_env: true
           - batch_tests: "cloning"
             test_bins_artifact: "cloning"
@@ -423,11 +395,8 @@ jobs:
           - batch_tests: "task-scheduler"
             test_bins_artifact: "task-scheduler"
             runner: "blacksmith-4vcpu-ubuntu-2404"
-          - batch_tests: "pubsub"
-            test_bins_artifact: "pubsub"
-            runner: "blacksmith-4vcpu-ubuntu-2404"
-          - batch_tests: "magicblock_api"
-            test_bins_artifact: "magicblock_api"
+          - batch_tests: "validator_services"
+            test_bins_artifact: "validator_services"
             runner: "blacksmith-4vcpu-ubuntu-2404"
           - batch_tests: "schedule_intents"
             test_bins_artifact: "schedule_intents"
@@ -444,10 +413,7 @@ jobs:
             test_bins_artifact: "committor-ix"
           - batch_tests: "committor_intent_executor"
             test_bins_artifact: "committor-intent-executor"
-      # While we iterate on this branch we want a single shard failure to
-      # cancel the rest of the matrix so we don't burn ~50 min of runner time
-      # on every false start. Flip back to `false` once it's green & stable.
-      fail-fast: true
+      fail-fast: false
     name: Integration Tests - ${{ matrix.batch_tests }}
     steps:
       - name: Checkout this magicblock-validator
@@ -458,15 +424,15 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         if: ${{ matrix.needs_build_env == true }}
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: "1.94.1"
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
+          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
         with:
           solana_version: ${{ env.SOLANA_VERSION }}
 
-      - name: Download prebuilt validator binary
+      - name: Download prebuilt leader binary
         uses: actions/download-artifact@v4
         with:
           name: magicblock-validator-bin

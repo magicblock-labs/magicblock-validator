@@ -23,8 +23,8 @@ index-size = 2048576
 max-snapshots = 7
 
 [ledger]
-reset = true
 block-time = "50ms"
+reset = true
 
 [[programs]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
@@ -38,10 +38,6 @@ path = "../../target/deploy/magicblock_committor_program.so"
 [[programs]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
 path = "../target/deploy/program_schedulecommit.so"
-
-[[programs]]
-id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
-path = "../target/deploy/program_flexi_counter.so"
 
 [geyser-grpc]
 port = 10001

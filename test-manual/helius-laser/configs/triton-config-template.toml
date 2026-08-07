@@ -1,9 +1,9 @@
 lifecycle = "ephemeral"
 
 remotes = [
-  "https://devnet.helius-rpc.com?api-key=<helius-api-key>",
-  "wss://devnet.helius-rpc.com?api-key=<helius-api-key>",
-  "grpcs://magicblo-devd137-9da1.devnet.rpcpool.com/<triton-api-key>",
+    "grpcs://magicblo-devd137-9da1.devnet.rpcpool.com/<triton-api-key>",
+    "https://devnet.helius-rpc.com?api-key=<helius-api-key>",
+    "wss://devnet.helius-rpc.com?api-key=<helius-api-key>"
 ]
 
 storage = "magicblock-test-storage"
@@ -12,7 +12,6 @@ storage = "magicblock-test-storage"
 listen = "127.0.0.1:9988"
 
 [chainlink]
-max-monitored-accounts = 100
 
 [accountsdb]
 # size of the main storage, we have to preallocate in advance

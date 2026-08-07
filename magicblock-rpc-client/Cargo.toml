@@ -1,40 +1,37 @@
 [package]
-name = "magicblock-rpc-client"
-version.workspace = true
 authors.workspace = true
-repository.workspace = true
+edition.workspace = true
 homepage.workspace = true
 license.workspace = true
-edition.workspace = true
+name = "magicblock-rpc-client"
+repository.workspace = true
+version.workspace = true
 
 [lib]
 doctest = false
 
 [dependencies]
-tracing = { workspace = true }
+futures-util = { workspace = true }
 magicblock-metrics = { workspace = true }
-solana-pubsub-client = { workspace = true }
-solana-rpc-client = { workspace = true }
-solana-rpc-client-api = { workspace = true }
-solana-transaction-status-client-types = { workspace = true }
-solana-account-decoder-client-types = { workspace = true }
-solana-transaction-error = { workspace = true }
+serde_json = { workspace = true }
 solana-account = { workspace = true }
+solana-account-decoder-client-types = { workspace = true }
+solana-address-lookup-table-interface = { workspace = true, features = ["bytemuck", "wincode"] }
 solana-clock = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-hash = { workspace = true }
 solana-instruction = { workspace = true }
 solana-pubkey = { workspace = true }
+solana-pubsub-client = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
 solana-signature = { workspace = true }
-solana-address-lookup-table-interface = { workspace = true, features = [
-  "bincode",
-  "bytemuck",
-] }
-futures-util = { workspace = true }
-serde_json = { workspace = true }
+solana-transaction-error = { workspace = true }
+solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

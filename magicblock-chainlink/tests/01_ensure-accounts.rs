@@ -1,26 +1,45 @@
 use assert_matches::assert_matches;
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_cloned_as_undelegated,
-    assert_not_cloned, assert_not_found, assert_not_subscribed,
-    assert_not_undelegating, assert_remain_undelegating,
-    assert_subscribed_without_delegation_record,
-    testing::deleg::add_delegation_record_for, AccountFetchContext,
+    AccountFetchContext, assert_cloned_as_delegated,
+    assert_cloned_as_empty_placeholder, assert_cloned_as_undelegated,
+    assert_not_cloned, assert_not_subscribed, assert_not_undelegating,
+    assert_remain_undelegating, assert_subscribed_without_delegation_record,
+    testing::{context::TestContext, deleg::add_delegation_record_for},
 };
-use solana_account::{Account, AccountSharedData};
-use solana_program::clock::Slot;
+use solana_account::{Account, AccountBuilder, AccountMode};
 use solana_pubkey::Pubkey;
-use tracing::*;
-use utils::test_context::TestContext;
-
-mod utils;
-
-use magicblock_chainlink::testing::init_logger;
 const CURRENT_SLOT: u64 = 11;
 
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
+async fn seed_undelegating_account(ctx: &TestContext, pubkey: Pubkey) {
+    let delegated = AccountBuilder::from(Account {
+        owner: dlp_api::id(),
+        data: vec![0; 100],
+        ..Default::default()
+    })
+    .mode(AccountMode::Delegated)
+    .slot(CURRENT_SLOT);
+    ctx.bank
+        .account(pubkey)
+        .create(delegated.clone(), None)
+        .await
+        .unwrap();
+
+    let transient = delegated.mode(AccountMode::Transient);
+    ctx.bank.account(pubkey).update(transient).await.unwrap();
+}
+
+#[tokio::test]
+async fn ensure_account_scenarios() {
+    let ctx = TestContext::init(CURRENT_SLOT).await;
+    write_non_existing_account(&ctx).await;
+    existing_account_undelegated(&ctx).await;
+    existing_account_missing_delegation_record(&ctx).await;
+    write_existing_account_valid_delegation_record(&ctx).await;
+    write_existing_account_other_authority(&ctx).await;
+    write_undelegating_account_undelegated_to_other_validator(&ctx).await;
+    write_undelegating_account_still_being_undelegated(&ctx).await;
+    write_existing_account_invalid_delegation_record(&ctx).await;
 }
 
 // NOTE: Case comments refer to the case studies in the relevant tabs of draw.io document, i.e. Fetch
@@ -28,70 +47,62 @@ async fn setup(slot: Slot) -> TestContext {
 // -----------------
 // Account does not exist
 // -----------------
-#[tokio::test]
-async fn test_write_non_existing_account() {
-    let TestContext {
-        chainlink, cloner, ..
-    } = setup(CURRENT_SLOT).await;
+async fn write_non_existing_account(ctx: &TestContext) {
+    let chainlink = &ctx.chainlink;
+    let bank = &ctx.bank;
 
     let pubkey = Pubkey::new_unique();
     let pubkeys = [pubkey];
-    let res = chainlink
+    chainlink
         .ensure_accounts(
             &pubkeys,
-            None,
             AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
-    debug!(result = ?res, "Ensure accounts completed");
 
-    assert_not_found!(res, &pubkeys);
-    assert_not_cloned!(cloner, &pubkeys);
-    assert_not_subscribed!(chainlink, &[&pubkey]);
+    assert_cloned_as_empty_placeholder!(bank, &pubkeys);
+    let mode = bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| account.mode())
+        .unwrap()
+        .unwrap();
+    assert_eq!(mode, AccountMode::Placeholder);
+    assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }
 
 // -----------------
 // BasicScenarios:Case 1 Account is initialized and never delegated
 // -----------------
-#[tokio::test]
-async fn test_existing_account_undelegated() {
-    let TestContext {
-        chainlink,
-        rpc_client,
-        cloner,
-        ..
-    } = setup(CURRENT_SLOT).await;
+async fn existing_account_undelegated(ctx: &TestContext) {
+    let chainlink = &ctx.chainlink;
+    let rpc_client = &ctx.rpc_client;
+    let bank = &ctx.bank;
 
     let pubkey = Pubkey::new_unique();
     rpc_client.add_account(pubkey, Account::default());
 
     let pubkeys = [pubkey];
-    let res = chainlink
+    chainlink
         .ensure_accounts(
             &pubkeys,
-            None,
             AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
-    debug!(result = ?res, "Ensure accounts completed");
 
-    assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_cloned_as_undelegated!(bank, &pubkeys, CURRENT_SLOT);
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }
 
 // -----------------
 // Failure cases account with missing/invalid delegation record
 // -----------------
-#[tokio::test]
-async fn test_existing_account_missing_delegation_record() {
-    let TestContext {
-        chainlink,
-        rpc_client,
-        cloner,
-        ..
-    } = setup(CURRENT_SLOT).await;
+async fn existing_account_missing_delegation_record(ctx: &TestContext) {
+    let chainlink = &ctx.chainlink;
+    let rpc_client = &ctx.rpc_client;
+    let bank = &ctx.bank;
 
     let pubkey = Pubkey::new_unique();
     rpc_client.add_account(
@@ -103,60 +114,59 @@ async fn test_existing_account_missing_delegation_record() {
     );
 
     let pubkeys = [pubkey];
-    let res = chainlink
+    chainlink
         .ensure_accounts(
             &pubkeys,
-            None,
             AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
-    debug!(result = ?res, "Ensure accounts completed");
 
-    assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_cloned_as_undelegated!(bank, &pubkeys, CURRENT_SLOT);
+    let mode = bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| account.mode())
+        .unwrap()
+        .unwrap();
+    assert_eq!(mode, AccountMode::Placeholder);
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }
 
 // -----------------
 // BasicScenarios:Case 2 Account is initialized and already delegated to us
 // -----------------
-#[tokio::test]
-async fn test_write_existing_account_valid_delegation_record() {
-    let TestContext {
-        chainlink,
-        rpc_client,
-        validator_pubkey,
-        cloner,
-        ..
-    } = setup(CURRENT_SLOT).await;
+async fn write_existing_account_valid_delegation_record(ctx: &TestContext) {
+    let chainlink = &ctx.chainlink;
+    let rpc_client = &ctx.rpc_client;
+    let bank = &ctx.bank;
+    let validator_pubkey = ctx.validator_pubkey;
 
     let pubkey = Pubkey::new_unique();
     let owner = Pubkey::new_unique();
 
     let acc = Account {
         owner: dlp_api::id(),
-        lamports: 1_234,
+        lamports: 1_000_000,
         ..Default::default()
     };
     rpc_client.add_account(pubkey, acc);
 
     let deleg_record_pubkey =
-        add_delegation_record_for(&rpc_client, pubkey, validator_pubkey, owner);
+        add_delegation_record_for(rpc_client, pubkey, validator_pubkey, owner);
 
     let pubkeys = [pubkey];
-    let res = chainlink
+    chainlink
         .ensure_accounts(
             &pubkeys,
-            None,
             AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
-    debug!(result = ?res, "Ensure accounts completed");
 
     // The account is cloned into the bank as delegated, the delegation record isn't
-    assert_cloned_as_delegated!(cloner, &[pubkey], CURRENT_SLOT, owner);
-    assert_not_cloned!(cloner, &[deleg_record_pubkey]);
+    assert_cloned_as_delegated!(bank, &[pubkey], CURRENT_SLOT, owner);
+    assert_not_cloned!(bank, &[deleg_record_pubkey]);
 
     assert_not_subscribed!(
         chainlink,
@@ -167,14 +177,10 @@ async fn test_write_existing_account_valid_delegation_record() {
 // -----------------
 // BasicScenarios:Case 3: Account Initialized and Already Delegated to Other
 // -----------------
-#[tokio::test]
-async fn test_write_existing_account_other_authority() {
-    let TestContext {
-        chainlink,
-        rpc_client,
-        cloner,
-        ..
-    } = setup(CURRENT_SLOT).await;
+async fn write_existing_account_other_authority(ctx: &TestContext) {
+    let chainlink = &ctx.chainlink;
+    let rpc_client = &ctx.rpc_client;
+    let bank = &ctx.bank;
 
     let pubkey = Pubkey::new_unique();
     let account = Account {
@@ -186,22 +192,27 @@ async fn test_write_existing_account_other_authority() {
     let owner = Pubkey::new_unique();
     let authority = Pubkey::new_unique();
     let deleg_record_pubkey =
-        add_delegation_record_for(&rpc_client, pubkey, authority, owner);
+        add_delegation_record_for(rpc_client, pubkey, authority, owner);
 
     let pubkeys = [pubkey];
-    let res = chainlink
+    chainlink
         .ensure_accounts(
             &pubkeys,
-            None,
             AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
-    debug!(result = ?res, "Ensure accounts completed");
 
     // The account is cloned into the bank as undelegated, the delegation record isn't
-    assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT, owner);
-    assert_not_cloned!(cloner, &[deleg_record_pubkey]);
+    assert_cloned_as_undelegated!(bank, &pubkeys, CURRENT_SLOT, owner);
+    let mode = bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| account.mode())
+        .unwrap()
+        .unwrap();
+    assert_eq!(mode, AccountMode::Placeholder);
+    assert_not_cloned!(bank, &[deleg_record_pubkey]);
 
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }
@@ -209,15 +220,12 @@ async fn test_write_existing_account_other_authority() {
 // -----------------
 // Account is in the process of being undelegated and its owner is the delegation program
 // -----------------
-#[tokio::test]
-async fn test_write_undelegating_account_undelegated_to_other_validator() {
-    let TestContext {
-        chainlink,
-        rpc_client,
-        bank,
-        cloner,
-        ..
-    } = setup(CURRENT_SLOT).await;
+async fn write_undelegating_account_undelegated_to_other_validator(
+    ctx: &TestContext,
+) {
+    let chainlink = &ctx.chainlink;
+    let rpc_client = &ctx.rpc_client;
+    let bank = &ctx.bank;
 
     let other_authority = Pubkey::new_unique();
     let pubkey = Pubkey::new_unique();
@@ -230,42 +238,28 @@ async fn test_write_undelegating_account_undelegated_to_other_validator() {
     let owner = Pubkey::new_unique();
     rpc_client.add_account(pubkey, account);
 
-    add_delegation_record_for(&rpc_client, pubkey, other_authority, owner);
+    add_delegation_record_for(rpc_client, pubkey, other_authority, owner);
 
     // The same account is already marked as undelegated in the bank
     // (set the owner to the delegation program and mark it as _undelegating_)
-    let mut shared_data = AccountSharedData::from(Account {
-        owner: dlp_api::id(),
-        data: vec![0; 100],
-        ..Default::default()
-    });
-    shared_data.set_undelegating(true);
-    shared_data.set_remote_slot(CURRENT_SLOT);
-    bank.insert(pubkey, shared_data);
+    seed_undelegating_account(ctx, pubkey).await;
 
     let pubkeys = [pubkey];
-    let res = chainlink
+    chainlink
         .ensure_accounts(
             &pubkeys,
-            None,
             AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
-    debug!(result = ?res, "Ensure accounts completed");
-    assert_not_undelegating!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_not_undelegating!(bank, &pubkeys, CURRENT_SLOT);
 }
 
-#[tokio::test]
-async fn test_write_undelegating_account_still_being_undelegated() {
-    let TestContext {
-        chainlink,
-        rpc_client,
-        bank,
-        cloner,
-        validator_pubkey,
-        ..
-    } = setup(CURRENT_SLOT).await;
+async fn write_undelegating_account_still_being_undelegated(ctx: &TestContext) {
+    let chainlink = &ctx.chainlink;
+    let rpc_client = &ctx.rpc_client;
+    let bank = &ctx.bank;
+    let validator_pubkey = ctx.validator_pubkey;
 
     let authority = validator_pubkey;
     let pubkey = Pubkey::new_unique();
@@ -278,43 +272,30 @@ async fn test_write_undelegating_account_still_being_undelegated() {
     let owner = Pubkey::new_unique();
     rpc_client.add_account(pubkey, account);
 
-    add_delegation_record_for(&rpc_client, pubkey, authority, owner);
+    add_delegation_record_for(rpc_client, pubkey, authority, owner);
 
     // The same account is already marked as undelegated in the bank
     // (setting the owner to the delegation program marks it as _undelegating_)
-    let mut shared_data = AccountSharedData::from(Account {
-        owner: dlp_api::id(),
-        data: vec![0; 100],
-        ..Default::default()
-    });
-    shared_data.set_remote_slot(CURRENT_SLOT);
-    shared_data.set_undelegating(true);
-    bank.insert(pubkey, shared_data);
+    seed_undelegating_account(ctx, pubkey).await;
 
     let pubkeys = [pubkey];
-    let res = chainlink
+    chainlink
         .ensure_accounts(
             &pubkeys,
-            None,
             AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await
         .unwrap();
-    debug!(result = ?res, "Ensure accounts completed");
-    assert_remain_undelegating!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_remain_undelegating!(bank, &pubkeys, CURRENT_SLOT);
 }
 
 // -----------------
 // Invalid Cases
 // -----------------
-#[tokio::test]
-async fn test_write_existing_account_invalid_delegation_record() {
-    let TestContext {
-        chainlink,
-        rpc_client,
-        cloner,
-        ..
-    } = setup(CURRENT_SLOT).await;
+async fn write_existing_account_invalid_delegation_record(ctx: &TestContext) {
+    let chainlink = &ctx.chainlink;
+    let rpc_client = &ctx.rpc_client;
+    let bank = &ctx.bank;
 
     let pubkey = Pubkey::new_unique();
     rpc_client.add_account(
@@ -338,14 +319,12 @@ async fn test_write_existing_account_invalid_delegation_record() {
     let res = chainlink
         .ensure_accounts(
             &[pubkey],
-            None,
             AccountFetchContext::rpc_get_multiple_accounts(),
         )
         .await;
-    debug!(result = ?res, "Ensure accounts completed");
 
     assert_matches!(res, Err(_));
-    assert!(cloner.get_account(&pubkey).is_none());
+    assert!(!bank.accounts().loader().contains(&pubkey).unwrap());
 
     assert_not_subscribed!(chainlink, &[&deleg_record_pubkey, &pubkey]);
 }

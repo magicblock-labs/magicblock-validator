@@ -1,12 +1,16 @@
-use std::{io::Cursor, mem};
+use std::mem;
 
 use magicblock_magic_program_api::MAGIC_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
 use solana_instruction::error::InstructionError;
+use wincode::{
+    SchemaRead, SchemaWrite,
+    config::{Configuration, deserialize, serialize_into, serialized_size},
+};
 
 use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub struct MagicContext {
     pub intent_id: u64,
     pub scheduled_base_intents: Vec<ScheduledIntentBundle>,
@@ -16,11 +20,11 @@ impl MagicContext {
     pub const SIZE: usize = MAGIC_CONTEXT_SIZE;
     pub const ZERO: [u8; Self::SIZE] = [0; Self::SIZE];
 
-    pub(crate) fn deserialize(data: &[u8]) -> Result<Self, bincode::Error> {
+    pub(crate) fn deserialize(data: &[u8]) -> Result<Self, wincode::ReadError> {
         if data.is_empty() || is_zeroed(data) {
             Ok(Self::default())
         } else {
-            bincode::deserialize_from(Cursor::new(data))
+            deserialize(data, magic_context_config())
         }
     }
 
@@ -28,14 +32,14 @@ impl MagicContext {
         &self,
         data: &mut [u8],
     ) -> Result<(), InstructionError> {
-        let size = bincode::serialized_size(self)
+        let size = serialized_size(self, magic_context_config())
             .map_err(|_| InstructionError::GenericError)?;
         if size > data.len() as u64 {
             return Err(InstructionError::AccountDataTooSmall);
         }
 
         data.fill(0);
-        bincode::serialize_into(&mut &mut data[..], self)
+        serialize_into(&mut &mut data[..], self, magic_context_config())
             .map_err(|_| InstructionError::GenericError)
     }
 
@@ -74,6 +78,11 @@ impl MagicContext {
         len.copy_from_slice(raw_len);
         u64::from_le_bytes(len) != 0
     }
+}
+
+fn magic_context_config() -> impl wincode::config::Config {
+    Configuration::default()
+        .with_preallocation_size_limit::<MAGIC_CONTEXT_SIZE>()
 }
 
 fn is_zeroed(buf: &[u8]) -> bool {

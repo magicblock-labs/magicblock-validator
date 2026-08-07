@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Only the latest `main` branch and the most recent release are supported with security fixes.
+Only the latest `master` branch and the most recent release are supported with security fixes.
 
 Older releases may not receive patches.
 

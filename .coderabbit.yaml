@@ -5,7 +5,7 @@ enable_free_tier: true
 reviews:
   # Review style + summary placement
   profile: assertive
-  high_level_summary_placeholder: "<!-- coderabbit-summary -->"
+  high_level_summary: false
   review_status: true
   collapse_walkthrough: true
 
@@ -98,10 +98,11 @@ reviews:
     - path: "{magicblock-*,programs,storage-proto}/**"
       instructions: |
         Treat any usage of `.unwrap()` or `.expect()` in production Rust code as a MAJOR issue.
-        These should not be categorized as trivial or nit-level concerns.
+        Perform reachability analysis and if the code can be reached under normal
+        circumastances notify the author.
         Request proper error handling or explicit justification with invariants.
     - path: "{test-*,tools}/**"
-      instructions: Usage of `.unwrap()` or `.expect()` in test code is acceptable and may be treated as trivial.
+      instructions: Usage of `.unwrap()` or `.expect()` in test code is acceptable.
 chat:
   # We leave emoji/ASCII art, but no auto-replies
   art: true

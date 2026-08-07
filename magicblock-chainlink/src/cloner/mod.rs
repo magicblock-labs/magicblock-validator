@@ -1,15 +1,32 @@
 use std::ops::Deref;
 
-use async_trait::async_trait;
+use engine::Engine;
 use errors::ClonerResult;
-use solana_account::AccountSharedData;
-use solana_instruction::Instruction;
+use magicblock_magic_program_api::{
+    MAGIC_CONTEXT_PUBKEY,
+    args::{
+        CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs,
+        UndelegateTypeArgs,
+    },
+    instruction::MagicBlockInstruction,
+};
+use solana_account::{AccountBuilder, AccountMode};
+use solana_instruction::{AccountMeta, Instruction};
+use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
+use tracing::debug;
 
-use crate::remote_account_provider::program_account::LoadedProgram;
+use crate::remote_account_provider::program_account::{
+    LOADER_V1, LOADER_V4, LoadedProgram, RemoteProgramLoader,
+};
 
 pub mod errors;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AccountMaterialization {
+    Create,
+    Update,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DelegationActions(Vec<Instruction>);
@@ -52,7 +69,7 @@ impl Deref for DelegationActions {
 #[derive(Clone)]
 pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
-    pub account: AccountSharedData,
+    pub account: AccountBuilder,
     pub commit_frequency_ms: Option<u64>,
     pub delegation_actions: DelegationActions,
     /// If the account is delegated to another validator,
@@ -64,26 +81,124 @@ pub struct AccountCloneRequest {
     pub needs_undelegation: bool,
 }
 
-#[async_trait]
-pub trait Cloner: Send + Sync + 'static {
-    /// Overrides the account in the bank to make sure it's a PDA that can be used as readonly
-    /// Future transactions should be able to read from it (but not write) on the account as-is
-    /// NOTE: this will run inside a separate task as to not block account sub handling.
-    /// However it includes a channel callback in order to signal once the account was cloned
-    /// successfully.
-    async fn clone_account(
-        &self,
-        request: AccountCloneRequest,
-    ) -> ClonerResult<Signature>;
+fn engine_err(err: impl ToString) -> errors::ClonerError {
+    errors::ClonerError::Engine(err.to_string())
+}
 
-    // Overrides the accounts in the bank to make sure the program is usable normally (and upgraded)
-    // We make sure all accounts involved in the program are present in the bank with latest state
-    async fn clone_program(
-        &self,
-        program: LoadedProgram,
-    ) -> ClonerResult<Signature>;
+fn undelegation_action(engine: &Engine, pubkey: Pubkey) -> Instruction {
+    let args = MagicIntentBundleArgs {
+        commit_and_undelegate: Some(CommitAndUndelegateArgs {
+            // Payer and Magic Context occupy action account indices 0 and 1.
+            commit_type: CommitTypeArgs::Standalone(vec![2]),
+            undelegate_type: UndelegateTypeArgs::Standalone,
+        }),
+        ..Default::default()
+    };
+    Instruction::new_with_wincode(
+        magicblock_magic_program_api::id(),
+        &MagicBlockInstruction::ScheduleIntentBundle(args),
+        vec![
+            // MagicRoot vouches for declared action signers during native CPI.
+            // Keep the authority readonly so its post-finalize mutability guard
+            // does not reject the validator's immutable identity account.
+            AccountMeta::new_readonly(engine.authority(), true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new(pubkey, false),
+        ],
+    )
+}
 
-    /// Evicts an account from the ephemeral validator by submitting an
-    /// EvictAccount transaction through the transaction pipeline.
-    async fn evict_account(&self, pubkey: Pubkey) -> ClonerResult<()>;
+pub(crate) async fn clone_account(
+    engine: &Engine,
+    request: AccountCloneRequest,
+    materialization: AccountMaterialization,
+) -> ClonerResult<AccountMode> {
+    if request.needs_undelegation
+        && materialization == AccountMaterialization::Update
+    {
+        return Err(errors::ClonerError::UndelegationSchedulingUnavailable(
+            request.pubkey,
+        ));
+    }
+
+    let mode = request.account.read().mode();
+    let actions = if request.needs_undelegation {
+        vec![undelegation_action(engine, request.pubkey)]
+    } else {
+        request.delegation_actions.into()
+    };
+    let account = request.account;
+    let result = match materialization {
+        AccountMaterialization::Create => {
+            let actions = (!actions.is_empty()).then_some(actions);
+            engine
+                .account(request.pubkey)
+                .create(account, actions)
+                .await
+        }
+        AccountMaterialization::Update => {
+            engine.account(request.pubkey).update(account).await
+        }
+    };
+    result.map_err(|err| {
+        errors::ClonerError::FailedToCloneRegularAccount(
+            request.pubkey,
+            Box::new(engine_err(err)),
+        )
+    })?;
+    Ok(mode)
+}
+
+pub(crate) async fn clone_program(
+    engine: &Engine,
+    program: LoadedProgram,
+    materialization: AccountMaterialization,
+) -> ClonerResult<Option<AccountMode>> {
+    let program_id = program.program_id;
+    if matches!(program.loader_status, LoaderV4Status::Retracted) {
+        debug!(%program_id, "Program is retracted on chain");
+        return Ok(None);
+    }
+
+    let owner = match program.loader {
+        RemoteProgramLoader::V1 => LOADER_V1,
+        RemoteProgramLoader::V2
+        | RemoteProgramLoader::V3
+        | RemoteProgramLoader::V4 => LOADER_V4,
+    };
+    let account = AccountBuilder::default()
+        .lamports(program.lamports())
+        .data(program.program_data)
+        .owner(owner)
+        .mode(AccountMode::ReadOnly)
+        .executable(true)
+        .slot(program.remote_slot);
+
+    let result = match materialization {
+        AccountMaterialization::Create => {
+            engine.account(program_id).create(account, None).await
+        }
+        AccountMaterialization::Update => {
+            engine.account(program_id).update(account).await
+        }
+    };
+    result.map_err(|err| {
+        errors::ClonerError::FailedToCloneProgram(
+            program_id,
+            Box::new(engine_err(err)),
+        )
+    })?;
+    Ok(Some(AccountMode::ReadOnly))
+}
+
+pub(crate) async fn evict_account(
+    engine: &Engine,
+    pubkey: Pubkey,
+) -> ClonerResult<()> {
+    engine.account(pubkey).delete().await.map_err(|err| {
+        errors::ClonerError::FailedToEvictAccount(
+            pubkey,
+            Box::new(engine_err(err)),
+        )
+    })
 }

@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use borsh::to_vec;
+use integration_test_tools::init_logger;
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
@@ -13,15 +14,12 @@ use magicblock_core::intent::{
     MagicIntentBundle, UndelegateType,
 };
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
-use program_flexi_counter::state::FlexiCounter;
+use program_schedulecommit::MainAccount;
 use solana_account::{Account, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    hash::Hash, signature::Keypair, signer::Signer, transaction::Transaction,
-};
-use test_kit::init_logger;
+use solana_sdk::{hash::Hash, signature::Keypair, signer::Signer};
 use tokio::task::JoinSet;
 use tracing::*;
 use utils::transactions::print_tx_logs;
@@ -255,15 +253,14 @@ async fn commit_single_account(
         init_and_delegate_account_on_chain(&counter_auth, bytes as u64, None)
             .await;
 
-    let counter = FlexiCounter {
-        label: "Counter".to_string(),
-        updates: 0,
+    let counter = MainAccount {
+        player: counter_auth.pubkey(),
         count: 101,
     };
     let mut data = to_vec(&counter).unwrap();
     data.resize(bytes, 0);
     account.data = data;
-    account.owner = program_flexi_counter::id();
+    account.owner = program_schedulecommit::id();
 
     let account = CommittedAccount {
         pubkey,
@@ -297,7 +294,6 @@ async fn commit_single_account(
         id: 0,
         slot: 10,
         blockhash: Hash::new_unique(),
-        sent_transaction: Transaction::default(),
         payer: counter_auth.pubkey(),
         intent_bundle: base_intent.into(),
     };
@@ -307,7 +303,7 @@ async fn commit_single_account(
         processor,
         vec![intent],
         expect_strategies(&[(expected_strategy, 1)]),
-        program_flexi_counter::ID,
+        program_schedulecommit::ID,
     )
     .await;
 }
@@ -379,7 +375,6 @@ async fn commit_book_order_account(
         id: 0,
         slot: 10,
         blockhash: Hash::new_unique(),
-        sent_transaction: Transaction::default(),
         payer: payer.pubkey(),
         intent_bundle: base_intent.into(),
     };
@@ -497,10 +492,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
 async fn test_commit_5_accounts_1kb_bundle_size_4() {
     commit_5_accounts_1kb(
         4,
-        expect_strategies(&[
-            (CommitStrategy::DiffArgs, 1),
-            (CommitStrategy::DiffBufferWithLookupTable, 4),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
         CommitIntentKind::Commit,
     )
     .await;
@@ -510,10 +502,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
 async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
     commit_5_accounts_1kb(
         4,
-        expect_strategies(&[
-            (CommitStrategy::DiffArgs, 1),
-            (CommitStrategy::DiffBufferWithLookupTable, 4),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
         CommitIntentKind::CommitAndUndelegate,
     )
     .await;
@@ -543,7 +532,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_3() {
 async fn test_commit_20_accounts_1kb_bundle_size_4() {
     commit_20_accounts_1kb(
         4,
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 20)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
         CommitIntentKind::Commit,
     )
     .await;
@@ -606,9 +595,8 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
     commit_20_accounts_1kb(
         8,
         expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::DiffBufferWithLookupTable, 20),
+            (CommitStrategy::DiffBufferWithLookupTable, 16),
+            (CommitStrategy::DiffArgs, 4),
         ]),
         CommitIntentKind::Commit,
     )
@@ -650,7 +638,7 @@ async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_ac
         &[1024, 2048],
         &[],
         &[1024, 2048],
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
     )
     .await;
 }
@@ -661,7 +649,7 @@ async fn test_ix_execute_intent_bundle_commit_three_accounts_cau_one_account() {
         &[512, 512, 512],
         &[],
         &[512],
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
     )
     .await;
 }
@@ -762,7 +750,7 @@ async fn create_and_delegate_accounts(
             )
             .await;
 
-            pda_acc.owner = program_flexi_counter::id();
+            pda_acc.owner = program_schedulecommit::id();
             pda_acc.data = vec![0u8; bytes];
             CommittedAccount {
                 pubkey: pda,
@@ -843,7 +831,6 @@ async fn commit_multiple_accounts(
             id: id as u64,
             slot: 0,
             blockhash: Hash::new_unique(),
-            sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
             intent_bundle: base_intent.into(),
         })
@@ -853,7 +840,7 @@ async fn commit_multiple_accounts(
         processor,
         intents,
         expected_strategies,
-        program_flexi_counter::ID,
+        program_schedulecommit::ID,
     )
     .await;
 }
@@ -908,7 +895,6 @@ async fn execute_intent_bundle(
         id: 0,
         slot: 0,
         blockhash: Hash::new_unique(),
-        sent_transaction: Transaction::default(),
         payer: Pubkey::new_unique(),
         intent_bundle,
     };
@@ -916,7 +902,7 @@ async fn execute_intent_bundle(
         processor,
         vec![intent_bundle],
         expected_strategies,
-        program_flexi_counter::id(),
+        program_schedulecommit::id(),
     )
     .await;
 }
@@ -966,9 +952,8 @@ async fn ix_commit_local(
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
     let mut strategies = ExpectedStrategies::new();
-    for (execution_result, base_intent) in execution_outputs
-        .into_iter()
-        .zip(intent_bundles.into_iter())
+    for (execution_result, base_intent) in
+        execution_outputs.into_iter().zip(intent_bundles)
     {
         let output = match execution_result.inner {
             Ok(output) => output,

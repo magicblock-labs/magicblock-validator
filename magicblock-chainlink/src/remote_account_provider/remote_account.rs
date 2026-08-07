@@ -1,6 +1,6 @@
-use magicblock_accounts_db::traits::AccountsBank;
+use engine::Engine;
 use solana_account::{
-    Account, AccountSharedData, ReadableAccount, WritableAccount,
+    Account, AccountBuilder, AccountSharedData, ReadableAccount,
 };
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;
@@ -27,147 +27,6 @@ pub enum ResolvedAccount {
     Bank((Pubkey, Slot)),
 }
 
-impl ResolvedAccount {
-    pub fn resolved_account_shared_data(
-        &self,
-        bank: &impl AccountsBank,
-    ) -> Option<ResolvedAccountSharedData> {
-        match self {
-            ResolvedAccount::Fresh(account) => {
-                Some(ResolvedAccountSharedData::Fresh(account.clone()))
-            }
-            ResolvedAccount::Bank((pubkey, _)) => bank
-                .get_account(pubkey)
-                .map(ResolvedAccountSharedData::Bank),
-        }
-    }
-}
-
-/// Same as [ResolvedAccount], but with the account data fetched from the bank.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResolvedAccountSharedData {
-    Fresh(AccountSharedData),
-    Bank(AccountSharedData),
-}
-
-impl ResolvedAccountSharedData {
-    pub fn owner(&self) -> &Pubkey {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.owner(),
-            Bank(account) => account.owner(),
-        }
-    }
-
-    pub fn set_owner(&mut self, owner: Pubkey) -> &mut Self {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.set_owner(owner),
-            Bank(account) => account.set_owner(owner),
-        }
-        self
-    }
-
-    pub fn data(&self) -> &[u8] {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.data(),
-            Bank(account) => account.data(),
-        }
-    }
-
-    pub fn lamports(&self) -> u64 {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.lamports(),
-            Bank(account) => account.lamports(),
-        }
-    }
-
-    pub fn executable(&self) -> bool {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.executable(),
-            Bank(account) => account.executable(),
-        }
-    }
-
-    pub fn delegated(&self) -> bool {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.delegated(),
-            Bank(account) => account.delegated(),
-        }
-    }
-
-    pub fn set_delegated(&mut self, delegated: bool) -> &mut Self {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.set_delegated(delegated),
-            Bank(account) => account.set_delegated(delegated),
-        }
-        self
-    }
-
-    pub fn confined(&self) -> bool {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.confined(),
-            Bank(account) => account.confined(),
-        }
-    }
-
-    pub fn set_confined(&mut self, confined: bool) -> &mut Self {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.set_confined(confined),
-            Bank(account) => account.set_confined(confined),
-        }
-        self
-    }
-
-    pub fn set_remote_slot(&mut self, remote_slot: Slot) -> &mut Self {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.set_remote_slot(remote_slot),
-            Bank(account) => account.set_remote_slot(remote_slot),
-        }
-        self
-    }
-
-    pub fn account_shared_data(&self) -> &AccountSharedData {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account,
-            Bank(account) => account,
-        }
-    }
-
-    pub fn account_shared_data_cloned(&self) -> AccountSharedData {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.clone(),
-            Bank(account) => account.clone(),
-        }
-    }
-
-    pub fn into_account_shared_data(self) -> AccountSharedData {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account,
-            Bank(account) => account,
-        }
-    }
-
-    pub fn remote_slot(&self) -> Slot {
-        use ResolvedAccountSharedData::*;
-        match self {
-            Fresh(account) => account.remote_slot(),
-            Bank(account) => account.remote_slot(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteAccountState {
     pub account: ResolvedAccount,
@@ -186,40 +45,37 @@ impl RemoteAccount {
         slot: u64,
         source: RemoteAccountUpdateSource,
     ) -> Self {
-        let mut account_shared_data = AccountSharedData::from(account);
-        account_shared_data.set_remote_slot(slot);
-        Self::from_fresh_account_shared_data(account_shared_data, source)
+        let account = AccountBuilder::from(account).slot(slot);
+        Self::from_fresh_account_builder(account, source)
     }
 
-    pub(crate) fn from_fresh_account_shared_data(
-        account_shared_data: AccountSharedData,
+    pub(crate) fn from_fresh_account_builder(
+        account: AccountBuilder,
         source: RemoteAccountUpdateSource,
     ) -> Self {
         RemoteAccount::Found(RemoteAccountState {
-            account: ResolvedAccount::Fresh(account_shared_data),
+            account: ResolvedAccount::Fresh(account.build()),
             source,
         })
     }
     /// Returns the fresh remote account if it was just updated, otherwise tries the bank
-    pub fn account<T: AccountsBank>(
-        &self,
-        bank: &T,
-    ) -> Option<ResolvedAccountSharedData> {
+    pub fn account(&self, engine: &Engine) -> Option<AccountBuilder> {
         match self {
             // Fresh remote account, not in the bank yet
             RemoteAccount::Found(RemoteAccountState {
                 account: ResolvedAccount::Fresh(remote_account),
                 ..
-            }) => {
-                Some(ResolvedAccountSharedData::Fresh(remote_account.clone()))
-            }
+            }) => Some(AccountBuilder::from(remote_account.clone())),
             // Most up to date version of account from the bank
             RemoteAccount::Found(RemoteAccountState {
                 account: ResolvedAccount::Bank((pubkey, _)),
                 ..
-            }) => bank
-                .get_account(pubkey)
-                .map(ResolvedAccountSharedData::Bank),
+            }) => engine
+                .accounts()
+                .loader()
+                .read(pubkey, |account| AccountBuilder::from(account.clone()))
+                .ok()
+                .flatten(),
             // Account not fetched/subbed nor in the bank
             RemoteAccount::NotFound(_) => None,
         }
@@ -229,7 +85,7 @@ impl RemoteAccount {
             RemoteAccount::Found(RemoteAccountState { account, .. }) => {
                 match account {
                     ResolvedAccount::Fresh(account_shared_data) => {
-                        account_shared_data.remote_slot()
+                        account_shared_data.slot()
                     }
                     ResolvedAccount::Bank((_, slot)) => *slot,
                 }

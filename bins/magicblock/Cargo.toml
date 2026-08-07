@@ -1,0 +1,27 @@
+[package]
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "magicblock"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+borsh = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+isocountry = { workspace = true }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "64c7c5e3", default-features = false }
+magicblock-config = { workspace = true }
+solana-account = { workspace = true }
+solana-commitment-config = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-sdk-ids = { workspace = true }
+solana-signer = { workspace = true }
+solana-transaction = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }

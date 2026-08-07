@@ -1,88 +1,17 @@
-use std::sync::Arc;
+//! Read-only access to the legacy ledger.
+//!
+//! The engine owns block production and its own ledger; this crate is retained
+//! only to read data written by earlier validator versions, and is consumed by
+//! `magicblock-aperture` as a fallback for RPC reads the engine's ledger cannot
+//! serve. It is expected to be removed once the transition completes.
 
-use arc_swap::{ArcSwapAny, Guard};
 pub use database::{
     meta::PerfSample,
-    options::{LedgerOptions, BLOCKSTORE_DIRECTORY_ROCKS_LEVEL},
+    options::{BLOCKSTORE_DIRECTORY_ROCKS_LEVEL, LedgerOptions},
 };
-use magicblock_core::{
-    link::blocks::LatestBlockInner, traits::LatestBlockProvider,
-};
-use solana_clock::Clock;
-use solana_hash::Hash;
 pub use store::api::{Ledger, SignatureInfosForAddress};
-use tokio::sync::broadcast;
-
-/// Atomically updated, shared, latest block information
-/// The instances of this type can be used by various components
-/// of the validator to cheaply retrieve the latest block data,
-/// without relying on expensive ledger operations. It's always
-/// kept in sync with the ledger by the ledger itself
-#[derive(Clone)]
-pub struct LatestBlock {
-    /// Atomically swappable block data, the reference can be safely
-    /// accessed by multiple threads, even if another threads swaps
-    /// the value from under them. As long as there're some readers,
-    /// the reference will be kept alive by arc swap, while the new
-    /// readers automatically get access to the latest version of the block
-    inner: Arc<ArcSwapAny<Arc<LatestBlockInner>>>,
-    /// Notification mechanism to signal that the block has been modified,
-    notifier: broadcast::Sender<LatestBlockInner>,
-}
-
-impl Default for LatestBlock {
-    fn default() -> Self {
-        let (notifier, _) = broadcast::channel(32);
-        let inner = Default::default();
-        Self { inner, notifier }
-    }
-}
-
-impl LatestBlock {
-    /// Atomically loads a snapshot of the latest block information.
-    /// This provides a high-performance, lock-free read.
-    pub fn load(&self) -> Guard<Arc<LatestBlockInner>> {
-        self.inner.load()
-    }
-
-    /// Atomically updates the latest block information and notifies all subscribers.
-    /// This is the "writer" method for the single-writer, multi-reader pattern.
-    pub fn store(&self, block: LatestBlockInner) {
-        self.inner.store(block.clone().into());
-        // Broadcast the update. It's okay if there are no active listeners.
-        let _ = self.notifier.send(block);
-    }
-
-    /// Creates a new receiver to listen for block updates.
-    /// Each receiver created via this method will be notified when `store` is called.
-    /// This allows multiple components to react to new blocks concurrently.
-    pub fn subscribe(&self) -> broadcast::Receiver<LatestBlockInner> {
-        self.notifier.subscribe()
-    }
-}
-
-impl LatestBlockProvider for LatestBlock {
-    fn slot(&self) -> u64 {
-        self.inner.load().slot
-    }
-
-    fn blockhash(&self) -> Hash {
-        self.inner.load().blockhash
-    }
-
-    fn clock(&self) -> Clock {
-        self.inner.load().clock.clone()
-    }
-
-    fn subscribe(&self) -> broadcast::Receiver<LatestBlockInner> {
-        self.subscribe()
-    }
-}
-
-pub mod blockstore_processor;
 
 mod database;
 pub mod errors;
-pub mod ledger_truncator;
 mod metrics;
 mod store;

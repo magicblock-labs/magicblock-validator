@@ -1,14 +1,14 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use helius_laserstream::{grpc::SubscribeRequest, LaserstreamError};
+use helius_laserstream::{LaserstreamError, grpc::SubscribeRequest};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{LaserResult, StreamFactory};
 use crate::remote_account_provider::{
-    chain_laser_actor::{LaserStreamWithHandle, StreamHandle},
     RemoteAccountProviderError, RemoteAccountProviderResult,
+    chain_laser_actor::{LaserStreamWithHandle, StreamHandle},
 };
 
 /// A test mock that captures subscription requests and allows driving

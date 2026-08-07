@@ -7,31 +7,23 @@ use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_subscribed, assert_remain_undelegating,
     assert_subscribed_without_delegation_record,
-    testing::{deleg::add_delegation_record_for, init_logger},
+    testing::{
+        accounts::account_shared_with_owner_and_slot, context::TestContext,
+        deleg::add_delegation_record_for,
+    },
 };
 use solana_account::Account;
-use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::{
-    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
-};
-
-mod utils;
-
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
 
 #[tokio::test]
 async fn test_undelegate_redelegate_to_other_in_same_slot() {
     let mut slot: u64 = 11;
 
-    let ctx = setup(slot).await;
+    let ctx = TestContext::init(slot).await;
     let TestContext {
         chainlink,
-        cloner,
+        bank,
         rpc_client,
         ..
     } = ctx.clone();
@@ -40,7 +32,7 @@ async fn test_undelegate_redelegate_to_other_in_same_slot() {
     let program_pubkey = Pubkey::new_unique();
     let other_authority = Pubkey::new_unique();
     let acc = Account {
-        lamports: 1_000,
+        lamports: 1_000_000,
         ..Default::default()
     };
 
@@ -63,23 +55,27 @@ async fn test_undelegate_redelegate_to_other_in_same_slot() {
         // Transaction to read/write would be ok
         // Fetch account - see it's owned by DP, fetch delegation record, clone account as delegated
         ctx.ensure_account(&pubkey).await.unwrap();
-        assert_cloned_as_delegated!(cloner, &[pubkey], slot, program_pubkey);
+        assert_cloned_as_delegated!(bank, &[pubkey], slot, program_pubkey);
         assert_not_subscribed!(&chainlink, &[&pubkey, &delegation_record]);
     };
 
     // 2. Account is undelegated and redelegated to another authority (same slot)
     // Undelegation requested, setup subscription, writes refused
     {
-        info!("2.1. Account is undelegated - Undelegation requested (account owner set to DP in Ephem)");
+        info!(
+            "2.1. Account is undelegated - Undelegation requested (account owner set to DP in Ephem)"
+        );
 
-        ctx.force_undelegation(&pubkey);
+        ctx.force_undelegation(&pubkey).await;
 
         info!("2.2. Would refuse write (account still owned by DP in Ephem)");
-        assert_remain_undelegating!(cloner, &[pubkey], slot);
+        assert_remain_undelegating!(bank, &[pubkey], slot);
 
         slot = rpc_client.set_slot(slot + 1);
 
-        info!("2.3. Account is undelegated and redelegated to other authority in same slot");
+        info!(
+            "2.3. Account is undelegated and redelegated to other authority in same slot"
+        );
 
         // First trigger undelegation subscription
         ctx.chainlink.undelegation_requested(pubkey).await.unwrap();
@@ -95,7 +91,7 @@ async fn test_undelegate_redelegate_to_other_in_same_slot() {
 
         // Account should be cloned as delegated to other (flagged as undelegated)
         info!("2.4. Would refuse write (delegated to other)");
-        assert_cloned_as_undelegated!(cloner, &[pubkey], slot, program_pubkey);
+        assert_cloned_as_undelegated!(bank, &[pubkey], slot, program_pubkey);
         assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
     }
 }

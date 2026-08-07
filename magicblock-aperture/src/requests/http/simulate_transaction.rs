@@ -1,85 +1,92 @@
-use std::{
-    collections::HashMap,
-    sync::{atomic::AtomicU64, Arc},
-};
+use std::collections::HashMap;
 
-use magicblock_core::link::transactions::TransactionSimulationResult;
+use magicblock_metrics::metrics::AccountFetchContext;
+use solana_account::AccountSharedData;
+use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
 use solana_message::inner_instruction::InnerInstructions;
+use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
-    response::{RpcBlockhash, RpcSimulateTransactionResult},
+    response::RpcSimulateTransactionResult,
 };
+use solana_svm::transaction_processing_result::TransactionProcessingResultExtensions;
 use solana_transaction_status::{
     InnerInstruction, InnerInstructions as StatusInnerInstructions,
     UiTransactionEncoding,
 };
-use tracing::*;
 
-use super::prelude::*;
+use super::{
+    ClaimedHandlerResult, HandlerResult, send_transaction::TransactionKind,
+};
+use crate::{
+    error::RpcError,
+    requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
+    server::http::dispatch::HttpDispatcher,
+};
 
 impl HttpDispatcher {
-    /// Handles the `simulateTransaction` RPC request.
-    ///
-    /// Simulates a transaction against the current state of the ledger without
-    /// committing any changes. This is used for preflight checks. The simulation
-    /// can be customized to skip signature verification or replace the transaction's
-    /// blockhash with a recent one. Returns a detailed result including execution
-    /// logs, compute units, and the simulation outcome.
     pub(crate) async fn simulate_transaction(
         &self,
-        request: &mut JsonRequest,
-        remote_account_claims: Arc<AtomicU64>,
-    ) -> HandlerResult {
-        self.require_primary_rpc_method("simulateTransaction")?;
+        request: &JsonRequest,
+    ) -> ClaimedHandlerResult {
+        let mut claims = 0;
+        let result =
+            self.simulate_transaction_inner(request, &mut claims).await;
+        (result, claims)
+    }
 
-        let (transaction_str, config) = parse_params!(
-            request.params()?,
-            String,
-            RpcSimulateTransactionConfig
-        );
-        let transaction_str: String = some_or_err!(transaction_str);
-        let config = config.unwrap_or_default();
+    async fn simulate_transaction_inner(
+        &self,
+        request: &JsonRequest,
+        claims: &mut u64,
+    ) -> HandlerResult {
+        let transaction_str = request.required::<String>(0)?;
+        let config = request
+            .optional::<RpcSimulateTransactionConfig>(1)?
+            .unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        // Prepare the transaction, applying simulation-specific options.
-        let transaction = self
+        let (transaction, remote_account_claims) = self
             .prepare_transaction(
                 &transaction_str,
                 encoding,
-                config.sig_verify,
-                config.replace_recent_blockhash,
+                TransactionKind::Simulate,
             )
-            .inspect_err(|err| {
-                debug!(error = ?err, "Failed to prepare transaction to simulate")
-            })?;
-        let fetch_context = Self::simulate_transaction_context(
-            *transaction.txn.signature(),
-            remote_account_claims.clone(),
-        );
-        self.ensure_transaction_accounts(&transaction.txn, fetch_context)
-            .await?;
-        let number_of_accounts = transaction.txn.message().account_keys().len();
+            .await;
+        *claims += remote_account_claims;
+        let transaction = transaction?;
+        let number_of_accounts = transaction.static_account_keys().len();
 
         let replacement_blockhash = config
             .replace_recent_blockhash
-            .then(|| RpcBlockhash::from(self.blocks.get_latest()));
+            .then(|| self.latest_blockhash().0);
         let inner_instructions_enabled = config.inner_instructions;
         let accounts_config = config.accounts;
 
-        // Submit the transaction to the scheduler for simulation.
-        let result = self
-            .transactions_scheduler
-            .simulate(transaction.txn)
-            .await
+        let record = self
+            .engine
+            .transaction(transaction)?
+            .simulate()
+            .await?
             .map_err(RpcError::transaction_simulation_from_scheduler)?;
-        let TransactionSimulationResult {
-            result,
-            logs,
-            post_simulation_accounts,
-            units_consumed,
-            return_data,
-            inner_instructions: recorded_inner_instructions,
-        } = result;
+
+        let result = record.result.flattened_result();
+        let (logs, units_consumed, return_data, recorded_inner, post_accounts) =
+            match record.result {
+                Ok(executed) => {
+                    let executed = *executed;
+                    let details = executed.execution_details;
+                    (
+                        details.log_messages.map(|l| l.as_ref().clone()),
+                        details.executed_units,
+                        details.return_data,
+                        details.inner_instructions,
+                        executed.loaded_transaction.accounts,
+                    )
+                }
+                Err(_) => (None, 0, None, None, Vec::new()),
+            };
+
         let accounts = if let Some(config_accounts) = accounts_config {
             let accounts_encoding = config_accounts
                 .encoding
@@ -111,15 +118,25 @@ impl HttpDispatcher {
                             .map_err(RpcError::invalid_params)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let fetch_context = Self::rpc_get_multiple_accounts_context(
-                    remote_account_claims.clone(),
-                );
-                let current_accounts = self
-                    .read_accounts_with_ensure(&pubkeys, fetch_context)
+                let reader = |pubkey: &Pubkey, account: &AccountSharedData| {
+                    encode_ui_account(
+                        pubkey,
+                        account,
+                        accounts_encoding,
+                        None,
+                        None,
+                    )
+                };
+                let (current_accounts, remote_account_claims) = self
+                    .read_accounts_with_ensure(
+                        &pubkeys,
+                        AccountFetchContext::rpc_get_multiple_accounts(),
+                        reader,
+                    )
                     .await;
-                let post_simulation_accounts = post_simulation_accounts
-                    .into_iter()
-                    .collect::<HashMap<_, _>>();
+                *claims += remote_account_claims;
+                let post_simulation_accounts =
+                    post_accounts.into_iter().collect::<HashMap<_, _>>();
 
                 Some(
                     pubkeys
@@ -129,11 +146,16 @@ impl HttpDispatcher {
                             post_simulation_accounts
                                 .get(&pubkey)
                                 .cloned()
-                                .or(account)
                                 .map(|account| {
-                                    LockedAccount::new(pubkey, account)
-                                        .ui_encode(accounts_encoding, None)
+                                    encode_ui_account(
+                                        &pubkey,
+                                        &account,
+                                        accounts_encoding,
+                                        None,
+                                        None,
+                                    )
                                 })
+                                .or(account)
                         })
                         .collect(),
                 )
@@ -142,7 +164,6 @@ impl HttpDispatcher {
             None
         };
 
-        // Convert the internal simulation result to the client-facing RPC format.
         let converter = |(index, ixs): (usize, InnerInstructions)| {
             StatusInnerInstructions {
                 index: index as u8,
@@ -158,7 +179,7 @@ impl HttpDispatcher {
         };
 
         let inner_instructions = inner_instructions_enabled.then(|| {
-            recorded_inner_instructions
+            recorded_inner
                 .into_iter()
                 .flatten()
                 .enumerate()
@@ -183,7 +204,7 @@ impl HttpDispatcher {
             loaded_addresses: None,
         };
 
-        let slot = self.blocks.block_height();
+        let slot = record.slot;
         Ok(ResponsePayload::encode(&request.id, result, slot))
     }
 }

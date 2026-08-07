@@ -1,4 +1,9 @@
-use std::process::{self, Child};
+use std::{
+    process::{self, Child},
+    time::Duration,
+};
+
+use integration_test_tools::validator::stop_validator;
 
 pub fn cleanup_validators(
     ephem_validator: &mut Child,
@@ -15,12 +20,8 @@ pub fn cleanup_devnet_only(devnet_validator: &mut Child) {
 }
 
 pub fn cleanup_validator(validator: &mut Child, label: &str) {
-    validator.kill().unwrap_or_else(|err| {
-        panic!("Failed to kill {} validator ({:?})", label, err)
-    });
-    validator.wait().unwrap_or_else(|err| {
-        panic!("Failed to reap {} validator ({:?})", label, err)
-    });
+    eprintln!("Stopping {label} validator");
+    stop_validator(validator, Duration::from_secs(10));
 }
 
 fn kill_process(name: &str) {
@@ -37,7 +38,7 @@ fn kill_process(name: &str) {
 }
 
 fn kill_validators() {
-    // Makes sure all the magicblock-validator + solana test validators  are really killed
+    // Makes sure all MagicBlock and Solana test validators are really killed.
     kill_process("magicblock-validator");
     kill_process("solana-test-validator");
 }

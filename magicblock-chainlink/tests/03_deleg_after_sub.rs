@@ -1,39 +1,31 @@
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_cloned_as_undelegated,
+    AccountFetchContext, assert_cloned_as_delegated,
+    assert_cloned_as_empty_placeholder, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
-    testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchContext,
+    testing::{
+        accounts::account_shared_with_owner_and_slot, context::TestContext,
+        deleg::add_delegation_record_for,
+    },
 };
-use solana_account::Account;
-use solana_program::clock::Slot;
+use solana_account::{Account, AccountBuilder, AccountMode};
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::{
-    accounts::account_shared_with_owner_and_slot, test_context::TestContext,
-};
-
-mod utils;
 
 // Implements the following flow:
 //
 // ## Account created then fetched, then delegated
 // @docs/flows/deleg-non-existing-after-sub.md
 
-async fn setup(slot: Slot) -> TestContext {
-    init_logger();
-    TestContext::init(slot).await
-}
-
 // NOTE: Flow "Account created then fetched, then delegated"
 #[tokio::test]
 async fn test_deleg_after_subscribe_case2() {
     let mut slot: u64 = 11;
 
-    let ctx = setup(slot).await;
+    let ctx = TestContext::init(slot).await;
     let TestContext {
         chainlink,
-        cloner,
+        bank,
         pubsub_client: _,
         rpc_client,
         ..
@@ -42,7 +34,7 @@ async fn test_deleg_after_subscribe_case2() {
     let pubkey = Pubkey::new_unique();
     let program_pubkey = Pubkey::new_unique();
     let acc = Account {
-        lamports: 1_000,
+        lamports: 1_000_000,
         owner: program_pubkey,
         ..Default::default()
     };
@@ -52,22 +44,29 @@ async fn test_deleg_after_subscribe_case2() {
     // - writable: NO
     {
         info!("1. Initially the account does not exist");
-        assert_not_cloned!(cloner, &[pubkey]);
+        assert_not_cloned!(bank, &[pubkey]);
 
         chainlink
             .ensure_accounts(
                 &[pubkey],
-                None,
                 AccountFetchContext::rpc_get_multiple_accounts(),
             )
             .await
             .unwrap();
-        assert_not_cloned!(cloner, &[pubkey]);
+        assert_cloned_as_empty_placeholder!(bank, &[pubkey]);
+        let mode = bank
+            .accounts()
+            .loader()
+            .read(&pubkey, |account| account.mode())
+            .unwrap()
+            .unwrap();
+        assert_eq!(mode, AccountMode::Placeholder);
+        assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
     }
 
     // 2. Account created with original owner
     //
-    // Now we can ensure it as readonly and it will be cloned
+    // The retained subscription replaces the placeholder with readonly state.
     // - readable: OK
     // - writable: NO
     {
@@ -77,21 +76,20 @@ async fn test_deleg_after_subscribe_case2() {
         let acc =
             account_shared_with_owner_and_slot(&acc, program_pubkey, slot);
 
-        // When the account is created we do not receive any update since we do not sub to a non-existing account
-        let updated = ctx
-            .send_and_receive_account_update(pubkey, acc.clone(), Some(400))
-            .await;
-        assert!(!updated);
-
-        chainlink
-            .ensure_accounts(
-                &[pubkey],
-                None,
-                AccountFetchContext::rpc_get_multiple_accounts(),
-            )
-            .await
-            .unwrap();
-        assert_cloned_as_undelegated!(cloner, &[pubkey], slot, program_pubkey);
+        assert!(chainlink.is_watching(&pubkey));
+        let expected = AccountBuilder::from(acc.clone())
+            .mode(AccountMode::ReadOnly)
+            .build();
+        let mut local_updates = bank.accounts().subscribe(pubkey).await;
+        ctx.send_account_update(pubkey, acc.clone()).await;
+        TestContext::wait_for_local_account(
+            &bank,
+            &pubkey,
+            &mut local_updates,
+            &expected,
+        )
+        .await;
+        assert_cloned_as_undelegated!(bank, &[pubkey], slot, program_pubkey);
         assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
     }
     // 3. Account delegated to us
@@ -109,11 +107,20 @@ async fn test_deleg_after_subscribe_case2() {
             ctx.validator_pubkey,
             program_pubkey,
         );
-        let updated = ctx
-            .send_and_receive_account_update(pubkey, acc.clone(), Some(400))
-            .await;
-        assert!(updated);
-        assert_cloned_as_delegated!(cloner, &[pubkey], slot, program_pubkey);
+        let expected = AccountBuilder::from(acc.clone())
+            .owner(program_pubkey)
+            .mode(AccountMode::Delegated)
+            .build();
+        let mut local_updates = bank.accounts().subscribe(pubkey).await;
+        ctx.send_account_update(pubkey, acc.clone()).await;
+        TestContext::wait_for_local_account(
+            &bank,
+            &pubkey,
+            &mut local_updates,
+            &expected,
+        )
+        .await;
+        assert_cloned_as_delegated!(bank, &[pubkey], slot, program_pubkey);
         assert_not_subscribed!(&chainlink, &[&pubkey, &delegation_record]);
     }
 }

@@ -37,6 +37,10 @@ Examples:
 
 The PR title becomes the commit title when merged.
 
+Under **What changed**, explain why the change is needed and what it does.
+Every non-release PR description must include exactly one `Closes #<issue>`
+link to the concrete work it completes.
+
 ---
 
 ### Compatibility & Safety
@@ -46,15 +50,16 @@ Explicitly call out any of the following in the PR description:
 - migrations (disk, state, network, protocol)
 - behavior changes affecting operators
 
-If none apply, mark the change as **non-breaking**.
+Describe these concerns under **Compatibility**. Write `None` when none apply.
 
 ---
 
-### Testing
+### Validation
 
 - Changes affecting correctness, consensus, or state handling **must** be tested.
 - Small refactors may rely on existing coverage; explain why if no new tests are added.
 - Performance-sensitive changes should include rationale or benchmarks where relevant.
+- Under **Validation**, list the exact commands or scenarios and their results.
 
 ---
 

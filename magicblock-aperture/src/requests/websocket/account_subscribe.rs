@@ -1,44 +1,43 @@
+use solana_account::AccountSharedData;
 use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
 use super::prelude::*;
-use crate::{encoder::AccountEncoder, some_or_err};
+use crate::encoder::AccountEncoder;
 
 impl WsDispatcher {
-    /// Handles the `accountSubscribe` WebSocket RPC request.
-    ///
-    /// Registers the current WebSocket connection to receive notifications whenever
-    /// the specified account is modified. The encoding of the notification can be
-    /// customized via an optional configuration object. Returns the subscription ID
-    /// used to identify notifications and to unsubscribe.
     pub(crate) async fn account_subscribe(
         &mut self,
-        request: &mut JsonRequest,
+        request: &JsonRequest,
     ) -> RpcResult<SubResult> {
-        let (pubkey, config) = parse_params!(
-            request.params()?,
-            Serde32Bytes,
-            RpcAccountInfoConfig
-        );
-
-        let pubkey = some_or_err!(pubkey);
-        let config = config.unwrap_or_default();
+        let pubkey = request.required::<Serde32Bytes>(0)?.into();
+        let config = request
+            .optional::<RpcAccountInfoConfig>(1)?
+            .unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let encoder = AccountEncoder {
             encoding,
             data_slice: config.data_slice,
         };
 
-        // Register the subscription with the global database.
-        let handle = self
-            .subscriptions
-            .subscribe_to_account(pubkey, encoder, self.chan.clone())
-            .await;
+        let id = next_subid();
+        let mut rx = self.engine.accounts().subscribe(pubkey).await;
+        let tx = self.chan.tx.clone();
+        let handle = tokio::spawn(async move {
+            while let Ok(account) = rx.recv().await {
+                let account: AccountSharedData = account;
+                let slot = account.slot();
+                let Some(bytes) = encoder.encode(slot, &(pubkey, account), id)
+                else {
+                    continue;
+                };
+                if tx.send(bytes).await.is_err() {
+                    break;
+                }
+            }
+        });
+        self.register(id, handle);
 
-        let result = SubResult::SubId(handle.id);
-        // Store the cleanup handle to manage the subscription's lifecycle.
-        self.register_unsub(handle);
-
-        Ok(result)
+        Ok(SubResult::SubId(id))
     }
 }

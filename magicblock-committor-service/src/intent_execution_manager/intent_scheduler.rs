@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque, hash_map::Entry};
 
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
@@ -855,19 +855,17 @@ pub(crate) fn create_test_intent(
     is_undelegate: bool,
 ) -> ScheduledIntentBundle {
     use magicblock_core::intent::{
-        types::CommittedAccount, CommitAndUndelegate, CommitType,
-        MagicIntentBundle, UndelegateType,
+        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
+        types::CommittedAccount,
     };
     use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
     use solana_account::Account;
     use solana_hash::Hash;
-    use solana_transaction::Transaction;
 
     let mut intent = ScheduledIntentBundle {
         id,
         slot: 0,
         blockhash: Hash::default(),
-        sent_transaction: Transaction::default(),
         payer: Pubkey::default(),
         intent_bundle: MagicIntentBundle::default(),
     };
@@ -905,13 +903,12 @@ pub(crate) fn create_test_intent_bundle(
     commit_and_undelegate_pubkeys: &[Pubkey],
 ) -> ScheduledIntentBundle {
     use magicblock_core::intent::{
-        types::CommittedAccount, CommitAndUndelegate, CommitType,
-        MagicIntentBundle, UndelegateType,
+        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
+        types::CommittedAccount,
     };
     use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
     use solana_account::Account;
     use solana_hash::Hash;
-    use solana_transaction::Transaction;
 
     let to_accounts = |keys: &[Pubkey]| -> Vec<CommittedAccount> {
         keys.iter()
@@ -928,7 +925,6 @@ pub(crate) fn create_test_intent_bundle(
         id,
         slot: 0,
         blockhash: Hash::default(),
-        sent_transaction: Transaction::default(),
         payer: Pubkey::default(),
         intent_bundle: MagicIntentBundle::default(),
     };

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use magicblock_core::tls::ExecutionTlsStash;
 use magicblock_magic_program_api::args::{CancelTaskRequest, TaskRequest};
+use nucleus::tls::TlsManager;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -38,8 +38,9 @@ pub(crate) fn process_cancel_task(
         authority: *task_authority_pubkey,
     };
 
-    // Add cancel request to execution TLS stash
-    ExecutionTlsStash::register_task(TaskRequest::Cancel(cancel_request));
+    // Hand the request to the engine, which publishes queued service
+    // messages once the transaction commits successfully.
+    TlsManager::enqueue(&TaskRequest::Cancel(cancel_request))?;
 
     ic_msg!(
         invoke_context,
@@ -55,7 +56,7 @@ mod test {
     use magicblock_magic_program_api::instruction::MagicBlockInstruction;
     use solana_account::AccountSharedData;
     use solana_instruction::{
-        error::InstructionError, AccountMeta, Instruction,
+        AccountMeta, Instruction, error::InstructionError,
     };
     use solana_keypair::Keypair;
     use solana_sdk_ids::system_program;
@@ -92,7 +93,7 @@ mod test {
         let task_id = 1;
 
         let account_metas = vec![AccountMeta::new(payer.pubkey(), false)];
-        let ix = Instruction::new_with_bincode(
+        let ix = Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::CancelTask { task_id },
             account_metas,

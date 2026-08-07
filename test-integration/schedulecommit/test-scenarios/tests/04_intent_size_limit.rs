@@ -1,6 +1,6 @@
 #![allow(clippy::result_large_err)]
 
-use integration_test_tools::run_test;
+use integration_test_tools::{init_logger, run_test};
 use magicblock_program::magic_sys::INTENT_TOO_LARGE_ERR;
 use program_schedulecommit::{
     api::{schedule_commit_cpi_instruction, UserSeeds},
@@ -12,7 +12,6 @@ use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
     instruction::InstructionError, signature::Signer, transaction::Transaction,
 };
-use test_kit::init_logger;
 use tracing::*;
 use utils::{
     assert_is_instruction_error, extract_transaction_error,

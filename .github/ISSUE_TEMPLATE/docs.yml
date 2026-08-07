@@ -11,6 +11,6 @@ body:
       placeholder: |
         Location (file/URL):
         What’s wrong:
-        Suggested change:
+        Suggested change (optional):
     validations:
       required: true

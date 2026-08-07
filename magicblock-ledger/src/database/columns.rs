@@ -1,5 +1,5 @@
 use byteorder::{BigEndian, ByteOrder};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;

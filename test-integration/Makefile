@@ -1,26 +1,23 @@
-# Makefile for building and testing Solana programs and test suitesk
+# Makefile for building and testing Solana programs and test suites
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 DEPLOY_DIR := $(DIR)target/deploy
 ROOT_DEPLOY_DIR := $(DIR)../target/deploy
 
 RUST_LOG ?= 'info'
 
-FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
 SCHEDULECOMMIT_DIR := $(DIR)programs/schedulecommit
 SCHEDULECOMMIT_SECURITY_DIR := $(DIR)programs/schedulecommit-security
 COMMITTOR_PROGRAM_DIR := $(DIR)../magicblock-committor-program
 
-FLEXI_COUNTER_SRC := $(shell find $(FLEXI_COUNTER_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SRC := $(shell find $(SCHEDULECOMMIT_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SECURITY_SRC := $(shell find $(SCHEDULECOMMIT_SECURITY_DIR) -name '*.rs' -o -name '*.toml')
 COMMITTOR_PROGRAM_SRC := $(shell find $(COMMITTOR_PROGRAM_DIR) -name '*.rs' -o -name '*.toml')
 
-FLEXI_COUNTER_SO := $(DEPLOY_DIR)/program_flexi_counter.so
 SCHEDULECOMMIT_SO := $(DEPLOY_DIR)/program_schedulecommit.so
 SCHEDULECOMMIT_SECURITY_SO := $(DEPLOY_DIR)/program_schedulecommit_security.so
 COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
 
-PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
+PROGRAMS_SO := $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
 COMMITTOR_IX_SINGLE_TESTS := committor,committor_single_large
 COMMITTOR_BUNDLE_TESTS := committor_bundles,committor_bundles_undelegate,committor_bundles_8
 COMMITTOR_BUNDLE_HEAVY_TESTS := committor_bundles_heavy,committor_bundles_heavy_tail
@@ -34,10 +31,9 @@ list-programs:
 
 programs: $(PROGRAMS_SO)
 
+ci-test: test
+
 test: $(PROGRAMS_SO)
-	if [ -z "$(RUN_TESTS)" ] || printf ',%s,' "$(RUN_TESTS)" | grep -Eq ',(chainlink|cloning),'; then \
-		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
-	fi && \
 	if [ -n "$(INTEGRATION_TEST_RUNNER_BIN)" ] && [ -x "$(INTEGRATION_TEST_RUNNER_BIN)" ]; then \
 		RUST_BACKTRACE=1 \
 		RUST_LOG=$(RUST_LOG) \
@@ -82,14 +78,6 @@ setup-schedulecommit-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-chainlink:
-	RUN_TESTS=chainlink \
-	$(MAKE) test
-setup-chainlink-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=chainlink \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
 test-cloning:
 	RUN_TESTS=cloning \
 	$(MAKE) test
@@ -109,31 +97,23 @@ setup-cloning-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-restore-ledger:
-	RUN_TESTS=restore_ledger \
-	$(MAKE) test
-setup-restore-ledger-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=restore_ledger \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
 
-test-magicblock-api:
-	RUN_TESTS=magicblock_api \
+test-validator-services:
+	RUN_TESTS=validator_services \
 	$(MAKE) test
-setup-magicblock-api-devnet:
+setup-validator-services-devnet:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=magicblock_api \
+	RUN_TESTS=validator_services \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-setup-magicblock-api-ephem:
+setup-validator-services-ephem:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=magicblock_api \
+	RUN_TESTS=validator_services \
 	SETUP_ONLY=ephem \
 	$(MAKE) test
-setup-magicblock-api-both:
+setup-validator-services-both:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=magicblock_api \
+	RUN_TESTS=validator_services \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
@@ -188,25 +168,6 @@ setup-committor-devnet:
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
-test-pubsub:
-	RUN_TESTS=pubsub \
-	$(MAKE) test
-setup-pubsub-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=pubsub \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
-setup-pubsub-ephem:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=pubsub \
-	SETUP_ONLY=ephem \
-	$(MAKE) test
-setup-pubsub-both:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=pubsub \
-	SETUP_ONLY=both \
-	$(MAKE) test
-
 test-config:
 	RUN_TESTS=config \
 	$(MAKE) test
@@ -243,9 +204,6 @@ setup-task-scheduler-devnet:
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
-$(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
-	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml \
-		--sbf-out-dir $(DEPLOY_DIR) --quiet
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml \
 		--sbf-out-dir $(DEPLOY_DIR) --quiet
@@ -256,13 +214,6 @@ $(COMMITTOR_PROGRAM_SO): $(COMMITTOR_PROGRAM_SRC)
 	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml \
 	--sbf-out-dir $(ROOT_DEPLOY_DIR)/ --quiet
 
-deploy-flexi-counter: $(FLEXI_COUNTER_SO)
-	solana program deploy \
-		-u localhost \
-		--keypair $(DIR)/target/deploy/program_flexi_counter-keypair.json \
-		--program-id $(DIR)/programs/flexi-counter/keys/f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4.json \
-		$(DIR)/target/deploy/program_flexi_counter.so
-
 fmt:
 	cargo +nightly fmt -- --config-path ../rustfmt-nightly.toml
 
@@ -272,31 +223,27 @@ lint:
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path ../rustfmt-nightly.toml
 
-ci-lint: lint
+ci-lint:
+	cargo clippy --workspace --all-targets --locked -- -D warnings
 
 .PHONY: \
+	ci-test \
 	ci-fmt \
 	lint \
 	ci-lint \
-	deploy-flexi-counter \
 	fmt \
 	list \
 	list-programs \
 	programs \
 	setup-aml-devnet \
-	setup-chainlink-devnet \
 	setup-cloning-both \
 	setup-cloning-devnet \
 	setup-cloning-ephem \
 	setup-committor-devnet \
 	setup-config-devnet \
-	setup-magicblock-api-both \
-	setup-magicblock-api-devnet \
-	setup-magicblock-api-ephem \
-	setup-pubsub-both \
-	setup-pubsub-devnet \
-	setup-pubsub-ephem \
-	setup-restore-ledger-devnet \
+	setup-validator-services-both \
+	setup-validator-services-devnet \
+	setup-validator-services-ephem \
 	setup-schedule-intents-both \
 	setup-schedule-intents-devnet \
 	setup-schedule-intents-ephem \
@@ -307,7 +254,6 @@ ci-lint: lint
 	setup-task-scheduler-devnet \
 	test \
 	test-aml \
-	test-chainlink \
 	test-cloning \
 	test-committor \
 	test-committor-ix-singles \
@@ -321,10 +267,8 @@ ci-lint: lint
 	test-committor-intent-executor \
 	test-config \
 	test-force-mb \
-	test-magicblock-api \
-	test-pubsub \
-	test-restore-ledger \
 	test-schedule-intents \
 	test-schedulecommit \
 	test-table-mania \
-	test-task-scheduler
+	test-task-scheduler \
+	test-validator-services

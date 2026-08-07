@@ -1,99 +1,63 @@
-use std::fmt::Debug;
-
 use hyper::body::Bytes;
 use json::Serialize;
-use magicblock_core::{
-    link::{accounts::LockedAccount, transactions::TransactionStatus},
-    Slot,
-};
-use solana_account::ReadableAccount;
+use magicblock_core::Slot;
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_account_decoder::{
-    encode_ui_account, UiAccountEncoding, UiDataSliceConfig,
+    UiAccountEncoding, UiDataSliceConfig, encode_ui_account,
 };
 use solana_pubkey::Pubkey;
 use solana_transaction_error::{TransactionError, TransactionResult};
 
 use crate::{
-    requests::{params::SerdeSignature, payload::NotificationPayload},
+    requests::{
+        http::get_program_accounts::{AccountWithPubkey, matches_filters},
+        payload::NotificationPayload,
+    },
     state::subscriptions::SubscriptionID,
-    utils::{AccountWithPubkey, ProgramFilters},
 };
 
-/// An abstraction trait over types which specialize in turning various
-/// websocket notification payload types into sequence of bytes
-pub(crate) trait Encoder: Ord + Eq + Clone + Debug {
-    type Data;
-    fn encode(
-        &self,
-        slot: Slot,
-        data: &Self::Data,
-        id: SubscriptionID,
-    ) -> Option<Bytes>;
-}
-
-/// A `accountSubscribe` payload encoder
-#[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct AccountEncoder {
     pub(crate) encoding: UiAccountEncoding,
     pub(crate) data_slice: Option<UiDataSliceConfig>,
 }
 
-impl PartialOrd for AccountEncoder {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
+pub(crate) struct ProgramAccountEncoder {
+    pub(crate) encoder: AccountEncoder,
+    pub(crate) filters: Vec<solana_rpc_client_api::filter::RpcFilterType>,
 }
 
-impl Ord for AccountEncoder {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let key = |e: &Self| {
-            (
-                e.encoding as u32,
-                e.data_slice.map(|ds| (ds.offset, ds.length)),
-            )
-        };
-        key(self).cmp(&key(other))
-    }
-}
-
-/// A `programSubscribe` payload encoder
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
-pub struct ProgramAccountEncoder {
-    pub encoder: AccountEncoder,
-    pub filters: ProgramFilters,
-}
-
-impl Encoder for AccountEncoder {
-    type Data = LockedAccount;
-
-    fn encode(
+impl AccountEncoder {
+    pub(crate) fn encode(
         &self,
         slot: Slot,
-        data: &Self::Data,
+        data: &(Pubkey, AccountSharedData),
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let encoded = data.read_locked(|pk, acc| {
-            encode_ui_account(pk, acc, self.encoding, None, self.data_slice)
-        });
+        let (pubkey, account) = data;
+        let encoded = encode_ui_account(
+            pubkey,
+            account,
+            self.encoding,
+            None,
+            self.data_slice,
+        );
         let method = "accountNotification";
         NotificationPayload::encode(encoded, slot, method, id)
     }
 }
 
-impl Encoder for ProgramAccountEncoder {
-    type Data = LockedAccount;
-
-    fn encode(
+impl ProgramAccountEncoder {
+    pub(crate) fn encode(
         &self,
         slot: Slot,
-        data: &Self::Data,
+        data: &(Pubkey, AccountSharedData),
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        data.read_locked(|_, acc| {
-            self.filters.matches(acc.data()).then_some(())
-        })?;
+        let (pubkey, account) = data;
+        matches_filters(&self.filters, account.data()).then_some(())?;
         let value = AccountWithPubkey::new(
-            data,
+            *pubkey,
+            account,
             self.encoder.encoding,
             self.encoder.data_slice,
         );
@@ -102,17 +66,13 @@ impl Encoder for ProgramAccountEncoder {
     }
 }
 
-/// A `signatureSubscribe` payload encoder
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
 pub(crate) struct TransactionResultEncoder;
 
-impl Encoder for TransactionResultEncoder {
-    type Data = TransactionResult<()>;
-
-    fn encode(
+impl TransactionResultEncoder {
+    pub(crate) fn encode(
         &self,
         slot: Slot,
-        data: &Self::Data,
+        data: &TransactionResult<()>,
         id: SubscriptionID,
     ) -> Option<Bytes> {
         #[derive(Serialize)]
@@ -126,59 +86,12 @@ impl Encoder for TransactionResultEncoder {
     }
 }
 
-/// A `logsSubscribe` payload encoder
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
-pub(crate) enum TransactionLogsEncoder {
-    All,
-    Mentions(Pubkey),
-}
-
-impl Encoder for TransactionLogsEncoder {
-    type Data = TransactionStatus;
-
-    fn encode(
-        &self,
-        slot: Slot,
-        data: &Self::Data,
-        id: SubscriptionID,
-    ) -> Option<Bytes> {
-        let logs = data.meta.log_messages.as_ref()?;
-        if let Self::Mentions(pubkey) = self {
-            data.txn
-                .message()
-                .account_keys()
-                .iter()
-                .any(|p| p == pubkey)
-                .then_some(())?;
-        }
-
-        #[derive(Serialize)]
-        struct TransactionLogs<'a> {
-            signature: SerdeSignature,
-            err: Option<TransactionError>,
-            logs: &'a [String],
-        }
-        let method = "logsNotification";
-        let result = TransactionLogs {
-            signature: SerdeSignature(*data.txn.signature()),
-            err: data.meta.status.as_ref().err().cloned(),
-            logs,
-        };
-        NotificationPayload::encode(result, slot, method, id)
-    }
-}
-
-/// A `slotSubscribe` payload encoder
-#[derive(PartialEq, PartialOrd, Ord, Eq, Clone, Debug)]
 pub(crate) struct SlotEncoder;
 
-impl Encoder for SlotEncoder {
-    type Data = ();
-
-    fn encode(
+impl SlotEncoder {
+    pub(crate) fn encode(
         &self,
         slot: Slot,
-        _: &Self::Data,
         id: SubscriptionID,
     ) -> Option<Bytes> {
         #[derive(Serialize)]

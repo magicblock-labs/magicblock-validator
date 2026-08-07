@@ -48,7 +48,6 @@ Primary files:
 | `programs/magicblock/src/clone_account/` | Magic Program processors for clone, chunk, cleanup, post-delegation actions, and program finalization instructions emitted by this crate. |
 | `magicblock-magic-program-api/src/instruction.rs` | Wire enum and `AccountCloneFields` used by clone instructions. |
 | `magicblock-api/src/magic_validator.rs` | Production startup wiring: constructs `ChainlinkCloner` and passes it into `ProdInnerChainlink`. |
-| `test-integration/test-cloning/` | Integration coverage for account/program cloning behavior, including multi-program and post-delegation action scenarios. |
 
 Main consumers:
 
@@ -190,7 +189,7 @@ Pitfalls:
 
 ### Eviction flow
 
-1. Chainlink requests eviction through the `Cloner` trait, typically as part of subscription/LRU or account lifecycle handling.
+1. Chainlink requests eviction through the `Cloner` trait after an engine account-cache eviction or exceptional stale-subscription detection.
 2. `evict_account` builds the Magic Program evict instruction and signs a local transaction with validator authority.
 3. The transaction is submitted through the same scheduler path as clones.
 4. Errors are wrapped as `ClonerError::FailedToEvictAccount`.
@@ -268,7 +267,6 @@ Inspect first:
 - `build_small_account_tx` and `build_large_account_txs`;
 - `programs/magicblock/src/clone_account/process_post_delegation_actions.rs`;
 - `magicblock-chainlink/src/fetch_cloner/delegation.rs` and action dependency validation in `fetch_cloner/mod.rs`;
-- `test-integration/test-cloning/tests/10_post_delegation_token_transfer.rs`.
 
 Risks:
 
@@ -285,7 +283,6 @@ Inspect first:
 - `magicblock-chainlink/src/remote_account_provider/program_account.rs`;
 - Magic Program finalizers in `programs/magicblock/src/clone_account/`;
 - loader API dependencies in `Cargo.toml`;
-- `test-integration/test-cloning/tests/08_multi_program_cloning.rs`.
 
 Risks:
 
@@ -328,8 +325,6 @@ Risks:
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-account-cloner` and, when request construction or account availability changes, `magicblock-chainlink`.
-- Relevant integration suites: `test-cloning`; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
-- Useful focused integration areas: `test-integration/test-cloning/tests/05_parallel-cloning.rs` for concurrent clone pressure, `test-integration/test-cloning/tests/08_multi_program_cloning.rs` for program cloning, and `test-integration/test-cloning/tests/10_post_delegation_token_transfer.rs` for post-delegation actions.
 - Performance validation intent: account/program clone changes should report whether they add transactions, serialization, allocations, logging, scheduler waits, cleanup work, or remote diagnostics to clone hot paths.
 
 ## Adjacent implementation references
@@ -339,4 +334,3 @@ Risks:
 - `magicblock-chainlink/src/cloner/mod.rs` — trait and request boundary implemented by this crate.
 - `programs/magicblock/src/clone_account/` — Magic Program clone processors that consume instructions built here.
 - `magicblock-magic-program-api/src/instruction.rs` — clone/finalize instruction wire types.
-- `test-integration/test-cloning/` — integration tests for cloning behavior.

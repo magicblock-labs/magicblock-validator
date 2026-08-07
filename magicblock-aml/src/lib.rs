@@ -5,13 +5,13 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use futures_util::future::{try_join_all, BoxFuture, FutureExt, Shared};
+use futures_util::future::{BoxFuture, FutureExt, Shared, try_join_all};
 use magicblock_config::config::RiskConfig;
 use reqwest::Client;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde_json::Value;
 use thiserror::Error;
-use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tokio::sync::{Mutex as AsyncMutex, mpsc};
 use tracing::*;
 
 pub type RiskResult<T> = Result<T, RiskError>;
@@ -421,7 +421,8 @@ mod tests {
                     };
                     let response = format!(
                         "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                        body.len(), body
+                        body.len(),
+                        body
                     );
                     stream
                         .write_all(response.as_bytes())
@@ -458,11 +459,7 @@ mod tests {
             first_line.split_whitespace().nth(1)?.split('?').nth(1)?;
         path_and_query.split('&').find_map(|part| {
             let (k, v) = part.split_once('=')?;
-            if k == key {
-                Some(v.to_string())
-            } else {
-                None
-            }
+            if k == key { Some(v.to_string()) } else { None }
         })
     }
 

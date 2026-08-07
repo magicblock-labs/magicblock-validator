@@ -1,10 +1,7 @@
 use std::time::Duration;
 
-use isocountry::CountryCode;
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 use solana_pubkey::Pubkey;
-use url::Url;
 
 use crate::consts;
 
@@ -25,17 +22,10 @@ impl Default for CommittorConfig {
     }
 }
 
-/// Metadata and operational settings for on-chain validator registration.
-#[serde_as]
+/// Optional leader-owned administrative background work.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct ChainOperationConfig {
-    /// The validator's two-letter ISO country code (e.g., "US", "DE").
-    pub country_code: CountryCode,
-
-    /// The validator's fully qualified domain name (FQDN).
-    pub fqdn: Url,
-
+pub struct AdminConfig {
     /// Frequency at which the validator claims accrued fees from the chain.
     #[serde(default = "default_claim_fees_frequency", with = "humantime")]
     pub claim_fees_frequency: Duration,
@@ -49,17 +39,6 @@ fn default_claim_fees_frequency() -> Duration {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainLinkConfig {
-    /// The maximum number of non-delegated accounts to track simultaneously for
-    /// updates.
-    pub max_monitored_accounts: usize,
-
-    /// The maximum number of accounts to retain in the secondary subscription
-    /// cache.
-    pub secondary_max_monitored_accounts: usize,
-
-    /// When true, confined accounts are removed during accounts bank reset.
-    pub remove_confined_accounts: bool,
-
     /// If specified, only these programs will be cloned into the validator.
     /// If empty or not specified, all programs are allowed.
     pub allowed_programs: Option<Vec<AllowedProgram>>,
@@ -82,10 +61,6 @@ pub struct ChainLinkConfig {
 impl Default for ChainLinkConfig {
     fn default() -> Self {
         Self {
-            max_monitored_accounts: consts::DEFAULT_MAX_MONITORED_ACCOUNTS,
-            secondary_max_monitored_accounts:
-                consts::DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS,
-            remove_confined_accounts: false,
             allowed_programs: None,
             resubscription_delay: Duration::from_millis(
                 consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,

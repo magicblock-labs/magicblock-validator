@@ -4,20 +4,20 @@ use std::{
 };
 
 use solana_account_decoder::parse_token::{
-    real_number_string_trimmed, UiTokenAmount,
+    UiTokenAmount, real_number_string_trimmed,
 };
-use solana_hash::{Hash, HASH_BYTES};
+use solana_hash::{HASH_BYTES, Hash};
 use solana_instruction::error::InstructionError;
 use solana_message::{
+    MessageHeader, VersionedMessage,
     compiled_instruction::CompiledInstruction,
     legacy::Message as LegacyMessage,
     v0,
     v0::{LoadedAddresses, MessageAddressTableLookup},
-    MessageHeader, VersionedMessage,
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_transaction::{versioned::VersionedTransaction, Transaction};
+use solana_transaction::{Transaction, versioned::VersionedTransaction};
 use solana_transaction_error::TransactionError;
 use solana_transaction_status::{
     ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward,
@@ -124,6 +124,11 @@ impl From<Reward> for generated::Reward {
                 Some(RewardType::Rent) => generated::RewardType::Rent,
                 Some(RewardType::Staking) => generated::RewardType::Staking,
                 Some(RewardType::Voting) => generated::RewardType::Voting,
+                // No representation in the legacy proto schema; old ledgers
+                // this deprecated crate reads never contain this reward type.
+                Some(RewardType::DeactivatedStake) => {
+                    generated::RewardType::Unspecified
+                }
             } as i32,
             commission: reward
                 .commission
@@ -363,6 +368,15 @@ impl From<VersionedMessage> for generated::Message {
                     .map(|lookup| lookup.into())
                     .collect(),
             },
+            // V1 introduces a new on-wire layout (lifetime_specifier / config,
+            // no address lookup tables) that the legacy proto schema cannot
+            // represent. This deprecated crate only ever reads pre-V1 ledgers,
+            // so a V1 message never reaches this write path.
+            VersionedMessage::V1(_) => {
+                panic!(
+                    "V1 messages are not representable in the legacy ledger proto schema"
+                )
+            }
         }
     }
 }
@@ -615,14 +629,10 @@ impl TryFrom<generated::TransactionStatusMeta> for TransactionStatusMeta {
             compute_units_consumed,
             cost_units: None,
         };
-        if !return_data_none {
-            if let Some(return_data) = return_data {
-                let data =
-                    meta.return_data.get_or_insert_with(Default::default);
-                data.program_id =
-                    Pubkey::try_from(return_data.program_id).unwrap();
-                data.data = return_data.data;
-            }
+        if !return_data_none && let Some(return_data) = return_data {
+            let data = meta.return_data.get_or_insert_with(Default::default);
+            data.program_id = Pubkey::try_from(return_data.program_id).unwrap();
+            data.data = return_data.data;
         }
         Ok(meta)
     }
@@ -797,80 +807,77 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
     fn try_from(
         transaction_error: tx_by_addr::TransactionError,
     ) -> Result<Self, Self::Error> {
-        if transaction_error.transaction_error == 8 {
-            if let Some(instruction_error) = transaction_error.instruction_error
-            {
-                if let Some(custom) = instruction_error.custom {
-                    return Ok(TransactionError::InstructionError(
-                        instruction_error.index as u8,
-                        InstructionError::Custom(custom.custom),
-                    ));
-                }
-
-                let ie = match instruction_error.error {
-                    0 => InstructionError::GenericError,
-                    1 => InstructionError::InvalidArgument,
-                    2 => InstructionError::InvalidInstructionData,
-                    3 => InstructionError::InvalidAccountData,
-                    4 => InstructionError::AccountDataTooSmall,
-                    5 => InstructionError::InsufficientFunds,
-                    6 => InstructionError::IncorrectProgramId,
-                    7 => InstructionError::MissingRequiredSignature,
-                    8 => InstructionError::AccountAlreadyInitialized,
-                    9 => InstructionError::UninitializedAccount,
-                    10 => InstructionError::UnbalancedInstruction,
-                    11 => InstructionError::ModifiedProgramId,
-                    12 => InstructionError::ExternalAccountLamportSpend,
-                    13 => InstructionError::ExternalAccountDataModified,
-                    14 => InstructionError::ReadonlyLamportChange,
-                    15 => InstructionError::ReadonlyDataModified,
-                    16 => InstructionError::DuplicateAccountIndex,
-                    17 => InstructionError::ExecutableModified,
-                    18 => InstructionError::RentEpochModified,
-                    19 => InstructionError::NotEnoughAccountKeys,
-                    20 => InstructionError::AccountDataSizeChanged,
-                    21 => InstructionError::AccountNotExecutable,
-                    22 => InstructionError::AccountBorrowFailed,
-                    23 => InstructionError::AccountBorrowOutstanding,
-                    24 => InstructionError::DuplicateAccountOutOfSync,
-                    26 => InstructionError::InvalidError,
-                    27 => InstructionError::ExecutableDataModified,
-                    28 => InstructionError::ExecutableLamportChange,
-                    29 => InstructionError::ExecutableAccountNotRentExempt,
-                    30 => InstructionError::UnsupportedProgramId,
-                    31 => InstructionError::CallDepth,
-                    32 => InstructionError::MissingAccount,
-                    33 => InstructionError::ReentrancyNotAllowed,
-                    34 => InstructionError::MaxSeedLengthExceeded,
-                    35 => InstructionError::InvalidSeeds,
-                    36 => InstructionError::InvalidRealloc,
-                    37 => InstructionError::ComputationalBudgetExceeded,
-                    38 => InstructionError::PrivilegeEscalation,
-                    39 => InstructionError::ProgramEnvironmentSetupFailure,
-                    40 => InstructionError::ProgramFailedToComplete,
-                    41 => InstructionError::ProgramFailedToCompile,
-                    42 => InstructionError::Immutable,
-                    43 => InstructionError::IncorrectAuthority,
-                    44 => InstructionError::BorshIoError,
-                    45 => InstructionError::AccountNotRentExempt,
-                    46 => InstructionError::InvalidAccountOwner,
-                    47 => InstructionError::ArithmeticOverflow,
-                    48 => InstructionError::UnsupportedSysvar,
-                    49 => InstructionError::IllegalOwner,
-                    50 => InstructionError::MaxAccountsDataAllocationsExceeded,
-                    51 => InstructionError::MaxAccountsExceeded,
-                    52 => InstructionError::MaxInstructionTraceLengthExceeded,
-                    53 => {
-                        InstructionError::BuiltinProgramsMustConsumeComputeUnits
-                    }
-                    _ => return Err("Invalid InstructionError"),
-                };
-
+        if transaction_error.transaction_error == 8
+            && let Some(instruction_error) = transaction_error.instruction_error
+        {
+            if let Some(custom) = instruction_error.custom {
                 return Ok(TransactionError::InstructionError(
                     instruction_error.index as u8,
-                    ie,
+                    InstructionError::Custom(custom.custom),
                 ));
             }
+
+            let ie = match instruction_error.error {
+                0 => InstructionError::GenericError,
+                1 => InstructionError::InvalidArgument,
+                2 => InstructionError::InvalidInstructionData,
+                3 => InstructionError::InvalidAccountData,
+                4 => InstructionError::AccountDataTooSmall,
+                5 => InstructionError::InsufficientFunds,
+                6 => InstructionError::IncorrectProgramId,
+                7 => InstructionError::MissingRequiredSignature,
+                8 => InstructionError::AccountAlreadyInitialized,
+                9 => InstructionError::UninitializedAccount,
+                10 => InstructionError::UnbalancedInstruction,
+                11 => InstructionError::ModifiedProgramId,
+                12 => InstructionError::ExternalAccountLamportSpend,
+                13 => InstructionError::ExternalAccountDataModified,
+                14 => InstructionError::ReadonlyLamportChange,
+                15 => InstructionError::ReadonlyDataModified,
+                16 => InstructionError::DuplicateAccountIndex,
+                17 => InstructionError::ExecutableModified,
+                18 => InstructionError::RentEpochModified,
+                19 => InstructionError::NotEnoughAccountKeys,
+                20 => InstructionError::AccountDataSizeChanged,
+                21 => InstructionError::AccountNotExecutable,
+                22 => InstructionError::AccountBorrowFailed,
+                23 => InstructionError::AccountBorrowOutstanding,
+                24 => InstructionError::DuplicateAccountOutOfSync,
+                26 => InstructionError::InvalidError,
+                27 => InstructionError::ExecutableDataModified,
+                28 => InstructionError::ExecutableLamportChange,
+                29 => InstructionError::ExecutableAccountNotRentExempt,
+                30 => InstructionError::UnsupportedProgramId,
+                31 => InstructionError::CallDepth,
+                32 => InstructionError::MissingAccount,
+                33 => InstructionError::ReentrancyNotAllowed,
+                34 => InstructionError::MaxSeedLengthExceeded,
+                35 => InstructionError::InvalidSeeds,
+                36 => InstructionError::InvalidRealloc,
+                37 => InstructionError::ComputationalBudgetExceeded,
+                38 => InstructionError::PrivilegeEscalation,
+                39 => InstructionError::ProgramEnvironmentSetupFailure,
+                40 => InstructionError::ProgramFailedToComplete,
+                41 => InstructionError::ProgramFailedToCompile,
+                42 => InstructionError::Immutable,
+                43 => InstructionError::IncorrectAuthority,
+                44 => InstructionError::BorshIoError,
+                45 => InstructionError::AccountNotRentExempt,
+                46 => InstructionError::InvalidAccountOwner,
+                47 => InstructionError::ArithmeticOverflow,
+                48 => InstructionError::UnsupportedSysvar,
+                49 => InstructionError::IllegalOwner,
+                50 => InstructionError::MaxAccountsDataAllocationsExceeded,
+                51 => InstructionError::MaxAccountsExceeded,
+                52 => InstructionError::MaxInstructionTraceLengthExceeded,
+                53 => InstructionError::BuiltinProgramsMustConsumeComputeUnits,
+                _ => return Err("Invalid InstructionError"),
+            };
+
+            return Ok(TransactionError::InstructionError(
+                instruction_error.index as u8,
+                ie,
+            ));
         }
 
         if let Some(transaction_details) = transaction_error.transaction_details
