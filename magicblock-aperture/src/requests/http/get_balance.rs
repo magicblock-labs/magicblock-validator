@@ -24,10 +24,11 @@ impl HttpDispatcher {
                 .read_account_with_ensure(
                     &pubkey,
                     AccountFetchContext::rpc_get_account(),
+                    |account| account.lamports(),
                 )
                 .await;
             claims += remote_account_claims;
-            let balance = account.map(|a| a.lamports()).unwrap_or_default();
+            let balance = account.unwrap_or_default();
 
             let slot = self.engine.blocks().latest().slot;
             Ok(ResponsePayload::encode(&request.id, balance, slot))

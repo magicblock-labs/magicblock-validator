@@ -10,7 +10,7 @@ use magicblock_chainlink::{
         init_logger,
     },
 };
-use solana_account::{AccountMode, ReadableAccount};
+use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::{Pubkey, pubkey};
@@ -60,14 +60,21 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     debug!("res: {:?}", ());
 
     // Cloned account should match eATA data (replacement)
+    let reader = |account: &AccountSharedData| {
+        (
+            spl_token::state::Account::unpack_from_slice(account.data()),
+            account.is(AccountMode::Delegated),
+        )
+    };
     let cloned = ctx
         .bank
         .accounts()
-        .get(&ata_pubkey)
+        .loader()
+        .read(&ata_pubkey, reader)
         .unwrap()
         .expect("ATA should be cloned into bank");
-    let spl_token_account =
-        spl_token::state::Account::unpack_from_slice(cloned.data()).unwrap();
+    let (spl_token_account, delegated) = cloned;
+    let spl_token_account = spl_token_account.unwrap();
     assert_eq!(spl_token_account.mint, mint);
     assert_eq!(spl_token_account.amount, amount);
     assert_eq!(spl_token_account.owner, wallet_owner);
@@ -78,7 +85,7 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     assert_eq!(spl_token_account.state, AccountState::Initialized);
     assert_eq!(spl_token_account.delegated_amount, 0);
     assert!(spl_token_account.is_native.is_none());
-    assert!(cloned.is(AccountMode::Delegated))
+    assert!(delegated)
 }
 
 #[tokio::test]
@@ -106,13 +113,16 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated() {
     let cloned = ctx
         .bank
         .accounts()
-        .get(&ata_pubkey)
+        .loader()
+        .read(&ata_pubkey, |account| {
+            (account.data().to_vec(), account.is(AccountMode::Delegated))
+        })
         .unwrap()
         .expect("ATA should be cloned");
 
     // Should keep original ATA data since not delegated
-    assert_eq!(cloned.data(), ata.data());
-    assert!(!cloned.is(AccountMode::Delegated))
+    assert_eq!(cloned.0, ata.data());
+    assert!(!cloned.1)
 }
 
 #[tokio::test]
@@ -159,11 +169,14 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated_to_us() {
     let cloned = ctx
         .bank
         .accounts()
-        .get(&ata_pubkey)
+        .loader()
+        .read(&ata_pubkey, |account| {
+            (account.data().to_vec(), account.is(AccountMode::Delegated))
+        })
         .unwrap()
         .expect("ATA should be cloned into bank");
 
     // Should keep original ATA data since not delegated to us
-    assert_eq!(cloned.data(), ata.data());
-    assert!(!cloned.is(AccountMode::Delegated))
+    assert_eq!(cloned.0, ata.data());
+    assert!(!cloned.1)
 }

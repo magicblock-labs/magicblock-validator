@@ -24,14 +24,12 @@ impl HttpDispatcher {
                 .read_account_with_ensure(
                     &pubkey,
                     AccountFetchContext::rpc_get_account(),
+                    |account| account.is(AccountMode::Delegated),
                 )
                 .await;
             claims += remote_account_claims;
 
-            let is_delegated = account
-                .as_ref()
-                .map(|acc| acc.is(AccountMode::Delegated))
-                .unwrap_or(false);
+            let is_delegated = account.unwrap_or(false);
 
             let payload = json::json!({ "isDelegated": is_delegated });
 

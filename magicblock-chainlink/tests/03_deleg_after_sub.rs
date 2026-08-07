@@ -54,8 +54,13 @@ async fn test_deleg_after_subscribe_case2() {
             .await
             .unwrap();
         assert_cloned_as_empty_placeholder!(bank, &[pubkey]);
-        let account = bank.accounts().get(&pubkey).unwrap().unwrap();
-        assert_eq!(account.mode(), AccountMode::Placeholder);
+        let mode = bank
+            .accounts()
+            .loader()
+            .read(&pubkey, |account| account.mode())
+            .unwrap()
+            .unwrap();
+        assert_eq!(mode, AccountMode::Placeholder);
         assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
     }
 

@@ -106,7 +106,7 @@ where
         // Not loaded by this process yet: full load.
         return false;
     };
-    if this.get_account(&pubkey).is_none() {
+    if !this.contains_account(&pubkey) {
         // The bank copy was evicted since the load that populated the
         // cache; drop the stale entry and reload.
         this.program_verify_cache.lock().pop(&pubkey);

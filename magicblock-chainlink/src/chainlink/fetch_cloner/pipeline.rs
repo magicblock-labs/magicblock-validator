@@ -7,7 +7,9 @@ use magicblock_metrics::metrics::{
     ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
     ChainlinkCompanionFetchKind,
 };
-use solana_account::{AccountBuilder, AccountMode, StateFlags};
+use solana_account::{
+    AccountBuilder, AccountMode, AccountSharedData, StateFlags,
+};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
@@ -359,11 +361,12 @@ where
                 };
             let cleanup_delegated_subscription =
                 account.read().is(AccountMode::Delegated);
+            let reader = |in_bank: &AccountSharedData| {
+                in_bank.is(AccountMode::Transient)
+                    || !in_bank.is(AccountMode::Delegated)
+            };
             let cleanup_undelegation_tracking = cleanup_delegated_subscription
-                && this.get_account(&pubkey).is_some_and(|in_bank| {
-                    in_bank.is(AccountMode::Transient)
-                        || !in_bank.is(AccountMode::Delegated)
-                });
+                && this.read_account(&pubkey, reader).unwrap_or(false);
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account,
