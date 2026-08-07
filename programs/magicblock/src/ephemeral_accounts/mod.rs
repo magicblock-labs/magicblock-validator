@@ -10,10 +10,6 @@ mod process_create_magic_ata;
 mod process_resize;
 mod validation;
 
-use magicblock_magic_program_api::{
-    EPHEMERAL_ACCOUNT_STATIC_SIZE as ACCOUNT_STATIC_SIZE,
-    EPHEMERAL_RENT_PER_BYTE,
-};
 pub(crate) use process_close::process_close_ephemeral_account;
 pub(crate) use process_close_magic_ata::process_close_magic_ata;
 pub(crate) use process_create::process_create_ephemeral_account;
@@ -38,16 +34,6 @@ const VAULT_IDX: u16 = 2;
 
 /// Maximum allowed data length for ephemeral accounts (10 MB, matching Solana's limit)
 const MAX_DATA_LEN: u32 = 10 * 1024 * 1024;
-
-/// Calculates rent for an ephemeral account based on its data length.
-fn rent_for(data_len: u32) -> Result<u64, InstructionError> {
-    let total_size = u64::from(data_len)
-        .checked_add(ACCOUNT_STATIC_SIZE)
-        .ok_or(InstructionError::ArithmeticOverflow)?;
-    total_size
-        .checked_mul(EPHEMERAL_RENT_PER_BYTE)
-        .ok_or(InstructionError::ArithmeticOverflow)
-}
 
 /// Returns the data length of an ephemeral account as a `u32`.
 fn get_ephemeral_data_len(
