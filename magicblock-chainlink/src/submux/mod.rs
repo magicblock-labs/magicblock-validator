@@ -2441,7 +2441,13 @@ mod tests {
 
         // Stale abort: the client is still connected, so the reconnector
         // must not drain it via try_reconnect.
+        let attempts_before = client1.subscribe_attempts();
         aborts[0].send(()).await.expect("abort send");
+        // The reconnect pass re-subscribes tracked accounts; wait for it so
+        // the assertions below run after the abort handler completed.
+        client1
+            .wait_for_subscribe_attempts(attempts_before + 1)
+            .await;
         wait_for_connected_clients(&mux, 2).await;
 
         assert_eq!(client1.reconnect_calls(), 0);

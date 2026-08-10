@@ -1246,4 +1246,79 @@ mod tests {
         }
         handle.abort();
     }
+
+    #[tokio::test]
+    async fn stale_ata_removal_keeps_eata_projection_subscription() {
+        use magicblock_core::token_programs::{
+            derive_ata, try_derive_eata_address_and_bump, TOKEN_PROGRAM_ID,
+        };
+        use solana_account::WritableAccount;
+
+        init_logger();
+        let provider = test_remote_account_provider().await;
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+
+        fn ata_setup(
+            accounts_bank: &AccountsBankStub,
+        ) -> (Pubkey, Pubkey, Pubkey) {
+            let wallet = Pubkey::new_unique();
+            let mint = Pubkey::new_unique();
+            let ata = derive_ata(&wallet, &mint);
+            let (eata, _) = try_derive_eata_address_and_bump(&wallet, &mint)
+                .expect("eATA derivation");
+            let mut account =
+                AccountSharedData::new(1_000_000, 64, &TOKEN_PROGRAM_ID);
+            account.data_as_mut_slice()[0..32].copy_from_slice(mint.as_ref());
+            account.data_as_mut_slice()[32..64]
+                .copy_from_slice(wallet.as_ref());
+            accounts_bank.insert(ata, account);
+            (ata, eata, wallet)
+        }
+
+        // ATA1: watched again by the time the (stale) removal notification
+        // is processed. ATA2: genuinely unwatched; its release is used as
+        // the fence proving the first notification was handled.
+        let (ata1, eata1, _) = ata_setup(&accounts_bank);
+        let (ata2, eata2, _) = ata_setup(&accounts_bank);
+        for (pk, reason) in [
+            (ata1, SubscriptionReason::DirectAccount),
+            (eata1, SubscriptionReason::AtaProjection),
+            (eata2, SubscriptionReason::AtaProjection),
+        ] {
+            provider
+                .acquire_subscription(&pk, reason)
+                .await
+                .expect("subscription");
+        }
+
+        let (removed_tx, removed_rx) = mpsc::channel(4);
+        let handle = InnerChainlink::subscribe_account_removals(
+            &accounts_bank,
+            &cloner,
+            &provider,
+            removed_rx,
+        );
+
+        removed_tx.send(ata1).await.expect("send stale removal");
+        removed_tx.send(ata2).await.expect("send removal");
+
+        // The handler is sequential: once eATA2 is released, the stale
+        // notification for ATA1 has been fully processed.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while provider.is_watching(&eata2) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "eATA2 projection subscription should be released"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        assert!(
+            provider.is_watching(&eata1),
+            "a stale removal notification for a still-watched ATA must not \
+             release its eATA projection subscription"
+        );
+        handle.abort();
+    }
 }
