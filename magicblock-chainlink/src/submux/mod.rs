@@ -766,7 +766,16 @@ where
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) -> RemoteAccountProviderResult<()> {
-        if let Err(err) = client.try_reconnect().await {
+        // A stale abort signal must not tear down a healthy transport
+        // (try_reconnect drains every live subscription first): when the
+        // transport is verifiably up, only restore missing subscriptions.
+        if client.transport_connected() == Some(true) {
+            debug!(
+                client_id = %client.id(),
+                "Transport already connected; skipping reconnect and \
+                 restoring subscriptions"
+            );
+        } else if let Err(err) = client.try_reconnect().await {
             debug!(
                 client_id = %client.id(),
                 error = ?err,
@@ -790,28 +799,10 @@ where
             }
         }
 
-        // Resubscribe all accounts from the authoritative tracker.
-        // This ensures subscriptions are restored even if all clients lost their state
-        // during disconnect/abort.
-        let account_subs = Self::account_subscriptions_for_client(
-            accounts_tracker.as_ref(),
-            grpc_only_subscriptions,
-            all_clients,
-            &connected_client_ids,
-            client.as_ref(),
-        );
-
-        if let Err(err) = client.resub_multiple(account_subs).await {
-            debug!(
-                client_id = %client.id(),
-                resub_delay_ms = ?client.current_resub_delay_ms(),
-                error = ?err,
-                "Failed to resubscribe accounts after reconnect"
-            );
-            return Err(err);
-        }
-
-        // Update connection related metrics to signal successful reconnect
+        // Mark the client connected BEFORE the account resubscription: the
+        // transport accepts subscriptions from here on, and restoring
+        // thousands of paced subscriptions can take minutes during which an
+        // invisible-but-streaming client would miss new subscriptions.
         let client_key = Self::client_key(&client);
         let was_disconnected = {
             let mut connected_ids =
@@ -819,43 +810,58 @@ where
             connected_ids.insert(client_key)
         };
         if was_disconnected {
-            // Catch subscriptions added while this client was reconnecting.
-            let programs: HashSet<Pubkey> =
-                program_subs.lock().unwrap().iter().copied().collect();
-            for program_id in programs {
-                if let Err(err) = client.subscribe_program(program_id).await {
-                    Self::connected_client_ids_lock(&connected_client_ids)
-                        .remove(&client_key);
-                    return Err(err);
-                }
-            }
-
-            let account_subs = Self::account_subscriptions_for_client(
-                accounts_tracker.as_ref(),
-                grpc_only_subscriptions,
-                all_clients,
-                &connected_client_ids,
-                client.as_ref(),
-            );
-            if let Err(err) = client.resub_multiple(account_subs).await {
-                Self::connected_client_ids_lock(&connected_client_ids)
-                    .remove(&client_key);
-                return Err(err);
-            }
-
             connected_clients.fetch_add(1, Ordering::SeqCst);
             metrics::set_connected_pubsub_clients_count(
                 connected_clients.load(Ordering::SeqCst) as usize,
             );
+            if client.subs_immediately() {
+                let previous = connected_clients_subscribing_immediately
+                    .fetch_add(1, Ordering::SeqCst);
+                metrics::set_connected_direct_pubsub_clients_count(
+                    previous.saturating_add(1) as usize,
+                );
+            }
         }
         metrics::set_pubsub_client_uptime(client.id(), true);
-        if was_disconnected && client.subs_immediately() {
-            let previous = connected_clients_subscribing_immediately
-                .fetch_add(1, Ordering::SeqCst);
-            let current = previous.saturating_add(1);
-            metrics::set_connected_direct_pubsub_clients_count(
-                current as usize,
+
+        // Restore account subscriptions from the authoritative tracker;
+        // resub_multiple skips whatever is already covered.
+        let account_subs = Self::account_subscriptions_for_client(
+            accounts_tracker.as_ref(),
+            grpc_only_subscriptions,
+            all_clients,
+            &connected_client_ids,
+            client.as_ref(),
+        );
+        if let Err(err) = client.resub_multiple(account_subs).await {
+            debug!(
+                client_id = %client.id(),
+                resub_delay_ms = ?client.current_resub_delay_ms(),
+                error = ?err,
+                "Failed to resubscribe accounts after reconnect"
             );
+            // Fatal resub failure: roll back visibility so the backoff
+            // loop retries from a clean state.
+            let was_connected = {
+                let mut connected_ids =
+                    Self::connected_client_ids_lock(&connected_client_ids);
+                connected_ids.remove(&client_key)
+            };
+            if was_connected {
+                connected_clients.fetch_sub(1, Ordering::SeqCst);
+                metrics::set_connected_pubsub_clients_count(
+                    connected_clients.load(Ordering::SeqCst) as usize,
+                );
+                if client.subs_immediately() {
+                    let previous = connected_clients_subscribing_immediately
+                        .fetch_sub(1, Ordering::SeqCst);
+                    metrics::set_connected_direct_pubsub_clients_count(
+                        previous.saturating_sub(1) as usize,
+                    );
+                }
+            }
+            metrics::set_pubsub_client_uptime(client.id(), false);
+            return Err(err);
         }
 
         Ok(())
@@ -2404,6 +2410,49 @@ mod tests {
         let up = got.expect("should receive update after retry reconnect");
         assert_eq!(up.pubkey, pk);
         assert!(up.slot >= 100);
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_stale_abort_on_connected_client_skips_reconnect() {
+        init_logger();
+
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+
+        let pk = Pubkey::new_unique();
+        let (mux, aborts) = new_submux_with_abort(
+            vec![client1.clone(), client2.clone()],
+            vec![pk],
+            Some(100),
+        );
+        let mut mux_rx = mux.take_updates();
+        mux.subscribe(pk, None).await.unwrap();
+
+        // Stale abort: the client is still connected, so the reconnector
+        // must not drain it via try_reconnect.
+        aborts[0].send(()).await.expect("abort send");
+        wait_for_connected_clients(&mux, 2).await;
+
+        assert_eq!(client1.reconnect_calls(), 0);
+        assert!(client1.subscriptions_union().contains(&pk));
+
+        // Client keeps streaming through the mux
+        client1
+            .send_account_update(pk, 7, &account_with_lamports(777))
+            .await;
+        let up = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            mux_rx.recv(),
+        )
+        .await
+        .expect("update after stale abort")
+        .expect("stream open");
+        assert_eq!(up.pubkey, pk);
+        assert_eq!(up.slot, 7);
 
         mux.shutdown().await.unwrap();
     }

@@ -22,6 +22,7 @@ pub async fn setup_actor_and_client() -> (
         "test-client",
         tx,
         CommitmentConfig::confirmed(),
+        None,
     )
     .await
     .expect("failed to create ChainPubsubActor");

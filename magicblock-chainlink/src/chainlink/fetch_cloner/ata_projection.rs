@@ -337,7 +337,8 @@ where
     let was_watching = this.remote_account_provider.is_watching(&eata_pubkey);
 
     // Ensure before cache checks; this keeps the subscription LRU warm
-    // without refcounting the projection reason on every ATA update.
+    // without refcounting the projection reason on every ATA update. The
+    // reason is released when the base ATA is removed from the bank.
     let subscribed = match this
         .ensure_subscription(&eata_pubkey, SubscriptionReason::AtaProjection)
         .await

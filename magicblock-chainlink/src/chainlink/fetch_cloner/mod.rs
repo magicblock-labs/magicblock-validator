@@ -3350,7 +3350,7 @@ where
         // Handle ATAs: for each detected ATA, we derive the eATA PDA, subscribe to both,
         // and, if the ATA is delegated to us and the eATA exists, we clone the eATA data
         // into the ATA in the bank.
-        // eATA subscriptions are kept implicitly (not tracked for release).
+        // eATA projection subscriptions are released when the ATA is removed.
         let ata_accounts = ata_projection::resolve_ata_with_eata_projection(
             self,
             atas,

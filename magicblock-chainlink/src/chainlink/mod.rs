@@ -21,6 +21,10 @@ use tokio::{
 };
 use tracing::*;
 
+use magicblock_core::token_programs::{
+    is_ata, try_derive_eata_address_and_bump,
+};
+
 use crate::{
     cloner::Cloner,
     config::ChainlinkConfig,
@@ -29,6 +33,7 @@ use crate::{
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
         ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
+        SubscriptionReason,
     },
     submux::SubMuxClient,
 };
@@ -454,7 +459,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 // Ephemeral accounts are local-validator state and must not update on
                 // base chain, so losing the remote subscription cannot make the local
                 // ephemeral bank state stale.
-                let should_evict = match accounts_bank.get_account(&pubkey) {
+                let (should_evict, ata_info) = match accounts_bank
+                    .get_account(&pubkey)
+                {
                     Some(account) => {
                         let undelegating = account.undelegating();
                         let delegated = account.delegated();
@@ -472,15 +479,44 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                                  transaction will be submitted"
                             );
                         }
-                        evict
+                        (evict, is_ata(&pubkey, &account))
                     }
-                    None => false,
+                    None => (false, None),
                 };
                 // Skipping a delegated/undelegating/ephemeral LRU candidate is not a
                 // removal event; protected bank state must not be translated
                 // into a downstream bank eviction.
                 if !should_evict {
                     continue;
+                }
+
+                // An evicted ATA no longer needs its companion eATA watched;
+                // release the projection reason so that subscription can be
+                // dropped instead of occupying the monitored set forever.
+                // It is re-ensured when the ATA is next resolved.
+                if let Some(ata_info) = ata_info {
+                    if let Some((eata_pubkey, _)) =
+                        try_derive_eata_address_and_bump(
+                            &ata_info.owner,
+                            &ata_info.mint,
+                        )
+                    {
+                        if let Err(err) = remote_account_provider
+                            .release_single_subscription(
+                                &eata_pubkey,
+                                SubscriptionReason::AtaProjection,
+                            )
+                            .await
+                        {
+                            warn!(
+                                pubkey = %pubkey,
+                                eata_pubkey = %eata_pubkey,
+                                error = ?err,
+                                "Failed to release eATA projection \
+                                 subscription for evicted ATA"
+                            );
+                        }
+                    }
                 }
 
                 // Removal notifications can race with a new acquire_subscription for the same
@@ -1152,5 +1188,59 @@ mod tests {
 
         assert!(subscribe_result.is_ok());
         assert!(remote_account_provider.is_watching(&pubkey));
+    }
+
+    #[tokio::test]
+    async fn removal_of_ata_releases_eata_projection_subscription() {
+        use magicblock_core::token_programs::{
+            derive_ata, try_derive_eata_address_and_bump, TOKEN_PROGRAM_ID,
+        };
+        use solana_account::WritableAccount;
+
+        init_logger();
+        let provider = test_remote_account_provider().await;
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+
+        let wallet = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet, &mint);
+        let (eata, _) = try_derive_eata_address_and_bump(&wallet, &mint)
+            .expect("eATA derivation");
+
+        // Plain (non-delegated) ATA in the bank; is_ata only needs
+        // mint + wallet in the first 64 data bytes.
+        let mut account =
+            AccountSharedData::new(1_000_000, 64, &TOKEN_PROGRAM_ID);
+        account.data_as_mut_slice()[0..32].copy_from_slice(mint.as_ref());
+        account.data_as_mut_slice()[32..64].copy_from_slice(wallet.as_ref());
+        accounts_bank.insert(ata, account);
+
+        provider
+            .acquire_subscription(&eata, SubscriptionReason::AtaProjection)
+            .await
+            .expect("eATA subscription");
+        assert!(provider.is_watching(&eata));
+
+        let (removed_tx, removed_rx) = mpsc::channel(4);
+        let handle = InnerChainlink::subscribe_account_removals(
+            &accounts_bank,
+            &cloner,
+            &provider,
+            removed_rx,
+        );
+
+        removed_tx.send(ata).await.expect("send removal");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while provider.is_watching(&eata) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "eATA projection subscription should be released when its \
+                 ATA is removed"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        handle.abort();
     }
 }

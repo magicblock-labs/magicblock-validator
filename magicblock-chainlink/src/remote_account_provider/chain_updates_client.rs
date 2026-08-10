@@ -28,12 +28,14 @@ pub enum ChainUpdatesClient {
 }
 
 impl ChainUpdatesClient {
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoint(
         endpoint: &Endpoint,
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
         resubscription_delay: std::time::Duration,
+        ws_subs_per_connection: Option<usize>,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> RemoteAccountProviderResult<Self> {
@@ -54,6 +56,7 @@ impl ChainUpdatesClient {
                         abort_sender,
                         commitment,
                         resubscription_delay,
+                        ws_subs_per_connection,
                     )
                     .await?,
                 ))
