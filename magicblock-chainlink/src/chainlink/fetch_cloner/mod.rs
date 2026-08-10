@@ -210,15 +210,23 @@ const PROGRAM_VERIFY_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64)
     None => panic!("PROGRAM_VERIFY_CACHE_CAPACITY must be non-zero"),
 };
 
-/// Bound on persistent programdata upgrade watches. Watches evicted here
-/// release their subscription, so untrusted program loads cannot pin an
-/// unbounded share of the subscription LRU. Sized generously: eviction
-/// also evicts the program itself (forcing a re-clone on next use), while
-/// each watch only costs one subscription.
-const PROGRAMDATA_WATCH_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
-    Some(n) => n,
-    None => panic!("PROGRAMDATA_WATCH_CAPACITY must be non-zero"),
-};
+/// Floor on persistent programdata upgrade watches. Watches evicted from
+/// the index release their subscription, so untrusted program loads cannot
+/// pin an unbounded share of the subscription LRU. Sized generously:
+/// eviction also evicts the program itself (forcing a re-clone on next
+/// use), while each watch only costs one subscription.
+const PROGRAMDATA_WATCH_MIN_CAPACITY: usize = 512;
+
+/// Bound on persistent programdata upgrade watches, scaling with the
+/// primary subscription LRU so large deployments watch more programs.
+fn programdata_watch_capacity(
+    subscribed_accounts_capacity: usize,
+) -> NonZeroUsize {
+    NonZeroUsize::new(
+        PROGRAMDATA_WATCH_MIN_CAPACITY.max(subscribed_accounts_capacity / 10),
+    )
+    .expect("programdata watch capacity has a non-zero floor")
+}
 
 /// Outcome of [FetchCloner::watch_programdata].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -519,7 +527,9 @@ where
                 PROGRAM_VERIFY_CACHE_CAPACITY,
             ))),
             programdata_index: Arc::new(PlMutex::new(LruCache::new(
-                PROGRAMDATA_WATCH_CAPACITY,
+                programdata_watch_capacity(
+                    remote_account_provider.subscribed_accounts_capacity(),
+                ),
             ))),
             dlp_collision_tracker: Arc::new(PlMutex::new(
                 DlpCollisionTracker::new(),

@@ -3250,6 +3250,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             || self.secondary_subscriptions.contains(pubkey)
     }
 
+    /// Capacity of the primary subscription LRU.
+    pub(crate) fn subscribed_accounts_capacity(&self) -> usize {
+        self.lrucache_subscribed_accounts.capacity()
+    }
+
     /// Removes a pubkey from the secondary LRU; safe for never-evict keys.
     fn remove_from_secondary(&self, pubkey: &Pubkey) {
         if self.secondary_subscriptions.contains(pubkey) {
@@ -3782,11 +3787,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(())
     }
 
-    /// Drops `reason` from `pubkey`'s ownership without attempting an
-    /// unsubscribe. The entry loses any reason-based eviction protection
-    /// immediately and the subscription is cleaned up by normal capacity
-    /// eviction, so a failed provider unsubscribe can never leave orphaned
-    /// protection behind.
+    /// Drops `reason` from `pubkey`'s ownership. The entry loses any
+    /// reason-based eviction protection immediately — even when the
+    /// provider unsubscribe fails — so no orphaned protection is ever left
+    /// behind. When the final reason is released the subscription and tier
+    /// entries are also dropped, so an unowned watch neither lingers until
+    /// capacity pressure nor routes later updates into the account-clone
+    /// path.
     pub(crate) async fn forget_subscription_reason(
         &self,
         pubkey: &Pubkey,
@@ -3794,12 +3801,34 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) {
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
-        let mut ownership = self.subscription_ownership.lock().await;
-        if let Some(existing) = ownership.get_mut(pubkey) {
-            existing.release(reason);
-            if existing.is_empty() {
-                ownership.remove(pubkey);
+        let now_unowned = {
+            let mut ownership = self.subscription_ownership.lock().await;
+            match ownership.get_mut(pubkey) {
+                Some(existing) => {
+                    existing.release(reason);
+                    let empty = existing.is_empty();
+                    if empty {
+                        ownership.remove(pubkey);
+                    }
+                    empty
+                }
+                None => false,
             }
+        };
+        if now_unowned {
+            // Best-effort unsubscribe; tier entries are removed regardless
+            // so a failed unsubscribe cannot keep the watch alive.
+            subscription_reconciler::unsubscribe_and_notify_removal(
+                *pubkey,
+                &self.pubsub_client,
+                &self.removed_account_tx,
+                SubscriptionCleanupSource::NormalRelease,
+            )
+            .await;
+            let _transition_guard =
+                self.subscription_transition_lock.lock().await;
+            self.lrucache_subscribed_accounts.remove(pubkey);
+            self.remove_from_secondary(pubkey);
         }
     }
 
