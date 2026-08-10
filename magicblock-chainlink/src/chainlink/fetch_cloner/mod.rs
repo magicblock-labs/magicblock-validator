@@ -1140,6 +1140,18 @@ where
                     SubscriptionReason::ProgramData,
                 )
                 .await;
+            // Without a watch the program would execute stale bytes past its
+            // next upgrade; evict it so the next use re-clones fresh state
+            // (and re-installs a watch) instead.
+            if let Err(err) =
+                self.cloner.evict_account(evicted_program_id).await
+            {
+                warn!(
+                    program_id = %evicted_program_id,
+                    error = %err,
+                    "Failed to evict program whose upgrade watch was released"
+                );
+            }
         }
         if let Err(err) = self
             .acquire_subscription_reason(
@@ -1155,6 +1167,23 @@ where
                 "Failed to hold programdata subscription; upgrades of this program may go undetected"
             );
             self.programdata_index.lock().pop(&program_data_pubkey);
+            return false;
+        }
+        // A concurrent load at capacity can evict this entry between the
+        // push above and the acquisition; without the entry nothing routes
+        // or releases this subscription, so drop it again.
+        if self
+            .programdata_index
+            .lock()
+            .get(&program_data_pubkey)
+            .is_none()
+        {
+            self.remote_account_provider
+                .forget_subscription_reason(
+                    &program_data_pubkey,
+                    SubscriptionReason::ProgramData,
+                )
+                .await;
             return false;
         }
         self.remote_account_provider
