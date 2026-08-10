@@ -784,25 +784,12 @@ where
             return Err(err);
         }
 
-        // Resubscribe all program subscriptions
-        let programs: HashSet<Pubkey> =
-            program_subs.lock().unwrap().iter().copied().collect();
-        for program_id in programs {
-            if let Err(err) = client.subscribe_program(program_id).await {
-                debug!(
-                    client_id = %client.id(),
-                    program_id = %program_id,
-                    error = ?err,
-                    "Failed to resubscribe program after reconnect"
-                );
-                return Err(err);
-            }
-        }
-
-        // Mark the client connected BEFORE the account resubscription: the
-        // transport accepts subscriptions from here on, and restoring
-        // thousands of paced subscriptions can take minutes during which an
-        // invisible-but-streaming client would miss new subscriptions.
+        // Mark the client connected BEFORE the resubscriptions: the
+        // transport accepts subscriptions from here on, so new program and
+        // account subscriptions fan out to this client directly (clients
+        // dedup repeated subscribes), while restoring thousands of paced
+        // subscriptions can take minutes during which an
+        // invisible-but-streaming client would miss them.
         let client_key = Self::client_key(&client);
         let was_disconnected = {
             let mut connected_ids =
@@ -824,24 +811,7 @@ where
         }
         metrics::set_pubsub_client_uptime(client.id(), true);
 
-        // Restore account subscriptions from the authoritative tracker;
-        // resub_multiple skips whatever is already covered.
-        let account_subs = Self::account_subscriptions_for_client(
-            accounts_tracker.as_ref(),
-            grpc_only_subscriptions,
-            all_clients,
-            &connected_client_ids,
-            client.as_ref(),
-        );
-        if let Err(err) = client.resub_multiple(account_subs).await {
-            debug!(
-                client_id = %client.id(),
-                resub_delay_ms = ?client.current_resub_delay_ms(),
-                error = ?err,
-                "Failed to resubscribe accounts after reconnect"
-            );
-            // Fatal resub failure: roll back visibility so the backoff
-            // loop retries from a clean state.
+        let rollback_visibility = || {
             let was_connected = {
                 let mut connected_ids =
                     Self::connected_client_ids_lock(&connected_client_ids);
@@ -861,6 +831,43 @@ where
                 }
             }
             metrics::set_pubsub_client_uptime(client.id(), false);
+        };
+
+        // Resubscribe all program subscriptions
+        let programs: HashSet<Pubkey> =
+            program_subs.lock().unwrap().iter().copied().collect();
+        for program_id in programs {
+            if let Err(err) = client.subscribe_program(program_id).await {
+                debug!(
+                    client_id = %client.id(),
+                    program_id = %program_id,
+                    error = ?err,
+                    "Failed to resubscribe program after reconnect"
+                );
+                rollback_visibility();
+                return Err(err);
+            }
+        }
+
+        // Restore account subscriptions from the authoritative tracker;
+        // resub_multiple skips whatever is already covered.
+        let account_subs = Self::account_subscriptions_for_client(
+            accounts_tracker.as_ref(),
+            grpc_only_subscriptions,
+            all_clients,
+            &connected_client_ids,
+            client.as_ref(),
+        );
+        if let Err(err) = client.resub_multiple(account_subs).await {
+            debug!(
+                client_id = %client.id(),
+                resub_delay_ms = ?client.current_resub_delay_ms(),
+                error = ?err,
+                "Failed to resubscribe accounts after reconnect"
+            );
+            // Fatal resub failure: roll back visibility so the backoff
+            // loop retries from a clean state.
+            rollback_visibility();
             return Err(err);
         }
 

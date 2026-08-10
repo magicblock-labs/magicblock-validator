@@ -489,35 +489,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                     continue;
                 }
 
-                // An evicted ATA no longer needs its companion eATA watched;
-                // release the projection reason so that subscription can be
-                // dropped instead of occupying the monitored set forever.
-                // It is re-ensured when the ATA is next resolved.
-                if let Some(ata_info) = ata_info {
-                    if let Some((eata_pubkey, _)) =
-                        try_derive_eata_address_and_bump(
-                            &ata_info.owner,
-                            &ata_info.mint,
-                        )
-                    {
-                        if let Err(err) = remote_account_provider
-                            .release_single_subscription(
-                                &eata_pubkey,
-                                SubscriptionReason::AtaProjection,
-                            )
-                            .await
-                        {
-                            warn!(
-                                pubkey = %pubkey,
-                                eata_pubkey = %eata_pubkey,
-                                error = ?err,
-                                "Failed to release eATA projection \
-                                 subscription for evicted ATA"
-                            );
-                        }
-                    }
-                }
-
                 // Removal notifications can race with a new acquire_subscription for the same
                 // pubkey. The provider helper holds the same per-pubkey subscription lock used
                 // by acquire/release while it re-checks is_watching and submits eviction. This
@@ -546,6 +517,39 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                         pubkey = %pubkey,
                         "Skipping removal notification because account is watched again"
                     );
+                    continue;
+                }
+
+                // An evicted ATA no longer needs its companion eATA watched;
+                // release the projection reason so that subscription can be
+                // dropped instead of occupying the monitored set forever.
+                // It is re-ensured when the ATA is next resolved. Done only
+                // after the defensive recheck confirmed the ATA is still
+                // unwatched, so a racing fresh ATA subscription keeps its
+                // eATA coverage.
+                if let Some(ata_info) = ata_info {
+                    if let Some((eata_pubkey, _)) =
+                        try_derive_eata_address_and_bump(
+                            &ata_info.owner,
+                            &ata_info.mint,
+                        )
+                    {
+                        if let Err(err) = remote_account_provider
+                            .release_single_subscription(
+                                &eata_pubkey,
+                                SubscriptionReason::AtaProjection,
+                            )
+                            .await
+                        {
+                            warn!(
+                                pubkey = %pubkey,
+                                eata_pubkey = %eata_pubkey,
+                                error = ?err,
+                                "Failed to release eATA projection \
+                                 subscription for evicted ATA"
+                            );
+                        }
+                    }
                 }
             }
             warn!("Removed accounts channel closed");
