@@ -118,7 +118,8 @@ where
         this.program_verify_cache.lock().pop(&pubkey);
         if this
             .programdata_index
-            .remove(&program_data_pubkey)
+            .lock()
+            .pop(&program_data_pubkey)
             .is_some()
         {
             release_program_data_subs(

@@ -614,7 +614,6 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             CapacityEvictionProtection {
                 delegated: false,
                 undelegating: false,
-                executable: false,
             },
         )
     }
@@ -1308,12 +1307,11 @@ pub(crate) enum SubscriptionReleaseMode {
 pub(crate) struct CapacityEvictionProtection {
     pub delegated: bool,
     pub undelegating: bool,
-    pub executable: bool,
 }
 
 impl CapacityEvictionProtection {
     pub fn is_protected(self) -> bool {
-        self.delegated || self.undelegating || self.executable
+        self.delegated || self.undelegating
     }
 }
 

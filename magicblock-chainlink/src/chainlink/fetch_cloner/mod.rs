@@ -155,7 +155,8 @@ where
     /// its program id, routing programdata updates into the program-reload
     /// path. Upgrades rewrite the program account byte-identically, so the
     /// programdata notification is the only reliable upgrade signal.
-    programdata_index: Arc<HashMap<Pubkey, Pubkey>>,
+    /// Bounded; entries evicted at capacity release their subscription.
+    programdata_index: Arc<PlMutex<LruCache<Pubkey, Pubkey>>>,
 
     /// Recognizes freshly delegated accounts whose app data collides with an
     /// internal DLP discriminator via delegation-record sightings.
@@ -207,6 +208,14 @@ const PROGRAM_VERIFY_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64)
 {
     Some(n) => n,
     None => panic!("PROGRAM_VERIFY_CACHE_CAPACITY must be non-zero"),
+};
+
+/// Bound on persistent programdata upgrade watches. Watches evicted here
+/// release their subscription, so untrusted program loads cannot pin an
+/// unbounded share of the subscription LRU.
+const PROGRAMDATA_WATCH_CAPACITY: NonZeroUsize = match NonZeroUsize::new(256) {
+    Some(n) => n,
+    None => panic!("PROGRAMDATA_WATCH_CAPACITY must be non-zero"),
 };
 
 /// Capacity for recently sighted delegation-record update slots; sized to
@@ -495,7 +504,9 @@ where
             program_verify_cache: Arc::new(PlMutex::new(LruCache::new(
                 PROGRAM_VERIFY_CACHE_CAPACITY,
             ))),
-            programdata_index: Arc::new(HashMap::new()),
+            programdata_index: Arc::new(PlMutex::new(LruCache::new(
+                PROGRAMDATA_WATCH_CAPACITY,
+            ))),
             dlp_collision_tracker: Arc::new(PlMutex::new(
                 DlpCollisionTracker::new(),
             )),
@@ -516,12 +527,10 @@ where
                     .map(|account| CapacityEvictionProtection {
                         delegated: account.delegated(),
                         undelegating: account.undelegating(),
-                        executable: account.executable(),
                     })
                     .unwrap_or(CapacityEvictionProtection {
                         delegated: false,
                         undelegating: false,
-                        executable: false,
                     })
             },
         );
@@ -1104,18 +1113,35 @@ where
         );
     }
 
-    /// Holds a persistent programdata subscription for a loaded LoaderV3
-    /// program so upgrades stay observable; both pubkeys are preferred onto
-    /// gRPC transport. Held once per program (idempotent across reloads).
-    async fn watch_programdata(&self, program_id: Pubkey) {
+    /// Holds a persistent programdata subscription for a LoaderV3 program so
+    /// upgrades stay observable; both pubkeys are preferred onto gRPC
+    /// transport. Installed before the clone so an upgrade notification
+    /// landing mid-clone already routes; held once per program (idempotent
+    /// across reloads). Returns whether a new watch was installed.
+    async fn watch_programdata(&self, program_id: Pubkey) -> bool {
         let program_data_pubkey =
             get_loaderv3_get_program_data_address(&program_id);
-        if self
-            .programdata_index
-            .insert(program_data_pubkey, program_id)
-            .is_err()
-        {
-            return;
+        let evicted = {
+            let mut index = self.programdata_index.lock();
+            if index.get(&program_data_pubkey).is_some() {
+                return false;
+            }
+            index.push(program_data_pubkey, program_id)
+        };
+        if let Some((evicted_program_data, evicted_program_id)) = evicted {
+            debug!(
+                program_id = %evicted_program_id,
+                program_data = %evicted_program_data,
+                "Releasing least-recently loaded programdata watch at capacity"
+            );
+            release_subs(
+                &self.remote_account_provider,
+                [SubscriptionRelease::Pubkey {
+                    pubkey: evicted_program_data,
+                    reason: SubscriptionReason::ProgramData,
+                }],
+            )
+            .await;
         }
         if let Err(err) = self
             .acquire_subscription_reason(
@@ -1130,8 +1156,8 @@ where
                 error = %err,
                 "Failed to hold programdata subscription; upgrades of this program may go undetected"
             );
-            self.programdata_index.remove(&program_data_pubkey);
-            return;
+            self.programdata_index.lock().pop(&program_data_pubkey);
+            return false;
         }
         self.remote_account_provider
             .prefer_grpc_subscription(&program_id)
@@ -1139,6 +1165,29 @@ where
         self.remote_account_provider
             .prefer_grpc_subscription(&program_data_pubkey)
             .await;
+        true
+    }
+
+    /// Drops a watch installed by [Self::watch_programdata], releasing its
+    /// subscription only when the index entry is still present.
+    async fn unwatch_programdata(&self, program_id: Pubkey) {
+        let program_data_pubkey =
+            get_loaderv3_get_program_data_address(&program_id);
+        if self
+            .programdata_index
+            .lock()
+            .pop(&program_data_pubkey)
+            .is_some()
+        {
+            release_subs(
+                &self.remote_account_provider,
+                [SubscriptionRelease::Pubkey {
+                    pubkey: program_data_pubkey,
+                    reason: SubscriptionReason::ProgramData,
+                }],
+            )
+            .await;
+        }
     }
 
     fn record_program_materialization(
@@ -1390,6 +1439,11 @@ where
                             clone_intent,
                             ChainlinkCloneOutcome::Submitted,
                         );
+                        // Installed before the clone so an upgrade
+                        // notification landing mid-clone already routes;
+                        // rolled back below if the clone fails.
+                        let installed_watch = is_loaderv3
+                            && self.watch_programdata(program_id).await;
                         let result = self.cloner.clone_program(program).await;
                         if result.is_ok() {
                             metrics::inc_chainlink_clone_accounts_total_with_context(
@@ -1403,10 +1457,10 @@ where
                                 remote_slot,
                                 fetch_context,
                             );
-                            if is_loaderv3 {
-                                self.watch_programdata(program_id).await;
-                            }
                         } else {
+                            if installed_watch {
+                                self.unwatch_programdata(program_id).await;
+                            }
                             metrics::inc_chainlink_clone_accounts_total_with_context(
                                 fetch_context.clone(),
                                 remote_result,
@@ -1953,10 +2007,9 @@ where
 
         // Programdata updates signal upgrades: route them to the
         // program-reload path instead of cloning them into the bank.
-        if let Some(program_id) = self
-            .programdata_index
-            .read(&pubkey, |_, program_id| *program_id)
-        {
+        let routed_program_id =
+            self.programdata_index.lock().get(&pubkey).copied();
+        if let Some(program_id) = routed_program_id {
             let mut program_account = AccountSharedData::new(1, 0, &LOADER_V3);
             program_account.set_remote_slot(update_slot);
             self.handle_executable_sub_update(

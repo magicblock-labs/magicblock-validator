@@ -653,7 +653,6 @@ mod tests {
             Some(Arc::new(|_| CapacityEvictionProtection {
                 delegated: true,
                 undelegating: false,
-                executable: false,
             }));
         mock_client.silently_noop_next_subscriptions(2);
         reconcile_subscriptions(
