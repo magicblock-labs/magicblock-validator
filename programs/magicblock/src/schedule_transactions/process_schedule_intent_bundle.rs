@@ -158,6 +158,8 @@ pub(crate) fn process_schedule_intent_bundle(
         check_commit_limits(commit_accounts, invoke_context)?;
     }
 
+    let sent_signature = scheduled_intent.sent_transaction.signatures[0];
+
     context.add_scheduled_action(scheduled_intent);
     let context_acc = get_instruction_account_with_idx(
         transaction_context,
@@ -166,6 +168,11 @@ pub(crate) fn process_schedule_intent_bundle(
     context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
 
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
+    ic_msg!(
+        invoke_context,
+        "ScheduledCommitSent signature: {}",
+        sent_signature,
+    );
 
     Ok(())
 }

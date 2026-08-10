@@ -17,7 +17,7 @@ use magicblock_committor_service::{
 };
 use magicblock_config::{LeaderParams, config::LifecycleMode};
 use magicblock_metrics::MetricsService;
-use magicblock_program::init_magic_sys;
+use magicblock_program::{init_magic_sys, validator::init_validator_authority};
 use magicblock_runtime::keeper_builder;
 use magicblock_services::{
     actions_callback_service::ActionsCallbackService,
@@ -73,6 +73,7 @@ impl Leader {
         let token = CancellationToken::new();
 
         let engine_ledger = config.engine.ledger.directory.clone();
+        init_validator_authority(config.engine.authority.local.clone());
 
         let (ledger, _) = ledger::init(&engine_ledger, &config.ledger)?;
         let ledger = Arc::new(ledger);

@@ -866,6 +866,7 @@ pub(crate) fn create_test_intent(
         id,
         slot: 0,
         blockhash: Hash::default(),
+        sent_transaction: Default::default(),
         payer: Pubkey::default(),
         intent_bundle: MagicIntentBundle::default(),
     };
@@ -925,6 +926,7 @@ pub(crate) fn create_test_intent_bundle(
         id,
         slot: 0,
         blockhash: Hash::default(),
+        sent_transaction: Default::default(),
         payer: Pubkey::default(),
         intent_bundle: MagicIntentBundle::default(),
     };

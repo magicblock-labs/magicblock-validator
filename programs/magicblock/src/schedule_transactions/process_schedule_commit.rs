@@ -26,6 +26,7 @@ use crate::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
             get_writable_with_idx,
         },
+        instruction_utils::InstructionUtils,
     },
 };
 
@@ -284,6 +285,9 @@ pub(crate) fn process_schedule_commit(
                 InstructionError::UnsupportedSysvar
             })?;
     let blockhash = invoke_context.environment_config.blockhash;
+    let sent_transaction =
+        InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
+    let sent_signature = sent_transaction.signatures[0];
 
     let base_intent = if opts.request_undelegation {
         MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
@@ -307,6 +311,7 @@ pub(crate) fn process_schedule_commit(
         id: intent_id,
         slot: clock.slot,
         blockhash,
+        sent_transaction,
         payer: *payer_pubkey,
         intent_bundle: base_intent,
     };
@@ -315,6 +320,11 @@ pub(crate) fn process_schedule_commit(
     context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
 
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
+    ic_msg!(
+        invoke_context,
+        "ScheduledCommitSent signature: {}",
+        sent_signature,
+    );
 
     Ok(())
 }

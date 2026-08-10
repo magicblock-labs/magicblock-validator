@@ -1555,6 +1555,7 @@ fn create_scheduled_intent_from_bundle(
         id: INTENT_ID.fetch_add(1, Ordering::Relaxed),
         slot: 10,
         blockhash: Hash::new_unique(),
+        sent_transaction: Default::default(),
         payer: Pubkey::new_unique(),
         intent_bundle,
     }

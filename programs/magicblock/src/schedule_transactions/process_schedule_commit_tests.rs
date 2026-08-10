@@ -260,6 +260,7 @@ fn assert_first_commit(
             payer: actual_payer,
             blockhash: _,
             intent_bundle,
+            ..
         } => {
             assert!(id >= &0);
             assert_eq!(slot, &test_clock.slot);

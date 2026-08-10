@@ -4,16 +4,20 @@ use magicblock_magic_program_api::{
     CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY, args::ScheduleTaskArgs,
     instruction::MagicBlockInstruction, pda::crank_signer_pda,
 };
+use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+use solana_transaction::Transaction;
+
+use crate::validator::{validator_authority, validator_authority_id};
 
 /// Builders for the MagicBlock program instructions.
 ///
-/// These return bare [`Instruction`]s only. Composing them into a transaction
-/// and signing is the engine's responsibility: validator-internal instructions
-/// are submitted through `engine.transaction(message)`, where the engine signs
-/// with its own authority — the same identity the builtins observe through
-/// [`crate::validator::authority`].
+/// Most builders return bare [`Instruction`]s for the engine to compose and
+/// sign. `scheduled_commit_sent` is pre-signed while scheduling so its future
+/// signature can be returned in the scheduling transaction logs.
 pub struct InstructionUtils;
 impl InstructionUtils {
     // -----------------
@@ -116,6 +120,18 @@ impl InstructionUtils {
     // -----------------
     // Scheduled Commit Sent
     // -----------------
+    pub fn scheduled_commit_sent(
+        scheduled_commit_id: u64,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::scheduled_commit_sent_instruction(
+            &crate::id(),
+            &validator_authority_id(),
+            scheduled_commit_id,
+        );
+        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
+    }
+
     pub fn scheduled_commit_sent_instruction(
         magic_block_program: &Pubkey,
         validator_authority: &Pubkey,
@@ -150,6 +166,19 @@ impl InstructionUtils {
             crate::id(),
             &MagicBlockInstruction::AcceptScheduleCommits,
             account_metas,
+        )
+    }
+
+    fn into_transaction(
+        payer: &Keypair,
+        instruction: Instruction,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&payer.pubkey()),
+            &[payer],
+            recent_blockhash,
         )
     }
 

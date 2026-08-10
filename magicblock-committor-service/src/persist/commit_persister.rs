@@ -566,6 +566,7 @@ fn intent_bundle_from_rows(
         id: message_id,
         slot,
         blockhash,
+        sent_transaction: Default::default(),
         payer: Pubkey::default(),
         intent_bundle,
     })
@@ -709,6 +710,7 @@ mod tests {
             id,
             slot: 100,
             blockhash: Hash::new_unique(),
+            sent_transaction: Default::default(),
             payer: Pubkey::new_unique(),
             intent_bundle,
         }
