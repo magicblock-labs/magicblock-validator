@@ -1,0 +1,32 @@
+{
+  "name": "magicblock-rollup-studio",
+  "version": "1.0.0",
+  "description": "Interactive Solana Ephemeral Rollup (ER) Validator, Sub-10ms SVM Execution & Settlement Studio for MagicBlock.",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "magicblock-cli": "./bin/magicblock-cli.js"
+  },
+  "scripts": {
+    "start": "node src/server/app.js",
+    "cli": "node bin/magicblock-cli.js",
+    "test": "node tests/run-all.js"
+  },
+  "keywords": [
+    "magicblock",
+    "solana",
+    "ephemeral-rollups",
+    "svm",
+    "sub-10ms-execution",
+    "gaming-rollup",
+    "state-delegation"
+  ],
+  "author": "MagicBlock Community",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.5",
+    "express": "^4.21.2"
+  }
+}
