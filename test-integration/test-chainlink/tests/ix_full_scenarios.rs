@@ -1,8 +1,9 @@
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_loaded_program_with_min_size, assert_loaded_program_with_size,
-    assert_not_subscribed, assert_subscribed_without_delegation_record,
+    assert_not_subscribed,
     assert_subscribed_with_loaderv3_program_data_account,
+    assert_subscribed_without_delegation_record,
     assert_subscribed_without_loaderv3_program_data_account,
     remote_account_provider::program_account::RemoteProgramLoader,
     testing::{init_logger, utils::random_pubkey},
