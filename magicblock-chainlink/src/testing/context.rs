@@ -255,8 +255,13 @@ impl TestContext {
         let mut last = None;
         let result = tokio::time::timeout(Duration::from_secs(8), async {
             loop {
-                // The snapshot is authoritative and also covers updates that
-                // commit before the subscription receiver is polled.
+                // A borrowed account can expose its new image before AccountsDB
+                // finishes moving it between storage backends. The account
+                // notification is emitted only after that commit completes.
+                updates
+                    .recv()
+                    .await
+                    .expect("local account update channel closed");
                 let account = bank
                     .accounts()
                     .loader()
@@ -266,13 +271,6 @@ impl TestContext {
                     break;
                 }
                 last = account;
-
-                tokio::select! {
-                    update = updates.recv() => {
-                        update.expect("local account update channel closed");
-                    }
-                    () = tokio::task::yield_now() => {}
-                }
             }
         })
         .await;
