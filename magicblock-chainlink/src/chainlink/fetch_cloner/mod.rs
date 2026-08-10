@@ -212,11 +212,25 @@ const PROGRAM_VERIFY_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64)
 
 /// Bound on persistent programdata upgrade watches. Watches evicted here
 /// release their subscription, so untrusted program loads cannot pin an
-/// unbounded share of the subscription LRU.
-const PROGRAMDATA_WATCH_CAPACITY: NonZeroUsize = match NonZeroUsize::new(256) {
+/// unbounded share of the subscription LRU. Sized generously: eviction
+/// also evicts the program itself (forcing a re-clone on next use), while
+/// each watch only costs one subscription.
+const PROGRAMDATA_WATCH_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
     Some(n) => n,
     None => panic!("PROGRAMDATA_WATCH_CAPACITY must be non-zero"),
 };
+
+/// Outcome of [FetchCloner::watch_programdata].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProgramDataWatch {
+    /// A new persistent watch was installed.
+    Installed,
+    /// A watch for this program was already held.
+    AlreadyInstalled,
+    /// The watch was rolled back: a concurrent load at capacity evicted the
+    /// index entry before installation completed.
+    EvictedConcurrently,
+}
 
 /// Capacity for recently sighted delegation-record update slots; sized to
 /// outlast DLP firehose churn across the SubMux debounce window.
@@ -1117,14 +1131,18 @@ where
     /// upgrades stay observable; both pubkeys are preferred onto gRPC
     /// transport. Installed before the clone so an upgrade notification
     /// landing mid-clone already routes; held once per program (idempotent
-    /// across reloads). Returns whether a new watch was installed.
-    async fn watch_programdata(&self, program_id: Pubkey) -> bool {
+    /// across reloads). Failing to hold the subscription is an error but
+    /// non-fatal to the clone: the watch is retried on the next load.
+    async fn watch_programdata(
+        &self,
+        program_id: Pubkey,
+    ) -> ChainlinkResult<ProgramDataWatch> {
         let program_data_pubkey =
             get_loaderv3_get_program_data_address(&program_id);
         let evicted = {
             let mut index = self.programdata_index.lock();
             if index.get(&program_data_pubkey).is_some() {
-                return false;
+                return Ok(ProgramDataWatch::AlreadyInstalled);
             }
             index.push(program_data_pubkey, program_id)
         };
@@ -1160,14 +1178,14 @@ where
             )
             .await
         {
-            warn!(
+            error!(
                 program_id = %program_id,
                 program_data = %program_data_pubkey,
                 error = %err,
                 "Failed to hold programdata subscription; upgrades of this program may go undetected"
             );
             self.programdata_index.lock().pop(&program_data_pubkey);
-            return false;
+            return Err(err);
         }
         // A concurrent load at capacity can evict this entry between the
         // push above and the acquisition; without the entry nothing routes
@@ -1184,7 +1202,7 @@ where
                     SubscriptionReason::ProgramData,
                 )
                 .await;
-            return false;
+            return Ok(ProgramDataWatch::EvictedConcurrently);
         }
         self.remote_account_provider
             .prefer_grpc_subscription(&program_id)
@@ -1192,7 +1210,7 @@ where
         self.remote_account_provider
             .prefer_grpc_subscription(&program_data_pubkey)
             .await;
-        true
+        Ok(ProgramDataWatch::Installed)
     }
 
     /// Drops a watch installed by [Self::watch_programdata], releasing its
@@ -1436,8 +1454,9 @@ where
                 );
                 // A fresh bank copy can predate this process (e.g. a
                 // restored bank), so ensure the upgrade watch regardless.
+                // Watch failure is non-fatal and logged at the source.
                 if is_loaderv3 {
-                    self.watch_programdata(program_id).await;
+                    let _ = self.watch_programdata(program_id).await;
                 }
                 return Ok(Signature::default());
             }
@@ -1461,8 +1480,9 @@ where
                             clone_intent,
                             ChainlinkCloneOutcome::Skipped,
                         );
+                        // Watch failure is non-fatal, logged at the source.
                         if is_loaderv3 {
-                            self.watch_programdata(program_id).await;
+                            let _ = self.watch_programdata(program_id).await;
                         }
                         Ok(Signature::default())
                     } else {
@@ -1476,7 +1496,10 @@ where
                         // notification landing mid-clone already routes;
                         // rolled back below if the clone fails.
                         let installed_watch = is_loaderv3
-                            && self.watch_programdata(program_id).await;
+                            && matches!(
+                                self.watch_programdata(program_id).await,
+                                Ok(ProgramDataWatch::Installed)
+                            );
                         let result = self.cloner.clone_program(program).await;
                         if result.is_ok() {
                             metrics::inc_chainlink_clone_accounts_total_with_context(
