@@ -30,37 +30,20 @@ impl PubsubClientConfig {
     }
 
     /// Like [Self::from_url] but with an explicit per-stream subscription
-    /// limit that overrides the per-provider defaults when set.
+    /// limit that overrides the default when set.
     pub fn from_url_with_limit(
         pubsub_url: impl Into<String>,
         commitment_config: CommitmentConfig,
         limit_override: Option<usize>,
     ) -> Self {
-        let pubsub_url = pubsub_url.into();
-        let per_stream_subscription_limit =
-            limit_override.or_else(|| Some(default_limit_for_url(&pubsub_url)));
+        let per_stream_subscription_limit = Some(
+            limit_override.unwrap_or(DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT),
+        );
         Self {
-            pubsub_url,
+            pubsub_url: pubsub_url.into(),
             commitment_config,
             per_stream_subscription_limit,
         }
-    }
-}
-
-/// Per-provider defaults for subscriptions per websocket connection, capped
-/// so large subscription sets fan out across the connection pool instead of
-/// serializing on one socket. Limits verified empirically (Aug 2026):
-/// Helius rejects sub #1001 with -32006; Triton accepts 10k+ at ~400 subs/s;
-/// QuickNode accepts 5k+ but subscribes slowly (~86/s), so a lower cap keeps
-/// per-socket reconnect repair time bounded.
-fn default_limit_for_url(pubsub_url: &str) -> usize {
-    let url = pubsub_url.to_lowercase();
-    if url.contains("helius") {
-        HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT
-    } else if url.contains("quiknode") {
-        QUICKNODE_PER_STREAM_SUBSCRIPTION_LIMIT
-    } else {
-        DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT
     }
 }
 
@@ -211,55 +194,11 @@ pub enum ChainPubsubActorMessage {
     },
 }
 
-/// Helius enforces a hard cap of 1,000 subscriptions per websocket
-/// connection (error -32006 above it); stay below with headroom.
-pub const HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 900;
-/// QuickNode accepts thousands of subs per connection but processes
-/// subscribe calls slowly; keep per-socket reconnect repair time bounded.
-pub const QUICKNODE_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_500;
-pub const DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 2_000;
+/// Default subscriptions per websocket connection; large subscription sets
+/// fan out across the connection pool instead of serializing on one socket.
+/// Sized with headroom under the strictest known provider cap (1,000 per
+/// connection); override per validator via `chainlink.ws-subs-per-connection`.
+pub const DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 900;
 
 pub const SUBSCRIPTION_UPDATE_CHANNEL_SIZE: usize = 5_000;
 pub const MESSAGE_CHANNEL_SIZE: usize = 1_000;
-
-#[cfg(test)]
-mod limit_tests {
-    use super::*;
-
-    fn limit_for(url: &str, limit_override: Option<usize>) -> Option<usize> {
-        PubsubClientConfig::from_url_with_limit(
-            url,
-            CommitmentConfig::confirmed(),
-            limit_override,
-        )
-        .per_stream_subscription_limit
-    }
-
-    #[test]
-    fn per_provider_default_limits() {
-        assert_eq!(
-            limit_for("wss://mainnet.helius-rpc.com/?api-key=x", None),
-            Some(HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT)
-        );
-        assert_eq!(
-            limit_for("wss://foo.solana-devnet.quiknode.pro/abc/", None),
-            Some(QUICKNODE_PER_STREAM_SUBSCRIPTION_LIMIT)
-        );
-        assert_eq!(
-            limit_for("wss://foo.mainnet.rpcpool.com/abc", None),
-            Some(DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT)
-        );
-    }
-
-    #[test]
-    fn explicit_limit_overrides_provider_default() {
-        assert_eq!(
-            limit_for("wss://mainnet.helius-rpc.com/?api-key=x", Some(50)),
-            Some(50)
-        );
-        assert_eq!(
-            limit_for("wss://foo.mainnet.rpcpool.com/abc", Some(50)),
-            Some(50)
-        );
-    }
-}

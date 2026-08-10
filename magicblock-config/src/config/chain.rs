@@ -75,8 +75,8 @@ pub struct ChainLinkConfig {
     #[serde(with = "humantime")]
     pub undelegation_request_poll_interval: Duration,
 
-    /// Max subscriptions per websocket connection. When unset, per-provider
-    /// defaults apply (Helius: 900, QuickNode: 1500, others: 2000).
+    /// Max subscriptions per websocket connection. Defaults to 900 when
+    /// unset.
     pub ws_subs_per_connection: Option<usize>,
 
     /// AML/Risk checks for post-delegation actions via Range API.
