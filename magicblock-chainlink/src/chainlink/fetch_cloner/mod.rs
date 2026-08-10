@@ -1134,14 +1134,12 @@ where
                 program_data = %evicted_program_data,
                 "Releasing least-recently loaded programdata watch at capacity"
             );
-            release_subs(
-                &self.remote_account_provider,
-                [SubscriptionRelease::Pubkey {
-                    pubkey: evicted_program_data,
-                    reason: SubscriptionReason::ProgramData,
-                }],
-            )
-            .await;
+            self.remote_account_provider
+                .forget_subscription_reason(
+                    &evicted_program_data,
+                    SubscriptionReason::ProgramData,
+                )
+                .await;
         }
         if let Err(err) = self
             .acquire_subscription_reason(
@@ -1179,14 +1177,12 @@ where
             .pop(&program_data_pubkey)
             .is_some()
         {
-            release_subs(
-                &self.remote_account_provider,
-                [SubscriptionRelease::Pubkey {
-                    pubkey: program_data_pubkey,
-                    reason: SubscriptionReason::ProgramData,
-                }],
-            )
-            .await;
+            self.remote_account_provider
+                .forget_subscription_reason(
+                    &program_data_pubkey,
+                    SubscriptionReason::ProgramData,
+                )
+                .await;
         }
     }
 
@@ -1409,6 +1405,11 @@ where
                     clone_intent,
                     ChainlinkCloneOutcome::Skipped,
                 );
+                // A fresh bank copy can predate this process (e.g. a
+                // restored bank), so ensure the upgrade watch regardless.
+                if is_loaderv3 {
+                    self.watch_programdata(program_id).await;
+                }
                 return Ok(Signature::default());
             }
 
@@ -1431,6 +1432,9 @@ where
                             clone_intent,
                             ChainlinkCloneOutcome::Skipped,
                         );
+                        if is_loaderv3 {
+                            self.watch_programdata(program_id).await;
+                        }
                         Ok(Signature::default())
                     } else {
                         metrics::inc_chainlink_clone_accounts_total_with_context(

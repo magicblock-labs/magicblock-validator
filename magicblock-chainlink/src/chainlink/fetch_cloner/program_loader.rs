@@ -122,11 +122,12 @@ where
             .pop(&program_data_pubkey)
             .is_some()
         {
-            release_program_data_subs(
-                &this.remote_account_provider,
-                program_data_pubkey,
-            )
-            .await;
+            this.remote_account_provider
+                .forget_subscription_reason(
+                    &program_data_pubkey,
+                    SubscriptionReason::ProgramData,
+                )
+                .await;
         }
         return false;
     }

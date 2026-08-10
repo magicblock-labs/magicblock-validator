@@ -12211,3 +12211,57 @@ async fn test_programdata_update_alone_detects_program_upgrade() {
     // The programdata account itself must not be cloned into the bank.
     assert_not_cloned!(cloner, &[program_data_pubkey]);
 }
+
+/// A fresh bank copy can predate this process (e.g. a restored bank), in
+/// which case the clone is skipped — the upgrade watch must be installed
+/// anyway so upgrades of that program stay observable.
+#[tokio::test]
+async fn test_skipped_program_clone_still_installs_programdata_watch() {
+    use crate::remote_account_provider::program_account::{
+        get_loaderv3_get_program_data_address, LoadedProgram,
+        RemoteProgramLoader, LOADER_V3,
+    };
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        remote_account_provider,
+        accounts_bank,
+        cloner,
+        ..
+    } = setup([], CURRENT_SLOT, validator_keypair.insecure_clone()).await;
+
+    // Program already in the bank at a slot as fresh as the load below.
+    let mut bank_program = AccountSharedData::new(1_000_000, 36, &LOADER_V3);
+    bank_program.set_remote_slot(CURRENT_SLOT);
+    accounts_bank.insert(program_pubkey, bank_program);
+
+    let program = LoadedProgram {
+        program_id: program_pubkey,
+        authority: random_pubkey(),
+        program_data: vec![7; 64],
+        loader: RemoteProgramLoader::V3,
+        loader_status:
+            solana_loader_v4_interface::state::LoaderV4Status::Deployed,
+        remote_slot: CURRENT_SLOT,
+    };
+    fetch_cloner
+        .clone_program_with_ownership(
+            program,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("skipped clone must succeed");
+
+    assert_eq!(cloner.program_clone_count(), 0, "clone must be skipped");
+    assert!(
+        remote_account_provider.is_watching(&program_data_pubkey),
+        "skipped clone must still install the programdata watch"
+    );
+}

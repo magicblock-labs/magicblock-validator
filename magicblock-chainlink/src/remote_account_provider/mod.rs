@@ -3782,6 +3782,27 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(())
     }
 
+    /// Drops `reason` from `pubkey`'s ownership without attempting an
+    /// unsubscribe. The entry loses any reason-based eviction protection
+    /// immediately and the subscription is cleaned up by normal capacity
+    /// eviction, so a failed provider unsubscribe can never leave orphaned
+    /// protection behind.
+    pub(crate) async fn forget_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) {
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+        let mut ownership = self.subscription_ownership.lock().await;
+        if let Some(existing) = ownership.get_mut(pubkey) {
+            existing.release(reason);
+            if existing.is_empty() {
+                ownership.remove(pubkey);
+            }
+        }
+    }
+
     /// Prefers gRPC-only coverage for `pubkey`. The multiplexer drops
     /// websocket legs only after confirming gRPC coverage; on failure full
     /// coverage stays, so this can never reduce delivery below the default.
