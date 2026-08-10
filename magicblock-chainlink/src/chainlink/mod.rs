@@ -9,6 +9,9 @@ use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
+use magicblock_core::token_programs::{
+    is_ata, try_derive_eata_address_and_bump,
+};
 use magicblock_metrics::metrics::AccountFetchContext;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
@@ -20,10 +23,6 @@ use tokio::{
     task,
 };
 use tracing::*;
-
-use magicblock_core::token_programs::{
-    is_ata, try_derive_eata_address_and_bump,
-};
 
 use crate::{
     cloner::Cloner,
