@@ -210,4 +210,12 @@ impl ReconnectableClient for ChainUpdatesClient {
             Laser(client) => client.current_resub_delay_ms(),
         }
     }
+
+    fn transport_connected(&self) -> Option<bool> {
+        use ChainUpdatesClient::*;
+        match self {
+            WebSocket(client) => client.transport_connected(),
+            Laser(client) => client.transport_connected(),
+        }
+    }
 }
