@@ -95,6 +95,7 @@ use crate::{
     remote_account_provider::{
         program_account::{
             get_loaderv3_get_program_data_address, LoadedProgram,
+            RemoteProgramLoader, LOADER_V3,
         },
         pubsub_common::{
             is_delegation_record_data, is_internal_dlp_account_data,
@@ -149,6 +150,12 @@ where
     /// resolve without re-pulling full program data. Entries for programs
     /// evicted from the bank are pruned on their next notification.
     program_verify_cache: Arc<PlMutex<LruCache<Pubkey, ProgramVerifyState>>>,
+
+    /// Maps the programdata pubkey of every loaded LoaderV3 program back to
+    /// its program id, routing programdata updates into the program-reload
+    /// path. Upgrades rewrite the program account byte-identically, so the
+    /// programdata notification is the only reliable upgrade signal.
+    programdata_index: Arc<HashMap<Pubkey, Pubkey>>,
 
     /// Recognizes freshly delegated accounts whose app data collides with an
     /// internal DLP discriminator via delegation-record sightings.
@@ -365,6 +372,7 @@ where
             programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
             program_verify_cache: self.program_verify_cache.clone(),
+            programdata_index: self.programdata_index.clone(),
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
@@ -487,6 +495,7 @@ where
             program_verify_cache: Arc::new(PlMutex::new(LruCache::new(
                 PROGRAM_VERIFY_CACHE_CAPACITY,
             ))),
+            programdata_index: Arc::new(HashMap::new()),
             dlp_collision_tracker: Arc::new(PlMutex::new(
                 DlpCollisionTracker::new(),
             )),
@@ -507,10 +516,12 @@ where
                     .map(|account| CapacityEvictionProtection {
                         delegated: account.delegated(),
                         undelegating: account.undelegating(),
+                        executable: account.executable(),
                     })
                     .unwrap_or(CapacityEvictionProtection {
                         delegated: false,
                         undelegating: false,
+                        executable: false,
                     })
             },
         );
@@ -1093,6 +1104,43 @@ where
         );
     }
 
+    /// Holds a persistent programdata subscription for a loaded LoaderV3
+    /// program so upgrades stay observable; both pubkeys are preferred onto
+    /// gRPC transport. Held once per program (idempotent across reloads).
+    async fn watch_programdata(&self, program_id: Pubkey) {
+        let program_data_pubkey =
+            get_loaderv3_get_program_data_address(&program_id);
+        if self
+            .programdata_index
+            .insert(program_data_pubkey, program_id)
+            .is_err()
+        {
+            return;
+        }
+        if let Err(err) = self
+            .acquire_subscription_reason(
+                &program_data_pubkey,
+                SubscriptionReason::ProgramData,
+            )
+            .await
+        {
+            warn!(
+                program_id = %program_id,
+                program_data = %program_data_pubkey,
+                error = %err,
+                "Failed to hold programdata subscription; upgrades of this program may go undetected"
+            );
+            self.programdata_index.remove(&program_data_pubkey);
+            return;
+        }
+        self.remote_account_provider
+            .prefer_grpc_subscription(&program_id)
+            .await;
+        self.remote_account_provider
+            .prefer_grpc_subscription(&program_data_pubkey)
+            .await;
+    }
+
     fn record_program_materialization(
         &self,
         program_id: &Pubkey,
@@ -1296,6 +1344,7 @@ where
     ) -> ClonerResult<Signature> {
         let program_id = program.program_id;
         let remote_slot = program.remote_slot;
+        let is_loaderv3 = matches!(program.loader, RemoteProgramLoader::V3);
         let remote_result = ChainlinkCloneRemoteResult::Found;
         let clone_intent = ChainlinkCloneIntent::ProgramData;
 
@@ -1354,6 +1403,9 @@ where
                                 remote_slot,
                                 fetch_context,
                             );
+                            if is_loaderv3 {
+                                self.watch_programdata(program_id).await;
+                            }
                         } else {
                             metrics::inc_chainlink_clone_accounts_total_with_context(
                                 fetch_context.clone(),
@@ -1898,6 +1950,22 @@ where
             primary_pubkey: pubkey,
             context_slot: update_slot,
         };
+
+        // Programdata updates signal upgrades: route them to the
+        // program-reload path instead of cloning them into the bank.
+        if let Some(program_id) =
+            self.programdata_index.read(&pubkey, |_, program_id| *program_id)
+        {
+            let mut program_account = AccountSharedData::new(1, 0, &LOADER_V3);
+            program_account.set_remote_slot(update_slot);
+            self.handle_executable_sub_update(
+                program_id,
+                program_account,
+                &companion_fetch_log_context,
+            )
+            .await;
+            return;
+        }
 
         let update_source = update.source;
         let (resolved_account, deleg_record, delegation_actions) = self

@@ -113,8 +113,16 @@ where
     };
     if this.accounts_bank.get_account(&pubkey).is_none() {
         // The bank copy was evicted since the load that populated the
-        // cache; drop the stale entry and reload.
+        // cache; drop the stale entry (and the persistent programdata
+        // watch held for it) and reload.
         this.program_verify_cache.lock().pop(&pubkey);
+        if this.programdata_index.remove(&program_data_pubkey).is_some() {
+            release_program_data_subs(
+                &this.remote_account_provider,
+                program_data_pubkey,
+            )
+            .await;
+        }
         return false;
     }
 

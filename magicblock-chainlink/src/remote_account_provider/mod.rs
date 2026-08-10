@@ -614,6 +614,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
             CapacityEvictionProtection {
                 delegated: false,
                 undelegating: false,
+                executable: false,
             },
         )
     }
@@ -815,6 +816,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                     .is_protected()
                 && !ownership.get(candidate).is_some_and(|ownership| {
                     ownership.contains(SubscriptionReason::UndelegationTracking)
+                        || ownership.contains(SubscriptionReason::ProgramData)
                 })
         })
     }
@@ -839,6 +841,7 @@ impl<U: ChainPubsubClient> SubscriptionTierCtx<U> {
                     .is_protected()
                 && !ownership.get(candidate).is_some_and(|ownership| {
                     ownership.contains(SubscriptionReason::UndelegationTracking)
+                        || ownership.contains(SubscriptionReason::ProgramData)
                 })
         })
     }
@@ -1305,11 +1308,12 @@ pub(crate) enum SubscriptionReleaseMode {
 pub(crate) struct CapacityEvictionProtection {
     pub delegated: bool,
     pub undelegating: bool,
+    pub executable: bool,
 }
 
 impl CapacityEvictionProtection {
     pub fn is_protected(self) -> bool {
-        self.delegated || self.undelegating
+        self.delegated || self.undelegating || self.executable
     }
 }
 
@@ -3778,6 +3782,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         Ok(())
+    }
+
+    /// Prefers gRPC-only coverage for `pubkey`. The multiplexer drops
+    /// websocket legs only after confirming gRPC coverage; on failure full
+    /// coverage stays, so this can never reduce delivery below the default.
+    pub(crate) async fn prefer_grpc_subscription(&self, pubkey: &Pubkey) {
+        if let Err(err) =
+            self.pubsub_client.prefer_grpc_subscription(*pubkey).await
+        {
+            debug!(
+                pubkey = %pubkey,
+                error = ?err,
+                "Keeping full subscription coverage; gRPC-only preference not applied"
+            );
+        }
     }
 
     /// Fetches a byte range of an account via `dataSlice`, retrying until the
