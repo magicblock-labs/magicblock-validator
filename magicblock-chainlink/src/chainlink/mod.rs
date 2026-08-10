@@ -1,6 +1,9 @@
 use std::{
     path::Path,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
@@ -496,18 +499,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 // subscription has made the account watched again, without blocking unrelated
                 // pubkeys on the defensive-eviction slow path.
                 let cloner = cloner.clone();
+                let eviction_submitted = Arc::new(AtomicBool::new(false));
+                let eviction_submitted_in_cb = eviction_submitted.clone();
                 let evicted = remote_account_provider
                     .evict_unwatched_with_subscription_lock(&pubkey, || async move {
                         trace!(
                             pubkey = %pubkey,
                             "Submitting eviction transaction for unwatched account"
                         );
-                        if let Err(err) = cloner.evict_account(pubkey).await {
-                            warn!(
-                                pubkey = %pubkey,
-                                error = ?err,
-                                "Failed to submit eviction transaction"
-                            );
+                        match cloner.evict_account(pubkey).await {
+                            Ok(()) => {
+                                eviction_submitted_in_cb
+                                    .store(true, Ordering::SeqCst);
+                            }
+                            Err(err) => {
+                                warn!(
+                                    pubkey = %pubkey,
+                                    error = ?err,
+                                    "Failed to submit eviction transaction"
+                                );
+                            }
                         }
                     })
                     .await;
@@ -519,14 +530,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                     );
                     continue;
                 }
+                if !eviction_submitted.load(Ordering::SeqCst) {
+                    // The ATA is still in the bank; keep its eATA coverage.
+                    continue;
+                }
 
                 // An evicted ATA no longer needs its companion eATA watched;
                 // release the projection reason so that subscription can be
                 // dropped instead of occupying the monitored set forever.
                 // It is re-ensured when the ATA is next resolved. Done only
                 // after the defensive recheck confirmed the ATA is still
-                // unwatched, so a racing fresh ATA subscription keeps its
-                // eATA coverage.
+                // unwatched and the eviction was actually submitted.
                 if let Some(ata_info) = ata_info {
                     if let Some((eata_pubkey, _)) =
                         try_derive_eata_address_and_bump(
