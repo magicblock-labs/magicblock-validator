@@ -1953,8 +1953,9 @@ where
 
         // Programdata updates signal upgrades: route them to the
         // program-reload path instead of cloning them into the bank.
-        if let Some(program_id) =
-            self.programdata_index.read(&pubkey, |_, program_id| *program_id)
+        if let Some(program_id) = self
+            .programdata_index
+            .read(&pubkey, |_, program_id| *program_id)
         {
             let mut program_account = AccountSharedData::new(1, 0, &LOADER_V3);
             program_account.set_remote_slot(update_slot);

@@ -116,7 +116,11 @@ where
         // cache; drop the stale entry (and the persistent programdata
         // watch held for it) and reload.
         this.program_verify_cache.lock().pop(&pubkey);
-        if this.programdata_index.remove(&program_data_pubkey).is_some() {
+        if this
+            .programdata_index
+            .remove(&program_data_pubkey)
+            .is_some()
+        {
             release_program_data_subs(
                 &this.remote_account_provider,
                 program_data_pubkey,
