@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use magicblock_chainlink::{
     assert_data_has_size, assert_loaded_program_with_size,
+    assert_subscribed_with_loaderv3_program_data_account,
     assert_subscribed_without_loaderv3_program_data_account,
     remote_account_provider::program_account::{
         LoadedProgram, ProgramAccountResolver, RemoteProgramLoader,
@@ -533,7 +534,7 @@ async fn ixtest_clone_mini_v3_loader_program() {
         LoaderV4Status::Deployed,
         MINI_SIZE
     );
-    assert_subscribed_without_loaderv3_program_data_account!(
+    assert_subscribed_with_loaderv3_program_data_account!(
         ctx.chainlink,
         &pubkeys
     );
@@ -632,6 +633,10 @@ async fn ixtest_clone_multiple_programs_v1_v2_v3() {
     );
     assert_subscribed_without_loaderv3_program_data_account!(
         ctx.chainlink,
-        &pubkeys
+        &[MEMOV1, MEMOV2]
+    );
+    assert_subscribed_with_loaderv3_program_data_account!(
+        ctx.chainlink,
+        &[MINIV3]
     );
 }

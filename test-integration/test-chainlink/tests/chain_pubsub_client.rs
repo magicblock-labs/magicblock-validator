@@ -30,6 +30,7 @@ async fn setup() -> (ChainPubsubClientImpl, mpsc::Receiver<SubscriptionUpdate>)
         tx,
         CommitmentConfig::confirmed(),
         Duration::from_millis(200),
+        None,
     )
     .await
     .unwrap();
