@@ -26,17 +26,21 @@ impl PubsubClientConfig {
         pubsub_url: impl Into<String>,
         commitment_config: CommitmentConfig,
     ) -> Self {
-        let pubsub_url = pubsub_url.into();
-        let per_stream_subscription_limit =
-            if pubsub_url.to_lowercase().contains("helius") {
-                Some(HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT)
-            } else {
-                // Cap so large subscription sets fan out across the
-                // connection pool instead of serializing on one socket
-                Some(DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT)
-            };
+        Self::from_url_with_limit(pubsub_url, commitment_config, None)
+    }
+
+    /// Like [Self::from_url] but with an explicit per-stream subscription
+    /// limit that overrides the default when set.
+    pub fn from_url_with_limit(
+        pubsub_url: impl Into<String>,
+        commitment_config: CommitmentConfig,
+        limit_override: Option<usize>,
+    ) -> Self {
+        let per_stream_subscription_limit = Some(
+            limit_override.unwrap_or(DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT),
+        );
         Self {
-            pubsub_url,
+            pubsub_url: pubsub_url.into(),
             commitment_config,
             per_stream_subscription_limit,
         }
@@ -190,8 +194,11 @@ pub enum ChainPubsubActorMessage {
     },
 }
 
-pub const HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 80;
-pub const DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 500;
+/// Default subscriptions per websocket connection; large subscription sets
+/// fan out across the connection pool instead of serializing on one socket.
+/// Sized with headroom under the strictest known provider cap (1,000 per
+/// connection); override per validator via `chainlink.ws-subs-per-connection`.
+pub const DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 900;
 
 pub const SUBSCRIPTION_UPDATE_CHANNEL_SIZE: usize = 5_000;
 pub const MESSAGE_CHANNEL_SIZE: usize = 1_000;

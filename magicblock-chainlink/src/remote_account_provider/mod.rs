@@ -141,12 +141,14 @@ pub(crate) async fn subscription_key_owned_guard_from_map(
 
 type ChainUpdatesPubsub = (Arc<ChainUpdatesClient>, mpsc::Receiver<()>);
 
+#[allow(clippy::too_many_arguments)]
 async fn connect_pubsub_client(
     ep: Endpoint,
     commitment: CommitmentConfig,
     rpc_client: ChainRpcClientImpl,
     chain_slot: Arc<AtomicU64>,
     resubscription_delay: Duration,
+    ws_subs_per_connection: Option<usize>,
     grpc_cfg: GrpcConfig,
 ) -> (String, RemoteAccountProviderResult<ChainUpdatesPubsub>) {
     let ep_label = ep.label().to_string();
@@ -157,6 +159,7 @@ async fn connect_pubsub_client(
         abort_tx,
         chain_slot,
         resubscription_delay,
+        ws_subs_per_connection,
         rpc_client,
         &grpc_cfg,
     )
@@ -190,6 +193,7 @@ fn spawn_deferred_pubsub_clients(
     rpc_client: ChainRpcClientImpl,
     chain_slot: Arc<AtomicU64>,
     resubscription_delay: Duration,
+    ws_subs_per_connection: Option<usize>,
     grpc_cfg: GrpcConfig,
     submux: SubMuxClient<ChainUpdatesClient>,
     subscribed_accounts: Arc<TieredSubscribedAccountsTracker>,
@@ -216,6 +220,7 @@ fn spawn_deferred_pubsub_clients(
                     rpc_client.clone(),
                     chain_slot.clone(),
                     resubscription_delay,
+                    ws_subs_per_connection,
                     grpc_cfg.clone(),
                 );
                 let (label, result) = tokio::select! {
@@ -1849,6 +1854,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         rpc_client,
                         chain_slot,
                         config.resubscription_delay(),
+                        config.ws_subs_per_connection(),
                         config.grpc().clone(),
                         provider.pubsub_client.clone(),
                         Arc::new(TieredSubscribedAccountsTracker::new(
@@ -1905,6 +1911,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 rpc_client.clone(),
                 chain_slot.clone(),
                 resubscription_delay,
+                config.ws_subs_per_connection(),
                 config.grpc().clone(),
             )
         });
@@ -1923,6 +1930,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         rpc_client.clone(),
                         chain_slot.clone(),
                         resubscription_delay,
+                        config.ws_subs_per_connection(),
                         config.grpc().clone(),
                     )
                 });
