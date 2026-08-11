@@ -3256,22 +3256,11 @@ where
             .into_iter()
             .map(|account| (account.pubkey, account.mode))
             .collect::<HashMap<_, _>>();
-        let mut tracked_since_yield = 0;
         for load in loads {
             let Some(mode) = materialized.remove(&load.pubkey) else {
                 continue;
             };
-            load.complete(mode);
-            if !mode.mutable() {
-                tracked_since_yield += 1;
-                if tracked_since_yield == 16 {
-                    // Engine eviction notifications use a small broadcast
-                    // buffer. Let Chainlink's listener drain between chunks
-                    // when one batched fetch completes many tracked loads.
-                    task::yield_now().await;
-                    tracked_since_yield = 0;
-                }
-            }
+            load.complete(mode).await;
         }
 
         for waiter in waiters {

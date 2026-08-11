@@ -15,7 +15,7 @@ impl WsDispatcher {
 
         // Subscribe first so no update can slip through between the status
         // check below and task startup.
-        let mut rx = self
+        let rx = self
             .engine
             .transactions()
             .subscribe_signature(signature)
@@ -37,7 +37,7 @@ impl WsDispatcher {
 
         let tx = self.chan.tx.clone();
         let handle = tokio::spawn(async move {
-            if let Ok(status) = rx.recv().await
+            if let Ok(status) = rx.await
                 && let Some(bytes) =
                     encoder.encode(status.slot, &status.result, id)
             {

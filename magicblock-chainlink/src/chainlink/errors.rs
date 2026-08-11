@@ -16,6 +16,9 @@ pub enum ChainlinkError {
     #[error("JoinError: {0}")]
     JoinError(#[from] tokio::task::JoinError),
 
+    #[error(transparent)]
+    Keeper(#[from] keeper::error::KeeperError),
+
     #[error("Engine clone operation failed: {0}")]
     ClonerError(#[from] crate::cloner::errors::ClonerError),
 

@@ -25,7 +25,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::engine_types::processed_transaction;
+use crate::{ApertureResult, engine_types::processed_transaction};
 
 const ENTRYPOINT_SYMBOL: &[u8] = b"_create_plugin";
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
@@ -275,12 +275,9 @@ pub(crate) fn start(
     event_processors: usize,
     engine: Engine,
     cancel: CancellationToken,
-) -> Vec<JoinHandle<()>> {
+) -> ApertureResult<Vec<JoinHandle<()>>> {
     let manager = Arc::new(GeyserPluginManager::load(configs));
-    if manager.plugins.is_empty() {
-        return Vec::new();
-    }
-    start_manager(manager, event_processors, engine, cancel)
+    Ok(start_manager(manager, event_processors, engine, cancel)?)
 }
 
 fn start_manager(
@@ -288,9 +285,12 @@ fn start_manager(
     event_processors: usize,
     engine: Engine,
     cancel: CancellationToken,
-) -> Vec<JoinHandle<()>> {
+) -> Result<Vec<JoinHandle<()>>, keeper::error::KeeperError> {
+    if manager.plugins.is_empty() {
+        return Ok(Vec::new());
+    }
     let (tx, rx) = mpsc::channel(EVENT_QUEUE_CAPACITY);
-    let mut transactions = engine.transactions().subscribe_processed();
+    let mut transactions = engine.transactions().subscribe_processed()?;
     let mut blocks = engine.blocks().subscribe();
     let feeder_cancel = cancel.clone();
     let feeder = tokio::spawn(async move {
@@ -298,20 +298,12 @@ fn start_manager(
             let event = tokio::select! {
                 _ = feeder_cancel.cancelled() => break,
                 result = transactions.recv() => match result {
-                    Ok(transaction) => GeyserEvent::Transaction(transaction),
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!(skipped, "Geyser transaction subscription lagged");
-                        continue;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Some(transaction) => GeyserEvent::Transaction(transaction),
+                    None => break,
                 },
                 result = blocks.recv() => match result {
-                    Ok(block) => GeyserEvent::Block(block),
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!(skipped, "Geyser block subscription lagged");
-                        continue;
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Some(block) => GeyserEvent::Block(block),
+                    None => break,
                 },
             };
             if tx.send(event).await.is_err() {
@@ -346,7 +338,7 @@ fn start_manager(
             }
         }));
     }
-    tasks
+    Ok(tasks)
 }
 
 #[cfg(test)]
@@ -477,7 +469,8 @@ mod tests {
                 FakePlugin(events.clone()),
             )]));
         let cancel = CancellationToken::new();
-        let tasks = start_manager(manager, 0, (*te).clone(), cancel.clone());
+        let tasks =
+            start_manager(manager, 0, (*te).clone(), cancel.clone()).unwrap();
 
         te.execute(&[E::lit(7).cpi().compose(output, &[])])
             .await

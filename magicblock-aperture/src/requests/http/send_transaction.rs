@@ -65,13 +65,8 @@ impl HttpDispatcher {
             Err(error) => return (Err(error), 0),
         };
         let signature = transaction.signatures()[0];
-        let blockhash = transaction.recent_blockhash();
         let fetch_context = match kind {
             TransactionKind::Send => {
-                if !self.engine.blocks().is_valid(blockhash) {
-                    let err = TransactionError::BlockhashNotFound.into();
-                    return (Err(err), 0);
-                }
                 AccountFetchContext::send_transaction(signature)
             }
             TransactionKind::Simulate => {

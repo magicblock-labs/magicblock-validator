@@ -24,7 +24,7 @@ impl WsDispatcher {
         let mut rx = self.engine.accounts().subscribe(pubkey).await;
         let tx = self.chan.tx.clone();
         let handle = tokio::spawn(async move {
-            while let Ok(account) = rx.recv().await {
+            while let Some(account) = rx.recv().await {
                 let account: AccountSharedData = account;
                 let slot = account.slot();
                 let Some(bytes) = encoder.encode(slot, &(pubkey, account), id)

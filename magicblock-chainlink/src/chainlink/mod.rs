@@ -168,7 +168,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                     Some(Self::subscribe_account_evictions(
                         engine.clone(),
                         fetch_cloner.remote_account_provider(),
-                        engine.accounts().subscribe_evictions(),
+                        engine.accounts().subscribe_evictions()?,
                     )),
                 )
             } else {
@@ -284,7 +284,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     fn subscribe_account_evictions(
         engine: Engine,
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
-        mut evictions: broadcast::Receiver<Pubkey>,
+        mut evictions: mpsc::Receiver<Pubkey>,
     ) -> task::JoinHandle<()> {
         let remote_account_provider = remote_account_provider.clone();
 
@@ -295,12 +295,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                     biased;
                     event = evictions.recv() => {
                         let pubkey = match event {
-                            Ok(pubkey) => pubkey,
-                            Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                                warn!(skipped, "Lagged behind engine account evictions");
-                                continue;
-                            }
-                            Err(broadcast::error::RecvError::Closed) => break,
+                            Some(pubkey) => pubkey,
+                            None => break,
                         };
                         let engine = engine.clone();
                         let remote_account_provider = remote_account_provider.clone();

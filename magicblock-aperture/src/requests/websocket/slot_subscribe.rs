@@ -8,7 +8,7 @@ impl WsDispatcher {
         let tx = self.chan.tx.clone();
         let encoder = SlotEncoder;
         let handle = tokio::spawn(async move {
-            while let Ok(block) = rx.recv().await {
+            while let Some(block) = rx.recv().await {
                 let Some(bytes) = encoder.encode(block.slot, id) else {
                     continue;
                 };

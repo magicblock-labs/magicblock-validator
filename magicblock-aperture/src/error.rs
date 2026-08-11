@@ -19,6 +19,8 @@ pub enum ApertureError {
     Rpc(#[from] RpcError),
     #[error("Geyser error: {0}")]
     Geyser(#[from] GeyserPluginError),
+    #[error(transparent)]
+    Keeper(#[from] keeper::error::KeeperError),
 }
 
 #[derive(Serialize, Debug, thiserror::Error)]

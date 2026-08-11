@@ -41,7 +41,7 @@ impl WsDispatcher {
         let tx = self.chan.tx.clone();
         let engine = self.engine.clone();
         let handle = tokio::spawn(async move {
-            while let Ok(logs) = rx.recv().await {
+            while let Some(logs) = rx.recv().await {
                 let slot = engine.blocks().latest().slot;
                 let value = LogsValue {
                     signature: logs.signature.to_string(),

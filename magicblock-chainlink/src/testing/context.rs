@@ -16,7 +16,7 @@ use solana_keypair::Keypair;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tracing::trace;
 
 use super::accounts::account_shared_with_owner_and_slot;
@@ -249,7 +249,7 @@ impl TestContext {
     pub async fn wait_for_local_account(
         bank: &Engine,
         pubkey: &Pubkey,
-        updates: &mut broadcast::Receiver<AccountSharedData>,
+        updates: &mut mpsc::Receiver<AccountSharedData>,
         expected: &AccountSharedData,
     ) {
         let mut last = None;

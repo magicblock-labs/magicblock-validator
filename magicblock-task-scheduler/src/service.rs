@@ -17,7 +17,7 @@ use magicblock_program::{
 use solana_message::Message;
 use tokio::{
     select,
-    sync::{broadcast, mpsc},
+    sync::mpsc,
     task::{JoinHandle, JoinSet},
     time::{Duration, MissedTickBehavior, interval},
 };
@@ -44,7 +44,7 @@ pub struct TaskSchedulerService {
     db: SchedulerDatabase,
     /// Receives service messages the engine publishes once a transaction
     /// commits; task requests arrive on this stream.
-    service_messages: broadcast::Receiver<Vec<u8>>,
+    service_messages: mpsc::Receiver<Vec<u8>>,
     /// Submits crank transactions and provides the latest blockhash; the engine
     /// signs them with its own authority.
     engine: Engine,
@@ -77,7 +77,7 @@ enum ProcessingOutcome {
 
 // SAFETY: TaskSchedulerService is moved into a single Tokio task in `start()` and never cloned.
 // It runs exclusively on that task's thread. All fields (SchedulerDatabase, Engine,
-// broadcast::Receiver, DelayQueue, HashMap, AtomicU64, CancellationToken) are Send+Sync,
+// mpsc::Receiver, DelayQueue, HashMap, AtomicU64, CancellationToken) are Send+Sync,
 // and the service maintains exclusive ownership throughout its lifetime.
 unsafe impl Send for TaskSchedulerService {}
 unsafe impl Sync for TaskSchedulerService {}
@@ -115,7 +115,7 @@ impl TaskSchedulerService {
             db,
             service_messages: engine
                 .transactions()
-                .subscribe_service_messages(),
+                .subscribe_service_messages()?,
             engine,
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
@@ -226,14 +226,8 @@ impl TaskSchedulerService {
                 }
                 message = self.service_messages.recv() => {
                     let encoded = match message {
-                        Ok(encoded) => encoded,
-                        // Slow consumers drop the oldest messages; a lagged task
-                        // request would be lost, so surface it rather than hide it.
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            warn!("Task scheduler lagged, {skipped} service messages skipped");
-                            continue;
-                        }
-                        Err(broadcast::error::RecvError::Closed) => {
+                        Some(encoded) => encoded,
+                        None => {
                             info!("Service message stream closed, stopping task scheduler");
                             break;
                         }
@@ -816,9 +810,9 @@ mod tests {
     /// wincode-encoded task requests onto the service-message stream.
     async fn setup(
         db: SchedulerDatabase,
-    ) -> (TestEngine, broadcast::Sender<Vec<u8>>, TaskSchedulerService) {
+    ) -> (TestEngine, mpsc::Sender<Vec<u8>>, TaskSchedulerService) {
         let engine = TestEngine::new().await;
-        let (service_tx, service_messages) = broadcast::channel(64);
+        let (service_tx, service_messages) = mpsc::channel(64);
         let service = TaskSchedulerService {
             db,
             service_messages,
@@ -874,7 +868,7 @@ mod tests {
         let handle = service.start().await.unwrap();
 
         // Invalid task interval
-        tx.send(encode_task(&TaskRequest::Schedule(ScheduleTaskRequest {
+        tx.try_send(encode_task(&TaskRequest::Schedule(ScheduleTaskRequest {
             id: 1,
             authority: Pubkey::new_unique(),
             execution_interval_millis: u32::MAX as i64,
@@ -883,7 +877,7 @@ mod tests {
         })))
         .unwrap();
         // Valid task interval
-        tx.send(encode_task(&TaskRequest::Schedule(ScheduleTaskRequest {
+        tx.try_send(encode_task(&TaskRequest::Schedule(ScheduleTaskRequest {
             id: 1,
             authority: Pubkey::new_unique(),
             execution_interval_millis: u32::MAX as i64 - 1,

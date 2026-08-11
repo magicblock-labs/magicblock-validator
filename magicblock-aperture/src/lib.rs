@@ -74,7 +74,7 @@ impl JsonRpcServer {
             config.event_processors,
             state.engine,
             cancel,
-        );
+        )?;
         Ok(Self {
             http,
             websocket,

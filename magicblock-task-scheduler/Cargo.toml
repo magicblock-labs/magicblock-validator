@@ -11,6 +11,7 @@ version.workspace = true
 chrono = { workspace = true }
 engine = { workspace = true }
 futures-util = { workspace = true }
+keeper = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-program = { workspace = true }
 rusqlite = { workspace = true }
