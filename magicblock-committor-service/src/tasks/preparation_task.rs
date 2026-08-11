@@ -11,7 +11,6 @@ use magicblock_committor_program::{
     pdas, ChangesetChunks, Chunks,
 };
 use magicblock_program::Pubkey;
-use solana_account::ReadableAccount;
 use solana_instruction::Instruction;
 use solana_program::account_info::MAX_PERMITTED_DATA_INCREASE;
 
@@ -20,7 +19,7 @@ use crate::{
     tasks::{
         commit_finalize_task::CommitFinalizeTask,
         commit_task::{CommitDelivery, CommitTask},
-        BaseTask, BaseTaskImpl, FinalizeTask, UndelegateTask,
+        BaseTaskImpl, FinalizeTask, UndelegateTask,
     },
 };
 

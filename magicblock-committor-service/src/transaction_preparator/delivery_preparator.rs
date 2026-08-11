@@ -1,9 +1,6 @@
 use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
-use futures_util::{
-    future::{join, join_all, try_join_all},
-    stream::FuturesUnordered,
-};
+use futures_util::future::{join, join_all, try_join_all};
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
@@ -40,7 +37,7 @@ use crate::{
         },
         task_strategist::TransactionStrategy,
         utils::TransactionUtils,
-        BaseTask, BaseTaskImpl, FinalizeTask,
+        BaseTaskImpl,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -51,6 +48,11 @@ pub struct DeliveryPreparator {
     table_mania: TableMania,
     compute_budget_config: ComputeBudgetConfig,
 }
+
+/// Preallocate instructions are packed this many per transaction.
+/// TX wire ceiling is 36, but due yo MaxInstructionTraceLengthExceeded
+/// ceiling is 31
+const PREALLOCATE_CHUNK_SIZE: usize = 31;
 
 const MAX_PARALLEL_BUFFER_SENDS: usize = 8;
 
@@ -75,37 +77,73 @@ impl DeliveryPreparator {
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let uniqueness_nonce = strategy.uniqueness_nonce;
-        let preparation_futures =
-            strategy.optimized_tasks.iter_mut().map(|task| async move {
-                let _timer =
-                    metrics::observe_committor_intent_task_preparation_time(
-                        &*task,
-                    );
-                self.prepare_task_handling_errors(
-                    authority,
-                    task,
-                    persister,
-                    uniqueness_nonce,
-                )
-                .await
-            });
 
-        let task_preparations = join_all(preparation_futures);
-        let alts_preparations = async {
+        let tasks_preparation = self.prepare_tasks(
+            authority,
+            &mut strategy.optimized_tasks,
+            persister,
+            uniqueness_nonce,
+        );
+        let alts_preparation = async {
             let _timer =
                 metrics::observe_committor_intent_alt_preparation_time();
             self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
                 .await
+                .map_err(DeliveryPreparatorError::FailedToCreateALTError)
         };
 
-        let (res1, res2) = join(task_preparations, alts_preparations).await;
+        let (res1, res2) = join(tasks_preparation, alts_preparation).await;
+        res1?;
+        res2
+    }
+
+    /// Prepares buffer content (writes) and account/buffer preallocation for
+    /// all tasks concurrently, since the two touch independent on-chain
+    /// state.
+    async fn prepare_tasks<P: IntentPersister>(
+        &self,
+        authority: &Keypair,
+        tasks: &mut [BaseTaskImpl],
+        persister: &Option<P>,
+        uniqueness_nonce: Option<u64>,
+    ) -> DeliveryPreparatorResult<()> {
+        // Preallocate futures
+        let mut preallocate_chunks =
+            Self::chunk_preallocate_instructions(tasks, &authority.pubkey());
+        let preallocate_preparations = self.send_preallocate_chunks(
+            authority,
+            &mut preallocate_chunks,
+            uniqueness_nonce,
+        );
+
+        // Buffer preparation futures
+        let buffer_preparation_futs = tasks.iter_mut().map(|task| async move {
+            let _timer =
+                metrics::observe_committor_intent_task_preparation_time(&*task);
+            self.prepare_buffer_handling_errors(
+                authority,
+                task,
+                persister,
+                uniqueness_nonce,
+            )
+            .await
+        });
+        let task_preparations = join_all(buffer_preparation_futs);
+
+        // Run both in parallel
+        let (res1, res2) =
+            join(task_preparations, preallocate_preparations).await;
         res1.into_iter()
             .collect::<Result<Vec<_>, _>>()
             .map_err(DeliveryPreparatorError::FailedToPrepareBufferAccounts)?;
-        let lookup_tables =
-            res2.map_err(DeliveryPreparatorError::FailedToCreateALTError)?;
+        res2.map_err(|err| {
+            DeliveryPreparatorError::FailedToPreallocateError(
+                // TODO(edwin): another variant
+                InternalError::BufferExecutionError(err),
+            )
+        })?;
 
-        Ok(lookup_tables)
+        Ok(())
     }
 
     /// Preallocates accounts for tasks which may require it, such as:
@@ -117,28 +155,49 @@ impl DeliveryPreparator {
         tasks: &[BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<()> {
-        // TODO(edwin): validate
-        const CHUNK_SIZE: usize = 7;
+        let mut chunked_ixs =
+            Self::chunk_preallocate_instructions(tasks, &authority.pubkey());
+        self.send_preallocate_chunks(
+            authority,
+            &mut chunked_ixs,
+            uniqueness_nonce,
+        )
+        .await
+        .map_err(|err| {
+            DeliveryPreparatorError::FailedToPreallocateError(
+                // TODO(edwin): another variant
+                InternalError::BufferExecutionError(err),
+            )
+        })
+    }
 
+    /// Derives the chunked PreallocateBuffer instructions for whichever
+    /// tasks need it. Synchronous, owned output — only needs a shared
+    /// borrow of `tasks`, so it can run before anything takes `&mut`
+    /// access to them.
+    fn chunk_preallocate_instructions(
+        tasks: &[BaseTaskImpl],
+        authority: &Pubkey,
+    ) -> Vec<Vec<Instruction>> {
         // Iterator with preallocate instructions
         let mut preallocate_instructions = tasks
             .iter()
             .filter_map(|task| match task {
                 BaseTaskImpl::Commit(value) => {
                     PreallocateCommitStateTask::from_commit(value)
-                        .map(|el| el.instructions(&authority.pubkey()))
+                        .map(|el| el.instructions(authority))
                 }
                 BaseTaskImpl::CommitFinalize(value) => {
                     PreallocateCommitFinalizeTask::from_commit_finalize(value)
-                        .map(|el| el.instructions(&authority.pubkey()))
+                        .map(|el| el.instructions(authority))
                 }
                 BaseTaskImpl::Finalize(value) => {
                     PreallocateFinalizeTask::from_finalize_task(value)
-                        .map(|el| el.instructions(&authority.pubkey()))
+                        .map(|el| el.instructions(authority))
                 }
                 BaseTaskImpl::Undelegate(value) => {
                     PreallocateUndelegateTask::from_undelegate_task(value)
-                        .map(|el| el.instructions(&authority.pubkey()))
+                        .map(|el| el.instructions(authority))
                 }
                 _ => None,
             })
@@ -147,16 +206,27 @@ impl DeliveryPreparator {
         // Get ix chunks that optimally fit into tx to save mOney
         let mut chunked_ixs = Vec::new();
         loop {
-            let chunk: Vec<_> =
-                preallocate_instructions.by_ref().take(CHUNK_SIZE).collect();
+            let chunk: Vec<_> = preallocate_instructions
+                .by_ref()
+                .take(PREALLOCATE_CHUNK_SIZE)
+                .collect();
             if chunk.is_empty() {
                 break;
-            } else {
-                chunked_ixs.push(chunk);
             }
+            chunked_ixs.push(chunk);
         }
+        chunked_ixs
+    }
 
-        // Send Preallocate txs
+    /// Sends already-derived preallocate instruction chunks. Takes owned
+    /// instruction data, not the originating tasks — never conflicts with
+    /// `&mut` access to those tasks elsewhere.
+    async fn send_preallocate_chunks(
+        &self,
+        authority: &Keypair,
+        chunked_ixs: &mut [Vec<Instruction>],
+        uniqueness_nonce: Option<u64>,
+    ) -> Result<(), BufferExecutionError> {
         let iter = chunked_ixs.iter_mut().map(|el| {
             self.send_ixs_with_retry(
                 el,
@@ -170,17 +240,11 @@ impl DeliveryPreparator {
             )
         });
 
-        let results = join_all(iter).await;
-        results.into_iter().try_for_each(|el| el).map_err(|err| {
-            DeliveryPreparatorError::FailedToPreallocateError(
-                // TODO(edwin): another variant
-                InternalError::BufferExecutionError(err),
-            )
-        })
+        join_all(iter).await.into_iter().try_for_each(|el| el)
     }
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
-    pub async fn prepare_task<P: IntentPersister>(
+    pub async fn prepare_buffer<P: IntentPersister>(
         &self,
         authority: &Keypair,
         task: &mut BaseTaskImpl,
@@ -254,7 +318,7 @@ impl DeliveryPreparator {
 
     /// Runs `prepare_task` and, if the buffer was already initialized,
     /// performs cleanup and retries once.
-    pub async fn prepare_task_handling_errors<P: IntentPersister>(
+    pub async fn prepare_buffer_handling_errors<P: IntentPersister>(
         &self,
         authority: &Keypair,
         task: &mut BaseTaskImpl,
@@ -262,7 +326,7 @@ impl DeliveryPreparator {
         uniqueness_nonce: Option<u64>,
     ) -> Result<(), InternalError> {
         let res = self
-            .prepare_task(authority, task, persister, uniqueness_nonce)
+            .prepare_buffer(authority, task, persister, uniqueness_nonce)
             .await;
         match res {
             Err(InternalError::BufferExecutionError(
@@ -300,7 +364,7 @@ impl DeliveryPreparator {
         self.rpc_client.invalidate_cached_blockhash().await;
 
         // Retry preparation
-        self.prepare_task(authority, task, persister, uniqueness_nonce)
+        self.prepare_buffer(authority, task, persister, uniqueness_nonce)
             .await
     }
 
@@ -823,3 +887,111 @@ impl DeliveryPreparatorError {
 
 pub type DeliveryPreparatorResult<T, E = DeliveryPreparatorError> =
     Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use dlp_api::args::PreallocateBufferKind;
+    use solana_hash::Hash;
+    use solana_keypair::Keypair;
+    use solana_message::v0::Message;
+    use solana_signer::Signer;
+    use solana_transaction::versioned::VersionedTransaction;
+
+    use super::*;
+    use crate::transactions::{
+        serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
+    };
+
+    /// Justifies `PREALLOCATE_CHUNK_SIZE`: packs that many real
+    /// PreallocateBuffer instructions (plus a uniqueness noop, the worst
+    /// case send_preallocate_chunks actually produces) into one transaction
+    /// and asserts it still fits on the wire. All three PreallocateBufferKind
+    /// variants produce the same fixed-shape instruction (7 accounts + a
+    /// small enum tag + u32), so the choice of kind here doesn't matter.
+    #[test]
+    fn preallocate_chunk_of_max_size_fits_in_one_tx() {
+        let authority = Keypair::new();
+        let delegated_account = Pubkey::new_unique();
+
+        let mut instructions: Vec<Instruction> = (0..PREALLOCATE_CHUNK_SIZE)
+            .map(|_| {
+                dlp_api::instruction_builder::preallocate_buffer(
+                    authority.pubkey(),
+                    delegated_account,
+                    PreallocateBufferKind::CommitState,
+                    u32::MAX,
+                )
+            })
+            .collect();
+        instructions.push(TransactionUtils::uniqueness_noop_instruction(42));
+
+        let message = Message::try_compile(
+            &authority.pubkey(),
+            &instructions,
+            &[],
+            Hash::new_unique(),
+        )
+        .expect("compile preallocate chunk transaction");
+        let transaction = VersionedTransaction::try_new(
+            VersionedMessage::V0(message),
+            &[&authority],
+        )
+        .expect("sign preallocate chunk transaction");
+
+        let transaction_size = serialized_transaction_size(&transaction);
+        info!(
+            transaction_size,
+            chunk_size = PREALLOCATE_CHUNK_SIZE,
+            "Preallocate chunk transaction size"
+        );
+        assert!(
+            transaction_size <= MAX_TRANSACTION_WIRE_SIZE,
+            "PREALLOCATE_CHUNK_SIZE={PREALLOCATE_CHUNK_SIZE} no longer fits \
+             in one tx ({transaction_size} > {MAX_TRANSACTION_WIRE_SIZE})"
+        );
+    }
+
+    /// One more instruction than PREALLOCATE_CHUNK_SIZE should already be
+    /// too many for the chunking to be needlessly conservative — if this
+    /// starts failing (i.e. it now also fits), PREALLOCATE_CHUNK_SIZE should
+    /// be bumped to pack transactions tighter.
+    #[test]
+    fn preallocate_chunk_size_plus_one_does_not_fit_in_one_tx() {
+        let authority = Keypair::new();
+        let delegated_account = Pubkey::new_unique();
+
+        let mut instructions: Vec<Instruction> = (0..PREALLOCATE_CHUNK_SIZE
+            + 1)
+            .map(|_| {
+                dlp_api::instruction_builder::preallocate_buffer(
+                    authority.pubkey(),
+                    delegated_account,
+                    PreallocateBufferKind::CommitState,
+                    u32::MAX,
+                )
+            })
+            .collect();
+        instructions.push(TransactionUtils::uniqueness_noop_instruction(42));
+
+        let message = Message::try_compile(
+            &authority.pubkey(),
+            &instructions,
+            &[],
+            Hash::new_unique(),
+        )
+        .expect("compile oversized preallocate chunk transaction");
+        let transaction = VersionedTransaction::try_new(
+            VersionedMessage::V0(message),
+            &[&authority],
+        )
+        .expect("sign oversized preallocate chunk transaction");
+
+        let transaction_size = serialized_transaction_size(&transaction);
+        assert!(
+            transaction_size > MAX_TRANSACTION_WIRE_SIZE,
+            "expected PREALLOCATE_CHUNK_SIZE + 1 instructions to no longer \
+             fit, but got {transaction_size} <= {MAX_TRANSACTION_WIRE_SIZE}; \
+             PREALLOCATE_CHUNK_SIZE could be increased"
+        );
+    }
+}

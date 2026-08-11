@@ -12,7 +12,10 @@ use tracing::info;
 
 use crate::{
     intent_executor::{
-        error::{IntentExecutorResult, TransactionStrategyExecutionError},
+        error::{
+            FailedToRecoverError, IntentExecutorResult,
+            TransactionStrategyExecutionError,
+        },
         intent_execution_client::IntentExecutionClient,
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
@@ -431,6 +434,31 @@ where
     ) {
         self.inner.execute_callbacks(signature, result)
     }
+}
+
+/// Fetches the committed state's size for a delegated account whose commit
+/// already landed (i.e. we're only retrying finalize), by reading its
+/// commit_state PDA — which is always sized to the full committed state,
+/// diff-delivered or not. Used to size finalize's account preallocation
+/// correctly instead of guessing.
+pub async fn fetch_finalize_state_size(
+    intent_client: &IntentExecutionClient,
+    delegated_account: Pubkey,
+) -> Result<usize, FailedToRecoverError> {
+    let commit_state_pda =
+        dlp_api::pda::commit_state_pda_from_delegated_account(
+            &delegated_account,
+        );
+    let commit_state_account = intent_client
+        .get_account(&commit_state_pda)
+        .await
+        .map_err(|err| {
+            FailedToRecoverError::FailedToFetchAccountError(err.into())
+        })?
+        .ok_or(FailedToRecoverError::MissingCommitStateAccount(
+            delegated_account,
+        ))?;
+    Ok(commit_state_account.data.len())
 }
 
 #[cfg(test)]

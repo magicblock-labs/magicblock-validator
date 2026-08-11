@@ -1,10 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use dlp_api::{
-    diff::compute_diff,
-    state::{DelegationMetadata, UndelegationRequester},
-};
+use dlp_api::state::{DelegationMetadata, UndelegationRequester};
 use magicblock_core::intent::{
     types::CommittedAccount, CommitAndUndelegate, CommitType, UndelegateType,
 };

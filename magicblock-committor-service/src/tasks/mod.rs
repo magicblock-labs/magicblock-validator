@@ -456,6 +456,7 @@ mod serialization_safety_test {
         // Test Finalize variant
         let finalize_task: BaseTaskImpl = FinalizeTask {
             delegated_account: Pubkey::new_unique(),
+            state_size: 101,
         }
         .into();
         assert_serializable(&finalize_task.instruction(&validator));
@@ -466,6 +467,7 @@ mod serialization_safety_test {
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
             include_undelegation_request: false,
+            state_size: 101,
         }
         .into();
         assert_serializable(&undelegate_task.instruction(&validator));
@@ -526,6 +528,7 @@ mod serialization_safety_test {
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
             include_undelegation_request: true,
+            state_size: 101,
         }
         .instruction(&Pubkey::new_unique());
 
