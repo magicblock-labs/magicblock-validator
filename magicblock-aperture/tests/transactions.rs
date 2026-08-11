@@ -10,6 +10,7 @@ use solana_rpc_client_api::config::{
     RpcSimulateTransactionConfig,
 };
 use solana_signature::Signature;
+use solana_transaction_error::TransactionError;
 use solana_transaction_status::UiTransactionEncoding;
 
 mod setup;
@@ -120,7 +121,7 @@ async fn test_send_and_confirm_transaction_success() {
     );
 }
 
-/// Verifies a transaction with an invalid blockhash is rejected.
+/// Verifies Engine rejects an invalid blockhash and records its final status.
 #[tokio::test]
 async fn test_send_transaction_with_invalid_blockhash() {
     let env = RpcTestEnv::new().await;
@@ -136,11 +137,12 @@ async fn test_send_transaction_with_invalid_blockhash() {
         "transaction with an invalid blockhash should fail"
     );
     assert!(
-        !matches!(
+        matches!(
             env.engine.transactions().status(signature).await,
-            Ok(Some(_))
+            Ok(Some(status))
+                if status.result == Err(TransactionError::BlockhashNotFound)
         ),
-        "failed transaction should not be persisted"
+        "dropped transaction should record its blockhash error"
     );
 }
 

@@ -8,7 +8,6 @@ use magicblock_metrics::metrics::{
 };
 use nucleus::runtime::TransactionView;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_transaction_error::TransactionError;
 use solana_transaction_status::UiTransactionEncoding;
 use tracing::warn;
 
