@@ -203,8 +203,9 @@ impl MagicBlockSendTransactionConfig {
             )),
             wait_for_processed_level: None,
             check_for_processed_interval: None,
-            // NOTE: that this time is after we already verified that the transaction was
-            //       processed
+            // NOTE: we skip the processed check here and wait directly for
+            //       the commitment level, trusting the confirmed result
+            //       even if an earlier processed check would have failed
             wait_for_commitment_level: Some(Duration::from_millis(8_000)),
             check_for_commitment_interval: Some(Duration::from_millis(400)),
         }
