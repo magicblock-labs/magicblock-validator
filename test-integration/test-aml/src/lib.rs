@@ -68,6 +68,9 @@ impl MockRangeServer {
             while !worker_shutdown.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        let _ = stream.set_nonblocking(false);
+                        let _ = stream
+                            .set_read_timeout(Some(Duration::from_secs(5)));
                         let mut buffer = [0u8; 4096];
                         let read = stream.read(&mut buffer).unwrap_or(0);
                         let request = String::from_utf8_lossy(&buffer[..read]);
@@ -289,6 +292,22 @@ pub fn token_balance_ephem(
         .get_token_account_balance(account)
         .ok()
         .and_then(|balance| balance.amount.parse::<u64>().ok())
+}
+
+/// Polls until `account` holds exactly `expected` tokens inside the ephemeral
+/// rollup, returning `false` if it did not within the window.
+pub fn wait_for_token_balance_ephem(
+    ctx: &IntegrationTestContext,
+    account: &Pubkey,
+    expected: u64,
+) -> bool {
+    for _ in 0..RETRY_COUNT {
+        if token_balance_ephem(ctx, account) == Some(expected) {
+            return true;
+        }
+        sleep(Duration::from_millis(200));
+    }
+    false
 }
 
 pub fn cleanup_both(validator: &mut Child, server: &mut MockRangeServer) {
