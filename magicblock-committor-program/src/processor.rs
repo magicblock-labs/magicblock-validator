@@ -277,7 +277,7 @@ fn process_write(
 ) -> ProgramResult {
     msg!("Instruction: Write");
 
-    let [authority_info, chunks_account_info, buffer_account_info] = accounts
+        let [authority_info, chunks_account_info, buffer_account_info] = accounts
     else {
         msg!("Need the following accounts: [authority, chunks, buffer ], but got {}", accounts.len());
         return Err(ProgramError::NotEnoughAccountKeys);

@@ -3,7 +3,7 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        commit_stage_task::CleanupTask,
+        preparation_task::CleanupTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::{create_commit_task, TransactionUtils},
         BaseActionTask, BaseActionTaskV1, BaseTaskImpl, FinalizeTask,
