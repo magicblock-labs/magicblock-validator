@@ -277,6 +277,19 @@ jobs:
               --key "$BENCHER_API_KEY" \
               --branch "$GITHUB_REF_NAME" \
               --testbed blacksmith-8vcpu-ubuntu-2404 \
+              --threshold-measure latency \
+              --threshold-test t_test \
+              --threshold-min-sample-size 4 \
+              --threshold-max-sample-size 30 \
+              --threshold-lower-boundary _ \
+              --threshold-upper-boundary 0.99 \
+              --threshold-measure throughput \
+              --threshold-test t_test \
+              --threshold-min-sample-size 4 \
+              --threshold-max-sample-size 30 \
+              --threshold-lower-boundary 0.99 \
+              --threshold-upper-boundary _ \
+              --thresholds-reset \
               --adapter json \
               --file redsuite-bmf.json
           else
