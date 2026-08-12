@@ -1,3 +1,9 @@
+<!--
+Title: use `<type>: <description>`, with a Conventional Commit type and a
+concise lowercase imperative description, without terminal punctuation.
+Example: `feat: add state replicator crate`
+-->
+
 ## What changed
 <!-- Summarize the change at the immediate-parent diff boundary. -->
 
