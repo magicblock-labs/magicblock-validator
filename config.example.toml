@@ -274,6 +274,11 @@ remove-confined-accounts = false
 # Env: MBV_CHAINLINK__UNDELEGATION_REQUEST_POLL_INTERVAL
 # undelegation-request-poll-interval = "5m"
 
+# Maximum subscriptions per websocket connection.
+# Default: 900
+# Env: MBV_CHAINLINK__WS_SUBS_PER_CONNECTION
+# ws-subs-per-connection = 900
+
 # ------------------------------------------------------------------------------
 # Optional: Range Risk API validation for post-delegation actions signers
 # ------------------------------------------------------------------------------

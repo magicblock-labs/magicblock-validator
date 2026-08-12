@@ -15,7 +15,9 @@ use dlp_api::{
     state::DelegationRecord,
 };
 use magicblock_aml::RiskService;
-use magicblock_chainlink::testing::init_logger;
+use magicblock_chainlink::{
+    cloner::ClonePostDelegationMode, testing::init_logger,
+};
 use magicblock_config::config::RiskConfig;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -205,7 +207,10 @@ async fn post_delegation_aml_rejection_schedules_undelegation_with_high_risk_sig
 
     let req = ctx.cloner.clone_requests().first().cloned().unwrap();
     assert!(
-        req.needs_undelegation,
+        matches!(
+            req.post_delegation_mode,
+            ClonePostDelegationMode::RescueUndelegate
+        ),
         "AML-rejected action must schedule undelegation"
     );
 
@@ -222,7 +227,10 @@ async fn post_delegation_aml_accepts_low_risk_signer() {
 
     let req = ctx.cloner.clone_requests().first().cloned().unwrap();
     assert!(
-        !req.needs_undelegation,
+        matches!(
+            req.post_delegation_mode,
+            ClonePostDelegationMode::ExecuteActions(_)
+        ),
         "AML-accepted action must not schedule undelegation"
     );
 

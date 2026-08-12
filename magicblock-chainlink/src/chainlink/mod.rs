@@ -1,6 +1,9 @@
 use std::{
     path::Path,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
@@ -9,6 +12,9 @@ use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
+use magicblock_core::token_programs::{
+    is_ata, try_derive_eata_address_and_bump,
+};
 use magicblock_metrics::metrics::AccountFetchContext;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
@@ -29,6 +35,7 @@ use crate::{
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
         ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
+        SubscriptionReason,
     },
     submux::SubMuxClient,
 };
@@ -189,16 +196,31 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    pub async fn ensure_transaction_accounts_with_context(
+        &self,
+        tx: &SanitizedTransaction,
+        fetch_context: impl Into<AccountFetchContext>,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
+        let fetch_context = fetch_context.into();
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink
+                    .ensure_transaction_accounts_with_context(tx, fetch_context)
+                    .await
+            }
+            Self::Disabled => Err(ChainlinkError::DisabledForNonPrimaryMode),
+        }
+    }
+
     pub async fn ensure_transaction_accounts(
         &self,
         tx: &SanitizedTransaction,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        match self {
-            Self::Enabled(chainlink) => {
-                chainlink.ensure_transaction_accounts(tx).await
-            }
-            Self::Disabled => Err(ChainlinkError::DisabledForNonPrimaryMode),
-        }
+        self.ensure_transaction_accounts_with_context(
+            tx,
+            AccountFetchContext::send_transaction(*tx.signature()),
+        )
+        .await
     }
 
     pub async fn fetch_accounts(
@@ -439,7 +461,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 // Ephemeral accounts are local-validator state and must not update on
                 // base chain, so losing the remote subscription cannot make the local
                 // ephemeral bank state stale.
-                let should_evict = match accounts_bank.get_account(&pubkey) {
+                let (should_evict, ata_info) = match accounts_bank
+                    .get_account(&pubkey)
+                {
                     Some(account) => {
                         let undelegating = account.undelegating();
                         let delegated = account.delegated();
@@ -457,9 +481,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                                  transaction will be submitted"
                             );
                         }
-                        evict
+                        (evict, is_ata(&pubkey, &account))
                     }
-                    None => false,
+                    None => (false, None),
                 };
                 // Skipping a delegated/undelegating/ephemeral LRU candidate is not a
                 // removal event; protected bank state must not be translated
@@ -475,18 +499,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 // subscription has made the account watched again, without blocking unrelated
                 // pubkeys on the defensive-eviction slow path.
                 let cloner = cloner.clone();
+                let eviction_submitted = Arc::new(AtomicBool::new(false));
+                let eviction_submitted_in_cb = eviction_submitted.clone();
                 let evicted = remote_account_provider
                     .evict_unwatched_with_subscription_lock(&pubkey, || async move {
                         trace!(
                             pubkey = %pubkey,
                             "Submitting eviction transaction for unwatched account"
                         );
-                        if let Err(err) = cloner.evict_account(pubkey).await {
-                            warn!(
-                                pubkey = %pubkey,
-                                error = ?err,
-                                "Failed to submit eviction transaction"
-                            );
+                        match cloner.evict_account(pubkey).await {
+                            Ok(()) => {
+                                eviction_submitted_in_cb
+                                    .store(true, Ordering::SeqCst);
+                            }
+                            Err(err) => {
+                                warn!(
+                                    pubkey = %pubkey,
+                                    error = ?err,
+                                    "Failed to submit eviction transaction"
+                                );
+                            }
                         }
                     })
                     .await;
@@ -496,6 +528,42 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                         pubkey = %pubkey,
                         "Skipping removal notification because account is watched again"
                     );
+                    continue;
+                }
+                if !eviction_submitted.load(Ordering::SeqCst) {
+                    // The ATA is still in the bank; keep its eATA coverage.
+                    continue;
+                }
+
+                // An evicted ATA no longer needs its companion eATA watched;
+                // release the projection reason so that subscription can be
+                // dropped instead of occupying the monitored set forever.
+                // It is re-ensured when the ATA is next resolved. Done only
+                // after the defensive recheck confirmed the ATA is still
+                // unwatched and the eviction was actually submitted.
+                if let Some(ata_info) = ata_info {
+                    if let Some((eata_pubkey, _)) =
+                        try_derive_eata_address_and_bump(
+                            &ata_info.owner,
+                            &ata_info.mint,
+                        )
+                    {
+                        if let Err(err) = remote_account_provider
+                            .release_single_subscription(
+                                &eata_pubkey,
+                                SubscriptionReason::AtaProjection,
+                            )
+                            .await
+                        {
+                            warn!(
+                                pubkey = %pubkey,
+                                eata_pubkey = %eata_pubkey,
+                                error = ?err,
+                                "Failed to release eATA projection \
+                                 subscription for evicted ATA"
+                            );
+                        }
+                    }
                 }
             }
             warn!("Removed accounts channel closed");
@@ -521,10 +589,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// is cloned in our validator.
     /// Returns the state of each account (writable and readonly) after the checks
     /// and cloning are done.
-    #[instrument(skip(self, tx))]
-    pub async fn ensure_transaction_accounts(
+    #[instrument(skip(self, tx, fetch_context))]
+    pub async fn ensure_transaction_accounts_with_context(
         &self,
         tx: &SanitizedTransaction,
+        fetch_context: impl Into<AccountFetchContext>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if is_noop_system_transfer(tx) {
             trace!(
@@ -533,6 +602,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             );
             return Ok(Default::default());
         }
+
+        let fetch_context = fetch_context.into();
 
         let mut pubkeys = tx
             .message()
@@ -563,14 +634,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
         // Ensure accounts
         let res = self
-            .ensure_accounts(
-                &pubkeys,
-                mark_empty_if_not_found,
-                AccountFetchContext::send_transaction(*tx.signature()),
-            )
+            .ensure_accounts(&pubkeys, mark_empty_if_not_found, fetch_context)
             .await?;
 
         Ok(res)
+    }
+
+    pub async fn ensure_transaction_accounts(
+        &self,
+        tx: &SanitizedTransaction,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
+        self.ensure_transaction_accounts_with_context(
+            tx,
+            AccountFetchContext::send_transaction(*tx.signature()),
+        )
+        .await
     }
 
     /// Same as fetch accounts, but does not return the accounts, just
@@ -1127,5 +1205,134 @@ mod tests {
 
         assert!(subscribe_result.is_ok());
         assert!(remote_account_provider.is_watching(&pubkey));
+    }
+
+    #[tokio::test]
+    async fn removal_of_ata_releases_eata_projection_subscription() {
+        use magicblock_core::token_programs::{
+            derive_ata, try_derive_eata_address_and_bump, TOKEN_PROGRAM_ID,
+        };
+        use solana_account::WritableAccount;
+
+        init_logger();
+        let provider = test_remote_account_provider().await;
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+
+        let wallet = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet, &mint);
+        let (eata, _) = try_derive_eata_address_and_bump(&wallet, &mint)
+            .expect("eATA derivation");
+
+        // Plain (non-delegated) ATA in the bank; is_ata only needs
+        // mint + wallet in the first 64 data bytes.
+        let mut account =
+            AccountSharedData::new(1_000_000, 64, &TOKEN_PROGRAM_ID);
+        account.data_as_mut_slice()[0..32].copy_from_slice(mint.as_ref());
+        account.data_as_mut_slice()[32..64].copy_from_slice(wallet.as_ref());
+        accounts_bank.insert(ata, account);
+
+        provider
+            .acquire_subscription(&eata, SubscriptionReason::AtaProjection)
+            .await
+            .expect("eATA subscription");
+        assert!(provider.is_watching(&eata));
+
+        let (removed_tx, removed_rx) = mpsc::channel(4);
+        let handle = InnerChainlink::subscribe_account_removals(
+            &accounts_bank,
+            &cloner,
+            &provider,
+            removed_rx,
+        );
+
+        removed_tx.send(ata).await.expect("send removal");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while provider.is_watching(&eata) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "eATA projection subscription should be released when its \
+                 ATA is removed"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn stale_ata_removal_keeps_eata_projection_subscription() {
+        use magicblock_core::token_programs::{
+            derive_ata, try_derive_eata_address_and_bump, TOKEN_PROGRAM_ID,
+        };
+        use solana_account::WritableAccount;
+
+        init_logger();
+        let provider = test_remote_account_provider().await;
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+
+        fn ata_setup(
+            accounts_bank: &AccountsBankStub,
+        ) -> (Pubkey, Pubkey, Pubkey) {
+            let wallet = Pubkey::new_unique();
+            let mint = Pubkey::new_unique();
+            let ata = derive_ata(&wallet, &mint);
+            let (eata, _) = try_derive_eata_address_and_bump(&wallet, &mint)
+                .expect("eATA derivation");
+            let mut account =
+                AccountSharedData::new(1_000_000, 64, &TOKEN_PROGRAM_ID);
+            account.data_as_mut_slice()[0..32].copy_from_slice(mint.as_ref());
+            account.data_as_mut_slice()[32..64]
+                .copy_from_slice(wallet.as_ref());
+            accounts_bank.insert(ata, account);
+            (ata, eata, wallet)
+        }
+
+        // ATA1: watched again by the time the (stale) removal notification
+        // is processed. ATA2: genuinely unwatched; its release is used as
+        // the fence proving the first notification was handled.
+        let (ata1, eata1, _) = ata_setup(&accounts_bank);
+        let (ata2, eata2, _) = ata_setup(&accounts_bank);
+        for (pk, reason) in [
+            (ata1, SubscriptionReason::DirectAccount),
+            (eata1, SubscriptionReason::AtaProjection),
+            (eata2, SubscriptionReason::AtaProjection),
+        ] {
+            provider
+                .acquire_subscription(&pk, reason)
+                .await
+                .expect("subscription");
+        }
+
+        let (removed_tx, removed_rx) = mpsc::channel(4);
+        let handle = InnerChainlink::subscribe_account_removals(
+            &accounts_bank,
+            &cloner,
+            &provider,
+            removed_rx,
+        );
+
+        removed_tx.send(ata1).await.expect("send stale removal");
+        removed_tx.send(ata2).await.expect("send removal");
+
+        // The handler is sequential: once eATA2 is released, the stale
+        // notification for ATA1 has been fully processed.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while provider.is_watching(&eata2) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "eATA2 projection subscription should be released"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        assert!(
+            provider.is_watching(&eata1),
+            "a stale removal notification for a still-watched ATA must not \
+             release its eATA projection subscription"
+        );
+        handle.abort();
     }
 }

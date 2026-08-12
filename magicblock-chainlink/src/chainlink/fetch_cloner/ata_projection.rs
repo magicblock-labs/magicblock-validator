@@ -20,10 +20,13 @@ use super::{
     CompanionFetchLogContext, FetchCloner,
 };
 use crate::{
-    cloner::{AccountCloneRequest, Cloner, DelegationActions},
+    cloner::{
+        AccountCloneRequest, ClonePostDelegationMode, Cloner, DelegationActions,
+    },
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
-        ResolvedAccountSharedData, SubscriptionReason,
+        pubsub_common::SubscriptionSource, ChainPubsubClient, ChainRpcClient,
+        MatchSlotsConfig, RemoteAccount, ResolvedAccountSharedData,
+        SubscriptionReason,
     },
 };
 
@@ -39,6 +42,29 @@ pub(crate) fn derive_eata_pubkey_from_ata_layout(
     ata_account: &AccountSharedData,
 ) -> Option<Pubkey> {
     derive_eata_pubkey(ata_info_from_layout(ata_pubkey, ata_account)?)
+}
+
+pub(crate) fn derive_supported_ata_pubkeys(
+    owner: &Pubkey,
+    mint: &Pubkey,
+) -> Vec<Pubkey> {
+    try_derive_supported_ata_pubkeys(owner, mint)
+        .token_2022_first()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+}
+
+pub(crate) fn derive_supported_ata_pubkeys_from_raw_eata(
+    eata_pubkey: &Pubkey,
+    eata_account: &AccountSharedData,
+) -> Option<Vec<Pubkey>> {
+    let (wallet_owner, mint) = delegation::parse_raw_eata_pda(
+        eata_pubkey,
+        eata_account.data(),
+        EATA_PROGRAM_ID,
+    )?;
+    Some(derive_supported_ata_pubkeys(&wallet_owner, &mint))
 }
 
 fn derive_eata_pubkey(ata_info: AtaInfo) -> Option<Pubkey> {
@@ -103,6 +129,7 @@ pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_up
     this: &FetchCloner<T, U, V, C>,
     eata_pubkey: Pubkey,
     eata_account: &AccountSharedData,
+    update_source: SubscriptionSource,
     deleg_record: Option<&DelegationRecord>,
     delegation_actions: &DelegationActions,
     companion_fetch_log_context: &CompanionFetchLogContext,
@@ -125,11 +152,19 @@ where
         .await;
     }
 
-    delegation::parse_raw_eata_pda(
-        &eata_pubkey,
-        eata_account.data(),
-        EATA_PROGRAM_ID,
-    )?;
+    let ata_pubkeys =
+        derive_supported_ata_pubkeys_from_raw_eata(&eata_pubkey, eata_account)?;
+    if ata_pubkeys.is_empty() {
+        return None;
+    }
+
+    if matches!(update_source, SubscriptionSource::Program)
+        && !this
+            .raw_eata_has_local_projection_interest(&eata_pubkey, &ata_pubkeys)
+            .await
+    {
+        return None;
+    }
 
     let (deleg_record, delegation_actions) =
         delegation::fetch_and_parse_delegation_record(
@@ -175,12 +210,7 @@ where
         eata_account.data(),
         deleg_record.owner,
     )?;
-    let ata_pubkeys = try_derive_supported_ata_pubkeys(&wallet_owner, &mint);
-    let ata_pubkeys = ata_pubkeys
-        .token_2022_first()
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+    let ata_pubkeys = derive_supported_ata_pubkeys(&wallet_owner, &mint);
 
     // eATA updates only carry the projected balance fields. The base ATA is
     // required so the clone preserves the actual token program owner and any
@@ -223,9 +253,10 @@ where
         pubkey: ata_pubkey,
         account: projected_ata,
         commit_frequency_ms: None,
-        delegation_actions: delegation_actions.clone(),
+        post_delegation_mode: ClonePostDelegationMode::from(
+            delegation_actions.clone(),
+        ),
         delegated_to_other: None,
-        needs_undelegation: false,
     })
 }
 
@@ -306,7 +337,8 @@ where
     let was_watching = this.remote_account_provider.is_watching(&eata_pubkey);
 
     // Ensure before cache checks; this keeps the subscription LRU warm
-    // without refcounting the projection reason on every ATA update.
+    // without refcounting the projection reason on every ATA update. The
+    // reason is released when the base ATA is removed from the bank.
     let subscribed = match this
         .ensure_subscription(&eata_pubkey, SubscriptionReason::AtaProjection)
         .await
@@ -459,8 +491,9 @@ where
 
     let mut accounts_to_clone = vec![];
     let mut ata_join_set = JoinSet::new();
-    let ata_projection_context =
-        fetch_context.with_reason(metrics::AccountFetchReason::AtaProjection);
+    let ata_projection_context = fetch_context
+        .clone()
+        .with_reason(metrics::AccountFetchReason::AtaProjection);
     let delegation_record_context = fetch_context
         .with_reason(metrics::AccountFetchReason::DelegationRecord);
 
@@ -490,7 +523,7 @@ where
                     ata_pubkey,
                     eata,
                     effective_slot,
-                    ata_projection_context,
+                    ata_projection_context.clone(),
                     ChainlinkCompanionFetchKind::AtaProjection,
                 )
                 .map(move |res| (ata_pubkey, eata, effective_slot, res)),
@@ -508,7 +541,7 @@ where
                     ata_pubkey,
                     companion_pubkey,
                     effective_slot,
-                    ata_projection_context,
+                    ata_projection_context.clone(),
                     ChainlinkCompanionFetchKind::AtaProjection,
                 )
                 .map(move |res| {
@@ -569,7 +602,7 @@ where
             }
             (ata_pubkey, eata_pubkey, effective_slot, Ok(Err(err))) => {
                 let companion_fetch_log_context = CompanionFetchLogContext {
-                    origin: ata_projection_context,
+                    origin: ata_projection_context.clone(),
                     primary_pubkey: ata_pubkey,
                     context_slot: effective_slot,
                 };
@@ -582,7 +615,7 @@ where
             }
             (ata_pubkey, eata_pubkey, effective_slot, Err(join_err)) => {
                 let companion_fetch_log_context = CompanionFetchLogContext {
-                    origin: ata_projection_context,
+                    origin: ata_projection_context.clone(),
                     primary_pubkey: ata_pubkey,
                     context_slot: effective_slot,
                 };
@@ -598,10 +631,11 @@ where
 
     // Phase 2: Fetch delegation records in parallel for all eATAs
     let deleg_futures = ata_inputs.iter().filter_map(|input| {
+        let delegation_record_context = delegation_record_context.clone();
         input.eata_shared.as_ref().map(|_| async move {
             let context_slot = this.remote_account_provider.chain_slot();
             let companion_fetch_log_context = CompanionFetchLogContext {
-                origin: delegation_record_context,
+                origin: delegation_record_context.clone(),
                 primary_pubkey: input.eata_pubkey,
                 context_slot,
             };
@@ -653,9 +687,10 @@ where
             pubkey: input.ata_pubkey,
             account: account_to_clone,
             commit_frequency_ms,
-            delegation_actions: actions.unwrap_or_default(),
+            post_delegation_mode: ClonePostDelegationMode::from(
+                actions.unwrap_or_default(),
+            ),
             delegated_to_other,
-            needs_undelegation: false,
         });
     }
 

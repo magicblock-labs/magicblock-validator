@@ -2,7 +2,7 @@ name: Notify PR Reviews on Slack
 
 env:
   SLACK_USER_ID_BY_GITHUB: >-
-    {"gabrielepicco":"U05KBBGBNR2","bmuddha":"U07UA8EMWUB","thlorenz":"U07JZ8TNDCM","taco-paco":"U08EV480NBD","snawaz":"U09F31XPU9H","lucacillario":"U08P8EL2SUU","crypto-vincent":"U08NN43TV6Y","kuldotha":"U087F2UMJC9","sporicle":"U08UP615N9X","dodecahedr0x":"U08LDC1L81Z","jonasxchen":"U08L7DK6UAJ"}
+    {"gabrielepicco":"U05KBBGBNR2","bmuddha":"U07UA8EMWUB","thlorenz":"U07JZ8TNDCM","taco-paco":"U08EV480NBD","snawaz":"U09F31XPU9H","lucacillario":"U08P8EL2SUU","crypto-vincent":"U08NN43TV6Y","kuldotha":"U087F2UMJC9","sporicle":"U08UP615N9X","dodecahedr0x":"U08LDC1L81Z","jonasxchen":"U08L7DK6UAJ","bzawisto":"U0B73GRCJDU","dhruvja":"U0BE3N6KDA6","supermarioblock":"U03KMCGLJUT"}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.review.id || github.event.requested_reviewer.login || github.event.requested_team.slug || github.run_id }}

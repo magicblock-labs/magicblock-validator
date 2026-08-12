@@ -24,7 +24,8 @@ use super::{
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{
-        errors::ClonerResult, AccountCloneRequest, Cloner, DelegationActions,
+        errors::ClonerResult, AccountCloneRequest, ClonePostDelegationMode,
+        Cloner, DelegationActions,
     },
     remote_account_provider::{
         program_account::{
@@ -42,10 +43,12 @@ pub(crate) fn collect_delegation_action_dependencies(
 ) -> HashSet<Pubkey> {
     let mut dependencies = HashSet::new();
     for request in accounts_to_clone {
-        for instruction in request.delegation_actions.iter() {
-            dependencies.insert(instruction.program_id);
-            for account_meta in &instruction.accounts {
-                dependencies.insert(account_meta.pubkey);
+        if let Some(actions) = request.post_delegation_mode.actions() {
+            for instruction in actions.iter() {
+                dependencies.insert(instruction.program_id);
+                for account_meta in &instruction.accounts {
+                    dependencies.insert(account_meta.pubkey);
+                }
             }
         }
     }
@@ -136,9 +139,8 @@ fn classify_single_account(
                             pubkey,
                             account: account_shared_data,
                             commit_frequency_ms: None,
-                            delegation_actions: DelegationActions::default(),
+                            post_delegation_mode: ClonePostDelegationMode::None,
                             delegated_to_other: None,
-                            needs_undelegation: false,
                         });
                     }
                 }
@@ -234,7 +236,7 @@ where
             this.task_to_fetch_with_delegation_record(
                 *pubkey,
                 effective_slot,
-                fetch_context,
+                fetch_context.clone(),
             ),
         );
     }
@@ -381,9 +383,10 @@ where
                 pubkey,
                 account: account.into_account_shared_data(),
                 commit_frequency_ms,
-                delegation_actions,
+                post_delegation_mode: ClonePostDelegationMode::from(
+                    delegation_actions,
+                ),
                 delegated_to_other,
-                needs_undelegation: false,
             });
             if cleanup_delegated_subscription {
                 if cleanup_undelegation_tracking {
@@ -711,7 +714,7 @@ where
     for acc in loaded_programs {
         if !this.is_program_allowed(&acc.program_id) {
             metrics::inc_chainlink_clone_accounts_total_with_context(
-                fetch_context,
+                fetch_context.clone(),
                 ChainlinkCloneRemoteResult::Found,
                 ChainlinkCloneIntent::ProgramData,
                 ChainlinkCloneOutcome::Skipped,
@@ -720,6 +723,7 @@ where
             continue;
         }
         let this_clone = this.clone();
+        let fetch_context = fetch_context.clone();
         program_join_set.spawn(async move {
             this_clone
                 .clone_program_with_ownership(acc, fetch_context)
@@ -737,7 +741,7 @@ where
     let (accounts_with_actions, accounts_without_actions): (Vec<_>, Vec<_>) =
         accounts_to_clone
             .into_iter()
-            .partition(|request| !request.delegation_actions.is_empty());
+            .partition(|request| request.post_delegation_mode.has_actions());
 
     let mut accounts_join_set = JoinSet::new();
     for request in accounts_without_actions {
@@ -751,6 +755,7 @@ where
         };
 
         let this_clone = this.clone();
+        let fetch_context = fetch_context.clone();
         accounts_join_set.spawn(async move {
             this_clone
                 .clone_account_with_post_delegation_action_invariants(
@@ -779,6 +784,7 @@ where
         };
 
         let this_clone = this.clone();
+        let fetch_context = fetch_context.clone();
         action_accounts_join_set.spawn(async move {
             this_clone
                 .clone_account_with_post_delegation_action_invariants(
