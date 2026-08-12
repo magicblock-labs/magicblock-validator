@@ -16,7 +16,7 @@ on:
       - '.github/workflows/ci-fmt.yml'
       - '.github/actions/setup-build-env/**'
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize]
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'

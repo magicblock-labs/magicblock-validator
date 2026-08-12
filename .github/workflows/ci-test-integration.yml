@@ -21,7 +21,7 @@ on:
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize]
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
@@ -55,7 +55,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
-          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       # lld typically halves the link step on large rust workspaces.
@@ -83,8 +82,6 @@ jobs:
   build_sbf:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     name: Build SBF Artifacts
-    env:
-      SOLANA_VERSION: v4.1.1
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -94,12 +91,10 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
-          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
-        with:
-          solana_version: ${{ env.SOLANA_VERSION }}
+        id: agave
 
       # SBF programs only depend on a small set of source dirs; cache them
       # directly so we skip cargo-build-sbf entirely on cache hits.
@@ -114,7 +109,7 @@ jobs:
           # source dirs alone don't capture. Also include rustc + solana
           # versions in the key so a toolchain bump invalidates stale .so
           # artifacts produced by the previous compiler.
-          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.96.1-solana${{ env.SOLANA_VERSION }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
+          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust${{ hashFiles('magicblock-validator/rust-toolchain.toml', 'magicblock-validator/test-integration/rust-toolchain.toml') }}-agave${{ steps.agave.outputs.agave_version }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
 
       - name: Build SBF programs
         run: make -C test-integration programs
@@ -146,7 +141,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
-          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
@@ -351,8 +345,6 @@ jobs:
   run_integration_tests:
     needs: [build_leader, build_sbf, build_integration_tests]
     runs-on: ${{ matrix.runner || 'blacksmith-8vcpu-ubuntu-2404' }}
-    env:
-      SOLANA_VERSION: v4.1.1
     strategy:
       matrix:
         include:
@@ -425,12 +417,9 @@ jobs:
         if: ${{ matrix.needs_build_env == true }}
         with:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
-          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
-        with:
-          solana_version: ${{ env.SOLANA_VERSION }}
 
       - name: Download prebuilt leader binary
         uses: actions/download-artifact@v4

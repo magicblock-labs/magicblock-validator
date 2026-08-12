@@ -6,8 +6,8 @@ inputs:
     description: "Token used to install protoc, i.e. the secrets.GITHUB_TOKEN"
     required: true
   rust_toolchain_release:
-    description: "Choose the type of rust toolchain to use (stable/nightly)"
-    required: true
+    description: "Rust toolchain override; defaults to rust-toolchain.toml"
+    required: false
   build_cache_key_name:
     description: "Build cache key"
     required: true
@@ -28,7 +28,15 @@ runs:
 
   - name: Install Rust
     shell: "bash"
-    run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile default --component clippy
+    working-directory: ${{ github.action_path }}/../../..
+    env:
+      REQUESTED_TOOLCHAIN: ${{ inputs.rust_toolchain_release }}
+    run: |
+      if [ -n "$REQUESTED_TOOLCHAIN" ]; then
+        rustup toolchain install "$REQUESTED_TOOLCHAIN" --profile default --component clippy
+      else
+        rustup toolchain install
+      fi
 
   - name: Install system deps (libudev, LLVM/Clang)
     if: runner.os == 'Linux'
