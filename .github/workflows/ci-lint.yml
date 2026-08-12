@@ -17,7 +17,7 @@ on:
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize]
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
@@ -40,7 +40,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-lint-v002"
-          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana

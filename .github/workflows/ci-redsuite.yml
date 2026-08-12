@@ -15,8 +15,6 @@ permissions:
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
   REDSUITE_REV: 91abdd5e44db88d922cba8a5d22ed2cfa0e63951
-  SOLANA_VERSION: v4.1.1
-  RUST_TOOLCHAIN: "1.96.1"
 
 jobs:
   build_er:
@@ -35,7 +33,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-redsuite-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: ${{ env.RUST_TOOLCHAIN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install lld linker
@@ -50,8 +47,6 @@ jobs:
         working-directory: magicblock-validator
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
-        with:
-          solana_version: ${{ env.SOLANA_VERSION }}
 
       - name: Build committor program
         run: |
@@ -92,15 +87,14 @@ jobs:
           persist-credentials: false
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
-        with:
-          solana_version: ${{ env.SOLANA_VERSION }}
+        id: agave
 
       - name: Restore redsuite build
         id: redsuite-cache
         uses: actions/cache@v4
         with:
           path: redsuite-dist
-          key: redsuite-bin-${{ env.REDSUITE_REV }}-rust${{ env.RUST_TOOLCHAIN }}-solana${{ env.SOLANA_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+          key: redsuite-bin-${{ env.REDSUITE_REV }}-agave${{ steps.agave.outputs.agave_version }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Checkout redsuite
         if: steps.redsuite-cache.outputs.cache-hit != 'true'
@@ -115,7 +109,7 @@ jobs:
         if: steps.redsuite-cache.outputs.cache-hit != 'true'
         run: |
           set -euxo pipefail
-          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup toolchain install
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=native" \
             cargo build --release --locked -p redsuite
           cargo xtask programs

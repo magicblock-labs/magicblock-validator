@@ -35,7 +35,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-prepare-release-v001"
-          rust_toolchain_release: "1.96.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine release version
