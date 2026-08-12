@@ -878,6 +878,11 @@ where
             Ok(materialized) => Ok(materialized),
             Err(err) => {
                 let pubkey = request.pubkey;
+                warn!(
+                    pubkey = %pubkey,
+                    error = ?err,
+                    "Post-delegation actions could not be satisfied; undelegating"
+                );
                 if self
                     .read_account(&pubkey, |account| {
                         account.is(AccountMode::Transient)
@@ -1499,7 +1504,14 @@ where
                     .into_iter()
                     .filter(|dependency| {
                         let reader = |account: &AccountSharedData| {
-                            writable_dependencies.contains(dependency)
+                            // A copy that already sits at `remote_slot` is as
+                            // fresh as the update we are resolving. Refreshing
+                            // it anyway re-clones it at its current slot, and
+                            // the engine rejects that slot patch as a
+                            // non-advancing transition, which fails the whole
+                            // action path and undelegates the account.
+                            account.slot() < remote_slot
+                                && writable_dependencies.contains(dependency)
                                 && (!account.is(AccountMode::Delegated)
                                     || account.is(AccountMode::Transient))
                         };

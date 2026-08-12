@@ -291,7 +291,6 @@ impl Leader {
             config.engine.authority.local.insecure_clone(),
             chainlink_config,
             &config.chainlink,
-            config.engine.ledger.directory.as_path(),
             chain_slot,
         )
         .await

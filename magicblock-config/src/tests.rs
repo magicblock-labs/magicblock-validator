@@ -107,6 +107,31 @@ fn engine_configuration_loads_from_toml() {
 
 #[test]
 #[parallel]
+fn risk_configuration_loads_from_toml() {
+    let (_dir, path) = create_temp_config(
+        r#"
+        [chainlink.risk]
+        enabled = true
+        risk-server-url = "http://risk.example:3001"
+        request-timeout = "2s"
+        "#,
+    );
+
+    let config = run_cli(&[path.to_str().expect("UTF-8 path")]);
+
+    assert!(config.chainlink.risk.enabled);
+    assert_eq!(
+        config.chainlink.risk.risk_server_url,
+        "http://risk.example:3001",
+    );
+    assert_eq!(
+        config.chainlink.risk.request_timeout,
+        Duration::from_secs(2)
+    );
+}
+
+#[test]
+#[parallel]
 fn follower_authority_is_rejected_by_parent_config() {
     let (_dir, path) = create_temp_config(
         r#"
@@ -171,5 +196,15 @@ fn example_configuration_parses() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../config.example.toml");
 
-    run_cli(&[path.to_str().expect("UTF-8 path")]);
+    let config = run_cli(&[path.to_str().expect("UTF-8 path")]);
+
+    assert!(!config.chainlink.risk.enabled);
+    assert_eq!(
+        config.chainlink.risk.risk_server_url,
+        consts::DEFAULT_RISK_SERVER_URL,
+    );
+    assert_eq!(
+        config.chainlink.risk.request_timeout,
+        Duration::from_secs(consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC),
+    );
 }
