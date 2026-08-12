@@ -13,9 +13,8 @@ reviews:
   
   
   auto_review:
-    enabled: true               # Disables automatic reviews on push
+    enabled: true               
     drafts: true
-    labels: ["coderabbit"]       # Triggers review when this label is added
     base_branches:
       - ".*"
     auto_incremental_review: true
