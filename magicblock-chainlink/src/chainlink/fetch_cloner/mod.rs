@@ -793,6 +793,16 @@ where
         fetch_context: AccountFetchContext,
         materialization: AccountMaterialization,
     ) -> ChainlinkResult<Option<MaterializedAccount>> {
+        if materialization == AccountMaterialization::Update
+            && !self.contains_account(&request.pubkey)
+        {
+            trace!(
+                pubkey = %request.pubkey,
+                "Ignoring account update for account absent from bank"
+            );
+            return Ok(None);
+        }
+
         if request.account.read().is(AccountMode::Delegated)
             && is_ata(
                 &request.pubkey,
