@@ -1,22 +1,21 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     path::Path,
     sync::{Arc, Mutex},
 };
 
 use magicblock_core::intent::{
-    types::CommittedAccount, CommitAndUndelegate,
-    CommitType as IntentCommitType, MagicIntentBundle, UndelegateType,
+    CommitAndUndelegate, CommitType as IntentCommitType, MagicIntentBundle,
+    UndelegateType, types::CommittedAccount,
 };
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
-use solana_transaction::Transaction;
 use tracing::warn;
 
 use super::{
-    db::CommitStatusRow, error::CommitPersistResult, utils::now, CommitStatus,
-    CommitStrategy, CommitType, CommittsDb, MessageSignatures,
+    CommitStatus, CommitStrategy, CommitType, CommittsDb, MessageSignatures,
+    db::CommitStatusRow, error::CommitPersistResult, utils::now,
 };
 use crate::{
     intent_executor::ExecutionOutput, persist::db::BundleSignatureRow,
@@ -140,6 +139,7 @@ impl IntentPersisterImpl {
                 commit_status: CommitStatus::Pending,
                 last_retried_at: created_at,
                 retries_count: 0,
+                remote_slot: account.remote_slot,
             }
         };
 
@@ -163,6 +163,18 @@ impl IntentPersisterImpl {
                 .map(move |account| create_row(undelegate, account))
         })
         .collect()
+    }
+
+    pub fn recoverable_intents(
+        &self,
+        min_created_at: u64,
+    ) -> CommitPersistResult<Vec<RecoveredIntent>> {
+        let rows = self
+            .commits_db
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .get_failed_commit_statuses(min_created_at)?;
+        Ok(pending_rows_to_recovered_intents(rows, min_created_at))
     }
 }
 
@@ -481,10 +493,25 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
     }
 }
 
+pub struct RecoveredIntent {
+    pub bundle: ScheduledIntentBundle,
+    pub commit_ids: HashMap<Pubkey, u64>,
+}
+
 fn pending_rows_to_scheduled_intent_bundles(
     rows: Vec<CommitStatusRow>,
     min_created_at: u64,
 ) -> Vec<ScheduledIntentBundle> {
+    pending_rows_to_recovered_intents(rows, min_created_at)
+        .into_iter()
+        .map(|recovered| recovered.bundle)
+        .collect()
+}
+
+fn pending_rows_to_recovered_intents(
+    rows: Vec<CommitStatusRow>,
+    min_created_at: u64,
+) -> Vec<RecoveredIntent> {
     let mut grouped_rows = BTreeMap::<u64, Vec<CommitStatusRow>>::new();
     for row in rows {
         grouped_rows.entry(row.message_id).or_default().push(row);
@@ -519,13 +546,13 @@ fn pending_rows_to_scheduled_intent_bundles(
                 Some(rows)
             }
         })
-        .filter_map(intent_bundle_from_rows)
+        .filter_map(recovered_intent_from_rows)
         .collect()
 }
 
-fn intent_bundle_from_rows(
+fn recovered_intent_from_rows(
     rows: Vec<CommitStatusRow>,
-) -> Option<ScheduledIntentBundle> {
+) -> Option<RecoveredIntent> {
     let first = rows.first()?;
     let message_id = first.message_id;
     let slot = first.slot;
@@ -533,11 +560,15 @@ fn intent_bundle_from_rows(
 
     let mut commit_finalize_accounts = Vec::new();
     let mut commit_finalize_and_undelegate_accounts = Vec::new();
+    let mut commit_ids = HashMap::new();
     for row in rows {
+        let pubkey = row.pubkey;
+        let commit_id = row.commit_id;
         let Some((account, undelegate)) = committed_account_from_row(row)
         else {
             continue;
         };
+        commit_ids.insert(pubkey, commit_id);
         if undelegate {
             commit_finalize_and_undelegate_accounts.push(account);
         } else {
@@ -563,13 +594,16 @@ fn intent_bundle_from_rows(
         return None;
     }
 
-    Some(ScheduledIntentBundle {
-        id: message_id,
-        slot,
-        blockhash,
-        sent_transaction: Transaction::default(),
-        payer: Pubkey::default(),
-        intent_bundle,
+    Some(RecoveredIntent {
+        bundle: ScheduledIntentBundle {
+            id: message_id,
+            slot,
+            blockhash,
+            sent_transaction: Default::default(),
+            payer: Pubkey::default(),
+            intent_bundle,
+        },
+        commit_ids,
     })
 }
 
@@ -595,7 +629,7 @@ fn committed_account_from_row(
                 executable: false,
                 rent_epoch: 0,
             },
-            remote_slot: 0,
+            remote_slot: row.remote_slot,
         },
         row.undelegate,
     ))
@@ -604,20 +638,19 @@ fn committed_account_from_row(
 #[cfg(test)]
 mod tests {
     use magicblock_core::intent::{
-        types::CommittedAccount, CommitAndUndelegate, CommitType,
-        MagicIntentBundle, UndelegateType,
+        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
+        types::CommittedAccount,
     };
     use solana_account::Account;
     use solana_hash::Hash;
     use solana_pubkey::Pubkey;
     use solana_signature::Signature;
-    use solana_transaction::Transaction;
     use tempfile::NamedTempFile;
 
     use super::*;
     use crate::{
         committor_processor::RECOVERY_MAX_AGE_SECS,
-        persist::{types, CommitStatusSignatures},
+        persist::{CommitStatusSignatures, types},
         test_utils,
     };
 
@@ -712,7 +745,7 @@ mod tests {
             id,
             slot: 100,
             blockhash: Hash::new_unique(),
-            sent_transaction: Transaction::default(),
+            sent_transaction: Default::default(),
             payer: Pubkey::new_unique(),
             intent_bundle,
         }
@@ -960,6 +993,7 @@ mod tests {
             commit_strategy: Default::default(),
             last_retried_at: 1,
             retries_count: 0,
+            remote_slot: 0,
         }
     }
 

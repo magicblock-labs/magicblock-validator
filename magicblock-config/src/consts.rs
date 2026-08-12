@@ -5,17 +5,12 @@ pub const DEFAULT_REMOTE: &str = DEVNET_URL;
 /// Default RPC address for the validator service
 pub const DEFAULT_RPC_ADDR: &str = "127.0.0.1:8899";
 
-/// Struct Default Values
-/// Default storage directory for ledger and accounts data
-pub const DEFAULT_STORAGE_DIRECTORY: &str = "magicblock-test-storage/";
+/// Default durable root for engine and validator state.
+pub const DEFAULT_ENGINE_LEDGER_DIRECTORY: &str = "magicblock-test-storage/";
 
 /// WARNING: This keypair is for development/testing only.
 /// Production deployments MUST provide their own keypair via config file, env var, or CLI argument.
-pub const DEFAULT_VALIDATOR_KEYPAIR: &str =
-     "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ";
-
-/// Default base fee in lamports for transactions
-pub const DEFAULT_BASE_FEE: u64 = 0;
+pub const DEFAULT_VALIDATOR_KEYPAIR: &str = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ";
 
 /// Default compute unit price in microlamports
 pub const DEFAULT_COMPUTE_UNIT_PRICE: u64 = 1_000_000;
@@ -37,15 +32,8 @@ pub const LOCALHOST_URL: &str = "http://localhost:8899/";
 /// Environment variable prefix for configuration (MBV_)
 pub const ENV_VAR_PREFIX: &str = "MBV_";
 
-/// Accounts DB Defaults
-/// Default size of the accounts database (100 MB)
-pub const DEFAULT_ACCOUNTS_DB_SIZE: usize = 100 * 1024 * 1024;
-
-/// Default size of the accounts index (16 MB)
-pub const DEFAULT_ACCOUNTS_INDEX_SIZE: usize = 16 * 1024 * 1024;
-
-/// Maximum number of account snapshots to retain
-pub const DEFAULT_ACCOUNTS_MAX_SNAPSHOTS: u16 = 4;
+/// Maximum number of resolved accounts retained for recency and eviction.
+pub const DEFAULT_ACCOUNTS_LRU_CAPACITY: usize = 5_000;
 
 /// Ledger Defaults
 /// Default block time in milliseconds
@@ -56,6 +44,9 @@ pub const DEFAULT_LEDGER_SIZE: u64 = 100 * 1024 * 1024 * 1024;
 
 /// Default superblock size (72K ~ 1 hour with 50ms block time)
 pub const DEFAULT_SUPERBLOCK_SIZE: u64 = 3600 * 20;
+
+/// Default leader replication listener.
+pub const DEFAULT_REPLICATION_BIND_ADDRESS: &str = "127.0.0.1:10000";
 
 /// Default ledger block cache size (512 MB, suits local dev;
 /// production nodes should configure 16 GB or more)
@@ -82,20 +73,9 @@ pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
 /// Default period in seconds for scanning DLP undelegation request accounts.
 pub const DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS: u64 = 5 * 60;
 
-/// Default capacity for the LRU cache of subscribed accounts
-pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;
+/// Default URL of the risk server that performs address risk assessments.
+/// Matches the PER risk server's default `risk_listen_addr` (port 3001).
+pub const DEFAULT_RISK_SERVER_URL: &str = "http://127.0.0.1:3001";
 
-/// Default capacity for the secondary LRU cache of subscribed accounts
-pub const DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS: usize = 20_000;
-
-/// Default base URL for Range risk service
-pub const DEFAULT_RISK_BASE_URL: &str = "https://api.range.org/v1";
-
-/// Default cache TTL for Range risk service
-pub const DEFAULT_RISK_CACHE_TTL_SEC: u64 = 60 * 60 * 24 * 30;
-
-/// Default request timeout for Range risk service
+/// Default request timeout for risk server calls
 pub const DEFAULT_RISK_REQUEST_TIMEOUT_SEC: u64 = 5;
-
-/// Default risk score threshold for Range risk service
-pub const DEFAULT_RISK_SCORE_THRESHOLD: u64 = 5;

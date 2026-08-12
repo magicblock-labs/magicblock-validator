@@ -5,10 +5,10 @@ use serde::Serialize;
 
 use crate::{
     config::LifecycleMode,
-    types::{network::Remote, BindAddress, SerdeKeypair},
+    types::{BindAddress, network::Remote},
 };
 
-/// CLI Arguments mirroring the structure of ValidatorParams.
+/// CLI arguments mirroring the structure of [`crate::LeaderParams`].
 /// All fields are optional to allow "overlay" behavior on top of the config file.
 #[derive(Parser, Serialize, Debug)]
 #[command(author, version, about)]
@@ -38,48 +38,14 @@ pub struct CliParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<LifecycleMode>,
 
-    /// Root directory for application storage.
-    #[arg(long)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub storage: Option<PathBuf>,
-
-    /// Disable the terminal UI (TUI). When set, validator runs headless.
-    ///
-    /// This is only relevant when the `magicblock-validator` binary is built
-    /// with TUI support enabled.
-    #[arg(long = "no-tui", default_value_t = false)]
-    #[serde(skip_serializing_if = "is_false", rename = "no-tui")]
-    pub no_tui: bool,
-
     /// Listen address for the metrics endpoint.
     #[arg(long, short)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<BindAddress>,
 
-    /// Validator-specific arguments.
-    #[command(flatten)]
-    pub validator: CliValidatorConfig,
-
     /// Aperture-specific arguments
     #[command(flatten)]
     pub aperture: CliApertureConfig,
-    /// Ledger-specific arguments.
-    #[command(flatten)]
-    pub ledger: CliLedgerConfig,
-}
-
-/// CLI analog of configuration for the validator's core behavior and identity.
-#[derive(Args, Serialize, Debug)]
-pub struct CliValidatorConfig {
-    /// Base fee in lamports for transactions.
-    #[arg(long)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub basefee: Option<u64>,
-
-    /// The validator's identity keypair, encoded in Base58.
-    #[arg(long, short)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub keypair: Option<SerdeKeypair>,
 }
 
 /// CLI analog of configuration for Aperture functionality: RPC, Websocket, Geyser
@@ -96,16 +62,4 @@ pub struct CliApertureConfig {
     #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_processors: Option<usize>,
-}
-
-#[derive(Args, Serialize, Debug, Default)]
-pub struct CliLedgerConfig {
-    /// Reset the ledger on startup (wipe existing ledger database).
-    #[arg(long)]
-    #[serde(skip_serializing_if = "is_false")]
-    pub reset: bool,
-}
-
-fn is_false(v: &bool) -> bool {
-    !*v
 }

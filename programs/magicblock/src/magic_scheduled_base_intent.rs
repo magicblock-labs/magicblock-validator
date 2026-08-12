@@ -1,24 +1,24 @@
 use std::collections::{HashMap, HashSet};
 
 pub use magicblock_core::intent::{
-    calculate_commit_fee, BaseAction, CommitAndUndelegate, CommitType,
+    ACTUAL_COMMIT_LIMIT, BaseAction, COMMIT_FEE_LAMPORTS,
+    COMPUTE_UNIT_PRICE_MICRO_LAMPORTS, CommitAndUndelegate, CommitType,
     MagicBaseIntent, MagicIntentBundle, ProgramArgs, UndelegateType,
-    ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
-    COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
+    calculate_commit_fee,
 };
 use magicblock_core::{
+    Slot,
     intent::types::CommittedAccount,
     token_programs::{
         EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
     },
-    Slot,
 };
 use magicblock_magic_program_api::args::{
     BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
     MagicBaseIntentArgs, MagicIntentBundleArgs, UndelegateTypeArgs,
 };
 use serde::{Deserialize, Serialize};
-use solana_account::ReadableAccount;
+use solana_account::{AccountMode, ReadableAccount};
 use solana_hash::Hash;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::{
@@ -27,15 +27,16 @@ use solana_program_runtime::{
 };
 use solana_pubkey::Pubkey;
 use solana_transaction::Transaction;
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     instruction_utils::InstructionUtils,
     magic_sys::validate_intent_size,
     utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        get_writable_with_idx, InstructionAccount,
+        InstructionAccount, get_instruction_account_with_idx,
+        get_instruction_pubkey_with_idx, get_writable_with_idx,
     },
-    validator::effective_validator_authority_id,
+    validator::authority,
 };
 
 /// Context necessary for construction of Schedule Action
@@ -84,7 +85,9 @@ type CommitAccountRef<'a, 'ix_data> =
     (Pubkey, InstructionAccount<'a, 'ix_data>);
 
 /// Scheduled action to be executed on base layer
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub struct ScheduledIntentBundle {
     pub id: u64,
     pub slot: Slot,
@@ -105,15 +108,15 @@ impl ScheduledIntentBundle {
     ) -> Result<ScheduledIntentBundle, InstructionError> {
         let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
         let blockhash = context.invoke_context.environment_config.blockhash;
-        let intent_bundle_sent_transaction =
+        let sent_transaction =
             InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
 
         Ok(ScheduledIntentBundle {
             id: commit_id,
             slot,
             blockhash,
+            sent_transaction,
             payer: *payer_pubkey,
-            sent_transaction: intent_bundle_sent_transaction,
             intent_bundle,
         })
     }
@@ -429,7 +432,7 @@ fn validate_commit_and_undelegate_accounts(
             context.transaction_context(),
             idx as u16,
         )?;
-        if is_writable && delegated.borrow()?.delegated() {
+        if is_writable && delegated.borrow()?.is(AccountMode::Delegated) {
             Ok(())
         } else {
             let pubkey = get_instruction_pubkey_with_idx(
@@ -507,7 +510,7 @@ fn validate_commit_type_accounts(
     context: &ConstructionContext<'_, '_, '_>,
 ) -> Result<(), InstructionError> {
     accounts.iter().try_for_each(|(pubkey, account)| {
-        if account.to_account_shared_data()?.confined() {
+        if account.borrow()?.is(AccountMode::Ephemeral) {
             ic_msg!(
                 context.invoke_context,
                 "ScheduleCommit ERR: account {} is confined and cannot be committed",
@@ -517,7 +520,7 @@ fn validate_commit_type_accounts(
         }
 
         // Prevent ephemeral accounts from being committed to base chain
-        if account.to_account_shared_data()?.ephemeral() {
+        if account.borrow()?.is(AccountMode::Ephemeral) {
             ic_msg!(
                 context.invoke_context,
                 "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
@@ -526,7 +529,7 @@ fn validate_commit_type_accounts(
             return Err(InstructionError::InvalidAccountData);
         }
 
-        if !account.borrow()?.delegated() {
+        if !account.borrow()?.is(AccountMode::Delegated) {
             ic_msg!(
                 context.invoke_context,
                 "ScheduleCommit ERR: account {} is required to be delegated to the current validator, in order to be committed",
@@ -594,7 +597,7 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
-                        let account = account.to_account_shared_data()?;
+                        let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(
                             pubkey,
                             &account,
@@ -621,7 +624,7 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
-                        let account = account.to_account_shared_data()?;
+                        let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(
                             pubkey,
                             &account,
@@ -680,7 +683,7 @@ pub(crate) fn validate_commit_schedule_permissions(
     parent_program_id: Option<&Pubkey>,
     signers: &HashSet<Pubkey>,
 ) -> Result<(), InstructionError> {
-    let validator_id = effective_validator_authority_id();
+    let validator_id = authority();
     let is_token_account_owner = committee_owner == &TOKEN_PROGRAM_ID
         || committee_owner == &TOKEN_2022_PROGRAM_ID;
     let is_eata_token_program_call =
@@ -702,7 +705,9 @@ pub(crate) fn validate_commit_schedule_permissions(
                 ic_msg!(
                     invoke_context,
                     "ScheduleCommit ERR: account {} needs to be owned by the invoking program {}, be a signer, or ix must be signed by the validator to be committed, but is owned by {}",
-                    committee_pubkey, parent_id, committee_owner
+                    committee_pubkey,
+                    parent_id,
+                    committee_owner
                 );
                 Err(InstructionError::InvalidAccountOwner)
             }
@@ -751,7 +756,6 @@ mod tests {
     #[test]
     fn test_scheduled_intent_bundle_fee_mixed_commit_and_cau() {
         use solana_hash::Hash;
-        use solana_transaction::Transaction;
 
         // commit WithBaseActions: pk1 above limit (charged), pk2 at limit (free)
         let pk1 = Pubkey::new_unique();

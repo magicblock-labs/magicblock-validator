@@ -1,8 +1,8 @@
 use solana_account::{
-    Account, AccountSharedData, ReadableAccount, WritableAccount,
+    Account, AccountBuilder, AccountMode, AccountSharedData, ReadableAccount,
 };
 use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
-use solana_pubkey::{pubkey, Pubkey};
+use solana_pubkey::{Pubkey, pubkey};
 use spl_token::state::Account as SplAccount;
 use spl_token_2022::{
     extension::StateWithExtensionsMut, state::Account as Token2022Account,
@@ -31,51 +31,54 @@ const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
 
 /// Private WSOL is represented locally by the token amount that maps to eATA,
 /// not by claimable lamports on the projected ATA.
-/// Returns false when token-program data is malformed and a caller that already
-/// rewrote projected token data should reject the clone.
+/// Returns `None` when token-program data is malformed and the clone should be
+/// rejected.
 pub fn normalize_native_token_account_for_local_clone(
-    account: &mut AccountSharedData,
-) -> bool {
-    let normalized = if account.owner() == &TOKEN_PROGRAM_ID {
-        normalize_legacy_native_token_account(account)
-    } else if account.owner() == &TOKEN_2022_PROGRAM_ID {
-        normalize_token_2022_native_token_account(account)
+    account: AccountBuilder,
+) -> Option<AccountBuilder> {
+    let normalized = if account.read().owner() == TOKEN_PROGRAM_ID {
+        normalize_legacy_native_token_account(account.read())
+    } else if account.read().owner() == TOKEN_2022_PROGRAM_ID {
+        normalize_token_2022_native_token_account(account.read())
     } else {
         NativeTokenNormalization::NotNative
     };
 
     match normalized {
-        NativeTokenNormalization::NotNative => true,
-        NativeTokenNormalization::Invalid => false,
-        NativeTokenNormalization::Normalized(rent_exempt_reserve) => {
-            account.set_lamports(rent_exempt_reserve);
-            true
-        }
+        NativeTokenNormalization::NotNative => Some(account),
+        NativeTokenNormalization::Invalid => None,
+        NativeTokenNormalization::Normalized {
+            data,
+            rent_exempt_reserve,
+        } => Some(account.data(data).lamports(rent_exempt_reserve)),
     }
 }
 
 /// Projected ATAs are virtual views over eATA state. They must not be locally
 /// closeable; settlement owns materialization and closure on the base layer.
 pub fn normalize_projected_token_account_for_local_clone(
-    account: &mut AccountSharedData,
-) -> bool {
-    if account.owner() == &TOKEN_PROGRAM_ID {
+    account: AccountBuilder,
+) -> Option<AccountBuilder> {
+    if account.read().owner() == TOKEN_PROGRAM_ID {
         normalize_legacy_projected_token_account(account)
-    } else if account.owner() == &TOKEN_2022_PROGRAM_ID {
+    } else if account.read().owner() == TOKEN_2022_PROGRAM_ID {
         normalize_token_2022_projected_token_account(account)
     } else {
-        true
+        Some(account)
     }
 }
 
 enum NativeTokenNormalization {
     NotNative,
-    Normalized(u64),
+    Normalized {
+        data: Vec<u8>,
+        rent_exempt_reserve: u64,
+    },
     Invalid,
 }
 
 fn normalize_legacy_native_token_account(
-    account: &mut AccountSharedData,
+    account: &solana_account::OwnedAccount,
 ) -> NativeTokenNormalization {
     let Ok(mut token_account) = SplAccount::unpack(account.data()) else {
         return NativeTokenNormalization::Invalid;
@@ -90,34 +93,49 @@ fn normalize_legacy_native_token_account(
 
     token_account.is_native = COption::None;
     token_account.close_authority = COption::Some(Pubkey::default());
-    if SplAccount::pack(token_account, account.data_as_mut_slice()).is_err() {
+    let mut data = account.data().to_vec();
+    if SplAccount::pack(token_account, &mut data).is_err() {
         return NativeTokenNormalization::Invalid;
     }
-    NativeTokenNormalization::Normalized(rent_exempt_reserve)
+    NativeTokenNormalization::Normalized {
+        data,
+        rent_exempt_reserve,
+    }
 }
 
 fn normalize_legacy_projected_token_account(
-    account: &mut AccountSharedData,
-) -> bool {
-    let Ok(mut token_account) = SplAccount::unpack(account.data()) else {
-        return false;
+    account: AccountBuilder,
+) -> Option<AccountBuilder> {
+    let Ok(mut token_account) = SplAccount::unpack(account.read().data())
+    else {
+        return None;
     };
-    if token_account.mint == spl_token::native_mint::id() {
-        if let COption::Some(rent_exempt_reserve) = token_account.is_native {
-            token_account.is_native = COption::None;
-            account.set_lamports(rent_exempt_reserve);
-        }
-    }
+    let rent_exempt_reserve = if token_account.mint
+        == spl_token::native_mint::id()
+        && let COption::Some(rent_exempt_reserve) = token_account.is_native
+    {
+        token_account.is_native = COption::None;
+        Some(rent_exempt_reserve)
+    } else {
+        None
+    };
     token_account.close_authority = COption::Some(Pubkey::default());
-    SplAccount::pack(token_account, account.data_as_mut_slice()).is_ok()
+    let mut data = account.read().data().to_vec();
+    SplAccount::pack(token_account, &mut data).ok()?;
+    let account = account.data(data);
+    Some(match rent_exempt_reserve {
+        Some(rent_exempt_reserve) => account.lamports(rent_exempt_reserve),
+        None => account,
+    })
 }
 
 fn normalize_token_2022_native_token_account(
-    account: &mut AccountSharedData,
+    account: &solana_account::OwnedAccount,
 ) -> NativeTokenNormalization {
-    let Ok(mut state) = StateWithExtensionsMut::<Token2022Account>::unpack(
-        account.data_as_mut_slice(),
-    ) else {
+    let mut data = account.data().to_vec();
+    let Ok(mut state) =
+        StateWithExtensionsMut::<Token2022Account>::unpack(&mut data)
+    else {
         return NativeTokenNormalization::Invalid;
     };
     if state.base.mint != spl_token_2022::native_mint::id() {
@@ -131,17 +149,21 @@ fn normalize_token_2022_native_token_account(
     state.base.is_native = COption::None;
     state.base.close_authority = COption::Some(Pubkey::default());
     state.pack_base();
-    NativeTokenNormalization::Normalized(rent_exempt_reserve)
+    NativeTokenNormalization::Normalized {
+        data,
+        rent_exempt_reserve,
+    }
 }
 
 fn normalize_token_2022_projected_token_account(
-    account: &mut AccountSharedData,
-) -> bool {
+    account: AccountBuilder,
+) -> Option<AccountBuilder> {
+    let mut data = account.read().data().to_vec();
     let rent_exempt_reserve = {
-        let Ok(mut state) = StateWithExtensionsMut::<Token2022Account>::unpack(
-            account.data_as_mut_slice(),
-        ) else {
-            return false;
+        let Ok(mut state) =
+            StateWithExtensionsMut::<Token2022Account>::unpack(&mut data)
+        else {
+            return None;
         };
         let rent_exempt_reserve =
             if state.base.mint == spl_token_2022::native_mint::id() {
@@ -159,10 +181,11 @@ fn normalize_token_2022_projected_token_account(
         state.pack_base();
         rent_exempt_reserve
     };
-    if let Some(rent_exempt_reserve) = rent_exempt_reserve {
-        account.set_lamports(rent_exempt_reserve);
-    }
-    true
+    let account = account.data(data);
+    Some(match rent_exempt_reserve {
+        Some(rent_exempt_reserve) => account.lamports(rent_exempt_reserve),
+        None => account,
+    })
 }
 
 /// Derives the standard Associated Token Account (ATA) address for the given wallet owner and token mint.
@@ -304,12 +327,12 @@ pub struct AtaInfo {
 /// Supports both spl-token and spl-token-2022 program owners.
 pub fn is_ata(
     account_pubkey: &Pubkey,
-    account: &AccountSharedData,
+    token_program_owner: Pubkey,
+    data: &[u8],
 ) -> Option<AtaInfo> {
     // The account must be owned by the SPL Token program (legacy) or Token-2022
-    let token_program_owner = account.owner();
-    let is_spl_token = *token_program_owner == spl_token::id();
-    let is_token_2022 = *token_program_owner == TOKEN_2022_PROGRAM_ID;
+    let is_spl_token = token_program_owner == spl_token::id();
+    let is_token_2022 = token_program_owner == TOKEN_2022_PROGRAM_ID;
     if !(is_spl_token || is_token_2022) {
         return None;
     }
@@ -318,7 +341,6 @@ pub fn is_ata(
     // Layout (at least the first 64 bytes):
     // 0..32  -> mint Pubkey
     // 32..64 -> owner Pubkey (the wallet the ATA belongs to)
-    let data = account.data();
     if data.len() < 64 {
         return None;
     }
@@ -360,7 +382,7 @@ pub fn try_remap_ata_to_eata(
     let token_program_owner = account.owner();
     let is_spl_token = *token_program_owner == TOKEN_PROGRAM_ID;
     let is_token_2022 = *token_program_owner == TOKEN_2022_PROGRAM_ID;
-    if !(is_spl_token || is_token_2022) || !account.delegated() {
+    if !(is_spl_token || is_token_2022) || !account.is(AccountMode::Delegated) {
         return None;
     }
 
@@ -431,16 +453,16 @@ impl EphemeralAta {
 
     pub fn project_into_ata_account(
         &self,
-        ata_account: &AccountSharedData,
-    ) -> Option<AccountSharedData> {
-        let token_program_owner = ata_account.owner();
-        let is_spl_token = *token_program_owner == TOKEN_PROGRAM_ID;
-        let is_token_2022 = *token_program_owner == TOKEN_2022_PROGRAM_ID;
+        ata_account: AccountBuilder,
+    ) -> Option<AccountBuilder> {
+        let token_program_owner = ata_account.read().owner();
+        let is_spl_token = token_program_owner == TOKEN_PROGRAM_ID;
+        let is_token_2022 = token_program_owner == TOKEN_2022_PROGRAM_ID;
         if !(is_spl_token || is_token_2022) {
             return None;
         }
 
-        let data = ata_account.data();
+        let data = ata_account.read().data();
         if data.len() < 72 {
             return None;
         }
@@ -450,13 +472,11 @@ impl EphemeralAta {
             return None;
         }
 
-        let mut projected = ata_account.clone();
-        projected.data_as_mut_slice()[64..72]
-            .copy_from_slice(&self.amount.to_le_bytes());
-        if !normalize_projected_token_account_for_local_clone(&mut projected) {
-            return None;
-        }
-        Some(projected)
+        let mut data = data.to_vec();
+        data[64..72].copy_from_slice(&self.amount.to_le_bytes());
+        normalize_projected_token_account_for_local_clone(
+            ata_account.data(data),
+        )
     }
 }
 
@@ -506,7 +526,7 @@ mod tests {
 
         let mut data = vec![0u8; SplAccount::LEN];
         SplAccount::pack(token_account, &mut data).unwrap();
-        let base_ata = AccountSharedData::from(Account {
+        let base_ata = AccountBuilder::from(Account {
             owner: TOKEN_PROGRAM_ID,
             data,
             lamports: rent_exempt_reserve,
@@ -522,8 +542,9 @@ mod tests {
         };
 
         let projected = eata
-            .project_into_ata_account(&base_ata)
+            .project_into_ata_account(base_ata)
             .expect("ATA should project");
+        let projected = projected.read();
         assert_eq!(projected.lamports(), rent_exempt_reserve);
 
         let projected_token =
@@ -556,7 +577,7 @@ mod tests {
 
         let mut data = vec![0u8; SplAccount::LEN];
         SplAccount::pack(token_account, &mut data).unwrap();
-        let base_ata = AccountSharedData::from(Account {
+        let base_ata = AccountBuilder::from(Account {
             owner: TOKEN_PROGRAM_ID,
             data,
             lamports: rent_exempt_reserve,
@@ -572,8 +593,9 @@ mod tests {
         };
 
         let projected = eata
-            .project_into_ata_account(&base_ata)
+            .project_into_ata_account(base_ata)
             .expect("native ATA should project");
+        let projected = projected.read();
         assert_eq!(projected.lamports(), rent_exempt_reserve);
 
         let projected_token =
@@ -607,7 +629,7 @@ mod tests {
 
         let mut data = vec![0u8; Token2022Account::LEN];
         Token2022Account::pack(token_account, &mut data).unwrap();
-        let base_ata = AccountSharedData::from(Account {
+        let base_ata = AccountBuilder::from(Account {
             owner: TOKEN_2022_PROGRAM_ID,
             data,
             lamports: rent_exempt_reserve,
@@ -623,9 +645,10 @@ mod tests {
         };
 
         let projected = eata
-            .project_into_ata_account(&base_ata)
+            .project_into_ata_account(base_ata)
             .expect("Token-2022 ATA should project");
-        assert_eq!(projected.owner(), &TOKEN_2022_PROGRAM_ID);
+        let projected = projected.read();
+        assert_eq!(projected.owner(), TOKEN_2022_PROGRAM_ID);
         assert_eq!(projected.lamports(), rent_exempt_reserve);
         assert_eq!(projected.data().len(), Token2022Account::LEN);
 

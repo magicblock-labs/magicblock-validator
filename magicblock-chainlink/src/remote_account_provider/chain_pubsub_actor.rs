@@ -1,8 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicBool, AtomicU16, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicU16, Ordering},
     },
 };
 
@@ -36,13 +36,13 @@ use super::{
     pubsub_connection_pool::PubSubConnectionPool,
 };
 use crate::remote_account_provider::{
+    DEFAULT_SUBSCRIPTION_RETRIES,
     pubsub_common::{
-        AccountSubscription, ChainPubsubActorMessage, PubsubClientConfig,
-        SubscriptionSource, SubscriptionUpdate, MESSAGE_CHANNEL_SIZE,
-        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        AccountSubscription, ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
+        PubsubClientConfig, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        SubscriptionSource, SubscriptionUpdate,
     },
     pubsub_connection::PubsubConnectionImpl,
-    DEFAULT_SUBSCRIPTION_RETRIES,
 };
 
 // Log every 10 secs (given chain slot time is 400ms)
@@ -114,9 +114,14 @@ impl ChainPubsubActor {
         client_id: &str,
         abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
+        subs_per_connection: Option<usize>,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
-        let config = PubsubClientConfig::from_url(pubsub_url, commitment);
+        let config = PubsubClientConfig::from_url_with_limit(
+            pubsub_url,
+            commitment,
+            subs_per_connection,
+        );
         Self::new(client_id, abort_sender, config).await
     }
 
@@ -314,6 +319,11 @@ impl ChainPubsubActor {
                 .remove(&pubkey);
         }
         result
+    }
+
+    /// Whether the actor currently considers its transport connected.
+    pub fn is_connected(&self) -> bool {
+        self.is_connected.load(Ordering::SeqCst)
     }
 
     pub fn subscriptions(&self) -> HashSet<Pubkey> {
@@ -1142,13 +1152,13 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use tokio::time::{sleep, Duration, Instant};
+    use tokio::time::{Duration, Instant, sleep};
 
     use super::*;
 
     #[tokio::test]
-    async fn drain_and_wait_for_listener_completion_waits_for_account_and_program_completion(
-    ) {
+    async fn drain_and_wait_for_listener_completion_waits_for_account_and_program_completion()
+     {
         let subscriptions = Arc::new(Mutex::new(HashMap::new()));
         let program_subs = Arc::new(Mutex::new(HashMap::new()));
         let account_pubkey = Pubkey::new_unique();
@@ -1207,14 +1217,18 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(subscriptions
-            .lock()
-            .expect("subscriptions lock poisoned")
-            .is_empty());
-        assert!(program_subs
-            .lock()
-            .expect("program subs lock poisoned")
-            .is_empty());
+        assert!(
+            subscriptions
+                .lock()
+                .expect("subscriptions lock poisoned")
+                .is_empty()
+        );
+        assert!(
+            program_subs
+                .lock()
+                .expect("program subs lock poisoned")
+                .is_empty()
+        );
         assert!(account_cancellation_token.is_cancelled());
         assert!(program_cancellation_token.is_cancelled());
         assert!(account_completion_token.is_cancelled());
@@ -1223,8 +1237,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drain_and_wait_for_listener_completion_returns_error_when_completion_times_out(
-    ) {
+    async fn drain_and_wait_for_listener_completion_returns_error_when_completion_times_out()
+     {
         let subscriptions = Arc::new(Mutex::new(HashMap::new()));
         let program_subs = Arc::new(Mutex::new(HashMap::new()));
         let account_pubkey = Pubkey::new_unique();
@@ -1252,16 +1266,18 @@ mod tests {
         assert!(result.is_err());
         // Timed-out entries must remain in the map so a reconnect retry can
         // wait for them again before pooled clients are dropped.
-        assert!(subscriptions
-            .lock()
-            .expect("subscriptions lock poisoned")
-            .contains_key(&account_pubkey));
+        assert!(
+            subscriptions
+                .lock()
+                .expect("subscriptions lock poisoned")
+                .contains_key(&account_pubkey)
+        );
         assert!(cancellation_token.is_cancelled());
     }
 
     #[tokio::test]
-    async fn explicit_unsubscribe_style_cancellation_leaves_entry_for_reconnect_drain(
-    ) {
+    async fn explicit_unsubscribe_style_cancellation_leaves_entry_for_reconnect_drain()
+     {
         let subscriptions = Arc::new(Mutex::new(HashMap::new()));
         let program_subs = Arc::new(Mutex::new(HashMap::new()));
         let pubkey = Pubkey::new_unique();
@@ -1287,10 +1303,12 @@ mod tests {
         cancellation_token_to_cancel.unwrap().cancel();
 
         assert!(cancellation_token.is_cancelled());
-        assert!(subscriptions
-            .lock()
-            .expect("subscriptions lock poisoned")
-            .contains_key(&pubkey));
+        assert!(
+            subscriptions
+                .lock()
+                .expect("subscriptions lock poisoned")
+                .contains_key(&pubkey)
+        );
 
         completion_token.cancel();
         ChainPubsubActor::drain_and_wait_for_listener_completion(
@@ -1301,9 +1319,11 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(subscriptions
-            .lock()
-            .expect("subscriptions lock poisoned")
-            .is_empty());
+        assert!(
+            subscriptions
+                .lock()
+                .expect("subscriptions lock poisoned")
+                .is_empty()
+        );
     }
 }

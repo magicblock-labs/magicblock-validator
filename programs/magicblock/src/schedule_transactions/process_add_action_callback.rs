@@ -12,10 +12,10 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    MagicContext,
     schedule_transactions::{
-        check_magic_context_id, get_clock, get_parent_program_id,
-        try_get_fee_vault, validate_callback_accounts, MAGIC_CONTEXT_IDX,
-        PAYER_IDX,
+        MAGIC_CONTEXT_IDX, PAYER_IDX, check_magic_context_id, get_clock,
+        get_parent_program_id, try_get_fee_vault, validate_callback_accounts,
     },
     utils::{
         account_actions::charge_delegated_payer,
@@ -23,7 +23,6 @@ use crate::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
     },
-    MagicContext,
 };
 
 const CALLBACK_FEE_LAMPORTS: u64 = 5_000;

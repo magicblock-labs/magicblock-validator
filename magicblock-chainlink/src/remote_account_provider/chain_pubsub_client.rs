@@ -1,8 +1,8 @@
 use std::{
     collections::HashSet,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -149,6 +149,11 @@ pub trait ReconnectableClient {
     fn current_resub_delay_ms(&self) -> Option<u64> {
         None
     }
+    /// Whether the underlying transport is currently connected; `None` when
+    /// unknown (callers must then assume a reconnect is required).
+    fn transport_connected(&self) -> Option<bool> {
+        None
+    }
 }
 
 // -----------------
@@ -172,12 +177,14 @@ impl ChainPubsubClientImpl {
         abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
         resubscription_delay: Duration,
+        subs_per_connection: Option<usize>,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, updates) = ChainPubsubActor::new_from_url(
             pubsub_url,
             &client_id,
             abort_sender,
             commitment,
+            subs_per_connection,
         )
         .await?;
         let initial_resub_delay_ms = resubscription_delay.as_millis() as u64;
@@ -401,6 +408,10 @@ impl ReconnectableClient for ChainPubsubClientImpl {
     fn current_resub_delay_ms(&self) -> Option<u64> {
         Some(self.current_resub_delay_ms.load(Ordering::SeqCst))
     }
+
+    fn transport_connected(&self) -> Option<bool> {
+        Some(self.actor.is_connected())
+    }
 }
 
 // -----------------
@@ -416,7 +427,7 @@ pub mod mock {
 
     use parking_lot::Mutex;
     use solana_account::Account;
-    use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
+    use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
     use solana_program::clock::Slot;
     use solana_rpc_client_api::response::{
         Response as RpcResponse, RpcResponseContext,
@@ -426,8 +437,8 @@ pub mod mock {
 
     use super::*;
     use crate::remote_account_provider::{
-        pubsub_common::SubscriptionSource, RemoteAccountProviderError,
-        RemoteAccountProviderResult,
+        RemoteAccountProviderError, RemoteAccountProviderResult,
+        pubsub_common::SubscriptionSource,
     };
 
     #[derive(Clone)]
@@ -450,6 +461,7 @@ pub mod mock {
         subscribe_continue_notify: Arc<Notify>,
         subscribe_attempts: Arc<AtomicU64>,
         program_subscribe_attempts: Arc<AtomicU64>,
+        reconnect_calls: Arc<AtomicU64>,
         subscribe_notify: Arc<Notify>,
         client_id: String,
         transport: Arc<Mutex<PubsubTransport>>,
@@ -482,6 +494,7 @@ pub mod mock {
                 subscribe_continue_notify: Arc::new(Notify::new()),
                 subscribe_attempts: Arc::new(AtomicU64::new(0)),
                 program_subscribe_attempts: Arc::new(AtomicU64::new(0)),
+                reconnect_calls: Arc::new(AtomicU64::new(0)),
                 subscribe_notify: Arc::new(Notify::new()),
                 client_id: format!(
                     "mock:{}",
@@ -638,6 +651,10 @@ pub mod mock {
 
         pub fn subscribe_attempts(&self) -> u64 {
             self.subscribe_attempts.load(AtomicOrdering::SeqCst)
+        }
+
+        pub fn reconnect_calls(&self) -> u64 {
+            self.reconnect_calls.load(AtomicOrdering::SeqCst)
         }
 
         pub fn is_connected_and_resubscribed(&self) -> bool {
@@ -837,6 +854,7 @@ pub mod mock {
     #[async_trait]
     impl ReconnectableClient for ChainPubsubClientMock {
         async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
+            self.reconnect_calls.fetch_add(1, AtomicOrdering::SeqCst);
             if !*self.reconnectable.lock() {
                 return Err(
                     RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
@@ -870,6 +888,10 @@ pub mod mock {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
             Ok(())
+        }
+
+        fn transport_connected(&self) -> Option<bool> {
+            Some(*self.connected.lock())
         }
     }
 }

@@ -1,8 +1,8 @@
 use std::{
     collections::HashSet,
     sync::{
-        atomic::{AtomicU16, AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU16, AtomicU64, Ordering},
     },
 };
 
@@ -14,11 +14,11 @@ use tokio::sync::mpsc;
 use tracing::*;
 
 use crate::remote_account_provider::{
+    ChainPubsubClient, ChainPubsubClientImpl, Endpoint, ReconnectableClient,
+    RemoteAccountProviderError, RemoteAccountProviderResult,
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
     chain_rpc_client::ChainRpcClientImpl, chain_slot::ChainSlot,
-    pubsub_common::SubscriptionUpdate, ChainPubsubClient,
-    ChainPubsubClientImpl, Endpoint, PubsubTransport, ReconnectableClient,
-    RemoteAccountProviderError, RemoteAccountProviderResult,
+    pubsub_common::SubscriptionUpdate,
 };
 
 #[derive(Clone)]
@@ -28,12 +28,14 @@ pub enum ChainUpdatesClient {
 }
 
 impl ChainUpdatesClient {
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoint(
         endpoint: &Endpoint,
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
         resubscription_delay: std::time::Duration,
+        ws_subs_per_connection: Option<usize>,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> RemoteAccountProviderResult<Self> {
@@ -54,6 +56,7 @@ impl ChainUpdatesClient {
                         abort_sender,
                         commitment,
                         resubscription_delay,
+                        ws_subs_per_connection,
                     )
                     .await?,
                 ))
@@ -169,14 +172,6 @@ impl ChainPubsubClient for ChainUpdatesClient {
             Laser(client) => client.id(),
         }
     }
-
-    fn transport(&self) -> PubsubTransport {
-        use ChainUpdatesClient::*;
-        match self {
-            WebSocket(client) => client.transport(),
-            Laser(client) => client.transport(),
-        }
-    }
 }
 
 #[async_trait]
@@ -205,6 +200,14 @@ impl ReconnectableClient for ChainUpdatesClient {
         match self {
             WebSocket(client) => client.current_resub_delay_ms(),
             Laser(client) => client.current_resub_delay_ms(),
+        }
+    }
+
+    fn transport_connected(&self) -> Option<bool> {
+        use ChainUpdatesClient::*;
+        match self {
+            WebSocket(client) => client.transport_connected(),
+            Laser(client) => client.transport_connected(),
         }
     }
 }

@@ -4,31 +4,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
-on:
-  push:
-    branches: [master, dev]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/ci-redsuite.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/ci-redsuite.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
+# Temporarily manual-only while RedSuite migrates to the leader's structured
+# Engine configuration. Restore the push and pull_request triggers once its
+# topology no longer invokes the removed legacy CLI options.
+on: workflow_dispatch
 
 permissions:
   contents: read
@@ -36,8 +15,8 @@ permissions:
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
   REDSUITE_REV: 91abdd5e44db88d922cba8a5d22ed2cfa0e63951
-  SOLANA_VERSION: v4.0.3
-  RUST_TOOLCHAIN: "1.94.1"
+  SOLANA_VERSION: v4.1.1
+  RUST_TOOLCHAIN: "1.96.1"
 
 jobs:
   build_er:
@@ -65,7 +44,7 @@ jobs:
 
       - name: Build validator release binary
         run: |
-          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=lld -C target-cpu=native" \
             cargo build --release --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
         shell: bash
         working-directory: magicblock-validator
@@ -137,7 +116,8 @@ jobs:
         run: |
           set -euxo pipefail
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
-          cargo build --release --locked -p redsuite
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=native" \
+            cargo build --release --locked -p redsuite
           cargo xtask programs
           mkdir -p ../redsuite-dist/deploy
           cp target/release/redsuite ../redsuite-dist/

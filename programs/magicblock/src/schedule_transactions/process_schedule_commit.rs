@@ -1,19 +1,20 @@
 use std::collections::HashSet;
 
 use magicblock_core::intent::{
-    calculate_commit_fee, types::CommittedAccount, CommitAndUndelegate,
-    CommitType, MagicBaseIntent, UndelegateType,
+    CommitAndUndelegate, CommitType, MagicBaseIntent, UndelegateType,
+    calculate_commit_fee, types::CommittedAccount,
 };
 // no direct token remap helpers needed here; handled in CommittedAccount builder
-use solana_account::{ReadableAccount, WritableAccount};
+use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    MagicContext,
     magic_scheduled_base_intent::{
-        validate_commit_schedule_permissions, ScheduledIntentBundle,
+        ScheduledIntentBundle, validate_commit_schedule_permissions,
     },
     magic_sys::{fetch_current_commit_nonces, validate_intent_size},
     schedule_transactions::{self, check_commit_limits, try_get_fee_vault},
@@ -27,7 +28,6 @@ use crate::{
         },
         instruction_utils::InstructionUtils,
     },
-    MagicContext,
 };
 
 #[derive(Default)]
@@ -150,17 +150,10 @@ pub(crate) fn process_schedule_commit(
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
 
-        if acc.to_account_shared_data()?.confined() {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: account {} is confined and cannot be committed",
-                acc_pubkey
-            );
-            return Err(InstructionError::InvalidAccountData);
-        }
-
-        // Prevent ephemeral accounts from being committed to base chain
-        if acc.to_account_shared_data()?.ephemeral() {
+        // Prevent accounts that exist only inside the ER from being committed
+        // to base chain. This covers what used to be two separate checks, for
+        // ephemeral and for confined accounts, which are now the same mode.
+        if acc.borrow()?.is(AccountMode::Ephemeral) {
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
@@ -170,7 +163,7 @@ pub(crate) fn process_schedule_commit(
         }
 
         {
-            let is_delegated = acc.to_account_shared_data()?.delegated();
+            let is_delegated = acc.borrow()?.is(AccountMode::Delegated);
 
             if opts.request_undelegation {
                 // Must be writable and delegated to avoid double-undelegation
@@ -203,7 +196,7 @@ pub(crate) fn process_schedule_commit(
                 &signers,
             )?;
 
-            let account = acc.to_account_shared_data()?;
+            let account = acc.borrow()?;
             let committed = CommittedAccount::from_account_shared(
                 *acc_pubkey,
                 &account,
@@ -242,7 +235,7 @@ pub(crate) fn process_schedule_commit(
             //
             // We also set the undelegating flag on the account in order to detect
             // undelegations for which we miss updates
-            mark_account_as_undelegated(&acc)?;
+            mark_account_as_undelegated(invoke_context, &acc)?;
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit: Marking account {} as undelegating",
@@ -292,9 +285,9 @@ pub(crate) fn process_schedule_commit(
                 InstructionError::UnsupportedSysvar
             })?;
     let blockhash = invoke_context.environment_config.blockhash;
-    let action_sent_transaction =
+    let sent_transaction =
         InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
-    let commit_sent_sig = action_sent_transaction.signatures[0];
+    let sent_signature = sent_transaction.signatures[0];
 
     let base_intent = if opts.request_undelegation {
         MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
@@ -318,7 +311,7 @@ pub(crate) fn process_schedule_commit(
         id: intent_id,
         slot: clock.slot,
         blockhash,
-        sent_transaction: action_sent_transaction,
+        sent_transaction,
         payer: *payer_pubkey,
         intent_bundle: base_intent,
     };
@@ -330,7 +323,7 @@ pub(crate) fn process_schedule_commit(
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent signature: {}",
-        commit_sent_sig,
+        sent_signature,
     );
 
     Ok(())

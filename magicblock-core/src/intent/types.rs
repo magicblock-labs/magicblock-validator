@@ -1,12 +1,15 @@
 use serde::{Deserialize, Serialize};
-use solana_account::{Account, AccountSharedData};
+use solana_account::{Account, AccountSharedData, ReadableAccount};
 use solana_message::Address as Pubkey;
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::token_programs::try_remap_ata_to_eata;
 
 pub type CommittedAccountRef = (Pubkey, AccountSharedData);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub struct CommittedAccount {
     pub pubkey: Pubkey,
     pub account: Account,
@@ -15,7 +18,7 @@ pub struct CommittedAccount {
 
 impl From<CommittedAccountRef> for CommittedAccount {
     fn from(value: CommittedAccountRef) -> Self {
-        let remote_slot = value.1.remote_slot();
+        let remote_slot = value.1.slot();
         Self {
             pubkey: value.0,
             account: value.1.into(),
@@ -33,7 +36,7 @@ impl CommittedAccount {
         account_shared: &AccountSharedData,
         parent_program_id: Option<Pubkey>,
     ) -> Self {
-        let remote_slot = account_shared.remote_slot();
+        let remote_slot = account_shared.slot();
         if let Some((eata_pubkey, eata)) =
             try_remap_ata_to_eata(&pubkey, account_shared)
         {
@@ -44,7 +47,13 @@ impl CommittedAccount {
             };
         }
 
-        let mut account: Account = account_shared.to_owned().into();
+        let mut account = Account {
+            lamports: account_shared.lamports(),
+            data: account_shared.data().to_vec(),
+            owner: *account_shared.owner(),
+            executable: account_shared.executable(),
+            rent_epoch: account_shared.rent_epoch(),
+        };
         account.owner = parent_program_id.unwrap_or(account.owner);
 
         CommittedAccount {

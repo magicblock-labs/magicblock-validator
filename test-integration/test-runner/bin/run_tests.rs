@@ -29,11 +29,6 @@ pub fn main() {
         // If any test run panics (i.e. not just a failing test) then we bail
         return;
     };
-    let Ok(chainlink_output) = run_chainlink_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
-
     let Ok(aml_output) = run_aml_tests(&manifest_dir, &config) else {
         return;
     };
@@ -42,26 +37,14 @@ pub fn main() {
         return;
     };
 
-    let Ok(restore_ledger_output) =
-        run_restore_ledger_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
-
-    let Ok(magicblock_api_output) =
-        run_magicblock_api_tests(&manifest_dir, &config)
+    let Ok(validator_services_output) =
+        run_validator_services_tests(&manifest_dir, &config)
     else {
         return;
     };
 
     let Ok((table_mania_output, committor_output)) =
         run_table_mania_and_committor_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
-
-    let Ok(magicblock_pubsub_output) =
-        run_magicblock_pubsub_tests(&manifest_dir, &config)
     else {
         return;
     };
@@ -85,14 +68,11 @@ pub fn main() {
     // Assert that all tests passed
     assert_cargo_tests_passed(security_output, "security");
     assert_cargo_tests_passed(scenarios_output, "scenarios");
-    assert_cargo_tests_passed(chainlink_output, "chainlink");
     assert_cargo_tests_passed(aml_output, "aml");
     assert_cargo_tests_passed(cloning_output, "cloning");
-    assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
-    assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
+    assert_cargo_tests_passed(validator_services_output, "validator_services");
     assert_cargo_tests_passed(table_mania_output, "table_mania");
     assert_cargo_tests_passed(committor_output, "committor");
-    assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
     assert_cargo_tests_passed(config_output, "config");
     assert_cargo_tests_passed(schedule_intents_output, "schedule_intents");
     assert_cargo_tests_passed(task_scheduler_output, "task_scheduler");
@@ -106,125 +86,18 @@ fn success_output() -> Output {
     }
 }
 
+fn materialize_v42_program(manifest_dir: &str) -> io::Result<()> {
+    let deploy_dir = Path::new(manifest_dir).join("../target/deploy");
+    fs::create_dir_all(&deploy_dir)?;
+    fs::write(
+        deploy_dir.join("v42_calculator_program.so"),
+        keeper::testkit::V42_PROGRAM_ELF,
+    )
+}
+
 // -----------------
 // Tests
 // -----------------
-fn run_restore_ledger_tests(
-    manifest_dir: &str,
-    config: &TestConfigViaEnvVars,
-) -> Result<Output, Box<dyn Error>> {
-    const TEST_NAME: &str = "restore_ledger";
-    if config.skip_entirely(TEST_NAME) {
-        return Ok(success_output());
-    }
-
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
-
-    let start_devnet_validator = || match start_validator(
-        "restore-ledger-conf.devnet.toml",
-        ValidatorCluster::Chain(None),
-        &loaded_chain_accounts,
-    ) {
-        Some(validator) => validator,
-        None => {
-            panic!("Failed to start devnet validator properly");
-        }
-    };
-
-    if config.run_test(TEST_NAME) {
-        eprintln!("======== RUNNING RESTORE LEDGER TESTS ========");
-
-        let mut devnet_validator = start_devnet_validator();
-
-        let test_restore_ledger_dir =
-            format!("{}/../{}", manifest_dir, "test-ledger-restore");
-        eprintln!(
-            "Running restore ledger tests in {}",
-            test_restore_ledger_dir
-        );
-        let output = match run_test(test_restore_ledger_dir, Default::default())
-        {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("Failed to run restore ledger tests: {:?}", err);
-                cleanup_devnet_only(&mut devnet_validator);
-                return Err(err.into());
-            }
-        };
-        cleanup_devnet_only(&mut devnet_validator);
-        Ok(output)
-    } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
-    }
-}
-
-fn run_chainlink_tests(
-    manifest_dir: &str,
-    config: &TestConfigViaEnvVars,
-) -> Result<Output, Box<dyn Error>> {
-    const TEST_NAME: &str = "chainlink";
-    if config.skip_entirely(TEST_NAME) {
-        return Ok(success_output());
-    }
-    let loaded_chain_accounts = {
-        let mut loaded_chain_accounts =
-            LoadedAccounts::with_delegation_program_test_authority();
-        loaded_chain_accounts.add(&[
-            (
-                "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo",
-                "memo_v1.json",
-            ),
-            (
-                "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
-                "memo_v2.json",
-            ),
-            (
-                "BL5oAaURQwAVVHcgrucxJe3H5K57kCQ5Q8ys7dctqfV8",
-                "old_program_v1.json",
-            ),
-            (
-                "MiniV21111111111111111111111111111111111111",
-                "target/deploy/miniv2/program_mini.json",
-            ),
-        ]);
-        loaded_chain_accounts
-    };
-    let start_devnet_validator = || match start_validator(
-        "chainlink-conf.devnet.toml",
-        ValidatorCluster::Chain(None),
-        &loaded_chain_accounts,
-    ) {
-        Some(validator) => validator,
-        None => {
-            panic!("Failed to start devnet validator properly");
-        }
-    };
-    if config.run_test(TEST_NAME) {
-        eprintln!("======== RUNNING CHAINLINK TESTS ========");
-        let mut devnet_validator = start_devnet_validator();
-        let test_chainlink_dir =
-            format!("{}/../{}", manifest_dir, "test-chainlink");
-        eprintln!("Running chainlink tests in {}", test_chainlink_dir);
-        let output = match run_test(test_chainlink_dir, Default::default()) {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("Failed to run chainlink tests: {:?}", err);
-                cleanup_devnet_only(&mut devnet_validator);
-                return Err(err.into());
-            }
-        };
-        cleanup_devnet_only(&mut devnet_validator);
-        Ok(output)
-    } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
-    }
-}
-
 fn run_aml_tests(
     manifest_dir: &str,
     config: &TestConfigViaEnvVars,
@@ -426,7 +299,6 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS: CommittorSubset =
         name_filters: &[],
         exact_name_filters: &[
             "test_commit_id_error_parsing",
-            "test_undelegation_error_parsing",
             "test_action_error_parsing",
             "test_cpi_limits_error_parsing",
             "test_min_context_slot_not_reached_error_parsing",
@@ -440,7 +312,6 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_BASIC_RECOVERY: CommittorSubset =
         name_filters: &[],
         exact_name_filters: &[
             "test_commit_id_error_recovery",
-            "test_undelegation_error_recovery",
             "test_action_error_recovery",
             "test_cpi_limits_error_recovery",
         ],
@@ -768,16 +639,10 @@ fn run_cloning_tests(
         let mut loaded_chain_accounts =
             LoadedAccounts::with_delegation_program_test_authority();
 
-        loaded_chain_accounts.add(&[
-            (
-                "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo",
-                "memo_v1.json",
-            ),
-            (
-                "MiniV21111111111111111111111111111111111111",
-                "target/deploy/miniv2/program_mini.json",
-            ),
-        ]);
+        loaded_chain_accounts.add(&[(
+            "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo",
+            "memo_v1.json",
+        )]);
         loaded_chain_accounts
     };
     let start_devnet_validator = || match start_validator(
@@ -838,11 +703,11 @@ fn run_cloning_tests(
     }
 }
 
-fn run_magicblock_api_tests(
+fn run_validator_services_tests(
     manifest_dir: &str,
     config: &TestConfigViaEnvVars,
 ) -> Result<Output, Box<dyn Error>> {
-    const TEST_NAME: &str = "magicblock_api";
+    const TEST_NAME: &str = "validator_services";
     if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
@@ -870,75 +735,17 @@ fn run_magicblock_api_tests(
     };
 
     if config.run_test(TEST_NAME) {
-        eprintln!("======== RUNNING MAGICBLOCK API TESTS ========");
+        eprintln!("======== RUNNING VALIDATOR SERVICES TESTS ========");
 
         let mut devnet_validator = start_devnet_validator();
         let mut ephem_validator = start_ephem_validator();
 
-        let test_dir = format!("{}/../{}", manifest_dir, "test-magicblock-api");
-        eprintln!("Running magicblock-api tests in {}", test_dir);
+        let test_dir =
+            format!("{}/../{}", manifest_dir, "test-validator-services");
+        eprintln!("Running validator-services tests in {}", test_dir);
 
         let output = run_test(test_dir, Default::default()).map_err(|err| {
-            eprintln!("Failed to magicblock api tests: {:?}", err);
-            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
-            err
-        })?;
-
-        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
-        Ok(output)
-    } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        let ephem_validator =
-            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
-    }
-}
-
-fn run_magicblock_pubsub_tests(
-    manifest_dir: &str,
-    config: &TestConfigViaEnvVars,
-) -> Result<Output, Box<dyn Error>> {
-    const TEST_NAME: &str = "pubsub";
-    if config.skip_entirely(TEST_NAME) {
-        return Ok(success_output());
-    }
-
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
-
-    let start_devnet_validator = || match start_validator(
-        "validator-offline.devnet.toml",
-        ValidatorCluster::Chain(None),
-        &loaded_chain_accounts,
-    ) {
-        Some(validator) => validator,
-        None => {
-            panic!("Failed to start ephemeral validator properly");
-        }
-    };
-    let start_ephem_validator = || match start_validator(
-        "cloning-conf.ephem.toml",
-        ValidatorCluster::Ephem,
-        &loaded_chain_accounts,
-    ) {
-        Some(validator) => validator,
-        None => {
-            panic!("Failed to start ephemeral validator properly");
-        }
-    };
-
-    if config.run_test(TEST_NAME) {
-        eprintln!("======== RUNNING MAGICBLOCK PUBSUB TESTS ========");
-
-        let mut devnet_validator = start_devnet_validator();
-        let mut ephem_validator = start_ephem_validator();
-
-        let test_dir = format!("{}/../{}", manifest_dir, "test-pubsub");
-        eprintln!("Running magicblock pubsub tests in {}", test_dir);
-
-        let output = run_test(test_dir, Default::default()).map_err(|err| {
-            eprintln!("Failed to magicblock pubsub tests: {:?}", err);
+            eprintln!("Failed to run validator-services tests: {:?}", err);
             cleanup_validators(&mut ephem_validator, &mut devnet_validator);
             err
         })?;
@@ -962,6 +769,8 @@ fn run_config_tests(
     if config.skip_entirely(TEST_NAME) {
         return Ok(success_output());
     }
+
+    materialize_v42_program(manifest_dir)?;
 
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
@@ -1010,10 +819,12 @@ fn run_schedule_intents_tests(
         return Ok(success_output());
     }
 
+    materialize_v42_program(manifest_dir)?;
+
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
     let start_devnet_validator = || match start_validator(
-        "config-conf.devnet.toml",
+        "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
         &loaded_chain_accounts,
     ) {

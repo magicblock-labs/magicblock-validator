@@ -6,8 +6,8 @@
 # comments will be used.
 #
 # CONFIGURATION PRECEDENCE (Highest to Lowest):
-# 1. CLI Arguments      (e.g. --basefee 500)
-# 2. Environment Vars   (e.g. MBV_VALIDATOR__BASEFEE=500)
+# 1. CLI Arguments      (e.g. --lifecycle offline)
+# 2. Environment Vars   (e.g. MBV_ENGINE__LEDGER__SIZE_LIMIT=536870912)
 # 3. TOML Config File   (this file)
 # 4. System Defaults
 #
@@ -15,7 +15,7 @@
 # Prefix: MBV_
 # Splitter: Double underscore (__) denotes hierarchy depth.
 # Naming:   Field names use UPPER_SNAKE_CASE.
-# Example:  [ledger] block-time -> MBV_LEDGER__BLOCK_TIME
+# Example:  [engine.blockstore] blocktime -> MBV_ENGINE__BLOCKSTORE__BLOCKTIME
 # ==============================================================================
 
 # --- Core Settings ---
@@ -61,15 +61,8 @@ lifecycle = "ephemeral"
 remotes = [
     "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
     "https://api.devnet.solana.com",
-    "wss://api.devnet.solana.com",
+    "wss://api.devnet.solana.com"
 ]
-
-# Root directory for application storage (ledger, accountsdb, snapshots).
-# Default: "magicblock-test-storage" (created in current working directory)
-# CLI: --storage <PATH>
-# Env: MBV_STORAGE
-storage = "magicblock-test-storage"
-
 
 [metrics]
 # Network address to bind the metrics service to.
@@ -106,36 +99,33 @@ max-subs-in-new = 400
 max-time-without-optimization-secs = 60
 
 # ==============================================================================
-# Validator Identity & Fees
+# Engine
 # ==============================================================================
-[validator]
-# The minimum fee (in lamports) required to process a transaction.
-# Default: 0
-# CLI: --basefee <UINT>
-# Env: MBV_VALIDATOR__BASEFEE
-basefee = 0
-
+[engine.authority]
 # The validator's identity keypair in Base58 format.
 # Default: A pre-generated devnet keypair
-# CLI: -k, --keypair <BASE58>
-# Env: MBV_VALIDATOR__KEYPAIR
-keypair = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ"
+# Env: MBV_ENGINE__AUTHORITY__LOCAL
+local = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ"
 
-# Replication role for this validator.
-# Default: "standalone"
-# Options:
-# - "standalone": disable replication
-# - "primary": replicate the state transitions
-# - "replica": replay the state transitions from primary
-# 
-# [validator.replication-mode.primary]
-# url = "nats://0.0.0.0:4222"
-# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-# 
-# [validator.replication-mode.replica]
-# url = "nats://0.0.0.0:4222"
-# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-# authority-override = "L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
+[engine.accountsdb]
+# AccountsDB lives under the ledger root by default.
+directory = "magicblock-test-storage/accountsdb"
+# Maximum number of recently loaded accounts retained in memory.
+lru-capacity = 5000
+
+[engine.blockstore]
+blocktime = "400ms"
+superblock = 72000
+
+[engine.ledger]
+# Shared durable root for the engine ledger, deprecated ledger, and service databases.
+directory = "magicblock-test-storage"
+size-limit = 536_870_912
+
+[engine.replication]
+# Nodes configured through LeaderParams are leaders.
+allowed-followers = ["L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"]
+bind-address = "127.0.0.1:10000"
 
 [aperture]
 # Network address to bind the main JSON RPC service to.
@@ -167,62 +157,9 @@ geyser-plugins = ["config.json"]
 compute-unit-price = 1_000_000
 
 # ==============================================================================
-# Accounts Database
-# ==============================================================================
-[accountsdb]
-# Total size (in bytes) allocated for the memory-mapped accounts file.
-# Default: 104,857,600 (100 MB)
-# Env: MBV_ACCOUNTSDB__DATABASE_SIZE
-database-size = 104_857_600
-
-# Block size for storage allocation.
-# Default: "block256"
-# Options: "block128", "block256", "block512"
-# Env: MBV_ACCOUNTSDB__BLOCK_SIZE
-block-size = "block256"
-
-# Size (in bytes) allocated for the accounts index.
-# Default: 16,777,216 (16 MB)
-# Env: MBV_ACCOUNTSDB__INDEX_SIZE
-index-size = 16_777_216
-
-# Maximum number of historical snapshots to keep on disk.
-# Default: 4
-# Env: MBV_ACCOUNTSDB__MAX_SNAPSHOTS
-max-snapshots = 4
-
-# If true, compacts accounts storage on startup.
-# Default: false
-# Env: MBV_ACCOUNTSDB__DEFRAGMENT_ON_STARTUP
-defragment-on-startup = false
-
-# If true, wipes the accounts database on every startup.
-# Default: false
-# Env: MBV_ACCOUNTSDB__RESET
-reset = false
-
-# ==============================================================================
-# Ledger & Block Production
+# Deprecated Ledger Compatibility
 # ==============================================================================
 [ledger]
-# Target duration for a block slot. Supports humantime (e.g. "400ms", "1s").
-# Default: "400ms"
-# Env: MBV_LEDGER__BLOCK_TIME
-block-time = "400ms"
-
-# The number of slots included in a superblock.
-# accountsdb checksum/snapshot is taken at superblock boundary
-# 
-# Default: 72000
-# Env: MBV_LEDGER__SUPERBLOCK_SIZE
-superblock-size = 72000
-
-# Upper hard threshold for the max size of the ledger (in bytes).
-# Ledger truncation logic kicks in when disk usage approaches this limit.
-# Default: 536_870_912 (512 MB)
-# Env: MBV_LEDGER__SIZE
-size = 536_870_912
-
 # Capacity in bytes of the RocksDB block cache shared by all ledger columns.
 # This is the only read caching layer (the ledger bypasses the OS page cache),
 # so production nodes should set 16 GB or more.
@@ -248,17 +185,6 @@ reset = false
 # Maximum number of accounts to monitor for price updates.
 # Default: 5000
 # Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
-max-monitored-accounts = 5000
-
-# Maximum number of accounts retained in the secondary subscription cache.
-# Default: 20000
-# Env: MBV_CHAINLINK__SECONDARY_MAX_MONITORED_ACCOUNTS
-secondary-max-monitored-accounts = 20000
-
-# When true, confined accounts are removed during accounts bank reset.
-# Default: false
-# Env: MBV_CHAINLINK__REMOVE_CONFINED_ACCOUNTS
-remove-confined-accounts = false
 
 # Delay between resubscribing to accounts after a pubsub reconnection.
 # This throttles the rate at which we resubscribe to prevent overwhelming the RPC provider.
@@ -274,59 +200,41 @@ remove-confined-accounts = false
 # Env: MBV_CHAINLINK__UNDELEGATION_REQUEST_POLL_INTERVAL
 # undelegation-request-poll-interval = "5m"
 
+# Maximum subscriptions per websocket connection.
+# Default: 900
+# Env: MBV_CHAINLINK__WS_SUBS_PER_CONNECTION
+# ws-subs-per-connection = 900
+
 # ------------------------------------------------------------------------------
 # Optional: Range Risk API validation for post-delegation actions signers
 # ------------------------------------------------------------------------------
 # When enabled, all signers referenced by post-delegation actions are checked
 # against Range API before actions are allowed to execute.
 [chainlink.risk]
-# Enables/disables Range risk checks.
+# Enables/disables address risk checks against the risk server.
 # Default: false
 # Env: MBV_CHAINLINK__RISK__ENABLED
 enabled = false
 
-# Range API base URL.
-# Default: "https://api.range.org/v1"
-# Env: MBV_CHAINLINK__RISK__BASE_URL
-base-url = "https://api.range.org/v1"
+# Base URL of the risk server that performs address risk assessments.
+# The risk server owns the upstream provider credentials, cache, and threshold.
+# Default: "http://127.0.0.1:3001"
+# Env: MBV_CHAINLINK__RISK__RISK_SERVER_URL
+risk-server-url = "http://127.0.0.1:3001"
 
-# Range API bearer token.
-# Default: None
-# Env: MBV_CHAINLINK__RISK__API_KEY
-api-key = "your-api-key"
-
-# Cache TTL.
-# Default: "30 days"
-# Env: MBV_CHAINLINK__RISK__CACHE_TTL
-cache-ttl = "30 days"
-
-# HTTP timeout for Range API calls.
+# HTTP timeout for risk server calls.
 # Default: "5s"
 # Env: MBV_CHAINLINK__RISK__REQUEST_TIMEOUT
 request-timeout = "5s"
 
-# Risk score threshold to consider an address high risk, on scale of 0-10.
-# Default: 5
-# Env: MBV_CHAINLINK__RISK__RISK_SCORE_THRESHOLD
-# risk-score-threshold = 5
-
 # ==============================================================================
-# On-Chain Registration (Optional)
+# Leader Administration (Optional)
 # ==============================================================================
-# Used only if the validator registers itself on-chain.
-# This section is optional. To disable, just remove/comment the section
+# This section is optional. Remove it to disable periodic fee claims.
 
-[chain-operation]
-# ISO 3166-1 alpha-2 country code (e.g. "US", "DE").
-# Env: MBV_CHAIN_OPERATION__COUNTRY_CODE
-country-code = "US"
-
-# Fully Qualified Domain Name where this validator is reachable.
-# Env: MBV_CHAIN_OPERATION__FQDN
-fqdn = "https://validator.example.com"
-
+[admin]
 # How often to claim accrued fees from the chain (e.g. "24h").
-# Env: MBV_CHAIN_OPERATION__CLAIM_FEES_FREQUENCY
+# Env: MBV_ADMIN__CLAIM_FEES_FREQUENCY
 claim-fees-frequency = "24h"
 
 # ==============================================================================

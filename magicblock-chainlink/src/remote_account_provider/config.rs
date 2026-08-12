@@ -2,10 +2,7 @@ use std::{collections::HashSet, time::Duration};
 
 use magicblock_config::{
     config::{GrpcConfig, LifecycleMode},
-    consts::{
-        DEFAULT_MAX_MONITORED_ACCOUNTS, DEFAULT_RESUBSCRIPTION_DELAY_MS,
-        DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS,
-    },
+    consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,
 };
 use solana_pubkey::Pubkey;
 
@@ -13,10 +10,6 @@ use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
 
 #[derive(Debug, Clone)]
 pub struct RemoteAccountProviderConfig {
-    /// How many accounts to monitor for changes
-    subscribed_accounts_lru_capacity: usize,
-    /// How many accounts to retain in the secondary subscription cache
-    secondary_subscriptions_lru_capacity: usize,
     /// Lifecycle mode of the validator
     lifecycle_mode: LifecycleMode,
     /// Whether to enable metrics for account subscriptions
@@ -27,32 +20,25 @@ pub struct RemoteAccountProviderConfig {
     /// Delay between resubscribing to accounts after a pubsub
     /// reconnection
     resubscription_delay: Duration,
+    /// Max subscriptions per websocket connection; overrides the
+    /// per-provider defaults when set
+    ws_subs_per_connection: Option<usize>,
     /// Global gRPC configuration
     grpc: GrpcConfig,
 }
 
 impl RemoteAccountProviderConfig {
     pub fn try_new(
-        subscribed_accounts_lru_capacity: usize,
         lifecycle_mode: LifecycleMode,
     ) -> RemoteAccountProviderResult<Self> {
-        Self::try_new_with_metrics(
-            subscribed_accounts_lru_capacity,
-            lifecycle_mode,
-            true,
-        )
+        Self::try_new_with_metrics(lifecycle_mode, true)
     }
 
     pub fn try_new_with_metrics(
-        subscribed_accounts_lru_capacity: usize,
         lifecycle_mode: LifecycleMode,
         enable_subscription_metrics: bool,
     ) -> RemoteAccountProviderResult<Self> {
-        if subscribed_accounts_lru_capacity == 0 {
-            return Err(RemoteAccountProviderError::InvalidLruCapacity);
-        }
         Ok(Self {
-            subscribed_accounts_lru_capacity,
             lifecycle_mode,
             enable_subscription_metrics,
             resubscription_delay: std::time::Duration::from_millis(
@@ -80,38 +66,8 @@ impl RemoteAccountProviderConfig {
         Ok(self)
     }
 
-    pub fn with_subscribed_accounts_lru_capacity(
-        mut self,
-        capacity: usize,
-    ) -> RemoteAccountProviderResult<Self> {
-        if capacity == 0 {
-            return Err(RemoteAccountProviderError::InvalidLruCapacity);
-        }
-        self.subscribed_accounts_lru_capacity = capacity;
-        Ok(self)
-    }
-
-    pub fn with_secondary_subscriptions_lru_capacity(
-        mut self,
-        capacity: usize,
-    ) -> RemoteAccountProviderResult<Self> {
-        if capacity == 0 {
-            return Err(RemoteAccountProviderError::InvalidLruCapacity);
-        }
-        self.secondary_subscriptions_lru_capacity = capacity;
-        Ok(self)
-    }
-
     pub fn lifecycle_mode(&self) -> &LifecycleMode {
         &self.lifecycle_mode
-    }
-
-    pub fn subscribed_accounts_lru_capacity(&self) -> usize {
-        self.subscribed_accounts_lru_capacity
-    }
-
-    pub fn secondary_subscriptions_lru_capacity(&self) -> usize {
-        self.secondary_subscriptions_lru_capacity
     }
 
     pub fn enable_subscription_metrics(&self) -> bool {
@@ -124,6 +80,21 @@ impl RemoteAccountProviderConfig {
 
     pub fn resubscription_delay(&self) -> Duration {
         self.resubscription_delay
+    }
+
+    pub fn with_ws_subs_per_connection(
+        mut self,
+        limit: Option<usize>,
+    ) -> RemoteAccountProviderResult<Self> {
+        if limit == Some(0) {
+            return Err(RemoteAccountProviderError::InvalidWsSubsPerConnection);
+        }
+        self.ws_subs_per_connection = limit;
+        Ok(self)
+    }
+
+    pub fn ws_subs_per_connection(&self) -> Option<usize> {
+        self.ws_subs_per_connection
     }
 
     pub fn grpc(&self) -> &GrpcConfig {
@@ -139,15 +110,13 @@ impl RemoteAccountProviderConfig {
 impl Default for RemoteAccountProviderConfig {
     fn default() -> Self {
         Self {
-            subscribed_accounts_lru_capacity: DEFAULT_MAX_MONITORED_ACCOUNTS,
-            secondary_subscriptions_lru_capacity:
-                DEFAULT_SECONDARY_MAX_MONITORED_ACCOUNTS,
             lifecycle_mode: LifecycleMode::default(),
             enable_subscription_metrics: true,
             program_subs: vec![dlp_api::id()].into_iter().collect(),
             resubscription_delay: std::time::Duration::from_millis(
                 DEFAULT_RESUBSCRIPTION_DELAY_MS,
             ),
+            ws_subs_per_connection: None,
             grpc: GrpcConfig::default(),
         }
     }

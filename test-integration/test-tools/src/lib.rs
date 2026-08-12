@@ -13,3 +13,14 @@ pub mod validator;
 pub use color_backtrace;
 pub use integration_test_context::IntegrationTestContext;
 pub use run_test::*;
+pub use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    signer::Signer,
+};
+
+#[macro_export]
+macro_rules! init_logger {
+    () => {
+        $crate::color_backtrace::install();
+    };
+}

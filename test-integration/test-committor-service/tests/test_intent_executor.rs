@@ -44,13 +44,11 @@ use magicblock_core::{
 };
 use magicblock_program::{
     args::ShortAccountMeta, magic_scheduled_base_intent::ScheduledIntentBundle,
-    validator::validator_authority_id,
 };
 use magicblock_rpc_client::MagicBlockSendTransactionConfig;
 use magicblock_table_mania::TableMania;
-use program_flexi_counter::{
-    instruction::FlexiCounterInstruction,
-    state::{FlexiCounter, FAIL_UNDELEGATION_LABEL},
+use program_schedulecommit::{
+    BookUpdate, MainAccount, OrderLevel, ScheduleCommitInstruction,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -63,12 +61,12 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::{Transaction, TransactionError},
 };
-use solana_sdk_ids::system_program;
 
 use crate::{
     common::{MockActionsCallbackExecutor, TestFixture},
     utils::{
-        ensure_validator_authority,
+        ensure_validator_authority, get_validator_auth,
+        instructions::account_pda,
         transactions::{
             fund_validator_auth_and_ensure_validator_fees_vault,
             init_and_delegate_account_on_chain,
@@ -114,6 +112,7 @@ impl TestEnv {
 
         let callback_executor = MockActionsCallbackExecutor::default();
         let intent_executor = IntentExecutorImpl::new(
+            fixture.authority.insecure_clone(),
             fixture.rpc_client.clone(),
             transaction_preparator,
             task_info_fetcher.clone(),
@@ -147,7 +146,7 @@ async fn test_commit_id_error_parsing() {
 
     let intent = create_intent(
         vec![CommittedAccount {
-            pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
+            pubkey: account_pda(&counter_auth.pubkey()),
             account,
             remote_slot,
         }],
@@ -203,68 +202,6 @@ async fn test_commit_id_error_parsing() {
 }
 
 #[tokio::test]
-async fn test_undelegation_error_parsing() {
-    const COUNTER_SIZE: u64 = 70;
-
-    let TestEnv {
-        fixture,
-        intent_executor: _,
-        task_info_fetcher,
-        callback_executor: _,
-        pre_test_tablemania_state: _,
-    } = TestEnv::setup().await;
-
-    // Create counter that will force undelegation to fail
-    let (counter_auth, account) =
-        setup_counter(COUNTER_SIZE, Some(FAIL_UNDELEGATION_LABEL.to_string()))
-            .await;
-    let intent = create_intent(
-        vec![CommittedAccount {
-            pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
-            account,
-            remote_slot: Default::default(),
-        }],
-        true,
-    );
-
-    let mut transaction_strategy = single_flow_transaction_strategy(
-        &fixture.authority.pubkey(),
-        &task_info_fetcher,
-        &intent,
-    )
-    .await;
-    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
-    let transaction_preparator = fixture.create_transaction_preparator();
-    let execution_result = prepare_and_execute_strategy(
-        &intent_client,
-        &fixture.authority,
-        &transaction_preparator,
-        &mut transaction_strategy,
-        &None::<IntentPersisterImpl>,
-    )
-    .await;
-    assert!(execution_result.is_ok(), "Preparation is expected to pass!");
-
-    // Verify that we got UndelegationError
-    let execution_result = execution_result.unwrap();
-    assert!(execution_result.is_err());
-    let err = execution_result.unwrap_err();
-    assert!(matches!(
-        err,
-        TransactionStrategyExecutionError::UndelegationError(
-            TransactionError::InstructionError(
-                _,
-                InstructionError::Custom(
-                    0x7a, // flexi-counter ProgramError::Custom(122): forced undelegation failure (FAIL_UNDELEGATION_CODE)
-                )
-            ),
-            _
-        )
-    ));
-    assert!(err.to_string().contains("Invalid undelegation"));
-}
-
-#[tokio::test]
 async fn test_action_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
 
@@ -281,7 +218,7 @@ async fn test_action_error_parsing() {
         .await;
 
     let committed_account = CommittedAccount {
-        pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
+        pubkey: account_pda(&counter_auth.pubkey()),
         account,
         remote_slot: Default::default(),
     };
@@ -326,7 +263,7 @@ async fn test_action_error_parsing() {
         TransactionStrategyExecutionError::ActionsError(
             TransactionError::InstructionError(
                 _,
-                InstructionError::ArithmeticOverflow
+                InstructionError::InvalidArgument
             ),
             _
         )
@@ -361,7 +298,7 @@ async fn test_cpi_limits_error_parsing() {
     let committed_accounts: Vec<_> = counters
         .iter()
         .map(|(counter, account)| CommittedAccount {
-            pubkey: FlexiCounter::pda(&counter.pubkey()).0,
+            pubkey: account_pda(&counter.pubkey()),
             account: account.clone(),
             remote_slot: Default::default(),
         })
@@ -424,7 +361,7 @@ async fn test_min_context_slot_not_reached_error_parsing() {
 
     let intent = create_intent(
         vec![CommittedAccount {
-            pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
+            pubkey: account_pda(&counter_auth.pubkey()),
             account,
             remote_slot: REMOTE_SLOT,
         }],
@@ -473,7 +410,7 @@ async fn test_commit_id_error_recovery() {
         init_and_delegate_account_on_chain(&counter_auth, COUNTER_SIZE, None)
             .await;
 
-    account.owner = program_flexi_counter::id();
+    account.owner = program_schedulecommit::id();
     let remote_slot = Default::default();
     let committed_account = CommittedAccount {
         pubkey,
@@ -537,68 +474,6 @@ async fn test_commit_id_error_recovery() {
 }
 
 #[tokio::test]
-async fn test_undelegation_error_recovery() {
-    const COUNTER_SIZE: u64 = 70;
-
-    let TestEnv {
-        fixture,
-        mut intent_executor,
-        task_info_fetcher: _,
-        callback_executor: _,
-        pre_test_tablemania_state,
-    } = TestEnv::setup().await;
-
-    let counter_auth = Keypair::new();
-    let (pubkey, mut account) = init_and_delegate_account_on_chain(
-        &counter_auth,
-        COUNTER_SIZE,
-        Some(FAIL_UNDELEGATION_LABEL.to_string()),
-    )
-    .await;
-
-    account.owner = program_flexi_counter::id();
-    let committed_account = CommittedAccount {
-        pubkey,
-        account,
-        remote_slot: Default::default(),
-    };
-    let intent = create_intent(vec![committed_account.clone()], true);
-
-    // Execute intent
-    let res = intent_executor
-        .execute(intent, None::<IntentPersisterImpl>)
-        .await;
-    let IntentExecutionResult {
-        inner: res,
-        patched_errors,
-        callbacks_report,
-    } = res;
-
-    assert!(res.is_ok());
-    assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
-    assert!(callbacks_report.is_empty());
-    assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
-
-    // Assert errors patched
-    let undelegation_error = patched_errors.into_iter().next().unwrap();
-    assert!(matches!(
-        undelegation_error,
-        TransactionStrategyExecutionError::UndelegationError(_, _)
-    ));
-
-    // Cleanup succeeds
-    assert!(intent_executor.cleanup().await.is_ok());
-    verify(
-        &fixture.table_mania,
-        fixture.rpc_client.get_inner(),
-        &HashMap::new(),
-        &pre_test_tablemania_state,
-        &[committed_account],
-    )
-    .await;
-}
-
-#[tokio::test]
 async fn test_action_error_recovery() {
     const COUNTER_SIZE: u64 = 100;
 
@@ -614,7 +489,7 @@ async fn test_action_error_recovery() {
     let (counter_pubkey, mut account) =
         init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
 
-    account.owner = program_flexi_counter::id();
+    account.owner = program_schedulecommit::id();
     let committed_account = CommittedAccount {
         pubkey: counter_pubkey,
         account,
@@ -684,7 +559,7 @@ async fn test_commit_id_and_action_errors_recovery() {
     let (counter_pubkey, mut account) =
         init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
 
-    account.owner = program_flexi_counter::id();
+    account.owner = program_schedulecommit::id();
     let remote_slot = Default::default();
     let committed_account = CommittedAccount {
         pubkey: counter_pubkey,
@@ -782,16 +657,15 @@ async fn test_cpi_limits_error_recovery() {
         .iter()
         .enumerate()
         .map(|(i, (counter, account))| {
-            let data = FlexiCounter {
-                label: format!("{}", i),
+            let data = MainAccount {
+                player: counter.pubkey(),
                 count: i as u64,
-                updates: i as u64,
             };
 
             let mut account = account.clone();
             account.data = to_vec(&data).unwrap();
             CommittedAccount {
-                pubkey: FlexiCounter::pda(&counter.pubkey()).0,
+                pubkey: account_pda(&counter.pubkey()),
                 account,
                 remote_slot: Default::default(),
             }
@@ -884,15 +758,14 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         .iter()
         .enumerate()
         .map(|(i, (counter, account))| {
-            let data = FlexiCounter {
-                label: format!("acct-{i}"),
+            let data = MainAccount {
+                player: counter.pubkey(),
                 count: i as u64,
-                updates: (i as u64) * 2,
             };
             let mut account = account.clone();
             account.data = to_vec(&data).unwrap();
             CommittedAccount {
-                pubkey: FlexiCounter::pda(&counter.pubkey()).0,
+                pubkey: account_pda(&counter.pubkey()),
                 account,
                 remote_slot: Default::default(),
             }
@@ -1021,10 +894,15 @@ async fn test_commit_unfinalized_account_recovery() {
 
     // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
     // We also craft unique on-chain data so we can verify post-commit state exactly.
-    let (counter_auth, account) = setup_counter(40, None).await;
+    let (counter_auth, mut account) = setup_counter(40, None).await;
     setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
         .await;
-    let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
+    account.data = to_vec(&MainAccount {
+        player: counter_auth.pubkey(),
+        count: 0,
+    })
+    .unwrap();
+    let pda = account_pda(&counter_auth.pubkey());
 
     // Commit account without finalization
     // This simulates finalization stage failure
@@ -1058,7 +936,7 @@ async fn test_commit_unfinalized_account_recovery() {
                 &MagicBlockSendTransactionConfig::ensure_committed(),
             )
             .await;
-        assert!(result.is_ok());
+        result.expect("unfinalized commit succeeds");
     }
 
     // Now simulate user sending new intent
@@ -1101,10 +979,15 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
     // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
     // We also craft unique on-chain data so we can verify post-commit state exactly.
     let counters = (0..8).map(async |_| {
-        let (counter_auth, account) = setup_counter(40, None).await;
+        let (counter_auth, mut account) = setup_counter(40, None).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
-        let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
+        account.data = to_vec(&MainAccount {
+            player: counter_auth.pubkey(),
+            count: 0,
+        })
+        .unwrap();
+        let pda = account_pda(&counter_auth.pubkey());
         (counter_auth, pda, account)
     });
     let counters: Vec<(_, _, _)> = join_all(counters).await;
@@ -1141,7 +1024,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
                 &MagicBlockSendTransactionConfig::ensure_committed(),
             )
             .await;
-        assert!(result.is_ok());
+        result.expect("unfinalized commit succeeds");
     }
 
     // Now simulate user sending new intent
@@ -1194,7 +1077,7 @@ async fn test_action_callback_fired_on_failure() {
     let (counter_pubkey, mut account) =
         init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
 
-    account.owner = program_flexi_counter::id();
+    account.owner = program_schedulecommit::id();
     let committed_account = CommittedAccount {
         pubkey: counter_pubkey,
         account,
@@ -1248,7 +1131,7 @@ async fn test_action_callback_fired_on_timeout() {
     let (counter_pubkey, mut account) =
         init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
 
-    account.owner = program_flexi_counter::id();
+    account.owner = program_schedulecommit::id();
     let committed_account = CommittedAccount {
         pubkey: counter_pubkey,
         account,
@@ -1275,6 +1158,7 @@ async fn test_action_callback_fired_on_timeout() {
         RpcTaskInfoFetcher::new(fixture.rpc_client.clone()),
     ));
     let mut intent_executor = IntentExecutorImpl::new(
+        fixture.authority.insecure_clone(),
         fixture.rpc_client.clone(),
         fixture.create_transaction_preparator(),
         task_info_fetcher,
@@ -1327,21 +1211,45 @@ async fn test_callbacks_fired_in_two_stage() {
     let payer = setup_payer(fixture.rpc_client.get_inner()).await;
     let (counter_pubkey, mut account) =
         init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
-    account.owner = program_flexi_counter::id();
+    account.owner = program_schedulecommit::id();
     let committed_account = CommittedAccount {
         pubkey: counter_pubkey,
         account,
         remote_slot: Default::default(),
     };
 
+    let action_authority = Keypair::new();
+    let (action_target, _) = Pubkey::find_program_address(
+        &[b"order_book", action_authority.pubkey().as_ref()],
+        &program_schedulecommit::id(),
+    );
+    let init_action_target =
+        program_schedulecommit::api::init_order_book_instruction(
+            payer.pubkey(),
+            action_authority.pubkey(),
+            action_target,
+        );
+    let tx = Transaction::new_signed_with_payer(
+        &[init_action_target],
+        Some(&payer.pubkey()),
+        &[&payer, &action_authority],
+        fixture.rpc_client.get_latest_blockhash().await.unwrap(),
+    );
+    fixture
+        .rpc_client
+        .get_inner()
+        .send_and_confirm_transaction(&tx)
+        .await
+        .expect("initialize action target");
+
     // commit-stage action: goes into standalone_actions → commit strategy
     let commit_base_action =
-        succeeding_commit_action(payer.pubkey(), counter_pubkey);
+        succeeding_commit_action(payer.pubkey(), action_target);
     let expected_commit_callback = commit_base_action.callback.clone().unwrap();
 
     // finalize-stage action: goes into UndelegateType::WithBaseActions → finalize strategy
     let undelegate_action =
-        succeeding_undelegate_action(payer.pubkey(), counter_pubkey);
+        succeeding_undelegate_action(payer.pubkey(), action_target);
     let UndelegateType::WithBaseActions(ref actions) = undelegate_action else {
         panic!("expected base actions");
     };
@@ -1389,7 +1297,7 @@ async fn test_callbacks_fired_in_two_stage() {
         "commit-stage callback must be fired by execute_callbacks"
     );
     assert_eq!(calls[0].0[0], expected_commit_callback);
-    assert!(calls[0].1.is_ok());
+    assert!(calls[0].1.is_ok(), "{:?}", calls[0].1);
 
     // Execute finalize stage
     let mut finalize_executor = executor.done(commit_sig);
@@ -1460,29 +1368,19 @@ fn succeeding_commit_action(
     escrow_authority: Pubkey,
     account: Pubkey,
 ) -> BaseAction {
-    const PRIZE: u64 = 900_000;
-
-    let data = FlexiCounterInstruction::CommitActionHandler { amount: PRIZE };
-    let transfer_destination = Pubkey::new_unique();
-    let account_metas = vec![
-        ShortAccountMeta {
-            pubkey: account,
-            is_writable: true,
-        },
-        ShortAccountMeta {
-            pubkey: transfer_destination,
-            is_writable: true,
-        },
-        ShortAccountMeta {
-            pubkey: system_program::id(),
-            is_writable: false,
-        },
-    ];
+    let data = ScheduleCommitInstruction::UpdateOrderBook(BookUpdate {
+        bids: vec![OrderLevel { price: 1, size: 1 }],
+        asks: vec![],
+    });
+    let account_metas = vec![ShortAccountMeta {
+        pubkey: account,
+        is_writable: true,
+    }];
     BaseAction {
         id: 0,
         compute_units: 100_000,
-        destination_program: program_flexi_counter::id(),
-        source_program: Some(program_flexi_counter::id()),
+        destination_program: program_schedulecommit::id(),
+        source_program: Some(program_schedulecommit::id()),
         escrow_authority,
         data_per_program: ProgramArgs {
             escrow_index: ACTOR_ESCROW_INDEX,
@@ -1497,36 +1395,22 @@ fn succeeding_undelegate_action(
     escrow_authority: Pubkey,
     undelegated_account: Pubkey,
 ) -> UndelegateType {
-    const PRIZE: u64 = 1_000_000;
-    const SUCCESS_DIFF: i64 = 1; // positive, no underflow on a zero-initialised counter
-
     let undelegate_action_data =
-        FlexiCounterInstruction::UndelegateActionHandler {
-            counter_diff: SUCCESS_DIFF,
-            amount: PRIZE,
-        };
+        ScheduleCommitInstruction::UpdateOrderBook(BookUpdate {
+            bids: vec![OrderLevel { price: 2, size: 1 }],
+            asks: vec![],
+        });
 
-    let transfer_destination = Pubkey::new_unique();
-    let account_metas = vec![
-        ShortAccountMeta {
-            pubkey: undelegated_account,
-            is_writable: true,
-        },
-        ShortAccountMeta {
-            pubkey: transfer_destination,
-            is_writable: true,
-        },
-        ShortAccountMeta {
-            pubkey: system_program::id(),
-            is_writable: false,
-        },
-    ];
+    let account_metas = vec![ShortAccountMeta {
+        pubkey: undelegated_account,
+        is_writable: true,
+    }];
 
     UndelegateType::WithBaseActions(vec![BaseAction {
         id: 0,
         compute_units: 100_000,
-        destination_program: program_flexi_counter::id(),
-        source_program: Some(program_flexi_counter::id()),
+        destination_program: program_schedulecommit::id(),
+        source_program: Some(program_schedulecommit::id()),
         escrow_authority,
         data_per_program: ProgramArgs {
             escrow_index: ACTOR_ESCROW_INDEX,
@@ -1541,40 +1425,20 @@ fn failing_undelegate_action(
     escrow_authority: Pubkey,
     undelegated_account: Pubkey,
 ) -> UndelegateType {
-    const PRIZE: u64 = 1_000_000;
-    const BREAKING_DIFF: i64 = -1000000; // Breaks action
-
-    let undelegate_action_data =
-        FlexiCounterInstruction::UndelegateActionHandler {
-            counter_diff: BREAKING_DIFF,
-            amount: PRIZE,
-        };
-
-    let transfer_destination = Pubkey::new_unique();
-    let account_metas = vec![
-        ShortAccountMeta {
-            pubkey: undelegated_account,
-            is_writable: true,
-        },
-        ShortAccountMeta {
-            pubkey: transfer_destination,
-            is_writable: true,
-        },
-        ShortAccountMeta {
-            pubkey: system_program::id(),
-            is_writable: false,
-        },
-    ];
+    let account_metas = vec![ShortAccountMeta {
+        pubkey: undelegated_account,
+        is_writable: true,
+    }];
 
     UndelegateType::WithBaseActions(vec![BaseAction {
         id: 0,
         compute_units: 100_000,
-        destination_program: program_flexi_counter::id(),
-        source_program: Some(program_flexi_counter::id()),
+        destination_program: program_schedulecommit::id(),
+        source_program: Some(program_schedulecommit::id()),
         escrow_authority,
         data_per_program: ProgramArgs {
             escrow_index: ACTOR_ESCROW_INDEX,
-            data: to_vec(&undelegate_action_data).unwrap(),
+            data: vec![u8::MAX],
         },
         account_metas_per_program: account_metas,
         callback: Some(create_callback()),
@@ -1583,7 +1447,7 @@ fn failing_undelegate_action(
 
 fn create_callback() -> BaseActionCallback {
     BaseActionCallback {
-        destination_program: program_flexi_counter::id(),
+        destination_program: program_schedulecommit::id(),
         discriminator: vec![1, 2, 3, 4, 5, 6, 7, 8],
         payload: vec![],
         compute_units: 50_000,
@@ -1656,7 +1520,7 @@ async fn setup_counter(
         init_and_delegate_account_on_chain(&counter_auth, counter_bytes, label)
             .await;
 
-    account.owner = program_flexi_counter::id();
+    account.owner = program_schedulecommit::id();
     (counter_auth, account)
 }
 
@@ -1691,7 +1555,7 @@ fn create_scheduled_intent_from_bundle(
         id: INTENT_ID.fetch_add(1, Ordering::Relaxed),
         slot: 10,
         blockhash: Hash::new_unique(),
-        sent_transaction: Transaction::default(),
+        sent_transaction: Default::default(),
         payer: Pubkey::new_unique(),
         intent_bundle,
     }
@@ -1744,7 +1608,7 @@ async fn verify_buffers_cleaned_up(
     commited_accounts: &[CommittedAccount],
     commit_ids_by_pk: &HashMap<Pubkey, u64>,
 ) {
-    let validator_auth = validator_authority_id();
+    let validator_auth = get_validator_auth().pubkey();
     for committed_account in commited_accounts {
         let Some(commit_id) = commit_ids_by_pk.get(&committed_account.pubkey)
         else {

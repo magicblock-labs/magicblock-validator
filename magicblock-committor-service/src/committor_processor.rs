@@ -1,12 +1,12 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     path::Path,
-    sync::{atomic::AtomicU64, Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicU64},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use futures_util::future::join_all;
-use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_core::{Slot, traits::ActionsCallbackScheduler};
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -21,7 +21,7 @@ use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::{
-        db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
+        BroadcastedIntentExecutionResult, IntentExecutionManager, db::DummyDB,
     },
     intent_executor::{
         intent_executor_factory::ExecutorConfig,
@@ -32,7 +32,7 @@ use crate::{
     },
     persist::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
-        MessageSignatures,
+        MessageSignatures, RecoveredIntent,
     },
 };
 const POISONED_MUTEX_MSG: &str =
@@ -102,6 +102,7 @@ impl CommittorProcessor {
             RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
         ));
         let commits_scheduler = IntentExecutionManager::new(
+            authority.insecure_clone(),
             magic_block_rpc_client.clone(),
             DummyDB::new(),
             task_info_fetcher.clone(),
@@ -154,48 +155,73 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
-    /// Fetches pending bundles from DB
-    pub async fn pending_intent_bundles(
-        &self,
-    ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
-        // Extract pending bundles satisfying predicate
-        let now = SystemTime::now()
+    fn recovery_min_created_at() -> u64 {
+        SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
-        let mut bundles = self.persister.pending_intent_bundles(
-            now.saturating_sub(RECOVERY_MAX_AGE_SECS),
-        )?;
+            .as_secs()
+            .saturating_sub(RECOVERY_MAX_AGE_SECS)
+    }
 
-        if bundles.is_empty() {
-            return Ok(bundles);
-        }
+    /// Fetches pending bundles from DB for recovery. No filtering - these
+    /// are the most recent ones, still in-flight, not yet confirmed failed.
+    pub async fn load_pending_intent_bundles(
+        &self,
+    ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
+        let bundles = self
+            .persister
+            .pending_intent_bundles(Self::recovery_min_created_at())?;
 
-        // Log info about extracted bundles
-        {
-            let accounts_count: usize = bundles
-                .iter()
-                .map(|bundle| bundle.get_all_committed_pubkeys().len())
-                .sum();
+        if !bundles.is_empty() {
             info!(
                 intent_count = bundles.len(),
-                accounts_count,
                 "Loaded pending commit intents from persistence for recovery"
             );
         }
 
-        // Extracted bundles are out of data and missing some of the info
-        self.refresh_intent_bundles(&mut bundles).await?;
-
         Ok(bundles)
     }
 
-    async fn refresh_intent_bundles(
+    /// Fetches failed bundles from DB for recovery, for the caller to filter
+    /// for nonce/delegation-session staleness before replaying.
+    pub async fn load_recovery_intent_bundles(
+        &self,
+    ) -> CommittorServiceResult<Vec<RecoveredIntent>> {
+        let recovered = self
+            .persister
+            .recoverable_intents(Self::recovery_min_created_at())?;
+
+        if !recovered.is_empty() {
+            let accounts_count: usize = recovered
+                .iter()
+                .map(|r| r.bundle.get_all_committed_pubkeys().len())
+                .sum();
+            info!(
+                intent_count = recovered.len(),
+                accounts_count,
+                "Loaded failed commit intents from persistence for recovery"
+            );
+        }
+
+        Ok(recovered)
+    }
+
+    pub(crate) async fn get_slot(&self) -> CommittorServiceResult<Slot> {
+        Ok(self.magic_rpc_client.get_slot().await?)
+    }
+
+    /// Stamps `payer` and `remote_slot` on recovered bundles with current
+    /// values so execution (fetching nonces/base accounts) uses a fresh
+    /// `min_context_slot`. Must run only on bundles that already survived
+    /// the caller's nonce and delegation-session recovery filters, since it
+    /// destroys the original scheduling-time `remote_slot` those filters
+    /// depend on.
+    pub(crate) async fn refresh_intent_bundles(
         &self,
         intent_bundles: &mut [ScheduledIntentBundle],
+        slot: u64,
     ) -> CommittorServiceResult<()> {
         let payer = self.authority.pubkey();
-        let slot = self.magic_rpc_client.get_slot().await?;
 
         macro_rules! set_remote_slot {
             ($field:expr, $slot:expr) => {
@@ -291,7 +317,7 @@ impl CommittorProcessor {
             return Err(err);
         }
 
-        let results = join_all(receivers.into_iter())
+        let results = join_all(receivers)
             .await
             .into_iter()
             .collect::<Result<Vec<_>, RecvError>>()?;

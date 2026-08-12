@@ -1,40 +1,34 @@
 [package]
-name = "magicblock-core"
-version.workspace = true
 authors.workspace = true
-repository.workspace = true
+edition.workspace = true
 homepage.workspace = true
 license.workspace = true
-edition.workspace = true
+name = "magicblock-core"
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
 
 console-subscriber = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync"] }
-flume = { workspace = true }
-bincode = { workspace = true }
-bytes = { workspace = true }
+wincode = { workspace = true }
 
+magicblock-magic-program-api = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-solana-account = { workspace = true }
-solana-account-decoder = { workspace = true, features = ["agave-unstable-api"] }
+solana-account = { workspace = true, features = ["wincode"] }
 solana-clock = { workspace = true }
-solana-hash = { workspace = true }
+solana-hash = { workspace = true, features = ["wincode"] }
 solana-message = { workspace = true }
 solana-program = { workspace = true }
-solana-pubkey = { workspace = true }
+solana-pubkey = { workspace = true, features = ["wincode"] }
 solana-signature = { workspace = true }
-solana-transaction = { workspace = true, features = ["blake3", "verify"] }
-solana-transaction-context = { workspace = true }
 solana-transaction-error = { workspace = true }
-solana-transaction-status-client-types = { workspace = true, features = ["agave-unstable-api"] }
-magicblock-magic-program-api = { workspace = true }
 spl-token = { workspace = true }
 spl-token-2022 = { workspace = true }
 
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["time"] }
 tracing-log = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["time"] }
 
 [features]
 tokio-console = ["console-subscriber", "tokio/tracing"]
