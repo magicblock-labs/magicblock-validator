@@ -138,12 +138,14 @@ pub(crate) async fn subscription_key_owned_guard_from_map(
 
 type ChainUpdatesPubsub = (Arc<ChainUpdatesClient>, mpsc::Receiver<()>);
 
+#[allow(clippy::too_many_arguments)]
 async fn connect_pubsub_client(
     ep: Endpoint,
     commitment: CommitmentConfig,
     rpc_client: ChainRpcClientImpl,
     chain_slot: Arc<AtomicU64>,
     resubscription_delay: Duration,
+    ws_subs_per_connection: Option<usize>,
     grpc_cfg: GrpcConfig,
 ) -> (String, RemoteAccountProviderResult<ChainUpdatesPubsub>) {
     let ep_label = ep.label().to_string();
@@ -154,6 +156,7 @@ async fn connect_pubsub_client(
         abort_tx,
         chain_slot,
         resubscription_delay,
+        ws_subs_per_connection,
         rpc_client,
         &grpc_cfg,
     )
@@ -187,6 +190,7 @@ fn spawn_deferred_pubsub_clients(
     rpc_client: ChainRpcClientImpl,
     chain_slot: Arc<AtomicU64>,
     resubscription_delay: Duration,
+    ws_subs_per_connection: Option<usize>,
     grpc_cfg: GrpcConfig,
     submux: SubMuxClient<ChainUpdatesClient>,
     subscribed_accounts: Arc<SubscribedAccounts>,
@@ -213,6 +217,7 @@ fn spawn_deferred_pubsub_clients(
                     rpc_client.clone(),
                     chain_slot.clone(),
                     resubscription_delay,
+                    ws_subs_per_connection,
                     grpc_cfg.clone(),
                 );
                 let (label, result) = tokio::select! {
@@ -949,6 +954,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         rpc_client,
                         chain_slot,
                         config.resubscription_delay(),
+                        config.ws_subs_per_connection(),
                         config.grpc().clone(),
                         provider.pubsub_client.clone(),
                         provider.subscribed_accounts.clone(),
@@ -1002,6 +1008,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 rpc_client.clone(),
                 chain_slot.clone(),
                 resubscription_delay,
+                config.ws_subs_per_connection(),
                 config.grpc().clone(),
             )
         });
@@ -1020,6 +1027,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         rpc_client.clone(),
                         chain_slot.clone(),
                         resubscription_delay,
+                        config.ws_subs_per_connection(),
                         config.grpc().clone(),
                     )
                 });
@@ -2395,6 +2403,53 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         self.subscribed_accounts.remove(pubkey);
         self.subscription_ownership.lock().await.remove(pubkey);
         Ok(())
+    }
+
+    /// Releases a reason without restoring ownership after an unsubscribe
+    /// failure. This is used when a bounded owner has already discarded its
+    /// entry and must not leave an orphaned protected subscription behind.
+    pub(crate) async fn forget_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) {
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+        let now_unowned = {
+            let mut ownership = self.subscription_ownership.lock().await;
+            let Some(existing) = ownership.get_mut(pubkey) else {
+                return;
+            };
+            existing.release(reason);
+            let empty = existing.is_empty();
+            if empty {
+                ownership.remove(pubkey);
+            }
+            empty
+        };
+        if now_unowned {
+            let _ = subscription_reconciler::unsubscribe_account(
+                *pubkey,
+                &self.pubsub_client,
+                SubscriptionCleanupSource::NormalRelease,
+            )
+            .await;
+            self.subscribed_accounts.remove(pubkey);
+        }
+    }
+
+    /// Prefers gRPC-only coverage while retaining existing coverage if the
+    /// transport cannot safely apply that preference.
+    pub(crate) async fn prefer_grpc_subscription(&self, pubkey: &Pubkey) {
+        if let Err(err) =
+            self.pubsub_client.prefer_grpc_subscription(*pubkey).await
+        {
+            debug!(
+                pubkey = %pubkey,
+                error = ?err,
+                "Keeping full subscription coverage; gRPC-only preference not applied"
+            );
+        }
     }
 
     /// Fetches a byte range of an account via `dataSlice`, retrying until the

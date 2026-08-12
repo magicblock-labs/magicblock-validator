@@ -8,7 +8,7 @@ use super::*;
 type TestFetchCloner = FetchCloner<ChainRpcClientMock, ChainPubsubClientMock>;
 
 use crate::{
-    cloner::{AccountCloneRequest, DelegationActions},
+    cloner::{AccountCloneRequest, ClonePostDelegationMode, DelegationActions},
     remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
     testing::rpc_client_mock::ChainRpcClientMock,
 };
@@ -18,9 +18,8 @@ fn request(account: AccountBuilder) -> AccountCloneRequest {
         pubkey: Pubkey::new_unique(),
         account,
         commit_frequency_ms: None,
-        delegation_actions: DelegationActions::default(),
+        post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
-        needs_undelegation: false,
     }
 }
 
@@ -71,12 +70,13 @@ fn clone_request_classification() {
     );
 
     let mut dependency = request(account());
-    dependency.delegation_actions =
+    dependency.post_delegation_mode =
         DelegationActions::from(vec![Instruction::new_with_bytes(
             system_program::id(),
             &[1],
             vec![],
-        )]);
+        )])
+        .into();
     assert_eq!(
         TestFetchCloner::clone_intent_for_request(&dependency),
         ChainlinkCloneIntent::ActionDependency

@@ -651,7 +651,12 @@ where
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) -> RemoteAccountProviderResult<()> {
-        if let Err(err) = client.try_reconnect().await {
+        if client.transport_connected() == Some(true) {
+            debug!(
+                client_id = %client.id(),
+                "Transport already connected; skipping reconnect and restoring subscriptions"
+            );
+        } else if let Err(err) = client.try_reconnect().await {
             debug!(
                 client_id = %client.id(),
                 error = ?err,
@@ -659,6 +664,51 @@ where
             );
             return Err(err);
         }
+
+        // Make a live transport visible before paced restoration so new
+        // subscriptions can use it while the existing set is replayed.
+        let client_key = Self::client_key(&client);
+        let was_disconnected = {
+            let mut connected_ids =
+                Self::connected_client_ids_lock(&connected_client_ids);
+            connected_ids.insert(client_key)
+        };
+        if was_disconnected {
+            connected_clients.fetch_add(1, Ordering::SeqCst);
+            metrics::set_connected_pubsub_clients_count(
+                connected_clients.load(Ordering::SeqCst) as usize,
+            );
+            if client.subs_immediately() {
+                let previous = connected_clients_subscribing_immediately
+                    .fetch_add(1, Ordering::SeqCst);
+                metrics::set_connected_direct_pubsub_clients_count(
+                    previous.saturating_add(1) as usize,
+                );
+            }
+        }
+        metrics::set_pubsub_client_uptime(client.id(), true);
+
+        let rollback_visibility = || {
+            let was_connected = {
+                let mut connected_ids =
+                    Self::connected_client_ids_lock(&connected_client_ids);
+                connected_ids.remove(&client_key)
+            };
+            if was_connected {
+                connected_clients.fetch_sub(1, Ordering::SeqCst);
+                metrics::set_connected_pubsub_clients_count(
+                    connected_clients.load(Ordering::SeqCst) as usize,
+                );
+                if client.subs_immediately() {
+                    let previous = connected_clients_subscribing_immediately
+                        .fetch_sub(1, Ordering::SeqCst);
+                    metrics::set_connected_direct_pubsub_clients_count(
+                        previous.saturating_sub(1) as usize,
+                    );
+                }
+            }
+            metrics::set_pubsub_client_uptime(client.id(), false);
+        };
 
         // Resubscribe all program subscriptions
         let programs: HashSet<Pubkey> =
@@ -671,13 +721,13 @@ where
                     error = ?err,
                     "Failed to resubscribe program after reconnect"
                 );
+                rollback_visibility();
                 return Err(err);
             }
         }
 
-        // Resubscribe all accounts from the authoritative tracker.
-        // This ensures subscriptions are restored even if all clients lost their state
-        // during disconnect/abort.
+        // Restore accounts from the authoritative tracker; clients deduplicate
+        // subscriptions that remained live across a stale abort signal.
         let account_subs = accounts_tracker.subscribed_accounts();
 
         if let Err(err) = client.resub_multiple(account_subs).await {
@@ -687,50 +737,8 @@ where
                 error = ?err,
                 "Failed to resubscribe accounts after reconnect"
             );
+            rollback_visibility();
             return Err(err);
-        }
-
-        // Update connection related metrics to signal successful reconnect
-        let client_key = Self::client_key(&client);
-        let was_disconnected = {
-            let mut connected_ids =
-                Self::connected_client_ids_lock(&connected_client_ids);
-            connected_ids.insert(client_key)
-        };
-        if was_disconnected {
-            // Catch subscriptions added while this client was reconnecting.
-            let programs: HashSet<Pubkey> =
-                program_subs.lock().unwrap().iter().copied().collect();
-            for program_id in programs {
-                if let Err(err) = client.subscribe_program(program_id).await {
-                    Self::connected_client_ids_lock(&connected_client_ids)
-                        .remove(&client_key);
-                    return Err(err);
-                }
-            }
-
-            if let Err(err) = client
-                .resub_multiple(accounts_tracker.subscribed_accounts())
-                .await
-            {
-                Self::connected_client_ids_lock(&connected_client_ids)
-                    .remove(&client_key);
-                return Err(err);
-            }
-
-            connected_clients.fetch_add(1, Ordering::SeqCst);
-            metrics::set_connected_pubsub_clients_count(
-                connected_clients.load(Ordering::SeqCst) as usize,
-            );
-        }
-        metrics::set_pubsub_client_uptime(client.id(), true);
-        if was_disconnected && client.subs_immediately() {
-            let previous = connected_clients_subscribing_immediately
-                .fetch_add(1, Ordering::SeqCst);
-            let current = previous.saturating_add(1);
-            metrics::set_connected_direct_pubsub_clients_count(
-                current as usize,
-            );
         }
 
         Ok(())

@@ -10,6 +10,9 @@ use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
+use magicblock_core::token_programs::{
+    is_ata, try_derive_eata_address_and_bump,
+};
 use magicblock_metrics::metrics::AccountFetchContext;
 use nucleus::runtime::TransactionView;
 use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
@@ -27,7 +30,8 @@ use crate::{
     config::ChainlinkConfig,
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, ChainRpcClientImpl, Endpoints,
-        RemoteAccountProvider, chain_updates_client::ChainUpdatesClient,
+        RemoteAccountProvider, SubscriptionReason,
+        chain_updates_client::ChainUpdatesClient,
     },
     submux::SubMuxClient,
 };
@@ -81,6 +85,12 @@ impl AccountStatusOnEr {
 pub struct AccountDelegationStatus {
     pub delegated_on_base: bool,
     pub account_on_er: AccountStatusOnEr,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccountDelegationSession {
+    pub locally_protected: bool,
+    pub remote_slot: u64,
 }
 
 impl AccountDelegationStatus {
@@ -301,6 +311,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                         let engine = engine.clone();
                         let remote_account_provider = remote_account_provider.clone();
                         pending.spawn(async move {
+                            let ata_info = {
+                                let accessor = engine.accounts();
+                                let loader = accessor.loader();
+                                loader
+                                    .read(&pubkey, |account| {
+                                        is_ata(
+                                            &pubkey,
+                                            *account.owner(),
+                                            account.data(),
+                                        )
+                                    })
+                                    .ok()
+                                    .flatten()
+                                    .flatten()
+                            };
                             // Engine emits only cache-tracked readonly accounts;
                             // MagicRoot still rejects a later mutable transition.
                             if let Err(err) = remote_account_provider.unsubscribe(&pubkey).await {
@@ -316,6 +341,32 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                                     pubkey = %pubkey,
                                     error = ?err,
                                     "Failed to remove engine-evicted account"
+                                );
+                                return;
+                            }
+                            let Some(ata_info) = ata_info else {
+                                return;
+                            };
+                            let Some((eata_pubkey, _)) =
+                                try_derive_eata_address_and_bump(
+                                    &ata_info.owner,
+                                    &ata_info.mint,
+                                )
+                            else {
+                                return;
+                            };
+                            if let Err(err) = remote_account_provider
+                                .release_single_subscription(
+                                    &eata_pubkey,
+                                    SubscriptionReason::AtaProjection,
+                                )
+                                .await
+                            {
+                                warn!(
+                                    pubkey = %pubkey,
+                                    eata_pubkey = %eata_pubkey,
+                                    error = ?err,
+                                    "Failed to release eATA projection subscription for evicted ATA"
                                 );
                             }
                         });
@@ -425,6 +476,36 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             .map(|pubkey| loader.read(pubkey, snapshot).ok().flatten())
             .collect();
         Ok(accounts)
+    }
+
+    /// Ensures accounts are materialized, then projects the local delegation
+    /// session metadata needed to validate durable intent recovery.
+    pub async fn account_delegation_sessions(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_context: impl Into<AccountFetchContext>,
+    ) -> ChainlinkResult<Vec<Option<AccountDelegationSession>>> {
+        let fetch_context = fetch_context.into();
+        if let Some(fetch_cloner) = self.fetch_cloner() {
+            self.fetch_accounts_common(fetch_cloner, pubkeys, fetch_context)
+                .await?;
+        }
+
+        let accessor = self.engine.accounts();
+        let loader = accessor.loader();
+        Ok(pubkeys
+            .iter()
+            .map(|pubkey| {
+                loader
+                    .read(pubkey, |account| AccountDelegationSession {
+                        locally_protected: account.is(AccountMode::Delegated)
+                            || account.is(AccountMode::Transient),
+                        remote_slot: account.slot(),
+                    })
+                    .ok()
+                    .flatten()
+            })
+            .collect())
     }
 
     #[instrument(skip(self, pubkeys, fetch_context))]

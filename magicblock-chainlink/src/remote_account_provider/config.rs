@@ -20,6 +20,9 @@ pub struct RemoteAccountProviderConfig {
     /// Delay between resubscribing to accounts after a pubsub
     /// reconnection
     resubscription_delay: Duration,
+    /// Max subscriptions per websocket connection; overrides the
+    /// per-provider defaults when set
+    ws_subs_per_connection: Option<usize>,
     /// Global gRPC configuration
     grpc: GrpcConfig,
 }
@@ -79,6 +82,21 @@ impl RemoteAccountProviderConfig {
         self.resubscription_delay
     }
 
+    pub fn with_ws_subs_per_connection(
+        mut self,
+        limit: Option<usize>,
+    ) -> RemoteAccountProviderResult<Self> {
+        if limit == Some(0) {
+            return Err(RemoteAccountProviderError::InvalidWsSubsPerConnection);
+        }
+        self.ws_subs_per_connection = limit;
+        Ok(self)
+    }
+
+    pub fn ws_subs_per_connection(&self) -> Option<usize> {
+        self.ws_subs_per_connection
+    }
+
     pub fn grpc(&self) -> &GrpcConfig {
         &self.grpc
     }
@@ -98,6 +116,7 @@ impl Default for RemoteAccountProviderConfig {
             resubscription_delay: std::time::Duration::from_millis(
                 DEFAULT_RESUBSCRIPTION_DELAY_MS,
             ),
+            ws_subs_per_connection: None,
             grpc: GrpcConfig::default(),
         }
     }

@@ -108,8 +108,22 @@ where
     };
     if !this.contains_account(&pubkey) {
         // The bank copy was evicted since the load that populated the
-        // cache; drop the stale entry and reload.
+        // cache; drop the stale entry (and the persistent programdata
+        // watch held for it) and reload.
         this.program_verify_cache.lock().pop(&pubkey);
+        if this
+            .programdata_index
+            .lock()
+            .pop(&program_data_pubkey)
+            .is_some()
+        {
+            this.remote_account_provider
+                .forget_subscription_reason(
+                    &program_data_pubkey,
+                    SubscriptionReason::ProgramData,
+                )
+                .await;
+        }
         return false;
     }
 

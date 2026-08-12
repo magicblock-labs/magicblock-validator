@@ -3615,7 +3615,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "anyhow",
  "borsh 1.7.0",
@@ -3660,7 +3660,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3678,7 +3678,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "agave-geyser-plugin-interface",
  "agave-transaction-view",
@@ -3732,7 +3732,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -3795,7 +3795,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "borsh 1.7.0",
  "paste",
@@ -3810,7 +3810,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "async-trait",
  "borsh 1.7.0",
@@ -3856,7 +3856,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "clap",
  "derive_more",
@@ -3875,7 +3875,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "console-subscriber",
  "magicblock-magic-program-api",
@@ -4062,7 +4062,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger-deprecated"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "bincode",
  "byteorder",
@@ -4089,7 +4089,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "bincode",
  "const-crypto",
@@ -4104,7 +4104,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -4150,7 +4150,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "assert_matches",
  "lazy_static",
@@ -4211,7 +4211,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4238,7 +4238,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-runtime"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "magicblock-config",
  "magicblock-keeper",
@@ -4257,7 +4257,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "futures-util",
  "magicblock-chainlink",
@@ -4286,7 +4286,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -4313,7 +4313,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "chrono",
  "futures-util",
@@ -4339,7 +4339,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "console-subscriber",
  "magicblock-aperture",
@@ -4378,7 +4378,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "magicblock-delegation-program-api",
  "magicblock-engine",
@@ -4397,7 +4397,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-tui"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "chrono",
  "clap",
@@ -4417,7 +4417,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-verifier"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "anyhow",
  "magicblock-config",
@@ -4434,7 +4434,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "agave-feature-set",
  "git-version",
@@ -8908,7 +8908,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.13.19"
+version = "0.13.20"
 dependencies = [
  "bincode",
  "bs58",

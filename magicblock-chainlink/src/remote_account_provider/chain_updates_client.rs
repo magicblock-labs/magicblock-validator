@@ -28,12 +28,14 @@ pub enum ChainUpdatesClient {
 }
 
 impl ChainUpdatesClient {
+    #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoint(
         endpoint: &Endpoint,
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
         resubscription_delay: std::time::Duration,
+        ws_subs_per_connection: Option<usize>,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> RemoteAccountProviderResult<Self> {
@@ -54,6 +56,7 @@ impl ChainUpdatesClient {
                         abort_sender,
                         commitment,
                         resubscription_delay,
+                        ws_subs_per_connection,
                     )
                     .await?,
                 ))
@@ -197,6 +200,14 @@ impl ReconnectableClient for ChainUpdatesClient {
         match self {
             WebSocket(client) => client.current_resub_delay_ms(),
             Laser(client) => client.current_resub_delay_ms(),
+        }
+    }
+
+    fn transport_connected(&self) -> Option<bool> {
+        use ChainUpdatesClient::*;
+        match self {
+            WebSocket(client) => client.transport_connected(),
+            Laser(client) => client.transport_connected(),
         }
     }
 }

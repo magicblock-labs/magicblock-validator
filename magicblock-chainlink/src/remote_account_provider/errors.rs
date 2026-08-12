@@ -78,6 +78,9 @@ pub enum RemoteAccountProviderError {
     #[error("Resubscription delay must be greater than 0")]
     InvalidResubscriptionDelay,
 
+    #[error("Websocket subscriptions per connection must be greater than 0")]
+    InvalidWsSubsPerConnection,
+
     #[error("Only one stale-account listener is supported")]
     StaleAccountSenderSupportsSingleReceiverOnly,
 

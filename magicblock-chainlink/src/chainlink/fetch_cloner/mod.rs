@@ -85,15 +85,16 @@ use crate::{
         account_still_undelegating_on_chain::account_still_undelegating_on_chain,
     },
     cloner::{
-        self, AccountCloneRequest, AccountMaterialization, DelegationActions,
-        errors::ClonerResult,
+        self, AccountCloneRequest, AccountMaterialization,
+        ClonePostDelegationMode, DelegationActions, errors::ClonerResult,
     },
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
         ResolvedAccount, SubscriptionReason,
         program_account::{
-            LoadedProgram, get_loaderv3_get_program_data_address,
+            LOADER_V3, LoadedProgram, RemoteProgramLoader,
+            get_loaderv3_get_program_data_address,
         },
         pubsub_common::{
             SubscriptionSource, is_delegation_record_data,
@@ -130,6 +131,11 @@ where
     /// resolve without re-pulling full program data. Entries for programs
     /// evicted from the bank are pruned on their next notification.
     program_verify_cache: Arc<PlMutex<LruCache<Pubkey, ProgramVerifyState>>>,
+
+    /// Maps watched LoaderV3 programdata accounts back to their program IDs.
+    /// Programdata notifications are the reliable upgrade signal because the
+    /// program account itself can remain byte-identical across upgrades.
+    programdata_index: Arc<PlMutex<LruCache<Pubkey, Pubkey>>>,
 
     /// Recognizes freshly delegated accounts whose app data collides with an
     /// internal DLP discriminator via delegation-record sightings.
@@ -171,6 +177,18 @@ const PROGRAM_VERIFY_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64)
     Some(n) => n,
     None => panic!("PROGRAM_VERIFY_CACHE_CAPACITY must be non-zero"),
 };
+
+/// Persistent programdata watches are bounded independently from the Engine
+/// account cache because subscription ownership remains in Chainlink.
+const PROGRAMDATA_WATCH_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(512).expect("programdata watch capacity is non-zero");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProgramDataWatch {
+    Installed,
+    AlreadyInstalled,
+    EvictedConcurrently,
+}
 
 /// Capacity for recently sighted delegation-record update slots; sized to
 /// outlast DLP firehose churn across the SubMux debounce window.
@@ -284,6 +302,7 @@ where
             allowed_programs: self.allowed_programs.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
             program_verify_cache: self.program_verify_cache.clone(),
+            programdata_index: self.programdata_index.clone(),
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
             risk_service: self.risk_service.clone(),
@@ -390,6 +409,9 @@ where
             ))),
             program_verify_cache: Arc::new(PlMutex::new(LruCache::new(
                 PROGRAM_VERIFY_CACHE_CAPACITY,
+            ))),
+            programdata_index: Arc::new(PlMutex::new(LruCache::new(
+                PROGRAMDATA_WATCH_CAPACITY,
             ))),
             dlp_collision_tracker: Arc::new(PlMutex::new(
                 DlpCollisionTracker::new(),
@@ -649,7 +671,7 @@ where
             ChainlinkCloneIntent::EmptyPlaceholder
         } else if request.account.read().is(AccountMode::Delegated) {
             ChainlinkCloneIntent::DelegationRecord
-        } else if !request.delegation_actions.is_empty() {
+        } else if request.post_delegation_mode.has_actions() {
             ChainlinkCloneIntent::ActionDependency
         } else {
             ChainlinkCloneIntent::NormalAccount
@@ -726,6 +748,98 @@ where
         result.map(|mode| MaterializedAccount { pubkey, mode })
     }
 
+    async fn watch_programdata(
+        &self,
+        program_id: Pubkey,
+    ) -> ChainlinkResult<ProgramDataWatch> {
+        let program_data_pubkey =
+            get_loaderv3_get_program_data_address(&program_id);
+        let evicted = {
+            let mut index = self.programdata_index.lock();
+            if index.get(&program_data_pubkey).is_some() {
+                return Ok(ProgramDataWatch::AlreadyInstalled);
+            }
+            index.push(program_data_pubkey, program_id)
+        };
+        if let Some((evicted_program_data, evicted_program_id)) = evicted {
+            debug!(
+                program_id = %evicted_program_id,
+                program_data = %evicted_program_data,
+                "Releasing least-recently loaded programdata watch at capacity"
+            );
+            self.remote_account_provider
+                .forget_subscription_reason(
+                    &evicted_program_data,
+                    SubscriptionReason::ProgramData,
+                )
+                .await;
+            if let Err(err) =
+                cloner::evict_account(&self.engine, evicted_program_id).await
+            {
+                warn!(
+                    program_id = %evicted_program_id,
+                    error = %err,
+                    "Failed to evict program whose upgrade watch was released"
+                );
+            }
+        }
+        if let Err(err) = self
+            .acquire_subscription_reason(
+                &program_data_pubkey,
+                SubscriptionReason::ProgramData,
+            )
+            .await
+        {
+            error!(
+                program_id = %program_id,
+                program_data = %program_data_pubkey,
+                error = %err,
+                "Failed to hold programdata subscription; upgrades may go undetected"
+            );
+            self.programdata_index.lock().pop(&program_data_pubkey);
+            return Err(err);
+        }
+        if self
+            .programdata_index
+            .lock()
+            .get(&program_data_pubkey)
+            .is_none()
+        {
+            self.remote_account_provider
+                .forget_subscription_reason(
+                    &program_data_pubkey,
+                    SubscriptionReason::ProgramData,
+                )
+                .await;
+            return Ok(ProgramDataWatch::EvictedConcurrently);
+        }
+        self.remote_account_provider
+            .prefer_grpc_subscription(&program_id)
+            .await;
+        self.remote_account_provider
+            .prefer_grpc_subscription(&program_data_pubkey)
+            .await;
+        Ok(ProgramDataWatch::Installed)
+    }
+
+    async fn unwatch_programdata(&self, program_id: Pubkey) {
+        let program_data_pubkey =
+            get_loaderv3_get_program_data_address(&program_id);
+        if self
+            .programdata_index
+            .lock()
+            .pop(&program_data_pubkey)
+            .is_some()
+        {
+            self.remote_account_provider
+                .forget_subscription_reason(
+                    &program_data_pubkey,
+                    SubscriptionReason::ProgramData,
+                )
+                .await;
+        }
+    }
+
     async fn clone_program(
         &self,
         program: LoadedProgram,
@@ -734,6 +848,7 @@ where
     ) -> ClonerResult<Option<MaterializedAccount>> {
         let program_id = program.program_id;
         let remote_slot = program.remote_slot;
+        let is_loaderv3 = matches!(program.loader, RemoteProgramLoader::V3);
         let remote_result = ChainlinkCloneRemoteResult::Found;
         let clone_intent = ChainlinkCloneIntent::ProgramData;
 
@@ -747,6 +862,9 @@ where
                 clone_intent,
                 ChainlinkCloneOutcome::Skipped,
             );
+            if is_loaderv3 {
+                let _ = self.watch_programdata(program_id).await;
+            }
             return Ok(None);
         }
 
@@ -756,6 +874,11 @@ where
             clone_intent,
             ChainlinkCloneOutcome::Submitted,
         );
+        let installed_watch = is_loaderv3
+            && matches!(
+                self.watch_programdata(program_id).await,
+                Ok(ProgramDataWatch::Installed)
+            );
         let result =
             cloner::clone_program(&self.engine, program, materialization).await;
         if result.is_ok() {
@@ -766,6 +889,9 @@ where
                 ChainlinkCloneOutcome::CloneSucceeded,
             );
         } else {
+            if installed_watch {
+                self.unwatch_programdata(program_id).await;
+            }
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context.clone(),
                 remote_result,
@@ -814,7 +940,7 @@ where
         self.normalize_immutable_account(&mut request);
 
         if materialization == AccountMaterialization::Update
-            && !request.delegation_actions.is_empty()
+            && request.post_delegation_mode.has_actions()
         {
             return Err(ChainlinkError::InvalidDelegationActions(
                 request.pubkey,
@@ -829,12 +955,13 @@ where
             return Ok(None);
         }
 
-        if request.delegation_actions.is_empty() {
+        let Some(delegation_actions) = request.post_delegation_mode.actions()
+        else {
             return Ok(Some(
                 self.clone_account(request, fetch_context, materialization)
                     .await?,
             ));
-        }
+        };
 
         if !request.account.read().is(AccountMode::Delegated) {
             return Err(ChainlinkError::InvalidDelegationActions(
@@ -848,7 +975,7 @@ where
             self.ensure_delegation_action_dependencies(
                 request.pubkey,
                 request.account.read().slot(),
-                &request.delegation_actions,
+                delegation_actions,
                 fetch_context.clone(),
             )
             .await?;
@@ -913,7 +1040,8 @@ where
         fetch_context: AccountFetchContext,
     ) -> ClonerResult<Option<MaterializedAccount>> {
         let pubkey = request.pubkey;
-        request.needs_undelegation = true;
+        request.post_delegation_mode =
+            ClonePostDelegationMode::RescueUndelegate;
         let remote_result = Self::clone_remote_result_for_request(&request);
         let clone_intent = Self::clone_intent_for_request(&request);
 
@@ -978,7 +1106,7 @@ where
             return Ok(());
         }
 
-        if !request.delegation_actions.is_empty() {
+        if request.post_delegation_mode.has_actions() {
             return Err(ChainlinkError::InvalidDelegationActions(
                 request.pubkey,
                 "post-delegation actions attached to unresolved DLP-owned clone target"
@@ -1223,6 +1351,21 @@ where
             context_slot: update_slot,
         };
 
+        let routed_program_id =
+            self.programdata_index.lock().get(&pubkey).copied();
+        if let Some(program_id) = routed_program_id {
+            let program_account =
+                AccountBuilder::from(AccountSharedData::new(1, 0, &LOADER_V3))
+                    .slot(update_slot);
+            self.handle_executable_sub_update(
+                program_id,
+                program_account,
+                &companion_fetch_log_context,
+            )
+            .await;
+            return;
+        }
+
         let update_source = update.source;
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
@@ -1428,9 +1571,8 @@ where
                         pubkey,
                         account,
                         commit_frequency_ms,
-                        delegation_actions: DelegationActions::default(),
+                        post_delegation_mode: ClonePostDelegationMode::None,
                         delegated_to_other,
-                        needs_undelegation: false,
                     },
                     subscription_clone_context.clone(),
                     AccountMaterialization::Update,

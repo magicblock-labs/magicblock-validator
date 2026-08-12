@@ -21,7 +21,7 @@ use super::{
     types::AccountWithCompanion,
 };
 use crate::{
-    cloner::{AccountCloneRequest, DelegationActions},
+    cloner::{AccountCloneRequest, ClonePostDelegationMode, DelegationActions},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         SubscriptionReason, pubsub_common::SubscriptionSource,
@@ -260,9 +260,10 @@ where
         pubkey: ata_pubkey,
         account: projected_ata,
         commit_frequency_ms: None,
-        delegation_actions: delegation_actions.clone(),
+        post_delegation_mode: ClonePostDelegationMode::from(
+            delegation_actions.clone(),
+        ),
         delegated_to_other: None,
-        needs_undelegation: false,
     })
 }
 
@@ -688,9 +689,10 @@ where
             pubkey: input.ata_pubkey,
             account: account_to_clone,
             commit_frequency_ms,
-            delegation_actions: actions.unwrap_or_default(),
+            post_delegation_mode: ClonePostDelegationMode::from(
+                actions.unwrap_or_default(),
+            ),
             delegated_to_other,
-            needs_undelegation: false,
         });
     }
 
