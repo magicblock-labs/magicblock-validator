@@ -196,7 +196,7 @@ pub(crate) fn process_schedule_commit(
                 &signers,
             )?;
 
-            let account = acc.to_account_shared_data()?;
+            let account = acc.borrow()?;
             let committed = CommittedAccount::from_account_shared(
                 *acc_pubkey,
                 &account,

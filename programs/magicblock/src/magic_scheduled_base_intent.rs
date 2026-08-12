@@ -597,7 +597,7 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
-                        let account = account.to_account_shared_data()?;
+                        let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(
                             pubkey,
                             &account,
@@ -624,7 +624,7 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
-                        let account = account.to_account_shared_data()?;
+                        let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(
                             pubkey,
                             &account,

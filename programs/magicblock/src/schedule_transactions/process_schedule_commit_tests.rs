@@ -174,6 +174,18 @@ fn find_magic_context_account(
         .find(|acc| acc.owner() == &crate::id() && acc.lamports() == u64::MAX)
 }
 
+fn remove_magic_context_account(
+    accounts: &mut Vec<AccountSharedData>,
+) -> AccountSharedData {
+    let index = accounts
+        .iter()
+        .position(|acc| {
+            acc.owner() == &crate::id() && acc.lamports() == u64::MAX
+        })
+        .expect("magic context account not found");
+    accounts.remove(index)
+}
+
 fn assert_non_accepted_actions<'a>(
     processed_scheduled: &'a [AccountSharedData],
     payer: &Pubkey,
@@ -228,14 +240,17 @@ fn extend_transaction_accounts_from_ix(
 
 fn extend_transaction_accounts_from_ix_adding_magic_context(
     ix: &Instruction,
-    magic_context_acc: &AccountSharedData,
+    magic_context_acc: AccountSharedData,
     account_data: &mut HashMap<Pubkey, AccountSharedData>,
     transaction_accounts: &mut Vec<(Pubkey, AccountSharedData)>,
 ) {
+    let mut magic_context_acc = Some(magic_context_acc);
     transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
         account_data.remove(&acc.pubkey).map(|shared_data| {
             let shared_data = if acc.pubkey == MAGIC_CONTEXT_PUBKEY {
-                magic_context_acc.clone()
+                magic_context_acc
+                    .take()
+                    .expect("magic context account already inserted")
             } else {
                 shared_data
             };
@@ -349,22 +364,24 @@ mod tests {
                 &mut transaction_accounts,
             );
 
-            let processed_scheduled = process_instruction(
+            let mut processed_scheduled = process_instruction(
                 ix.data.as_slice(),
-                transaction_accounts.clone(),
+                transaction_accounts,
                 ix.accounts,
                 Ok(()),
             );
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_actions(
+            assert_non_accepted_actions(
                 &processed_scheduled,
                 &payer.pubkey(),
                 1,
             );
+            let magic_context_acc =
+                remove_magic_context_account(&mut processed_scheduled);
 
-            (processed_scheduled.clone(), magic_context_acc.clone())
+            (processed_scheduled, magic_context_acc)
         };
 
         // 2. We run the transaction that accepts the scheduled commit
@@ -379,7 +396,7 @@ mod tests {
             );
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
-                &magic_context_acc,
+                magic_context_acc,
                 &mut account_data,
                 &mut transaction_accounts,
             );
@@ -535,22 +552,24 @@ mod tests {
                 &mut transaction_accounts,
             );
 
-            let processed_scheduled = process_instruction(
+            let mut processed_scheduled = process_instruction(
                 ix.data.as_slice(),
-                transaction_accounts.clone(),
+                transaction_accounts,
                 ix.accounts,
                 Ok(()),
             );
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_actions(
+            assert_non_accepted_actions(
                 &processed_scheduled,
                 &payer.pubkey(),
                 1,
             );
+            let magic_context_acc =
+                remove_magic_context_account(&mut processed_scheduled);
 
-            (processed_scheduled.clone(), magic_context_acc.clone())
+            (processed_scheduled, magic_context_acc)
         };
 
         // 2. We run the transaction that accepts the scheduled commit
@@ -565,7 +584,7 @@ mod tests {
             );
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
-                &magic_context_acc,
+                magic_context_acc,
                 &mut account_data,
                 &mut transaction_accounts,
             );
@@ -631,7 +650,7 @@ mod tests {
         );
 
         // Execute scheduling
-        let processed_scheduled = process_instruction(
+        let mut processed_scheduled = process_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -639,11 +658,9 @@ mod tests {
         );
 
         // Extract magic context and then accept scheduled commits
-        let magic_context_acc = assert_non_accepted_actions(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
+        assert_non_accepted_actions(&processed_scheduled, &payer.pubkey(), 1);
+        let magic_context_acc =
+            remove_magic_context_account(&mut processed_scheduled);
 
         let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
             &validator::validator_authority_id(),
@@ -773,7 +790,7 @@ mod tests {
         );
 
         // Execute scheduling
-        let processed_scheduled = process_instruction(
+        let mut processed_scheduled = process_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -781,11 +798,9 @@ mod tests {
         );
 
         // Extract magic context and then accept scheduled commits
-        let magic_context_acc = assert_non_accepted_actions(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
+        assert_non_accepted_actions(&processed_scheduled, &payer.pubkey(), 1);
+        let magic_context_acc =
+            remove_magic_context_account(&mut processed_scheduled);
 
         let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
             &validator::validator_authority_id(),
@@ -860,7 +875,7 @@ mod tests {
                 &mut transaction_accounts,
             );
 
-            let processed_scheduled = process_instruction(
+            let mut processed_scheduled = process_instruction(
                 ix.data.as_slice(),
                 transaction_accounts,
                 ix.accounts,
@@ -869,15 +884,17 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_actions(
+            assert_non_accepted_actions(
                 &processed_scheduled,
                 &payer.pubkey(),
                 1,
             );
+            let magic_context_acc =
+                remove_magic_context_account(&mut processed_scheduled);
 
             (
-                processed_scheduled.clone(),
-                magic_context_acc.clone(),
+                processed_scheduled,
+                magic_context_acc,
                 program,
                 committee_uno,
                 committee_dos,
@@ -902,7 +919,7 @@ mod tests {
             );
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
-                &magic_context_acc,
+                magic_context_acc,
                 &mut accounts_data,
                 &mut transaction_accounts,
             );
@@ -977,7 +994,7 @@ mod tests {
                 &mut transaction_accounts,
             );
 
-            let processed_scheduled = process_instruction(
+            let mut processed_scheduled = process_instruction(
                 ix.data.as_slice(),
                 transaction_accounts,
                 ix.accounts,
@@ -986,15 +1003,17 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_actions(
+            assert_non_accepted_actions(
                 &processed_scheduled,
                 &payer.pubkey(),
                 1,
             );
+            let magic_context_acc =
+                remove_magic_context_account(&mut processed_scheduled);
 
             (
-                processed_scheduled.clone(),
-                magic_context_acc.clone(),
+                processed_scheduled,
+                magic_context_acc,
                 program,
                 committee_uno,
                 committee_dos,
@@ -1019,7 +1038,7 @@ mod tests {
             );
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
-                &magic_context_acc,
+                magic_context_acc,
                 &mut accounts_data,
                 &mut transaction_accounts,
             );
@@ -1159,7 +1178,7 @@ mod tests {
 
         process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
+            transaction_accounts,
             ix.accounts,
             Err(InstructionError::ReadonlyDataModified),
         );
@@ -1200,7 +1219,7 @@ mod tests {
 
         process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
+            transaction_accounts,
             ix.accounts,
             Err(InstructionError::IllegalOwner),
         );
@@ -1297,7 +1316,7 @@ mod tests {
 
         process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
+            transaction_accounts,
             ix.accounts,
             Err(InstructionError::InvalidAccountData),
         );

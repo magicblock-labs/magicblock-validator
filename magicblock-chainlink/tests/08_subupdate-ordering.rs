@@ -39,7 +39,6 @@ async fn test_subs_receive_out_of_order_updates() {
             Pubkey::new_unique(),
             1,
         )
-        .clone()
         .into(),
     );
 
@@ -51,14 +50,16 @@ async fn test_subs_receive_out_of_order_updates() {
         .await
         .unwrap();
 
-    let acc = bank
+    let initial_matches = bank
         .accounts()
         .loader()
-        .read(&pubkey, |account| account.clone())
+        .read(&pubkey, |account| {
+            account.lamports() == 1_000_000
+                && account.data() == vec![1; 10].as_slice()
+        })
         .unwrap()
         .expect("Account should be cloned");
-    assert_eq!(acc.lamports(), 1_000_000);
-    assert_eq!(acc.data(), vec![1; 10].as_slice());
+    assert!(initial_matches);
 
     let mut local_updates = bank.accounts().subscribe(pubkey).await;
 
@@ -90,11 +91,11 @@ async fn test_subs_receive_out_of_order_updates() {
         "stale state 2 update was not processed"
     );
 
-    let acc = bank
+    let final_matches = bank
         .accounts()
         .loader()
-        .read(&pubkey, |account| account.clone())
+        .read(&pubkey, |account| account == &expected_state_3)
         .unwrap()
         .expect("Account should be cloned");
-    assert_eq!(acc, expected_state_3);
+    assert!(final_matches);
 }

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use solana_account::{Account, AccountSharedData};
+use solana_account::{Account, AccountSharedData, ReadableAccount};
 use solana_message::Address as Pubkey;
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -47,7 +47,13 @@ impl CommittedAccount {
             };
         }
 
-        let mut account: Account = account_shared.to_owned().into();
+        let mut account = Account {
+            lamports: account_shared.lamports(),
+            data: account_shared.data().to_vec(),
+            owner: *account_shared.owner(),
+            executable: account_shared.executable(),
+            rent_epoch: account_shared.rent_epoch(),
+        };
         account.owner = parent_program_id.unwrap_or(account.owner);
 
         CommittedAccount {

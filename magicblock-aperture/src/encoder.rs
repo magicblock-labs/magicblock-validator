@@ -30,10 +30,10 @@ impl AccountEncoder {
     pub(crate) fn encode(
         &self,
         slot: Slot,
-        data: &(Pubkey, AccountSharedData),
+        pubkey: &Pubkey,
+        account: &AccountSharedData,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let (pubkey, account) = data;
         let encoded = encode_ui_account(
             pubkey,
             account,
@@ -50,10 +50,10 @@ impl ProgramAccountEncoder {
     pub(crate) fn encode(
         &self,
         slot: Slot,
-        data: &(Pubkey, AccountSharedData),
+        pubkey: &Pubkey,
+        account: &AccountSharedData,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let (pubkey, account) = data;
         matches_filters(&self.filters, account.data()).then_some(())?;
         let value = AccountWithPubkey::new(
             *pubkey,

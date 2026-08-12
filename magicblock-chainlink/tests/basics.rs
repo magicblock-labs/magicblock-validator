@@ -33,7 +33,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
         ..Default::default()
     };
     let acc = account_shared_with_owner_and_slot(&acc, owner, slot);
-    rpc_client.add_account(pubkey, acc.clone().into());
+    rpc_client.add_account(pubkey, acc.into());
 
     assert_eq!(chainlink.fetch_count().unwrap(), 0);
 

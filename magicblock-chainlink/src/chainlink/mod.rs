@@ -403,15 +403,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             let count = pubkeys.len();
             trace!(count, "Fetching accounts");
         }
+        let snapshot = |account: &AccountSharedData| {
+            AccountSharedData::from(account.owned())
+        };
         let Some(fetch_cloner) = self.fetch_cloner() else {
             // If we're offline and not syncing accounts then we just get them from the bank
             let accessor = self.engine.accounts();
             let loader = accessor.loader();
             return Ok(pubkeys
                 .iter()
-                .map(|pubkey| {
-                    loader.read(pubkey, AccountSharedData::clone).ok().flatten()
-                })
+                .map(|pubkey| loader.read(pubkey, snapshot).ok().flatten())
                 .collect());
         };
         self.fetch_accounts_common(fetch_cloner, pubkeys, fetch_context)
@@ -421,9 +422,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         let loader = accessor.loader();
         let accounts = pubkeys
             .iter()
-            .map(|pubkey| {
-                loader.read(pubkey, AccountSharedData::clone).ok().flatten()
-            })
+            .map(|pubkey| loader.read(pubkey, snapshot).ok().flatten())
             .collect();
         Ok(accounts)
     }

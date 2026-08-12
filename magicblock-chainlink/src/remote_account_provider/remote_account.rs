@@ -11,7 +11,7 @@ pub enum RemoteAccountUpdateSource {
     Subscription,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ResolvedAccount {
     /// The most recent remote state of the account that is not stored in the bank yet.
     /// The account maybe in our bank at this point, but with a stale remote state.
@@ -25,6 +25,17 @@ pub enum ResolvedAccount {
     /// Most _fresh_ accounts are stored in the bank before the transaction needing
     /// them proceeds. Delegation records are not stored.
     Bank((Pubkey, Slot)),
+}
+
+impl Clone for ResolvedAccount {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Fresh(account) => {
+                Self::Fresh(AccountSharedData::from(account.owned()))
+            }
+            Self::Bank(account) => Self::Bank(*account),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +76,9 @@ impl RemoteAccount {
             RemoteAccount::Found(RemoteAccountState {
                 account: ResolvedAccount::Fresh(remote_account),
                 ..
-            }) => Some(AccountBuilder::from(remote_account.clone())),
+            }) => Some(AccountBuilder::from(AccountSharedData::from(
+                remote_account.owned(),
+            ))),
             // Most up to date version of account from the bank
             RemoteAccount::Found(RemoteAccountState {
                 account: ResolvedAccount::Bank((pubkey, _)),
@@ -73,7 +86,11 @@ impl RemoteAccount {
             }) => engine
                 .accounts()
                 .loader()
-                .read(pubkey, |account| AccountBuilder::from(account.clone()))
+                .read(pubkey, |account| {
+                    AccountBuilder::from(AccountSharedData::from(
+                        account.owned(),
+                    ))
+                })
                 .ok()
                 .flatten(),
             // Account not fetched/subbed nor in the bank
@@ -84,9 +101,7 @@ impl RemoteAccount {
         match self {
             RemoteAccount::Found(RemoteAccountState { account, .. }) => {
                 match account {
-                    ResolvedAccount::Fresh(account_shared_data) => {
-                        account_shared_data.slot()
-                    }
+                    ResolvedAccount::Fresh(account) => account.slot(),
                     ResolvedAccount::Bank((_, slot)) => *slot,
                 }
             }
@@ -106,12 +121,22 @@ impl RemoteAccount {
         !matches!(self, RemoteAccount::NotFound(_))
     }
 
-    pub fn fresh_account(&self) -> Option<AccountSharedData> {
+    pub fn fresh_account(&self) -> Option<&AccountSharedData> {
         match self {
             RemoteAccount::Found(RemoteAccountState {
                 account: ResolvedAccount::Fresh(account),
                 ..
-            }) => Some(account.clone()),
+            }) => Some(account),
+            _ => None,
+        }
+    }
+
+    pub fn into_fresh_account(self) -> Option<AccountSharedData> {
+        match self {
+            RemoteAccount::Found(RemoteAccountState {
+                account: ResolvedAccount::Fresh(account),
+                ..
+            }) => Some(account),
             _ => None,
         }
     }

@@ -262,15 +262,19 @@ impl TestContext {
                     .recv()
                     .await
                     .expect("local account update channel closed");
-                let account = bank
+                let matches = bank
                     .accounts()
                     .loader()
-                    .read(pubkey, AccountSharedData::clone)
+                    .read(pubkey, |account| account == expected)
                     .expect("load local account");
-                if account.as_ref() == Some(expected) {
+                if matches == Some(true) {
                     break;
                 }
-                last = account;
+                last = bank
+                    .accounts()
+                    .loader()
+                    .read(pubkey, |account| format!("{account:?}"))
+                    .expect("load local account");
             }
         })
         .await;
@@ -297,7 +301,7 @@ impl TestContext {
         // normally this would happen as part of a transaction
         // Magicblock program marks account as undelegated in the Ephem
         let reader = |account: &AccountSharedData| {
-            AccountBuilder::from(account.clone())
+            AccountBuilder::from(AccountSharedData::from(account.owned()))
                 .owner(dlp_api::id())
                 .mode(AccountMode::Transient)
         };
@@ -340,8 +344,11 @@ impl TestContext {
             dlp_api::pda::delegation_record_pda_from_delegated_account(pubkey);
         self.rpc_client.remove_account(&delegation_record_pubkey);
         let mut local_updates = self.bank.accounts().subscribe(*pubkey).await;
-        self.send_account_update(*pubkey, undelegated_acc.clone())
-            .await;
+        self.send_account_update(
+            *pubkey,
+            AccountSharedData::from(undelegated_acc.owned()),
+        )
+        .await;
         Self::wait_for_local_account(
             &self.bank,
             pubkey,
@@ -376,14 +383,15 @@ impl TestContext {
         } else {
             AccountMode::ReadOnly
         };
-        let expected = AccountBuilder::from(delegated_acc.clone())
-            .owner(*owner)
-            .slot(self.rpc_client.get_slot())
-            .mode(mode)
-            .build();
+        let expected = AccountBuilder::from(AccountSharedData::from(
+            delegated_acc.owned(),
+        ))
+        .owner(*owner)
+        .slot(self.rpc_client.get_slot())
+        .mode(mode)
+        .build();
         let mut local_updates = self.bank.accounts().subscribe(*pubkey).await;
-        self.send_account_update(*pubkey, delegated_acc.clone())
-            .await;
+        self.send_account_update(*pubkey, delegated_acc).await;
         Self::wait_for_local_account(
             &self.bank,
             pubkey,
@@ -393,13 +401,11 @@ impl TestContext {
         .await;
 
         Ok(DelegateResult {
-            delegated_account: delegated_acc,
             delegation_record_pubkey,
         })
     }
 }
 
 pub struct DelegateResult {
-    pub delegated_account: AccountSharedData,
     pub delegation_record_pubkey: Pubkey,
 }

@@ -41,9 +41,9 @@ pub(crate) fn derive_eata_pubkey_from_ata_account(
 
 pub(crate) fn derive_eata_pubkey_from_ata_layout(
     ata_pubkey: &Pubkey,
-    ata_account: &AccountSharedData,
+    data: &[u8],
 ) -> Option<Pubkey> {
-    derive_eata_pubkey(ata_info_from_layout(ata_pubkey, ata_account)?)
+    derive_eata_pubkey(ata_info_from_layout(ata_pubkey, data)?)
 }
 
 pub(crate) fn derive_supported_ata_pubkeys(
@@ -59,13 +59,10 @@ pub(crate) fn derive_supported_ata_pubkeys(
 
 pub(crate) fn derive_supported_ata_pubkeys_from_raw_eata(
     eata_pubkey: &Pubkey,
-    eata_account: &AccountSharedData,
+    data: &[u8],
 ) -> Option<Vec<Pubkey>> {
-    let (wallet_owner, mint) = delegation::parse_raw_eata_pda(
-        eata_pubkey,
-        eata_account.data(),
-        EATA_PROGRAM_ID,
-    )?;
+    let (wallet_owner, mint) =
+        delegation::parse_raw_eata_pda(eata_pubkey, data, EATA_PROGRAM_ID)?;
     Some(derive_supported_ata_pubkeys(&wallet_owner, &mint))
 }
 
@@ -75,11 +72,7 @@ fn derive_eata_pubkey(ata_info: AtaInfo) -> Option<Pubkey> {
     Some(eata_pubkey)
 }
 
-fn ata_info_from_layout(
-    ata_pubkey: &Pubkey,
-    ata_account: &AccountSharedData,
-) -> Option<AtaInfo> {
-    let data = ata_account.data();
+fn ata_info_from_layout(ata_pubkey: &Pubkey, data: &[u8]) -> Option<AtaInfo> {
     if data.len() < 64 {
         return None;
     }
@@ -219,7 +212,11 @@ where
             let reader = |account: &AccountSharedData| {
                 is_ata(&candidate_pubkey, *account.owner(), account.data())
                     .is_some()
-                    .then(|| account.clone())
+                    .then(|| {
+                        AccountBuilder::from(AccountSharedData::from(
+                            account.owned(),
+                        ))
+                    })
             };
             if let Some(candidate_account) = loader
                 .read(&candidate_pubkey, reader)
@@ -246,14 +243,14 @@ where
         }
     };
 
-    if base_ata.is(AccountMode::Delegated)
-        || base_ata.is(AccountMode::Transient)
+    if base_ata.read().is(AccountMode::Delegated)
+        || base_ata.read().is(AccountMode::Transient)
     {
         return None;
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(
         this,
-        AccountBuilder::from(base_ata),
+        base_ata,
         eata_account.read().data(),
         eata_account.read().slot(),
         deleg_record,
@@ -274,7 +271,7 @@ async fn fetch_remote_base_ata<T, U>(
     ata_pubkeys: &[Pubkey],
     min_context_slot: u64,
     companion_fetch_log_context: &CompanionFetchLogContext,
-) -> Option<(Pubkey, AccountSharedData)>
+) -> Option<(Pubkey, AccountBuilder)>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -309,9 +306,9 @@ where
 
     ata_pubkeys.iter().copied().zip(remote_accounts).find_map(
         |(ata_pubkey, remote_account)| {
-            let account = remote_account.fresh_account()?;
+            let account = remote_account.into_fresh_account()?;
             is_ata(&ata_pubkey, *account.owner(), account.data())?;
-            Some((ata_pubkey, account))
+            Some((ata_pubkey, AccountBuilder::from(account)))
         },
     )
 }
@@ -319,7 +316,7 @@ where
 pub(crate) async fn maybe_project_ata_from_subscription_update<T, U>(
     this: &FetchCloner<T, U>,
     ata_pubkey: Pubkey,
-    ata_account: AccountSharedData,
+    ata_account: AccountBuilder,
     companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> (
     AccountBuilder,
@@ -329,7 +326,6 @@ where
     T: ChainRpcClient,
     U: ChainPubsubClient,
 {
-    let ata_account = AccountBuilder::from(ata_account);
     let Some(ata_info) = is_ata(
         &ata_pubkey,
         ata_account.read().owner(),
@@ -386,7 +382,7 @@ where
             let popped = accounts.pop();
             // Only `NotFound` proves absence; stale, missing, or failed fetches retry later.
             let nf = matches!(popped, Some(RemoteAccount::NotFound(_)));
-            let fresh = popped.and_then(|a| a.fresh_account());
+            let fresh = popped.and_then(RemoteAccount::into_fresh_account);
             (fresh, nf)
         }
         Err(err) => {

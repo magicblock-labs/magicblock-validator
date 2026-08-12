@@ -437,7 +437,8 @@ where
 
         if let Some(ata_pubkeys) =
             ata_projection::derive_supported_ata_pubkeys_from_raw_eata(
-                &pubkey, account,
+                &pubkey,
+                account.data(),
             )
         {
             let has_projection_interest = self
@@ -450,7 +451,10 @@ where
             };
         }
 
-        if self.base_ata_has_projection_interest(pubkey, account).await {
+        if self
+            .base_ata_has_projection_interest(pubkey, account.data())
+            .await
+        {
             return DlpProgramUpdateInterest::ProcessAtaProjection;
         }
 
@@ -480,12 +484,10 @@ where
     async fn base_ata_has_projection_interest(
         &self,
         pubkey: Pubkey,
-        account: &AccountSharedData,
+        data: &[u8],
     ) -> bool {
         let Some(eata_pubkey) =
-            ata_projection::derive_eata_pubkey_from_ata_layout(
-                &pubkey, account,
-            )
+            ata_projection::derive_eata_pubkey_from_ata_layout(&pubkey, data)
         else {
             return false;
         };
@@ -1088,10 +1090,9 @@ where
     ) {
         let fresh_update_account = update.account.fresh_account();
         let is_dlp_owned_update = fresh_update_account
-            .as_ref()
             .is_some_and(|account| account.owner() == &dlp_api::id());
         let is_internal_dlp_update =
-            fresh_update_account.as_ref().is_some_and(|account| {
+            fresh_update_account.is_some_and(|account| {
                 is_internal_dlp_account_data(account.data())
             });
 
@@ -1099,7 +1100,7 @@ where
             if matches!(update.source, SubscriptionSource::Program)
                 && is_dlp_owned_update
             {
-                match fresh_update_account.as_ref() {
+                match fresh_update_account {
                     Some(account) => Some(
                         self.classify_dlp_program_update_interest(
                             pubkey, account,
@@ -1141,7 +1142,7 @@ where
             Some(DlpProgramUpdateInterest::ProcessUndelegating)
                 | Some(DlpProgramUpdateInterest::ProcessAtaProjection)
         ) && is_dlp_owned_update
-            && let Some(account) = fresh_update_account.as_ref()
+            && let Some(account) = fresh_update_account
             && is_internal_dlp_update
         {
             // Sight records from either source: SubMux dedup can
@@ -1772,7 +1773,7 @@ where
             return false;
         };
 
-        if !account.owner().eq(&dlp_api::id()) {
+        if account.owner() != &dlp_api::id() {
             return false;
         }
 
@@ -1885,7 +1886,9 @@ where
                 } else if let Some(projected_ata_clone_request) = self
                     .maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
                         pubkey,
-                        &AccountBuilder::from(account.clone()),
+                        &AccountBuilder::from(AccountSharedData::from(
+                            account.owned(),
+                        )),
                         update.source,
                         Some(&deleg_record),
                         &delegation_actions,
@@ -1929,7 +1932,8 @@ where
                         greedy_ata_pubkeys.iter().copied().find(|ata_pubkey| {
                             loader
                                 .read(ata_pubkey, |account_in_bank| {
-                                    account_in_bank.slot() >= account.slot()
+                                    account_in_bank.slot()
+                                        >= account.slot()
                                 })
                                 .ok()
                                 .flatten()
@@ -2062,7 +2066,7 @@ where
         let owned_by_delegation_program =
             account.is_owned_by_delegation_program();
 
-        if let Some(account) = account.fresh_account() {
+        if let Some(account) = account.into_fresh_account() {
             // If the account is owned by the delegation program we need to resolve
             // its true owner and determine if it is delegated to us
             if owned_by_delegation_program {
@@ -2306,7 +2310,7 @@ where
                 let (account, deleg_record) = self
                     .maybe_project_ata_from_subscription_update(
                         pubkey,
-                        account,
+                        AccountBuilder::from(account),
                         companion_fetch_log_context,
                     )
                     .await;
@@ -2323,7 +2327,7 @@ where
         } else {
             // This should not happen since we call this method with sub updates which always hold
             // a fresh remote account
-            error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
+            error!(pubkey = %pubkey, "BUG: Received subscription update without fresh account");
             (None, None, DelegationActions::default())
         }
     }
@@ -2352,7 +2356,7 @@ where
     async fn maybe_project_ata_from_subscription_update(
         &self,
         ata_pubkey: Pubkey,
-        ata_account: AccountSharedData,
+        ata_account: AccountBuilder,
         companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> (
         AccountBuilder,
@@ -3062,7 +3066,8 @@ where
                             account.slot(),
                             account.is(AccountMode::Delegated),
                             ata_projection::derive_eata_pubkey_from_ata_layout(
-                                pubkey, account,
+                                pubkey,
+                                account.data(),
                             ),
                         ))
                     } else {
@@ -3376,11 +3381,15 @@ where
         let accessor = engine.accounts();
         let loader = accessor.loader();
         let resolve = |account: &ResolvedAccount| match account {
-            ResolvedAccount::Fresh(account) => {
-                Some(AccountBuilder::from(account.clone()))
-            }
+            ResolvedAccount::Fresh(account) => Some(AccountBuilder::from(
+                AccountSharedData::from(account.owned()),
+            )),
             ResolvedAccount::Bank((pubkey, _)) => loader
-                .read(pubkey, |account| AccountBuilder::from(account.clone()))
+                .read(pubkey, |account| {
+                    AccountBuilder::from(AccountSharedData::from(
+                        account.owned(),
+                    ))
+                })
                 .ok()
                 .flatten(),
         };

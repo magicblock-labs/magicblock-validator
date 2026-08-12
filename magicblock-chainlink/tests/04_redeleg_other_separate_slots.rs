@@ -45,7 +45,7 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
         slot = rpc_client.set_slot(slot + 11);
         let delegated_acc =
             account_shared_with_owner_and_slot(&acc, dlp_api::id(), slot);
-        rpc_client.add_account(pubkey, delegated_acc.clone().into());
+        rpc_client.add_account(pubkey, delegated_acc.into());
         let delegation_record = add_delegation_record_for(
             &rpc_client,
             pubkey,
@@ -82,13 +82,12 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
             .unwrap();
 
         // Account should be cloned as undelegated
-        assert_eq!(
+        assert!(
             bank.accounts()
                 .loader()
-                .read(&pubkey, AccountSharedData::clone)
+                .read(&pubkey, |account| account == &undelegated_acc)
                 .unwrap()
-                .unwrap(),
-            undelegated_acc
+                .unwrap()
         );
 
         info!("2.4. Would refuse write (undelegated on chain)");
@@ -105,9 +104,7 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
         );
         slot = rpc_client.set_slot(slot + 2);
 
-        let DelegateResult {
-            delegated_account, ..
-        } = ctx
+        let DelegateResult { .. } = ctx
             .delegate_existing_account_to(
                 &pubkey,
                 &other_authority,
@@ -117,21 +114,17 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
             .unwrap();
 
         // Account should remain owned by DP but delegated to other authority
-        let acc_redeleg_expected: AccountSharedData =
-            AccountBuilder::from(account_shared_with_owner_and_slot(
-                &delegated_account.into(),
-                program_pubkey,
-                slot,
-            ))
-            .mode(AccountMode::ReadOnly)
-            .build();
-        assert_eq!(
+        let acc_redeleg_expected: AccountSharedData = AccountBuilder::from(
+            account_shared_with_owner_and_slot(&acc, program_pubkey, slot),
+        )
+        .mode(AccountMode::ReadOnly)
+        .build();
+        assert!(
             bank.accounts()
                 .loader()
-                .read(&pubkey, AccountSharedData::clone)
+                .read(&pubkey, |account| account == &acc_redeleg_expected)
                 .unwrap()
-                .unwrap(),
-            acc_redeleg_expected
+                .unwrap()
         );
 
         info!("4.2. Would refuse write (delegated to other)");

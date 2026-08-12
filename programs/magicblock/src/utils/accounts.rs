@@ -1,10 +1,7 @@
 #![allow(unused)] // most of these utilities will come in useful later
 
 use magicblock_magic_program_api::args::ShortAccountMeta;
-use solana_account::{
-    Account, AccountSharedData, ReadableAccount, WritableAccount,
-};
-use solana_account_info::{AccountInfo, IntoAccountInfo};
+use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::{AccountMeta, error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -21,13 +18,6 @@ pub(crate) struct InstructionAccount<'a, 'ix_data> {
 }
 
 impl<'a, 'ix_data> InstructionAccount<'a, 'ix_data> {
-    pub(crate) fn to_account_shared_data(
-        &self,
-    ) -> Result<AccountSharedData, InstructionError> {
-        // `AccountRef` derefs through `TransactionAccountView` to the account.
-        Ok((**self.borrow()?).clone())
-    }
-
     pub(crate) fn borrow(&self) -> Result<AccountRef<'_>, InstructionError> {
         self.transaction_context
             .accounts()
@@ -90,19 +80,6 @@ pub(crate) fn get_instruction_account_with_idx<'a, 'ix_data>(
         instruction_idx: idx,
         tx_idx,
     })
-}
-
-pub(crate) fn get_instruction_pubkey_and_account_with_idx(
-    transaction_context: &TransactionContext<'_>,
-    idx: u16,
-) -> Result<(Pubkey, Account), InstructionError> {
-    let account_ref =
-        get_instruction_account_with_idx(transaction_context, idx)?;
-    let account = account_ref.borrow()?;
-    let account = Account::from((**account).clone());
-    let pubkey =
-        transaction_context.get_key_of_account_at_index(account_ref.tx_idx)?;
-    Ok((*pubkey, account))
 }
 
 pub(crate) fn get_instruction_account_owner_with_idx(

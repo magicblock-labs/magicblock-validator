@@ -17,7 +17,7 @@ use json::{JsonValueTrait, Value};
 use ledger::schema::Block;
 use libloading::{Library, Symbol};
 use nucleus::runtime::FullTransaction;
-use solana_account::ReadableAccount;
+use solana_account::{AccountSeqLock, AccountSharedData, ReadableAccount};
 use tokio::{
     sync::{Mutex, mpsc},
     task::JoinHandle,
@@ -42,7 +42,7 @@ pub(crate) struct GeyserPluginManager {
 }
 
 enum GeyserEvent {
-    Transaction(Arc<FullTransaction>),
+    Transaction(FullTransaction),
     Block(Block),
 }
 
@@ -158,20 +158,27 @@ impl GeyserPluginManager {
         }
     }
 
-    fn notify_accounts(&self, transaction: &FullTransaction) {
+    fn notify_accounts(&self, mut transaction: FullTransaction) {
+        let slot = transaction.execution.slot;
         let Some(execution) = transaction
             .execution
             .result
-            .as_ref()
+            .as_mut()
             .ok()
             .filter(|execution| execution.was_successful())
         else {
             return;
         };
-        for (pubkey, account) in &execution.loaded_transaction.accounts {
-            if !account.dirty() {
+        for (pubkey, account) in
+            std::mem::take(&mut execution.loaded_transaction.accounts)
+        {
+            let Some(account) = AccountSeqLock::new(account).read(|account| {
+                account
+                    .dirty()
+                    .then(|| AccountSharedData::from(account.owned()))
+            }) else {
                 continue;
-            }
+            };
             let write_version =
                 self.write_version.fetch_add(1, Ordering::Relaxed);
             let info = ReplicaAccountInfoV3 {
@@ -189,7 +196,7 @@ impl GeyserPluginManager {
                 if plugin.account_data_notifications_enabled()
                     && let Err(error) = plugin.update_account(
                         ReplicaAccountInfoVersions::V0_0_3(&info),
-                        transaction.execution.slot,
+                        slot,
                         false,
                     )
                 {
@@ -328,7 +335,7 @@ fn start_manager(
                 match event {
                     Some(GeyserEvent::Transaction(transaction)) => {
                         manager.notify_transaction(&transaction);
-                        manager.notify_accounts(&transaction);
+                        manager.notify_accounts(transaction);
                     }
                     Some(GeyserEvent::Block(block)) => {
                         manager.notify_block(block)

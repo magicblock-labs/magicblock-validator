@@ -32,14 +32,14 @@ chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
-engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "1372a", features = [
+engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3150af", features = [
     "testkit"
 ] }
 ephemeral-rollups-sdk = { version = "0.14", default-features = false, features = ["modular-sdk"] }
 futures = "0.3.31"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
-keeper = { package = "magicblock-keeper", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "1372a", features = [
+keeper = { package = "magicblock-keeper", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3150af", features = [
     "testkit"
 ] }
 lazy_static = "1.4.0"
@@ -70,7 +70,7 @@ schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
 shlex = "1.3.0"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "1372a" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3150af" }
 solana-address = "=2.6.1"
 solana-address-lookup-table-interface = "3.0"
 solana-clock = "=3.1.1"
@@ -113,15 +113,15 @@ toml = "0.8.13"
 tracing = "0.1"
 ureq = "2.9.6"
 url = "2.5.0"
-v42-calculator-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "1372a", features = [
+v42-calculator-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3150af", features = [
     "builder"
 ] }
 
 [patch.crates-io]
-agave-transaction-view = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "1372a" }
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "1372a" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "1372a" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "1372a" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "1372a" }
+agave-transaction-view = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3150af" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3150af" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3150af" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3150af" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3150af" }
 # Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }

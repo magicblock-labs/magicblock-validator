@@ -35,7 +35,7 @@ impl WsDispatcher {
         let handle = tokio::spawn(async move {
             while let Some((pubkey, account)) = rx.recv().await {
                 let slot = account.slot();
-                let Some(bytes) = encoder.encode(slot, &(pubkey, account), id)
+                let Some(bytes) = encoder.encode(slot, &pubkey, &account, id)
                 else {
                     continue;
                 };

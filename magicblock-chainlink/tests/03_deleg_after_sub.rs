@@ -8,7 +8,7 @@ use magicblock_chainlink::{
         deleg::add_delegation_record_for,
     },
 };
-use solana_account::{Account, AccountBuilder, AccountMode};
+use solana_account::{Account, AccountBuilder, AccountMode, AccountSharedData};
 use solana_pubkey::Pubkey;
 use tracing::*;
 
@@ -77,11 +77,12 @@ async fn test_deleg_after_subscribe_case2() {
             account_shared_with_owner_and_slot(&acc, program_pubkey, slot);
 
         assert!(chainlink.is_watching(&pubkey));
-        let expected = AccountBuilder::from(acc.clone())
-            .mode(AccountMode::ReadOnly)
-            .build();
+        let expected =
+            AccountBuilder::from(AccountSharedData::from(acc.owned()))
+                .mode(AccountMode::ReadOnly)
+                .build();
         let mut local_updates = bank.accounts().subscribe(pubkey).await;
-        ctx.send_account_update(pubkey, acc.clone()).await;
+        ctx.send_account_update(pubkey, acc).await;
         TestContext::wait_for_local_account(
             &bank,
             &pubkey,
@@ -107,12 +108,13 @@ async fn test_deleg_after_subscribe_case2() {
             ctx.validator_pubkey,
             program_pubkey,
         );
-        let expected = AccountBuilder::from(acc.clone())
-            .owner(program_pubkey)
-            .mode(AccountMode::Delegated)
-            .build();
+        let expected =
+            AccountBuilder::from(AccountSharedData::from(acc.owned()))
+                .owner(program_pubkey)
+                .mode(AccountMode::Delegated)
+                .build();
         let mut local_updates = bank.accounts().subscribe(pubkey).await;
-        ctx.send_account_update(pubkey, acc.clone()).await;
+        ctx.send_account_update(pubkey, acc).await;
         TestContext::wait_for_local_account(
             &bank,
             &pubkey,

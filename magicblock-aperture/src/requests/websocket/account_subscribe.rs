@@ -27,7 +27,7 @@ impl WsDispatcher {
             while let Some(account) = rx.recv().await {
                 let account: AccountSharedData = account;
                 let slot = account.slot();
-                let Some(bytes) = encoder.encode(slot, &(pubkey, account), id)
+                let Some(bytes) = encoder.encode(slot, &pubkey, &account, id)
                 else {
                     continue;
                 };

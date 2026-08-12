@@ -109,9 +109,9 @@ fn classify_single_account(
         }
         Found(remote_account_state) => {
             match remote_account_state.account {
-                ResolvedAccount::Fresh(account_shared_data) => {
-                    let slot = account_shared_data.slot();
-                    let account = AccountBuilder::from(account_shared_data);
+                ResolvedAccount::Fresh(account) => {
+                    let slot = account.slot();
+                    let account = AccountBuilder::from(account);
                     let state = account.read();
 
                     if state.owner() == dlp_api::id() {
