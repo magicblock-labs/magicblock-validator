@@ -20,7 +20,9 @@ use super::{
     CompanionFetchLogContext, FetchCloner,
 };
 use crate::{
-    cloner::{AccountCloneRequest, Cloner, DelegationActions},
+    cloner::{
+        AccountCloneRequest, ClonePostDelegationMode, Cloner, DelegationActions,
+    },
     remote_account_provider::{
         pubsub_common::SubscriptionSource, ChainPubsubClient, ChainRpcClient,
         MatchSlotsConfig, RemoteAccount, ResolvedAccountSharedData,
@@ -251,9 +253,10 @@ where
         pubkey: ata_pubkey,
         account: projected_ata,
         commit_frequency_ms: None,
-        delegation_actions: delegation_actions.clone(),
+        post_delegation_mode: ClonePostDelegationMode::from(
+            delegation_actions.clone(),
+        ),
         delegated_to_other: None,
-        needs_undelegation: false,
     })
 }
 
@@ -334,7 +337,8 @@ where
     let was_watching = this.remote_account_provider.is_watching(&eata_pubkey);
 
     // Ensure before cache checks; this keeps the subscription LRU warm
-    // without refcounting the projection reason on every ATA update.
+    // without refcounting the projection reason on every ATA update. The
+    // reason is released when the base ATA is removed from the bank.
     let subscribed = match this
         .ensure_subscription(&eata_pubkey, SubscriptionReason::AtaProjection)
         .await
@@ -683,9 +687,10 @@ where
             pubkey: input.ata_pubkey,
             account: account_to_clone,
             commit_frequency_ms,
-            delegation_actions: actions.unwrap_or_default(),
+            post_delegation_mode: ClonePostDelegationMode::from(
+                actions.unwrap_or_default(),
+            ),
             delegated_to_other,
-            needs_undelegation: false,
         });
     }
 

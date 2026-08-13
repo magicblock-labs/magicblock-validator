@@ -75,6 +75,10 @@ pub struct ChainLinkConfig {
     #[serde(with = "humantime")]
     pub undelegation_request_poll_interval: Duration,
 
+    /// Max subscriptions per websocket connection. Defaults to 900 when
+    /// unset.
+    pub ws_subs_per_connection: Option<usize>,
+
     /// AML/Risk checks for post-delegation actions via Range API.
     pub risk: RiskConfig,
 }
@@ -93,6 +97,7 @@ impl Default for ChainLinkConfig {
             undelegation_request_poll_interval: Duration::from_secs(
                 consts::DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS,
             ),
+            ws_subs_per_connection: None,
             risk: RiskConfig::default(),
         }
     }

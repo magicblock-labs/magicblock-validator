@@ -34,7 +34,9 @@ fn main() {
         .build()
         .expect("failed to build async runtime");
     runtime.block_on(run());
-    drop(runtime);
+    // All durable state is flushed inside stop(); don't let lingering
+    // blocking tasks keep the dead process (and RPC downtime) alive.
+    runtime.shutdown_timeout(std::time::Duration::from_millis(250));
 
     info!("main runtime shutdown!");
 }
