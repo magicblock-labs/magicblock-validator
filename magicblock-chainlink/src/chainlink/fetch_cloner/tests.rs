@@ -6625,8 +6625,6 @@ async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_sl
     // An older record fetch is in flight: started when the chain was still
     // at the park slot, it resolves at that slot with the stale record.
     rpc_client.block_fetches();
-    let fetches_before = rpc_client.single_account_fetches()
-        + rpc_client.multi_account_fetches();
     let in_flight = tokio::spawn({
         let provider = remote_account_provider.clone();
         async move {
@@ -6641,9 +6639,9 @@ async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_sl
         }
     });
     tokio::time::timeout(Duration::from_secs(3), async {
-        while rpc_client.single_account_fetches()
-            + rpc_client.multi_account_fetches()
-            == fetches_before
+        while remote_account_provider
+            .pending_fetch_waiter_count(&delegation_record_pubkey)
+            < 1
         {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -6663,7 +6661,16 @@ async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_sl
                 .await
         }
     });
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while remote_account_provider
+            .pending_fetch_waiter_count(&delegation_record_pubkey)
+            < 2
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the record lookup to join the fetch");
 
     rpc_client.allow_fetches();
     let stale = in_flight
@@ -6676,9 +6683,9 @@ async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_sl
         "the joined in-flight result must be older than the chain slot"
     );
 
-    // The RPC view catches up with the fresh generation delegated to us.
-    rpc_client.set_slot(CHAIN_SLOT);
-    rpc_client.set_clock_sysvar_for_slot(CHAIN_SLOT);
+    // The RPC view catches up with the fresh generation delegated to us;
+    // the record is swapped before the slot advances so the release's
+    // retries can never observe the stale record at the new slot.
     add_delegation_record_with_slot_for(
         &rpc_client,
         account_pubkey,
@@ -6686,6 +6693,8 @@ async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_sl
         account_owner,
         CHAIN_SLOT - 10,
     );
+    rpc_client.set_slot(CHAIN_SLOT);
+    rpc_client.set_clock_sysvar_for_slot(CHAIN_SLOT);
     release.await.unwrap();
 
     let in_bank = accounts_bank
