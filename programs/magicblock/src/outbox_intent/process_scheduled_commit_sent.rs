@@ -5,6 +5,7 @@ use std::{
 
 use lazy_static::lazy_static;
 use magicblock_core::{coordination_mode, intent::outbox::outbox_intent_pda};
+use magicblock_magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID;
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
@@ -170,18 +171,20 @@ fn validate(
     intent_id: u64,
 ) -> Result<(), InstructionError> {
     const VALIDATOR_IDX: u16 = 0;
-    const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
-    const MAGIC_VAULT_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
+    const ESP_IDX: u16 = VALIDATOR_IDX + 1;
+    const MAGIC_VAULT_IDX: u16 = ESP_IDX + 1;
     const CLOSING_PDA_IDX: u16 = MAGIC_VAULT_IDX + 1;
 
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
-    // Assert MagicBlock program
-    if ix_ctx.get_program_key()? != &crate::id() {
+    // Assert outbox intent program
+    if ix_ctx.get_program_key()?
+        != &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID
+    {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent ERR: Magic program account not found"
+            "ScheduleCommitSent ERR: outbox intent program account not found"
         );
         return Err(InstructionError::UnsupportedProgramId);
     }
@@ -199,18 +202,16 @@ fn validate(
         return Err(InstructionError::IncorrectAuthority);
     }
 
-    // Assert magic program account
-    let magic_program_pubkey = get_instruction_pubkey_with_idx(
-        transaction_context,
-        MAGIC_PROGRAM_IDX,
-    )?;
-    if *magic_program_pubkey != crate::id() {
+    // Assert ephemeral system program account (CPI target for the close)
+    let esp_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, ESP_IDX)?;
+    if *esp_pubkey != EPHEMERAL_SYSTEM_PROGRAM_ID {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent ERR: account at idx {} is {}, expected magic program {}",
-            MAGIC_PROGRAM_IDX,
-            magic_program_pubkey,
-            crate::id()
+            "ScheduleCommitSent ERR: account at idx {} is {}, expected ephemeral system program {}",
+            ESP_IDX,
+            esp_pubkey,
+            EPHEMERAL_SYSTEM_PROGRAM_ID
         );
         return Err(InstructionError::IncorrectProgramId);
     }
@@ -308,7 +309,9 @@ fn log_sent_commit(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
+    use magicblock_magic_program_api::{
+        EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
+    };
     use solana_account::AccountSharedData;
     use solana_instruction::{error::InstructionError, Instruction};
     use solana_keypair::Keypair;
@@ -318,7 +321,9 @@ mod tests {
     use super::*;
     use crate::{
         instruction_utils::InstructionUtils,
-        test_utils::{ensure_started_validator, process_instruction},
+        test_utils::{
+            ensure_started_validator, process_outbox_intent_instruction,
+        },
     };
 
     fn single_acc_commit(commit_id: u64) -> SentCommit {
@@ -377,7 +382,7 @@ mod tests {
 
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -411,7 +416,7 @@ mod tests {
         ix.accounts[0].pubkey = fake_validator.pubkey();
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -446,7 +451,7 @@ mod tests {
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
 
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -464,7 +469,8 @@ mod tests {
         let commit = setup_registered_commit();
 
         let pda = outbox_intent_pda(commit.message_id);
-        let mut pda_account = AccountSharedData::new(0, 0, &crate::id());
+        let mut pda_account =
+            AccountSharedData::new(0, 0, &OUTBOX_INTENT_PROGRAM_ID);
         pda_account.set_ephemeral(true);
 
         let mut account_data = {
@@ -486,7 +492,7 @@ mod tests {
 
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,

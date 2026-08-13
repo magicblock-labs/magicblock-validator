@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_magic_program_api::{
-    instruction::MagicBlockInstruction, EPHEMERAL_VAULT_PUBKEY,
+    instruction::EphemeralSystemInstruction, EPHEMERAL_SYSTEM_PROGRAM_ID,
+    EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
 };
 use solana_account::ReadableAccount;
 use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
@@ -11,7 +12,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
@@ -41,18 +42,18 @@ fn validate(
     intent_id: u64,
 ) -> Result<(Pubkey, Pubkey), InstructionError> {
     const VALIDATOR_IDX: u16 = 0;
-    const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
-    const MAGIC_VAULT_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
+    const ESP_IDX: u16 = VALIDATOR_IDX + 1;
+    const MAGIC_VAULT_IDX: u16 = ESP_IDX + 1;
     const CLOSING_PDA_IDX: u16 = MAGIC_VAULT_IDX + 1;
 
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
-    // Assert MagicBlock program
-    if ix_ctx.get_program_key()? != &crate::id() {
+    // Assert outbox intent program
+    if ix_ctx.get_program_key()? != &OUTBOX_INTENT_PROGRAM_ID {
         ic_msg!(
             invoke_context,
-            "CloseOutboxIntent ERR: Magic program account not found"
+            "CloseOutboxIntent ERR: outbox intent program account not found"
         );
         return Err(InstructionError::UnsupportedProgramId);
     }
@@ -70,18 +71,16 @@ fn validate(
         return Err(InstructionError::IncorrectAuthority);
     }
 
-    // Assert magic program account
-    let magic_program_pubkey = get_instruction_pubkey_with_idx(
-        transaction_context,
-        MAGIC_PROGRAM_IDX,
-    )?;
-    if *magic_program_pubkey != crate::id() {
+    // Assert ephemeral system program account (CPI target for the close)
+    let esp_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, ESP_IDX)?;
+    if *esp_pubkey != EPHEMERAL_SYSTEM_PROGRAM_ID {
         ic_msg!(
             invoke_context,
-            "CloseOutboxIntent ERR: account at idx {} is {}, expected magic program {}",
-            MAGIC_PROGRAM_IDX,
-            magic_program_pubkey,
-            crate::id()
+            "CloseOutboxIntent ERR: account at idx {} is {}, expected ephemeral system program {}",
+            ESP_IDX,
+            esp_pubkey,
+            EPHEMERAL_SYSTEM_PROGRAM_ID
         );
         return Err(InstructionError::IncorrectProgramId);
     }
@@ -144,13 +143,13 @@ fn close_outbox_account_cpi(
 ) -> Result<(), InstructionError> {
     invoke_context.native_invoke(
         Instruction {
-            program_id: crate::id(),
+            program_id: EPHEMERAL_SYSTEM_PROGRAM_ID,
             accounts: vec![
                 AccountMeta::new(sponsor, true),
                 AccountMeta::new(pda, false),
                 AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
             ],
-            data: MagicBlockInstruction::CloseEphemeralAccount
+            data: EphemeralSystemInstruction::CloseEphemeralAccount
                 .try_to_vec()
                 .map_err(|_| InstructionError::InvalidInstructionData)?,
         },
@@ -180,7 +179,9 @@ mod tests {
     use crate::{
         instruction_utils::InstructionUtils,
         magic_scheduled_base_intent::ScheduledIntentBundle,
-        test_utils::{ensure_started_validator, process_instruction},
+        test_utils::{
+            ensure_started_validator, process_outbox_intent_instruction,
+        },
     };
 
     fn transaction_accounts_from_map(
@@ -223,7 +224,7 @@ mod tests {
         let pda = outbox_intent_pda(intent_id);
         let data = outbox_bundle_bytes(intent_id, stage);
         let mut pda_account =
-            AccountSharedData::new(0, data.len(), &crate::id());
+            AccountSharedData::new(0, data.len(), &OUTBOX_INTENT_PROGRAM_ID);
         pda_account.set_data_from_slice(&data);
         pda_account.set_ephemeral(true);
 
@@ -258,7 +259,7 @@ mod tests {
 
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -283,7 +284,7 @@ mod tests {
         ix.accounts[0].pubkey = fake_validator.pubkey();
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -308,7 +309,7 @@ mod tests {
         ix.accounts[1].pubkey = fake_program.pubkey();
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -326,7 +327,7 @@ mod tests {
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -349,7 +350,7 @@ mod tests {
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -369,7 +370,7 @@ mod tests {
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -393,7 +394,7 @@ mod tests {
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
