@@ -393,8 +393,158 @@ async fn commit_book_order_account(
     .await;
 }
 
-// TODO(thlorenz/snawaz): once delegation program supports larger commits
-// add 1MB and 10MB tests
+// -----------------
+// Oversized Commits (PreallocateBuffer)
+// -----------------
+//
+// Accounts whose committed state exceeds MAX_PERMITTED_DATA_INCREASE
+// (10_240 bytes) can no longer grow their commit_state PDA (or, on
+// finalize, the delegated account itself) in a single instruction, so
+// preparation sends PreallocateBuffer instructions ahead of the actual
+// commit/finalize to grow those accounts in steps first.
+
+#[tokio::test]
+async fn test_ix_commit_single_account_50kb_buffer() {
+    commit_large_account(
+        50 * 1024,
+        CommitStrategy::DiffBuffer,
+        CommitIntentKind::Commit,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_finalize_single_account_350kb_buffer() {
+    // 350KB needs more preallocate steps than fit in one transaction
+    // (350 * 1024 / MAX_PERMITTED_DATA_INCREASE > PREALLOCATE_CHUNK_SIZE),
+    // so this also exercises preallocate chunking across multiple txs, for
+    // both the commit_state PDA (commit) and the delegated account (finalize).
+    commit_large_account(
+        350 * 1024,
+        CommitStrategy::DiffBuffer,
+        CommitIntentKind::CommitFinalize,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_and_undelegate_single_account_50kb_buffer() {
+    // Two-stage: commit (PreallocateCommitStateTask grows commit_state PDA)
+    // then finalize + undelegate (PreallocateFinalizeTask grows the
+    // delegated account itself, PreallocateUndelegateTask grows the
+    // undelegate buffer) -- exercises all three PreallocateBufferKind paths.
+    commit_large_account(
+        50 * 1024,
+        CommitStrategy::DiffBuffer,
+        CommitIntentKind::CommitAndUndelegate,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_finalize_and_undelegate_single_account_50kb_buffer() {
+    // Single combined commit+finalize (PreallocateCommitFinalizeTask grows
+    // the delegated account directly) followed by undelegate
+    // (PreallocateUndelegateTask grows the undelegate buffer).
+    commit_large_account(
+        50 * 1024,
+        CommitStrategy::DiffBuffer,
+        CommitIntentKind::CommitFinalizeAndUndelegate,
+    )
+    .await;
+}
+
+/// Delegates a *small* account, then commits (and optionally finalizes) it
+/// with `bytes` of brand new random data -- far more than what's currently
+/// delegated. The delegated account starts small deliberately: Solana's own
+/// realloc cap makes it impossible to delegate an account that's already
+/// bigger than MAX_PERMITTED_DATA_INCREASE in one shot, so PreallocateBuffer
+/// only ever needs to grow accounts *after* they're already delegated --
+/// exactly this shape.
+///
+/// The random data (vs. only a few changed fields) guarantees a large diff
+/// against the small base state, forcing buffer delivery: a small diff,
+/// however large the account grows, could still fit inline as
+/// [`CommitStrategy::DiffArgs`].
+async fn commit_large_account(
+    bytes: usize,
+    expected_strategy: CommitStrategy,
+    commit_type: CommitIntentKind,
+) {
+    const DELEGATED_ACCOUNT_SIZE: u64 = 100;
+
+    init_logger!();
+
+    let validator_auth = ensure_validator_authority();
+    fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
+
+    let processor = Arc::new(
+        CommittorProcessor::try_new(
+            validator_auth.insecure_clone(),
+            ":memory:",
+            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+            None,
+            common::MockActionsCallbackExecutor::default(),
+        )
+        .unwrap(),
+    );
+
+    let counter_auth = Keypair::new();
+    let (pubkey, mut account) = init_and_delegate_account_on_chain(
+        &counter_auth,
+        DELEGATED_ACCOUNT_SIZE,
+        None,
+    )
+    .await;
+
+    account.data = common::generate_random_bytes(bytes);
+    account.owner = program_flexi_counter::id();
+
+    let account = CommittedAccount {
+        pubkey,
+        account,
+        remote_slot: Default::default(),
+    };
+    let base_intent = match commit_type {
+        CommitIntentKind::Commit => {
+            MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+        }
+        CommitIntentKind::CommitFinalize => {
+            MagicBaseIntent::CommitFinalize(CommitType::Standalone(vec![
+                account,
+            ]))
+        }
+        CommitIntentKind::CommitAndUndelegate => {
+            MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![account]),
+                undelegate_action: UndelegateType::Standalone,
+            })
+        }
+        CommitIntentKind::CommitFinalizeAndUndelegate => {
+            MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![account]),
+                undelegate_action: UndelegateType::Standalone,
+            })
+        }
+    };
+
+    let intent = ScheduledIntentBundle {
+        id: 0,
+        slot: 10,
+        blockhash: Hash::new_unique(),
+        sent_transaction: Transaction::default(),
+        payer: counter_auth.pubkey(),
+        intent_bundle: base_intent.into(),
+    };
+
+    ix_commit_local(
+        processor,
+        vec![intent],
+        expect_strategies(&[(expected_strategy, 1)]),
+        program_flexi_counter::ID,
+    )
+    .await;
+}
 
 // -----------------
 // Multiple Account Commits
@@ -948,12 +1098,98 @@ async fn execute_intent_bundle(
 // -----------------
 // Test Executor
 // -----------------
+
+/// For each committed account across `intent_bundles`, fetches its current
+/// on-chain balance and its `DelegationRecord.lamports` ledger value, keyed
+/// by pubkey. Missing/undeserializable records are omitted (the caller falls
+/// back to treating the account as having no prior growth).
+async fn collect_pre_execution_lamports(
+    rpc_client: &RpcClient,
+    intent_bundles: &[ScheduledIntentBundle],
+) -> HashMap<Pubkey, (u64, u64)> {
+    let mut pre_state = HashMap::new();
+    for base_intent in intent_bundles {
+        let pubkeys: Vec<Pubkey> = [
+            base_intent.get_commit_intent_accounts(),
+            base_intent.get_commit_finalize_intent_accounts(),
+            base_intent.get_undelegate_intent_accounts(),
+            base_intent.get_commit_finalize_and_undelegate_intent_accounts(),
+        ]
+        .into_iter()
+        .flatten()
+        .flat_map(|accounts| accounts.iter())
+        .map(|account| account.pubkey)
+        .collect();
+
+        for pubkey in pubkeys {
+            if pre_state.contains_key(&pubkey) {
+                continue;
+            }
+            let Ok(balance_before) = rpc_client.get_balance(&pubkey).await
+            else {
+                continue;
+            };
+            let delegation_record_pda =
+                dlp_api::pda::delegation_record_pda_from_delegated_account(
+                    &pubkey,
+                );
+            let delegation_record_lamports = rpc_client
+                .get_account(&delegation_record_pda)
+                .await
+                .ok()
+                .and_then(|acc| {
+                    dlp_api::state::DelegationRecord::try_from_bytes_with_discriminator(
+                        &acc.data,
+                    )
+                    .ok()
+                    .map(|record| record.lamports)
+                })
+                .unwrap_or(balance_before);
+            pre_state
+                .insert(pubkey, (balance_before, delegation_record_lamports));
+        }
+    }
+    pre_state
+}
+
+/// Computes what `pubkey`'s real final balance should be after committing
+/// `committed_lamports` lamports at `new_data_len` bytes, mirroring dlp's own
+/// settlement math (see `finalize.rs`/`commit_finalize_internal.rs`): the
+/// committed lamports value is a *delta* against `DelegationRecord.lamports`,
+/// applied on top of whatever the account already holds -- which may be more
+/// than its pre-commit balance if PreallocateBuffer grew (and funded) it.
+fn expected_settled_lamports(
+    pre_state: &HashMap<Pubkey, (u64, u64)>,
+    pubkey: Pubkey,
+    committed_lamports: u64,
+    new_data_len: usize,
+) -> u64 {
+    let (balance_before, delegation_record_lamports_before) = pre_state
+        .get(&pubkey)
+        .copied()
+        .unwrap_or((committed_lamports, committed_lamports));
+    let rent_exempt_minimum =
+        solana_sdk::rent::Rent::default().minimum_balance(new_data_len);
+    let base = balance_before.max(rent_exempt_minimum);
+    (base as i128 + committed_lamports as i128
+        - delegation_record_lamports_before as i128) as u64
+}
+
 async fn ix_commit_local(
     processor: Arc<CommittorProcessor>,
     intent_bundles: Vec<ScheduledIntentBundle>,
     expected_strategies: ExpectedStrategies,
     program_id: Pubkey,
 ) {
+    let rpc_client = RpcClient::new_with_commitment(
+        "http://localhost:7799".to_string(),
+        CommitmentConfig::confirmed(),
+    );
+
+    // Fetch pre intent state
+    let pre_state = collect_pre_execution_lamports(&rpc_client, &intent_bundles)
+        .await;
+
     let execution_outputs = processor
         .execute_intent_bundles(intent_bundles.clone())
         .await
@@ -964,12 +1200,14 @@ async fn ix_commit_local(
     // Assert that all completed
     assert_eq!(execution_outputs.len(), intent_bundles.len());
 
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
     let mut strategies = ExpectedStrategies::new();
     for (execution_result, base_intent) in execution_outputs
         .into_iter()
         .zip(intent_bundles.into_iter())
     {
+        if !execution_result.patched_errors.is_empty() {
+            panic!("Failed to execute without patching: {:?}", execution_result.patched_errors);
+        }
         let output = match execution_result.inner {
             Ok(output) => output,
             Err(err) => {
@@ -1055,7 +1293,12 @@ async fn ix_commit_local(
                 dlp_api::id()
             };
 
-            let lamports = account.account.lamports;
+            let lamports = expected_settled_lamports(
+                &pre_state,
+                account.pubkey,
+                account.account.lamports,
+                account.account.data.len(),
+            );
             get_account!(
                 rpc_client,
                 account.pubkey,
@@ -1097,8 +1340,9 @@ fn validate_account(
     account_pubkey: Pubkey,
     is_undelegate: bool,
 ) -> bool {
-    let matches_data =
-        acc.data() == expected_data && acc.lamports() == expected_lamports;
+    let matches_data = acc.data() == expected_data;
+    let matched_balance = acc.lamports() == expected_lamports;
+    let matches_data = matches_data && matched_balance;
     let matches_undelegation = acc.owner().eq(&expected_owner);
     let matches_all = matches_data && matches_undelegation;
 
