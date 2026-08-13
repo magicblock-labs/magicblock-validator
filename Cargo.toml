@@ -187,7 +187,7 @@ serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "03950095887b011818886b68e06fde6a1a94def1" }
+solana-account = "3.4"
 solana-account-decoder = { version = "4.0" }
 solana-account-decoder-client-types = { version = "4.0" }
 solana-account-info = { version = "3.1" }
@@ -260,7 +260,7 @@ git = "https://github.com/magicblock-labs/magicblock-svm.git"
 rev = "03950095887b011818886b68e06fde6a1a94def1"
 
 [patch.crates-io]
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "03950095887b011818886b68e06fde6a1a94def1" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "26378e77bc8eb2541b6e0ace0981bf989ef5d9da" }
 solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "03950095887b011818886b68e06fde6a1a94def1" }
 solana-storage-proto = { path = "storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "03950095887b011818886b68e06fde6a1a94def1" }
