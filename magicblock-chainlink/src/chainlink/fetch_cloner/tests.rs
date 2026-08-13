@@ -6559,6 +6559,143 @@ async fn test_released_collision_candidate_retries_when_clone_settles_stale() {
     );
 }
 
+// A released candidate's record precheck must use the effective account-
+// fetch slot: when chain_slot() > candidate.slot, joining an older
+// in-flight record fetch must not settle the release on its stale result.
+#[tokio::test]
+async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_slot(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let other_validator = random_pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const PARK_SLOT: u64 = 100;
+    const CHAIN_SLOT: u64 = 120;
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        PARK_SLOT,
+        validator_keypair,
+    )
+    .await;
+
+    // The RPC still serves the previous generation's record (delegated to
+    // another validator).
+    let delegation_record_pubkey = add_delegation_record_with_slot_for(
+        &rpc_client,
+        account_pubkey,
+        other_validator,
+        account_owner,
+        PARK_SLOT - 10,
+    );
+
+    // The chain advances past the candidate slot via a clock update.
+    remote_account_provider
+        .pubsub_client()
+        .send_account_update(
+            solana_sdk_ids::sysvar::clock::ID,
+            CHAIN_SLOT,
+            &Account::default(),
+        )
+        .await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while remote_account_provider.chain_slot() < CHAIN_SLOT {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the chain slot to advance");
+
+    // An older record fetch is in flight: started when the chain was still
+    // at the park slot, it resolves at that slot with the stale record.
+    rpc_client.block_fetches();
+    let fetches_before = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
+    let in_flight = tokio::spawn({
+        let provider = remote_account_provider.clone();
+        async move {
+            provider
+                .try_get_multi(
+                    &[delegation_record_pubkey],
+                    None,
+                    AccountFetchContext::rpc_get_account(),
+                    Some(PARK_SLOT),
+                )
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches()
+            == fetches_before
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the in-flight record fetch to start");
+
+    // The release's record lookup joins the in-flight fetch as a waiter.
+    let release = tokio::spawn({
+        let fetch_cloner = fetch_cloner.clone();
+        async move {
+            fetch_cloner
+                .clone_released_collision_candidate(ParkedCollisionCandidate {
+                    pubkey: account_pubkey,
+                    slot: PARK_SLOT,
+                })
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    rpc_client.allow_fetches();
+    let stale = in_flight
+        .await
+        .unwrap()
+        .expect("in-flight record fetch must resolve");
+    assert_eq!(
+        stale[0].slot(),
+        PARK_SLOT,
+        "the joined in-flight result must be older than the chain slot"
+    );
+
+    // The RPC view catches up with the fresh generation delegated to us.
+    rpc_client.set_slot(CHAIN_SLOT);
+    rpc_client.set_clock_sysvar_for_slot(CHAIN_SLOT);
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        CHAIN_SLOT - 10,
+    );
+    release.await.unwrap();
+
+    let in_bank = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("release must clone the candidate from the effective slot");
+    assert!(in_bank.delegated());
+    assert_eq!(in_bank.owner(), &account_owner);
+    assert_eq!(in_bank.remote_slot(), CHAIN_SLOT);
+}
+
 // A released collision candidate delegated to another validator must be
 // ignored like record-first discovery, not force-cloned from the firehose.
 #[tokio::test]
