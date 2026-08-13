@@ -80,6 +80,9 @@ pub enum RemoteAccountProviderError {
     #[error("Resubscription delay must be greater than 0")]
     InvalidResubscriptionDelay,
 
+    #[error("Websocket subscriptions per connection must be greater than 0")]
+    InvalidWsSubsPerConnection,
+
     #[error(
         "Only one listener supported on lru cache removed accounts events"
     )]

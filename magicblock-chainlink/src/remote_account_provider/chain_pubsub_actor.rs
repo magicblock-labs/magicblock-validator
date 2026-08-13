@@ -114,9 +114,14 @@ impl ChainPubsubActor {
         client_id: &str,
         abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
+        subs_per_connection: Option<usize>,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
-        let config = PubsubClientConfig::from_url(pubsub_url, commitment);
+        let config = PubsubClientConfig::from_url_with_limit(
+            pubsub_url,
+            commitment,
+            subs_per_connection,
+        );
         Self::new(client_id, abort_sender, config).await
     }
 
@@ -314,6 +319,11 @@ impl ChainPubsubActor {
                 .remove(&pubkey);
         }
         result
+    }
+
+    /// Whether the actor currently considers its transport connected.
+    pub fn is_connected(&self) -> bool {
+        self.is_connected.load(Ordering::SeqCst)
     }
 
     pub fn subscriptions(&self) -> HashSet<Pubkey> {

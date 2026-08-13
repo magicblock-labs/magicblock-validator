@@ -61,6 +61,10 @@ impl AccountsLruCache {
         }
     }
 
+    pub fn capacity(&self) -> usize {
+        self.subscribed_accounts.lock().cap().get()
+    }
+
     /// Lock-free emptiness hint. Exact whenever no mutation is mid-flight;
     /// callers use it to skip the mutex on hot paths where a missed
     /// concurrent insert is harmless (e.g. skipping an LRU promote).

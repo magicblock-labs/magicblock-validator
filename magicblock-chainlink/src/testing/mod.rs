@@ -89,6 +89,28 @@ macro_rules! assert_subscribed_without_loaderv3_program_data_account {
     }};
 }
 
+/// Asserts LoaderV3 programs are subscribed together with their programdata
+/// account, which is held persistently for upgrade detection.
+#[macro_export]
+macro_rules! assert_subscribed_with_loaderv3_program_data_account {
+    ($provider:expr, $pubkeys:expr) => {{
+        for pubkey in $pubkeys {
+            let program_data_account_pubkey =
+                $crate::remote_account_provider::program_account::get_loaderv3_get_program_data_address(pubkey);
+            assert!(
+                $provider.is_watching(pubkey),
+                "Expected {} to be subscribed",
+                pubkey
+            );
+            assert!(
+                $provider.is_watching(&program_data_account_pubkey),
+                "Expected programdata {} to be subscribed for upgrade detection",
+                program_data_account_pubkey
+            );
+        }
+    }};
+}
+
 #[macro_export]
 macro_rules! assert_cloned_as_undelegated {
     ($cloner:expr, $pubkeys:expr) => {{

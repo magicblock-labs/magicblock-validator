@@ -372,9 +372,8 @@ fn account_clone_request(account: AccountSharedData) -> AccountCloneRequest {
         pubkey: random_pubkey(),
         account,
         commit_frequency_ms: None,
-        delegation_actions: DelegationActions::default(),
+        post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
-        needs_undelegation: false,
     }
 }
 
@@ -437,12 +436,13 @@ fn clone_classification_treats_delegated_account_as_delegation_record() {
 #[test]
 fn clone_classification_treats_action_dependency_as_action_dependency() {
     let mut request = account_clone_request(non_empty_account());
-    request.delegation_actions =
+    request.post_delegation_mode =
         DelegationActions::from(vec![Instruction::new_with_bytes(
             system_program::id(),
             &[1],
             vec![],
-        )]);
+        )])
+        .into();
 
     assert!(!request.account.delegated());
     assert_eq!(
@@ -5697,7 +5697,7 @@ async fn test_raw_eata_greedy_projection_carries_post_delegation_actions() {
         .expect("projected ATA should be cloned");
     assert!(projected_ata_request.account.delegated());
     assert!(
-        !projected_ata_request.delegation_actions.is_empty(),
+        projected_ata_request.post_delegation_mode.has_actions(),
         "post-delegation actions must stay attached to the projected ATA"
     );
 }
@@ -6194,7 +6194,7 @@ async fn test_explicit_clone_executes_post_delegation_actions_after_prefilter_ch
         .iter()
         .find(|request| request.pubkey == account_pubkey)
         .expect("delegated account clone request should be recorded");
-    assert!(!delegated_clone_request.delegation_actions.is_empty());
+    assert!(delegated_clone_request.post_delegation_mode.has_actions());
     let cloned_account = accounts_bank
         .get_account(&account_pubkey)
         .expect("delegated account should be cloned explicitly");
@@ -6557,6 +6557,152 @@ async fn test_released_collision_candidate_retries_when_clone_settles_stale() {
         release_fetches >= 4,
         "expected retried clone attempts, saw only {release_fetches} fetches"
     );
+}
+
+// A released candidate's record precheck must use the effective account-
+// fetch slot: when chain_slot() > candidate.slot, joining an older
+// in-flight record fetch must not settle the release on its stale result.
+#[tokio::test]
+async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_slot(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let other_validator = random_pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const PARK_SLOT: u64 = 100;
+    const CHAIN_SLOT: u64 = 120;
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        PARK_SLOT,
+        validator_keypair,
+    )
+    .await;
+
+    // The RPC still serves the previous generation's record (delegated to
+    // another validator).
+    let delegation_record_pubkey = add_delegation_record_with_slot_for(
+        &rpc_client,
+        account_pubkey,
+        other_validator,
+        account_owner,
+        PARK_SLOT - 10,
+    );
+
+    // The chain advances past the candidate slot via a clock update.
+    remote_account_provider
+        .pubsub_client()
+        .send_account_update(
+            solana_sdk_ids::sysvar::clock::ID,
+            CHAIN_SLOT,
+            &Account::default(),
+        )
+        .await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while remote_account_provider.chain_slot() < CHAIN_SLOT {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the chain slot to advance");
+
+    // An older record fetch is in flight: started when the chain was still
+    // at the park slot, it resolves at that slot with the stale record.
+    rpc_client.block_fetches();
+    let in_flight = tokio::spawn({
+        let provider = remote_account_provider.clone();
+        async move {
+            provider
+                .try_get_multi(
+                    &[delegation_record_pubkey],
+                    None,
+                    AccountFetchContext::rpc_get_account(),
+                    Some(PARK_SLOT),
+                )
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while remote_account_provider
+            .pending_fetch_waiter_count(&delegation_record_pubkey)
+            < 1
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the in-flight record fetch to start");
+
+    // The release's record lookup joins the in-flight fetch as a waiter.
+    let release = tokio::spawn({
+        let fetch_cloner = fetch_cloner.clone();
+        async move {
+            fetch_cloner
+                .clone_released_collision_candidate(ParkedCollisionCandidate {
+                    pubkey: account_pubkey,
+                    slot: PARK_SLOT,
+                })
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while remote_account_provider
+            .pending_fetch_waiter_count(&delegation_record_pubkey)
+            < 2
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the record lookup to join the fetch");
+
+    rpc_client.allow_fetches();
+    let stale = in_flight
+        .await
+        .unwrap()
+        .expect("in-flight record fetch must resolve");
+    assert_eq!(
+        stale[0].slot(),
+        PARK_SLOT,
+        "the joined in-flight result must be older than the chain slot"
+    );
+
+    // The RPC view catches up with the fresh generation delegated to us;
+    // the record is swapped before the slot advances so the release's
+    // retries can never observe the stale record at the new slot.
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        CHAIN_SLOT - 10,
+    );
+    rpc_client.set_slot(CHAIN_SLOT);
+    rpc_client.set_clock_sysvar_for_slot(CHAIN_SLOT);
+    release.await.unwrap();
+
+    let in_bank = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("release must clone the candidate from the effective slot");
+    assert!(in_bank.delegated());
+    assert_eq!(in_bank.owner(), &account_owner);
+    assert_eq!(in_bank.remote_slot(), CHAIN_SLOT);
 }
 
 // A released collision candidate delegated to another validator must be
@@ -7537,7 +7683,7 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
         .expect("delegated account should be cloned");
     assert!(action_request.account.delegated());
     assert!(
-        !action_request.delegation_actions.is_empty(),
+        action_request.post_delegation_mode.has_actions(),
         "post-delegation actions must stay attached to the delegated target"
     );
 }
@@ -7887,7 +8033,7 @@ async fn test_delegated_eata_subscription_update_projects_remote_ata() {
         .expect("projected ATA should be cloned");
     assert!(projected_ata_request.account.delegated());
     assert!(
-        !projected_ata_request.delegation_actions.is_empty(),
+        projected_ata_request.post_delegation_mode.has_actions(),
         "post-delegation actions must stay attached to the projected ATA"
     );
 }
@@ -8107,7 +8253,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
         .expect("raw eATA should be cloned");
     assert!(!raw_eata_request.account.delegated());
     assert!(
-        raw_eata_request.delegation_actions.is_empty(),
+        !raw_eata_request.post_delegation_mode.has_actions(),
         "raw eATA must never carry post-delegation actions"
     );
 
@@ -8117,7 +8263,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
         .expect("projected ATA should be cloned");
     assert!(projected_ata_request.account.delegated());
     assert!(
-        !projected_ata_request.delegation_actions.is_empty(),
+        projected_ata_request.post_delegation_mode.has_actions(),
         "projected delegated ATA must be the action-bearing clone target"
     );
 
@@ -8138,7 +8284,7 @@ async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
     let action_request_count = cloner
         .clone_requests()
         .iter()
-        .filter(|request| !request.delegation_actions.is_empty())
+        .filter(|request| request.post_delegation_mode.has_actions())
         .count();
     assert_eq!(
         action_request_count, 1,
@@ -8186,9 +8332,8 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 pubkey: account_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: actions,
+                post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8239,9 +8384,8 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 pubkey: account_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8292,9 +8436,8 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 pubkey: account_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8341,9 +8484,8 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 pubkey: ata_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8404,9 +8546,8 @@ async fn test_delegated_malformed_ata_clone_is_rejected() {
                 pubkey: ata_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8461,9 +8602,8 @@ async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
                 pubkey: account_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8513,9 +8653,8 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 pubkey: ata_pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8606,9 +8745,8 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 pubkey: target_pubkey,
                 account: target_account,
                 commit_frequency_ms: None,
-                delegation_actions: actions,
+                post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8637,7 +8775,9 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
         "writable dependency must be cloned before the action target"
     );
     assert!(
-        !clone_requests[target_idx].delegation_actions.is_empty(),
+        clone_requests[target_idx]
+            .post_delegation_mode
+            .has_actions(),
         "actions must stay attached to the delegated target"
     );
 }
@@ -8726,9 +8866,8 @@ async fn test_undelegating_action_dependency_stays_locked_and_target_is_rescued(
                 pubkey: target_pubkey,
                 account: target_account,
                 commit_frequency_ms: None,
-                delegation_actions: actions,
+                post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8757,8 +8896,14 @@ async fn test_undelegating_action_dependency_stays_locked_and_target_is_rescued(
     assert!(clone_requests
         .iter()
         .all(|request| request.pubkey == target_pubkey));
-    assert!(!clone_requests[0].needs_undelegation);
-    assert!(clone_requests[1].needs_undelegation);
+    assert!(matches!(
+        clone_requests[0].post_delegation_mode,
+        ClonePostDelegationMode::ExecuteActions(_)
+    ));
+    assert!(matches!(
+        clone_requests[1].post_delegation_mode,
+        ClonePostDelegationMode::RescueUndelegate
+    ));
 }
 
 #[tokio::test]
@@ -8802,9 +8947,10 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                     pubkey: target_pubkey,
                     account: target_account,
                     commit_frequency_ms: None,
-                    delegation_actions: actions.clone(),
+                    post_delegation_mode: ClonePostDelegationMode::from(
+                        actions.clone(),
+                    ),
                     delegated_to_other: None,
-                    needs_undelegation: false,
                 },
                 AccountFetchContext::rpc_get_account(),
             )
@@ -8823,7 +8969,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
         "newer remote-slot updates must not reclone an already delegated action target"
     );
     assert!(
-        !target_requests[0].delegation_actions.is_empty(),
+        target_requests[0].post_delegation_mode.has_actions(),
         "the first clone remains the only action-bearing clone"
     );
 }
@@ -8870,9 +9016,8 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
                 pubkey: target_pubkey,
                 account: target_account,
                 commit_frequency_ms: None,
-                delegation_actions: actions,
+                post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8932,9 +9077,8 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 pubkey: target_pubkey,
                 account: newer_remote_target,
                 commit_frequency_ms: None,
-                delegation_actions: DelegationActions::default(),
+                post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                needs_undelegation: false,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -9139,7 +9283,7 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
 
     assert_eq!(projected_ata_request.pubkey, ata_pubkey);
     assert!(
-        !projected_ata_request.delegation_actions.is_empty(),
+        projected_ata_request.post_delegation_mode.has_actions(),
         "projected ATA clone request must preserve post-delegation actions",
     );
 }
@@ -12111,4 +12255,159 @@ async fn test_replay_subscription_update_for_unwatched_account_is_processed() {
         .expect("account should be in bank");
     assert_eq!(in_bank.remote_slot(), 50);
     assert_eq!(in_bank.lamports(), 2_000_000);
+}
+
+/// An upgrade rewrites the program account byte-identically, so no
+/// program-account notification may be emitted at all. The programdata
+/// notification alone — routed through the full subscription pipeline —
+/// must reload the program, and must not clone the programdata account
+/// into the bank.
+#[tokio::test]
+async fn test_programdata_update_alone_detects_program_upgrade() {
+    use crate::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const DEPLOY_SLOT: u64 = 90;
+    const CURRENT_SLOT: u64 = 100;
+    const UPGRADE_SLOT: u64 = 150;
+
+    let (program_account, program_data_account) =
+        loaderv3_program_accounts(&program_data_pubkey, DEPLOY_SLOT, &[7; 64]);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        remote_account_provider,
+        rpc_client,
+        cloner,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (program_pubkey, program_account.clone()),
+            (program_data_pubkey, program_data_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut update = AccountSharedData::from(program_account.clone());
+    update.set_remote_slot(CURRENT_SLOT);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update).await;
+    assert_eq!(cloner.program_clone_count(), 1);
+
+    // The load must leave a persistent programdata watch behind; without it
+    // the upgrade notification below would be dropped as unwatched.
+    assert!(
+        remote_account_provider.is_watching(&program_data_pubkey),
+        "programdata subscription must persist after the clone"
+    );
+
+    // Upgrade on chain. Only the programdata account changes bytes, so only
+    // it notifies — no program-account update is sent.
+    let upgraded_elf = [9u8; 64];
+    let (_, upgraded_program_data) = loaderv3_program_accounts(
+        &program_data_pubkey,
+        UPGRADE_SLOT,
+        &upgraded_elf,
+    );
+    rpc_client.set_current_slot(UPGRADE_SLOT);
+    rpc_client.account_override_slot(&program_pubkey, UPGRADE_SLOT);
+    rpc_client.add_account(program_data_pubkey, upgraded_program_data.clone());
+
+    // Clear the program verify throttle window.
+    tokio::time::sleep(Duration::from_millis(350)).await;
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: program_data_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                upgraded_program_data,
+                UPGRADE_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Account,
+        })
+        .await
+        .expect("subscription update must be accepted");
+
+    let mut reloaded = false;
+    for _ in 0..100 {
+        if cloner.program_clone_count() == 2 {
+            reloaded = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        reloaded,
+        "programdata notification alone must trigger a program reload"
+    );
+    let reloaded_program = cloner
+        .get_cloned_program(&program_pubkey)
+        .expect("program must be cloned");
+    assert_eq!(
+        reloaded_program.program_data, upgraded_elf,
+        "reload must pick up the upgraded program data"
+    );
+    // The programdata account itself must not be cloned into the bank.
+    assert_not_cloned!(cloner, &[program_data_pubkey]);
+}
+
+/// A fresh bank copy can predate this process (e.g. a restored bank), in
+/// which case the clone is skipped — the upgrade watch must be installed
+/// anyway so upgrades of that program stay observable.
+#[tokio::test]
+async fn test_skipped_program_clone_still_installs_programdata_watch() {
+    use crate::remote_account_provider::program_account::{
+        get_loaderv3_get_program_data_address, LoadedProgram,
+        RemoteProgramLoader, LOADER_V3,
+    };
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        remote_account_provider,
+        accounts_bank,
+        cloner,
+        ..
+    } = setup([], CURRENT_SLOT, validator_keypair.insecure_clone()).await;
+
+    // Program already in the bank at a slot as fresh as the load below.
+    let mut bank_program = AccountSharedData::new(1_000_000, 36, &LOADER_V3);
+    bank_program.set_remote_slot(CURRENT_SLOT);
+    accounts_bank.insert(program_pubkey, bank_program);
+
+    let program = LoadedProgram {
+        program_id: program_pubkey,
+        authority: random_pubkey(),
+        program_data: vec![7; 64],
+        loader: RemoteProgramLoader::V3,
+        loader_status:
+            solana_loader_v4_interface::state::LoaderV4Status::Deployed,
+        remote_slot: CURRENT_SLOT,
+    };
+    fetch_cloner
+        .clone_program_with_ownership(
+            program,
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect("skipped clone must succeed");
+
+    assert_eq!(cloner.program_clone_count(), 0, "clone must be skipped");
+    assert!(
+        remote_account_provider.is_watching(&program_data_pubkey),
+        "skipped clone must still install the programdata watch"
+    );
 }
