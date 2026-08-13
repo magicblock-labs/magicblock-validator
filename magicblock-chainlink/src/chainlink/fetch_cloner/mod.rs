@@ -2505,10 +2505,16 @@ where
             primary_pubkey: candidate.pubkey,
             context_slot: candidate.slot,
         };
+        // The record precheck shares the account fetch's effective slot
+        // floor; a lower floor could settle on an older in-flight record
+        // result and conservatively re-park the candidate.
+        let record_min_context_slot = candidate
+            .slot
+            .max(self.remote_account_provider.chain_slot());
         let Some((deleg_record, _)) = self
             .fetch_and_parse_delegation_record(
                 candidate.pubkey,
-                candidate.slot,
+                record_min_context_slot,
                 record_context,
                 companion_fetch_log_context,
             )
