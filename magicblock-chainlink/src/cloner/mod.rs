@@ -14,7 +14,7 @@ use solana_account::{AccountBuilder, AccountMode};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_pubkey::Pubkey;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::remote_account_provider::program_account::{
     LOADER_V1, LOADER_V4, LoadedProgram, RemoteProgramLoader,
@@ -152,6 +152,13 @@ pub(crate) async fn clone_account(
     request: AccountCloneRequest,
     materialization: AccountMaterialization,
 ) -> ClonerResult<AccountMode> {
+    if let Some(authority) = request.delegated_to_other {
+        warn!(
+            pubkey = %request.pubkey,
+            delegated_to = %authority,
+            "Cloning account delegated to another validator"
+        );
+    }
     if request.post_delegation_mode.is_rescue_undelegate()
         && materialization == AccountMaterialization::Update
     {
