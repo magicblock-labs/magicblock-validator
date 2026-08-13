@@ -137,19 +137,17 @@ impl IntentExecutionResult {
     /// sends; action-only intents (`has_dedup_guard == false`) have no such
     /// guard and can double-execute if their transaction landed unobserved,
     /// so they only retry pre-send failures.
-    pub fn is_retriable(&self, has_dedup_guard: bool) -> bool {
-        let send_stage_failure = matches!(
-            &self.inner,
-            Err(IntentExecutorError::FailedToCommitError { .. })
-                | Err(IntentExecutorError::FailedToFinalizeError { .. })
-        );
+    pub fn is_retriable(&self) -> bool {
         self.callbacks_report.is_empty()
             && matches!(&self.inner, Err(err) if err.is_transient())
-            && (has_dedup_guard || !send_stage_failure)
     }
 
     pub fn is_err(&self) -> bool {
         self.inner.is_err()
+    }
+
+    pub fn is_ok(&self) -> bool {
+        self.inner.is_ok()
     }
 }
 
