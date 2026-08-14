@@ -229,11 +229,14 @@ request-timeout = "5s"
 
 # Which post-delegation action signers to risk check.
 #   "all-signers":       check every signer of every action (conservative).
-#   "relevant-programs": only check when an action involves the SPL Token,
-#                        ephemeral SPL (eATA/ESPL), or Magic program.
-# Default: "relevant-programs"
+#   "relevant-programs": only check when an action involves a value
+#                        transferring program: SPL Token (legacy and 2022),
+#                        ephemeral SPL (eATA/ESPL), Magic, or the (ephemeral)
+#                        system program. Actions touching none of these
+#                        activate without any risk server call.
+# Default: "all-signers"
 # Env: MBV_CHAINLINK__RISK__CHECK_STRATEGY
-check-strategy = "relevant-programs"
+check-strategy = "all-signers"
 
 # ==============================================================================
 # Leader Administration (Optional)

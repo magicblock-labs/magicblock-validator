@@ -126,11 +126,15 @@ mod aml_check_strategy {
 
     #[test]
     fn relevant_programs_strategy_matches_each_relevant_program() {
+        // Spelled out rather than iterating RISK_RELEVANT_PROGRAMS, so that
+        // dropping a program from that list fails this test.
         for program in [
             TOKEN_PROGRAM_ID,
             TOKEN_2022_PROGRAM_ID,
             EATA_PROGRAM_ID,
             magicblock_magic_program_api::ID,
+            system_program::ID,
+            magicblock_magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
         ] {
             let actions: DelegationActions =
                 vec![action_for_program(program)].into();
@@ -153,6 +157,28 @@ mod aml_check_strategy {
                 "program {program} referenced as account should require check",
             );
         }
+    }
+
+    #[test]
+    fn default_strategy_checks_all_signers() {
+        // The narrower strategy must be opted into: defaulting to it would
+        // silently drop coverage for deployments that only set `enabled`.
+        assert_eq!(AmlCheckStrategy::default(), AmlCheckStrategy::AllSigners);
+    }
+
+    #[test]
+    fn relevant_programs_strategy_matches_native_sol_transfers() {
+        let actions: DelegationActions =
+            vec![solana_system_interface::instruction::transfer(
+                &Pubkey::new_unique(),
+                &Pubkey::new_unique(),
+                1_000,
+            )]
+            .into();
+        assert!(delegation_actions_require_risk_check(
+            AmlCheckStrategy::RelevantPrograms,
+            &actions,
+        ));
     }
 
     #[test]

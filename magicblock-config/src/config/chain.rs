@@ -86,12 +86,14 @@ impl Default for ChainLinkConfig {
 #[serde(rename_all = "kebab-case")]
 pub enum AmlCheckStrategy {
     /// Check every signer of every post-delegation action, regardless of which
-    /// programs the action invokes.
-    AllSigners,
-    /// Only check signers when a post-delegation action involves the SPL Token,
-    /// ephemeral SPL (eATA/ESPL), or Magic program. Actions touching none of
-    /// these programs skip the risk check entirely.
+    /// programs the action invokes. The default, since it is the only strategy
+    /// that cannot silently let an action through unchecked.
     #[default]
+    AllSigners,
+    /// Only check signers when a post-delegation action involves a value
+    /// transferring program: SPL Token (legacy and 2022), ephemeral SPL
+    /// (eATA/ESPL), Magic, or the (ephemeral) system program. Actions touching
+    /// none of these programs skip the risk check entirely.
     RelevantPrograms,
 }
 
