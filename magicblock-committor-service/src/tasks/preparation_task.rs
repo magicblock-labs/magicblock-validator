@@ -401,6 +401,7 @@ impl Preallocate<FinalizeTask> {
     }
 }
 
+// TODO: use once dlp side support large undelegations
 impl Preallocate<UndelegateTask> {
     pub fn from_undelegate_task(task: &UndelegateTask) -> Option<Self> {
         Self::new(task.delegated_account, 0, task.state_size as u32)

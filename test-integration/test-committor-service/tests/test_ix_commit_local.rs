@@ -611,7 +611,7 @@ async fn test_ix_commit_finalize_3_large_1_small() {
     commit_large_accounts(
         &[20 * (1 << 10), 20 * (1 << 10), 32 * (1 << 10) + 3, 201],
         1,
-        CommitIntentKind::Commit,
+        CommitIntentKind::CommitFinalize,
         expect_strategies(&[
             (CommitStrategy::DiffBuffer, 3),
             (CommitStrategy::StateArgs, 1),
@@ -663,7 +663,7 @@ async fn test_ix_commit_finalize_7_large_2_small() {
             103,
         ],
         1,
-        CommitIntentKind::Commit,
+        CommitIntentKind::CommitFinalize,
         expect_strategies(&[
             (CommitStrategy::DiffBuffer, 7),
             (CommitStrategy::StateArgs, 2),

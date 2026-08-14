@@ -179,10 +179,8 @@ impl DeliveryPreparator {
                     Preallocate::from_finalize_task(value)
                         .map(|el| el.instructions(authority))
                 }
-                BaseTaskImpl::Undelegate(value) => {
-                    Preallocate::from_undelegate_task(value)
-                        .map(|el| el.instructions(authority))
-                }
+                // TODO: not supported by dlp. use Preallocate<UndelegateTask> once enabled
+                BaseTaskImpl::Undelegate(_) => None,
                 _ => None,
             })
             .flatten();
@@ -291,10 +289,6 @@ impl DeliveryPreparator {
 
         preparation_task.done();
         Ok(())
-    }
-
-    pub async fn preallocate_account(&self) -> DeliveryPreparatorResult<()> {
-        todo!()
     }
 
     /// Runs `prepare_task` and, if the buffer was already initialized,
