@@ -34,6 +34,7 @@ async fn init_remote_account_provider(
         Endpoint::WebSocket {
             url: PUBSUB_URL.to_string(),
             label: "test-ws".to_string(),
+            subs_per_connection: None,
         },
     ];
     let endpoints = Endpoints::from(endpoints_vec.as_slice());

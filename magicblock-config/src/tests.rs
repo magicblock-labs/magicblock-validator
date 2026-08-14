@@ -448,7 +448,7 @@ fn test_example_config_full_coverage() {
         matches!(r, Remote::Http(_)) && r.url_str() == consts::DEVNET_URL
     }));
     assert!(config.remotes.iter().any(|r| {
-        matches!(r, Remote::Websocket(_))
+        matches!(r, Remote::Websocket(..))
             && r.url_str() == "wss://api.devnet.solana.com/"
     }));
     assert_eq!(config.aperture.listen.0.port(), 8899);
@@ -749,7 +749,35 @@ fn test_parse_http_remote() {
 #[parallel]
 fn test_parse_websocket_remote() {
     let remote: Remote = "ws://localhost:8900".parse().unwrap();
-    assert!(matches!(remote, Remote::Websocket(_)));
+    assert!(matches!(remote, Remote::Websocket(..)));
+}
+
+#[test]
+#[parallel]
+fn test_deserialize_remotes_with_per_endpoint_ws_subs_limit() {
+    #[derive(serde::Deserialize)]
+    struct Cfg {
+        remotes: Vec<Remote>,
+    }
+    let cfg: Cfg = toml::from_str(
+        "remotes = [\n\
+             \"http://localhost:8899\",\n\
+             { url = \"ws://localhost:8900\", ws-subs-per-connection = 100 },\n\
+         ]\n",
+    )
+    .unwrap();
+    assert!(matches!(cfg.remotes[0], Remote::Http(_)));
+    assert!(matches!(cfg.remotes[1], Remote::Websocket(_, Some(100))));
+
+    // The option is rejected on non-websocket remotes and when zero
+    assert!(toml::from_str::<Cfg>(
+        "remotes = [{ url = \"http://localhost:8899\", ws-subs-per-connection = 100 }]"
+    )
+    .is_err());
+    assert!(toml::from_str::<Cfg>(
+        "remotes = [{ url = \"ws://localhost:8900\", ws-subs-per-connection = 0 }]"
+    )
+    .is_err());
 }
 
 #[test]
@@ -774,7 +802,7 @@ fn test_parse_alias() {
 fn test_to_websocket_from_http() {
     let remote: Remote = "http://localhost:8899".parse().unwrap();
     let ws_remote = remote.to_websocket().unwrap();
-    assert!(matches!(ws_remote, Remote::Websocket(_)));
+    assert!(matches!(ws_remote, Remote::Websocket(..)));
     assert_eq!(ws_remote.url_str(), "ws://localhost:8900/");
 }
 
