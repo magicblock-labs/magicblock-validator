@@ -42,7 +42,7 @@ impl WsDispatcher {
         let engine = self.engine.clone();
         let handle = tokio::spawn(async move {
             while let Some(logs) = rx.recv().await {
-                let slot = engine.blocks().latest().slot;
+                let slot = context_slot(&engine);
                 let value = LogsValue {
                     signature: logs.signature.to_string(),
                     err: logs.result.as_ref().err().cloned(),
