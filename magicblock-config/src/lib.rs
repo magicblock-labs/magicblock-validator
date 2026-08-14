@@ -149,7 +149,7 @@ impl ValidatorParams {
         if self
             .remotes
             .iter()
-            .any(|r| matches!(r, Remote::Websocket(_)))
+            .any(|r| matches!(r, Remote::Websocket(..)))
         {
             return;
         }
@@ -186,7 +186,7 @@ impl ValidatorParams {
     pub fn websocket_urls(&self) -> impl Iterator<Item = &str> + '_ {
         self.remotes
             .iter()
-            .filter(|r| matches!(r, Remote::Websocket(_)))
+            .filter(|r| matches!(r, Remote::Websocket(..)))
             .map(|r| r.url_str())
     }
 
