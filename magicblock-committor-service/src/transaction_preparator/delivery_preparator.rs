@@ -30,11 +30,7 @@ use tracing::{error, info};
 use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        preparation_task::{
-            BufferPreparationTask, CleanupTask, PreallocateCommitFinalizeTask,
-            PreallocateCommitStateTask, PreallocateFinalizeTask,
-            PreallocateUndelegateTask,
-        },
+        preparation_task::{BufferPreparationTask, CleanupTask, Preallocate},
         task_strategist::TransactionStrategy,
         utils::TransactionUtils,
         BaseTaskImpl,
@@ -183,20 +179,18 @@ impl DeliveryPreparator {
         let mut preallocate_instructions = tasks
             .iter()
             .filter_map(|task| match task {
-                BaseTaskImpl::Commit(value) => {
-                    PreallocateCommitStateTask::from_commit(value)
-                        .map(|el| el.instructions(authority))
-                }
+                BaseTaskImpl::Commit(value) => Preallocate::from_commit(value)
+                    .map(|el| el.instructions(authority)),
                 BaseTaskImpl::CommitFinalize(value) => {
-                    PreallocateCommitFinalizeTask::from_commit_finalize(value)
+                    Preallocate::from_commit_finalize(value)
                         .map(|el| el.instructions(authority))
                 }
                 BaseTaskImpl::Finalize(value) => {
-                    PreallocateFinalizeTask::from_finalize_task(value)
+                    Preallocate::from_finalize_task(value)
                         .map(|el| el.instructions(authority))
                 }
                 BaseTaskImpl::Undelegate(value) => {
-                    PreallocateUndelegateTask::from_undelegate_task(value)
+                    Preallocate::from_undelegate_task(value)
                         .map(|el| el.instructions(authority))
                 }
                 _ => None,

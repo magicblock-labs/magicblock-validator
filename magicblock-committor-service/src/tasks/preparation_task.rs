@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use dlp_api::{args::PreallocateBufferKind, diff::compute_diff};
 use magicblock_committor_program::{
     instruction_builder::{
@@ -19,7 +21,7 @@ use crate::{
     tasks::{
         commit_finalize_task::CommitFinalizeTask,
         commit_task::{CommitDelivery, CommitTask},
-        BaseTaskImpl, FinalizeTask, UndelegateTask,
+        FinalizeTask, UndelegateTask,
     },
 };
 
@@ -296,26 +298,60 @@ impl CleanupTask {
     }
 }
 
-/// TODO(edwin):
-/// Could be implemented by CommitTask, FinalizeTask and others
-pub trait HasPreparation<P> {
-    // Returns Some(P) if task requires preparation
-    fn preparation_task(&self) -> Option<P>;
-}
-
-pub struct PreallocateCommitStateTask {
+pub struct Preallocate<T> {
     delegated_account: Pubkey,
+    current_size: u32,
     target_size: u32,
+    _phantom: PhantomData<T>,
 }
 
-impl PreallocateCommitStateTask {
-    pub fn from(task: &BaseTaskImpl) -> Option<Self> {
-        match &task {
-            BaseTaskImpl::Commit(value) => Self::from_commit(value),
-            _ => None,
-        }
+pub trait Preallocatable {
+    const KIND: PreallocateBufferKind;
+}
+
+impl Preallocatable for CommitTask {
+    const KIND: PreallocateBufferKind = PreallocateBufferKind::CommitState;
+}
+
+impl Preallocatable for CommitFinalizeTask {
+    const KIND: PreallocateBufferKind = PreallocateBufferKind::DelegatedAccount;
+}
+
+impl Preallocatable for FinalizeTask {
+    const KIND: PreallocateBufferKind = PreallocateBufferKind::DelegatedAccount;
+}
+
+impl Preallocatable for UndelegateTask {
+    const KIND: PreallocateBufferKind = PreallocateBufferKind::UndelegateBuffer;
+}
+
+impl<T: Preallocatable> Preallocate<T> {
+    pub fn new(
+        delegated_account: Pubkey,
+        current_size: u32,
+        target_size: u32,
+    ) -> Option<Self> {
+        (target_size > current_size + MAX_PERMITTED_DATA_INCREASE as u32)
+            .then_some(Self {
+                delegated_account,
+                current_size,
+                target_size,
+                _phantom: PhantomData,
+            })
     }
 
+    pub fn instructions(&self, validator: &Pubkey) -> Vec<Instruction> {
+        dlp_api::instruction_builder::preallocate_buffer_chunks(
+            *validator,
+            self.delegated_account,
+            T::KIND,
+            self.current_size,
+            self.target_size,
+        )
+    }
+}
+
+impl Preallocate<CommitTask> {
     pub fn from_commit(task: &CommitTask) -> Option<Self> {
         let delegated_account = task.committed_account.pubkey;
         match &task.delivery_details {
@@ -328,46 +364,14 @@ impl PreallocateCommitStateTask {
             // account state, so the target size is the same regardless of
             // whether delivery is diff or state based. see dlp merge_diff_copy
             | CommitDelivery::DiffInBuffer { .. } => {
-                let target_size = task.committed_account.account.data.len();
-                if target_size > MAX_PERMITTED_DATA_INCREASE {
-                    Some(Self {
-                        delegated_account,
-                        target_size: target_size as u32,
-                    })
-                } else {
-                    None
-                }
+                let target_size = task.committed_account.account.data.len() as u32;
+                Self::new(delegated_account, 0, target_size)
             }
         }
     }
-
-    /// Returns instructions for allocating the commit_state buffer.
-    pub fn instructions(&self, validator: &Pubkey) -> Vec<Instruction> {
-        dlp_api::instruction_builder::preallocate_buffer_chunks(
-            *validator,
-            self.delegated_account,
-            PreallocateBufferKind::CommitState,
-            0,
-            self.target_size,
-        )
-    }
 }
 
-pub struct PreallocateCommitFinalizeTask {
-    delegated_account: Pubkey,
-    target_size: u32,
-}
-
-impl PreallocateCommitFinalizeTask {
-    pub fn from(task: &BaseTaskImpl) -> Option<Self> {
-        match &task {
-            BaseTaskImpl::CommitFinalize(value) => {
-                Self::from_commit_finalize(value)
-            }
-            _ => None,
-        }
-    }
-
+impl Preallocate<CommitFinalizeTask> {
     pub fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
         let delegated_account = task.committed_account.pubkey;
         match &task.delivery {
@@ -375,97 +379,31 @@ impl PreallocateCommitFinalizeTask {
             CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
                 None
             }
-            // Same reasoning as PreallocateCommitStateTask::from_commit
-            CommitDelivery::StateInBuffer { .. }
-            | CommitDelivery::DiffInBuffer { .. } => {
-                let target_size = task.committed_account.account.data.len();
-                if target_size > MAX_PERMITTED_DATA_INCREASE {
-                    Some(Self {
-                        delegated_account,
-                        target_size: target_size as u32,
-                    })
-                } else {
-                    None
-                }
+            CommitDelivery::StateInBuffer { .. } => {
+                let target_size =
+                    task.committed_account.account.data.len() as u32;
+                Self::new(delegated_account, 0, target_size)
+            }
+            CommitDelivery::DiffInBuffer { base_account, .. } => {
+                // This increases delegated account, so we care about delta and not resulting size
+                let current_size = base_account.data.len() as u32;
+                let target_size =
+                    task.committed_account.account.data.len() as u32;
+                Self::new(delegated_account, current_size, target_size)
             }
         }
     }
-
-    /// Returns instructions for allocating the delegated account.
-    pub fn instructions(&self, validator: &Pubkey) -> Vec<Instruction> {
-        dlp_api::instruction_builder::preallocate_buffer_chunks(
-            *validator,
-            self.delegated_account,
-            PreallocateBufferKind::DelegatedAccount,
-            0,
-            self.target_size,
-        )
-    }
 }
 
-pub struct PreallocateFinalizeTask {
-    delegated_account: Pubkey,
-    target_size: u32,
-}
-
-impl PreallocateFinalizeTask {
-    pub fn from(task: &BaseTaskImpl) -> Option<Self> {
-        match &task {
-            BaseTaskImpl::Finalize(value) => Self::from_finalize_task(value),
-            _ => None,
-        }
-    }
-
+impl Preallocate<FinalizeTask> {
     pub fn from_finalize_task(task: &FinalizeTask) -> Option<Self> {
-        (task.state_size > MAX_PERMITTED_DATA_INCREASE).then_some(Self {
-            delegated_account: task.delegated_account,
-            target_size: task.state_size as u32,
-        })
-    }
-
-    /// Returns instructions for allocating the delegated account.
-    pub fn instructions(&self, validator: &Pubkey) -> Vec<Instruction> {
-        dlp_api::instruction_builder::preallocate_buffer_chunks(
-            *validator,
-            self.delegated_account,
-            PreallocateBufferKind::DelegatedAccount,
-            0,
-            self.target_size,
-        )
+        Self::new(task.delegated_account, 0, task.state_size as u32)
     }
 }
 
-pub struct PreallocateUndelegateTask {
-    delegated_account: Pubkey,
-    target_size: u32,
-}
-
-impl PreallocateUndelegateTask {
-    pub fn from(task: &BaseTaskImpl) -> Option<Self> {
-        match &task {
-            BaseTaskImpl::Undelegate(value) => {
-                Self::from_undelegate_task(value)
-            }
-            _ => None,
-        }
-    }
-
+impl Preallocate<UndelegateTask> {
     pub fn from_undelegate_task(task: &UndelegateTask) -> Option<Self> {
-        (task.state_size > MAX_PERMITTED_DATA_INCREASE).then_some(Self {
-            delegated_account: task.delegated_account,
-            target_size: task.state_size as u32,
-        })
-    }
-
-    /// Returns instructions for allocating the undelegate buffer.
-    pub fn instructions(&self, validator: &Pubkey) -> Vec<Instruction> {
-        dlp_api::instruction_builder::preallocate_buffer_chunks(
-            *validator,
-            self.delegated_account,
-            PreallocateBufferKind::UndelegateBuffer,
-            0,
-            self.target_size,
-        )
+        Self::new(task.delegated_account, 0, task.state_size as u32)
     }
 }
 
