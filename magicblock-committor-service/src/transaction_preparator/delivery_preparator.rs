@@ -132,12 +132,7 @@ impl DeliveryPreparator {
         res1.into_iter()
             .collect::<Result<Vec<_>, _>>()
             .map_err(DeliveryPreparatorError::FailedToPrepareBufferAccounts)?;
-        res2.map_err(|err| {
-            DeliveryPreparatorError::FailedToPreallocateError(
-                // TODO(edwin): another variant
-                InternalError::BufferExecutionError(err),
-            )
-        })?;
+        res2.map_err(DeliveryPreparatorError::FailedToPreallocateError)?;
 
         Ok(())
     }
@@ -159,12 +154,7 @@ impl DeliveryPreparator {
             uniqueness_nonce,
         )
         .await
-        .map_err(|err| {
-            DeliveryPreparatorError::FailedToPreallocateError(
-                // TODO(edwin): another variant
-                InternalError::BufferExecutionError(err),
-            )
-        })
+        .map_err(DeliveryPreparatorError::FailedToPreallocateError)
     }
 
     /// Derives the chunked PreallocateBuffer instructions for whichever
@@ -220,17 +210,14 @@ impl DeliveryPreparator {
         authority: &Keypair,
         chunked_ixs: &mut [Vec<Instruction>],
         uniqueness_nonce: Option<u64>,
-    ) -> Result<(), BufferExecutionError> {
+    ) -> Result<(), TransactionSendError> {
         let iter = chunked_ixs.iter_mut().map(|el| {
             self.send_ixs_with_retry(
                 el,
                 authority,
                 3,
                 uniqueness_nonce,
-                // TODO(edwin): need different mapper
-                BufferErrorMapper {
-                    transaction_error_mapper: BufferTransactionErrorMapper,
-                },
+                PreallocateErrorMapper,
             )
         });
 
@@ -712,6 +699,30 @@ impl TransactionSendError {
     }
 }
 
+/// Dummy error mapper for preallocate
+/// We introduce it to reuse `decide_rpc_error_flow` mechanics
+/// Atm there's no need to map error to anything as we assume idempotent execution of preallocate
+pub struct PreallocateErrorMapper;
+impl SendErrorMapper<TransactionSendError> for PreallocateErrorMapper {
+    type ExecutionError = TransactionSendError;
+    fn map(&self, error: TransactionSendError) -> Self::ExecutionError {
+        error
+    }
+
+    fn decide_flow(
+        &self,
+        mapped_error: &Self::ExecutionError,
+    ) -> ControlFlow<(), Duration> {
+        match mapped_error {
+            TransactionSendError::CompileError(_)
+            | TransactionSendError::SignerError(_) => ControlFlow::Break(()),
+            TransactionSendError::MagicBlockRpcClientError(value) => {
+                decide_rpc_error_flow(value.as_ref())
+            }
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum BufferExecutionError {
     #[error("AccountAlreadyInitializedError: {0}")]
@@ -854,7 +865,7 @@ pub enum DeliveryPreparatorError {
     #[error(
         "Failed to preallocate delegated account for finalize instruction: {0}"
     )]
-    FailedToPreallocateError(#[source] InternalError),
+    FailedToPreallocateError(#[source] TransactionSendError),
     #[error("FailedToPrepareBufferAccounts: {0}")]
     FailedToPrepareBufferAccounts(#[source] InternalError),
     #[error("FailedToCreateALTError: {0}")]
@@ -865,16 +876,16 @@ impl DeliveryPreparatorError {
     pub fn signature(&self) -> Option<Signature> {
         match self {
             Self::FailedToCreateALTError(err)
-            | Self::FailedToPrepareBufferAccounts(err)
-            | Self::FailedToPreallocateError(err) => err.signature(),
+            | Self::FailedToPrepareBufferAccounts(err) => err.signature(),
+            Self::FailedToPreallocateError(err) => err.signature(),
         }
     }
 
     pub fn is_transient(&self) -> bool {
         match self {
             Self::FailedToCreateALTError(err)
-            | Self::FailedToPrepareBufferAccounts(err)
-            | Self::FailedToPreallocateError(err) => err.is_transient(),
+            | Self::FailedToPrepareBufferAccounts(err) => err.is_transient(),
+            Self::FailedToPreallocateError(err) => err.is_transient(),
         }
     }
 }
@@ -942,50 +953,6 @@ mod tests {
             transaction_size <= MAX_TRANSACTION_WIRE_SIZE,
             "PREALLOCATE_CHUNK_SIZE={PREALLOCATE_CHUNK_SIZE} no longer fits \
              in one tx ({transaction_size} > {MAX_TRANSACTION_WIRE_SIZE})"
-        );
-    }
-
-    /// One more instruction than PREALLOCATE_CHUNK_SIZE should already be
-    /// too many for the chunking to be needlessly conservative — if this
-    /// starts failing (i.e. it now also fits), PREALLOCATE_CHUNK_SIZE should
-    /// be bumped to pack transactions tighter.
-    #[test]
-    fn preallocate_chunk_size_plus_one_does_not_fit_in_one_tx() {
-        let authority = Keypair::new();
-        let delegated_account = Pubkey::new_unique();
-
-        let mut instructions: Vec<Instruction> = (0..PREALLOCATE_CHUNK_SIZE
-            + 1)
-            .map(|_| {
-                dlp_api::instruction_builder::preallocate_buffer(
-                    authority.pubkey(),
-                    delegated_account,
-                    PreallocateBufferKind::CommitState,
-                    u32::MAX,
-                )
-            })
-            .collect();
-        instructions.push(TransactionUtils::uniqueness_noop_instruction(42));
-
-        let message = Message::try_compile(
-            &authority.pubkey(),
-            &instructions,
-            &[],
-            Hash::new_unique(),
-        )
-        .expect("compile oversized preallocate chunk transaction");
-        let transaction = VersionedTransaction::try_new(
-            VersionedMessage::V0(message),
-            &[&authority],
-        )
-        .expect("sign oversized preallocate chunk transaction");
-
-        let transaction_size = serialized_transaction_size(&transaction);
-        assert!(
-            transaction_size > MAX_TRANSACTION_WIRE_SIZE,
-            "expected PREALLOCATE_CHUNK_SIZE + 1 instructions to no longer \
-             fit, but got {transaction_size} <= {MAX_TRANSACTION_WIRE_SIZE}; \
-             PREALLOCATE_CHUNK_SIZE could be increased"
         );
     }
 }

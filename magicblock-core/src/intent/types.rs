@@ -53,4 +53,8 @@ impl CommittedAccount {
             remote_slot,
         }
     }
+
+    pub fn data_len(&self) -> usize {
+        self.account.data.len()
+    }
 }

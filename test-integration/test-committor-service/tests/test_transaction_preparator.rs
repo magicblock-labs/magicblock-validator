@@ -37,6 +37,7 @@ async fn test_prepare_commit_tx_with_single_account() {
         create_commit_task(1, true, committed_account.clone(), None).into(),
         FinalizeTask {
             delegated_account: committed_account.pubkey,
+            state_size: committed_account.account.data.len(),
         }
         .into(),
     ];
@@ -97,11 +98,13 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
         // finalize account 1
         FinalizeTask {
             delegated_account: committed_account1.pubkey,
+            state_size: committed_account1.data_len(),
         }
         .into(),
         // finalize account 2
         FinalizeTask {
             delegated_account: committed_account2.pubkey,
+            state_size: committed_account2.data_len(),
         }
         .into(),
     ];
@@ -189,6 +192,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
         // finalize account
         FinalizeTask {
             delegated_account: committed_account.pubkey,
+            state_size: committed_account.data_len(),
         }
         .into(),
         // BaseAction
@@ -263,6 +267,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
         // finalize account
         FinalizeTask {
             delegated_account: committed_account.pubkey,
+            state_size: committed_account.data_len(),
         }
         .into(),
         // Undelegate
@@ -271,6 +276,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
             include_undelegation_request: false,
+            state_size: committed_account.data_len(),
         }
         .into(),
     ];
