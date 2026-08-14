@@ -21,14 +21,15 @@ pub fn keeper_builder<R>(
     engine: &EngineConfig<R>,
     programs: &[LoadableProgram],
 ) -> Result<KeeperBuilder, Error> {
+    let programs = load_programs(programs)?;
     Ok(KeeperBuilder {
         authority: engine.authority.clone(),
         accountsdb: engine.accountsdb.clone(),
         ledger: engine.ledger.clone(),
         blockstore: engine.blockstore,
         builtins: builtins(),
-        programs: load_programs(programs)?,
-        accounts: accounts::initial_accounts(),
+        accounts: accounts::initial_accounts(&programs),
+        programs,
         rent: Rent::default(),
     })
 }

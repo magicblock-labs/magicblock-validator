@@ -129,7 +129,7 @@ impl Remote {
     }
 
     /// Converts an HTTP remote to a WebSocket remote by deriving the appropriate WebSocket URL.
-    pub(crate) fn to_websocket(&self) -> Option<Self> {
+    pub fn to_websocket(&self) -> Option<Self> {
         let mut url = match self {
             Self::Websocket(_) => return Some(self.clone()),
             Self::Grpc(_) => return None,

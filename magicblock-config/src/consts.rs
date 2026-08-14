@@ -1,3 +1,9 @@
+use solana_pubkey::Pubkey;
+
+/// Validator-controlled scratch account used by the RPC healthcheck.
+pub const HEALTHCHECK_ACCOUNT_PUBKEY: Pubkey =
+    Pubkey::from_str_const("V42Hea1thCheckTargetMagicb1ock1111111111111");
+
 /// CLI Default Values
 /// Default remote endpoint: devnet HTTP URL
 pub const DEFAULT_REMOTE: &str = DEVNET_URL;
