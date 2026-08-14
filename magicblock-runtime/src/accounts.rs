@@ -50,23 +50,15 @@ pub(crate) fn initial_accounts(
     accounts.insert(native_mint::id(), native_mint);
 
     let healthcheck = AccountBuilder::default()
-        .lamports(0)
         .data(vec![0; size_of::<i64>()])
         .owner(v42_calculator_interface::ID)
-        .executable(false)
         .mode(AccountMode::Ephemeral)
         .build();
     accounts.insert(HEALTHCHECK_ACCOUNT_PUBKEY, healthcheck);
 
     if !programs.contains_key(&v42_calculator_interface::ID) {
-        let sentinel = AccountBuilder::default()
-            .lamports(0)
-            .data(Vec::new())
-            .owner(system_program::ID)
-            .executable(false)
-            .mode(AccountMode::System)
-            .build();
-        accounts.insert(v42_calculator_interface::ID, sentinel);
+        let sentinel = AccountBuilder::default().mode(AccountMode::System);
+        accounts.insert(v42_calculator_interface::ID, sentinel.build());
     }
 
     accounts
