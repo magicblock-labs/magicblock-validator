@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
 pub use types::CommittedAccount;
+pub mod outbox;
 pub mod types;
 
 /// Commits that are covered by User's dlp PDAs

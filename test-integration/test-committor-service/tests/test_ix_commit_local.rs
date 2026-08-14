@@ -4,15 +4,22 @@ use borsh::to_vec;
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
+    intent_engine::db::DummyDB,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
-    persist::CommitStrategy,
+    tasks::{
+        commit_task::CommitDelivery, task_strategist::TransactionStrategy,
+        BaseTaskImpl,
+    },
     ComputeBudgetConfig,
 };
 use magicblock_core::intent::{
     types::CommittedAccount, CommitAndUndelegate, CommitType, MagicBaseIntent,
     MagicIntentBundle, UndelegateType,
 };
-use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use magicblock_program::{
+    magic_scheduled_base_intent::ScheduledIntentBundle,
+    outbox_intent_bundles::OutboxIntentBundle,
+};
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::{Account, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
@@ -42,6 +49,108 @@ mod utils;
 // Utilities and Setup
 // -----------------
 type ExpectedStrategies = HashMap<CommitStrategy, u8>;
+
+#[allow(unused)]
+pub struct AccountCommitInfo {
+    data: Vec<u8>,
+    commit_nonce: u64,
+    allow_undelegation: bool,
+    strategy: CommitStrategy,
+}
+
+impl AccountCommitInfo {
+    fn from_strategy(
+        strategy: TransactionStrategy,
+    ) -> Vec<(Pubkey, AccountCommitInfo)> {
+        let uses_alts = strategy.uses_alts();
+        strategy
+            .optimized_tasks
+            .iter()
+            .fold(vec![], |mut infos, task| {
+                let commit_info = match task {
+                    BaseTaskImpl::Commit(val) => {
+                        let info = AccountCommitInfo {
+                            commit_nonce: val.commit_id,
+                            data: val.committed_account.account.data.clone(),
+                            allow_undelegation: val.allow_undelegation,
+                            strategy: CommitStrategy::new(
+                                uses_alts,
+                                val.delivery_details.clone(),
+                            ),
+                        };
+
+                        Some((val.committed_account.pubkey, info))
+                    }
+                    BaseTaskImpl::CommitFinalize(val) => {
+                        let info = AccountCommitInfo {
+                            commit_nonce: val.commit_id,
+                            data: val.committed_account.account.data.clone(),
+                            allow_undelegation: val.allow_undelegation,
+                            strategy: CommitStrategy::new(
+                                uses_alts,
+                                val.delivery.clone(),
+                            ),
+                        };
+
+                        Some((val.committed_account.pubkey, info))
+                    }
+                    _ => None,
+                };
+
+                if let Some(commit_info) = commit_info {
+                    infos.push(commit_info);
+                    infos
+                } else {
+                    infos
+                }
+            })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum CommitStrategy {
+    /// Args without the use of a lookup table
+    #[default]
+    StateArgs,
+    /// Args with the use of a lookup table
+    StateArgsWithLookupTable,
+    /// Buffer and chunks which has the most overhead
+    StateBuffer,
+    /// Buffer and chunks with the use of a lookup table
+    StateBufferWithLookupTable,
+
+    /// Args without the use of a lookup table
+    DiffArgs,
+    /// Args with the use of a lookup table
+    DiffArgsWithLookupTable,
+    /// Buffer and chunks which has the most overhead
+    DiffBuffer,
+    /// Buffer and chunks with the use of a lookup table
+    DiffBufferWithLookupTable,
+}
+
+impl CommitStrategy {
+    fn new(uses_alts: bool, commit_delivery: CommitDelivery) -> Self {
+        match (uses_alts, commit_delivery) {
+            (false, CommitDelivery::StateInArgs) => Self::StateArgs,
+            (false, CommitDelivery::StateInBuffer { .. }) => Self::StateBuffer,
+            (false, CommitDelivery::DiffInArgs { .. }) => Self::DiffArgs,
+            (false, CommitDelivery::DiffInBuffer { .. }) => Self::DiffBuffer,
+            (true, CommitDelivery::StateInArgs) => {
+                Self::StateArgsWithLookupTable
+            }
+            (true, CommitDelivery::StateInBuffer { .. }) => {
+                Self::StateBufferWithLookupTable
+            }
+            (true, CommitDelivery::DiffInArgs { .. }) => {
+                Self::DiffArgsWithLookupTable
+            }
+            (true, CommitDelivery::DiffInBuffer { .. }) => {
+                Self::DiffBufferWithLookupTable
+            }
+        }
+    }
+}
 
 ///
 /// Unlike ScheduleCommitType which always implies Finalize (because that
@@ -239,16 +348,14 @@ async fn commit_single_account(
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     // Run each test with and without finalizing
-    let processor = Arc::new(
-        CommittorProcessor::try_new(
-            validator_auth.insecure_clone(),
-            ":memory:",
-            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-            None,
-            common::MockActionsCallbackExecutor::default(),
-        )
-        .unwrap(),
-    );
+    let processor = Arc::new(CommittorProcessor::new(
+        validator_auth.insecure_clone(),
+        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        None,
+        DummyDB::new(),
+        Arc::new(common::MockOutboxClient),
+        common::MockActionsCallbackExecutor::default(),
+    ));
 
     let counter_auth = Keypair::new();
     let (pubkey, mut account) =
@@ -323,16 +430,14 @@ async fn commit_book_order_account(
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     // Run each test with and without finalizing
-    let processor = Arc::new(
-        CommittorProcessor::try_new(
-            validator_auth.insecure_clone(),
-            ":memory:",
-            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-            None,
-            common::MockActionsCallbackExecutor::default(),
-        )
-        .unwrap(),
-    );
+    let processor = Arc::new(CommittorProcessor::new(
+        validator_auth.insecure_clone(),
+        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        None,
+        DummyDB::new(),
+        Arc::new(common::MockOutboxClient),
+        common::MockActionsCallbackExecutor::default(),
+    ));
 
     let payer = Keypair::new();
     let (order_book_pk, mut order_book_ac) =
@@ -798,16 +903,14 @@ async fn commit_multiple_accounts(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
-    let processor = Arc::new(
-        CommittorProcessor::try_new(
-            validator_auth.insecure_clone(),
-            ":memory:",
-            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-            None,
-            common::MockActionsCallbackExecutor::default(),
-        )
-        .unwrap(),
-    );
+    let processor = Arc::new(CommittorProcessor::new(
+        validator_auth.insecure_clone(),
+        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        None,
+        DummyDB::new(),
+        Arc::new(common::MockOutboxClient),
+        common::MockActionsCallbackExecutor::default(),
+    ));
 
     // Create bundles of committed accounts
     let bundles_of_committees = create_bundles(bundle_size, bytess).await;
@@ -869,16 +972,14 @@ async fn execute_intent_bundle(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
-    let processor = Arc::new(
-        CommittorProcessor::try_new(
-            validator_auth.insecure_clone(),
-            ":memory:",
-            ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-            None,
-            common::MockActionsCallbackExecutor::default(),
-        )
-        .unwrap(),
-    );
+    let processor = Arc::new(CommittorProcessor::new(
+        validator_auth.insecure_clone(),
+        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        None,
+        DummyDB::new(),
+        Arc::new(common::MockOutboxClient),
+        common::MockActionsCallbackExecutor::default(),
+    ));
 
     // Create bundles of committed accounts
     let to_commit = create_and_delegate_accounts(bytess_to_commit);
@@ -949,13 +1050,17 @@ async fn execute_intent_bundle(
 // Test Executor
 // -----------------
 async fn ix_commit_local(
-    processor: Arc<CommittorProcessor>,
+    processor: Arc<CommittorProcessor<DummyDB>>,
     intent_bundles: Vec<ScheduledIntentBundle>,
     expected_strategies: ExpectedStrategies,
     program_id: Pubkey,
 ) {
+    let outbox_bundles = intent_bundles
+        .iter()
+        .map(|b| OutboxIntentBundle::accepted(b.clone()))
+        .collect::<Vec<_>>();
     let execution_outputs = processor
-        .execute_intent_bundles(intent_bundles.clone())
+        .execute_intent_bundles(outbox_bundles)
         .await
         .unwrap()
         .into_iter()
@@ -1030,23 +1135,19 @@ async fn ix_commit_local(
         })
         .collect();
 
-        let statuses = processor.get_commit_statuses(base_intent.id).unwrap();
-        debug!(
-            "{}",
-            statuses
+        let account_commit_infos: Vec<(Pubkey, AccountCommitInfo)> =
+            execution_result
+                .successful_transaction_strategies
                 .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
+                .flat_map(|s| AccountCommitInfo::from_strategy(s.clone()))
+                .collect();
 
-        assert_eq!(statuses.len(), committed_accounts.len());
+        assert_eq!(account_commit_infos.len(), committed_accounts.len());
 
-        for commit_status in statuses {
+        for (pubkey, commit_info) in account_commit_infos {
             let (is_undelegate, account) = committed_accounts
-                .remove(&commit_status.pubkey)
+                .remove(&pubkey)
                 .expect("Account should be persisted");
-            println!("account: {}", account.pubkey);
 
             // When we finalize it is possible to also undelegate the account
             let expected_owner = if is_undelegate {
@@ -1074,7 +1175,7 @@ async fn ix_commit_local(
             );
 
             // Track the strategy used
-            let strategy = commit_status.commit_strategy;
+            let strategy = commit_info.strategy;
             let strategy_count = strategies.entry(strategy).or_insert(0);
             *strategy_count += 1;
         }

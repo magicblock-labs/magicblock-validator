@@ -80,9 +80,8 @@ pub fn process_transfer_action_handler(
 /// counter PDA retains the pre-payment as the cost of the deal.
 ///
 /// On failure (`ok == false`): moves `amount` lamports from the counter PDA
-/// back to the payer on Base (refund). The counter PDA can be written because
-/// at callback time the account has already been undelegated and is owned by
-/// the flexi-counter program again.
+/// back to the payer on ER (refund). The counter PDA can be written because
+/// at callback time the account is still delegated
 ///
 /// Accounts:
 /// 0. [signer, readonly] validator authority (auto-prepended by magic program)

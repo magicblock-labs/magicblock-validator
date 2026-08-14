@@ -9,6 +9,7 @@ pub mod commit_stage_task;
 pub mod commit_task;
 pub mod intent_size_validator;
 pub mod task_builder;
+pub mod task_info_fetcher;
 pub mod task_strategist;
 pub mod utils;
 
@@ -599,9 +600,7 @@ fn test_close_buffer_limit() {
     use crate::{
         tasks::{commit_stage_task::CleanupTask, utils::TransactionUtils},
         test_utils,
-        transactions::{
-            serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
-        },
+        utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
     };
 
     test_utils::init_test_logger();
