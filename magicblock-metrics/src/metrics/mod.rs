@@ -105,6 +105,41 @@ lazy_static::lazy_static! {
         "program_subscription_discovered_dlp_update_delegated_elsewhere_count", "DLP-owned subscription updates that, after fetching the delegation record, were found delegated to another validator and dropped",
     ).unwrap();
 
+    static ref CHAINLINK_RECORD_MIRROR_LOOKUPS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "chainlink_record_mirror_lookups_total",
+                "Delegation-record mirror lookups by outcome; every non-hit outcome falls back to an RPC fetch",
+            ),
+            &["outcome"],
+        )
+        .expect("static name and label set are valid metric identifiers");
+
+    static ref CHAINLINK_RECORD_MIRROR_LIVE_GAUGE: IntGauge = IntGauge::new(
+        "chainlink_record_mirror_live",
+        "1 while the delegation-record mirror stream is live, 0 otherwise",
+    ).expect("static name is a valid metric identifier");
+
+    static ref CHAINLINK_RECORD_MIRROR_WATERMARK_GAUGE: IntGauge = IntGauge::new(
+        "chainlink_record_mirror_watermark",
+        "Latest confirmed slot the delegation-record mirror is caught up to",
+    ).expect("static name is a valid metric identifier");
+
+    static ref CHAINLINK_AUTHORITY_RECORDS_ON_CHAIN_GAUGE: IntGauge = IntGauge::new(
+        "chainlink_authority_records_on_chain",
+        "On-chain delegation records naming this validator as authority",
+    ).expect("static name is a valid metric identifier");
+
+    static ref SUBSCRIPTION_TRANSPORT_GRPC_GAUGE: IntGauge = IntGauge::new(
+        "chainlink_subscription_transport_grpc",
+        "1 for gRPC base-chain subscriptions, 0 for websockets",
+    ).expect("static name is a valid metric identifier");
+
+    static ref GRPC_ACCOUNT_FILTER_UPDATES_COUNT: IntCounter = IntCounter::new(
+        "grpc_account_filter_updates_count",
+        "Subscription filter updates written to gRPC account streams",
+    ).expect("static name is a valid metric identifier");
+
     static ref PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
@@ -593,6 +628,12 @@ pub(crate) fn register() {
         register!(CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL);
         register!(PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT);
+        register!(CHAINLINK_RECORD_MIRROR_LOOKUPS_TOTAL);
+        register!(CHAINLINK_AUTHORITY_RECORDS_ON_CHAIN_GAUGE);
+        register!(GRPC_ACCOUNT_FILTER_UPDATES_COUNT);
+        register!(SUBSCRIPTION_TRANSPORT_GRPC_GAUGE);
+        register!(CHAINLINK_RECORD_MIRROR_LIVE_GAUGE);
+        register!(CHAINLINK_RECORD_MIRROR_WATERMARK_GAUGE);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL);
@@ -767,6 +808,55 @@ pub fn chainlink_subscription_cleanup_accounts_value(
 
 pub fn inc_discovered_dlp_update_delegated_elsewhere() {
     PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT.inc();
+}
+
+/// Outcome of a delegation-record mirror lookup. Every non-`Hit` outcome
+/// falls back to an RPC fetch.
+#[derive(Debug, Clone, Copy)]
+pub enum RecordMirrorLookupOutcome {
+    Hit,
+    Miss,
+    Stale,
+    Tombstone,
+    ParseFallback,
+}
+
+impl RecordMirrorLookupOutcome {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Hit => "hit",
+            Self::Miss => "miss",
+            Self::Stale => "stale",
+            Self::Tombstone => "tombstone",
+            Self::ParseFallback => "parse_fallback",
+        }
+    }
+}
+
+pub fn inc_record_mirror_lookup(outcome: RecordMirrorLookupOutcome) {
+    CHAINLINK_RECORD_MIRROR_LOOKUPS_TOTAL
+        .with_label_values(&[outcome.as_str()])
+        .inc();
+}
+
+pub fn set_authority_records_on_chain(count: i64) {
+    CHAINLINK_AUTHORITY_RECORDS_ON_CHAIN_GAUGE.set(count);
+}
+
+pub fn set_subscription_transport_grpc(grpc: bool) {
+    SUBSCRIPTION_TRANSPORT_GRPC_GAUGE.set(grpc as i64);
+}
+
+pub fn inc_grpc_account_filter_updates() {
+    GRPC_ACCOUNT_FILTER_UPDATES_COUNT.inc();
+}
+
+pub fn set_record_mirror_live(live: bool) {
+    CHAINLINK_RECORD_MIRROR_LIVE_GAUGE.set(live as i64);
+}
+
+pub fn set_record_mirror_watermark(slot: u64) {
+    CHAINLINK_RECORD_MIRROR_WATERMARK_GAUGE.set(slot as i64);
 }
 
 pub fn inc_committor_intents_count_by(by: u64) {

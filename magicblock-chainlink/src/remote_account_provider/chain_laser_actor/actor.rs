@@ -55,6 +55,8 @@ pub struct Slots {
     /// Updated via `update()` when slot updates are received from GRPC.
     /// Metrics are automatically captured on updates.
     pub chain_slot: ChainSlot,
+    /// Slot notifications seen on this endpoint's stream.
+    pub slot_updates_seen: Arc<AtomicU64>,
 }
 
 // -----------------
@@ -728,6 +730,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         // Handle slot updates - update chain_slot to max of current and received
         if let UpdateOneof::Slot(slot_update) = &update_oneof {
             self.slots.chain_slot.update(slot_update.slot);
+            self.slots.slot_updates_seen.fetch_add(1, Ordering::Relaxed);
             return;
         }
 

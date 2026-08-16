@@ -21,6 +21,32 @@ use crate::remote_account_provider::{
     pubsub_common::SubscriptionUpdate,
 };
 
+const GRPC_LIVENESS_PROBE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(10);
+const GRPC_LIVENESS_PROBE_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(250);
+
+async fn probe_grpc_liveness(
+    client: &ChainLaserClientImpl,
+    slot_updates_seen: &Arc<AtomicU64>,
+) -> RemoteAccountProviderResult<()> {
+    client
+        .subscribe(solana_sdk_ids::sysvar::clock::ID, None)
+        .await?;
+    let deadline = tokio::time::Instant::now() + GRPC_LIVENESS_PROBE_TIMEOUT;
+    while tokio::time::Instant::now() < deadline {
+        if slot_updates_seen.load(Ordering::Relaxed) > 0 {
+            return Ok(());
+        }
+        tokio::time::sleep(GRPC_LIVENESS_PROBE_INTERVAL).await;
+    }
+    Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+        format!(
+            "gRPC endpoint delivered no slot updates within {GRPC_LIVENESS_PROBE_TIMEOUT:?}"
+        ),
+    ))
+}
+
 #[derive(Clone)]
 pub enum ChainUpdatesClient {
     WebSocket(ChainPubsubClientImpl),
@@ -72,21 +98,23 @@ impl ChainUpdatesClient {
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
                 );
 
+                let slot_updates_seen = Arc::new(AtomicU64::new(0));
                 let slots = Slots {
                     chain_slot: ChainSlot::new(chain_slot),
+                    slot_updates_seen: slot_updates_seen.clone(),
                 };
-                Ok(ChainUpdatesClient::Laser(
-                    ChainLaserClientImpl::new_from_url(
-                        url,
-                        client_id.to_string(),
-                        api_key,
-                        commitment.commitment,
-                        abort_sender,
-                        slots,
-                        rpc_client,
-                        grpc_config,
-                    ),
-                ))
+                let client = ChainLaserClientImpl::new_from_url(
+                    url,
+                    client_id.to_string(),
+                    api_key,
+                    commitment.commitment,
+                    abort_sender,
+                    slots,
+                    rpc_client,
+                    grpc_config,
+                );
+                probe_grpc_liveness(&client, &slot_updates_seen).await?;
+                Ok(ChainUpdatesClient::Laser(client))
             }
             Rpc { .. } => {
                 Err(RemoteAccountProviderError::InvalidPubsubEndpoint(format!(

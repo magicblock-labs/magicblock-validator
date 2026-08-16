@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use solana_pubkey::Pubkey;
+use url::Url;
 
 use crate::consts;
 
@@ -60,6 +61,13 @@ pub struct ChainLinkConfig {
 
     /// Address risk checks for post-delegation actions via the risk server.
     pub risk: RiskConfig,
+
+    /// Delegation-record mirror fed from the in-validator record stream.
+    pub record_sync: RecordSyncConfig,
+
+    /// Subscription transport for base-chain account updates. `grpc` is the
+    /// supported production transport; `ws` remains for local/dev validators.
+    pub subscription_transport: SubscriptionTransport,
 }
 
 impl Default for ChainLinkConfig {
@@ -74,6 +82,46 @@ impl Default for ChainLinkConfig {
             ),
             ws_subs_per_connection: None,
             risk: RiskConfig::default(),
+            record_sync: RecordSyncConfig::default(),
+            subscription_transport: SubscriptionTransport::default(),
+        }
+    }
+}
+
+/// Transport used for base-chain account subscriptions.
+#[derive(
+    Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum SubscriptionTransport {
+    /// Yellowstone gRPC (Laserstream): the production transport.
+    #[default]
+    Grpc,
+    /// WebSocket pubsub: local/dev only.
+    Ws,
+}
+
+/// Configuration for the in-memory delegation-record mirror.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RecordSyncConfig {
+    /// Enables the delegation-record mirror.
+    pub enabled: bool,
+    /// Laserstream gRPC endpoint. Defaults to the first gRPC remote.
+    pub endpoint: Option<Url>,
+    /// API key for the endpoint. Defaults to the first gRPC remote's key.
+    pub api_key: Option<String>,
+    /// Maximum number of record entries retained in the mirror.
+    pub capacity: usize,
+}
+
+impl Default for RecordSyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            endpoint: None,
+            api_key: None,
+            capacity: consts::DEFAULT_RECORD_SYNC_CAPACITY,
         }
     }
 }

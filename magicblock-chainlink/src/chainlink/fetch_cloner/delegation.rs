@@ -18,7 +18,10 @@ use super::{
     subscription::{SubscriptionRelease, release_subs},
 };
 use crate::{
-    chainlink::errors::{ChainlinkError, ChainlinkResult},
+    chainlink::{
+        errors::{ChainlinkError, ChainlinkResult},
+        record_mirror::MirrorLookup,
+    },
     cloner::DelegationActions,
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, SubscriptionReason,
@@ -200,44 +203,61 @@ where
             false
         });
 
-    let res = match this
-        .remote_account_provider
-        .try_get_multi_until_slots_match(
-            &[delegation_record_pubkey],
-            Some(MatchSlotsConfig {
-                min_context_slot: Some(min_context_slot),
-                ..MatchSlotsConfig::new(
-                    ChainlinkCompanionFetchKind::DelegationRecord,
-                )
-            }),
-            fetch_context
-                .with_reason(metrics::AccountFetchReason::DelegationRecord),
-        )
-        .await
+    let mirrored = this.record_mirror.as_ref().and_then(|mirror| match mirror
+        .get(&delegation_record_pubkey, min_context_slot)
     {
-        Ok(mut delegation_records) => {
-            if let Some(delegation_record_remote) = delegation_records.pop() {
-                match delegation_record_remote.fresh_account() {
-                    Some(delegation_record_account) => this
-                        .parse_delegation_record(
-                            delegation_record_account.data(),
-                            delegation_record_pubkey,
-                        )
-                        .ok(),
-                    None => None,
-                }
+        MirrorLookup::Hit { data, .. } => {
+            use metrics::RecordMirrorLookupOutcome as Outcome;
+            let parsed = this
+                .parse_delegation_record(&data, delegation_record_pubkey)
+                .ok();
+            metrics::inc_record_mirror_lookup(if parsed.is_some() {
+                Outcome::Hit
             } else {
+                Outcome::ParseFallback
+            });
+            parsed
+        }
+        MirrorLookup::Tombstone { .. } | MirrorLookup::Miss => None,
+    });
+
+    let res = if mirrored.is_some() {
+        mirrored
+    } else {
+        match this
+            .remote_account_provider
+            .try_get_multi_until_slots_match(
+                &[delegation_record_pubkey],
+                Some(MatchSlotsConfig {
+                    min_context_slot: Some(min_context_slot),
+                    ..MatchSlotsConfig::new(
+                        ChainlinkCompanionFetchKind::DelegationRecord,
+                    )
+                }),
+                fetch_context
+                    .with_reason(metrics::AccountFetchReason::DelegationRecord),
+            )
+            .await
+        {
+            Ok(mut delegation_records) => delegation_records
+                .pop()
+                .and_then(|remote| remote.fresh_account().cloned())
+                .and_then(|account| {
+                    this.parse_delegation_record(
+                        account.data(),
+                        delegation_record_pubkey,
+                    )
+                    .ok()
+                }),
+            Err(err) => {
+                log_companion_fetch_failure(
+                    companion_fetch_log_context,
+                    delegation_record_pubkey,
+                    ChainlinkCompanionFetchKind::DelegationRecord,
+                    &err,
+                );
                 None
             }
-        }
-        Err(err) => {
-            log_companion_fetch_failure(
-                companion_fetch_log_context,
-                delegation_record_pubkey,
-                ChainlinkCompanionFetchKind::DelegationRecord,
-                &err,
-            );
-            None
         }
     };
 

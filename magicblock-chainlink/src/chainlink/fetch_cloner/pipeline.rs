@@ -209,7 +209,7 @@ where
 
     // For potentially delegated accounts we update the owner and delegation state first
     let mut fetch_with_delegation_record_join_set = JoinSet::new();
-    for (pubkey, _, account_slot) in &owned_by_deleg {
+    for (pubkey, account, account_slot) in &owned_by_deleg {
         let effective_slot = if let Some(min_slot) = min_context_slot {
             min_slot.max(*account_slot)
         } else {
@@ -218,6 +218,8 @@ where
         fetch_with_delegation_record_join_set.spawn(
             this.task_to_fetch_with_delegation_record(
                 *pubkey,
+                account.clone(),
+                *account_slot,
                 effective_slot,
                 fetch_context.clone(),
             ),

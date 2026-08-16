@@ -25,6 +25,7 @@ use tokio::{
 use tracing::*;
 
 use crate::{
+    chainlink::record_mirror::DelegationRecordMirror,
     cloner,
     config::ChainlinkConfig,
     remote_account_provider::{
@@ -39,6 +40,8 @@ mod account_still_undelegating_on_chain;
 pub mod config;
 pub mod errors;
 pub mod fetch_cloner;
+pub mod record_mirror;
+mod record_stream;
 
 pub(crate) const SUBSCRIPTION_UPDATE_LIMIT: usize = 5_000;
 const ENSURE_ACCOUNTS_TIMEOUT: Duration = Duration::from_secs(30);
@@ -203,6 +206,23 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         chainlink_config: &ChainLinkConfig,
         chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<ProdChainlink> {
+        let record_mirror = DelegationRecordMirror::try_from_config(
+            &chainlink_config.record_sync,
+            endpoints,
+        )
+        .await;
+        let provider_config = config
+            .remote_account_provider
+            .clone()
+            .with_subscription_transport(
+                chainlink_config.subscription_transport,
+            );
+        let provider_config = if record_mirror.is_some() {
+            provider_config.with_program_subs(Default::default())
+        } else {
+            provider_config
+        };
+
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
         let (tx, rx) = tokio::sync::mpsc::channel(SUBSCRIPTION_UPDATE_LIMIT);
@@ -210,7 +230,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             endpoints,
             commitment,
             tx,
-            &config.remote_account_provider,
+            &provider_config,
             Some(chain_slot),
         )
         .await?;
@@ -220,6 +240,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             let risk_service =
                 RiskService::try_from_config(&chainlink_config.risk)?
                     .map(Arc::new);
+            if let Some(requests) = record_mirror
+                .as_ref()
+                .and_then(|mirror| mirror.take_undelegation_requests())
+            {
+                Self::forward_undelegation_requests(
+                    requests,
+                    undelegation_request_sender.clone(),
+                );
+            }
             let fetch_cloner =
                 FetchCloner::new_with_undelegation_request_sender(
                     &provider,
@@ -228,6 +257,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                     rx,
                     chainlink_config.allowed_programs.clone(),
                     risk_service,
+                    record_mirror,
                     undelegation_request_sender.clone(),
                 );
             Some(fetch_cloner)
@@ -240,6 +270,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             fetch_cloner,
             undelegation_request_sender,
         )
+    }
+
+    fn forward_undelegation_requests(
+        mut requests: mpsc::Receiver<ObservedUndelegationRequest>,
+        sender: broadcast::Sender<ObservedUndelegationRequest>,
+    ) {
+        task::spawn(async move {
+            while let Some(request) = requests.recv().await {
+                let _ = sender.send(request);
+            }
+        });
     }
 
     fn subscribe_stale_accounts(

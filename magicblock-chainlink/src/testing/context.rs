@@ -16,12 +16,13 @@ use solana_keypair::Keypair;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tracing::trace;
 
 use super::accounts::account_shared_with_owner_and_slot;
 use crate::{
     AccountFetchContext, InnerChainlink,
+    chainlink::record_mirror::DelegationRecordMirror,
     errors::ChainlinkResult,
     fetch_cloner::FetchCloner,
     remote_account_provider::{
@@ -58,6 +59,7 @@ impl TestContext {
             ),
             None,
             None,
+            None,
         )
         .await
     }
@@ -73,6 +75,7 @@ impl TestContext {
             ),
             risk_service,
             None,
+            None,
         )
         .await
     }
@@ -81,7 +84,7 @@ impl TestContext {
         slot: Slot,
         config: RemoteAccountProviderConfig,
     ) -> Self {
-        Self::init_with_config_and_risk(slot, config, None, None).await
+        Self::init_with_config_and_risk(slot, config, None, None, None).await
     }
 
     pub async fn init_with_lru_capacity(slot: Slot, capacity: usize) -> Self {
@@ -92,8 +95,26 @@ impl TestContext {
             ),
             None,
             Some(capacity),
+            None,
         )
         .await
+    }
+
+    pub async fn init_with_record_mirror(
+        slot: Slot,
+    ) -> (Self, Arc<DelegationRecordMirror>) {
+        let mirror = DelegationRecordMirror::new_for_tests();
+        let context = Self::init_with_config_and_risk(
+            slot,
+            RemoteAccountProviderConfig::default_with_lifecycle_mode(
+                LifecycleMode::Ephemeral,
+            ),
+            None,
+            None,
+            Some(mirror.clone()),
+        )
+        .await;
+        (context, mirror)
     }
 
     async fn init_with_config_and_risk(
@@ -101,6 +122,7 @@ impl TestContext {
         config: RemoteAccountProviderConfig,
         risk_service: Option<Arc<RiskService>>,
         lru_capacity: Option<usize>,
+        record_mirror: Option<Arc<DelegationRecordMirror>>,
     ) -> Self {
         super::init_logger();
         let (rpc_client, pubsub_client) = {
@@ -143,13 +165,16 @@ impl TestContext {
                 .expect("create remote account provider")
                 .expect("ephemeral lifecycle enables remote accounts"),
             );
-            FetchCloner::new(
+            let (undelegation_request_sender, _) = broadcast::channel(1024);
+            FetchCloner::new_with_undelegation_request_sender(
                 &provider,
                 bank.clone(),
                 validator_keypair.insecure_clone(),
                 rx,
                 None,
                 risk_service,
+                record_mirror,
+                undelegation_request_sender,
             )
         };
         let chainlink =

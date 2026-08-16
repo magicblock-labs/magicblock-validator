@@ -79,3 +79,6 @@ pub const DEFAULT_RISK_SERVER_URL: &str = "http://127.0.0.1:3001";
 
 /// Default request timeout for risk server calls
 pub const DEFAULT_RISK_REQUEST_TIMEOUT_SEC: u64 = 5;
+
+/// Default capacity of the delegation-record mirror (~40 MB of records)
+pub const DEFAULT_RECORD_SYNC_CAPACITY: usize = 262_144;
