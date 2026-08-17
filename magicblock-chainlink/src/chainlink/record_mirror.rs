@@ -67,6 +67,7 @@ struct MirrorState {
 struct RecordEntry {
     slot: u64,
     data: Option<Vec<u8>>,
+    uncertain: bool,
 }
 
 impl RecordEntry {
@@ -78,6 +79,7 @@ impl RecordEntry {
 pub enum MirrorLookup {
     Hit { data: Vec<u8>, slot: u64 },
     Tombstone { slot: u64 },
+    Uncertain { slot: u64 },
     Miss,
 }
 
@@ -407,19 +409,34 @@ impl DelegationRecordMirror {
             if existing.slot > slot {
                 return;
             }
-            if existing.slot == slot
-                && existing.data.as_deref() != data.as_deref()
-            {
-                warn!(%record, slot, "conflicting same-slot record updates; requiring RPC confirmation");
-                Self::put_entry(
-                    &mut inner,
-                    record,
-                    RecordEntry { slot, data: None },
-                );
-                return;
+            if existing.slot == slot {
+                if existing.uncertain {
+                    return;
+                }
+                if existing.data.as_deref() != data.as_deref() {
+                    warn!(%record, slot, "conflicting same-slot record updates; requiring RPC confirmation");
+                    Self::put_entry(
+                        &mut inner,
+                        record,
+                        RecordEntry {
+                            slot,
+                            data: None,
+                            uncertain: true,
+                        },
+                    );
+                    return;
+                }
             }
         }
-        Self::put_entry(&mut inner, record, RecordEntry { slot, data });
+        Self::put_entry(
+            &mut inner,
+            record,
+            RecordEntry {
+                slot,
+                data,
+                uncertain: false,
+            },
+        );
     }
 
     fn put_entry(inner: &mut MirrorState, record: Pubkey, entry: RecordEntry) {
@@ -501,6 +518,12 @@ impl DelegationRecordMirror {
             return (
                 MirrorLookup::Miss,
                 Some(RecordMirrorLookupOutcome::Stale),
+            );
+        }
+        if entry.uncertain {
+            return (
+                MirrorLookup::Uncertain { slot: entry.slot },
+                Some(RecordMirrorLookupOutcome::Uncertain),
             );
         }
         match &entry.data {
@@ -825,7 +848,12 @@ mod tests {
 
         assert!(matches!(
             mirror.get(&record, 50),
-            MirrorLookup::Tombstone { slot: 50 }
+            MirrorLookup::Uncertain { slot: 50 }
+        ));
+        mirror.insert(record, 51, Some(vec![3]));
+        assert!(matches!(
+            mirror.get(&record, 50),
+            MirrorLookup::Hit { slot: 51, .. }
         ));
     }
 

@@ -258,7 +258,9 @@ where
             });
             parsed
         }
-        MirrorLookup::Tombstone { .. } | MirrorLookup::Miss => None,
+        MirrorLookup::Tombstone { .. }
+        | MirrorLookup::Uncertain { .. }
+        | MirrorLookup::Miss => None,
     });
 
     let res = if let Some((record, actions)) = mirrored {

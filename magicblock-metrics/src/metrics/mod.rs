@@ -818,6 +818,7 @@ pub enum RecordMirrorLookupOutcome {
     Miss,
     Stale,
     Tombstone,
+    Uncertain,
     ParseFallback,
 }
 
@@ -828,6 +829,7 @@ impl RecordMirrorLookupOutcome {
             Self::Miss => "miss",
             Self::Stale => "stale",
             Self::Tombstone => "tombstone",
+            Self::Uncertain => "uncertain",
             Self::ParseFallback => "parse_fallback",
         }
     }

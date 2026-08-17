@@ -630,6 +630,13 @@ where
                 }
             }
             MirrorLookup::Tombstone { .. } => {}
+            MirrorLookup::Uncertain { .. } => {
+                if self.clone_colliding_delegated_account(pubkey, slot).await
+                    == CollisionCloneOutcome::Retry
+                {
+                    self.schedule_collision_recheck(pubkey, slot).await;
+                }
+            }
             MirrorLookup::Miss => {
                 self.schedule_collision_recheck(pubkey, slot).await;
             }
@@ -934,6 +941,7 @@ fn collision_recheck_action(
     match lookup {
         MirrorLookup::Hit { .. } => CollisionRecheckAction::Resolve,
         MirrorLookup::Tombstone { .. } => CollisionRecheckAction::Discard,
+        MirrorLookup::Uncertain { .. } => CollisionRecheckAction::Resolve,
         MirrorLookup::Miss if complete_through_slot => {
             CollisionRecheckAction::Resolve
         }
@@ -948,6 +956,7 @@ fn collision_overflow_action(
 ) -> CollisionRecheckAction {
     match lookup {
         MirrorLookup::Tombstone { .. } => CollisionRecheckAction::Discard,
+        MirrorLookup::Uncertain { .. } => CollisionRecheckAction::Resolve,
         MirrorLookup::Miss if authoritative_recovery => {
             CollisionRecheckAction::Resolve
         }
@@ -1693,6 +1702,21 @@ mod tests {
         );
         assert_eq!(
             collision_overflow_action(&MirrorLookup::Miss, true, true),
+            CollisionRecheckAction::Resolve
+        );
+        assert_eq!(
+            collision_recheck_action(
+                &MirrorLookup::Uncertain { slot: 1 },
+                false
+            ),
+            CollisionRecheckAction::Resolve
+        );
+        assert_eq!(
+            collision_overflow_action(
+                &MirrorLookup::Uncertain { slot: 1 },
+                true,
+                false
+            ),
             CollisionRecheckAction::Resolve
         );
     }
