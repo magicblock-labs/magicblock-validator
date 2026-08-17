@@ -14,6 +14,7 @@ use magicblock_core::token_programs::{
 };
 use magicblock_metrics::metrics::AccountFetchContext;
 use nucleus::runtime::TransactionView;
+use parking_lot::Mutex;
 use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -132,6 +133,8 @@ pub struct InnerChainlink<T: ChainRpcClient, U: ChainPubsubClient> {
     engine: Engine,
     fetch_cloner: Option<Arc<FetchCloner<T, U>>>,
     undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
+    pending_record_undelegation_requests:
+        Mutex<Option<mpsc::Receiver<ObservedUndelegationRequest>>>,
     /// Removes readonly accounts whose remote subscription became unusable.
     #[allow(unused)]
     stale_accounts_sub: Option<task::JoinHandle<()>>,
@@ -191,6 +194,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             engine,
             fetch_cloner,
             undelegation_request_sender,
+            pending_record_undelegation_requests: Mutex::new(None),
             stale_accounts_sub,
             evicted_accounts_sub,
         })
@@ -245,20 +249,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         )
         .await?;
         let (undelegation_request_sender, _) = broadcast::channel(1024);
+        let mut pending_record_undelegation_requests = None;
         let fetch_cloner = if let Some(provider) = account_provider {
             let provider = Arc::new(provider);
             let risk_service =
                 RiskService::try_from_config(&chainlink_config.risk)?
                     .map(Arc::new);
-            if let Some(requests) = record_mirror
+            pending_record_undelegation_requests = record_mirror
                 .as_ref()
-                .and_then(|mirror| mirror.take_undelegation_requests())
-            {
-                Self::forward_undelegation_requests(
-                    requests,
-                    undelegation_request_sender.clone(),
-                );
-            }
+                .and_then(|mirror| mirror.take_undelegation_requests());
             let fetch_cloner =
                 FetchCloner::new_with_undelegation_request_sender(
                     &provider,
@@ -275,11 +274,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             None
         };
 
-        InnerChainlink::try_new_with_undelegation_request_sender(
-            engine,
-            fetch_cloner,
-            undelegation_request_sender,
-        )
+        let chainlink =
+            InnerChainlink::try_new_with_undelegation_request_sender(
+                engine,
+                fetch_cloner,
+                undelegation_request_sender,
+            )?;
+        *chainlink.pending_record_undelegation_requests.lock() =
+            pending_record_undelegation_requests;
+        Ok(chainlink)
     }
 
     fn forward_undelegation_requests(
@@ -705,7 +708,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     pub fn subscribe_undelegation_requests(
         &self,
     ) -> broadcast::Receiver<ObservedUndelegationRequest> {
-        self.undelegation_request_sender.subscribe()
+        Self::subscribe_undelegation_request_channel(
+            &self.pending_record_undelegation_requests,
+            &self.undelegation_request_sender,
+        )
+    }
+
+    fn subscribe_undelegation_request_channel(
+        pending_requests: &Mutex<
+            Option<mpsc::Receiver<ObservedUndelegationRequest>>,
+        >,
+        sender: &broadcast::Sender<ObservedUndelegationRequest>,
+    ) -> broadcast::Receiver<ObservedUndelegationRequest> {
+        let receiver = sender.subscribe();
+        let pending_requests = pending_requests.lock().take();
+        if let Some(requests) = pending_requests {
+            Self::forward_undelegation_requests(requests, sender.clone());
+        }
+        receiver
     }
 }
 
@@ -717,9 +737,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
 mod tests {
     use std::{sync::Arc, time::Duration};
 
+    use parking_lot::Mutex;
     use solana_pubkey::Pubkey;
-    use tokio::sync::mpsc;
+    use tokio::sync::{broadcast, mpsc};
 
+    use super::{InnerChainlink, ObservedUndelegationRequest};
     use crate::{
         remote_account_provider::{
             SubscriptionReason,
@@ -727,6 +749,36 @@ mod tests {
         },
         testing::{init_logger, rpc_client_mock::ChainRpcClientMock},
     };
+
+    #[tokio::test]
+    async fn streamed_undelegation_requests_wait_for_first_subscriber() {
+        let request = ObservedUndelegationRequest {
+            request_pda: Pubkey::new_unique(),
+            delegated_account: Pubkey::new_unique(),
+            expires_at_slot: 10,
+            observed_slot: 2,
+        };
+        let (requests_tx, requests_rx) = mpsc::channel(1);
+        requests_tx.send(request.clone()).await.unwrap();
+        let (sender, receiver) = broadcast::channel(1);
+        drop(receiver);
+        let pending_requests = Mutex::new(Some(requests_rx));
+
+        let mut receiver = InnerChainlink::<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+        >::subscribe_undelegation_request_channel(
+            &pending_requests, &sender
+        );
+
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), receiver.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+            request
+        );
+    }
 
     async fn test_remote_account_provider() -> Arc<
         crate::remote_account_provider::RemoteAccountProvider<
