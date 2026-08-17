@@ -389,18 +389,6 @@ where
             }
         }
 
-        release_subs(
-            &this.remote_account_provider,
-            owned_by_deleg
-                .iter()
-                .map(|(pubkey, _, _)| SubscriptionRelease::Pubkey {
-                    pubkey: *pubkey,
-                    reason: SubscriptionReason::DirectAccount,
-                })
-                .collect::<Vec<_>>(),
-        )
-        .await;
-
         // Subscribe to owner programs concurrently in background (best-effort)
         if !owner_programs_to_subscribe.is_empty() {
             let remote_account_provider = this.remote_account_provider.clone();
@@ -819,6 +807,33 @@ mod tests {
         let releases = compute_subscription_releases(
             &[record],
             &[],
+            &[],
+            vec![record],
+            HashSet::new(),
+        );
+
+        assert!(matches!(
+            releases.as_slice(),
+            [SubscriptionRelease::Pubkey { pubkey, reason }]
+                if *pubkey == record
+                    && *reason == SubscriptionReason::DelegationRecord
+        ));
+    }
+
+    #[test]
+    fn missing_record_cleanup_keeps_primary_watch() {
+        let primary = Pubkey::new_unique();
+        let record = delegation_record_pda_from_delegated_account(&primary);
+        let request = AccountCloneRequest {
+            pubkey: primary,
+            account: AccountBuilder::default(),
+            commit_frequency_ms: None,
+            post_delegation_mode: ClonePostDelegationMode::None,
+            delegated_to_other: None,
+        };
+        let releases = compute_subscription_releases(
+            &[primary, record],
+            &[request],
             &[],
             vec![record],
             HashSet::new(),
