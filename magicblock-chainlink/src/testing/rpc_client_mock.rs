@@ -10,6 +10,8 @@ use std::{
 #[cfg(any(test, feature = "dev-context"))]
 use async_trait::async_trait;
 #[cfg(any(test, feature = "dev-context"))]
+use dlp_api::state::UndelegationRequest;
+#[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 use solana_clock::Clock;
 #[cfg(any(test, feature = "dev-context"))]
@@ -130,6 +132,9 @@ impl ChainRpcClientMockBuilder {
             program_account_fetches: Arc::<AtomicU64>::default(),
             block_fetches: Arc::new(AtomicBool::new(false)),
             fetch_block_notify: Arc::new(Notify::new()),
+            fail_unpartitioned_undelegation_request_scan: Arc::new(
+                AtomicBool::new(false),
+            ),
             multi_account_response_truncate: self
                 .multi_account_response_truncate,
         };
@@ -158,6 +163,7 @@ pub struct ChainRpcClientMock {
     program_account_fetches: Arc<AtomicU64>,
     block_fetches: Arc<AtomicBool>,
     fetch_block_notify: Arc<Notify>,
+    fail_unpartitioned_undelegation_request_scan: Arc<AtomicBool>,
     multi_account_response_truncate: Option<usize>,
 }
 
@@ -173,6 +179,9 @@ impl ChainRpcClientMock {
             program_account_fetches: Arc::<AtomicU64>::default(),
             block_fetches: Arc::new(AtomicBool::new(false)),
             fetch_block_notify: Arc::new(Notify::new()),
+            fail_unpartitioned_undelegation_request_scan: Arc::new(
+                AtomicBool::new(false),
+            ),
             multi_account_response_truncate: None,
         }
     }
@@ -287,6 +296,11 @@ impl ChainRpcClientMock {
 
     pub fn program_account_fetches(&self) -> u64 {
         self.program_account_fetches.load(Ordering::Relaxed)
+    }
+
+    pub fn fail_unpartitioned_undelegation_request_scan(&self) {
+        self.fail_unpartitioned_undelegation_request_scan
+            .store(true, Ordering::Relaxed);
     }
 
     /// Account lookup shared by both fetch methods of the
@@ -445,6 +459,33 @@ impl ChainRpcClient for ChainRpcClientMock {
     ) -> client_error::Result<Vec<(Pubkey, Account)>> {
         self.program_account_fetches.fetch_add(1, Ordering::Relaxed);
         self.wait_if_fetches_blocked().await;
+
+        if self
+            .fail_unpartitioned_undelegation_request_scan
+            .load(Ordering::Relaxed)
+            && pubkey == &dlp_api::id()
+            && config.filters.as_ref().is_some_and(|filters| {
+                filters.iter().any(|filter| {
+                    matches!(
+                        filter,
+                        RpcFilterType::DataSize(size)
+                            if *size
+                                == UndelegationRequest::size_with_discriminator()
+                                    as u64
+                    )
+                }) && !filters.iter().any(|filter| {
+                    matches!(
+                        filter,
+                        RpcFilterType::Memcmp(memcmp) if memcmp.offset() == 8
+                    )
+                })
+            })
+        {
+            return Err(client_error::ErrorKind::Custom(
+                "unpartitioned undelegation request scan failed".to_string(),
+            )
+            .into());
+        }
 
         let mut accounts = vec![];
         for (account_pubkey, AccountAtSlot { account, slot }) in

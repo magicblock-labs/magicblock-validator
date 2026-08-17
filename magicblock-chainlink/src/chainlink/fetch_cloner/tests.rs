@@ -10,7 +10,7 @@ type TestFetchCloner = FetchCloner<ChainRpcClientMock, ChainPubsubClientMock>;
 use crate::{
     cloner::{AccountCloneRequest, ClonePostDelegationMode, DelegationActions},
     remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
-    testing::rpc_client_mock::ChainRpcClientMock,
+    testing::{context::TestContext, rpc_client_mock::ChainRpcClientMock},
 };
 
 fn request(account: AccountBuilder) -> AccountCloneRequest {
@@ -44,6 +44,23 @@ fn delegation_record_account(delegation_slot: u64) -> Account {
     };
     let mut data = vec![0; DelegationRecord::size_with_discriminator()];
     record.to_bytes_with_discriminator(&mut data).unwrap();
+    Account {
+        data,
+        owner: dlp_api::id(),
+        ..Default::default()
+    }
+}
+
+fn undelegation_request_account(
+    delegated_account: Pubkey,
+    expires_at_slot: u64,
+) -> Account {
+    let request = UndelegationRequest {
+        delegated_account,
+        expires_at_slot,
+    };
+    let mut data = vec![0; UndelegationRequest::size_with_discriminator()];
+    request.to_bytes_with_discriminator(&mut data).unwrap();
     Account {
         data,
         owner: dlp_api::id(),
@@ -130,7 +147,7 @@ fn replay_recovery_requests_full_confirmed_blocks() {
 
 #[test]
 fn replay_recovery_request_scan_is_slot_and_type_bounded() {
-    let config = undelegation_request_config(42);
+    let config = undelegation_request_config(42, Some(&[0xab, 0xcd]));
 
     assert_eq!(config.account_config.min_context_slot, Some(42));
     assert!(matches!(
@@ -138,6 +155,7 @@ fn replay_recovery_request_scan_is_slot_and_type_bounded() {
         Some([
             RpcFilterType::DataSize(size),
             RpcFilterType::Memcmp(memcmp),
+            RpcFilterType::Memcmp(prefix),
         ]) if *size == UndelegationRequest::size_with_discriminator() as u64
             && memcmp.offset() == 0
             && memcmp.bytes().is_some_and(|bytes| {
@@ -146,7 +164,61 @@ fn replay_recovery_request_scan_is_slot_and_type_bounded() {
                         .to_bytes()
                         .as_slice()
             })
+            && prefix.offset() == 8
+            && prefix.bytes().is_some_and(|bytes| {
+                bytes.as_slice() == [0xab, 0xcd]
+            })
     ));
+
+    let global = undelegation_request_config(42, None);
+    assert_eq!(global.filters.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn request_scan_partitions_after_global_failure() {
+    let context = TestContext::init(42).await;
+    let delegated_account = Pubkey::new_unique();
+    let record_pda =
+        delegation_record_pda_from_delegated_account(&delegated_account);
+    let request_pda =
+        undelegation_request_pda_from_delegated_account(&delegated_account);
+    let mut record = delegation_record_account(1);
+    let record_data = DelegationRecord {
+        authority: context.validator_pubkey,
+        owner: Pubkey::new_unique(),
+        delegation_slot: 1,
+        lamports: 1,
+        commit_frequency_ms: 1,
+    };
+    record_data
+        .to_bytes_with_discriminator(&mut record.data)
+        .unwrap();
+    context.rpc_client.add_account(record_pda, record);
+    context.rpc_client.add_account(
+        request_pda,
+        undelegation_request_account(delegated_account, 100),
+    );
+    context
+        .rpc_client
+        .fail_unpartitioned_undelegation_request_scan();
+    let baseline = context.rpc_client.program_account_fetches();
+
+    let requests = context
+        .chainlink
+        .fetch_undelegation_requests()
+        .await
+        .expect("partitioned request scan should succeed");
+
+    assert_eq!(
+        requests,
+        vec![ObservedUndelegationRequest {
+            request_pda,
+            delegated_account,
+            expires_at_slot: 100,
+            observed_slot: 42,
+        }]
+    );
+    assert_eq!(context.rpc_client.program_account_fetches() - baseline, 257);
 }
 
 #[test]

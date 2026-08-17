@@ -76,6 +76,9 @@ pub enum ChainlinkError {
     #[error("undelegation request receiver closed during replay recovery")]
     UndelegationRequestReceiverClosed,
 
+    #[error("undelegation request recovery could not scan {0} partitions")]
+    IncompleteUndelegationRequestRecovery(usize),
+
     #[error("Failed to perform risk check: {0}")]
     RiskCheckFailed(#[from] RiskError),
 }

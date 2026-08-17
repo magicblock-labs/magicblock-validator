@@ -22,6 +22,7 @@ use dlp_api::{
     },
 };
 use engine::Engine;
+use futures_util::{StreamExt, stream};
 use keeper::MissingAccount;
 use lru::LruCache;
 use magicblock_aml::RiskService;
@@ -220,6 +221,7 @@ const PENDING_COLLISION_RECHECKS_CAPACITY: NonZeroUsize =
 const COLLISION_OVERFLOW_RECONCILIATION_LIMIT: usize = 64;
 const AUTHORITY_RECORD_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
 const REPLAY_RECOVERY_RETRY_DELAY: Duration = Duration::from_secs(30);
+const UNDELEGATION_REQUEST_PARTITION_CONCURRENCY: usize = 16;
 const COLLISION_RECHECK_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
     Duration::from_secs(8),
@@ -288,19 +290,27 @@ fn replay_recovery_block_config() -> RpcBlockConfig {
 
 fn undelegation_request_config(
     min_context_slot: u64,
+    delegated_account_prefix: Option<&[u8]>,
 ) -> RpcProgramAccountsConfig {
+    let mut filters = vec![
+        RpcFilterType::DataSize(
+            UndelegationRequest::size_with_discriminator() as u64
+        ),
+        RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+            0,
+            AccountDiscriminator::UndelegationRequest
+                .to_bytes()
+                .to_vec(),
+        )),
+    ];
+    if let Some(prefix) = delegated_account_prefix {
+        filters.push(RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+            8,
+            prefix.to_vec(),
+        )));
+    }
     RpcProgramAccountsConfig {
-        filters: Some(vec![
-            RpcFilterType::DataSize(
-                UndelegationRequest::size_with_discriminator() as u64,
-            ),
-            RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
-                0,
-                AccountDiscriminator::UndelegationRequest
-                    .to_bytes()
-                    .to_vec(),
-            )),
-        ]),
+        filters: Some(filters),
         account_config: RpcAccountInfoConfig {
             encoding: Some(UiAccountEncoding::Base64Zstd),
             min_context_slot: Some(min_context_slot),
@@ -308,6 +318,11 @@ fn undelegation_request_config(
         },
         ..Default::default()
     }
+}
+
+struct UndelegationRequestScan {
+    requests: Vec<ObservedUndelegationRequest>,
+    incomplete_partitions: usize,
 }
 
 fn records_in_replay_gap(
@@ -711,11 +726,11 @@ where
         &self,
         min_context_slot: u64,
     ) -> ChainlinkResult<()> {
-        let requests = self
-            .fetch_undelegation_requests_at_slot(min_context_slot)
+        let scan = self
+            .scan_undelegation_requests_at_slot(min_context_slot)
             .await?;
-        let request_count = requests.len();
-        for request in requests {
+        let request_count = scan.requests.len();
+        for request in scan.requests {
             self.undelegation_request_sender
                 .send(request)
                 .await
@@ -727,6 +742,11 @@ where
             request_count,
             "undelegation requests reconciled after record replay gap"
         );
+        if scan.incomplete_partitions > 0 {
+            return Err(ChainlinkError::IncompleteUndelegationRequestRecovery(
+                scan.incomplete_partitions,
+            ));
+        }
         Ok(())
     }
 
@@ -907,20 +927,86 @@ where
     pub async fn fetch_undelegation_requests(
         &self,
     ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
-        self.fetch_undelegation_requests_at_slot(0).await
+        let scan = self.scan_undelegation_requests_at_slot(0).await?;
+        if scan.incomplete_partitions > 0 {
+            warn!(
+                incomplete_partitions = scan.incomplete_partitions,
+                "undelegation request scan incomplete; successful partitions remain actionable"
+            );
+        }
+        Ok(scan.requests)
     }
 
-    async fn fetch_undelegation_requests_at_slot(
+    async fn scan_undelegation_requests_at_slot(
         &self,
         min_context_slot: u64,
-    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
+    ) -> ChainlinkResult<UndelegationRequestScan> {
         let observed_slot = self
             .remote_account_provider
             .get_slot()
             .await?
             .max(min_context_slot);
+        match self
+            .fetch_undelegation_request_partition(observed_slot, None)
+            .await
+        {
+            Ok(requests) => {
+                return Ok(UndelegationRequestScan {
+                    requests,
+                    incomplete_partitions: 0,
+                });
+            }
+            Err(error) => warn!(
+                ?error,
+                "global undelegation request scan failed; retrying with bounded partitions"
+            ),
+        }
+        let mut partitions = stream::iter(u8::MIN..=u8::MAX)
+            .map(|prefix| async move {
+                (
+                    prefix,
+                    self.fetch_undelegation_request_partition(
+                        observed_slot,
+                        Some(prefix),
+                    )
+                    .await,
+                )
+            })
+            .buffer_unordered(UNDELEGATION_REQUEST_PARTITION_CONCURRENCY);
+        let mut requests = Vec::new();
+        let mut incomplete_partitions = 0usize;
+        while let Some((prefix, partition)) = partitions.next().await {
+            match partition {
+                Ok(mut partition_requests) => {
+                    requests.append(&mut partition_requests);
+                }
+                Err(error) => {
+                    incomplete_partitions =
+                        incomplete_partitions.saturating_add(1);
+                    warn!(
+                        ?error,
+                        prefix,
+                        "undelegation request partition failed; continuing"
+                    );
+                }
+            }
+        }
+        Ok(UndelegationRequestScan {
+            requests,
+            incomplete_partitions,
+        })
+    }
+
+    async fn fetch_undelegation_request_partition(
+        &self,
+        observed_slot: u64,
+        delegated_account_prefix: Option<u8>,
+    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
         let delegation_program = dlp_api::id();
-        let config = undelegation_request_config(observed_slot);
+        let config = undelegation_request_config(
+            observed_slot,
+            delegated_account_prefix.as_ref().map(std::slice::from_ref),
+        );
         let accounts = self
             .remote_account_provider
             .get_program_accounts_with_config(&delegation_program, config)
