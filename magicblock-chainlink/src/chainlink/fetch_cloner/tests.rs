@@ -155,6 +155,35 @@ async fn fallback_undelegation_requests_require_fresh_local_authority() {
         .await
         .is_err()
     );
+
+    let request_pda =
+        undelegation_request_pda_from_delegated_account(&delegated_account);
+    rpc_client.add_account(
+        request_pda,
+        undelegation_request_account(delegated_account, 100),
+    );
+    rpc_client.set_slot(43);
+    let recovered = scan_undelegation_requests_with_provider(
+        &remote_account_provider,
+        validator_pubkey,
+        43,
+    )
+    .await
+    .unwrap();
+    assert_eq!(recovered.incomplete_partitions, 0);
+    assert_eq!(recovered.requests.len(), 1);
+    assert_eq!(recovered.requests[0].request_pda, request_pda);
+}
+
+#[test]
+fn fallback_request_recovery_coalesces_latest_context_slot() {
+    let recovery = UndelegationRequestRecoveryState::default();
+    recovery.request(42);
+    recovery.request(40);
+    recovery.request(43);
+
+    assert_eq!(recovery.take_pending(), Some(43));
+    assert_eq!(recovery.take_pending(), None);
 }
 
 fn undelegation_request_account(

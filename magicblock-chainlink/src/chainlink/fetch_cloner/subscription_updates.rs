@@ -1504,11 +1504,16 @@ where
                                         delegated_account = %observed.delegated_account,
                                         "Ignoring fallback undelegation request without fresh local authority"
                                     ),
-                                    Err(error) => warn!(
-                                        ?error,
-                                        delegated_account = %observed.delegated_account,
-                                        "Unable to verify fallback undelegation request authority"
-                                    ),
+                                    Err(error) => {
+                                        warn!(
+                                            ?error,
+                                            delegated_account = %observed.delegated_account,
+                                            observed_slot = observed.observed_slot,
+                                            "Unable to verify fallback undelegation request authority; scheduling recovery"
+                                        );
+                                        self.undelegation_request_recovery
+                                            .request(observed.observed_slot);
+                                    }
                                 }
                             }
                             (

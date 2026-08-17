@@ -56,7 +56,7 @@ use solana_transaction_status_client_types::{
     TransactionDetails, UiTransactionEncoding,
 };
 use tokio::{
-    sync::{Semaphore, mpsc},
+    sync::{Notify, Semaphore, mpsc},
     task,
     task::JoinSet,
 };
@@ -171,6 +171,7 @@ where
     record_mirror: Option<Arc<DelegationRecordMirror>>,
 
     undelegation_request_sender: mpsc::Sender<ObservedUndelegationRequest>,
+    undelegation_request_recovery: Arc<UndelegationRequestRecoveryState>,
 }
 
 struct PendingUndelegationGuard {
@@ -186,6 +187,38 @@ impl Drop for PendingUndelegationGuard {
         {
             pending_undelegations.remove(&self.pubkey);
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct UndelegationRequestRecoveryState {
+    pending_min_context_slot: Mutex<Option<u64>>,
+    notify: Notify,
+}
+
+impl UndelegationRequestRecoveryState {
+    fn request(&self, min_context_slot: u64) {
+        let mut pending = self
+            .pending_min_context_slot
+            .lock()
+            .expect("undelegation request recovery lock");
+        *pending = Some(
+            pending
+                .take()
+                .map_or(min_context_slot, |slot| slot.max(min_context_slot)),
+        );
+        self.notify.notify_one();
+    }
+
+    async fn notified(&self) {
+        self.notify.notified().await;
+    }
+
+    fn take_pending(&self) -> Option<u64> {
+        self.pending_min_context_slot
+            .lock()
+            .expect("undelegation request recovery lock")
+            .take()
     }
 }
 
@@ -708,6 +741,9 @@ where
             undelegation_request_sender: self
                 .undelegation_request_sender
                 .clone(),
+            undelegation_request_recovery: Arc::clone(
+                &self.undelegation_request_recovery,
+            ),
         }
     }
 }
@@ -822,8 +858,12 @@ where
             risk_service,
             record_mirror,
             undelegation_request_sender,
+            undelegation_request_recovery: Arc::new(
+                UndelegationRequestRecoveryState::default(),
+            ),
         });
 
+        me.clone().start_undelegation_request_recovery_listener();
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
 
@@ -844,6 +884,49 @@ where
         }
 
         me
+    }
+
+    fn start_undelegation_request_recovery_listener(self: Arc<Self>) {
+        let recovery = Arc::clone(&self.undelegation_request_recovery);
+        let weak = Arc::downgrade(&self);
+        drop(self);
+        task::spawn(async move {
+            loop {
+                recovery.notified().await;
+                let Some(mut min_context_slot) = recovery.take_pending() else {
+                    continue;
+                };
+                loop {
+                    if let Some(next) = recovery.take_pending() {
+                        min_context_slot = min_context_slot.max(next);
+                    }
+                    let Some(this) = weak.upgrade() else { return };
+                    match this
+                        .reconcile_undelegation_requests(min_context_slot)
+                        .await
+                    {
+                        Ok(()) => {
+                            info!(
+                                min_context_slot,
+                                "fallback undelegation request recovery completed"
+                            );
+                            break;
+                        }
+                        Err(error) => warn!(
+                            ?error,
+                            min_context_slot,
+                            "fallback undelegation request recovery failed; retrying"
+                        ),
+                    }
+                    drop(this);
+
+                    tokio::select! {
+                        _ = recovery.notified() => {}
+                        _ = tokio::time::sleep(REPLAY_RECOVERY_RETRY_DELAY) => {}
+                    }
+                }
+            }
+        });
     }
 
     fn start_replay_recovery_listener(
