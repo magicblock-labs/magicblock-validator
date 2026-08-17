@@ -636,18 +636,32 @@ where
         }
     }
 
+    pub(super) async fn resolve_recovered_dlp_collision(
+        &self,
+        pubkey: Pubkey,
+        slot: u64,
+    ) {
+        if self.clone_colliding_delegated_account(pubkey, slot).await
+            == CollisionCloneOutcome::Retry
+        {
+            self.schedule_collision_recheck_inner(pubkey, slot, true)
+                .await;
+        }
+    }
+
     pub(super) fn schedule_collision_recheck(
         &self,
         pubkey: Pubkey,
         slot: u64,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(self.schedule_collision_recheck_inner(pubkey, slot))
+        Box::pin(self.schedule_collision_recheck_inner(pubkey, slot, false))
     }
 
     async fn schedule_collision_recheck_inner(
         &self,
         pubkey: Pubkey,
         slot: u64,
+        authoritative_recovery: bool,
     ) {
         let record_pda = delegation_record_pda_from_delegated_account(&pubkey);
         let enqueue = {
@@ -690,6 +704,7 @@ where
                         if collision_overflow_action(
                             &mirror.probe(&record_pda, slot),
                             mirror.is_complete_through(slot),
+                            authoritative_recovery,
                         ) == CollisionRecheckAction::Discard
                         {
                             return;
@@ -929,9 +944,13 @@ fn collision_recheck_action(
 fn collision_overflow_action(
     lookup: &MirrorLookup,
     complete_through_slot: bool,
+    authoritative_recovery: bool,
 ) -> CollisionRecheckAction {
     match lookup {
         MirrorLookup::Tombstone { .. } => CollisionRecheckAction::Discard,
+        MirrorLookup::Miss if authoritative_recovery => {
+            CollisionRecheckAction::Resolve
+        }
         MirrorLookup::Miss if complete_through_slot => {
             CollisionRecheckAction::Discard
         }
@@ -1607,19 +1626,24 @@ mod tests {
             CollisionRecheckAction::Discard
         );
         assert_eq!(
-            collision_overflow_action(&MirrorLookup::Miss, true),
+            collision_overflow_action(&MirrorLookup::Miss, true, false),
             CollisionRecheckAction::Discard
         );
         assert_eq!(
-            collision_overflow_action(&MirrorLookup::Miss, false),
+            collision_overflow_action(&MirrorLookup::Miss, false, false),
             CollisionRecheckAction::Resolve
         );
         assert_eq!(
             collision_overflow_action(
                 &MirrorLookup::Tombstone { slot: 1 },
+                false,
                 false
             ),
             CollisionRecheckAction::Discard
+        );
+        assert_eq!(
+            collision_overflow_action(&MirrorLookup::Miss, true, true),
+            CollisionRecheckAction::Resolve
         );
     }
 

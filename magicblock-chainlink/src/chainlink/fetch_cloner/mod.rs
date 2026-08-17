@@ -12,7 +12,10 @@ use std::{
 };
 
 use dlp_api::{
-    pda::delegation_record_pda_from_delegated_account,
+    pda::{
+        delegation_record_pda_from_delegated_account,
+        undelegation_request_pda_from_delegated_account,
+    },
     state::{
         DelegationRecord, UndelegationRequest,
         discriminator::AccountDiscriminator,
@@ -338,6 +341,15 @@ fn records_in_replay_gap(
     Ok(records_by_slot)
 }
 
+fn undelegation_request_has_local_record(
+    delegated_account: &Pubkey,
+    local_records: &HashSet<Pubkey>,
+) -> bool {
+    local_records.contains(&delegation_record_pda_from_delegated_account(
+        delegated_account,
+    ))
+}
+
 impl<T, U> Clone for FetchCloner<T, U>
 where
     T: ChainRpcClient,
@@ -598,26 +610,37 @@ where
             local_records.into_iter().chain(confined_records),
             range,
         )?;
-        let mut remaining = records_by_slot
-            .values()
-            .flatten()
-            .copied()
-            .collect::<HashSet<_>>();
-        if remaining.is_empty() {
+        if records_by_slot.is_empty() {
             return Ok(0);
         }
 
         let mut slots = records_by_slot.keys().copied().collect::<Vec<_>>();
         slots.sort_unstable();
-        let mut recovered = HashMap::new();
+        let mut recovered_count = 0usize;
+        let mut incomplete_count = 0usize;
         for slot in slots {
             let expected_records = records_by_slot
                 .remove(&slot)
                 .expect("slot came from records_by_slot");
-            let block = self
+            let block = match self
                 .remote_account_provider
                 .get_block_with_config(slot, replay_recovery_block_config())
-                .await?;
+                .await
+            {
+                Ok(block) => block,
+                Err(error) => {
+                    incomplete_count =
+                        incomplete_count.saturating_add(expected_records.len());
+                    warn!(
+                        ?error,
+                        slot,
+                        record_count = expected_records.len(),
+                        "record replay block unavailable; continuing with other slots"
+                    );
+                    continue;
+                }
+            };
+            let mut recovered = HashMap::new();
             for delegation in recover_delegations_from_block(&block, slot) {
                 if !expected_records.contains(&delegation.record)
                     || delegation_record_pda_from_delegated_account(
@@ -640,26 +663,30 @@ where
                     }
                     Entry::Occupied(_) => {}
                 }
-                remaining.remove(&delegation.record);
             }
+            incomplete_count = incomplete_count.saturating_add(
+                expected_records.len().saturating_sub(recovered.len()),
+            );
+            let mut recovered = recovered.into_values().collect::<Vec<_>>();
+            recovered.sort_unstable_by_key(|delegation| {
+                delegation.delegated_account
+            });
+            for delegation in recovered.iter().copied() {
+                self.resolve_recovered_dlp_collision(
+                    delegation.delegated_account,
+                    delegation.slot,
+                )
+                .await;
+            }
+            recovered_count = recovered_count.saturating_add(recovered.len());
         }
-        if !remaining.is_empty() {
+        if incomplete_count > 0 {
             return Err(ChainlinkError::IncompleteReplayRecovery(
-                remaining.len(),
+                incomplete_count,
             ));
         }
 
-        let mut recovered = recovered.into_values().collect::<Vec<_>>();
-        recovered
-            .sort_unstable_by_key(|delegation| delegation.delegated_account);
-        for delegation in recovered.iter().copied() {
-            self.resolve_internal_dlp_collision(
-                delegation.delegated_account,
-                delegation.slot,
-            )
-            .await;
-        }
-        Ok(recovered.len())
+        Ok(recovered_count)
     }
 
     fn start_authority_record_sweep(self: Arc<Self>) {
@@ -851,11 +878,33 @@ where
             .get_slot()
             .await?
             .max(min_context_slot);
+        let delegation_program = dlp_api::id();
         let config = undelegation_request_config(observed_slot);
-        let accounts = self
+        let requests = self
             .remote_account_provider
-            .get_program_accounts_with_config(&dlp_api::id(), config)
-            .await?;
+            .get_program_accounts_with_config(&delegation_program, config);
+        let local_records = self
+            .remote_account_provider
+            .get_program_accounts_with_config(
+                &delegation_program,
+                authority_record_config(
+                    self.validator_pubkey,
+                    Some(observed_slot),
+                ),
+            );
+        let confined_records = self
+            .remote_account_provider
+            .get_program_accounts_with_config(
+                &delegation_program,
+                authority_record_config(Pubkey::default(), Some(observed_slot)),
+            );
+        let (accounts, local_records, confined_records) =
+            tokio::try_join!(requests, local_records, confined_records)?;
+        let local_records = local_records
+            .into_iter()
+            .chain(confined_records)
+            .map(|(pubkey, _)| pubkey)
+            .collect::<HashSet<_>>();
 
         let mut requests = Vec::with_capacity(accounts.len());
         for (request_pda, account) in accounts {
@@ -871,6 +920,27 @@ where
                 );
                 continue;
             };
+            if undelegation_request_pda_from_delegated_account(
+                &request.delegated_account,
+            ) != request_pda
+            {
+                warn!(
+                    %request_pda,
+                    delegated_account = %request.delegated_account,
+                    "Skipping undelegation request with invalid PDA"
+                );
+                continue;
+            }
+            if !undelegation_request_has_local_record(
+                &request.delegated_account,
+                &local_records,
+            ) {
+                trace!(
+                    delegated_account = %request.delegated_account,
+                    "Ignoring undelegation request without local authority"
+                );
+                continue;
+            }
             requests.push(ObservedUndelegationRequest {
                 request_pda,
                 delegated_account: request.delegated_account,

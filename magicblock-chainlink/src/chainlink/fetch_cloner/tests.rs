@@ -52,6 +52,23 @@ fn delegation_record_account(delegation_slot: u64) -> Account {
 }
 
 #[test]
+fn replayed_requests_require_local_or_confined_authority() {
+    let local = Pubkey::new_unique();
+    let foreign = Pubkey::new_unique();
+    let local_records =
+        HashSet::from([delegation_record_pda_from_delegated_account(&local)]);
+
+    assert!(undelegation_request_has_local_record(
+        &local,
+        &local_records,
+    ));
+    assert!(!undelegation_request_has_local_record(
+        &foreign,
+        &local_records,
+    ));
+}
+
+#[test]
 fn replay_recovery_record_scan_is_slot_and_authority_bounded() {
     let authority = Pubkey::new_unique();
     let config = replay_recovery_record_config(authority, 42);
