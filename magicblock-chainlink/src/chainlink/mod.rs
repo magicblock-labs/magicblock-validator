@@ -220,6 +220,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             let risk_service =
                 RiskService::try_from_config(&chainlink_config.risk)?
                     .map(Arc::new);
+            match risk_service.as_ref() {
+                // Which policy is live decides whether an action can activate
+                // unchecked, so make it visible at startup.
+                Some(service) => info!(
+                    risk_server_url = %chainlink_config.risk.risk_server_url,
+                    check_strategy = ?service.check_strategy(),
+                    "Address risk checks enabled"
+                ),
+                None => info!("Address risk checks disabled"),
+            }
             let fetch_cloner =
                 FetchCloner::new_with_undelegation_request_sender(
                     &provider,

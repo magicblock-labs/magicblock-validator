@@ -227,6 +227,17 @@ risk-server-url = "http://127.0.0.1:3001"
 # Env: MBV_CHAINLINK__RISK__REQUEST_TIMEOUT
 request-timeout = "5s"
 
+# Which post-delegation action signers to risk check.
+#   "all-signers":       check every signer of every action (conservative).
+#   "relevant-programs": only check when an action involves a value
+#                        transferring program: SPL Token (legacy and 2022),
+#                        ephemeral SPL (eATA/ESPL), Magic, or the (ephemeral)
+#                        system program. Actions touching none of these
+#                        activate without any risk server call.
+# Default: "all-signers"
+# Env: MBV_CHAINLINK__RISK__CHECK_STRATEGY
+check-strategy = "all-signers"
+
 # ==============================================================================
 # Leader Administration (Optional)
 # ==============================================================================

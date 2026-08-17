@@ -78,6 +78,25 @@ impl Default for ChainLinkConfig {
     }
 }
 
+/// Strategy for deciding which post-delegation action signers get AML/risk
+/// checked.
+#[derive(
+    Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum AmlCheckStrategy {
+    /// Check every signer of every post-delegation action, regardless of which
+    /// programs the action invokes. The default, since it is the only strategy
+    /// that cannot silently let an action through unchecked.
+    #[default]
+    AllSigners,
+    /// Only check signers when a post-delegation action involves a value
+    /// transferring program: SPL Token (legacy and 2022), ephemeral SPL
+    /// (eATA/ESPL), Magic, or the (ephemeral) system program. Actions touching
+    /// none of these programs skip the risk check entirely.
+    RelevantPrograms,
+}
+
 /// Configuration for checking address risk against the risk server. The risk
 /// server owns the upstream provider credentials, caching, and threshold; the
 /// validator is a thin client.
@@ -91,6 +110,8 @@ pub struct RiskConfig {
     /// Request timeout for risk server calls.
     #[serde(with = "humantime")]
     pub request_timeout: Duration,
+    /// Which post-delegation action signers to risk check.
+    pub check_strategy: AmlCheckStrategy,
 }
 
 impl Default for RiskConfig {
@@ -101,6 +122,7 @@ impl Default for RiskConfig {
             request_timeout: Duration::from_secs(
                 consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC,
             ),
+            check_strategy: AmlCheckStrategy::default(),
         }
     }
 }
