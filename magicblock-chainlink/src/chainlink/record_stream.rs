@@ -239,7 +239,10 @@ impl RecordStream {
         match update {
             UpdateOneof::Account(account) => {
                 self.slot = self.slot.max(account.slot);
-                self.handle_account_update(account).await
+                let violated =
+                    self.interrupt_on_watermark_violation(account.slot).await;
+                self.handle_account_update(account).await;
+                !violated
             }
             UpdateOneof::Slot(slot) => {
                 if SlotStatus::try_from(slot.status)
@@ -256,14 +259,18 @@ impl RecordStream {
                     self.deliver(RecordStreamUpdate::SlotAdvanced(slot.slot))
                         .await;
                 }
+                true
             }
             UpdateOneof::Transaction(transaction) => {
                 self.slot = self.slot.max(transaction.slot);
-                self.handle_transaction_update(transaction).await
+                let violated = self
+                    .interrupt_on_watermark_violation(transaction.slot)
+                    .await;
+                self.handle_transaction_update(transaction).await;
+                !violated
             }
-            _ => {}
+            _ => true,
         }
-        true
     }
 
     async fn deliver(&mut self, update: RecordStreamUpdate) {
@@ -272,15 +279,20 @@ impl RecordStream {
         }
     }
 
-    async fn interrupt_on_watermark_violation(&mut self, slot: Slot) {
+    async fn interrupt_on_watermark_violation(&mut self, slot: Slot) -> bool {
         if self.watermark > 0 && slot <= self.watermark {
             tracing::warn!(
                 slot,
                 watermark = self.watermark,
                 "record update violated published watermark"
             );
+            // Rewind replay to the interval whose ordering guarantee failed.
+            self.slot = slot;
             self.watermark = 0;
             self.deliver(RecordStreamUpdate::SyncInterrupted).await;
+            true
+        } else {
+            false
         }
     }
 
@@ -307,7 +319,6 @@ impl RecordStream {
                 slot: update.slot,
             },
         };
-        self.interrupt_on_watermark_violation(update.slot).await;
         self.deliver(event).await;
     }
 
@@ -410,7 +421,6 @@ impl RecordStream {
                     }
                 }
             };
-            self.interrupt_on_watermark_violation(update.slot).await;
             self.deliver(event).await;
         }
     }
@@ -812,30 +822,33 @@ mod tests {
             updates.try_recv(),
             Ok(RecordStreamUpdate::SlotAdvanced(100))
         ));
-        stream
-            .handle_update(Ok(SubscribeUpdate {
-                update_oneof: Some(UpdateOneof::Account(
-                    SubscribeUpdateAccount {
-                        account: Some(SubscribeUpdateAccountInfo {
-                            pubkey: vec![4; PUBKEY_LEN],
-                            data: vec![1],
+        assert!(
+            !stream
+                .handle_update(Ok(SubscribeUpdate {
+                    update_oneof: Some(UpdateOneof::Account(
+                        SubscribeUpdateAccount {
+                            account: Some(SubscribeUpdateAccountInfo {
+                                pubkey: vec![4; PUBKEY_LEN],
+                                data: vec![1],
+                                ..Default::default()
+                            }),
+                            slot: 40,
                             ..Default::default()
-                        }),
-                        slot: 100,
-                        ..Default::default()
-                    },
-                )),
-                ..Default::default()
-            }))
-            .await;
+                        },
+                    )),
+                    ..Default::default()
+                }))
+                .await
+        );
         assert!(matches!(
             updates.try_recv(),
             Ok(RecordStreamUpdate::SyncInterrupted)
         ));
         assert!(matches!(
             updates.try_recv(),
-            Ok(RecordStreamUpdate::Record { slot, .. }) if slot == 100
+            Ok(RecordStreamUpdate::Record { slot, .. }) if slot == 40
         ));
+        assert_eq!(stream.slot, 40);
     }
 
     #[tokio::test]
