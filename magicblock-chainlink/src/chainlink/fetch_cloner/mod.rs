@@ -590,30 +590,10 @@ where
             );
         let (local_records, confined_records) =
             tokio::try_join!(local_records, confined_records)?;
-        let undelegation_requests = self
-            .fetch_undelegation_requests_at_slot(range.through_slot)
-            .await?;
-        let request_count = undelegation_requests.len();
-        for request in undelegation_requests {
-            self.undelegation_request_sender
-                .send(request)
-                .await
-                .map_err(|_| {
-                    ChainlinkError::UndelegationRequestReceiverClosed
-                })?;
-        }
-        info!(
-            request_count,
-            "undelegation requests reconciled after record replay gap"
-        );
         let mut records_by_slot = records_in_replay_gap(
             local_records.into_iter().chain(confined_records),
             range,
         )?;
-        if records_by_slot.is_empty() {
-            return Ok(0);
-        }
-
         let mut slots = records_by_slot.keys().copied().collect::<Vec<_>>();
         slots.sort_unstable();
         let mut recovered_count = 0usize;
@@ -680,6 +660,8 @@ where
             }
             recovered_count = recovered_count.saturating_add(recovered.len());
         }
+        self.reconcile_undelegation_requests(range.through_slot)
+            .await?;
         if incomplete_count > 0 {
             return Err(ChainlinkError::IncompleteReplayRecovery(
                 incomplete_count,
@@ -687,6 +669,29 @@ where
         }
 
         Ok(recovered_count)
+    }
+
+    async fn reconcile_undelegation_requests(
+        &self,
+        min_context_slot: u64,
+    ) -> ChainlinkResult<()> {
+        let requests = self
+            .fetch_undelegation_requests_at_slot(min_context_slot)
+            .await?;
+        let request_count = requests.len();
+        for request in requests {
+            self.undelegation_request_sender
+                .send(request)
+                .await
+                .map_err(|_| {
+                    ChainlinkError::UndelegationRequestReceiverClosed
+                })?;
+        }
+        info!(
+            request_count,
+            "undelegation requests reconciled after record replay gap"
+        );
+        Ok(())
     }
 
     fn start_authority_record_sweep(self: Arc<Self>) {
