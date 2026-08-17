@@ -1,5 +1,6 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
+use dlp_api::state::DelegationRecord;
 use lru::LruCache;
 use magicblock_config::config::RecordSyncConfig;
 use magicblock_metrics::metrics::{self, RecordMirrorLookupOutcome};
@@ -17,7 +18,6 @@ use crate::{
 };
 
 const MIRROR_EVENT_CHANNEL_CAPACITY: usize = 4096;
-const MIRROR_RECONCILIATION_CHANNEL_CAPACITY: usize = 1;
 
 #[derive(Debug, Clone, Copy)]
 pub struct DiscoveredDelegation {
@@ -39,12 +39,12 @@ pub struct DelegationRecordMirror {
     undelegation_requests_tx: Sender<ObservedUndelegationRequest>,
     undelegation_requests_rx:
         Mutex<Option<Receiver<ObservedUndelegationRequest>>>,
-    reconciliations_tx: Sender<()>,
-    reconciliations_rx: Mutex<Option<Receiver<()>>>,
 }
 
 struct MirrorState {
     entries: LruCache<Pubkey, RecordEntry>,
+    retained_data_bytes: usize,
+    max_retained_data_bytes: usize,
     watermark: u64,
     live: bool,
 }
@@ -52,6 +52,12 @@ struct MirrorState {
 struct RecordEntry {
     slot: u64,
     data: Option<Vec<u8>>,
+}
+
+impl RecordEntry {
+    fn retained_data_bytes(&self) -> usize {
+        self.data.as_ref().map_or(0, Vec::capacity)
+    }
 }
 
 pub enum MirrorLookup {
@@ -119,11 +125,14 @@ impl DelegationRecordMirror {
             mpsc::channel(MIRROR_EVENT_CHANNEL_CAPACITY);
         let (undelegation_requests_tx, undelegation_requests_rx) =
             mpsc::channel(MIRROR_EVENT_CHANNEL_CAPACITY);
-        let (reconciliations_tx, reconciliations_rx) =
-            mpsc::channel(MIRROR_RECONCILIATION_CHANNEL_CAPACITY);
+        let max_retained_data_bytes = capacity
+            .get()
+            .saturating_mul(DelegationRecord::size_with_discriminator());
         Self {
             inner: Mutex::new(MirrorState {
                 entries: LruCache::new(capacity),
+                retained_data_bytes: 0,
+                max_retained_data_bytes,
                 watermark: 0,
                 live: false,
             }),
@@ -133,8 +142,6 @@ impl DelegationRecordMirror {
             undelegation_requests_rx: Mutex::new(Some(
                 undelegation_requests_rx,
             )),
-            reconciliations_tx,
-            reconciliations_rx: Mutex::new(Some(reconciliations_rx)),
         }
     }
 
@@ -146,10 +153,6 @@ impl DelegationRecordMirror {
         &self,
     ) -> Option<Receiver<ObservedUndelegationRequest>> {
         self.undelegation_requests_rx.lock().take()
-    }
-
-    pub fn take_reconciliations(&self) -> Option<Receiver<()>> {
-        self.reconciliations_rx.lock().take()
     }
 
     async fn consume(&self, update: RecordStreamUpdate) {
@@ -224,7 +227,6 @@ impl DelegationRecordMirror {
             | RecordStreamUpdate::SyncTerminated => {
                 self.clear();
                 metrics::set_record_mirror_live(false);
-                let _ = self.reconciliations_tx.try_send(());
             }
         }
     }
@@ -239,16 +241,49 @@ impl DelegationRecordMirror {
                 && existing.data.as_deref() != data.as_deref()
             {
                 warn!(%record, slot, "conflicting same-slot record updates; requiring RPC confirmation");
-                inner.entries.put(record, RecordEntry { slot, data: None });
+                Self::put_entry(
+                    &mut inner,
+                    record,
+                    RecordEntry { slot, data: None },
+                );
                 return;
             }
         }
-        inner.entries.put(record, RecordEntry { slot, data });
+        Self::put_entry(&mut inner, record, RecordEntry { slot, data });
+    }
+
+    fn put_entry(inner: &mut MirrorState, record: Pubkey, entry: RecordEntry) {
+        let entry_bytes = entry.retained_data_bytes();
+        if entry_bytes > inner.max_retained_data_bytes {
+            if let Some(existing) = inner.entries.pop(&record) {
+                inner.retained_data_bytes = inner
+                    .retained_data_bytes
+                    .saturating_sub(existing.retained_data_bytes());
+            }
+            return;
+        }
+        if let Some((_, replaced)) = inner.entries.push(record, entry) {
+            inner.retained_data_bytes = inner
+                .retained_data_bytes
+                .saturating_sub(replaced.retained_data_bytes());
+        }
+        inner.retained_data_bytes =
+            inner.retained_data_bytes.saturating_add(entry_bytes);
+        while inner.retained_data_bytes > inner.max_retained_data_bytes {
+            let Some((_, evicted)) = inner.entries.pop_lru() else {
+                inner.retained_data_bytes = 0;
+                break;
+            };
+            inner.retained_data_bytes = inner
+                .retained_data_bytes
+                .saturating_sub(evicted.retained_data_bytes());
+        }
     }
 
     fn clear(&self) {
         let mut inner = self.inner.lock();
         inner.entries.clear();
+        inner.retained_data_bytes = 0;
         inner.watermark = 0;
         inner.live = false;
     }
@@ -302,7 +337,12 @@ impl DelegationRecordMirror {
     }
 
     pub fn invalidate(&self, record: &Pubkey) {
-        self.inner.lock().entries.pop(record);
+        let mut inner = self.inner.lock();
+        if let Some(entry) = inner.entries.pop(record) {
+            inner.retained_data_bytes = inner
+                .retained_data_bytes
+                .saturating_sub(entry.retained_data_bytes());
+        }
     }
 }
 
@@ -442,12 +482,10 @@ mod tests {
     #[test]
     fn interruption_clears_entries_and_watermark() {
         let mirror = DelegationRecordMirror::with_capacity(16);
-        let mut reconciliations = mirror.take_reconciliations().unwrap();
         let record = Pubkey::new_unique();
         mirror.insert(record, 50, Some(vec![1]));
         mirror.apply(RecordStreamUpdate::SlotAdvanced(120));
         mirror.apply(RecordStreamUpdate::SyncInterrupted);
-        assert_eq!(reconciliations.try_recv(), Ok(()));
         assert!(matches!(mirror.get(&record, 1), MirrorLookup::Miss));
         mirror.insert(record, 130, Some(vec![2]));
         assert!(matches!(mirror.get(&record, 140), MirrorLookup::Miss));
@@ -467,6 +505,33 @@ mod tests {
         assert!(matches!(mirror.get(&a, 5), MirrorLookup::Miss));
         assert!(matches!(mirror.get(&b, 5), MirrorLookup::Hit { .. }));
         assert!(matches!(mirror.get(&c, 5), MirrorLookup::Hit { .. }));
+    }
+
+    #[test]
+    fn retained_record_data_is_byte_bounded() {
+        let mirror = DelegationRecordMirror::with_capacity(3);
+        let record_size = DelegationRecord::size_with_discriminator();
+        let (a, b, c, oversized) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        mirror.insert(a, 10, Some(vec![1; record_size]));
+        mirror.insert(b, 11, Some(vec![2; record_size]));
+        mirror.insert(c, 12, Some(vec![3; record_size.saturating_add(1)]));
+        mirror.insert(
+            oversized,
+            13,
+            Some(vec![4; record_size.saturating_mul(3).saturating_add(1)]),
+        );
+
+        let inner = mirror.inner.lock();
+        assert!(inner.retained_data_bytes <= inner.max_retained_data_bytes);
+        assert!(!inner.entries.contains(&a));
+        assert!(inner.entries.contains(&b));
+        assert!(inner.entries.contains(&c));
+        assert!(!inner.entries.contains(&oversized));
     }
 
     #[test]

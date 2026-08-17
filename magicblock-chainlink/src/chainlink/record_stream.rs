@@ -167,9 +167,8 @@ impl RecordStream {
         let _ = self.updates.send(RecordStreamUpdate::SyncTerminated).await;
     }
 
-    /// Reconnects indefinitely. Replay resumes behind the observed slot; if
-    /// replay is unavailable, the consumer is explicitly told to discard all
-    /// mirrored state before the fresh stream is trusted.
+    /// Reconnects indefinitely with replay behind the observed slot. A fresh
+    /// stream is never trusted after continuity is lost.
     async fn reconnect(&mut self) -> bool {
         tracing::warn!("record stream ended; reconnecting");
         self.watermark = 0;
@@ -181,41 +180,23 @@ impl RecordStream {
             if self.updates.is_closed() {
                 return false;
             }
-            let resume_slot = (self.slot > 0).then(|| {
-                self.slot.saturating_sub(RESUME_SAFETY_MARGIN_SLOTS).max(1)
-            });
-            match Self::connect(self.config.clone(), resume_slot).await {
+            let resume_slot =
+                self.slot.saturating_sub(RESUME_SAFETY_MARGIN_SLOTS).max(1);
+            match Self::connect(self.config.clone(), Some(resume_slot)).await {
                 Ok(stream) => {
                     self.stream = stream;
                     self.watermark = 0;
                     tracing::info!(
-                        from_slot = ?resume_slot,
+                        from_slot = resume_slot,
                         "record stream reconnected"
                     );
-                    return self.send_interrupted().await;
+                    return true;
                 }
                 Err(error) => tracing::warn!(
                     ?error,
-                    from_slot = ?resume_slot,
+                    from_slot = resume_slot,
                     "record stream resume failed"
                 ),
-            }
-
-            if resume_slot.is_some() {
-                match Self::connect(self.config.clone(), None).await {
-                    Ok(stream) => {
-                        self.stream = stream;
-                        self.watermark = 0;
-                        tracing::warn!(
-                            "record stream reconnected without replay"
-                        );
-                        return self.send_interrupted().await;
-                    }
-                    Err(error) => tracing::warn!(
-                        ?error,
-                        "fresh record stream reconnect failed"
-                    ),
-                }
             }
 
             tokio::select! {
