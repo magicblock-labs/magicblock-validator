@@ -34,33 +34,33 @@ fn account() -> AccountBuilder {
     .mode(AccountMode::ReadOnly)
 }
 
-#[test]
-fn replay_recovery_selects_only_accounts_with_authorized_records() {
-    let local = Pubkey::new_unique();
-    let confined = Pubkey::new_unique();
-    let foreign = Pubkey::new_unique();
-    let internal = Pubkey::new_unique();
-    let record_pdas = HashSet::from([
-        delegation_record_pda_from_delegated_account(&local),
-        delegation_record_pda_from_delegated_account(&confined),
-        internal,
-    ]);
-
-    let candidates = replay_recovery_candidates(
-        [local, foreign, confined, internal],
-        &record_pdas,
-    );
-
-    assert_eq!(candidates, vec![local, confined]);
+fn delegation_record_account(delegation_slot: u64) -> Account {
+    let record = DelegationRecord {
+        authority: Pubkey::new_unique(),
+        owner: Pubkey::new_unique(),
+        delegation_slot,
+        lamports: 1_000_000,
+        commit_frequency_ms: 1_000,
+    };
+    let mut data = vec![0; DelegationRecord::size_with_discriminator()];
+    record.to_bytes_with_discriminator(&mut data).unwrap();
+    Account {
+        data,
+        owner: dlp_api::id(),
+        ..Default::default()
+    }
 }
 
 #[test]
 fn replay_recovery_record_scan_is_slot_and_authority_bounded() {
     let authority = Pubkey::new_unique();
-    let config = authority_record_config(authority, Some(42));
+    let config = replay_recovery_record_config(authority, 42);
 
     assert_eq!(config.account_config.min_context_slot, Some(42));
-    assert_eq!(config.account_config.data_slice.unwrap().length, 0);
+    assert_eq!(
+        config.account_config.data_slice.unwrap().length,
+        DelegationRecord::size_with_discriminator()
+    );
     let filters = config.filters.unwrap();
     assert_eq!(filters.len(), 2);
     assert!(matches!(
@@ -70,6 +70,64 @@ fn replay_recovery_record_scan_is_slot_and_authority_bounded() {
                 && memcmp.bytes().is_some_and(|bytes| {
                     bytes.as_slice() == authority.as_ref()
                 })
+    ));
+}
+
+#[test]
+fn replay_recovery_selects_only_records_created_inside_gap() {
+    let before = Pubkey::new_unique();
+    let inside = Pubkey::new_unique();
+    let through = Pubkey::new_unique();
+    let after = Pubkey::new_unique();
+    let range = ReplayRecoveryRange {
+        after_slot: 10,
+        through_slot: 20,
+    };
+
+    let records = records_in_replay_gap(
+        [
+            (before, delegation_record_account(10)),
+            (inside, delegation_record_account(11)),
+            (through, delegation_record_account(20)),
+            (after, delegation_record_account(21)),
+        ],
+        range,
+    )
+    .unwrap();
+
+    assert_eq!(records[&11], HashSet::from([inside]));
+    assert_eq!(records[&20], HashSet::from([through]));
+    assert_eq!(records.len(), 2);
+}
+
+#[test]
+fn replay_recovery_requests_full_confirmed_blocks() {
+    let config = replay_recovery_block_config();
+
+    assert_eq!(config.encoding, Some(UiTransactionEncoding::Base64));
+    assert_eq!(config.transaction_details, Some(TransactionDetails::Full));
+    assert_eq!(config.rewards, Some(false));
+    assert_eq!(config.max_supported_transaction_version, Some(1));
+}
+
+#[test]
+fn replay_recovery_request_scan_is_slot_and_type_bounded() {
+    let config = undelegation_request_config(42);
+
+    assert_eq!(config.account_config.min_context_slot, Some(42));
+    assert!(matches!(
+        config.filters.as_deref(),
+        Some([
+            RpcFilterType::DataSize(size),
+            RpcFilterType::Memcmp(memcmp),
+        ]) if *size == UndelegationRequest::size_with_discriminator() as u64
+            && memcmp.offset() == 0
+            && memcmp.bytes().is_some_and(|bytes| {
+                bytes.as_slice()
+                    == AccountDiscriminator::UndelegationRequest
+                        .to_bytes()
+                        .as_slice()
+            })
     ));
 }
 

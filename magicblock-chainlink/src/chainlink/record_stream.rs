@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
     pin::Pin,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -24,12 +24,15 @@ use helius_laserstream::{
     },
 };
 use magicblock_metrics::metrics;
+use solana_pubkey::Pubkey;
 use solana_system_interface::MAX_PERMITTED_DATA_LENGTH;
+use solana_transaction_status_client_types::{
+    UiConfirmedBlock, UiInstruction, option_serializer::OptionSerializer,
+};
 use tokio::{
     sync::{
-        OwnedSemaphorePermit, Semaphore,
+        Notify, OwnedSemaphorePermit, Semaphore,
         mpsc::{self, Receiver, Sender},
-        watch,
     },
     time,
 };
@@ -129,7 +132,58 @@ impl RecordStreamMessage {
 pub(super) struct RecordStreamReceiver {
     pub(super) updates: Receiver<RecordStreamMessage>,
     pub(super) continuity_epoch: Arc<AtomicU64>,
-    pub(super) replay_recovery_slots: watch::Receiver<Slot>,
+    pub(super) replay_recovery: Arc<ReplayRecoveryState>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct ReplayRecoveryRange {
+    pub(super) after_slot: Slot,
+    pub(super) through_slot: Slot,
+}
+
+impl ReplayRecoveryRange {
+    pub(super) fn merged(self, other: Self) -> Self {
+        Self {
+            after_slot: self.after_slot.min(other.after_slot),
+            through_slot: self.through_slot.max(other.through_slot),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(super) struct ReplayRecoveryState {
+    pending: Mutex<Option<ReplayRecoveryRange>>,
+    notify: Notify,
+}
+
+impl ReplayRecoveryState {
+    pub(super) fn request(&self, range: ReplayRecoveryRange) {
+        if range.through_slot <= range.after_slot {
+            return;
+        }
+        let mut pending = self.pending.lock().expect("replay recovery lock");
+        *pending = Some(
+            pending
+                .take()
+                .map_or(range, |current| current.merged(range)),
+        );
+        self.notify.notify_one();
+    }
+
+    pub(super) async fn notified(&self) {
+        self.notify.notified().await;
+    }
+
+    pub(super) fn take_pending(&self) -> Option<ReplayRecoveryRange> {
+        self.pending.lock().expect("replay recovery lock").take()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RecoveredDelegation {
+    pub(super) delegated_account: Pubkey,
+    pub(super) record: Pubkey,
+    pub(super) slot: Slot,
 }
 
 struct LaserStream {
@@ -168,8 +222,9 @@ pub struct RecordStream {
     updates: Sender<RecordStreamMessage>,
     payload_budget: Arc<Semaphore>,
     continuity_epoch: Arc<AtomicU64>,
-    replay_recovery_slots: watch::Sender<Slot>,
+    replay_recovery: Arc<ReplayRecoveryState>,
     slot: Slot,
+    last_confirmed_slot: Slot,
     watermark: Slot,
 }
 
@@ -186,10 +241,14 @@ impl RecordStream {
             replay: true,
         };
         let (updates, receiver) = mpsc::channel(MAX_PENDING_UPDATES);
-        let (replay_recovery_slots, replay_recovery_receiver) =
-            watch::channel(0);
         let continuity_epoch = Arc::new(AtomicU64::new(0));
-        let (stream, _) = Self::connect(config.clone(), None).await?;
+        let replay_recovery = Arc::new(ReplayRecoveryState::default());
+        let (stream, confirmed_slot) =
+            Self::connect(config.clone(), None).await?;
+        replay_recovery.request(ReplayRecoveryRange {
+            after_slot: 0,
+            through_slot: confirmed_slot,
+        });
         tokio::spawn(
             Self {
                 stream,
@@ -199,8 +258,9 @@ impl RecordStream {
                     MAX_PENDING_PAYLOAD_BYTES,
                 )),
                 continuity_epoch: Arc::clone(&continuity_epoch),
-                replay_recovery_slots,
+                replay_recovery: Arc::clone(&replay_recovery),
                 slot: 0,
+                last_confirmed_slot: 0,
                 watermark: 0,
             }
             .run(),
@@ -208,7 +268,7 @@ impl RecordStream {
         Ok(RecordStreamReceiver {
             updates: receiver,
             continuity_epoch,
-            replay_recovery_slots: replay_recovery_receiver,
+            replay_recovery,
         })
     }
 
@@ -254,9 +314,14 @@ impl RecordStream {
                     if let Some(from_slot) = from_slot {
                         tracing::info!(from_slot, "record stream reconnected");
                     } else {
-                        self.replay_recovery_slots.send_replace(confirmed_slot);
+                        let range = ReplayRecoveryRange {
+                            after_slot: self.last_confirmed_slot,
+                            through_slot: confirmed_slot,
+                        };
+                        self.replay_recovery.request(range);
                         tracing::warn!(
-                            confirmed_slot,
+                            after_slot = range.after_slot,
+                            through_slot = range.through_slot,
                             "record stream replay anchor expired; requesting RPC recovery"
                         );
                     }
@@ -326,6 +391,8 @@ impl RecordStream {
                 self.slot = self.slot.max(slot.slot);
                 if slot.slot > self.watermark {
                     self.watermark = slot.slot;
+                    self.last_confirmed_slot =
+                        self.last_confirmed_slot.max(slot.slot);
                     self.deliver(RecordStreamUpdate::SlotAdvanced(slot.slot))
                         .await;
                 }
@@ -386,6 +453,8 @@ impl RecordStream {
             );
             // Rewind replay to the interval whose ordering guarantee failed.
             self.slot = slot;
+            self.last_confirmed_slot =
+                self.last_confirmed_slot.min(slot.saturating_sub(1));
             self.invalidate_continuity();
             self.deliver(RecordStreamUpdate::SyncInterrupted).await;
             true
@@ -438,55 +507,18 @@ impl RecordStream {
             return;
         };
 
-        let accounts: Vec<&Vec<u8>> = message
+        let accounts = message
             .account_keys
             .iter()
             .chain(meta.loaded_writable_addresses.iter())
             .chain(meta.loaded_readonly_addresses.iter())
-            .collect();
-        let delegation_program = dlp_api::id().to_bytes();
-        let account_at = |ix_accounts: &[u8], index: usize| {
-            ix_accounts
-                .get(index)
-                .and_then(|&idx| accounts.get(idx as usize))
-                .and_then(|bytes| PubkeyBytes::try_from(bytes.as_slice()).ok())
-        };
-        let parse = |program_id_index: usize,
-                     ix_accounts: &[u8],
-                     data: &[u8]| {
-            let program_id = *accounts.get(program_id_index)?;
-            (program_id.as_slice() == delegation_program).then_some(())?;
-            let discriminator = u64::from_le_bytes(
-                data.get(..DISCRIMINATOR_LEN)?.try_into().ok()?,
-            );
-            match discriminator {
-                UNDELEGATE_DISCRIMINATOR => Some(DlpInstruction::Undelegate {
-                    record: account_at(
-                        ix_accounts,
-                        DELEGATION_RECORD_ACCOUNT_INDEX,
-                    )?,
-                }),
-                discriminator
-                    if DELEGATE_DISCRIMINATORS.contains(&discriminator) =>
-                {
-                    Some(DlpInstruction::Delegate {
-                        delegated_account: account_at(
-                            ix_accounts,
-                            DELEGATE_DELEGATED_ACCOUNT_INDEX,
-                        )?,
-                        record: account_at(
-                            ix_accounts,
-                            DELEGATE_RECORD_ACCOUNT_INDEX,
-                        )?,
-                    })
-                }
-                _ => None,
-            }
-        };
+            .map(|bytes| PubkeyBytes::try_from(bytes.as_slice()).ok())
+            .collect::<Vec<_>>();
 
         let mut instructions = Vec::new();
         for instruction in &message.instructions {
-            instructions.extend(parse(
+            instructions.extend(parse_dlp_instruction(
+                &accounts,
                 instruction.program_id_index as usize,
                 &instruction.accounts,
                 &instruction.data,
@@ -494,7 +526,8 @@ impl RecordStream {
         }
         for inner in &meta.inner_instructions {
             for instruction in &inner.instructions {
-                instructions.extend(parse(
+                instructions.extend(parse_dlp_instruction(
+                    &accounts,
                     instruction.program_id_index as usize,
                     &instruction.accounts,
                     &instruction.data,
@@ -605,6 +638,127 @@ impl RecordStream {
     }
 }
 
+fn parse_dlp_instruction(
+    accounts: &[Option<PubkeyBytes>],
+    program_id_index: usize,
+    ix_accounts: &[u8],
+    data: &[u8],
+) -> Option<DlpInstruction> {
+    let program_id = accounts.get(program_id_index).copied().flatten()?;
+    (program_id == dlp_api::id().to_bytes()).then_some(())?;
+    let account_at = |index: usize| {
+        ix_accounts
+            .get(index)
+            .and_then(|&idx| accounts.get(idx as usize))
+            .copied()
+            .flatten()
+    };
+    let discriminator =
+        u64::from_le_bytes(data.get(..DISCRIMINATOR_LEN)?.try_into().ok()?);
+    match discriminator {
+        UNDELEGATE_DISCRIMINATOR => Some(DlpInstruction::Undelegate {
+            record: account_at(DELEGATION_RECORD_ACCOUNT_INDEX)?,
+        }),
+        discriminator if DELEGATE_DISCRIMINATORS.contains(&discriminator) => {
+            Some(DlpInstruction::Delegate {
+                delegated_account: account_at(
+                    DELEGATE_DELEGATED_ACCOUNT_INDEX,
+                )?,
+                record: account_at(DELEGATE_RECORD_ACCOUNT_INDEX)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn recover_delegations_from_block(
+    block: &UiConfirmedBlock,
+    slot: Slot,
+) -> Vec<RecoveredDelegation> {
+    let mut recovered = Vec::new();
+    for encoded in block.transactions.iter().flatten() {
+        let Some(meta) = encoded.meta.as_ref() else {
+            continue;
+        };
+        if meta.err.is_some() {
+            continue;
+        }
+        let Some(transaction) = encoded.transaction.decode() else {
+            continue;
+        };
+        let mut accounts = transaction
+            .message
+            .static_account_keys()
+            .iter()
+            .map(|pubkey| Some(pubkey.to_bytes()))
+            .collect::<Vec<_>>();
+        if let OptionSerializer::Some(loaded) = &meta.loaded_addresses {
+            accounts.extend(
+                loaded.writable.iter().chain(loaded.readonly.iter()).map(
+                    |pubkey| {
+                        pubkey.parse::<Pubkey>().ok().map(|key| key.to_bytes())
+                    },
+                ),
+            );
+        }
+
+        for instruction in transaction.message.instructions() {
+            if let Some(DlpInstruction::Delegate {
+                delegated_account,
+                record,
+            }) = parse_dlp_instruction(
+                &accounts,
+                instruction.program_id_index as usize,
+                &instruction.accounts,
+                &instruction.data,
+            ) {
+                recovered.push(RecoveredDelegation {
+                    delegated_account: Pubkey::new_from_array(
+                        delegated_account,
+                    ),
+                    record: Pubkey::new_from_array(record),
+                    slot,
+                });
+            }
+        }
+
+        let OptionSerializer::Some(inner_instructions) =
+            &meta.inner_instructions
+        else {
+            continue;
+        };
+        for inner in inner_instructions {
+            for instruction in &inner.instructions {
+                let UiInstruction::Compiled(instruction) = instruction else {
+                    continue;
+                };
+                let Ok(data) = bs58::decode(&instruction.data).into_vec()
+                else {
+                    continue;
+                };
+                if let Some(DlpInstruction::Delegate {
+                    delegated_account,
+                    record,
+                }) = parse_dlp_instruction(
+                    &accounts,
+                    instruction.program_id_index as usize,
+                    &instruction.accounts,
+                    &data,
+                ) {
+                    recovered.push(RecoveredDelegation {
+                        delegated_account: Pubkey::new_from_array(
+                            delegated_account,
+                        ),
+                        record: Pubkey::new_from_array(record),
+                        slot,
+                    });
+                }
+            }
+        }
+    }
+    recovered
+}
+
 fn reconnect_from_slot(slot: Slot, replay_failures: usize) -> Option<Slot> {
     (replay_failures < MAX_REPLAY_RECONNECT_FAILURES)
         .then(|| slot.saturating_sub(RESUME_SAFETY_MARGIN_SLOTS).max(1))
@@ -688,7 +842,6 @@ mod tests {
 
     fn test_stream() -> (RecordStream, Receiver<RecordStreamMessage>) {
         let (updates, receiver) = mpsc::channel(32);
-        let (replay_recovery_slots, _) = watch::channel(0);
         (
             RecordStream {
                 stream: LaserStream {
@@ -707,8 +860,9 @@ mod tests {
                     MAX_PENDING_PAYLOAD_BYTES,
                 )),
                 continuity_epoch: Arc::new(AtomicU64::new(0)),
-                replay_recovery_slots,
+                replay_recovery: Arc::new(ReplayRecoveryState::default()),
                 slot: 0,
+                last_confirmed_slot: 0,
                 watermark: 0,
             },
             receiver,
@@ -838,6 +992,28 @@ mod tests {
         assert_eq!(reconnect_from_slot(100, usize::MAX), None);
     }
 
+    #[tokio::test]
+    async fn pending_recovery_ranges_merge_without_loss() {
+        let recovery = ReplayRecoveryState::default();
+        recovery.request(ReplayRecoveryRange {
+            after_slot: 20,
+            through_slot: 30,
+        });
+        recovery.request(ReplayRecoveryRange {
+            after_slot: 40,
+            through_slot: 50,
+        });
+
+        recovery.notified().await;
+        assert_eq!(
+            recovery.take_pending(),
+            Some(ReplayRecoveryRange {
+                after_slot: 20,
+                through_slot: 50,
+            })
+        );
+    }
+
     #[test]
     fn parses_undelegation_request() {
         let delegated_account = [7; PUBKEY_LEN];
@@ -874,6 +1050,86 @@ mod tests {
             ));
         }
         assert_eq!(stream.slot, 7);
+    }
+
+    #[test]
+    fn recovers_cpi_delegation_with_alt_accounts_from_block() {
+        use solana_hash::Hash;
+        use solana_message::{
+            MessageHeader, VersionedMessage,
+            compiled_instruction::CompiledInstruction,
+            v0::{LoadedAddresses, Message, MessageAddressTableLookup},
+        };
+        use solana_signature::Signature;
+        use solana_transaction::versioned::VersionedTransaction;
+        use solana_transaction_status::Encodable;
+        use solana_transaction_status_client_types::{
+            EncodedTransactionWithStatusMeta, InnerInstruction,
+            InnerInstructions, TransactionStatusMeta, UiTransactionEncoding,
+        };
+
+        let delegated_account = Pubkey::new_unique();
+        let record = Pubkey::new_unique();
+        let transaction = VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::V0(Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 1,
+                },
+                account_keys: vec![Pubkey::new_unique(), dlp_api::id()],
+                recent_blockhash: Hash::default(),
+                instructions: vec![],
+                address_table_lookups: vec![MessageAddressTableLookup {
+                    account_key: Pubkey::new_unique(),
+                    writable_indexes: vec![0, 1],
+                    readonly_indexes: vec![],
+                }],
+            }),
+        };
+        let meta = TransactionStatusMeta {
+            inner_instructions: Some(vec![InnerInstructions {
+                index: 0,
+                instructions: vec![InnerInstruction {
+                    instruction: CompiledInstruction {
+                        program_id_index: 1,
+                        accounts: vec![0, 2, 0, 0, 3],
+                        data: 0u64.to_le_bytes().to_vec(),
+                    },
+                    stack_height: Some(2),
+                }],
+            }]),
+            loaded_addresses: LoadedAddresses {
+                writable: vec![delegated_account, record],
+                readonly: vec![],
+            },
+            ..Default::default()
+        };
+        let block = UiConfirmedBlock {
+            previous_blockhash: String::new(),
+            blockhash: String::new(),
+            parent_slot: 41,
+            transactions: Some(vec![EncodedTransactionWithStatusMeta {
+                transaction: transaction.encode(UiTransactionEncoding::Base64),
+                meta: Some(meta.into()),
+                version: None,
+            }]),
+            signatures: None,
+            rewards: None,
+            num_reward_partitions: None,
+            block_time: None,
+            block_height: None,
+        };
+
+        assert_eq!(
+            recover_delegations_from_block(&block, 42),
+            vec![RecoveredDelegation {
+                delegated_account,
+                record,
+                slot: 42,
+            }]
+        );
     }
 
     #[tokio::test]
@@ -1073,6 +1329,7 @@ mod tests {
             Ok(RecordStreamUpdate::Record { slot, .. }) if slot == 40
         ));
         assert_eq!(stream.slot, 40);
+        assert_eq!(stream.last_confirmed_slot, 39);
     }
 
     #[tokio::test]

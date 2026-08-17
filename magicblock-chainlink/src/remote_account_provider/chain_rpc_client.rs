@@ -7,9 +7,10 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error,
-    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    config::{RpcAccountInfoConfig, RpcBlockConfig, RpcProgramAccountsConfig},
     response::{Response, RpcResult},
 };
+use solana_transaction_status_client_types::UiConfirmedBlock;
 
 // -----------------
 // Trait
@@ -37,6 +38,12 @@ pub trait ChainRpcClient: Send + Sync + Clone + 'static {
         pubkey: &Pubkey,
         config: RpcProgramAccountsConfig,
     ) -> client_error::Result<Vec<(Pubkey, Account)>>;
+
+    async fn get_block_with_config(
+        &self,
+        slot: u64,
+        config: RpcBlockConfig,
+    ) -> client_error::Result<UiConfirmedBlock>;
 }
 
 // -----------------
@@ -137,5 +144,13 @@ impl ChainRpcClient for ChainRpcClientImpl {
                 ))
             })
             .collect()
+    }
+
+    async fn get_block_with_config(
+        &self,
+        slot: u64,
+        config: RpcBlockConfig,
+    ) -> client_error::Result<UiConfirmedBlock> {
+        self.rpc_client.get_block_with_config(slot, config).await
     }
 }

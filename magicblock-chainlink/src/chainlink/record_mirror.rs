@@ -14,10 +14,7 @@ use magicblock_config::config::RecordSyncConfig;
 use magicblock_metrics::metrics::{self, RecordMirrorLookupOutcome};
 use parking_lot::Mutex;
 use solana_pubkey::Pubkey;
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    watch,
-};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{info, trace, warn};
 
 use crate::{
@@ -25,6 +22,7 @@ use crate::{
         ObservedUndelegationRequest,
         record_stream::{
             RecordStream, RecordStreamReceiver, RecordStreamUpdate,
+            ReplayRecoveryState,
         },
     },
     remote_account_provider::{Endpoint, Endpoints},
@@ -54,7 +52,7 @@ pub struct DelegationRecordMirror {
     undelegation_requests_tx: Sender<ObservedUndelegationRequest>,
     undelegation_requests_rx:
         Mutex<Option<Receiver<ObservedUndelegationRequest>>>,
-    replay_recovery_slots: Mutex<Option<watch::Receiver<u64>>>,
+    replay_recovery: Mutex<Option<Arc<ReplayRecoveryState>>>,
 }
 
 struct MirrorState {
@@ -151,14 +149,14 @@ impl DelegationRecordMirror {
         let RecordStreamReceiver {
             mut updates,
             continuity_epoch,
-            replay_recovery_slots,
+            replay_recovery,
         } = receiver;
         let mirror = Arc::new(Self::with_capacity_and_epoch(
             capacity,
             validator_pubkey,
             continuity_epoch,
         ));
-        *mirror.replay_recovery_slots.lock() = Some(replay_recovery_slots);
+        *mirror.replay_recovery.lock() = Some(replay_recovery);
         let consumer = Arc::clone(&mirror);
         tokio::spawn(async move {
             while let Some(message) = updates.recv().await {
@@ -216,7 +214,7 @@ impl DelegationRecordMirror {
             undelegation_requests_rx: Mutex::new(Some(
                 undelegation_requests_rx,
             )),
-            replay_recovery_slots: Mutex::new(None),
+            replay_recovery: Mutex::new(None),
         }
     }
 
@@ -230,10 +228,10 @@ impl DelegationRecordMirror {
         self.undelegation_requests_rx.lock().take()
     }
 
-    pub(crate) fn take_replay_recovery_slots(
+    pub(super) fn take_replay_recovery(
         &self,
-    ) -> Option<watch::Receiver<u64>> {
-        self.replay_recovery_slots.lock().take()
+    ) -> Option<Arc<ReplayRecoveryState>> {
+        self.replay_recovery.lock().take()
     }
 
     async fn consume_at_epoch(&self, update: RecordStreamUpdate, epoch: u64) {
@@ -600,23 +598,34 @@ mod tests {
 
     #[tokio::test]
     async fn replay_recovery_signal_reaches_fetch_cloner() {
+        use crate::chainlink::record_stream::ReplayRecoveryRange;
+
         let (_updates_tx, updates) = mpsc::channel(1);
-        let (recovery_tx, replay_recovery_slots) = watch::channel(0);
+        let replay_recovery = Arc::new(ReplayRecoveryState::default());
         let mirror = DelegationRecordMirror::start_consumer(
             RecordStreamReceiver {
                 updates,
                 continuity_epoch: Arc::new(AtomicU64::new(0)),
-                replay_recovery_slots,
+                replay_recovery: Arc::clone(&replay_recovery),
             },
             16,
             None,
         );
-        let mut recovery_slots = mirror.take_replay_recovery_slots().unwrap();
+        let recovery = mirror.take_replay_recovery().unwrap();
 
-        recovery_tx.send_replace(42);
+        replay_recovery.request(ReplayRecoveryRange {
+            after_slot: 21,
+            through_slot: 42,
+        });
 
-        recovery_slots.changed().await.unwrap();
-        assert_eq!(*recovery_slots.borrow_and_update(), 42);
+        recovery.notified().await;
+        assert_eq!(
+            recovery.take_pending(),
+            Some(ReplayRecoveryRange {
+                after_slot: 21,
+                through_slot: 42,
+            })
+        );
     }
 
     #[tokio::test]

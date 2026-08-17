@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     future::Future,
     mem,
     num::NonZeroUsize,
@@ -44,12 +44,15 @@ use solana_account_decoder_client_types::{
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
-    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    config::{RpcAccountInfoConfig, RpcBlockConfig, RpcProgramAccountsConfig},
     filter::{Memcmp, RpcFilterType},
 };
 use solana_signer::Signer;
+use solana_transaction_status_client_types::{
+    TransactionDetails, UiTransactionEncoding,
+};
 use tokio::{
-    sync::{Semaphore, mpsc, watch},
+    sync::{Semaphore, mpsc},
     task,
     task::JoinSet,
 };
@@ -92,6 +95,10 @@ use crate::{
         account_still_undelegating_on_chain::account_still_undelegating_on_chain,
         record_mirror::{
             DelegationRecordMirror, DiscoveredDelegation, MirrorLookup,
+        },
+        record_stream::{
+            ReplayRecoveryRange, ReplayRecoveryState,
+            recover_delegations_from_block,
         },
     },
     cloner::{
@@ -253,17 +260,82 @@ fn authority_record_config(
     }
 }
 
-fn replay_recovery_candidates(
-    account_pubkeys: impl IntoIterator<Item = Pubkey>,
-    record_pdas: &HashSet<Pubkey>,
-) -> Vec<Pubkey> {
-    account_pubkeys
-        .into_iter()
-        .filter(|pubkey| {
-            record_pdas
-                .contains(&delegation_record_pda_from_delegated_account(pubkey))
-        })
-        .collect()
+fn replay_recovery_record_config(
+    authority: Pubkey,
+    min_context_slot: u64,
+) -> RpcProgramAccountsConfig {
+    let mut config = authority_record_config(authority, Some(min_context_slot));
+    config.account_config.encoding = Some(UiAccountEncoding::Base64);
+    config.account_config.data_slice = Some(UiDataSliceConfig {
+        offset: 0,
+        length: DelegationRecord::size_with_discriminator(),
+    });
+    config
+}
+
+fn replay_recovery_block_config() -> RpcBlockConfig {
+    RpcBlockConfig {
+        encoding: Some(UiTransactionEncoding::Base64),
+        transaction_details: Some(TransactionDetails::Full),
+        rewards: Some(false),
+        max_supported_transaction_version: Some(1),
+        ..Default::default()
+    }
+}
+
+fn undelegation_request_config(
+    min_context_slot: u64,
+) -> RpcProgramAccountsConfig {
+    RpcProgramAccountsConfig {
+        filters: Some(vec![
+            RpcFilterType::DataSize(
+                UndelegationRequest::size_with_discriminator() as u64,
+            ),
+            RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                0,
+                AccountDiscriminator::UndelegationRequest
+                    .to_bytes()
+                    .to_vec(),
+            )),
+        ]),
+        account_config: RpcAccountInfoConfig {
+            encoding: Some(UiAccountEncoding::Base64Zstd),
+            min_context_slot: Some(min_context_slot),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn records_in_replay_gap(
+    records: impl IntoIterator<Item = (Pubkey, Account)>,
+    range: ReplayRecoveryRange,
+) -> ChainlinkResult<HashMap<u64, HashSet<Pubkey>>> {
+    let mut records_by_slot = HashMap::<u64, HashSet<Pubkey>>::new();
+    for (pubkey, account) in records {
+        let record_size = DelegationRecord::size_with_discriminator();
+        if account.data.len() < record_size {
+            return Err(ChainlinkError::InvalidDelegationRecord(
+                pubkey,
+                solana_program::program_error::ProgramError::InvalidAccountData,
+            ));
+        }
+        let record = DelegationRecord::try_from_bytes_with_discriminator(
+            &account.data[..record_size],
+        )
+        .map_err(|error| {
+            ChainlinkError::InvalidDelegationRecord(pubkey, error)
+        })?;
+        if record.delegation_slot > range.after_slot
+            && record.delegation_slot <= range.through_slot
+        {
+            records_by_slot
+                .entry(record.delegation_slot)
+                .or_default()
+                .insert(pubkey);
+        }
+    }
+    Ok(records_by_slot)
 }
 
 impl<T, U> Clone for FetchCloner<T, U>
@@ -420,12 +492,12 @@ where
             me.clone().start_discovery_listener(discoveries);
             me.clone().start_authority_record_sweep();
         }
-        if let Some(recovery_slots) = me
+        if let Some(replay_recovery) = me
             .record_mirror
             .as_ref()
-            .and_then(|mirror| mirror.take_replay_recovery_slots())
+            .and_then(|mirror| mirror.take_replay_recovery())
         {
-            me.clone().start_replay_recovery_listener(recovery_slots);
+            me.clone().start_replay_recovery_listener(replay_recovery);
         }
 
         me
@@ -433,37 +505,43 @@ where
 
     fn start_replay_recovery_listener(
         self: Arc<Self>,
-        mut recovery_slots: watch::Receiver<u64>,
+        replay_recovery: Arc<ReplayRecoveryState>,
     ) {
         let weak = Arc::downgrade(&self);
         drop(self);
         task::spawn(async move {
-            while recovery_slots.changed().await.is_ok() {
-                let mut recovery_slot = *recovery_slots.borrow_and_update();
+            loop {
+                replay_recovery.notified().await;
+                let Some(mut recovery_range) = replay_recovery.take_pending()
+                else {
+                    continue;
+                };
                 loop {
                     let Some(this) = weak.upgrade() else { return };
-                    match this.reconcile_replay_gap(recovery_slot).await {
+                    match this.reconcile_replay_gap(recovery_range).await {
                         Ok(count) => {
                             info!(
-                                recovery_slot,
-                                count, "record replay gap reconciled"
+                                after_slot = recovery_range.after_slot,
+                                through_slot = recovery_range.through_slot,
+                                count,
+                                "record replay gap reconciled"
                             );
                             break;
                         }
                         Err(error) => warn!(
                             ?error,
-                            recovery_slot,
+                            after_slot = recovery_range.after_slot,
+                            through_slot = recovery_range.through_slot,
                             "record replay gap recovery failed; retrying"
                         ),
                     }
                     drop(this);
 
                     tokio::select! {
-                        changed = recovery_slots.changed() => {
-                            if changed.is_err() {
-                                return;
+                        _ = replay_recovery.notified() => {
+                            if let Some(next) = replay_recovery.take_pending() {
+                                recovery_range = recovery_range.merged(next);
                             }
-                            recovery_slot = *recovery_slots.borrow_and_update();
                         }
                         _ = tokio::time::sleep(REPLAY_RECOVERY_RETRY_DELAY) => {}
                     }
@@ -474,62 +552,114 @@ where
 
     async fn reconcile_replay_gap(
         &self,
-        min_context_slot: u64,
+        range: ReplayRecoveryRange,
     ) -> ChainlinkResult<usize> {
+        if range.through_slot <= range.after_slot {
+            return Ok(0);
+        }
         let delegation_program = dlp_api::id();
         let local_records = self
             .remote_account_provider
             .get_program_accounts_with_config(
                 &delegation_program,
-                authority_record_config(
+                replay_recovery_record_config(
                     self.validator_pubkey,
-                    Some(min_context_slot),
+                    range.through_slot,
                 ),
             );
         let confined_records = self
             .remote_account_provider
             .get_program_accounts_with_config(
                 &delegation_program,
-                authority_record_config(
+                replay_recovery_record_config(
                     Pubkey::default(),
-                    Some(min_context_slot),
+                    range.through_slot,
                 ),
             );
         let (local_records, confined_records) =
             tokio::try_join!(local_records, confined_records)?;
-        let record_pdas = local_records
-            .into_iter()
-            .chain(confined_records)
-            .map(|(pubkey, _)| pubkey)
-            .collect::<HashSet<_>>();
-
-        let accounts = self
-            .remote_account_provider
-            .get_program_accounts_with_config(
-                &delegation_program,
-                RpcProgramAccountsConfig {
-                    account_config: RpcAccountInfoConfig {
-                        encoding: Some(UiAccountEncoding::Base64Zstd),
-                        data_slice: Some(UiDataSliceConfig {
-                            offset: 0,
-                            length: 0,
-                        }),
-                        min_context_slot: Some(min_context_slot),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            )
+        let undelegation_requests = self
+            .fetch_undelegation_requests_at_slot(range.through_slot)
             .await?;
-        let candidates = replay_recovery_candidates(
-            accounts.into_iter().map(|(pubkey, _)| pubkey),
-            &record_pdas,
-        );
-        for pubkey in candidates.iter().copied() {
-            self.resolve_internal_dlp_collision(pubkey, min_context_slot)
-                .await;
+        let request_count = undelegation_requests.len();
+        for request in undelegation_requests {
+            self.undelegation_request_sender
+                .send(request)
+                .await
+                .map_err(|_| {
+                    ChainlinkError::UndelegationRequestReceiverClosed
+                })?;
         }
-        Ok(candidates.len())
+        info!(
+            request_count,
+            "undelegation requests reconciled after record replay gap"
+        );
+        let mut records_by_slot = records_in_replay_gap(
+            local_records.into_iter().chain(confined_records),
+            range,
+        )?;
+        let mut remaining = records_by_slot
+            .values()
+            .flatten()
+            .copied()
+            .collect::<HashSet<_>>();
+        if remaining.is_empty() {
+            return Ok(0);
+        }
+
+        let mut slots = records_by_slot.keys().copied().collect::<Vec<_>>();
+        slots.sort_unstable();
+        let mut recovered = HashMap::new();
+        for slot in slots {
+            let expected_records = records_by_slot
+                .remove(&slot)
+                .expect("slot came from records_by_slot");
+            let block = self
+                .remote_account_provider
+                .get_block_with_config(slot, replay_recovery_block_config())
+                .await?;
+            for delegation in recover_delegations_from_block(&block, slot) {
+                if !expected_records.contains(&delegation.record)
+                    || delegation_record_pda_from_delegated_account(
+                        &delegation.delegated_account,
+                    ) != delegation.record
+                {
+                    continue;
+                }
+                match recovered.entry(delegation.record) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(delegation);
+                    }
+                    Entry::Occupied(entry)
+                        if entry.get().delegated_account
+                            != delegation.delegated_account =>
+                    {
+                        return Err(ChainlinkError::AmbiguousReplayRecovery(
+                            delegation.record,
+                        ));
+                    }
+                    Entry::Occupied(_) => {}
+                }
+                remaining.remove(&delegation.record);
+            }
+        }
+        if !remaining.is_empty() {
+            return Err(ChainlinkError::IncompleteReplayRecovery(
+                remaining.len(),
+            ));
+        }
+
+        let mut recovered = recovered.into_values().collect::<Vec<_>>();
+        recovered
+            .sort_unstable_by_key(|delegation| delegation.delegated_account);
+        for delegation in recovered.iter().copied() {
+            self.resolve_internal_dlp_collision(
+                delegation.delegated_account,
+                delegation.slot,
+            )
+            .await;
+        }
+        Ok(recovered.len())
     }
 
     fn start_authority_record_sweep(self: Arc<Self>) {
@@ -709,25 +839,19 @@ where
     pub async fn fetch_undelegation_requests(
         &self,
     ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
-        let observed_slot = self.remote_account_provider.get_slot().await?;
-        let config = RpcProgramAccountsConfig {
-            filters: Some(vec![
-                RpcFilterType::DataSize(
-                    UndelegationRequest::size_with_discriminator() as u64,
-                ),
-                RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
-                    0,
-                    AccountDiscriminator::UndelegationRequest
-                        .to_bytes()
-                        .to_vec(),
-                )),
-            ]),
-            account_config: RpcAccountInfoConfig {
-                encoding: Some(UiAccountEncoding::Base64Zstd),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
+        self.fetch_undelegation_requests_at_slot(0).await
+    }
+
+    async fn fetch_undelegation_requests_at_slot(
+        &self,
+        min_context_slot: u64,
+    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
+        let observed_slot = self
+            .remote_account_provider
+            .get_slot()
+            .await?
+            .max(min_context_slot);
+        let config = undelegation_request_config(observed_slot);
         let accounts = self
             .remote_account_provider
             .get_program_accounts_with_config(&dlp_api::id(), config)

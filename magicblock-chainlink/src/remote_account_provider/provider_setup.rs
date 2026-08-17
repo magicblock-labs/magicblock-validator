@@ -1,3 +1,6 @@
+use solana_rpc_client_api::config::RpcBlockConfig;
+use solana_transaction_status_client_types::UiConfirmedBlock;
+
 use super::*;
 
 impl
@@ -398,6 +401,31 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         .map_err(|err| {
             RemoteAccountProviderError::AccountResolutionsFailed(format!(
                 "RpcError fetching program accounts for {pubkey}: {err:?}"
+            ))
+        })
+    }
+
+    pub(crate) async fn get_block_with_config(
+        &self,
+        slot: u64,
+        mut config: RpcBlockConfig,
+    ) -> RemoteAccountProviderResult<UiConfirmedBlock> {
+        config.commitment = Some(self.rpc_client.commitment());
+
+        tokio::time::timeout(
+            RPC_FETCH_TIMEOUT,
+            self.rpc_client.get_block_with_config(slot, config),
+        )
+        .await
+        .map_err(|_| {
+            RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                "RPC call timeout fetching block {slot} after {}ms",
+                RPC_FETCH_TIMEOUT.as_millis()
+            ))
+        })?
+        .map_err(|err| {
+            RemoteAccountProviderError::AccountResolutionsFailed(format!(
+                "RpcError fetching block {slot}: {err:?}"
             ))
         })
     }

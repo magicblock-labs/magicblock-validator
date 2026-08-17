@@ -20,10 +20,12 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::client_error;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_rpc_client_api::{
-    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    config::{RpcAccountInfoConfig, RpcBlockConfig, RpcProgramAccountsConfig},
     filter::RpcFilterType,
     response::{Response, RpcResponseContext, RpcResult},
 };
+#[cfg(any(test, feature = "dev-context"))]
+use solana_transaction_status_client_types::UiConfirmedBlock;
 #[cfg(any(test, feature = "dev-context"))]
 use tokio::sync::Notify;
 use tracing::*;
@@ -460,5 +462,16 @@ impl ChainRpcClient for ChainRpcClientMock {
             accounts.push((*account_pubkey, account.clone()));
         }
         Ok(accounts)
+    }
+
+    async fn get_block_with_config(
+        &self,
+        slot: u64,
+        _config: RpcBlockConfig,
+    ) -> client_error::Result<UiConfirmedBlock> {
+        Err(client_error::ErrorKind::Custom(format!(
+            "block {slot} is not configured in ChainRpcClientMock"
+        ))
+        .into())
     }
 }
