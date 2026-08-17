@@ -624,23 +624,51 @@ where
         if matches!(mirror.probe(&record_pda, slot), MirrorLookup::Hit { .. }) {
             self.clone_colliding_delegated_account(pubkey, slot).await;
         } else {
-            self.schedule_collision_recheck(pubkey, slot);
+            self.schedule_collision_recheck(pubkey, slot).await;
         }
     }
 
-    pub(super) fn schedule_collision_recheck(&self, pubkey: Pubkey, slot: u64) {
+    pub(super) fn schedule_collision_recheck(
+        &self,
+        pubkey: Pubkey,
+        slot: u64,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(self.schedule_collision_recheck_inner(pubkey, slot))
+    }
+
+    async fn schedule_collision_recheck_inner(
+        &self,
+        pubkey: Pubkey,
+        slot: u64,
+    ) {
         let record_pda = delegation_record_pda_from_delegated_account(&pubkey);
-        {
-            let mut rechecks = self.pending_collision_rechecks.lock();
-            if let Some(pending) = rechecks.get_mut(&record_pda) {
-                pending.1 = pending.1.max(slot);
-                return;
+        let mut reported_full = false;
+        loop {
+            let enqueue = {
+                let mut rechecks = self.pending_collision_rechecks.lock();
+                try_enqueue_collision_recheck(
+                    &mut rechecks,
+                    record_pda,
+                    pubkey,
+                    slot,
+                    PENDING_COLLISION_RECHECKS_CAPACITY.get(),
+                )
+            };
+            match enqueue {
+                CollisionRecheckEnqueue::Inserted => break,
+                CollisionRecheckEnqueue::Updated => return,
+                CollisionRecheckEnqueue::Full => {
+                    if !reported_full {
+                        trace!(
+                            pubkey = %pubkey,
+                            slot,
+                            "Collision recheck queue is full; applying backpressure"
+                        );
+                        reported_full = true;
+                    }
+                    tokio::time::sleep(COLLISION_RECHECK_DELAYS[0]).await;
+                }
             }
-            if rechecks.len() >= PENDING_COLLISION_RECHECKS_CAPACITY.get() {
-                trace!(pubkey = %pubkey, slot, "Collision recheck queue is full");
-                return;
-            }
-            rechecks.put(record_pda, (pubkey, slot));
         }
 
         let this = self.clone();
@@ -829,8 +857,34 @@ where
             slot,
             "Collision clone did not settle; waiting for newer record evidence"
         );
-        self.schedule_collision_recheck(pubkey, slot.saturating_add(1));
+        self.schedule_collision_recheck(pubkey, slot.saturating_add(1))
+            .await;
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CollisionRecheckEnqueue {
+    Inserted,
+    Updated,
+    Full,
+}
+
+fn try_enqueue_collision_recheck(
+    rechecks: &mut LruCache<Pubkey, (Pubkey, u64)>,
+    record_pda: Pubkey,
+    pubkey: Pubkey,
+    slot: u64,
+    capacity: usize,
+) -> CollisionRecheckEnqueue {
+    if let Some(pending) = rechecks.get_mut(&record_pda) {
+        pending.1 = pending.1.max(slot);
+        return CollisionRecheckEnqueue::Updated;
+    }
+    if rechecks.len() >= capacity {
+        return CollisionRecheckEnqueue::Full;
+    }
+    rechecks.put(record_pda, (pubkey, slot));
+    CollisionRecheckEnqueue::Inserted
 }
 
 impl<T, U> FetchCloner<T, U>
@@ -1454,5 +1508,52 @@ where
             companion_fetch_log_context,
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collision_recheck_capacity_never_evicts_a_candidate() {
+        let mut rechecks = LruCache::new(NonZeroUsize::new(1).unwrap());
+        let first = Pubkey::new_unique();
+        let first_record = delegation_record_pda_from_delegated_account(&first);
+        assert_eq!(
+            try_enqueue_collision_recheck(
+                &mut rechecks,
+                first_record,
+                first,
+                1,
+                1,
+            ),
+            CollisionRecheckEnqueue::Inserted
+        );
+
+        let second = Pubkey::new_unique();
+        assert_eq!(
+            try_enqueue_collision_recheck(
+                &mut rechecks,
+                delegation_record_pda_from_delegated_account(&second),
+                second,
+                2,
+                1,
+            ),
+            CollisionRecheckEnqueue::Full
+        );
+        assert_eq!(rechecks.peek(&first_record), Some(&(first, 1)));
+
+        assert_eq!(
+            try_enqueue_collision_recheck(
+                &mut rechecks,
+                first_record,
+                first,
+                3,
+                1,
+            ),
+            CollisionRecheckEnqueue::Updated
+        );
+        assert_eq!(rechecks.peek(&first_record), Some(&(first, 3)));
     }
 }

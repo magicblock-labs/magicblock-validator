@@ -238,6 +238,7 @@ impl RecordStream {
 
         match update {
             UpdateOneof::Account(account) => {
+                self.slot = self.slot.max(account.slot);
                 self.handle_account_update(account).await
             }
             UpdateOneof::Slot(slot) => {
@@ -257,6 +258,7 @@ impl RecordStream {
                 }
             }
             UpdateOneof::Transaction(transaction) => {
+                self.slot = self.slot.max(transaction.slot);
                 self.handle_transaction_update(transaction).await
             }
             _ => {}
@@ -470,24 +472,55 @@ impl RecordStream {
     ) -> Result<LaserStream, RecordStreamError> {
         let (stream, handle) =
             client::subscribe(config, Self::subscribe_request(from_slot));
-        let mut stream = Box::pin(stream);
-        let first = time::timeout(Duration::from_secs(5), stream.next())
-            .await
-            .map_err(|_| {
-                RecordStreamError::Connection("health check timed out")
-            })?
-            .ok_or(RecordStreamError::Connection(
-                "stream closed before first update",
-            ))?
-            .map_err(RecordStreamError::Laserstream)?;
+        let mut stream: Laser = Box::pin(stream);
+        let initial_updates = time::timeout(
+            Duration::from_secs(5),
+            buffer_until_confirmed_slot(&mut stream),
+        )
+        .await
+        .map_err(|_| {
+            RecordStreamError::Connection(
+                "confirmed-slot health check timed out",
+            )
+        })??;
         let stream = Box::pin(
-            futures_util::stream::once(std::future::ready(Ok(first)))
+            futures_util::stream::iter(initial_updates.into_iter().map(Ok))
                 .chain(stream),
         );
         Ok(LaserStream {
             stream,
             _handle: Some(handle),
         })
+    }
+}
+
+async fn buffer_until_confirmed_slot(
+    stream: &mut Laser,
+) -> Result<Vec<SubscribeUpdate>, RecordStreamError> {
+    let mut initial_updates = Vec::new();
+    loop {
+        let update = stream
+            .next()
+            .await
+            .ok_or(RecordStreamError::Connection(
+                "stream closed before confirmed-slot barrier",
+            ))?
+            .map_err(RecordStreamError::Laserstream)?;
+        let confirmed_slot = matches!(
+            update.update_oneof.as_ref(),
+            Some(UpdateOneof::Slot(slot))
+                if SlotStatus::try_from(slot.status)
+                    == Ok(SlotStatus::SlotConfirmed)
+        );
+        initial_updates.push(update);
+        if confirmed_slot {
+            return Ok(initial_updates);
+        }
+        if initial_updates.len() >= MAX_PENDING_UPDATES {
+            return Err(RecordStreamError::Connection(
+                "confirmed-slot barrier exceeded startup buffer",
+            ));
+        }
     }
 }
 
@@ -668,6 +701,40 @@ mod tests {
                     && record == [2; PUBKEY_LEN]
             ));
         }
+        assert_eq!(stream.slot, 7);
+    }
+
+    #[tokio::test]
+    async fn startup_requires_confirmed_slot_replay_anchor() {
+        use helius_laserstream::grpc::SubscribeUpdateSlot;
+
+        let mut source: Laser = Box::pin(futures_util::stream::iter([
+            Ok(delegate_update([1; PUBKEY_LEN], [2; PUBKEY_LEN], false, 0)),
+            Ok(SubscribeUpdate {
+                update_oneof: Some(UpdateOneof::Slot(SubscribeUpdateSlot {
+                    slot: 8,
+                    status: SlotStatus::SlotConfirmed as i32,
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }),
+        ]));
+        let buffered = buffer_until_confirmed_slot(&mut source).await.unwrap();
+        assert_eq!(buffered.len(), 2);
+
+        let mut source_without_barrier: Laser =
+            Box::pin(futures_util::stream::iter([Ok(delegate_update(
+                [1; PUBKEY_LEN],
+                [2; PUBKEY_LEN],
+                false,
+                0,
+            ))]));
+        assert!(matches!(
+            buffer_until_confirmed_slot(&mut source_without_barrier).await,
+            Err(RecordStreamError::Connection(
+                "stream closed before confirmed-slot barrier"
+            ))
+        ));
     }
 
     #[tokio::test]
