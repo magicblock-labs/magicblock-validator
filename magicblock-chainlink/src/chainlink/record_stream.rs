@@ -159,9 +159,18 @@ impl RecordStream {
                 break;
             }
             match self.stream.next().await {
-                Some(update) => self.handle_update(update).await,
-                None if self.reconnect().await => {}
-                None => break,
+                Some(update) => {
+                    if !self.handle_update(update).await
+                        && !self.reconnect().await
+                    {
+                        break;
+                    }
+                }
+                None => {
+                    if !self.interrupt().await || !self.reconnect().await {
+                        break;
+                    }
+                }
             }
         }
         let _ = self.updates.send(RecordStreamUpdate::SyncTerminated).await;
@@ -170,11 +179,7 @@ impl RecordStream {
     /// Reconnects indefinitely with replay behind the observed slot. A fresh
     /// stream is never trusted after continuity is lost.
     async fn reconnect(&mut self) -> bool {
-        tracing::warn!("record stream ended; reconnecting");
-        self.watermark = 0;
-        if !self.send_interrupted().await {
-            return false;
-        }
+        tracing::warn!("record stream continuity lost; reconnecting");
         let mut delay = RECONNECT_BASE_DELAY;
         loop {
             if self.updates.is_closed() {
@@ -207,7 +212,8 @@ impl RecordStream {
         }
     }
 
-    async fn send_interrupted(&mut self) -> bool {
+    async fn interrupt(&mut self) -> bool {
+        self.watermark = 0;
         self.updates
             .send(RecordStreamUpdate::SyncInterrupted)
             .await
@@ -217,15 +223,16 @@ impl RecordStream {
     async fn handle_update(
         &mut self,
         result: Result<SubscribeUpdate, LaserstreamError>,
-    ) {
+    ) -> bool {
         let update = match result {
             Ok(update) => match update.update_oneof {
                 Some(update) => update,
-                None => return,
+                None => return true,
             },
             Err(error) => {
                 tracing::warn!(%error, "record stream update failed");
-                return;
+                let _ = self.interrupt().await;
+                return false;
             }
         };
 
@@ -237,7 +244,7 @@ impl RecordStream {
                 if SlotStatus::try_from(slot.status)
                     != Ok(SlotStatus::SlotConfirmed)
                 {
-                    return;
+                    return true;
                 }
                 // LaserStream guarantees that every confirmed account and
                 // transaction update through this slot precedes its confirmed
@@ -254,6 +261,7 @@ impl RecordStream {
             }
             _ => {}
         }
+        true
     }
 
     async fn deliver(&mut self, update: RecordStreamUpdate) {
@@ -760,6 +768,25 @@ mod tests {
         assert!(matches!(
             updates.try_recv(),
             Ok(RecordStreamUpdate::Record { slot, .. }) if slot == 100
+        ));
+    }
+
+    #[tokio::test]
+    async fn stream_error_interrupts_before_reconnect() {
+        let (mut stream, mut updates) = test_stream();
+        stream.watermark = 100;
+
+        assert!(
+            !stream
+                .handle_update(Err(LaserstreamError::ConnectionError(
+                    "test".into()
+                )))
+                .await
+        );
+        assert_eq!(stream.watermark, 0);
+        assert!(matches!(
+            updates.try_recv(),
+            Ok(RecordStreamUpdate::SyncInterrupted)
         ));
     }
 }
