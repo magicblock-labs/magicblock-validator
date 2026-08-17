@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::{Context, Result, bail};
 use borsh::BorshDeserialize;
 use mdp::{
@@ -18,21 +16,17 @@ use solana_sdk_ids::system_program;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-pub struct DomainClient {
-    client: Arc<RpcClient>,
-}
+pub(super) struct Client(RpcClient);
 
-impl DomainClient {
-    pub fn new(url: impl ToString) -> Self {
-        Self {
-            client: Arc::new(RpcClient::new_with_commitment(
-                url.to_string(),
-                CommitmentConfig::confirmed(),
-            )),
-        }
+impl Client {
+    pub(super) fn new(url: &str) -> Self {
+        Self(RpcClient::new_with_commitment(
+            url.to_owned(),
+            CommitmentConfig::confirmed(),
+        ))
     }
 
-    pub async fn register(
+    pub(super) async fn register(
         &self,
         payer: &Keypair,
         record: ErRecord,
@@ -46,7 +40,11 @@ impl DomainClient {
         .context("failed to register domain record")
     }
 
-    pub async fn sync(&self, payer: &Keypair, record: &ErRecord) -> Result<()> {
+    pub(super) async fn sync(
+        &self,
+        payer: &Keypair,
+        record: &ErRecord,
+    ) -> Result<()> {
         let update = SyncRecordV0 {
             identity: *record.identity(),
             status: Some(record.status()),
@@ -66,7 +64,7 @@ impl DomainClient {
         .context("failed to synchronize domain record")
     }
 
-    pub async fn unregister(&self, payer: &Keypair) -> Result<()> {
+    pub(super) async fn unregister(&self, payer: &Keypair) -> Result<()> {
         let pda = record_pda(&payer.pubkey());
         if self.fetch(&pda).await?.is_none() {
             bail!("no domain record exists for {}", payer.pubkey());
@@ -82,13 +80,13 @@ impl DomainClient {
 
     async fn fetch(&self, pubkey: &Pubkey) -> Result<Option<ErRecord>> {
         let response = self
-            .client
-            .get_account_with_commitment(pubkey, self.client.commitment())
+            .0
+            .get_account_with_commitment(pubkey, self.0.commitment())
             .await
             .with_context(|| {
                 format!(
                     "failed to fetch domain record {pubkey} from {}",
-                    self.client.url()
+                    self.0.url()
                 )
             })?;
         response
@@ -114,7 +112,7 @@ impl DomainClient {
         let instruction =
             Instruction::new_with_borsh(ID, &instruction, accounts);
         let blockhash = self
-            .client
+            .0
             .get_latest_blockhash()
             .await
             .context("failed to get latest blockhash")?;
@@ -124,7 +122,7 @@ impl DomainClient {
             &[payer],
             blockhash,
         );
-        self.client
+        self.0
             .send_and_confirm_transaction(&transaction)
             .await
             .context("failed to send and confirm domain transaction")?;

@@ -19,5 +19,7 @@ solana-program-pack = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rent = { workspace = true }
+solana-sdk-ids = { workspace = true }
 spl-token = { workspace = true }
 thiserror = { workspace = true }
+v42-calculator-interface = { workspace = true }
