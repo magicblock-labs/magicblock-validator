@@ -536,6 +536,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         Ok(remote_accounts)
     }
+
+    pub(crate) async fn fetch_multi_rpc_only_chunked(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        fetch_context: AccountFetchContext,
+    ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
+        let mut accounts = Vec::with_capacity(pubkeys.len());
+        for chunk in pubkeys.chunks(MAX_MULTIPLE_ACCOUNTS_PER_REQUEST) {
+            accounts.extend(
+                self.fetch_multi_rpc_only(
+                    chunk,
+                    min_context_slot,
+                    fetch_context.clone(),
+                )
+                .await?,
+            );
+        }
+        Ok(accounts)
+    }
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {

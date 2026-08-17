@@ -53,19 +53,20 @@ fn delegation_record_account(delegation_slot: u64) -> Account {
 
 #[test]
 fn replayed_requests_require_local_or_confined_authority() {
-    let local = Pubkey::new_unique();
-    let foreign = Pubkey::new_unique();
-    let local_records =
-        HashSet::from([delegation_record_pda_from_delegated_account(&local)]);
+    let validator = Pubkey::new_unique();
+    let mut record = DelegationRecord {
+        authority: validator,
+        owner: Pubkey::new_unique(),
+        delegation_slot: 1,
+        lamports: 1,
+        commit_frequency_ms: 1,
+    };
 
-    assert!(undelegation_request_has_local_record(
-        &local,
-        &local_records,
-    ));
-    assert!(!undelegation_request_has_local_record(
-        &foreign,
-        &local_records,
-    ));
+    assert!(delegation_record_has_local_authority(&record, validator));
+    record.authority = Pubkey::default();
+    assert!(delegation_record_has_local_authority(&record, validator));
+    record.authority = Pubkey::new_unique();
+    assert!(!delegation_record_has_local_authority(&record, validator));
 }
 
 #[test]

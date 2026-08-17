@@ -341,13 +341,12 @@ fn records_in_replay_gap(
     Ok(records_by_slot)
 }
 
-fn undelegation_request_has_local_record(
-    delegated_account: &Pubkey,
-    local_records: &HashSet<Pubkey>,
+fn delegation_record_has_local_authority(
+    record: &DelegationRecord,
+    validator_pubkey: Pubkey,
 ) -> bool {
-    local_records.contains(&delegation_record_pda_from_delegated_account(
-        delegated_account,
-    ))
+    record.authority == validator_pubkey
+        || record.authority == Pubkey::default()
 }
 
 impl<T, U> Clone for FetchCloner<T, U>
@@ -578,8 +577,15 @@ where
                     self.validator_pubkey,
                     range.through_slot,
                 ),
-            );
-        let confined_records = self
+            )
+            .await?;
+        let (mut recovered_count, incomplete_count) =
+            self.recover_replay_records(local_records, range).await?;
+
+        // Confined records have no validator authority by which an RPC can
+        // partition them. Recover them only after validator-scoped records and
+        // never let the global census prevent local recovery from completing.
+        match self
             .remote_account_provider
             .get_program_accounts_with_config(
                 &delegation_program,
@@ -587,13 +593,50 @@ where
                     Pubkey::default(),
                     range.through_slot,
                 ),
-            );
-        let (local_records, confined_records) =
-            tokio::try_join!(local_records, confined_records)?;
-        let mut records_by_slot = records_in_replay_gap(
-            local_records.into_iter().chain(confined_records),
-            range,
-        )?;
+            )
+            .await
+        {
+            Ok(confined_records) => match self
+                .recover_replay_records(confined_records, range)
+                .await
+            {
+                Ok((recovered, incomplete)) => {
+                    if incomplete > 0 {
+                        warn!(
+                            incomplete,
+                            "confined record replay recovery incomplete; continuing"
+                        );
+                    }
+                    recovered_count = recovered_count.saturating_add(recovered);
+                }
+                Err(error) => warn!(
+                    ?error,
+                    "confined record replay recovery failed; continuing"
+                ),
+            },
+            Err(error) => warn!(
+                ?error,
+                "confined record replay scan failed; validator-scoped recovery remains active"
+            ),
+        }
+
+        self.reconcile_undelegation_requests(range.through_slot)
+            .await?;
+        if incomplete_count > 0 {
+            return Err(ChainlinkError::IncompleteReplayRecovery(
+                incomplete_count,
+            ));
+        }
+
+        Ok(recovered_count)
+    }
+
+    async fn recover_replay_records(
+        &self,
+        records: Vec<(Pubkey, Account)>,
+        range: ReplayRecoveryRange,
+    ) -> ChainlinkResult<(usize, usize)> {
+        let mut records_by_slot = records_in_replay_gap(records, range)?;
         let mut slots = records_by_slot.keys().copied().collect::<Vec<_>>();
         slots.sort_unstable();
         let mut recovered_count = 0usize;
@@ -660,15 +703,8 @@ where
             }
             recovered_count = recovered_count.saturating_add(recovered.len());
         }
-        self.reconcile_undelegation_requests(range.through_slot)
-            .await?;
-        if incomplete_count > 0 {
-            return Err(ChainlinkError::IncompleteReplayRecovery(
-                incomplete_count,
-            ));
-        }
 
-        Ok(recovered_count)
+        Ok((recovered_count, incomplete_count))
     }
 
     async fn reconcile_undelegation_requests(
@@ -885,33 +921,11 @@ where
             .max(min_context_slot);
         let delegation_program = dlp_api::id();
         let config = undelegation_request_config(observed_slot);
-        let requests = self
+        let accounts = self
             .remote_account_provider
-            .get_program_accounts_with_config(&delegation_program, config);
-        let local_records = self
-            .remote_account_provider
-            .get_program_accounts_with_config(
-                &delegation_program,
-                authority_record_config(
-                    self.validator_pubkey,
-                    Some(observed_slot),
-                ),
-            );
-        let confined_records = self
-            .remote_account_provider
-            .get_program_accounts_with_config(
-                &delegation_program,
-                authority_record_config(Pubkey::default(), Some(observed_slot)),
-            );
-        let (accounts, local_records, confined_records) =
-            tokio::try_join!(requests, local_records, confined_records)?;
-        let local_records = local_records
-            .into_iter()
-            .chain(confined_records)
-            .map(|(pubkey, _)| pubkey)
-            .collect::<HashSet<_>>();
-
-        let mut requests = Vec::with_capacity(accounts.len());
+            .get_program_accounts_with_config(&delegation_program, config)
+            .await?;
+        let mut parsed_requests = Vec::with_capacity(accounts.len());
         for (request_pda, account) in accounts {
             let Ok(request) =
                 UndelegationRequest::try_from_bytes_with_discriminator(
@@ -936,20 +950,73 @@ where
                 );
                 continue;
             }
-            if !undelegation_request_has_local_record(
-                &request.delegated_account,
-                &local_records,
+            parsed_requests.push((
+                request_pda,
+                request.delegated_account,
+                request.expires_at_slot,
+            ));
+        }
+
+        let record_pubkeys = parsed_requests
+            .iter()
+            .map(|(_, delegated_account, _)| {
+                delegation_record_pda_from_delegated_account(delegated_account)
+            })
+            .collect::<Vec<_>>();
+        let records = self
+            .remote_account_provider
+            .fetch_multi_rpc_only_chunked(
+                &record_pubkeys,
+                observed_slot,
+                AccountFetchContext::rpc_get_multiple_accounts(),
+            )
+            .await?;
+
+        let mut requests = Vec::with_capacity(parsed_requests.len());
+        for ((request_pda, delegated_account, expires_at_slot), record) in
+            parsed_requests.into_iter().zip(records)
+        {
+            let Some(record_account) = record.fresh_account() else {
+                trace!(
+                    %delegated_account,
+                    "Ignoring undelegation request without a delegation record"
+                );
+                continue;
+            };
+            if record_account.owner() != &delegation_program {
+                warn!(
+                    %delegated_account,
+                    owner = %record_account.owner(),
+                    "Ignoring undelegation request with an invalid record owner"
+                );
+                continue;
+            }
+            let Ok(record) =
+                DelegationRecord::try_from_bytes_with_discriminator(
+                    record_account.data(),
+                )
+            else {
+                warn!(
+                    %delegated_account,
+                    "Ignoring undelegation request with an invalid delegation record"
+                );
+                continue;
+            };
+            if !delegation_record_has_local_authority(
+                record,
+                self.validator_pubkey,
             ) {
                 trace!(
-                    delegated_account = %request.delegated_account,
+                    %delegated_account,
+                    authority = %record.authority,
                     "Ignoring undelegation request without local authority"
                 );
                 continue;
             }
             requests.push(ObservedUndelegationRequest {
                 request_pda,
-                delegated_account: request.delegated_account,
-                expires_at_slot: request.expires_at_slot,
+                delegated_account,
+                expires_at_slot,
                 observed_slot,
             });
         }
