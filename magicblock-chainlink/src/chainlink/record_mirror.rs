@@ -258,10 +258,16 @@ impl DelegationRecordMirror {
             .peek(&record)
             .and_then(|entry| entry.data.as_deref())
         else {
-            return false;
+            // Missing and tombstoned entries are uncertain, not evidence that
+            // the request belongs to another validator.
+            return true;
         };
-        DelegationRecord::try_from_bytes_with_discriminator(data)
-            .is_ok_and(|record| record.authority == validator_pubkey)
+        let Ok(record) =
+            DelegationRecord::try_from_bytes_with_discriminator(data)
+        else {
+            return true;
+        };
+        record.authority == validator_pubkey
     }
 
     fn apply(&self, update: RecordStreamUpdate) {
@@ -553,6 +559,29 @@ mod tests {
         assert_eq!(
             requests.recv().await.unwrap().delegated_account,
             local_account
+        );
+    }
+
+    #[tokio::test]
+    async fn unmirrored_undelegation_request_falls_back_to_verification() {
+        let mirror = Arc::new(DelegationRecordMirror::with_capacity(
+            16,
+            Some(Pubkey::new_unique()),
+        ));
+        let mut requests = mirror.take_undelegation_requests().unwrap();
+        let delegated_account = Pubkey::new_unique();
+        mirror
+            .consume(RecordStreamUpdate::UndelegationRequested {
+                request_pda: Pubkey::new_unique().to_bytes(),
+                delegated_account: delegated_account.to_bytes(),
+                expires_at_slot: 10,
+                slot: 2,
+            })
+            .await;
+
+        assert_eq!(
+            requests.recv().await.unwrap().delegated_account,
+            delegated_account
         );
     }
 
