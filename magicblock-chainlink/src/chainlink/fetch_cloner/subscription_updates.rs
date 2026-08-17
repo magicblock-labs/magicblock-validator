@@ -652,32 +652,50 @@ where
         slot: u64,
     ) {
         let record_pda = delegation_record_pda_from_delegated_account(&pubkey);
-        let mut reported_full = false;
-        loop {
-            let enqueue = {
-                let mut rechecks = self.pending_collision_rechecks.lock();
-                try_enqueue_collision_recheck(
-                    &mut rechecks,
-                    record_pda,
-                    pubkey,
+        let enqueue = {
+            let mut rechecks = self.pending_collision_rechecks.lock();
+            try_enqueue_collision_recheck(
+                &mut rechecks,
+                record_pda,
+                pubkey,
+                slot,
+                PENDING_COLLISION_RECHECKS_CAPACITY.get(),
+            )
+        };
+        match enqueue {
+            CollisionRecheckEnqueue::Inserted => {}
+            CollisionRecheckEnqueue::Updated => return,
+            CollisionRecheckEnqueue::Full => {
+                trace!(
+                    pubkey = %pubkey,
                     slot,
-                    PENDING_COLLISION_RECHECKS_CAPACITY.get(),
-                )
-            };
-            match enqueue {
-                CollisionRecheckEnqueue::Inserted => break,
-                CollisionRecheckEnqueue::Updated => return,
-                CollisionRecheckEnqueue::Full => {
-                    if !reported_full {
-                        trace!(
-                            pubkey = %pubkey,
-                            slot,
-                            "Collision recheck queue is full; applying backpressure"
-                        );
-                        reported_full = true;
+                    "Collision recheck queue is full; reconciling via RPC"
+                );
+                // Overflow work does not wait for mirror progress, so this
+                // backpressure cannot form a cycle with the mirror consumer.
+                // This semaphore is owned here and never closed, so acquiring
+                // a permit cannot fail.
+                let permit = self
+                    .collision_overflow_reconciliations
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .expect("collision overflow semaphore never closed");
+                let this = self.clone();
+                task::spawn(async move {
+                    let resolved = this
+                        .clone_colliding_delegated_account(pubkey, slot)
+                        .await;
+                    drop(permit);
+                    if !resolved {
+                        this.schedule_collision_recheck(
+                            pubkey,
+                            slot.saturating_add(1),
+                        )
+                        .await;
                     }
-                    tokio::time::sleep(COLLISION_RECHECK_DELAYS[0]).await;
-                }
+                });
+                return;
             }
         }
 
@@ -1540,7 +1558,7 @@ mod tests {
         assert_eq!(
             collision_recheck_action(
                 &MirrorLookup::Tombstone { slot: 1 },
-                false,
+                false
             ),
             CollisionRecheckAction::Discard
         );

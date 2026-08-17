@@ -2,10 +2,10 @@ use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
     pin::Pin,
+    sync::Arc,
     time::Duration,
 };
 
-use dlp_api::state::DelegationRecord;
 use futures_util::StreamExt;
 use helius_laserstream::{
     LaserstreamConfig, LaserstreamError, StreamHandle, client,
@@ -20,8 +20,12 @@ use helius_laserstream::{
         subscribe_update::UpdateOneof,
     },
 };
+use solana_system_interface::MAX_PERMITTED_DATA_LENGTH;
 use tokio::{
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        OwnedSemaphorePermit, Semaphore,
+        mpsc::{self, Receiver, Sender},
+    },
     time,
 };
 
@@ -35,8 +39,8 @@ const DELEGATE_DELEGATED_ACCOUNT_INDEX: usize = 1;
 const DELEGATE_RECORD_ACCOUNT_INDEX: usize = 4;
 const UNDELEGATION_REQUEST_DISCRIMINATOR: u64 = 104;
 const UNDELEGATION_REQUEST_MIN_LEN: usize = 8 + 32 + 8;
-/// Composes with the fixed account-payload cap below to bound queued bytes.
 const MAX_PENDING_UPDATES: usize = 8192;
+const MAX_PENDING_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_RECONNECT_ATTEMPTS: u32 = 16;
 const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
@@ -90,6 +94,26 @@ pub enum RecordStreamUpdate {
     SyncTerminated,
 }
 
+impl RecordStreamUpdate {
+    fn payload_bytes(&self) -> usize {
+        match self {
+            Self::Record { data, .. } => data.len(),
+            _ => 0,
+        }
+    }
+}
+
+pub(super) struct RecordStreamMessage {
+    update: RecordStreamUpdate,
+    _payload_permit: Option<OwnedSemaphorePermit>,
+}
+
+impl RecordStreamMessage {
+    pub(super) fn into_update(self) -> RecordStreamUpdate {
+        self.update
+    }
+}
+
 struct LaserStream {
     stream: Laser,
     _handle: Option<StreamHandle>,
@@ -123,7 +147,8 @@ enum DlpInstruction {
 pub struct RecordStream {
     stream: LaserStream,
     config: LaserstreamConfig,
-    updates: Sender<RecordStreamUpdate>,
+    updates: Sender<RecordStreamMessage>,
+    payload_budget: Arc<Semaphore>,
     slot: Slot,
     watermark: Slot,
 }
@@ -132,7 +157,7 @@ impl RecordStream {
     pub async fn start(
         endpoint: String,
         api_key: String,
-    ) -> Result<Receiver<RecordStreamUpdate>, RecordStreamError> {
+    ) -> Result<Receiver<RecordStreamMessage>, RecordStreamError> {
         let config = LaserstreamConfig {
             api_key,
             endpoint,
@@ -147,6 +172,9 @@ impl RecordStream {
                 stream,
                 config,
                 updates,
+                payload_budget: Arc::new(Semaphore::new(
+                    MAX_PENDING_PAYLOAD_BYTES,
+                )),
                 slot: 0,
                 watermark: 0,
             }
@@ -175,7 +203,7 @@ impl RecordStream {
                 }
             }
         }
-        let _ = self.updates.send(RecordStreamUpdate::SyncTerminated).await;
+        self.deliver(RecordStreamUpdate::SyncTerminated).await;
     }
 
     /// Reconnects indefinitely with replay behind the observed slot. A fresh
@@ -216,10 +244,7 @@ impl RecordStream {
 
     async fn interrupt(&mut self) -> bool {
         self.watermark = 0;
-        self.updates
-            .send(RecordStreamUpdate::SyncInterrupted)
-            .await
-            .is_ok()
+        self.enqueue(RecordStreamUpdate::SyncInterrupted).await
     }
 
     async fn handle_update(
@@ -237,7 +262,7 @@ impl RecordStream {
                 return false;
             }
         };
-        bound_account_update_payload(&mut update);
+        sanitize_account_update_payload(&mut update);
 
         match update {
             UpdateOneof::Account(account) => {
@@ -276,8 +301,35 @@ impl RecordStream {
         }
     }
 
+    async fn enqueue(&mut self, update: RecordStreamUpdate) -> bool {
+        let payload_bytes = update.payload_bytes();
+        let payload_permit = if payload_bytes == 0 {
+            None
+        } else {
+            let Ok(payload_bytes) = u32::try_from(payload_bytes) else {
+                return false;
+            };
+            match self
+                .payload_budget
+                .clone()
+                .acquire_many_owned(payload_bytes)
+                .await
+            {
+                Ok(permit) => Some(permit),
+                Err(_) => return false,
+            }
+        };
+        self.updates
+            .send(RecordStreamMessage {
+                update,
+                _payload_permit: payload_permit,
+            })
+            .await
+            .is_ok()
+    }
+
     async fn deliver(&mut self, update: RecordStreamUpdate) {
-        if self.updates.send(update).await.is_err() {
+        if !self.enqueue(update).await {
             tracing::warn!("record stream consumer closed");
         }
     }
@@ -511,6 +563,7 @@ async fn buffer_until_confirmed_slot(
     stream: &mut Laser,
 ) -> Result<Vec<SubscribeUpdate>, RecordStreamError> {
     let mut initial_updates = Vec::new();
+    let mut pending_payload_bytes = 0usize;
     loop {
         let mut update = stream
             .next()
@@ -520,7 +573,13 @@ async fn buffer_until_confirmed_slot(
             ))?
             .map_err(RecordStreamError::Laserstream)?;
         if let Some(update) = update.update_oneof.as_mut() {
-            bound_account_update_payload(update);
+            pending_payload_bytes = pending_payload_bytes
+                .saturating_add(sanitize_account_update_payload(update));
+            if pending_payload_bytes > MAX_PENDING_PAYLOAD_BYTES {
+                return Err(RecordStreamError::Connection(
+                    "confirmed-slot barrier exceeded payload budget",
+                ));
+            }
         }
         let confirmed_slot = matches!(
             update.update_oneof.as_ref(),
@@ -540,16 +599,21 @@ async fn buffer_until_confirmed_slot(
     }
 }
 
-fn bound_account_update_payload(update: &mut UpdateOneof) {
+fn sanitize_account_update_payload(update: &mut UpdateOneof) -> usize {
     let UpdateOneof::Account(update) = update else {
-        return;
+        return 0;
     };
     let Some(account) = update.account.as_mut() else {
-        return;
+        return 0;
     };
-    let max_len = DelegationRecord::size_with_discriminator()
-        .max(UNDELEGATION_REQUEST_MIN_LEN);
-    account.data.truncate(max_len);
+    if account.data.len() > MAX_PERMITTED_DATA_LENGTH as usize {
+        tracing::warn!(
+            data_len = account.data.len(),
+            "record stream account exceeded the Solana data limit; requiring RPC confirmation"
+        );
+        account.data.clear();
+    }
+    account.data.len()
 }
 
 fn parse_undelegation_request(data: &[u8]) -> Option<(PubkeyBytes, Slot)> {
@@ -568,7 +632,7 @@ fn parse_undelegation_request(data: &[u8]) -> Option<(PubkeyBytes, Slot)> {
 mod tests {
     use super::*;
 
-    fn test_stream() -> (RecordStream, Receiver<RecordStreamUpdate>) {
+    fn test_stream() -> (RecordStream, Receiver<RecordStreamMessage>) {
         let (updates, receiver) = mpsc::channel(32);
         (
             RecordStream {
@@ -584,11 +648,26 @@ mod tests {
                     replay: true,
                 },
                 updates,
+                payload_budget: Arc::new(Semaphore::new(
+                    MAX_PENDING_PAYLOAD_BYTES,
+                )),
                 slot: 0,
                 watermark: 0,
             },
             receiver,
         )
+    }
+
+    fn try_recv_update(
+        updates: &mut Receiver<RecordStreamMessage>,
+    ) -> Result<RecordStreamUpdate, mpsc::error::TryRecvError> {
+        updates.try_recv().map(RecordStreamMessage::into_update)
+    }
+
+    async fn recv_update(
+        updates: &mut Receiver<RecordStreamMessage>,
+    ) -> Option<RecordStreamUpdate> {
+        updates.recv().await.map(RecordStreamMessage::into_update)
     }
 
     fn delegate_update(
@@ -720,7 +799,7 @@ mod tests {
                 )))
                 .await;
             assert!(matches!(
-                updates.try_recv(),
+                try_recv_update(&mut updates),
                 Ok(RecordStreamUpdate::DelegationObserved {
                     delegated_account,
                     record,
@@ -766,11 +845,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pending_record_payload_is_bounded_before_enqueue() {
+    async fn pending_record_payload_preserves_action_bytes() {
+        use dlp_api::state::DelegationRecord;
         use helius_laserstream::grpc::SubscribeUpdateAccountInfo;
 
-        let max_len = DelegationRecord::size_with_discriminator()
-            .max(UNDELEGATION_REQUEST_MIN_LEN);
+        let payload_len = DelegationRecord::size_with_discriminator() + 64;
         let (mut stream, mut updates) = test_stream();
         stream
             .handle_update(Ok(SubscribeUpdate {
@@ -778,7 +857,7 @@ mod tests {
                     SubscribeUpdateAccount {
                         account: Some(SubscribeUpdateAccountInfo {
                             pubkey: vec![4; PUBKEY_LEN],
-                            data: vec![0; max_len * 2],
+                            data: vec![0; payload_len],
                             ..Default::default()
                         }),
                         slot: 7,
@@ -790,10 +869,39 @@ mod tests {
             .await;
 
         assert!(matches!(
-            updates.recv().await,
+            recv_update(&mut updates).await,
             Some(RecordStreamUpdate::Record { data, .. })
-                if data.len() == max_len
+                if data.len() == payload_len
         ));
+    }
+
+    #[tokio::test]
+    async fn pending_record_payload_budget_applies_backpressure() {
+        let (mut stream, mut updates) = test_stream();
+        stream.payload_budget = Arc::new(Semaphore::new(4));
+        let record = |slot| RecordStreamUpdate::Record {
+            record: [slot as u8; PUBKEY_LEN],
+            data: vec![0; 4],
+            slot,
+        };
+
+        stream.deliver(record(1)).await;
+        let blocked_delivery = stream.deliver(record(2));
+        tokio::pin!(blocked_delivery);
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(10),
+                &mut blocked_delivery,
+            )
+            .await
+            .is_err()
+        );
+
+        drop(updates.recv().await.unwrap());
+        tokio::time::timeout(Duration::from_secs(1), blocked_delivery)
+            .await
+            .unwrap();
+        assert!(updates.recv().await.is_some());
     }
 
     #[tokio::test]
@@ -843,7 +951,7 @@ mod tests {
         let (mut stream, mut updates) = test_stream();
         stream.handle_update(Ok(update)).await;
         assert!(matches!(
-            updates.try_recv(),
+            try_recv_update(&mut updates),
             Ok(RecordStreamUpdate::RecordUndelegated {
                 record,
                 slot: 8,
@@ -868,7 +976,7 @@ mod tests {
             }))
             .await;
         assert!(matches!(
-            updates.try_recv(),
+            try_recv_update(&mut updates),
             Ok(RecordStreamUpdate::SlotAdvanced(100))
         ));
         assert!(
@@ -890,11 +998,11 @@ mod tests {
                 .await
         );
         assert!(matches!(
-            updates.try_recv(),
+            try_recv_update(&mut updates),
             Ok(RecordStreamUpdate::SyncInterrupted)
         ));
         assert!(matches!(
-            updates.try_recv(),
+            try_recv_update(&mut updates),
             Ok(RecordStreamUpdate::Record { slot, .. }) if slot == 40
         ));
         assert_eq!(stream.slot, 40);
@@ -914,7 +1022,7 @@ mod tests {
         );
         assert_eq!(stream.watermark, 0);
         assert!(matches!(
-            updates.try_recv(),
+            try_recv_update(&mut updates),
             Ok(RecordStreamUpdate::SyncInterrupted)
         ));
     }

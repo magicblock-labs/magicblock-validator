@@ -14,7 +14,9 @@ use tracing::{info, trace, warn};
 use crate::{
     chainlink::{
         ObservedUndelegationRequest,
-        record_stream::{RecordStream, RecordStreamUpdate},
+        record_stream::{
+            RecordStream, RecordStreamMessage, RecordStreamUpdate,
+        },
     },
     remote_account_provider::{Endpoint, Endpoints},
 };
@@ -130,7 +132,7 @@ impl DelegationRecordMirror {
     }
 
     fn start_consumer(
-        mut updates: Receiver<RecordStreamUpdate>,
+        mut updates: Receiver<RecordStreamMessage>,
         capacity: usize,
         validator_pubkey: Option<Pubkey>,
     ) -> Arc<Self> {
@@ -138,7 +140,7 @@ impl DelegationRecordMirror {
         let consumer = Arc::clone(&mirror);
         tokio::spawn(async move {
             while let Some(update) = updates.recv().await {
-                consumer.consume(update).await;
+                consumer.consume(update.into_update()).await;
             }
             consumer.clear();
             metrics::set_record_mirror_live(false);

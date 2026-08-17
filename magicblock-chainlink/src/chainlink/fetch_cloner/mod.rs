@@ -149,6 +149,8 @@ where
 
     /// Internal-looking DLP updates awaiting a delayed mirror recheck.
     pending_collision_rechecks: Arc<PlMutex<LruCache<Pubkey, (Pubkey, u64)>>>,
+    /// Bounds direct RPC reconciliation when the delayed set is full.
+    collision_overflow_reconciliations: Arc<Semaphore>,
 
     pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
 
@@ -205,6 +207,7 @@ enum ProgramDataWatch {
 
 const PENDING_COLLISION_RECHECKS_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(16_384).expect("collision recheck capacity is non-zero");
+const COLLISION_OVERFLOW_RECONCILIATION_LIMIT: usize = 64;
 const AUTHORITY_RECORD_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
 const COLLISION_RECHECK_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
@@ -239,6 +242,9 @@ where
             program_verify_cache: self.program_verify_cache.clone(),
             programdata_index: self.programdata_index.clone(),
             pending_collision_rechecks: self.pending_collision_rechecks.clone(),
+            collision_overflow_reconciliations: self
+                .collision_overflow_reconciliations
+                .clone(),
             pending_undelegations: self.pending_undelegations.clone(),
             risk_service: self.risk_service.clone(),
             record_mirror: self.record_mirror.clone(),
@@ -352,6 +358,9 @@ where
             pending_collision_rechecks: Arc::new(PlMutex::new(LruCache::new(
                 PENDING_COLLISION_RECHECKS_CAPACITY,
             ))),
+            collision_overflow_reconciliations: Arc::new(Semaphore::new(
+                COLLISION_OVERFLOW_RECONCILIATION_LIMIT,
+            )),
             pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
             risk_service,
             record_mirror,
