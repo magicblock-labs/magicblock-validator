@@ -32,9 +32,10 @@ impl WsDispatcher {
         let id = next_subid();
         let mut rx = self.engine.accounts().subscribe_program(pubkey).await;
         let tx = self.chan.tx.clone();
+        let engine = self.engine.clone();
         let handle = tokio::spawn(async move {
             while let Some((pubkey, account)) = rx.recv().await {
-                let slot = account.slot();
+                let slot = context_slot(&engine);
                 let Some(bytes) = encoder.encode(slot, &pubkey, &account, id)
                 else {
                     continue;

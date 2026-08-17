@@ -28,18 +28,19 @@ impl WsDispatcher {
             .await
             .map_err(crate::error::RpcError::internal)?
         {
-            if let Some(bytes) = encoder.encode(status.slot, &status.result, id)
-            {
+            let slot = context_slot(&self.engine);
+            if let Some(bytes) = encoder.encode(slot, &status.result, id) {
                 let _ = self.chan.tx.send(bytes).await;
             }
             return Ok(SubResult::SubId(id));
         }
 
         let tx = self.chan.tx.clone();
+        let engine = self.engine.clone();
         let handle = tokio::spawn(async move {
             if let Ok(status) = rx.await
                 && let Some(bytes) =
-                    encoder.encode(status.slot, &status.result, id)
+                    encoder.encode(context_slot(&engine), &status.result, id)
             {
                 let _ = tx.send(bytes).await;
             }
