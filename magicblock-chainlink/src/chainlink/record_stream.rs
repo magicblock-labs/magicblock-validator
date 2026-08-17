@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use dlp_api::state::DelegationRecord;
 use futures_util::StreamExt;
 use helius_laserstream::{
     LaserstreamConfig, LaserstreamError, StreamHandle, client,
@@ -34,6 +35,7 @@ const DELEGATE_DELEGATED_ACCOUNT_INDEX: usize = 1;
 const DELEGATE_RECORD_ACCOUNT_INDEX: usize = 4;
 const UNDELEGATION_REQUEST_DISCRIMINATOR: u64 = 104;
 const UNDELEGATION_REQUEST_MIN_LEN: usize = 8 + 32 + 8;
+/// Composes with the fixed account-payload cap below to bound queued bytes.
 const MAX_PENDING_UPDATES: usize = 8192;
 const MAX_RECONNECT_ATTEMPTS: u32 = 16;
 const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -224,7 +226,7 @@ impl RecordStream {
         &mut self,
         result: Result<SubscribeUpdate, LaserstreamError>,
     ) -> bool {
-        let update = match result {
+        let mut update = match result {
             Ok(update) => match update.update_oneof {
                 Some(update) => update,
                 None => return true,
@@ -235,6 +237,7 @@ impl RecordStream {
                 return false;
             }
         };
+        bound_account_update_payload(&mut update);
 
         match update {
             UpdateOneof::Account(account) => {
@@ -509,13 +512,16 @@ async fn buffer_until_confirmed_slot(
 ) -> Result<Vec<SubscribeUpdate>, RecordStreamError> {
     let mut initial_updates = Vec::new();
     loop {
-        let update = stream
+        let mut update = stream
             .next()
             .await
             .ok_or(RecordStreamError::Connection(
                 "stream closed before confirmed-slot barrier",
             ))?
             .map_err(RecordStreamError::Laserstream)?;
+        if let Some(update) = update.update_oneof.as_mut() {
+            bound_account_update_payload(update);
+        }
         let confirmed_slot = matches!(
             update.update_oneof.as_ref(),
             Some(UpdateOneof::Slot(slot))
@@ -532,6 +538,18 @@ async fn buffer_until_confirmed_slot(
             ));
         }
     }
+}
+
+fn bound_account_update_payload(update: &mut UpdateOneof) {
+    let UpdateOneof::Account(update) = update else {
+        return;
+    };
+    let Some(account) = update.account.as_mut() else {
+        return;
+    };
+    let max_len = DelegationRecord::size_with_discriminator()
+        .max(UNDELEGATION_REQUEST_MIN_LEN);
+    account.data.truncate(max_len);
 }
 
 fn parse_undelegation_request(data: &[u8]) -> Option<(PubkeyBytes, Slot)> {
@@ -744,6 +762,37 @@ mod tests {
             Err(RecordStreamError::Connection(
                 "stream closed before confirmed-slot barrier"
             ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn pending_record_payload_is_bounded_before_enqueue() {
+        use helius_laserstream::grpc::SubscribeUpdateAccountInfo;
+
+        let max_len = DelegationRecord::size_with_discriminator()
+            .max(UNDELEGATION_REQUEST_MIN_LEN);
+        let (mut stream, mut updates) = test_stream();
+        stream
+            .handle_update(Ok(SubscribeUpdate {
+                update_oneof: Some(UpdateOneof::Account(
+                    SubscribeUpdateAccount {
+                        account: Some(SubscribeUpdateAccountInfo {
+                            pubkey: vec![4; PUBKEY_LEN],
+                            data: vec![0; max_len * 2],
+                            ..Default::default()
+                        }),
+                        slot: 7,
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            }))
+            .await;
+
+        assert!(matches!(
+            updates.recv().await,
+            Some(RecordStreamUpdate::Record { data, .. })
+                if data.len() == max_len
         ));
     }
 

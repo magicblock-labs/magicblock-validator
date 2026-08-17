@@ -8,7 +8,7 @@ use magicblock_chainlink::{
 use magicblock_metrics::metrics::AccountFetchContext;
 use magicblock_program::instruction_utils::InstructionUtils;
 use solana_transaction_error::TransactionError;
-use tokio::{sync::broadcast, time::MissedTickBehavior};
+use tokio::{sync::mpsc, time::MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -63,7 +63,7 @@ impl UndelegationRequestService {
     }
 
     async fn undelegation_request_processor(
-        mut requests: broadcast::Receiver<ObservedUndelegationRequest>,
+        mut requests: mpsc::Receiver<ObservedUndelegationRequest>,
         cancellation_token: CancellationToken,
         chainlink: Arc<ChainlinkImpl>,
         engine: Engine,
@@ -77,18 +77,10 @@ impl UndelegationRequestService {
                 }
                 request = requests.recv() => {
                     match request {
-                        Ok(request) => request,
-                        Err(broadcast::error::RecvError::Closed) => {
+                        Some(request) => request,
+                        None => {
                             info!("Undelegation request subscription closed");
                             return;
-                        }
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            error!(
-                                skipped_count = skipped,
-                                skip_reason = "broadcast_receiver_lagged",
-                                "Lagged behind undelegation request updates"
-                            );
-                            continue;
                         }
                     }
                 }
@@ -375,7 +367,10 @@ impl UndelegationRequestService {
     }
 
     pub fn start(self: &Arc<Self>) {
-        let requests = self.chainlink.subscribe_undelegation_requests();
+        let Some(requests) = self.chainlink.take_undelegation_requests() else {
+            error!("Undelegation request processor already started");
+            return;
+        };
         tokio::spawn(Self::undelegation_request_processor(
             requests,
             self.cancellation_token.clone(),

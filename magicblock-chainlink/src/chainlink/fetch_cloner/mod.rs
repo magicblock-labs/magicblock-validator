@@ -49,7 +49,7 @@ use solana_rpc_client_api::{
 };
 use solana_signer::Signer;
 use tokio::{
-    sync::{Semaphore, broadcast, mpsc},
+    sync::{Semaphore, mpsc},
     task,
     task::JoinSet,
 };
@@ -157,7 +157,7 @@ where
 
     record_mirror: Option<Arc<DelegationRecordMirror>>,
 
-    undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
+    undelegation_request_sender: mpsc::Sender<ObservedUndelegationRequest>,
 }
 
 struct PendingUndelegationGuard {
@@ -303,7 +303,7 @@ where
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
     ) -> Arc<Self> {
-        let (undelegation_request_sender, _) = broadcast::channel(1024);
+        let (undelegation_request_sender, _) = mpsc::channel(1024);
         Self::new_with_undelegation_request_sender(
             remote_account_provider,
             engine,
@@ -326,9 +326,7 @@ where
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
         record_mirror: Option<Arc<DelegationRecordMirror>>,
-        undelegation_request_sender: broadcast::Sender<
-            ObservedUndelegationRequest,
-        >,
+        undelegation_request_sender: mpsc::Sender<ObservedUndelegationRequest>,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let allowed_programs = allowed_programs.map(|programs| {

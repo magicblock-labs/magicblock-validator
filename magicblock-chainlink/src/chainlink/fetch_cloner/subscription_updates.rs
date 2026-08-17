@@ -1371,16 +1371,18 @@ where
                                 expires_at_slot = observed.expires_at_slot,
                                 "Observed DLP undelegation request"
                             );
-                            if let Err(broadcast::error::SendError(observed)) =
-                                self.undelegation_request_sender.send(observed)
+                            if let Err(mpsc::error::SendError(observed)) = self
+                                .undelegation_request_sender
+                                .send(observed)
+                                .await
                             {
                                 warn!(
                                     request_pda = %observed.request_pda,
                                     delegated_account = %observed.delegated_account,
                                     observed_slot = observed.observed_slot,
                                     expires_at_slot = observed.expires_at_slot,
-                                    drop_reason = "no_active_subscribers",
-                                    "Dropped observed DLP undelegation request because no subscribers are active"
+                                    drop_reason = "request_consumer_closed",
+                                    "Dropped observed DLP undelegation request because its consumer is closed"
                                 );
                             }
                             (

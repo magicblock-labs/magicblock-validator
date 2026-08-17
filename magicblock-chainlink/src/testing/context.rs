@@ -16,7 +16,7 @@ use solana_keypair::Keypair;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tracing::trace;
 
 use super::accounts::account_shared_with_owner_and_slot;
@@ -165,7 +165,7 @@ impl TestContext {
                 .expect("create remote account provider")
                 .expect("ephemeral lifecycle enables remote accounts"),
             );
-            let (undelegation_request_sender, _) = broadcast::channel(1024);
+            let (undelegation_request_sender, _) = mpsc::channel(1024);
             FetchCloner::new_with_undelegation_request_sender(
                 &provider,
                 bank.clone(),
