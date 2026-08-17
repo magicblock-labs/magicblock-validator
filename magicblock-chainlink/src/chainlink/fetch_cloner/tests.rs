@@ -282,18 +282,26 @@ fn replay_recovery_requests_full_confirmed_blocks() {
 
 #[test]
 fn incomplete_replay_recovery_retries_are_bounded() {
-    let incomplete = ChainlinkError::IncompleteReplayRecovery(1);
+    assert_eq!(next_replay_recovery_retry_attempt(0), Some(1));
+    assert_eq!(next_replay_recovery_retry_attempt(1), Some(2));
+    assert_eq!(next_replay_recovery_retry_attempt(2), None);
+}
 
-    assert_eq!(next_replay_recovery_retry_attempt(&incomplete, 0), Some(1));
-    assert_eq!(next_replay_recovery_retry_attempt(&incomplete, 1), Some(2));
-    assert_eq!(next_replay_recovery_retry_attempt(&incomplete, 2), None);
-    assert_eq!(
-        next_replay_recovery_retry_attempt(
-            &ChainlinkError::IncompleteUndelegationRequestRecovery(1),
-            2,
-        ),
-        Some(2)
-    );
+#[test]
+fn incomplete_replay_recovery_checkpoints_records_by_slot() {
+    let recovery = IncompleteReplayRecoveryState::default();
+    let first = Pubkey::new_unique();
+    let second = Pubkey::new_unique();
+    recovery.request(HashMap::from([(11, HashSet::from([first]))]));
+    recovery.request(HashMap::from([
+        (11, HashSet::from([second])),
+        (12, HashSet::from([first])),
+    ]));
+
+    let pending = recovery.take_pending();
+    assert_eq!(pending[&11], HashSet::from([first, second]));
+    assert_eq!(pending[&12], HashSet::from([first]));
+    assert!(recovery.take_pending().is_empty());
 }
 
 #[test]

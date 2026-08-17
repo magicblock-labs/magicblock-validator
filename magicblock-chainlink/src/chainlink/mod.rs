@@ -160,6 +160,13 @@ fn provider_config_with_dlp_fallback(
         .with_program_subs(program_subs)
 }
 
+fn needs_rpc_startup_recovery(
+    record_sync_enabled: bool,
+    record_mirror_initialized: bool,
+) -> bool {
+    record_sync_enabled && !record_mirror_initialized
+}
+
 impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     fn contains_account(&self, pubkey: &Pubkey) -> bool {
         self.engine
@@ -244,6 +251,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         } else {
             None
         };
+        let needs_rpc_startup_recovery = needs_rpc_startup_recovery(
+            chainlink_config.record_sync.enabled,
+            record_mirror.is_some(),
+        );
         let provider_config =
             provider_config_with_dlp_fallback(&config, chainlink_config);
 
@@ -285,6 +296,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                     record_mirror,
                     undelegation_request_sender.clone(),
                 );
+            if needs_rpc_startup_recovery {
+                fetch_cloner.clone().start_rpc_startup_recovery();
+            }
             Some(fetch_cloner)
         } else {
             None
@@ -739,7 +753,7 @@ mod tests {
 
     use super::{
         InnerChainlink, ObservedUndelegationRequest,
-        provider_config_with_dlp_fallback,
+        needs_rpc_startup_recovery, provider_config_with_dlp_fallback,
     };
     use crate::{
         chainlink::config::ChainlinkConfig,
@@ -762,6 +776,13 @@ mod tests {
         );
 
         assert!(provider_config.program_subs().contains(&dlp_api::id()));
+    }
+
+    #[test]
+    fn failed_record_mirror_initialization_keeps_rpc_startup_recovery() {
+        assert!(needs_rpc_startup_recovery(true, false));
+        assert!(!needs_rpc_startup_recovery(true, true));
+        assert!(!needs_rpc_startup_recovery(false, false));
     }
 
     #[tokio::test]

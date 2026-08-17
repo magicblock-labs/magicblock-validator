@@ -172,6 +172,7 @@ where
 
     undelegation_request_sender: mpsc::Sender<ObservedUndelegationRequest>,
     undelegation_request_recovery: Arc<UndelegationRequestRecoveryState>,
+    incomplete_replay_recovery: Arc<IncompleteReplayRecoveryState>,
 }
 
 struct PendingUndelegationGuard {
@@ -222,6 +223,68 @@ impl UndelegationRequestRecoveryState {
     }
 }
 
+type ReplayRecordsBySlot = HashMap<u64, HashSet<Pubkey>>;
+
+fn merge_replay_records_by_slot(
+    target: &mut ReplayRecordsBySlot,
+    source: ReplayRecordsBySlot,
+) {
+    for (slot, records) in source {
+        target.entry(slot).or_default().extend(records);
+    }
+}
+
+#[derive(Debug, Default)]
+struct IncompleteReplayRecoveryState {
+    pending: Mutex<ReplayRecordsBySlot>,
+    notify: Notify,
+}
+
+impl IncompleteReplayRecoveryState {
+    fn request(&self, records: ReplayRecordsBySlot) {
+        if records.is_empty() {
+            return;
+        }
+        let mut pending = self
+            .pending
+            .lock()
+            .expect("incomplete replay recovery lock");
+        merge_replay_records_by_slot(&mut pending, records);
+        self.notify.notify_one();
+    }
+
+    async fn notified(&self) {
+        self.notify.notified().await;
+    }
+
+    fn take_pending(&self) -> ReplayRecordsBySlot {
+        mem::take(
+            &mut *self
+                .pending
+                .lock()
+                .expect("incomplete replay recovery lock"),
+        )
+    }
+}
+
+#[derive(Default)]
+struct ReplayRecordRecovery {
+    recovered_count: usize,
+    unresolved_records: ReplayRecordsBySlot,
+}
+
+impl ReplayRecordRecovery {
+    fn incomplete_count(&self) -> usize {
+        self.unresolved_records.values().map(HashSet::len).sum()
+    }
+}
+
+#[derive(Default)]
+struct ReplayGapRecovery {
+    recovered_count: usize,
+    unresolved_records: ReplayRecordsBySlot,
+}
+
 /// Negative-cache capacity for known-empty eATAs.
 const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
     match NonZeroUsize::new(100_000) {
@@ -254,6 +317,8 @@ const PENDING_COLLISION_RECHECKS_CAPACITY: NonZeroUsize =
 const COLLISION_OVERFLOW_RECONCILIATION_LIMIT: usize = 64;
 const AUTHORITY_RECORD_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
 const REPLAY_RECOVERY_RETRY_DELAY: Duration = Duration::from_secs(30);
+const INCOMPLETE_REPLAY_RECOVERY_RETRY_DELAY: Duration =
+    Duration::from_secs(300);
 const MAX_INCOMPLETE_REPLAY_RECOVERY_ATTEMPTS: usize = 3;
 const UNDELEGATION_REQUEST_PARTITION_CONCURRENCY: usize = 16;
 const COLLISION_RECHECK_DELAYS: [Duration; 3] = [
@@ -263,12 +328,8 @@ const COLLISION_RECHECK_DELAYS: [Duration; 3] = [
 ];
 
 fn next_replay_recovery_retry_attempt(
-    error: &ChainlinkError,
     incomplete_attempts: usize,
 ) -> Option<usize> {
-    if !matches!(error, ChainlinkError::IncompleteReplayRecovery(_)) {
-        return Some(incomplete_attempts);
-    }
     let next = incomplete_attempts.saturating_add(1);
     (next < MAX_INCOMPLETE_REPLAY_RECOVERY_ATTEMPTS).then_some(next)
 }
@@ -744,6 +805,9 @@ where
             undelegation_request_recovery: Arc::clone(
                 &self.undelegation_request_recovery,
             ),
+            incomplete_replay_recovery: Arc::clone(
+                &self.incomplete_replay_recovery,
+            ),
         }
     }
 }
@@ -861,9 +925,13 @@ where
             undelegation_request_recovery: Arc::new(
                 UndelegationRequestRecoveryState::default(),
             ),
+            incomplete_replay_recovery: Arc::new(
+                IncompleteReplayRecoveryState::default(),
+            ),
         });
 
         me.clone().start_undelegation_request_recovery_listener();
+        me.clone().start_incomplete_replay_recovery_listener();
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
 
@@ -884,6 +952,37 @@ where
         }
 
         me
+    }
+
+    pub(super) fn start_rpc_startup_recovery(self: Arc<Self>) {
+        let replay_recovery = Arc::new(ReplayRecoveryState::default());
+        self.clone()
+            .start_replay_recovery_listener(Arc::clone(&replay_recovery));
+        let weak = Arc::downgrade(&self);
+        drop(self);
+        task::spawn(async move {
+            loop {
+                let Some(this) = weak.upgrade() else { return };
+                match this.remote_account_provider.get_slot().await {
+                    Ok(through_slot) if through_slot > 0 => {
+                        replay_recovery.request(ReplayRecoveryRange {
+                            after_slot: 0,
+                            through_slot,
+                        });
+                        return;
+                    }
+                    Ok(_) => warn!(
+                        "RPC startup recovery is waiting for a nonzero confirmed slot"
+                    ),
+                    Err(error) => warn!(
+                        ?error,
+                        "RPC startup recovery could not read the confirmed slot; retrying"
+                    ),
+                }
+                drop(this);
+                tokio::time::sleep(REPLAY_RECOVERY_RETRY_DELAY).await;
+            }
+        });
     }
 
     fn start_undelegation_request_recovery_listener(self: Arc<Self>) {
@@ -929,6 +1028,60 @@ where
         });
     }
 
+    fn start_incomplete_replay_recovery_listener(self: Arc<Self>) {
+        let recovery = Arc::clone(&self.incomplete_replay_recovery);
+        let weak = Arc::downgrade(&self);
+        drop(self);
+        task::spawn(async move {
+            loop {
+                recovery.notified().await;
+                let mut records = recovery.take_pending();
+                if records.is_empty() {
+                    continue;
+                }
+                loop {
+                    merge_replay_records_by_slot(
+                        &mut records,
+                        recovery.take_pending(),
+                    );
+                    let Some(this) = weak.upgrade() else { return };
+                    match this
+                        .recover_replay_record_slots(records.clone())
+                        .await
+                    {
+                        Ok(result) if result.unresolved_records.is_empty() => {
+                            info!(
+                                recovered_count = result.recovered_count,
+                                "checkpointed replay recovery completed"
+                            );
+                            break;
+                        }
+                        Ok(result) => {
+                            warn!(
+                                recovered_count = result.recovered_count,
+                                incomplete_count = result.incomplete_count(),
+                                "checkpointed replay recovery remains incomplete; retrying"
+                            );
+                            records = result.unresolved_records;
+                        }
+                        Err(error) => warn!(
+                            ?error,
+                            "checkpointed replay recovery failed; retrying"
+                        ),
+                    }
+                    drop(this);
+
+                    tokio::select! {
+                        _ = recovery.notified() => {}
+                        _ = tokio::time::sleep(
+                            INCOMPLETE_REPLAY_RECOVERY_RETRY_DELAY
+                        ) => {}
+                    }
+                }
+            }
+        });
+    }
+
     fn start_replay_recovery_listener(
         self: Arc<Self>,
         replay_recovery: Arc<ReplayRecoveryState>,
@@ -946,33 +1099,47 @@ where
                 loop {
                     let Some(this) = weak.upgrade() else { return };
                     match this.reconcile_replay_gap(recovery_range).await {
-                        Ok(count) => {
+                        Ok(result) if result.unresolved_records.is_empty() => {
                             info!(
                                 after_slot = recovery_range.after_slot,
                                 through_slot = recovery_range.through_slot,
-                                count,
+                                count = result.recovered_count,
                                 "record replay gap reconciled"
                             );
                             break;
                         }
-                        Err(error) => {
+                        Ok(result) => {
+                            let incomplete_count = result
+                                .unresolved_records
+                                .values()
+                                .map(HashSet::len)
+                                .sum::<usize>();
                             let Some(next_attempt) =
                                 next_replay_recovery_retry_attempt(
-                                    &error,
                                     incomplete_attempts,
                                 )
                             else {
+                                this.incomplete_replay_recovery
+                                    .request(result.unresolved_records);
                                 error!(
-                                    ?error,
                                     after_slot = recovery_range.after_slot,
                                     through_slot = recovery_range.through_slot,
+                                    incomplete_count,
                                     incomplete_attempts =
                                         MAX_INCOMPLETE_REPLAY_RECOVERY_ATTEMPTS,
-                                    "record replay gap recovery exhausted bounded historical-block retries"
+                                    "record replay gap recovery checkpointed unresolved records after bounded archival retries"
                                 );
                                 break;
                             };
                             incomplete_attempts = next_attempt;
+                            warn!(
+                                after_slot = recovery_range.after_slot,
+                                through_slot = recovery_range.through_slot,
+                                incomplete_count,
+                                "record replay gap recovery incomplete; retrying"
+                            );
+                        }
+                        Err(error) => {
                             warn!(
                                 ?error,
                                 after_slot = recovery_range.after_slot,
@@ -999,9 +1166,9 @@ where
     async fn reconcile_replay_gap(
         &self,
         range: ReplayRecoveryRange,
-    ) -> ChainlinkResult<usize> {
+    ) -> ChainlinkResult<ReplayGapRecovery> {
         if range.through_slot <= range.after_slot {
-            return Ok(0);
+            return Ok(ReplayGapRecovery::default());
         }
         let delegation_program = dlp_api::id();
         let local_records = self
@@ -1014,7 +1181,7 @@ where
                 ),
             )
             .await?;
-        let (mut recovered_count, incomplete_count) =
+        let mut local_recovery =
             self.recover_replay_records(local_records, range).await?;
 
         // Confined records have no validator authority by which an RPC can
@@ -1031,24 +1198,27 @@ where
             )
             .await
         {
-            Ok(confined_records) => match self
-                .recover_replay_records(confined_records, range)
-                .await
-            {
-                Ok((recovered, incomplete)) => {
-                    if incomplete > 0 {
-                        warn!(
-                            incomplete,
-                            "confined record replay recovery incomplete; continuing"
-                        );
+            Ok(confined_records) => {
+                match self.recover_replay_records(confined_records, range).await
+                {
+                    Ok(result) => {
+                        let incomplete_count = result.incomplete_count();
+                        if incomplete_count > 0 {
+                            warn!(
+                                incomplete_count,
+                                "confined record replay recovery incomplete; continuing"
+                            );
+                        }
+                        local_recovery.recovered_count = local_recovery
+                            .recovered_count
+                            .saturating_add(result.recovered_count);
                     }
-                    recovered_count = recovered_count.saturating_add(recovered);
+                    Err(error) => warn!(
+                        ?error,
+                        "confined record replay recovery failed; continuing"
+                    ),
                 }
-                Err(error) => warn!(
-                    ?error,
-                    "confined record replay recovery failed; continuing"
-                ),
-            },
+            }
             Err(error) => warn!(
                 ?error,
                 "confined record replay scan failed; validator-scoped recovery remains active"
@@ -1057,25 +1227,30 @@ where
 
         self.reconcile_undelegation_requests(range.through_slot)
             .await?;
-        if incomplete_count > 0 {
-            return Err(ChainlinkError::IncompleteReplayRecovery(
-                incomplete_count,
-            ));
-        }
 
-        Ok(recovered_count)
+        Ok(ReplayGapRecovery {
+            recovered_count: local_recovery.recovered_count,
+            unresolved_records: local_recovery.unresolved_records,
+        })
     }
 
     async fn recover_replay_records(
         &self,
         records: Vec<(Pubkey, Account)>,
         range: ReplayRecoveryRange,
-    ) -> ChainlinkResult<(usize, usize)> {
-        let mut records_by_slot = records_in_replay_gap(records, range)?;
+    ) -> ChainlinkResult<ReplayRecordRecovery> {
+        self.recover_replay_record_slots(records_in_replay_gap(records, range)?)
+            .await
+    }
+
+    async fn recover_replay_record_slots(
+        &self,
+        mut records_by_slot: ReplayRecordsBySlot,
+    ) -> ChainlinkResult<ReplayRecordRecovery> {
         let mut slots = records_by_slot.keys().copied().collect::<Vec<_>>();
         slots.sort_unstable();
         let mut recovered_count = 0usize;
-        let mut incomplete_count = 0usize;
+        let mut unresolved_records = ReplayRecordsBySlot::new();
         for slot in slots {
             let expected_records = records_by_slot
                 .remove(&slot)
@@ -1087,14 +1262,13 @@ where
             {
                 Ok(block) => block,
                 Err(error) => {
-                    incomplete_count =
-                        incomplete_count.saturating_add(expected_records.len());
                     warn!(
                         ?error,
                         slot,
                         record_count = expected_records.len(),
                         "record replay block unavailable; continuing with other slots"
                     );
+                    unresolved_records.insert(slot, expected_records);
                     continue;
                 }
             };
@@ -1122,9 +1296,13 @@ where
                     Entry::Occupied(_) => {}
                 }
             }
-            incomplete_count = incomplete_count.saturating_add(
-                expected_records.len().saturating_sub(recovered.len()),
-            );
+            let unresolved = expected_records
+                .into_iter()
+                .filter(|record| !recovered.contains_key(record))
+                .collect::<HashSet<_>>();
+            if !unresolved.is_empty() {
+                unresolved_records.insert(slot, unresolved);
+            }
             let mut recovered = recovered.into_values().collect::<Vec<_>>();
             recovered.sort_unstable_by_key(|delegation| {
                 delegation.delegated_account
@@ -1139,7 +1317,10 @@ where
             recovered_count = recovered_count.saturating_add(recovered.len());
         }
 
-        Ok((recovered_count, incomplete_count))
+        Ok(ReplayRecordRecovery {
+            recovered_count,
+            unresolved_records,
+        })
     }
 
     async fn reconcile_undelegation_requests(
