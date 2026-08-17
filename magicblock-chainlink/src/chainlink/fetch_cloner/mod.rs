@@ -221,12 +221,24 @@ const PENDING_COLLISION_RECHECKS_CAPACITY: NonZeroUsize =
 const COLLISION_OVERFLOW_RECONCILIATION_LIMIT: usize = 64;
 const AUTHORITY_RECORD_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
 const REPLAY_RECOVERY_RETRY_DELAY: Duration = Duration::from_secs(30);
+const MAX_INCOMPLETE_REPLAY_RECOVERY_ATTEMPTS: usize = 3;
 const UNDELEGATION_REQUEST_PARTITION_CONCURRENCY: usize = 16;
 const COLLISION_RECHECK_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
     Duration::from_secs(8),
     Duration::from_secs(30),
 ];
+
+fn next_replay_recovery_retry_attempt(
+    error: &ChainlinkError,
+    incomplete_attempts: usize,
+) -> Option<usize> {
+    if !matches!(error, ChainlinkError::IncompleteReplayRecovery(_)) {
+        return Some(incomplete_attempts);
+    }
+    let next = incomplete_attempts.saturating_add(1);
+    (next < MAX_INCOMPLETE_REPLAY_RECOVERY_ATTEMPTS).then_some(next)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DlpProgramUpdateInterest {
@@ -542,6 +554,7 @@ where
                 else {
                     continue;
                 };
+                let mut incomplete_attempts = 0usize;
                 loop {
                     let Some(this) = weak.upgrade() else { return };
                     match this.reconcile_replay_gap(recovery_range).await {
@@ -554,12 +567,31 @@ where
                             );
                             break;
                         }
-                        Err(error) => warn!(
-                            ?error,
-                            after_slot = recovery_range.after_slot,
-                            through_slot = recovery_range.through_slot,
-                            "record replay gap recovery failed; retrying"
-                        ),
+                        Err(error) => {
+                            let Some(next_attempt) =
+                                next_replay_recovery_retry_attempt(
+                                    &error,
+                                    incomplete_attempts,
+                                )
+                            else {
+                                error!(
+                                    ?error,
+                                    after_slot = recovery_range.after_slot,
+                                    through_slot = recovery_range.through_slot,
+                                    incomplete_attempts =
+                                        MAX_INCOMPLETE_REPLAY_RECOVERY_ATTEMPTS,
+                                    "record replay gap recovery exhausted bounded historical-block retries"
+                                );
+                                break;
+                            };
+                            incomplete_attempts = next_attempt;
+                            warn!(
+                                ?error,
+                                after_slot = recovery_range.after_slot,
+                                through_slot = recovery_range.through_slot,
+                                "record replay gap recovery failed; retrying"
+                            );
+                        }
                     }
                     drop(this);
 

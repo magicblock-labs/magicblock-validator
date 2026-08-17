@@ -34,6 +34,7 @@ use crate::{
         ChainPubsubClient, ChainRpcClient, ChainRpcClientImpl, Endpoints,
         RemoteAccountProvider, SubscriptionReason,
         chain_updates_client::ChainUpdatesClient,
+        config::RemoteAccountProviderConfig,
     },
     submux::SubMuxClient,
 };
@@ -143,6 +144,22 @@ pub struct InnerChainlink<T: ChainRpcClient, U: ChainPubsubClient> {
     evicted_accounts_sub: Option<task::JoinHandle<()>>,
 }
 
+fn provider_config_with_dlp_fallback(
+    config: &ChainlinkConfig,
+    chainlink_config: &ChainLinkConfig,
+) -> RemoteAccountProviderConfig {
+    // Keep the DLP program subscription active alongside record mirroring so
+    // the selected account transport remains a continuity fallback.
+    let mut program_subs =
+        config.remote_account_provider.program_subs().clone();
+    program_subs.insert(dlp_api::id());
+    config
+        .remote_account_provider
+        .clone()
+        .with_subscription_transport(chainlink_config.subscription_transport)
+        .with_program_subs(program_subs)
+}
+
 impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     fn contains_account(&self, pubkey: &Pubkey) -> bool {
         self.engine
@@ -227,17 +244,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         } else {
             None
         };
-        let provider_config = config
-            .remote_account_provider
-            .clone()
-            .with_subscription_transport(
-                chainlink_config.subscription_transport,
-            );
-        let provider_config = if record_mirror.is_some() {
-            provider_config.with_program_subs(Default::default())
-        } else {
-            provider_config
-        };
+        let provider_config =
+            provider_config_with_dlp_fallback(&config, chainlink_config);
 
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
@@ -729,14 +737,32 @@ mod tests {
     use solana_pubkey::Pubkey;
     use tokio::sync::mpsc;
 
-    use super::{InnerChainlink, ObservedUndelegationRequest};
+    use super::{
+        InnerChainlink, ObservedUndelegationRequest,
+        provider_config_with_dlp_fallback,
+    };
     use crate::{
+        chainlink::config::ChainlinkConfig,
         remote_account_provider::{
             SubscriptionReason,
             chain_pubsub_client::mock::ChainPubsubClientMock,
         },
         testing::{init_logger, rpc_client_mock::ChainRpcClientMock},
     };
+
+    #[test]
+    fn record_mirror_keeps_dlp_program_subscription_fallback() {
+        let config = ChainlinkConfig::new(
+            crate::remote_account_provider::config::RemoteAccountProviderConfig::default()
+                .with_program_subs(Default::default()),
+        );
+        let provider_config = provider_config_with_dlp_fallback(
+            &config,
+            &magicblock_config::config::ChainLinkConfig::default(),
+        );
+
+        assert!(provider_config.program_subs().contains(&dlp_api::id()));
+    }
 
     #[tokio::test]
     async fn forwarded_undelegation_requests_are_lossless() {

@@ -146,6 +146,22 @@ fn replay_recovery_requests_full_confirmed_blocks() {
 }
 
 #[test]
+fn incomplete_replay_recovery_retries_are_bounded() {
+    let incomplete = ChainlinkError::IncompleteReplayRecovery(1);
+
+    assert_eq!(next_replay_recovery_retry_attempt(&incomplete, 0), Some(1));
+    assert_eq!(next_replay_recovery_retry_attempt(&incomplete, 1), Some(2));
+    assert_eq!(next_replay_recovery_retry_attempt(&incomplete, 2), None);
+    assert_eq!(
+        next_replay_recovery_retry_attempt(
+            &ChainlinkError::IncompleteUndelegationRequestRecovery(1),
+            2,
+        ),
+        Some(2)
+    );
+}
+
+#[test]
 fn replay_recovery_request_scan_is_slot_and_type_bounded() {
     let config = undelegation_request_config(42, Some(&[0xab, 0xcd]));
 
