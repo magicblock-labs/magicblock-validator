@@ -381,6 +381,47 @@ fn delegation_record_has_local_authority(
         || record.authority == Pubkey::default()
 }
 
+async fn fallback_request_has_local_authority<T, U>(
+    remote_account_provider: &RemoteAccountProvider<T, U>,
+    delegated_account: Pubkey,
+    validator_pubkey: Pubkey,
+    observed_slot: u64,
+) -> ChainlinkResult<bool>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+{
+    let record_pubkey =
+        delegation_record_pda_from_delegated_account(&delegated_account);
+    let mut records = remote_account_provider
+        .fetch_multi_rpc_only(
+            &[record_pubkey],
+            observed_slot,
+            AccountFetchContext::subscription_update(
+                AccountFetchReason::DelegationRecord,
+            ),
+        )
+        .await?;
+    let Some(record) = records.pop() else {
+        return Ok(false);
+    };
+    let Some(record_account) = record.fresh_account() else {
+        return Ok(false);
+    };
+    if record_account.owner() != &dlp_api::id() {
+        return Ok(false);
+    }
+    let Ok(record) = DelegationRecord::try_from_bytes_with_discriminator(
+        record_account.data(),
+    ) else {
+        return Ok(false);
+    };
+    Ok(delegation_record_has_local_authority(
+        record,
+        validator_pubkey,
+    ))
+}
+
 async fn scan_undelegation_requests_with_provider<T, U>(
     remote_account_provider: &RemoteAccountProvider<T, U>,
     validator_pubkey: Pubkey,

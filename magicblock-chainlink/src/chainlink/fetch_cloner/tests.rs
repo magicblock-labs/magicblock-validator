@@ -45,8 +45,18 @@ fn account() -> AccountBuilder {
 }
 
 fn delegation_record_account(delegation_slot: u64) -> Account {
+    delegation_record_account_with_authority(
+        delegation_slot,
+        Pubkey::new_unique(),
+    )
+}
+
+fn delegation_record_account_with_authority(
+    delegation_slot: u64,
+    authority: Pubkey,
+) -> Account {
     let record = DelegationRecord {
-        authority: Pubkey::new_unique(),
+        authority,
         owner: Pubkey::new_unique(),
         delegation_slot,
         lamports: 1_000_000,
@@ -59,6 +69,92 @@ fn delegation_record_account(delegation_slot: u64) -> Account {
         owner: dlp_api::id(),
         ..Default::default()
     }
+}
+
+#[tokio::test]
+async fn fallback_undelegation_requests_require_fresh_local_authority() {
+    let rpc_client = ChainRpcClientMockBuilder::new().slot(42).build();
+    let (updates_sender, updates_receiver) = mpsc::channel(100);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+    let (forward_sender, _forward_receiver) = mpsc::channel(100);
+    let config = RemoteAccountProviderConfig::default_with_lifecycle_mode(
+        LifecycleMode::Ephemeral,
+    );
+    let subscribed_accounts =
+        create_test_subscribed_accounts_with_config(&config);
+    let remote_account_provider =
+        RemoteAccountProvider::try_from_clients_and_mode(
+            rpc_client.clone(),
+            pubsub_client,
+            forward_sender,
+            &config,
+            subscribed_accounts,
+            Arc::<AtomicU64>::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let validator_pubkey = Pubkey::new_unique();
+    let delegated_account = Pubkey::new_unique();
+    let record_pda =
+        delegation_record_pda_from_delegated_account(&delegated_account);
+
+    rpc_client.add_account(
+        record_pda,
+        delegation_record_account_with_authority(1, Pubkey::new_unique()),
+    );
+    assert!(
+        !fallback_request_has_local_authority(
+            &remote_account_provider,
+            delegated_account,
+            validator_pubkey,
+            42,
+        )
+        .await
+        .unwrap()
+    );
+
+    rpc_client.add_account(
+        record_pda,
+        delegation_record_account_with_authority(1, validator_pubkey),
+    );
+    assert!(
+        fallback_request_has_local_authority(
+            &remote_account_provider,
+            delegated_account,
+            validator_pubkey,
+            42,
+        )
+        .await
+        .unwrap()
+    );
+
+    rpc_client.add_account(
+        record_pda,
+        delegation_record_account_with_authority(1, Pubkey::default()),
+    );
+    assert!(
+        fallback_request_has_local_authority(
+            &remote_account_provider,
+            delegated_account,
+            validator_pubkey,
+            42,
+        )
+        .await
+        .unwrap()
+    );
+
+    assert!(
+        fallback_request_has_local_authority(
+            &remote_account_provider,
+            delegated_account,
+            validator_pubkey,
+            43,
+        )
+        .await
+        .is_err()
+    );
 }
 
 fn undelegation_request_account(

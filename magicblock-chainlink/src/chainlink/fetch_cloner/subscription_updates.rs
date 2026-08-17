@@ -1452,19 +1452,64 @@ where
                                 expires_at_slot = observed.expires_at_slot,
                                 "Observed DLP undelegation request"
                             );
-                            if let Err(mpsc::error::SendError(observed)) = self
-                                .undelegation_request_sender
-                                .send(observed)
-                                .await
+                            if undelegation_request_pda_from_delegated_account(
+                                &observed.delegated_account,
+                            ) != observed.request_pda
                             {
                                 warn!(
                                     request_pda = %observed.request_pda,
                                     delegated_account = %observed.delegated_account,
-                                    observed_slot = observed.observed_slot,
-                                    expires_at_slot = observed.expires_at_slot,
-                                    drop_reason = "request_consumer_closed",
-                                    "Dropped observed DLP undelegation request because its consumer is closed"
+                                    "Ignoring DLP undelegation request with invalid PDA"
                                 );
+                            } else if self.record_mirror.as_ref().is_some_and(
+                                |mirror| {
+                                    !mirror.should_forward_undelegation_request(
+                                        &observed.delegated_account,
+                                        observed.observed_slot,
+                                    )
+                                },
+                            ) {
+                                trace!(
+                                    delegated_account = %observed.delegated_account,
+                                    "Ignoring fallback undelegation request with foreign mirrored authority"
+                                );
+                            } else {
+                                match fallback_request_has_local_authority(
+                                    self.remote_account_provider.as_ref(),
+                                    observed.delegated_account,
+                                    self.validator_pubkey,
+                                    observed.observed_slot,
+                                )
+                                .await
+                                {
+                                    Ok(true) => {
+                                        if let Err(mpsc::error::SendError(
+                                            observed,
+                                        )) = self
+                                            .undelegation_request_sender
+                                            .send(observed)
+                                            .await
+                                        {
+                                            warn!(
+                                                request_pda = %observed.request_pda,
+                                                delegated_account = %observed.delegated_account,
+                                                observed_slot = observed.observed_slot,
+                                                expires_at_slot = observed.expires_at_slot,
+                                                drop_reason = "request_consumer_closed",
+                                                "Dropped observed DLP undelegation request because its consumer is closed"
+                                            );
+                                        }
+                                    }
+                                    Ok(false) => trace!(
+                                        delegated_account = %observed.delegated_account,
+                                        "Ignoring fallback undelegation request without fresh local authority"
+                                    ),
+                                    Err(error) => warn!(
+                                        ?error,
+                                        delegated_account = %observed.delegated_account,
+                                        "Unable to verify fallback undelegation request authority"
+                                    ),
+                                }
                             }
                             (
                                 Some(account),

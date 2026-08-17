@@ -297,7 +297,7 @@ impl DelegationRecordMirror {
         self.consume_at_epoch(update, epoch).await;
     }
 
-    fn should_forward_undelegation_request(
+    pub(super) fn should_forward_undelegation_request(
         &self,
         delegated_account: &Pubkey,
         observed_slot: u64,
