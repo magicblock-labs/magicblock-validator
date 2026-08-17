@@ -623,12 +623,10 @@ where
         let record_pda = delegation_record_pda_from_delegated_account(&pubkey);
         match mirror.probe(&record_pda, slot) {
             MirrorLookup::Hit { .. } => {
-                if !self.clone_colliding_delegated_account(pubkey, slot).await {
-                    self.schedule_collision_recheck(
-                        pubkey,
-                        slot.saturating_add(1),
-                    )
-                    .await;
+                if self.clone_colliding_delegated_account(pubkey, slot).await
+                    == CollisionCloneOutcome::Retry
+                {
+                    self.schedule_collision_recheck(pubkey, slot).await;
                 }
             }
             MirrorLookup::Tombstone { .. } => {}
@@ -683,16 +681,34 @@ where
                     .expect("collision overflow semaphore never closed");
                 let this = self.clone();
                 task::spawn(async move {
-                    let resolved = this
-                        .clone_colliding_delegated_account(pubkey, slot)
-                        .await;
-                    drop(permit);
-                    if !resolved {
-                        this.schedule_collision_recheck(
-                            pubkey,
-                            slot.saturating_add(1),
-                        )
-                        .await;
+                    let _permit = permit;
+                    let mut retry_count = 0usize;
+                    loop {
+                        let Some(mirror) = &this.record_mirror else {
+                            return;
+                        };
+                        if collision_overflow_action(
+                            &mirror.probe(&record_pda, slot),
+                            mirror.is_complete_through(slot),
+                        ) == CollisionRecheckAction::Discard
+                        {
+                            return;
+                        }
+                        match this
+                            .clone_colliding_delegated_account(pubkey, slot)
+                            .await
+                        {
+                            CollisionCloneOutcome::Settled
+                            | CollisionCloneOutcome::Terminal => return,
+                            CollisionCloneOutcome::Retry => {
+                                let delay = COLLISION_RECHECK_DELAYS
+                                    [retry_count.min(
+                                        COLLISION_RECHECK_DELAYS.len() - 1,
+                                    )];
+                                retry_count = retry_count.saturating_add(1);
+                                tokio::time::sleep(delay).await;
+                            }
+                        }
                     }
                 });
                 return;
@@ -742,33 +758,30 @@ where
                     continue;
                 }
                 if action == CollisionRecheckAction::Resolve
-                    && !this
+                    && this
                         .clone_colliding_delegated_account(pubkey, slot)
                         .await
+                        == CollisionCloneOutcome::Retry
                 {
-                    this.schedule_collision_recheck(
-                        pubkey,
-                        slot.saturating_add(1),
-                    )
-                    .await;
+                    this.schedule_collision_recheck(pubkey, slot).await;
                 }
                 return;
             }
         });
     }
 
-    pub(super) async fn clone_colliding_delegated_account(
+    async fn clone_colliding_delegated_account(
         &self,
         pubkey: Pubkey,
         slot: u64,
-    ) -> bool {
+    ) -> CollisionCloneOutcome {
         let fresh_delegated = self
             .read_account(&pubkey, |account| {
                 account.is(AccountMode::Delegated) && account.slot() >= slot
             })
             .unwrap_or(false);
         if fresh_delegated {
-            return true;
+            return CollisionCloneOutcome::Settled;
         }
 
         let fetch_context = AccountFetchContext::subscription_update(
@@ -779,26 +792,35 @@ where
             .with_reason(AccountFetchReason::DelegationRecord);
         let record_min_context_slot =
             slot.max(self.remote_account_provider.chain_slot());
-        let Some((deleg_record, _)) = self
-            .fetch_and_parse_delegation_record(
-                pubkey,
-                record_min_context_slot,
-                record_context.clone(),
-                CompanionFetchLogContext {
-                    origin: record_context,
-                    primary_pubkey: pubkey,
-                    context_slot: record_min_context_slot,
-                },
-            )
-            .await
-        else {
-            return false;
+        let deleg_record = match delegation::resolve_delegation_record(
+            self,
+            pubkey,
+            record_min_context_slot,
+            record_context.clone(),
+            &CompanionFetchLogContext {
+                origin: record_context,
+                primary_pubkey: pubkey,
+                context_slot: record_min_context_slot,
+            },
+        )
+        .await
+        {
+            delegation::DelegationRecordResolution::Found(record, _) => record,
+            delegation::DelegationRecordResolution::Missing => {
+                return CollisionCloneOutcome::Terminal;
+            }
+            delegation::DelegationRecordResolution::Invalid => {
+                return CollisionCloneOutcome::Terminal;
+            }
+            delegation::DelegationRecordResolution::Uncertain => {
+                return CollisionCloneOutcome::Retry;
+            }
         };
         if deleg_record.authority != self.validator_pubkey
             && deleg_record.authority != Pubkey::default()
         {
             metrics::inc_discovered_dlp_update_delegated_elsewhere();
-            return true;
+            return CollisionCloneOutcome::Settled;
         }
 
         const MAX_CLONE_ATTEMPTS: usize = 3;
@@ -816,7 +838,7 @@ where
                 })
                 .unwrap_or(false);
             if still_undelegating {
-                return true;
+                return CollisionCloneOutcome::Settled;
             }
 
             let result = match self
@@ -833,7 +855,7 @@ where
                 Ok(result) => result,
                 Err(error) => {
                     warn!(pubkey = %pubkey, %error, "Collision clone failed");
-                    return false;
+                    return CollisionCloneOutcome::Retry;
                 }
             };
             if result
@@ -842,7 +864,7 @@ where
                 .chain(result.missing_delegation_record.iter())
                 .any(|(missing, _)| missing == &pubkey)
             {
-                return false;
+                return CollisionCloneOutcome::Terminal;
             }
             let state = self.read_account(&pubkey, |account| {
                 let settled = account.slot() > slot
@@ -853,7 +875,7 @@ where
                 (settled, stale_transient)
             });
             if state.is_some_and(|(settled, _)| settled) {
-                return true;
+                return CollisionCloneOutcome::Settled;
             }
             if state.is_some_and(|(_, stale)| stale) {
                 break;
@@ -865,7 +887,7 @@ where
             slot,
             "Collision clone did not settle; waiting for newer record evidence"
         );
-        false
+        CollisionCloneOutcome::Retry
     }
 }
 
@@ -883,6 +905,13 @@ enum CollisionRecheckAction {
     Discard,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CollisionCloneOutcome {
+    Settled,
+    Terminal,
+    Retry,
+}
+
 fn collision_recheck_action(
     lookup: &MirrorLookup,
     complete_through_slot: bool,
@@ -894,6 +923,21 @@ fn collision_recheck_action(
             CollisionRecheckAction::Resolve
         }
         MirrorLookup::Miss => CollisionRecheckAction::Wait,
+    }
+}
+
+fn collision_overflow_action(
+    lookup: &MirrorLookup,
+    complete_through_slot: bool,
+) -> CollisionRecheckAction {
+    match lookup {
+        MirrorLookup::Tombstone { .. } => CollisionRecheckAction::Discard,
+        MirrorLookup::Miss if complete_through_slot => {
+            CollisionRecheckAction::Discard
+        }
+        MirrorLookup::Hit { .. } | MirrorLookup::Miss => {
+            CollisionRecheckAction::Resolve
+        }
     }
 }
 
@@ -1557,6 +1601,21 @@ mod tests {
         );
         assert_eq!(
             collision_recheck_action(
+                &MirrorLookup::Tombstone { slot: 1 },
+                false
+            ),
+            CollisionRecheckAction::Discard
+        );
+        assert_eq!(
+            collision_overflow_action(&MirrorLookup::Miss, true),
+            CollisionRecheckAction::Discard
+        );
+        assert_eq!(
+            collision_overflow_action(&MirrorLookup::Miss, false),
+            CollisionRecheckAction::Resolve
+        );
+        assert_eq!(
+            collision_overflow_action(
                 &MirrorLookup::Tombstone { slot: 1 },
                 false
             ),
