@@ -439,7 +439,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
-    pub(super) async fn fetch_multi_rpc_only(
+    pub(crate) async fn fetch_multi_rpc_only(
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,

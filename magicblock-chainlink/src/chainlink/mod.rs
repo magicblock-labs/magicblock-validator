@@ -206,11 +206,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         chainlink_config: &ChainLinkConfig,
         chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<ProdChainlink> {
-        let record_mirror = DelegationRecordMirror::try_from_config(
-            &chainlink_config.record_sync,
-            endpoints,
-        )
-        .await;
+        let record_mirror = if config
+            .remote_account_provider
+            .lifecycle_mode()
+            .needs_remote_account_provider()
+        {
+            DelegationRecordMirror::try_from_config(
+                &chainlink_config.record_sync,
+                endpoints,
+            )
+            .await
+        } else {
+            None
+        };
         let provider_config = config
             .remote_account_provider
             .clone()

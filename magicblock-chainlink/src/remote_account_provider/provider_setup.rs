@@ -226,7 +226,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             }
             SubscriptionTransport::Grpc => {
                 error!(
-                    "subscription-transport is grpc but no gRPC remote is configured; running DEGRADED on websockets"
+                    ws_remotes = ws.len(),
+                    "subscription-transport is grpc but no gRPC remote is configured; falling back to websockets (DEGRADED)"
                 );
                 metrics::set_subscription_transport_grpc(false);
                 ws.clone()
@@ -320,9 +321,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .program_subs()
                 .iter()
                 .map(|program_id| submux.subscribe_program(*program_id));
-            try_join_all(subscribe_program_futs).await?;
+            if let Err(error) = try_join_all(subscribe_program_futs).await {
+                if let Err(shutdown_error) = submux.shutdown().await {
+                    warn!(
+                        ?shutdown_error,
+                        "failed to shut down pubsub clients after program subscription failure"
+                    );
+                }
+                return Err(error);
+            }
         }
 
+        let shutdown_submux = submux.clone();
         let provider = RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
@@ -334,7 +344,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscribed_accounts,
             ChainSlot::new(chain_slot),
         )
-        .await?;
+        .await;
+        let provider = match provider {
+            Ok(provider) => provider,
+            Err(error) => {
+                if let Err(shutdown_error) = shutdown_submux.shutdown().await {
+                    warn!(
+                        ?shutdown_error,
+                        "failed to shut down pubsub clients after provider startup failure"
+                    );
+                }
+                return Err(error);
+            }
+        };
         Ok(provider)
     }
 

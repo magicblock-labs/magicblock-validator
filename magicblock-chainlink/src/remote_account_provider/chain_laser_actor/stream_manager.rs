@@ -269,7 +269,6 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             self.current_new_subs.insert(*pk);
         }
 
-        metrics::inc_grpc_account_filter_updates();
         let result = if let Some(handle) = &self.current_new_handle {
             let request = Self::build_account_request(
                 &self.current_new_subs.iter().collect::<Vec<_>>(),
@@ -292,6 +291,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             }
             result?;
         }
+        metrics::inc_grpc_account_filter_updates();
 
         // Update active subscriptions with new pubkeys only after stream update
         {

@@ -34,11 +34,19 @@ async fn probe_grpc_liveness(
         .subscribe(solana_sdk_ids::sysvar::clock::ID, None)
         .await?;
     let deadline = tokio::time::Instant::now() + GRPC_LIVENESS_PROBE_TIMEOUT;
-    while tokio::time::Instant::now() < deadline {
+    loop {
         if slot_updates_seen.load(Ordering::Relaxed) > 0 {
             return Ok(());
         }
-        tokio::time::sleep(GRPC_LIVENESS_PROBE_INTERVAL).await;
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            break;
+        }
+        tokio::time::sleep(GRPC_LIVENESS_PROBE_INTERVAL.min(deadline - now))
+            .await;
+    }
+    if slot_updates_seen.load(Ordering::Relaxed) > 0 {
+        return Ok(());
     }
     Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
         format!(
@@ -113,7 +121,17 @@ impl ChainUpdatesClient {
                     rpc_client,
                     grpc_config,
                 );
-                probe_grpc_liveness(&client, &slot_updates_seen).await?;
+                if let Err(error) =
+                    probe_grpc_liveness(&client, &slot_updates_seen).await
+                {
+                    if let Err(shutdown_error) = client.shutdown().await {
+                        warn!(
+                            ?shutdown_error,
+                            "failed to shut down gRPC client after liveness probe failure"
+                        );
+                    }
+                    return Err(error);
+                }
                 Ok(ChainUpdatesClient::Laser(client))
             }
             Rpc { .. } => {

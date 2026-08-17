@@ -275,12 +275,6 @@ where
                     .chain(record_subs.iter().copied().map(|pubkey| {
                         SubscriptionRelease::Pubkey {
                             pubkey,
-                            reason: SubscriptionReason::DirectAccount,
-                        }
-                    }))
-                    .chain(record_subs.iter().copied().map(|pubkey| {
-                        SubscriptionRelease::Pubkey {
-                            pubkey,
                             reason: SubscriptionReason::DelegationRecord,
                         }
                     }))
@@ -657,6 +651,7 @@ where
             slot,
             fetch_context.with_reason(AccountFetchReason::DelegationRecord),
             ChainlinkCompanionFetchKind::DelegationRecord,
+            true,
         )
     }
 
@@ -674,6 +669,7 @@ where
             slot,
             fetch_context.with_reason(AccountFetchReason::ProgramData),
             ChainlinkCompanionFetchKind::ProgramData,
+            false,
         )
     }
 
@@ -684,6 +680,7 @@ where
         slot: u64,
         fetch_context: AccountFetchContext,
         companion_fetch_kind: ChainlinkCompanionFetchKind,
+        rpc_only: bool,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let provider = self.remote_account_provider.clone();
         let engine = self.engine.clone();
@@ -699,16 +696,27 @@ where
             // Increment fetch counter for testing deduplication (2 accounts: pubkey + delegation_record_pubkey)
             fetch_count.fetch_add(2, Ordering::Relaxed);
 
-            provider
-                .try_get_multi_until_slots_match(
-                    &[pubkey, companion_pubkey],
-                    Some(MatchSlotsConfig {
-                        min_context_slot: Some(slot),
-                        ..MatchSlotsConfig::new(companion_fetch_kind)
-                    }),
-                    fetch_context,
-                )
-                .await
+            let accounts = if rpc_only {
+                provider
+                    .fetch_multi_rpc_only(
+                        &[pubkey, companion_pubkey],
+                        slot,
+                        fetch_context,
+                    )
+                    .await
+            } else {
+                provider
+                    .try_get_multi_until_slots_match(
+                        &[pubkey, companion_pubkey],
+                        Some(MatchSlotsConfig {
+                            min_context_slot: Some(slot),
+                            ..MatchSlotsConfig::new(companion_fetch_kind)
+                        }),
+                        fetch_context,
+                    )
+                    .await
+            };
+            accounts
                 .map_err(ChainlinkError::from)
                 .and_then(|accs| {
                     match accs.as_slice() {

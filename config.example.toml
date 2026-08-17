@@ -182,12 +182,6 @@ reset = false
 # Chainlink (cloning pipeline)
 # ==============================================================================
 [chainlink]
-# Transport for base-chain account subscriptions. "grpc" is the supported
-# production transport; "ws" remains for local/dev validators without gRPC.
-# Default: "grpc"
-# Env: MBV_CHAINLINK__SUBSCRIPTION_TRANSPORT
-subscription-transport = "grpc"
-
 # Maximum number of accounts to monitor for price updates.
 # Default: 5000
 # Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
@@ -232,26 +226,6 @@ risk-server-url = "http://127.0.0.1:3001"
 # Default: "5s"
 # Env: MBV_CHAINLINK__RISK__REQUEST_TIMEOUT
 request-timeout = "5s"
-
-[chainlink.record-sync]
-# In-memory delegation-record mirror streamed from the in-validator record
-# stream. Any miss falls back to an RPC record fetch.
-# Default: true
-# Env: MBV_CHAINLINK__RECORD_SYNC__ENABLED
-enabled = true
-
-# Laserstream gRPC endpoint. Defaults to the first gRPC remote.
-# Env: MBV_CHAINLINK__RECORD_SYNC__ENDPOINT
-# endpoint = "https://laserstream-mainnet-ewr.helius-rpc.com"
-
-# API key for the endpoint above. Defaults to the first gRPC remote's key.
-# Env: MBV_CHAINLINK__RECORD_SYNC__API_KEY
-# api-key = "YOUR_API_KEY"
-
-# Maximum number of record entries retained in the mirror.
-# Default: 262144
-# Env: MBV_CHAINLINK__RECORD_SYNC__CAPACITY
-# capacity = 262144
 
 # ==============================================================================
 # Leader Administration (Optional)

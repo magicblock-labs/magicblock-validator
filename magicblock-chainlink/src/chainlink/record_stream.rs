@@ -25,11 +25,6 @@ use tokio::{
 };
 
 const PUBKEY_LEN: usize = 32;
-const DELEGATION_PROGRAM: &str = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
-const DELEGATION_PROGRAM_PUBKEY: &[u8; PUBKEY_LEN] = &[
-    181, 183, 0, 225, 242, 87, 58, 192, 204, 6, 34, 1, 52, 74, 207, 151, 184,
-    53, 6, 235, 140, 229, 25, 152, 204, 98, 126, 24, 147, 128, 167, 62,
-];
 const DELEGATION_RECORD_DISCRIMINATOR: u64 = 100;
 const UNDELEGATE_DISCRIMINATOR: u64 = 3;
 const DELEGATE_DISCRIMINATORS: [u64; 2] = [0, 19];
@@ -348,6 +343,7 @@ impl RecordStream {
             .chain(meta.loaded_writable_addresses.iter())
             .chain(meta.loaded_readonly_addresses.iter())
             .collect();
+        let delegation_program = dlp_api::id().to_bytes();
         let account_at = |ix_accounts: &[u8], index: usize| {
             ix_accounts
                 .get(index)
@@ -358,7 +354,7 @@ impl RecordStream {
                      ix_accounts: &[u8],
                      data: &[u8]| {
             let program_id = *accounts.get(program_id_index)?;
-            (program_id == DELEGATION_PROGRAM_PUBKEY).then_some(())?;
+            (program_id.as_slice() == delegation_program).then_some(())?;
             let discriminator = u64::from_le_bytes(
                 data.get(..DISCRIMINATOR_LEN)?.try_into().ok()?,
             );
@@ -436,7 +432,7 @@ impl RecordStream {
             accounts.insert(
                 name.into(),
                 SubscribeRequestFilterAccounts {
-                    owner: vec![DELEGATION_PROGRAM.into()],
+                    owner: vec![dlp_api::id().to_string()],
                     filters: vec![SubscribeRequestFilterAccountsFilter {
                         filter: Some(Filter::Memcmp(
                             SubscribeRequestFilterAccountsFilterMemcmp {
@@ -456,7 +452,7 @@ impl RecordStream {
         transactions.insert(
             "delegation-instructions".into(),
             SubscribeRequestFilterTransactions {
-                account_include: vec![DELEGATION_PROGRAM.into()],
+                account_include: vec![dlp_api::id().to_string()],
                 ..Default::default()
             },
         );
@@ -566,7 +562,7 @@ mod tests {
             vec![6; PUBKEY_LEN],
             record.to_vec(),
             vec![5; PUBKEY_LEN],
-            DELEGATION_PROGRAM_PUBKEY.to_vec(),
+            dlp_api::id().to_bytes().to_vec(),
         ];
         let data = discriminator.to_le_bytes().to_vec();
         let ix_accounts = vec![0, 1, 2, 3, 4, 5];
@@ -642,7 +638,7 @@ mod tests {
         assert_eq!(request.from_slot, Some(42));
         assert_eq!(
             request.transactions["delegation-instructions"].account_include,
-            vec![DELEGATION_PROGRAM.to_string()]
+            vec![dlp_api::id().to_string()]
         );
         assert_eq!(request.slots["slots"].filter_by_commitment, Some(true));
     }
@@ -717,7 +713,7 @@ mod tests {
                         meta: Some(TransactionStatusMeta {
                             loaded_writable_addresses: vec![record.to_vec()],
                             loaded_readonly_addresses: vec![
-                                DELEGATION_PROGRAM_PUBKEY.to_vec(),
+                                dlp_api::id().to_bytes().to_vec(),
                             ],
                             ..Default::default()
                         }),

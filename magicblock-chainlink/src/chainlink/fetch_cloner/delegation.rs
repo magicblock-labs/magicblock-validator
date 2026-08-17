@@ -226,14 +226,9 @@ where
     } else {
         match this
             .remote_account_provider
-            .try_get_multi_until_slots_match(
+            .fetch_multi_rpc_only(
                 &[delegation_record_pubkey],
-                Some(MatchSlotsConfig {
-                    min_context_slot: Some(min_context_slot),
-                    ..MatchSlotsConfig::new(
-                        ChainlinkCompanionFetchKind::DelegationRecord,
-                    )
-                }),
+                min_context_slot,
                 fetch_context
                     .with_reason(metrics::AccountFetchReason::DelegationRecord),
             )
@@ -261,24 +256,15 @@ where
         }
     };
 
-    let mut releases = Vec::new();
-    // Handle edge case where it was cloned in the meantime.
-    // The small possibility of a fetch + clone of this delegation record being in process
-    // still exists, but it's negligible.
-    if !this.contains_account(&delegation_record_pubkey) {
-        releases.push(SubscriptionRelease::Pubkey {
-            pubkey: delegation_record_pubkey,
-            reason: SubscriptionReason::DirectAccount,
-        });
-    }
     if acquired_delegation_record_reason {
-        releases.push(SubscriptionRelease::Pubkey {
-            pubkey: delegation_record_pubkey,
-            reason: SubscriptionReason::DelegationRecord,
-        });
-    }
-    if !releases.is_empty() {
-        release_subs(&this.remote_account_provider, releases).await;
+        release_subs(
+            &this.remote_account_provider,
+            [SubscriptionRelease::Pubkey {
+                pubkey: delegation_record_pubkey,
+                reason: SubscriptionReason::DelegationRecord,
+            }],
+        )
+        .await;
     }
 
     res

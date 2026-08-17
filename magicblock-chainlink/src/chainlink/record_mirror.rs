@@ -337,10 +337,6 @@ impl DelegationRecordMirror {
     pub fn test_clear(&self) {
         self.clear();
     }
-
-    pub fn test_apply(&self, update: RecordStreamUpdate) {
-        self.apply(update);
-    }
 }
 
 #[cfg(test)]

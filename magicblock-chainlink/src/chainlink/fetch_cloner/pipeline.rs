@@ -251,7 +251,6 @@ where
             let releases = owned_by_deleg
                 .iter()
                 .map(|(pubkey, _, _)| *pubkey)
-                .chain(record_subs.iter().copied())
                 .map(|pubkey| SubscriptionRelease::Pubkey {
                     pubkey,
                     reason: SubscriptionReason::DirectAccount,
@@ -303,7 +302,6 @@ where
                             let releases = owned_by_deleg
                                 .iter()
                                 .map(|(pubkey, _, _)| *pubkey)
-                                .chain(record_subs.iter().copied())
                                 .map(|pubkey| SubscriptionRelease::Pubkey {
                                     pubkey,
                                     reason: SubscriptionReason::DirectAccount,
@@ -648,16 +646,17 @@ pub(crate) fn compute_subscription_releases(
         .map(|request| request.pubkey)
         .collect::<HashSet<_>>();
 
+    let record_subs = record_subs.into_iter().collect::<HashSet<_>>();
     let mut direct_releases = all_requested_pubkeys
         .iter()
         .copied()
         .filter(|pubkey| {
             !cloned_accounts.contains(pubkey)
                 && !loaded_program_ids.contains(pubkey)
+                && !record_subs.contains(pubkey)
         })
         .collect::<HashSet<_>>();
     direct_releases.extend(delegated_cloned_accounts);
-    direct_releases.extend(record_subs.iter().copied());
     direct_releases.extend(program_data_subs.iter().copied());
 
     let mut releases = direct_releases
@@ -808,4 +807,28 @@ where
     );
 
     Ok(materialized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_cleanup_releases_only_the_acquired_reason() {
+        let record = Pubkey::new_unique();
+        let releases = compute_subscription_releases(
+            &[record],
+            &[],
+            &[],
+            vec![record],
+            HashSet::new(),
+        );
+
+        assert!(matches!(
+            releases.as_slice(),
+            [SubscriptionRelease::Pubkey { pubkey, reason }]
+                if *pubkey == record
+                    && *reason == SubscriptionReason::DelegationRecord
+        ));
+    }
 }
