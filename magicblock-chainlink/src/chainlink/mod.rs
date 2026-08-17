@@ -18,6 +18,7 @@ use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use tokio::{
     sync::{broadcast, mpsc},
     task::{self, JoinSet},
@@ -211,9 +212,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             .lifecycle_mode()
             .needs_remote_account_provider()
         {
-            DelegationRecordMirror::try_from_config(
+            DelegationRecordMirror::try_from_config_for_validator(
                 &chainlink_config.record_sync,
                 endpoints,
+                validator_keypair.pubkey(),
             )
             .await
         } else {

@@ -1,13 +1,15 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
-use dlp_api::state::DelegationRecord;
+use dlp_api::{
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+};
 use lru::LruCache;
 use magicblock_config::config::RecordSyncConfig;
 use magicblock_metrics::metrics::{self, RecordMirrorLookupOutcome};
 use parking_lot::Mutex;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 use crate::{
     chainlink::{
@@ -34,6 +36,7 @@ pub struct DiscoveredDelegation {
 /// as "not delegated".
 pub struct DelegationRecordMirror {
     inner: Mutex<MirrorState>,
+    validator_pubkey: Option<Pubkey>,
     discoveries_tx: Sender<DiscoveredDelegation>,
     discoveries_rx: Mutex<Option<Receiver<DiscoveredDelegation>>>,
     undelegation_requests_tx: Sender<ObservedUndelegationRequest>,
@@ -74,6 +77,27 @@ impl DelegationRecordMirror {
         config: &RecordSyncConfig,
         endpoints: &Endpoints,
     ) -> Option<Arc<Self>> {
+        Self::try_from_config_with_validator(config, endpoints, None).await
+    }
+
+    pub(crate) async fn try_from_config_for_validator(
+        config: &RecordSyncConfig,
+        endpoints: &Endpoints,
+        validator_pubkey: Pubkey,
+    ) -> Option<Arc<Self>> {
+        Self::try_from_config_with_validator(
+            config,
+            endpoints,
+            Some(validator_pubkey),
+        )
+        .await
+    }
+
+    async fn try_from_config_with_validator(
+        config: &RecordSyncConfig,
+        endpoints: &Endpoints,
+        validator_pubkey: Option<Pubkey>,
+    ) -> Option<Arc<Self>> {
         if !config.enabled {
             return None;
         }
@@ -98,14 +122,19 @@ impl DelegationRecordMirror {
             }
         };
         info!("record mirror connected");
-        Some(Self::start_consumer(updates, config.capacity))
+        Some(Self::start_consumer(
+            updates,
+            config.capacity,
+            validator_pubkey,
+        ))
     }
 
     fn start_consumer(
         mut updates: Receiver<RecordStreamUpdate>,
         capacity: usize,
+        validator_pubkey: Option<Pubkey>,
     ) -> Arc<Self> {
-        let mirror = Arc::new(Self::with_capacity(capacity));
+        let mirror = Arc::new(Self::with_capacity(capacity, validator_pubkey));
         let consumer = Arc::clone(&mirror);
         tokio::spawn(async move {
             while let Some(update) = updates.recv().await {
@@ -118,7 +147,10 @@ impl DelegationRecordMirror {
         mirror
     }
 
-    fn with_capacity(capacity: usize) -> Self {
+    fn with_capacity(
+        capacity: usize,
+        validator_pubkey: Option<Pubkey>,
+    ) -> Self {
         let capacity = NonZeroUsize::new(capacity)
             .unwrap_or(NonZeroUsize::new(1).expect("1 is non-zero"));
         let (discoveries_tx, discoveries_rx) =
@@ -136,6 +168,7 @@ impl DelegationRecordMirror {
                 watermark: 0,
                 live: false,
             }),
+            validator_pubkey,
             discoveries_tx,
             discoveries_rx: Mutex::new(Some(discoveries_rx)),
             undelegation_requests_tx,
@@ -182,11 +215,19 @@ impl DelegationRecordMirror {
                 expires_at_slot,
                 slot,
             } => {
+                let delegated_account =
+                    Pubkey::new_from_array(delegated_account);
+                if !self.should_forward_undelegation_request(&delegated_account)
+                {
+                    trace!(
+                        %delegated_account,
+                        "Ignoring undelegation request without local mirrored authority"
+                    );
+                    return;
+                }
                 let request = ObservedUndelegationRequest {
                     request_pda: Pubkey::new_from_array(request_pda),
-                    delegated_account: Pubkey::new_from_array(
-                        delegated_account,
-                    ),
+                    delegated_account,
                     expires_at_slot,
                     observed_slot: slot,
                 };
@@ -200,6 +241,27 @@ impl DelegationRecordMirror {
             }
             update => self.apply(update),
         }
+    }
+
+    fn should_forward_undelegation_request(
+        &self,
+        delegated_account: &Pubkey,
+    ) -> bool {
+        let Some(validator_pubkey) = self.validator_pubkey else {
+            return true;
+        };
+        let record =
+            delegation_record_pda_from_delegated_account(delegated_account);
+        let inner = self.inner.lock();
+        let Some(data) = inner
+            .entries
+            .peek(&record)
+            .and_then(|entry| entry.data.as_deref())
+        else {
+            return false;
+        };
+        DelegationRecord::try_from_bytes_with_discriminator(data)
+            .is_ok_and(|record| record.authority == validator_pubkey)
     }
 
     fn apply(&self, update: RecordStreamUpdate) {
@@ -371,7 +433,7 @@ fn resolve_endpoint(
 #[cfg(any(test, feature = "dev-context"))]
 impl DelegationRecordMirror {
     pub fn new_for_tests() -> Arc<Self> {
-        Arc::new(Self::with_capacity(1024))
+        Arc::new(Self::with_capacity(1024, None))
     }
 
     pub fn test_insert_record(&self, record: Pubkey, data: Vec<u8>, slot: u64) {
@@ -397,9 +459,22 @@ mod tests {
 
     use super::*;
 
+    fn delegation_record_data(authority: Pubkey) -> Vec<u8> {
+        let record = DelegationRecord {
+            authority,
+            owner: Pubkey::new_unique(),
+            delegation_slot: 1,
+            lamports: 1_000_000,
+            commit_frequency_ms: 1_000,
+        };
+        let mut data = vec![0; DelegationRecord::size_with_discriminator()];
+        record.to_bytes_with_discriminator(&mut data).unwrap();
+        data
+    }
+
     #[tokio::test]
     async fn discovery_backpressure_is_lossless() {
-        let mirror = Arc::new(DelegationRecordMirror::with_capacity(16));
+        let mirror = Arc::new(DelegationRecordMirror::with_capacity(16, None));
         let mut discoveries = mirror.take_discoveries().unwrap();
         for slot in 0..MIRROR_EVENT_CHANNEL_CAPACITY as u64 {
             mirror
@@ -433,9 +508,57 @@ mod tests {
         assert_eq!(last.unwrap().slot, MIRROR_EVENT_CHANNEL_CAPACITY as u64);
     }
 
+    #[tokio::test]
+    async fn undelegation_requests_require_local_mirrored_authority() {
+        let validator = Pubkey::new_unique();
+        let mirror = Arc::new(DelegationRecordMirror::with_capacity(
+            16,
+            Some(validator),
+        ));
+        let mut requests = mirror.take_undelegation_requests().unwrap();
+
+        let foreign_account = Pubkey::new_unique();
+        mirror.insert(
+            delegation_record_pda_from_delegated_account(&foreign_account),
+            1,
+            Some(delegation_record_data(Pubkey::new_unique())),
+        );
+        mirror
+            .consume(RecordStreamUpdate::UndelegationRequested {
+                request_pda: Pubkey::new_unique().to_bytes(),
+                delegated_account: foreign_account.to_bytes(),
+                expires_at_slot: 10,
+                slot: 2,
+            })
+            .await;
+        assert!(matches!(
+            requests.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+
+        let local_account = Pubkey::new_unique();
+        mirror.insert(
+            delegation_record_pda_from_delegated_account(&local_account),
+            1,
+            Some(delegation_record_data(validator)),
+        );
+        mirror
+            .consume(RecordStreamUpdate::UndelegationRequested {
+                request_pda: Pubkey::new_unique().to_bytes(),
+                delegated_account: local_account.to_bytes(),
+                expires_at_slot: 10,
+                slot: 2,
+            })
+            .await;
+        assert_eq!(
+            requests.recv().await.unwrap().delegated_account,
+            local_account
+        );
+    }
+
     #[test]
     fn hit_requires_entry_slot_or_live_watermark() {
-        let mirror = DelegationRecordMirror::with_capacity(16);
+        let mirror = DelegationRecordMirror::with_capacity(16, None);
         let record = Pubkey::new_unique();
         mirror.insert(record, 50, Some(vec![1]));
         assert!(matches!(mirror.get(&record, 100), MirrorLookup::Miss));
@@ -450,7 +573,7 @@ mod tests {
 
     #[test]
     fn updates_are_monotonic_and_tombstones_are_not_negative_answers() {
-        let mirror = DelegationRecordMirror::with_capacity(16);
+        let mirror = DelegationRecordMirror::with_capacity(16, None);
         let record = Pubkey::new_unique();
         mirror.insert(record, 50, Some(vec![1]));
         mirror.insert(record, 40, Some(vec![9]));
@@ -467,7 +590,7 @@ mod tests {
 
     #[test]
     fn conflicting_same_slot_updates_require_rpc_confirmation() {
-        let mirror = DelegationRecordMirror::with_capacity(16);
+        let mirror = DelegationRecordMirror::with_capacity(16, None);
         let record = Pubkey::new_unique();
         mirror.insert(record, 50, Some(vec![1]));
         mirror.insert(record, 50, None);
@@ -481,7 +604,7 @@ mod tests {
 
     #[test]
     fn interruption_clears_entries_and_watermark() {
-        let mirror = DelegationRecordMirror::with_capacity(16);
+        let mirror = DelegationRecordMirror::with_capacity(16, None);
         let record = Pubkey::new_unique();
         mirror.insert(record, 50, Some(vec![1]));
         mirror.apply(RecordStreamUpdate::SlotAdvanced(120));
@@ -493,7 +616,7 @@ mod tests {
 
     #[test]
     fn eviction_degrades_to_miss() {
-        let mirror = DelegationRecordMirror::with_capacity(2);
+        let mirror = DelegationRecordMirror::with_capacity(2, None);
         let (a, b, c) = (
             Pubkey::new_unique(),
             Pubkey::new_unique(),
@@ -509,7 +632,7 @@ mod tests {
 
     #[test]
     fn retained_record_data_is_byte_bounded() {
-        let mirror = DelegationRecordMirror::with_capacity(3);
+        let mirror = DelegationRecordMirror::with_capacity(3, None);
         let record_size = DelegationRecord::size_with_discriminator();
         let (a, b, c, oversized) = (
             Pubkey::new_unique(),
